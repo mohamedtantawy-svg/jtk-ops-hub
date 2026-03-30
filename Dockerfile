@@ -1,4 +1,4 @@
-# ── Stage 1: Build frontend ──────────────────────────────────────────────────
+# ── Stage 1: Build ───────────────────────────────────────────────────────────
 FROM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json* ./
@@ -10,10 +10,10 @@ RUN npm run build
 FROM node:22-alpine AS production
 WORKDIR /app
 
-RUN npm install -g serve
-
-# Copy frontend build output
-COPY --from=build /app/dist ./dist
+# Copy standalone output
+COPY --from=build /app/.next/standalone ./
+COPY --from=build /app/.next/static ./.next/static
+COPY --from=build /app/public ./public
 
 # Non-root user for security
 RUN addgroup -g 1001 -S appgroup && \
@@ -22,10 +22,11 @@ USER appuser
 
 ENV NODE_ENV=production
 ENV PORT=3001
+ENV HOSTNAME=0.0.0.0
 
 EXPOSE 3001
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:3001 || exit 1
 
-CMD ["serve", "-s", "dist", "-l", "3001"]
+CMD ["node", "server.js"]
