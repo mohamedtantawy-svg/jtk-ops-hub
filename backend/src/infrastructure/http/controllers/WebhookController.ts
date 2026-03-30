@@ -128,6 +128,10 @@ export class WebhookController {
 
       // Verify shared secret (passed as Bearer token or X-Zapier-Secret header)
       const secret = config.ZAPIER_WEBHOOK_SECRET;
+      if (!secret && config.NODE_ENV === 'production') {
+        res.status(503).json({ error: 'Webhook endpoint disabled — ZAPIER_WEBHOOK_SECRET not configured' });
+        return;
+      }
       if (secret) {
         const authHeader = req.headers.authorization ?? '';
         const auth = authHeader.toLowerCase().startsWith('bearer ')
@@ -138,7 +142,6 @@ export class WebhookController {
           return;
         }
       }
-      // Warning for missing secret is logged once at startup in server.ts
 
       const body = req.body;
       if (!body || typeof body !== 'object') {

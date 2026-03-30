@@ -5,6 +5,14 @@ import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import http from 'http';
 import path from 'path';
+import { readFileSync } from 'fs';
+
+const APP_VERSION = (() => {
+  try {
+    const pkg = JSON.parse(readFileSync(path.resolve(__dirname, '../../../package.json'), 'utf8'));
+    return pkg.version || '1.0.0';
+  } catch { return '1.0.0'; }
+})();
 
 import { config } from '../../shared/config';
 import { logger } from '../../shared/logger';
@@ -322,7 +330,7 @@ async function bootstrap(): Promise<void> {
       res.json({
         status: dbAvailable ? 'ok' : 'frontend_only',
         ts: new Date().toISOString(),
-        version: process.env.npm_package_version || '1.0.0',
+        version: APP_VERSION,
         env: config.NODE_ENV,
         pid: process.pid,
         uptime: Math.floor(process.uptime()),
