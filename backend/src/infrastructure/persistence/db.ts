@@ -23,18 +23,34 @@ export async function checkDbConnection(): Promise<boolean> {
     logger.warn('DATABASE_URL not configured — running in frontend-only mode (no API)');
     return false;
   }
-  try {
-    const client = await pool.connect();
-    await client.query('SELECT 1');
-    client.release();
-    logger.info('Database connection established', { maxPool: config.DB_POOL_MAX });
-    return true;
-  } catch (err) {
-    logger.warn('Database connection failed — running in frontend-only mode', {
-      err: (err as Error).message,
-    });
-    return false;
+
+  const maxRetries = 5;
+  const baseDelay = 2000;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const client = await pool.connect();
+      await client.query('SELECT 1');
+      client.release();
+      logger.info('Database connection established', { maxPool: config.DB_POOL_MAX, attempt });
+      return true;
+    } catch (err) {
+      const delay = baseDelay * attempt;
+      if (attempt < maxRetries) {
+        logger.warn(`Database connection attempt ${attempt}/${maxRetries} failed — retrying in ${delay}ms`, {
+          err: (err as Error).message,
+        });
+        await new Promise((r) => setTimeout(r, delay));
+      } else {
+        logger.warn('Database connection failed after all retries — running in frontend-only mode', {
+          err: (err as Error).message,
+          attempts: maxRetries,
+        });
+        return false;
+      }
+    }
   }
+  return false;
 }
 
 /** Pool metrics for health check */

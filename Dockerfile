@@ -4,6 +4,7 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci
 COPY . .
+# API_BASE defaults to /api/v1 (same-origin) — no env var needed
 RUN npm run build
 
 # ── Stage 2: Build backend ──────────────────────────────────────────────────
