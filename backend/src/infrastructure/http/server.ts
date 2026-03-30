@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import http from 'http';
+import path from 'path';
 
 import { config } from '../../shared/config';
 import { logger } from '../../shared/logger';
@@ -288,7 +289,7 @@ async function bootstrap(): Promise<void> {
   app.use(helmet());
   app.use(cors({
     origin: config.NODE_ENV === 'production'
-      ? ['https://ops-hub.deel.com']
+      ? ['https://jtk-ops-hub.dp.com', 'https://ops-hub.deel.com']
       : ['http://localhost:5173', 'http://localhost:3000'],
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -353,6 +354,16 @@ async function bootstrap(): Promise<void> {
     requestController,
     announcementController,
   ));
+
+  // ── Serve frontend in production ──────────────────────────────────────────
+  if (config.NODE_ENV === 'production') {
+    const frontendDir = path.resolve(__dirname, '../../../public');
+    app.use(express.static(frontendDir));
+    // SPA fallback — serve index.html for all non-API routes
+    app.get('*', (_req, res) => {
+      res.sendFile(path.join(frontendDir, 'index.html'));
+    });
+  }
 
   app.use(errorHandler);
 
