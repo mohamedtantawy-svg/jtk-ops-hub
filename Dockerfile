@@ -1,32 +1,18 @@
-# ── Stage 1: Build ───────────────────────────────────────────────────────────
-FROM node:22-alpine AS build
+FROM public.ecr.aws/docker/library/node:22-alpine AS builder
 WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN npm ci
 COPY . .
-RUN npm run build
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN npm ci && npm run build && mkdir -p public
 
-# ── Stage 2: Production image ───────────────────────────────────────────────
-FROM node:22-alpine AS production
+FROM public.ecr.aws/docker/library/node:22-alpine AS runner
 WORKDIR /app
-
-# Copy standalone output
-COPY --from=build /app/.next/standalone ./
-COPY --from=build /app/.next/static ./.next/static
-COPY --from=build /app/public ./public
-
-# Non-root user for security
-RUN addgroup -g 1001 -S appgroup && \
-    adduser -S appuser -u 1001 -G appgroup
-USER appuser
-
 ENV NODE_ENV=production
-ENV PORT=3001
-ENV HOSTNAME=0.0.0.0
-
-EXPOSE 3001
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3001 || exit 1
-
+ENV NEXT_TELEMETRY_DISABLED=1
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next/static ./.next/static
+RUN npm install --no-save pg pg-hstore
+EXPOSE 3000
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
 CMD ["node", "server.js"]
