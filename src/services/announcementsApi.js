@@ -1,0 +1,96 @@
+// ── Announcements API service ─────────────────────────────────────────────────
+// Wraps all announcement-related API calls. Falls back to local state when the
+// backend is unreachable so the app keeps working in offline / demo mode.
+
+import { apiFetch } from './api';
+
+// ── List announcements ───────────────────────────────────────────────────────
+export async function fetchAnnouncements({ status, target, limit } = {}) {
+  const params = new URLSearchParams();
+  if (status) params.set('status', Array.isArray(status) ? status.join(',') : status);
+  if (target) params.set('target', target);
+  if (limit) params.set('limit', String(limit));
+  const qs = params.toString();
+  return apiFetch(`/announcements${qs ? `?${qs}` : ''}`);
+}
+
+// ── Get single announcement ──────────────────────────────────────────────────
+export async function fetchAnnouncementById(id) {
+  return apiFetch(`/announcements/${id}`);
+}
+
+// ── Create announcement ──────────────────────────────────────────────────────
+export async function createAnnouncement({ type, title, body, target, priority, isPopup, imageUrl, link }) {
+  return apiFetch('/announcements', {
+    method: 'POST',
+    body: JSON.stringify({ type, title, body, target, priority, isPopup, imageUrl, link }),
+  });
+}
+
+// ── Update announcement ──────────────────────────────────────────────────────
+export async function updateAnnouncement(id, fields) {
+  return apiFetch(`/announcements/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(fields),
+  });
+}
+
+// ── Send announcement ────────────────────────────────────────────────────────
+export async function sendAnnouncement(id) {
+  return apiFetch(`/announcements/${id}/send`, { method: 'PATCH' });
+}
+
+// ── Mark as read / acknowledged ──────────────────────────────────────────────
+export async function acknowledgeAnnouncement(id) {
+  return apiFetch(`/announcements/${id}/read`, { method: 'POST' });
+}
+
+// ── Delete announcement ──────────────────────────────────────────────────────
+export async function deleteAnnouncement(id) {
+  return apiFetch(`/announcements/${id}`, { method: 'DELETE' });
+}
+
+// ── Unarchive announcement ──────────────────────────────────────────────────
+export async function unarchiveAnnouncement(id) {
+  return apiFetch(`/announcements/${id}/unarchive`, { method: 'PATCH' });
+}
+
+// ── Comments ────────────────────────────────────────────────────────────────
+export async function fetchComments(announcementId) {
+  return apiFetch(`/announcements/${announcementId}/comments`);
+}
+
+export async function addComment(announcementId, { body, parentId }) {
+  return apiFetch(`/announcements/${announcementId}/comments`, {
+    method: 'POST',
+    body: JSON.stringify({ body, parentId: parentId || null }),
+  });
+}
+
+export async function deleteComment(announcementId, commentId) {
+  return apiFetch(`/announcements/${announcementId}/comments/${commentId}`, { method: 'DELETE' });
+}
+
+// ── Linked announcements ────────────────────────────────────────────────────
+export async function fetchLinks(id) {
+  return apiFetch(`/announcements/${id}/links`);
+}
+
+export async function linkAnnouncement(id, targetId) {
+  return apiFetch(`/announcements/${id}/links`, {
+    method: 'POST',
+    body: JSON.stringify({ targetId }),
+  });
+}
+
+export async function unlinkAnnouncement(id, targetId) {
+  return apiFetch(`/announcements/${id}/links/${targetId}`, { method: 'DELETE' });
+}
+
+// ── Reactions ──────────────────────────────────────────────────────────────
+export async function reactToAnnouncement(id, emoji) {
+  return apiFetch(`/announcements/${id}/react`, {
+    method: 'POST',
+    body: JSON.stringify({ emoji }),
+  });
+}

@@ -1,0 +1,726 @@
+@import "tailwindcss";
+
+:root {
+/* ── Deel Design Tokens ────────────────────────────── */
+
+/* Typography scale */
+--font-xs: 11px;
+--font-sm: 12px;
+--font-base: 13px;
+--font-md: 14px;
+--font-lg: 16px;
+--font-xl: 18px;
+--font-2xl: 20px;
+--font-3xl: 24px;
+--font-4xl: 28px;
+--font-5xl: 32px;
+
+/* Line heights */
+--lh-tight: 1.25;
+--lh-snug: 1.375;
+--lh-base: 1.5;
+--lh-relaxed: 1.625;
+
+/* Letter spacing */
+--ls-caps: 0.05em;
+--ls-wide: 0.04em;
+
+/* Font weights */
+--fw-normal: 400;
+--fw-medium: 500;
+--fw-semibold: 600;
+--fw-bold: 700;
+
+/* Spacing */
+--space-1: 4px;
+--space-2: 8px;
+--space-3: 12px;
+--space-4: 16px;
+--space-5: 20px;
+--space-6: 24px;
+--space-8: 32px;
+
+/* Border radius */
+--radius-sm: 4px;
+--radius-md: 6px;
+--radius-lg: 8px;
+--radius-xl: 10px;
+--radius-2xl: 12px;
+--radius-pill: 20px;
+
+/* Button heights */
+--btn-sm: 28px;
+--btn-md: 32px;
+--btn-lg: 36px;
+
+/* Shadows */
+--shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+--shadow-md: 0 2px 8px rgba(0,0,0,0.08);
+--shadow-lg: 0 4px 16px rgba(0,0,0,0.12);
+--shadow-xl: 0 8px 32px rgba(0,0,0,0.16);
+
+/* ── Colour tokens (light mode) ────────────────────── */
+--bg: #f7f5f2;
+--bg-2: #f0ede9;
+--surface: #ffffff;
+--surface-2: #faf9f7;
+--surface-3: #f5f3f0;
+--border: #e8e4df;
+--border-light: #f0ede9;
+
+--text: #1a1a1a;
+--text-secondary: #6b6560;
+--text-muted: #9b928a;
+--text-disabled: #c4bdb7;
+
+--purple: #7c3aed;
+--purple-hover: #6d28d9;
+--purple-light: #f5f0ff;
+--purple-mid: #ede9fe;
+--purple-dark: #5b21b6;
+
+--green: #15803d;
+--green-light: #f0fdf4;
+--green-mid: #dcfce7;
+--green-solid: #16a34a;
+
+--orange: #b45309;
+--orange-light: #fffbeb;
+--orange-mid: #fef3c7;
+--orange-solid: #d97706;
+
+--red: #b91c1c;
+--red-light: #fef2f2;
+--red-mid: #fee2e2;
+--red-solid: #dc2626;
+
+--blue: #1d4ed8;
+--blue-light: #eff6ff;
+--blue-mid: #dbeafe;
+--blue-solid: #2563eb;
+
+/* Status */
+--status-new-color: var(--purple);
+--status-new-bg: var(--purple-light);
+--status-progress-color: var(--blue);
+--status-progress-bg: var(--blue-light);
+--status-waiting-color: var(--text-secondary);
+--status-waiting-bg: var(--surface-3);
+--status-resolved-color: var(--green);
+--status-resolved-bg: var(--green-light);
+
+/* SLA */
+--sla-ok-color: var(--green);
+--sla-ok-bg: var(--green-light);
+--sla-risk-color: var(--orange);
+--sla-risk-bg: var(--orange-light);
+--sla-breach-color: var(--red);
+--sla-breach-bg: var(--red-light);
+
+/* Priority border */
+--priority-critical: var(--red-solid);
+--priority-high: var(--orange-solid);
+--priority-medium: #0369a1;
+--priority-low: var(--text-muted);
+
+/* Legacy aliases kept for compatibility */
+--g:#1b1b1b;--gd:#000000;--brand-orange:#ed5e2a;--navy:#1b1b1b;--mid:#2d2d2d;
+--success-light:#c2eeb5;--hot:#d42d35;--urgent:#d42d35;
+--info:#1f74b3;--error-light:#ffe2de;--warning-light:#ffe27c;
+--purple-accent:#c4b1f9;
+/* Legacy token aliases (values reference primary tokens above) */
+--text-1: var(--text);
+--text-2: var(--text-secondary);
+--text-3: var(--text-muted);
+--text-4: var(--text-disabled);
+--accent:#1f74b3;
+--accent-light:#e8f0fe;
+--success:#29811e;
+--success-bg:#e6f4e3;
+--warn:#ed5e2a;
+--warn-bg:#fff0eb;
+--error:#d42d35;
+--error-bg:#ffe2de;
+}
+
+[data-theme="dark"] {
+  --bg: #0f0f0f;
+  --bg-2: #1a1a1a;
+  --surface: #1e1e1e;
+  --surface-2: #252525;
+  --surface-3: #2c2c2c;
+  --border: #333333;
+  --border-light: #2a2a2a;
+  --text: #f0ede9;
+  --text-secondary: #a09890;
+  --text-muted: #6b6560;
+  --text-disabled: #444;
+  --purple-light: #2d1f5e;
+  --purple-mid: #3d2a7a;
+  --green-light: #052e16;
+  --green-mid: #14532d;
+  --orange-light: #2d1a00;
+  --orange-mid: #451a03;
+  --red-light: #2d0a0a;
+  --red-mid: #450a0a;
+  --blue-light: #0a1628;
+  --blue-mid: #1e3a5f;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md: 0 2px 8px rgba(0,0,0,0.4);
+  --shadow-lg: 0 4px 16px rgba(0,0,0,0.5);
+  /* Legacy dark overrides */
+  --g: #f0f0f0;
+  --gd: #ffffff;
+  --text-1: #f0ede9;
+  --text-2: #a09890;
+  --text-3: #666666;
+  --text-4: #444444;
+  --accent: #4a9fd4;
+  --accent-light: #1a3a50;
+  --success: #4caf50;
+  --success-light: #1a3a1a;
+  --warn: #ff7043;
+  --hot: #ef5350;
+  --urgent: #ef5350;
+  --error: #ef5350;
+  --error-light: #3a1a1a;
+  --error-bg: #3a1a1a;
+  --warning-light: #3a3a1a;
+  --info: #4a9fd4;
+}
+
+    *{box-sizing:border-box;}
+    body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: var(--font-md);
+  line-height: var(--lh-base);
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  margin: 0;
+}
+    /* ── Design tokens ─────────────────────────────────────────────────────── */
+    ::-webkit-scrollbar{width:5px;height:5px;}::-webkit-scrollbar-track{background:transparent;}::-webkit-scrollbar-thumb{background:#bebebe;border-radius:6px;}::-webkit-scrollbar-thumb:hover{background:#757575;}
+    /* ── Animations ────────────────────────────────────────────────────────── */
+    @keyframes ticker{0%{transform:translateX(0);}100%{transform:translateX(-50%);}}
+    .ticker-track{display:flex;animation:ticker 44s linear infinite;}.ticker-track:hover{animation-play-state:paused;}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+    @keyframes fadeSlide{from{opacity:0;transform:translateY(-4px);max-height:0;}to{opacity:1;transform:translateY(0);max-height:300px;}}
+    .fade-in{animation:fadeIn .2s ease;}
+    @keyframes slideIn{from{transform:translateX(20px);opacity:0;}to{transform:translateX(0);opacity:1;}}
+    .slide-in{animation:slideIn .2s ease;}
+    @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.3;}}.pulse{animation:pulse 1.6s ease infinite;}
+    @keyframes barGrow{from{width:0;}to{width:var(--w);}}.bar-grow{animation:barGrow .7s ease forwards;}
+    @keyframes slideInRight{from{transform:translateX(110%);opacity:0;}to{transform:translateX(0);opacity:1;}}
+    .toast-enter{animation:slideInRight .3s ease forwards;}
+    @keyframes slideUp{from{transform:translateY(18px);opacity:0;}to{transform:translateY(0);opacity:1;}}
+    @keyframes bulkSlideUp{from{transform:translateY(100%);opacity:0;}to{transform:translateY(0);opacity:1;}}
+    /* ── Emoji float animation (announcements reactions) ────────────────── */
+    @keyframes floatEmoji {
+      0% { opacity: 0; transform: scale(0.3) translateY(0) translateX(0) rotate(0deg); }
+      12% { opacity: 1; transform: scale(1.15) translateY(-30px) translateX(calc(var(--drift, 0px) * 0.3)) rotate(5deg); }
+      50% { opacity: 0.9; transform: scale(1) translateY(-120px) translateX(calc(var(--drift, 0px) * 0.8)) rotate(-3deg); }
+      80% { opacity: 0.4; transform: scale(0.85) translateY(-220px) translateX(var(--drift, 0px)) rotate(8deg); }
+      100% { opacity: 0; transform: scale(0.6) translateY(-300px) translateX(calc(var(--drift, 0px) * 1.2)) rotate(15deg); }
+    }
+    @keyframes popupFadeIn { from { opacity:0; transform:scale(0.96) translateY(8px); } to { opacity:1; transform:scale(1) translateY(0); } }
+    /* ── 10/10 Briefing Animations ────────────────────────────────────────── */
+    @keyframes countUp{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
+    .count-up{animation:countUp .5s cubic-bezier(.16,1,.3,1) forwards;opacity:0;}
+    .count-up-1{animation-delay:.05s;}.count-up-2{animation-delay:.1s;}.count-up-3{animation-delay:.15s;}
+    .count-up-4{animation-delay:.2s;}.count-up-5{animation-delay:.25s;}.count-up-6{animation-delay:.3s;}
+    .count-up-7{animation-delay:.35s;}.count-up-8{animation-delay:.4s;}
+    @keyframes ringDraw{from{stroke-dashoffset:var(--circ);}to{stroke-dashoffset:var(--off);}}
+    @keyframes heroGlow{0%,100%{opacity:.5;}50%{opacity:.8;}}
+    .hero-glow{animation:heroGlow 4s ease infinite;}
+    @keyframes staggerIn{from{opacity:0;transform:translateY(10px) scale(.97);}to{opacity:1;transform:translateY(0) scale(1);}}
+    .stagger-in{animation:staggerIn .4s cubic-bezier(.16,1,.3,1) forwards;opacity:0;}
+    .stagger-1{animation-delay:.06s;}.stagger-2{animation-delay:.12s;}.stagger-3{animation-delay:.18s;}
+    .stagger-4{animation-delay:.24s;}.stagger-5{animation-delay:.3s;}
+
+
+/* ── Page Transitions ─────────────────────────────────────────────── */
+@keyframes pageIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+.page-enter{animation:pageIn .18s ease-out both;width:100%;min-width:0;}
+
+/* ── Loading Skeleton ─────────────────────────────────────────────── */
+@keyframes skeleton-pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.skeleton-text{height:14px;border-radius:4px;}
+.skeleton-title{height:20px;border-radius:4px;width:60%;}
+.skeleton-avatar{width:36px;height:36px;border-radius:50%;flex-shrink:0;}
+.skeleton-card{border-radius:var(--radius-lg);}
+/* Legacy skeleton-row kept for compatibility */
+.skeleton-row{height:16px;margin-bottom:8px;border-radius:4px;}
+
+/* ── Improved hover/active for subnav ────────────────────────────── */
+.deel-subnav-item:active{opacity:0.7;}
+.deel-nav-item:active{opacity:0.7;transform:scale(0.97);}
+
+/* ── Smooth view transitions ─────────────────────────────────────── */
+.deel-content>div{animation:pageIn .2s ease-out;}
+
+/* ── Better stat-card hover ──────────────────────────────────────── */
+.stat-card{transition:box-shadow .2s,transform .15s;}
+.stat-card:hover{box-shadow:0 2px 8px rgba(0,0,0,0.06);}
+
+/* ── Task row improvements ───────────────────────────────────────── */
+.task-row{transition:background .15s,border-color .15s;}
+
+/* ── Active subnav indicator ─────────────────────────────────────── */
+.deel-subnav-item{transition:all .15s;}
+
+/* ── TOP NAVIGATION ───────────────────────────────────────────────────────── */
+.deel-topnav{position:fixed;top:0;left:0;right:0;height:68px;background:linear-gradient(180deg, #F8F5FF 0%, #F3EEFF 100%);border-bottom:1px solid #E8E0F5;display:flex;align-items:center;padding:0 24px;z-index:100;gap:8px;}
+[data-theme="dark"] .deel-topnav{background:linear-gradient(180deg, #1a1528 0%, #1e1a2e 100%);border-bottom-color:#2a2540;}
+.deel-logo{font-size:26px;font-weight:800;color:var(--text);letter-spacing:-1px;font-family:Inter,Arial,Helvetica,sans-serif;}
+.deel-org-badge{width:32px;height:32px;border-radius:50%;background:var(--purple);color:white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;}
+.deel-org-name{font-size:var(--font-base);font-weight:var(--fw-semibold);color:var(--text);line-height:16px;}
+.deel-org-sub{font-size:var(--font-xs);color:var(--text-muted);line-height:14px;}
+.deel-nav-items{display:flex;align-items:center;gap:2px;margin:0 auto;}
+.deel-nav-item{display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:var(--radius-lg);font-size:var(--font-md);font-weight:var(--fw-medium);color:var(--text-secondary);cursor:pointer;transition:all .15s;border:none;background:transparent;user-select:none;}
+.deel-nav-item:hover{background:var(--surface-2);color:var(--text);}
+.deel-nav-item.active{background:rgba(124,58,237,0.1);font-weight:var(--fw-semibold);color:var(--purple);border:none;}
+.deel-nav-right{display:flex;align-items:center;gap:6px;margin-left:12px;}
+.deel-icon-btn{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:transparent;border:none;cursor:pointer;color:var(--text-secondary);font-size:18px;transition:background .15s;position:relative;}
+.deel-icon-btn:hover{background:rgba(0,0,0,0.06);}
+.deel-search-btn{display:flex;align-items:center;gap:8px;padding:8px 16px;border-radius:var(--radius-pill);background:rgba(255,255,255,0.7);border:1px solid rgba(0,0,0,0.08);cursor:pointer;font-size:var(--font-md);color:var(--text-secondary);transition:all .15s;backdrop-filter:blur(4px);min-width:280px;}
+.deel-search-btn:hover{background:rgba(255,255,255,0.9);border-color:rgba(0,0,0,0.12);}
+[data-theme="dark"] .deel-search-btn{background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.1);}
+[data-theme="dark"] .deel-search-btn:hover{background:rgba(255,255,255,0.12);}
+.deel-kbd{background:var(--bg-2);border-radius:5px;padding:2px 7px;font-size:var(--font-xs);font-family:-apple-system,system-ui,sans-serif;color:var(--text-muted);font-weight:var(--fw-medium);letter-spacing:.02em;}
+.deel-notif-badge{position:absolute;top:2px;right:2px;min-width:16px;height:16px;border-radius:8px;background:var(--red-solid);color:white;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px;}
+.deel-avatar-sm{width:36px;height:36px;border-radius:50%;object-fit:cover;}
+
+/* ── SUB-NAVIGATION TABS ──────────────────────────────────────────────────── */
+.deel-subnav{height:44px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:24px;padding:0 32px;overflow-x:auto;flex-shrink:0;}
+.deel-subnav-item{display:flex;align-items:center;gap:6px;padding:10px 8px;font-size:var(--font-md);font-weight:var(--fw-medium);color:var(--text-secondary);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap;}
+.deel-subnav-item:hover{color:var(--text);}
+.deel-subnav-item.active{color:var(--text);font-weight:700;border-bottom-color:var(--text);}
+
+/* ── UPDATED CONTENT AREA (Deel spacing: 24px 32px) ──────────────────────── */
+.deel-content{padding:24px 32px;background:var(--bg);flex:1;display:flex;overflowX:hidden;overflow-y:auto;}
+
+/* ── GLASS CARDS (UPDATED) ────────────────────────────────────────────── */
+/* Glass card */
+    .glass-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow-sm);transition:box-shadow .2s,transform .2s;}
+    .glass-card:hover{box-shadow:var(--shadow-md);}
+    .glass-card-static{background:var(--surface);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow-sm);}
+    /* Metric hover */
+    .metric-cell{transition:background .15s;border-radius:8px;cursor:default;}
+    .metric-cell:hover{background:rgba(0,0,0,.02);}
+    /* Sparkline */
+    @keyframes sparkDraw{from{stroke-dashoffset:200;}to{stroke-dashoffset:0;}}
+    .spark-line{stroke-dasharray:200;animation:sparkDraw 1.2s ease forwards;}
+    /* Priority task hover */
+    .ptask{transition:all .15s;border-left:3px solid transparent;}
+    .ptask:hover{background:#e8f0fe !important;border-left-color:var(--accent) !important;transform:translateX(2px);}
+    /* Health ring label */
+    .health-label{font-variant-numeric:tabular-nums;}
+    @keyframes modalIn{from{transform:scale(.98);opacity:0;}to{transform:scale(1);opacity:1;}}
+    .modal-enter{animation:modalIn .18s cubic-bezier(.34,1.56,.64,1) forwards;}
+
+    /* ── Deel Table Header (People page pattern) ──────────────────────────── */
+    .deel-table-header{background:var(--surface-2);font-size:var(--font-xs);font-weight:var(--fw-semibold);text-transform:uppercase;letter-spacing:var(--ls-caps);color:var(--text-secondary);padding:0 16px;display:flex;align-items:center;min-height:40px;border-bottom:1px solid var(--border);}
+    .deel-table-header-cell{font-size:var(--font-xs);font-weight:var(--fw-semibold);text-transform:uppercase;letter-spacing:var(--ls-caps);color:var(--text-secondary);}
+
+    /* ── Task rows (Deel table row pattern) ────────────────────────────────── */
+    /* Fix #27: Full-row background tint for urgency states */
+    .task-row{border-left:none;padding:12px 16px;transition:background .1s;cursor:pointer;display:flex;align-items:center;gap:12px;min-height:60px;border-bottom:1px solid var(--border-light);}
+    .task-row:hover{background:var(--surface-2);}.task-row.selected{background:var(--blue-light);}
+    .task-row.age-warn{border-left-color:var(--warn);background:rgba(245,158,11,.06);}
+    .task-row.age-hot{border-left-color:var(--hot);background:rgba(249,115,22,.08);}
+    .task-row.age-urgent{border-left-color:var(--urgent);background:rgba(239,68,68,.12);}
+    .task-row.age-warn:hover{background:rgba(245,158,11,.055);}
+    .task-row.age-hot:hover{background:rgba(249,115,22,.06);}
+    .task-row.age-urgent:hover{background:rgba(239,68,68,.08);}
+    /* ── Sidebar nav ───────────────────────────────────────────────────────── */
+    /* Fix #1: Active nav item uses bold text, no colored background */
+
+    /* ── Buttons (Deel pill shape — border-radius: 128px) ─────────────────── */
+    .btn-p{background:var(--text);color:var(--surface);border:none;border-radius:128px;padding:10px 20px;font-size:var(--font-md);font-weight:var(--fw-medium);cursor:pointer;transition:background .15s;display:inline-flex;align-items:center;gap:6px;}
+    .btn-p:hover{background:var(--text-secondary);}
+    .btn-g{background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:128px;padding:10px 20px;font-size:var(--font-md);font-weight:var(--fw-medium);cursor:pointer;transition:all .15s;}
+    .btn-g:hover{border-color:var(--text-disabled);background:var(--surface-2);}
+    /* ── Badges / pills ────────────────────────────────────────────────────── */
+    .badge{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;white-space:nowrap;}
+    /* Fix #4: Urgency pills now legible at 10.5px */
+    .urgency-pill{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:6px;font-size:10px;font-weight:700;white-space:nowrap;letter-spacing:.02em;}
+    .snooze-pill{display:inline-flex;align-items:center;gap:3px;padding:2px 6px;border-radius:6px;font-size:10px;font-weight:600;background:#c7e2fe;color:#1f74b3;white-space:nowrap;}
+    /* ── Filter chips (Deel pill shape — height: 36px, border-radius: 128px) ── */
+    .filter-chip{display:inline-flex;align-items:center;gap:5px;height:36px;padding:6px 14px;border-radius:128px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:var(--font-base);font-weight:var(--fw-medium);cursor:pointer;white-space:nowrap;transition:all .15s;font-family:inherit;}
+    .filter-chip:hover{border-color:var(--text-disabled);background:var(--surface-2);}
+    .filter-chip.active{border-color:#1f74b3;background:#e8f0fe;color:#1f74b3;font-weight:600;}
+    .filter-chip .chip-count{background:#f7f5f2;border-radius:128px;padding:0 6px;font-size:10px;font-weight:700;}
+    .filter-chip.active .chip-count{background:rgba(31,116,179,.15);color:var(--accent);}
+    /* ── Knowledge hub tabs ────────────────────────────────────────────────── */
+    .tab{padding:10px 0;font-size:14px;font-weight:500;cursor:pointer;border-bottom:2px solid transparent;color:#616161;transition:all .15s;white-space:nowrap;margin-right:24px;}
+    .tab.active{color:#1b1b1b;border-bottom-color:#1b1b1b;font-weight:700;}
+    .tab:hover{color:#1b1b1b;border-bottom-color:rgba(27,27,27,.2);}
+    /* ── Form inputs ───────────────────────────────────────────────────────── */
+    .note-input{width:100%;border:1px solid #e8e8e8;border-radius:12px;padding:10px;font-size:13px;line-height:1.55;color:#616161;resize:none;outline:none;font-family:inherit;transition:border .15s;}
+    .note-input:focus{border-color:var(--accent);}
+    input[type=text]:focus,input[type=search]:focus{outline:none;border-color:var(--accent)!important;}
+    select{font-family:inherit;outline:none;}select:focus{border-color:var(--accent)!important;}
+    .sort-select{border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:12px;color:#1b1b1b;background:white;cursor:pointer;font-family:inherit;height:32px;}
+    /* ── Fix #18: BulkBar — fixed bottom dock sliding up ───────────────────── */
+    .bulk-bar{position:fixed;bottom:0;left:0;right:0;background:#1b1b1b;color:white;padding:12px 20px;display:flex;align-items:center;gap:12px;border-top:2px solid rgba(31,116,179,.3);z-index:300;animation:bulkSlideUp .22s ease;box-shadow:0 -2px 8px rgba(0,0,0,.06);}
+    /* ── Fix #20: Keyboard hint bar ────────────────────────────────────────── */
+    .kb-hint-bar{padding:6px 16px;background:#f7f5f2;border-top:1px solid var(--border);display:flex;align-items:center;gap:14px;flex-shrink:0;}
+    /* ── AI reply textarea — Fix #19 ─────────────────────────────────────── */
+    .ai-reply-textarea{width:100%;border:1px solid #e8e8e8;border-radius:0 0 8px 8px;padding:10px;font-size:13px;line-height:1.55;color:#616161;resize:none;outline:none;font-family:inherit;transition:border .15s;background:white;}
+    .ai-reply-textarea:focus{border-color:#1f74b3;background:white;}
+    .ai-reply-header{padding:8px 13px;display:flex;align-items:center;gap:7px;background:#f3eff8;border:1px solid #e8e8e8;border-bottom:1px solid #e8e8e8;border-radius:8px 8px 0 0;}
+    /* ── Misc components ───────────────────────────────────────────────────── */
+    .kbd{display:inline-block;background:#2d2d2d;color:#bebebe;border-radius:6px;padding:1px 6px;font-size:10.5px;font-family:monospace;border:1px solid #616161;}
+    .kbd-light{display:inline-block;background:#ffffff;color:#1b1b1b;border-radius:6px;padding:1px 6px;font-size:10px;font-family:monospace;border:1px solid #e8e8e8;}
+    .slack-card{background:white;border:1px solid var(--border);border-radius:16px;overflow:hidden;transition:box-shadow .15s;}
+    .slack-card:hover{box-shadow:0 2px 14px rgba(0,0,0,.08);}
+    .dropdown-item:hover{background:#f7f5f2;}
+    .stat-card{background:white;border-radius:16px;padding:20px 24px;border:1px solid #e8e8e8;box-shadow:0 1px 2px rgba(0,0,0,0.04);}
+
+    /* ── Dropdown menus (Deel style — 12px radius, proper shadow) ─────────── */
+    .dropdown-menu{border-radius:12px;box-shadow:0 4px 16px rgba(0,0,0,0.12);border:1px solid #e8e8e8;background:white;overflow:hidden;}
+
+    /* ── Search overlay & box (Deel search modal) ─────────────────────────── */
+    .search-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:900;display:flex;align-items:flex-start;justify-content:center;padding-top:80px;}
+    .search-box{background:white;border-radius:16px;width:590px;max-height:min(520px,70vh);display:flex;flex-direction:column;box-shadow:0 4px 16px rgba(0,0,0,0.12);border:1px solid #e8e8e8;animation:slideUp .18s ease;}
+    .onboard-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:800;display:flex;align-items:center;justify-content:center;}
+
+    /* ── Page header (Deel pattern — 24px/700 title, subtitle #616161) ────── */
+    .page-header{padding:16px 0;background:transparent;border-bottom:none;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;}
+    .page-header[role="banner"]{padding:16px 0 14px;}
+    .page-header-title{font-size:24px;font-weight:700;color:#1b1b1b;}
+    .page-header-subtitle{font-size:14px;color:#616161;}
+    .page-header-icon{width:38px;height:38px;border-radius:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-right:12px;}
+
+    /* Fix #8: Queue resolved divider */
+    .queue-divider{padding:5px 14px;background:var(--surface);font-size:10px;font-weight:700;color:#bebebe;letter-spacing:.07em;border-bottom:1px solid var(--border);border-top:1px solid var(--border);display:flex;align-items:center;gap:6px;}
+    /* Workload bar in reassign */
+    .wl-bar-bg{background:#e8e8e8;border-radius:3px;height:5px;flex:1;}
+    .wl-bar-fg{height:5px;border-radius:3px;background:#1f74b3;transition:width .4s ease;}
+    /* Focus visible – handled globally below */
+
+    /* ── Avatar (Deel style — 36px circle) ───────────────────────────────── */
+    .deel-avatar{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;color:white;flex-shrink:0;}
+
+    /* ── Links (Deel blue #1f74b3) ──────────────────────────────────────── */
+    .deel-link{color:#1f74b3;text-decoration:none;cursor:pointer;}
+    .deel-link:hover{text-decoration:underline;}
+
+    /* Demo mode badge */
+    /* Respect reduced-motion preference */
+    @media(prefers-reduced-motion:reduce){
+      .fade-in,.slide-in,.toast-enter,.pulse,.ticker-track,.bar-grow,.count-up,.stagger-in,.spark-line,.hero-glow{animation:none !important;transition:none !important;}
+      .ticker-track{animation:none !important;}
+    }
+    .demo-badge{display:inline-flex;align-items:center;gap:4px;background:rgba(245,158,11,.15);color:#ed8d00;border-radius:6px;padding:2px 7px;font-size:10px;font-weight:700;letter-spacing:.04em;}
+    @media print{
+      .ticker-track,.sidebar-wrap,.bulk-bar,.toast-enter,.search-overlay,.kb-hint-bar,.top-bar{display:none !important;}
+      body{background:white !important;}
+    }
+
+/* NOTE: bi-slack does not exist in Bootstrap Icons — use bi-chat-square-dots as fallback */
+
+/* ── DARK MODE component overrides ───────────────────────────────────── */
+
+[data-theme="dark"] body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+[data-theme="dark"] .glass-card,
+[data-theme="dark"] .glass-card-static,
+[data-theme="dark"] .stat-card,
+[data-theme="dark"] .slack-card {
+  background: #1e1e1e;
+  border-color: #333;
+}
+
+[data-theme="dark"] .deel-topnav {
+  background: var(--surface);
+  border-bottom-color: var(--border);
+}
+
+[data-theme="dark"] .deel-subnav {
+  background: #1e1e1e;
+  border-bottom-color: #333;
+}
+
+[data-theme="dark"] .filter-chip {
+  background: #2a2a2a;
+  border-color: #444;
+  color: #e0e0e0;
+}
+
+[data-theme="dark"] .filter-chip.active {
+  background: #1a3a5c;
+  border-color: #4a9eda;
+  color: #4a9eda;
+}
+
+[data-theme="dark"] .btn-p {
+  background: #4a9eda;
+  color: #121212;
+}
+
+[data-theme="dark"] .btn-g {
+  background: #2a2a2a;
+  border-color: #444;
+  color: #e0e0e0;
+}
+
+[data-theme="dark"] .task-row:hover {
+  background: rgba(255,255,255,0.05);
+}
+
+[data-theme="dark"] .search-box,
+[data-theme="dark"] .onboard-overlay > div {
+  background: #1e1e1e;
+  color: #f0f0f0;
+}
+
+[data-theme="dark"] .note-input,
+[data-theme="dark"] .ai-reply-textarea {
+  background: #2a2a2a;
+  border-color: #444;
+  color: #e0e0e0;
+}
+
+[data-theme="dark"] .badge {
+  opacity: 0.9;
+}
+
+[data-theme="dark"] .queue-divider {
+  background: #1a1a1a;
+  border-color: #333;
+}
+
+[data-theme="dark"] .bulk-bar {
+  background: #2a2a2a;
+}
+
+[data-theme="dark"] .kb-hint-bar {
+  background: #1a1a1a;
+  border-color: #333;
+}
+
+[data-theme="dark"] .deel-nav-item.active {
+  background: rgba(107,63,160,0.15);
+  color: #c4a8f0;
+  border: none;
+}
+
+[data-theme="dark"] input[type=text],
+[data-theme="dark"] input[type=search],
+[data-theme="dark"] select,
+[data-theme="dark"] .sort-select {
+  background: #2a2a2a;
+  color: #e0e0e0;
+  border-color: #444;
+}
+
+[data-theme="dark"] .dropdown-menu {
+  background: #1e1e1e;
+  border-color: #333;
+}
+
+[data-theme="dark"] .deel-table-header {
+  background: #1a1a1a;
+  border-color: #333;
+}
+
+a:hover,.link-hover:hover{text-decoration:underline;}
+button:disabled,.btn-p:disabled,.btn-g:disabled{opacity:0.45;cursor:not-allowed;}
+
+/* ── Focus rings (WCAG) ───────────────────────────────────────────── */
+:focus-visible{outline:2px solid var(--purple);outline-offset:2px;border-radius:var(--radius-sm);}
+button:focus-visible,[role="button"]:focus-visible{outline:2px solid var(--purple);outline-offset:2px;}
+
+/* ── Sticky table headers ─────────────────────────────────────────── */
+.deel-table-header{position:sticky;top:0;z-index:10;}
+
+/* ── Error input state ────────────────────────────────────────────── */
+.input-error{border-color:var(--error) !important;background:var(--error-bg) !important;}
+.error-msg{color:var(--error);font-size:12px;margin-top:4px;display:flex;align-items:center;gap:4px;}
+
+/* ── Tooltip ──────────────────────────────────────────────────────── */
+.tooltip-wrap{position:relative;display:inline-flex;}
+.tooltip-wrap .tooltip-text{
+  visibility:hidden;opacity:0;pointer-events:none;
+  position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);
+  background:#1b1b1b;color:white;font-size:11px;font-weight:500;
+  padding:4px 8px;border-radius:6px;white-space:nowrap;
+  transition:opacity .15s;z-index:9999;
+}
+.tooltip-wrap .tooltip-text::after{
+  content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);
+  border:4px solid transparent;border-top-color:#1b1b1b;
+}
+.tooltip-wrap:hover .tooltip-text{visibility:visible;opacity:1;}
+
+/* ── Interactive rows ─────────────────────────────────────────────── */
+.interactive-row{transition:background .12s;cursor:pointer;}
+.interactive-row:hover{background:var(--surface-2);}
+
+/* ── Shake animation (EscalModal) ────────────────────────────────── */
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-4px)}75%{transform:translateX(4px)}}
+.shake{animation:shake .3s ease;}
+
+/* ── Deel utility classes ───────────────────────────────────────────── */
+
+/* ALL CAPS labels get letter-spacing */
+.label-caps {
+  text-transform: uppercase;
+  letter-spacing: var(--ls-caps);
+  font-size: var(--font-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--text-muted);
+}
+
+/* Truncate text */
+.truncate {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Standard card */
+.deel-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2xl);
+  padding: var(--space-5);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Standard button base */
+.deel-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--btn-md);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-pill);
+  font-size: var(--font-base);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+  border: none;
+  transition: background 0.15s, color 0.15s, opacity 0.15s;
+  white-space: nowrap;
+}
+.deel-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.deel-btn-primary { background: var(--purple); color: #fff; }
+.deel-btn-primary:hover:not(:disabled) { background: var(--purple-hover); }
+.deel-btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+.deel-btn-secondary:hover:not(:disabled) { background: var(--surface-3); }
+.deel-btn-ghost { background: transparent; color: var(--text-secondary); }
+.deel-btn-ghost:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
+.deel-btn-danger { background: var(--red-light); color: var(--red); border: 1px solid var(--red-mid); }
+.deel-btn-danger:hover:not(:disabled) { background: var(--red-mid); }
+.deel-btn-sm { height: var(--btn-sm); padding: 0 var(--space-3); font-size: var(--font-sm); }
+.deel-btn-lg { height: var(--btn-lg); padding: 0 var(--space-5); font-size: var(--font-md); }
+
+/* Standard badge */
+.deel-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--font-xs);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+}
+.deel-badge-purple { background: var(--purple-light); color: var(--purple); }
+.deel-badge-green  { background: var(--green-light);  color: var(--green); }
+.deel-badge-orange { background: var(--orange-light); color: var(--orange); }
+.deel-badge-red    { background: var(--red-light);    color: var(--red); }
+.deel-badge-blue   { background: var(--blue-light);   color: var(--blue); }
+.deel-badge-grey   { background: var(--surface-3);    color: var(--text-secondary); }
+
+/* Page transition */
+.page-enter {
+  animation: pageIn 0.18s ease-out both;
+  width: 100%;
+  min-width: 0;
+}
+
+/* Checkbox custom style */
+input[type="checkbox"].deel-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 15px;
+  height: 15px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  position: relative;
+}
+input[type="checkbox"].deel-checkbox:checked {
+  background: var(--purple);
+  border-color: var(--purple);
+}
+input[type="checkbox"].deel-checkbox:checked::after {
+  content: '';
+  position: absolute;
+  width: 4px;
+  height: 7px;
+  border: 1.5px solid #fff;
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+input[type="checkbox"].deel-checkbox:focus {
+  outline: 2px solid var(--purple);
+  outline-offset: 2px;
+}
+
+/* Toggle switch */
+.deel-toggle {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+}
+.deel-toggle input { opacity: 0; width: 0; height: 0; }
+.deel-toggle-track {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: var(--border);
+  border-radius: 20px;
+  transition: background 0.2s;
+}
+.deel-toggle-track::before {
+  content: '';
+  position: absolute;
+  width: 14px; height: 14px;
+  left: 3px; top: 3px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s;
+  box-shadow: var(--shadow-sm);
+}
+.deel-toggle input:checked + .deel-toggle-track { background: var(--purple); }
+.deel-toggle input:checked + .deel-toggle-track::before { transform: translateX(16px); }
+.deel-toggle input:focus + .deel-toggle-track { outline: 2px solid var(--purple); outline-offset: 2px; }
+
+/* Loading skeleton */
+.skeleton {
+  background: linear-gradient(90deg, var(--surface-3) 25%, var(--border-light) 50%, var(--surface-3) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius-md);
+}
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}

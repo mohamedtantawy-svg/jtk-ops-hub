@@ -1,0 +1,433 @@
+import { useState, useEffect, useRef, useContext } from 'react';
+import { PermissionsContext, SettingsContext } from '../../App';
+import { MEMBERS } from '../../data/members';
+import { TOOLS, STATUSES, FLAGS, SLA_MINS } from '../../data/constants';
+import { slaInfo, rel, getUrl } from '../../utils/helpers';
+import { ToolBadge, FnBadge, StatusBadge } from '../ui/Badges';
+import Avatar from '../ui/Avatar';
+import NotesTab from './NotesTab';
+import TimelineTab from './TimelineTab';
+
+// ZD status tooltip descriptions
+const STATUS_TOOLTIPS={
+  new:'Just received, not yet opened by an agent.',
+  in_progress:'ZD Open / Jira In Progress — actively being worked.',
+  waiting:'ZD Pending (waiting on requester) / ZD On-Hold.',
+  resolved:'ZD Solved / Jira Done — issue has been closed.',
+};
+
+// Supported translation languages
+const TRANSLATE_LANGS=['Japanese','French','German','Spanish','Portuguese'];
+
+// Mock translation — prepend language tag
+const mockTranslate=(text,lang)=>`[Translated to ${lang}]: ${text||''}`;
+
+// Quick reply templates keyed by task type
+const REPLY_TEMPLATES={
+  default:'Thank you for reaching out. I\'m reviewing your request and will follow up within [SLA time].',
+  'Payment Issue':'I can see there\'s a discrepancy in your payslip. I\'ve raised this with the payroll team and expect a correction within 2 business days.',
+  'Immigration':'Your immigration case has been received. Please allow 5-10 business days for processing.',
+  'Onboarding':'Welcome! Your onboarding request has been received. Your manager will be in touch shortly.',
+  'Benefits':'Your benefits query has been logged. Our benefits team will respond within 24 hours.',
+  'Leave Request':'Your leave request has been reviewed. Please check your leave balance in the HR portal.',
+  'Leave Query':'Your leave request has been reviewed. Please check your leave balance in the HR portal.',
+};
+
+const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setActivity,currentUser,onEscalMgr,escalations=[],onResolve,addToast})=>{
+  const perms=useContext(PermissionsContext);
+  const settings=useContext(SettingsContext);
+  const [tab,setTab]=useState('overview');
+  const [showTemplates,setShowTemplates]=useState(false);
+  const [replyText,setReplyText]=useState('');
+  const [aiGenerating,setAiGenerating]=useState(false);
+  const [showTranslateDD,setShowTranslateDD]=useState(false);
+  const [activeLang,setActiveLang]=useState(null);
+  const [originalReplyText,setOriginalReplyText]=useState(null);
+  // Linked Systems state
+  const [linkedTickets,setLinkedTickets]=useState(task.linkedTickets||[]);
+  const [showLinkForm,setShowLinkForm]=useState(false);
+  const [linkSystem,setLinkSystem]=useState('Zendesk');
+  const [linkTicketId,setLinkTicketId]=useState('');
+  const [showSideConvTooltip,setShowSideConvTooltip]=useState(false);
+  // Reset tab and reply when task changes
+  useEffect(()=>{ setTab('overview'); setReplyText(''); },[task.id]);
+  // Sync linkedTickets when task changes
+  useEffect(()=>{ setLinkedTickets(task.linkedTickets||[]); },[task.id]);
+
+  // Translate dropdown close on outside click
+  const translateRef = useRef(null);
+  useEffect(() => {
+    if (!showTranslateDD) return;
+    const h = (e) => { if (translateRef.current && !translateRef.current.contains(e.target)) setShowTranslateDD(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [showTranslateDD]);
+
+  const assignee=MEMBERS.find(m=>m.id===task.assigneeId);
+  const taskEscalation=escalations.find(e=>e.taskId===task.id);
+  const sla=slaInfo(task);
+
+  // SLA progress bar data
+  const slaLim=SLA_MINS[task.type]||1440;
+  const slaRem=slaLim-(task.minutesAgo??0);
+  const slaPct=Math.max(0,Math.min(100,(slaRem/slaLim)*100));
+  const slaBarColor = slaRem<=0
+    ? 'var(--red, #b91c1c)'
+    : slaPct>50
+    ? 'var(--green, #15803d)'
+    : slaPct>20
+    ? 'var(--orange, #b45309)'
+    : 'var(--red, #b91c1c)';
+  const slaBarText=slaRem<=0?`Breached ${Math.abs(slaRem)}m ago`:`${slaRem>=60?Math.floor(slaRem/60)+'h '+(slaRem%60?slaRem%60+'m':''):slaRem+'m'} remaining`;
+
+  // Template list for this task type
+  const templateKeys=['default',...Object.keys(REPLY_TEMPLATES).filter(k=>k!=='default')];
+  const getTemplate=(type)=>REPLY_TEMPLATES[type]||REPLY_TEMPLATES.default;
+
+  const tabItems=['overview','notes','timeline'];
+
+  // Panel style with slide-in animation
+  const panelStyle = {
+    width: '100%',
+    background: 'white',
+    display: 'flex',
+    flexDirection: 'column',
+    flexShrink: 0,
+    height: '100%',
+    overflow: 'hidden',
+    animation: 'slideInRight 0.2s cubic-bezier(0.16, 1, 0.3, 1) both',
+  };
+
+  return(
+    <div className="slide-in" style={panelStyle}>
+      <style>{`@keyframes slideInRight { from { opacity:0; transform:translateX(20px); } to { opacity:1; transform:translateX(0); } }`}</style>
+      {/* Header */}
+      <div style={{padding:'16px 20px',borderBottom:'1px solid #e8e8e8',flexShrink:0}}>
+        <div style={{display:'flex',alignItems:'flex-start',gap:8}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:8,alignItems:'center'}}>
+              <ToolBadge source={task.source}/>
+              {/* D: Status badge with info tooltip */}
+              <div className="tooltip-wrap" style={{display:'inline-flex',alignItems:'center',gap:4,position:'relative'}}>
+                <StatusBadge status={task.status}/>
+                <i className="bi-info-circle" style={{fontSize:11,color:'#bebebe',cursor:'default'}}></i>
+                <span className="tooltip-text" style={{position:'absolute',top:'calc(100% + 6px)',left:0,zIndex:200,background:'#1b1b1b',color:'white',fontSize:11,padding:'6px 10px',borderRadius:8,whiteSpace:'nowrap',pointerEvents:'none',boxShadow:'0 4px 12px rgba(0,0,0,0.2)',minWidth:220,lineHeight:1.6}}>
+                  {STATUS_TOOLTIPS[task.status]||'Status unknown'}
+                </span>
+              </div>
+              {task.isAlert&&<span style={{background:'#fff8e6',color:'#ed8d00',borderRadius:128,padding:'2px 10px',fontSize:11,fontWeight:600}}>Alert</span>}
+            </div>
+            <div style={{color:'#1b1b1b',fontWeight:700,fontSize:16,lineHeight:1.35}}>{task.subject}</div>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginTop:4}}>
+              <span style={{color:'#9e9e9e',fontSize:12}}>{task.id}</span>
+              {/* E: Open in Source button — guarded */}
+              {task.externalUrl&&(
+                <button onClick={()=>window.open(task.externalUrl,'_blank')} style={{display:'inline-flex',alignItems:'center',gap:4,height:22,padding:'0 8px',borderRadius:128,border:'1px solid var(--border,#e8e4df)',background:'white',color:'#616161',fontSize:11,fontWeight:500,cursor:'pointer',transition:'all .12s'}}
+                  onMouseEnter={e=>{e.currentTarget.style.background='#f2f2f2';e.currentTarget.style.borderColor='#c0c0c0';}}
+                  onMouseLeave={e=>{e.currentTarget.style.background='white';e.currentTarget.style.borderColor='var(--border,#e8e4df)';}}>
+                  <i className="bi-box-arrow-up-right" style={{fontSize:9}}></i>
+                  Open in {TOOLS[task.source]?.label||'Source'}
+                </button>
+              )}
+            </div>
+          </div>
+          <div style={{display:'flex',gap:6,flexShrink:0,alignItems:'center'}}>
+            <a href={getUrl(task)} target="_blank" rel="noreferrer" title={`Open in ${TOOLS[task.source]?.label||'source'}`} style={{display:'flex',alignItems:'center',justifyContent:'center',width:32,height:32,borderRadius:8,border:'1px solid #e8e8e8',color:'#616161',textDecoration:'none',fontSize:14,transition:'all .15s'}} onMouseEnter={e=>{e.currentTarget.style.borderColor='#1f74b3';e.currentTarget.style.color='#1f74b3';}} onMouseLeave={e=>{e.currentTarget.style.borderColor='#e8e8e8';e.currentTarget.style.color='#616161';}}><i className="bi-box-arrow-up-right"></i></a>
+            <button aria-label="Close detail panel" onClick={onClose} style={{display:'flex',alignItems:'center',justifyContent:'center',width:32,height:32,background:'none',border:'none',color:'#9e9e9e',cursor:'pointer',borderRadius:8,transition:'all .15s',fontSize:18}} onMouseEnter={e=>{e.currentTarget.style.background='#f2f2f2';e.currentTarget.style.color='#1b1b1b';}} onMouseLeave={e=>{e.currentTarget.style.background='none';e.currentTarget.style.color='#9e9e9e';}}><i className="bi-x-lg"></i></button>
+          </div>
+        </div>
+        {/* Tabs — Title Case labels */}
+        <div role="tablist" style={{display:'flex',marginTop:14,gap:0,borderBottom:'1px solid #e8e8e8',marginLeft:-20,marginRight:-20,paddingLeft:20,paddingRight:20}}>
+          {tabItems.map(t=>{
+            const active=tab===t;
+            const label=t==='overview'?'Overview':t==='notes'?'Notes':'Timeline';
+            const noteCount=t==='notes'?(notes[task.id]||[]).length:0;
+            return(
+              <div key={t} role="tab" aria-selected={active} onClick={()=>setTab(t)} style={{padding:'10px 8px',marginRight:16,fontSize:14,fontWeight:active?700:400,color:active?'#1b1b1b':'#9e9e9e',borderBottom:active?'2px solid #1b1b1b':'2px solid transparent',cursor:'pointer',transition:'all .15s',display:'flex',alignItems:'center',gap:4,marginBottom:-1}}>
+                {label}
+                {noteCount>0&&<span style={{background:active?'#1b1b1b':'#f2f2f2',color:active?'white':'#616161',borderRadius:10,padding:'0 6px',fontSize:10,fontWeight:700,lineHeight:'18px'}}>{noteCount}</span>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      {/* Body */}
+      <div role="tabpanel" style={{flex:1,overflowY:'auto'}}>
+        {tab==='overview'&&(
+          <div style={{padding:'16px 20px',display:'flex',flexDirection:'column',gap:16}}>
+            {/* Meta — clean key-value grid */}
+            <div style={{display:'grid',gridTemplateColumns:'repeat(2, minmax(0, 1fr))',gap:12}}>
+              {[
+                {l:'Assignee',v:<div style={{display:'flex',alignItems:'center',gap:6}}><Avatar name={assignee?.name||'Unassigned'} size={22}/><span>{assignee?.name||'Unassigned'}</span></div>},
+                {l:'Country',v:`${FLAGS[task.country]||''} ${task.country||'--'}`},
+                {l:'Received',v:task.receivedAt||'--'},
+                {l:'Last Update',v:task.updatedMinsAgo!=null?rel(task.updatedMinsAgo):'--'}
+              ].map(m=>(
+                <div key={m.l} style={{overflow:'hidden'}}>
+                  <div style={{fontSize:'var(--font-xs)',fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:4}}>{m.l}</div>
+                  <div style={{color:'#1b1b1b',fontSize:14}}>{m.v}</div>
+                </div>
+              ))}
+            </div>
+            {/* Requester context */}
+            {task.requesterName&&(
+              <div>
+                <div style={{fontSize:'var(--font-xs)',fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6}}>Requester</div>
+                <div style={{display:'flex',alignItems:'center',gap:6,color:'#1b1b1b',fontSize:14}}>
+                  <i className="bi-person-circle" style={{color:'#9e9e9e',fontSize:15}}></i>
+                  <span>{task.requesterName}</span>
+                </div>
+              </div>
+            )}
+            {/* SLA Remaining bar */}
+            {settings.sla_enabled!==false&&task.status!=='resolved'&&task.status!=='waiting'&&(
+              <div>
+                <div style={{fontSize:'var(--font-xs)',fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6}}>SLA</div>
+                <div style={{background:'#f2f2f2',borderRadius:4,height:6,overflow:'hidden',marginBottom:4}}>
+                  <div style={{height:'100%',width:`${slaPct}%`,background:slaBarColor,borderRadius:4,transition:'width .3s'}}></div>
+                </div>
+                <div style={{display:'flex',justifyContent:'space-between',marginTop:4}}>
+                  <span style={{fontSize:'var(--font-xs)',color:'var(--text-muted)'}}>{slaBarText}</span>
+                  {!task.status?.includes('resolved')&&(
+                    <span style={{fontSize:'var(--font-xs)',color:slaPct<20?'var(--red)':'var(--text-muted)'}}>
+                      {Math.round(slaPct)}% remaining
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+            {/* SLA Info banner */}
+            {settings.sla_enabled!==false&&sla&&(
+              <div style={{display:'flex',alignItems:'center',gap:8,padding:'10px 14px',borderRadius:10,background:sla.bg,border:`1px solid ${sla.color}22`}}>
+                <i className={sla.breach?'bi-exclamation-triangle-fill':'bi-clock'} style={{fontSize:13,color:sla.color}}></i>
+                <span style={{fontSize:13,fontWeight:600,color:sla.color}}>{sla.label}</span>
+              </div>
+            )}
+            {/* C: Offboarding Processing Time */}
+            {(task.source==='workbench'||/offboard|termination/i.test(task.subject))&&task.status!=='resolved'&&(()=>{
+              const dayNum=Math.round(task.minutesAgo/60/24)||1;
+              const ptColor=dayNum<=4?'#29811e':dayNum===5?'#ed8d00':'#d42d35';
+              const ptPct=Math.min(100,(dayNum/6)*100);
+              return(
+                <div>
+                  <div style={{fontSize:'var(--font-xs)',fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6}}>Processing Time</div>
+                  <div style={{background:'#f2f2f2',borderRadius:4,height:6,overflow:'hidden',marginBottom:6}}>
+                    <div style={{height:'100%',width:`${ptPct}%`,background:ptColor,borderRadius:4,transition:'width .3s'}}></div>
+                  </div>
+                  <div style={{fontSize:12,color:ptColor,fontWeight:600}}>Day {dayNum} of 6 <span style={{fontWeight:400,color:'#9e9e9e'}}>(6-day SLA)</span></div>
+                </div>
+              );
+            })()}
+            {/* G: AI Summary card */}
+            {task.aiSummary&&(
+              <div style={{background:'#f5f3ff',border:'1px solid #c4b1f9',borderRadius:12,padding:'12px 14px'}}>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+                  <div style={{display:'flex',alignItems:'center',gap:5}}>
+                    <i className="bi-stars" style={{fontSize:12,color:'#7c3aed'}}></i>
+                    <span style={{fontSize:11,fontWeight:700,color:'#7c3aed',letterSpacing:'.05em',textTransform:'uppercase'}}>AI Summary</span>
+                  </div>
+                  <button onClick={()=>{setAiGenerating(true);setTimeout(()=>setAiGenerating(false),1500);}} style={{display:'inline-flex',alignItems:'center',gap:3,height:22,padding:'0 8px',borderRadius:128,border:'1px solid #c4b1f9',background:'white',color:'#7c3aed',fontSize:11,fontWeight:500,cursor:'pointer',transition:'all .12s'}}
+                    onMouseEnter={e=>{e.currentTarget.style.background='#ede9fe';}} onMouseLeave={e=>{e.currentTarget.style.background='white';}}>
+                    <i className="bi-arrow-clockwise" style={{fontSize:9}}></i>
+                    {aiGenerating?'Generating…':'Regenerate'}
+                  </button>
+                </div>
+                {aiGenerating?(
+                  <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 0',color:'var(--text-muted)',fontSize:'var(--font-sm)'}}>
+                    <span className="skeleton" style={{width:120,height:12}}/>
+                    <span className="skeleton" style={{width:80,height:12}}/>
+                    <span className="skeleton" style={{width:100,height:12}}/>
+                  </div>
+                ):(
+                  <p style={{fontSize:13,color:'#4b5563',lineHeight:1.6,margin:0}}>{task.aiSummary}</p>
+                )}
+              </div>
+            )}
+            {/* Escalation Status */}
+            {taskEscalation&&(
+              <div style={{background:taskEscalation.managerResponseStatus==='responded'?'#F0FDF9':'#fff8e6',border:`1px solid ${taskEscalation.managerResponseStatus==='responded'?'#A7F3D0':'#ffe27c'}`,borderRadius:12,padding:'12px 14px'}}>
+                <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
+                  <span style={{width:8,height:8,borderRadius:'50%',background:taskEscalation.managerResponseStatus==='responded'?'#29811e':'#ed8d00',display:'inline-block',flexShrink:0}}></span>
+                  <span style={{fontSize:12,fontWeight:700,color:taskEscalation.managerResponseStatus==='responded'?'#29811e':'#92400E'}}>
+                    <i className="bi-arrow-up-circle-fill" style={{marginRight:4,fontSize:11}}></i>
+                    Escalated to {taskEscalation.managerName}
+                    <span style={{fontWeight:400,marginLeft:6,color:'#616161'}}>
+                      {taskEscalation.managerResponseStatus==='responded'?'Responded':'Pending Response'}
+                    </span>
+                  </span>
+                </div>
+                <div style={{fontSize:12,color:'#616161'}}><span style={{fontWeight:600}}>Reason:</span> {taskEscalation.reason}</div>
+              </div>
+            )}
+            {/* B: Linked Tickets — from task.linkedTickets field */}
+            {task.linkedTickets&&task.linkedTickets.length>0&&(
+              <div>
+                <div style={{fontSize:'var(--font-xs)',fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:8}}>Linked Tickets</div>
+                <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+                  {task.linkedTickets.map((lt,i)=>{
+                    const url=lt.type==='jira'?`https://deel.atlassian.net/browse/${lt.id}`:lt.type==='zendesk'?`https://deel.zendesk.com/agent/tickets/${lt.id.replace(/\D/g,'')}`:task.externalUrl||'#';
+                    return(
+                      <a key={i} href={url} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 10px',borderRadius:128,background:'var(--border,#e8e4df)',color:'#1b1b1b',border:'1px solid #d6d0ca',fontSize:12,fontWeight:500,textDecoration:'none',transition:'all .12s'}}
+                        onMouseEnter={e=>{e.currentTarget.style.background='#ddd8d2';}} onMouseLeave={e=>{e.currentTarget.style.background='var(--border,#e8e4df)';}}>
+                        <i className="bi-link-45deg" style={{fontSize:11,color:'#616161'}}></i>
+                        <span style={{fontSize:10,color:'#616161',textTransform:'uppercase',fontWeight:700}}>{lt.type.slice(0,2).toUpperCase()}</span>
+                        {lt.id}
+                      </a>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {/* ── Linked Systems ──────────────────────────────────────── */}
+            <div>
+              <div style={{fontSize:'var(--font-xs)',fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:8,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                <span>Linked Systems</span>
+                {task.source==='zendesk'&&(
+                  <div style={{position:'relative',display:'inline-block'}}>
+                    <button onClick={()=>setShowSideConvTooltip(v=>!v)}
+                      style={{display:'inline-flex',alignItems:'center',gap:4,height:22,padding:'0 8px',borderRadius:6,border:'1px solid #e8e8e8',background:'white',color:'#9e9e9e',fontSize:10,fontWeight:500,cursor:'pointer',transition:'all .12s'}}
+                      onMouseEnter={e=>{e.currentTarget.style.borderColor='#1f74b3';e.currentTarget.style.color='#1f74b3';}} onMouseLeave={e=>{e.currentTarget.style.borderColor='#e8e8e8';e.currentTarget.style.color='#9e9e9e';}}>
+                      <i className="bi-chat-dots" style={{fontSize:10}}></i>Side Conversations (0)
+                    </button>
+                    {showSideConvTooltip&&(
+                      <div style={{position:'absolute',right:0,top:28,width:220,background:'#1b1b1b',color:'white',borderRadius:10,padding:'10px 14px',fontSize:12,zIndex:200,boxShadow:'0 4px 16px rgba(0,0,0,0.18)',animation:'fadeSlide .15s ease'}}>
+                        <i className="bi-info-circle" style={{marginRight:6,fontSize:11}}></i>
+                        Side conversation feature coming in V2
+                        <div style={{position:'absolute',right:12,top:-5,width:10,height:10,background:'#1b1b1b',transform:'rotate(45deg)',borderRadius:2}}></div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              {/* Existing linked tickets as chips */}
+              <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:linkedTickets.length>0?8:0}}>
+                {linkedTickets.map((lt,i)=>(
+                  <span key={i} style={{display:'inline-flex',alignItems:'center',gap:5,background:'#f3eff8',color:'#7c3aed',border:'1px solid #c4b1f9',borderRadius:128,padding:'3px 10px',fontSize:12,fontWeight:600,cursor:'default'}}>
+                    <i className="bi-link-45deg" style={{fontSize:11}}></i>
+                    {lt.system}: {lt.ticketId}
+                    <button onClick={()=>setLinkedTickets(prev=>prev.filter((_,j)=>j!==i))}
+                      style={{background:'none',border:'none',color:'#9e9e9e',cursor:'pointer',padding:0,fontSize:12,lineHeight:1,display:'flex',alignItems:'center'}}
+                      aria-label="Remove linked ticket">×</button>
+                  </span>
+                ))}
+              </div>
+              {/* + Link Ticket button */}
+              {!showLinkForm&&(
+                <button onClick={()=>setShowLinkForm(true)}
+                  style={{display:'inline-flex',alignItems:'center',gap:5,height:28,padding:'0 12px',borderRadius:128,border:'1px dashed #c4b1f9',background:'transparent',color:'#7c3aed',fontSize:12,fontWeight:600,cursor:'pointer',transition:'all .12s'}}
+                  onMouseEnter={e=>{e.currentTarget.style.background='#f3eff8';}} onMouseLeave={e=>{e.currentTarget.style.background='transparent';}}>
+                  <i className="bi-plus-circle" style={{fontSize:11}}></i>Link Ticket
+                </button>
+              )}
+              {/* Inline link form */}
+              {showLinkForm&&(
+                <div style={{display:'flex',alignItems:'center',gap:6,marginTop:4,flexWrap:'wrap'}}>
+                  <select value={linkSystem} onChange={e=>setLinkSystem(e.target.value)}
+                    style={{height:32,padding:'0 8px',borderRadius:8,border:'1px solid #e8e8e8',background:'white',fontSize:12,color:'#1b1b1b',cursor:'pointer',outline:'none'}}>
+                    {['Zendesk','Jira','Workbench','Slack'].map(s=><option key={s} value={s}>{s}</option>)}
+                  </select>
+                  <input value={linkTicketId} onChange={e=>setLinkTicketId(e.target.value)}
+                    placeholder="Ticket ID…" onKeyDown={e=>{if(e.key==='Enter'&&linkTicketId.trim()){setLinkedTickets(prev=>[...prev,{system:linkSystem,ticketId:linkTicketId.trim()}]);addToast&&addToast('success','Ticket linked',`${linkSystem}: ${linkTicketId.trim()}`);setLinkTicketId('');setShowLinkForm(false);}}}
+                    style={{height:32,padding:'0 10px',borderRadius:8,border:'1px solid #e8e8e8',background:'white',fontSize:12,color:'#1b1b1b',outline:'none',width:110,transition:'border-color .12s'}}
+                    onFocus={e=>e.target.style.borderColor='#7c3aed'} onBlur={e=>e.target.style.borderColor='#e8e8e8'}/>
+                  <button
+                    onClick={()=>{if(linkTicketId.trim()){setLinkedTickets(prev=>[...prev,{system:linkSystem,ticketId:linkTicketId.trim()}]);addToast&&addToast('success','Ticket linked',`${linkSystem}: ${linkTicketId.trim()}`);setLinkTicketId('');setShowLinkForm(false);}}}
+                    style={{height:32,padding:'0 14px',borderRadius:128,border:'none',background:'#7c3aed',color:'white',fontSize:12,fontWeight:700,cursor:'pointer'}}>
+                    Link
+                  </button>
+                  <button onClick={()=>{setShowLinkForm(false);setLinkTicketId('');}}
+                    style={{height:32,padding:'0 10px',borderRadius:128,border:'1px solid #e8e8e8',background:'white',color:'#616161',fontSize:12,cursor:'pointer'}}>
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Message Body */}
+            {task.body&&(
+              <div>
+                <div style={{fontSize:'var(--font-xs)',fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6}}>Message</div>
+                <div style={{background:'#fafaf9',borderRadius:10,padding:'12px 14px',color:'#616161',fontSize:13,lineHeight:1.65,border:'1px solid #f2f2f2'}}>{task.body}</div>
+              </div>
+            )}
+            {/* Quick reply templates + textarea */}
+            {settings.ai_replies_enabled!==false&&<div>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
+                <div style={{fontSize:'var(--font-xs)',fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Quick Reply</div>
+                <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                  {/* H: Translate button */}
+                  <div ref={translateRef} style={{position:'relative'}}>
+                    <button onClick={()=>setShowTranslateDD(v=>!v)} style={{display:'inline-flex',alignItems:'center',gap:4,height:26,padding:'0 10px',borderRadius:6,border:'1px solid #e8e8e8',background:showTranslateDD?'#e8f0fe':'white',color:showTranslateDD?'#1f74b3':'#616161',fontSize:11,fontWeight:500,cursor:'pointer',transition:'all .12s'}}>
+                      🌐 Translate
+                    </button>
+                    {showTranslateDD&&(
+                      <div style={{position:'absolute',right:0,top:30,width:160,background:'white',border:'1px solid #e8e8e8',borderRadius:10,boxShadow:'0 4px 16px rgba(0,0,0,0.1)',zIndex:110,overflow:'hidden'}}>
+                        {TRANSLATE_LANGS.map(lang=>(
+                          <button key={lang} onClick={()=>{
+                            const orig=activeLang?originalReplyText:replyText;
+                            setOriginalReplyText(orig);
+                            setReplyText(mockTranslate(orig,lang));
+                            setActiveLang(lang);
+                            setShowTranslateDD(false);
+                          }} style={{display:'block',width:'100%',textAlign:'left',padding:'8px 14px',border:'none',borderBottom:'1px solid #f2f2f2',background:'white',cursor:'pointer',fontSize:12,color:'#1b1b1b',transition:'background .1s'}}
+                            onMouseEnter={e=>e.currentTarget.style.background='#f7f5f2'} onMouseLeave={e=>e.currentTarget.style.background='white'}>
+                            {lang}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{position:'relative'}}>
+                    <button onClick={()=>setShowTemplates(t=>!t)} style={{display:'inline-flex',alignItems:'center',gap:4,height:26,padding:'0 10px',borderRadius:6,border:'1px solid #e8e8e8',background:showTemplates?'#e8f0fe':'white',color:showTemplates?'#1f74b3':'#616161',fontSize:11,fontWeight:500,cursor:'pointer',transition:'all .12s'}}>
+                      <i className="bi-file-text" style={{fontSize:10}}></i>Templates
+                    </button>
+                    {showTemplates&&(
+                      <div style={{position:'absolute',right:0,top:30,width:280,background:'white',border:'1px solid #e8e8e8',borderRadius:10,boxShadow:'0 4px 16px rgba(0,0,0,0.1)',zIndex:100,overflow:'hidden'}}>
+                        {templateKeys.map(key=>{
+                          const tpl=REPLY_TEMPLATES[key];
+                          const label=key==='default'?'General':key;
+                          return(
+                            <button key={key} onClick={()=>{setReplyText(tpl);setShowTemplates(false);}} style={{display:'block',width:'100%',textAlign:'left',padding:'10px 14px',border:'none',borderBottom:'1px solid #f2f2f2',background:'white',cursor:'pointer',fontSize:12,color:'#1b1b1b',transition:'background .1s'}}
+                              onMouseEnter={e=>e.currentTarget.style.background='#f7f5f2'} onMouseLeave={e=>e.currentTarget.style.background='white'}>
+                              <div style={{fontWeight:600,marginBottom:2,fontSize:12}}>{label}</div>
+                              <div style={{color:'#9e9e9e',fontSize:11,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{tpl.slice(0,60)}…</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <textarea value={replyText} onChange={e=>setReplyText(e.target.value)} className="note-input" rows={3} placeholder="Type a reply or select a template above…" style={{width:'100%',boxSizing:'border-box'}}/>
+              {/* H: Active translation badge */}
+              {activeLang&&(
+                <div style={{display:'inline-flex',alignItems:'center',gap:6,marginTop:4,padding:'3px 10px',borderRadius:128,background:'#e8f0fe',border:'1px solid #93c5fd',fontSize:11,color:'#1f74b3',fontWeight:500}}>
+                  🌐 Translated to: {activeLang}
+                  <button onClick={()=>{if(originalReplyText!=null)setReplyText(originalReplyText);setActiveLang(null);setOriginalReplyText(null);}} style={{background:'none',border:'none',cursor:'pointer',color:'#1f74b3',fontSize:12,padding:0,lineHeight:1,display:'flex',alignItems:'center'}} title="Revert translation">✕</button>
+                </div>
+              )}
+            </div>}
+            {/* Open in source link */}
+            <a href={getUrl(task)} target="_blank" rel="noreferrer" style={{display:'flex',alignItems:'center',justifyContent:'center',gap:6,padding:'10px 16px',borderRadius:128,border:'1px solid #e8e8e8',background:'white',color:'#1f74b3',fontSize:13,fontWeight:600,textDecoration:'none',transition:'all .15s'}} onMouseEnter={e=>{e.currentTarget.style.background='#e8f0fe';}} onMouseLeave={e=>{e.currentTarget.style.background='white';}}>
+              <i className={TOOLS[task.source]?.icon||'bi-box-arrow-up-right'} style={{fontSize:12}}></i>
+              Open in {TOOLS[task.source]?.label||'Source'}
+              <i className="bi-box-arrow-up-right" style={{fontSize:10,marginLeft:2}}></i>
+            </a>
+            {/* Mark Resolved button — gated by can_resolve_task */}
+            {task.status!=='resolved'&&onResolve&&perms?.canDo('can_resolve_task')!==false&&(
+              <button onClick={()=>onResolve(task)} style={{display:'flex',alignItems:'center',justifyContent:'center',gap:6,padding:'10px 16px',borderRadius:128,border:'1px solid #29811e',background:'#e8f5e9',color:'#29811e',fontSize:13,fontWeight:600,cursor:'pointer',transition:'all .15s',width:'100%'}}
+                onMouseEnter={e=>{e.currentTarget.style.background='#29811e';e.currentTarget.style.color='white';}} onMouseLeave={e=>{e.currentTarget.style.background='#e8f5e9';e.currentTarget.style.color='#29811e';}}>
+                <i className="bi-check-circle-fill" style={{fontSize:13}}></i>Mark Resolved
+              </button>
+            )}
+          </div>
+        )}
+        {tab==='notes'&&<NotesTab taskId={task.id} notes={notes} setNotes={setNotes} currentUser={currentUser} setActivity={setActivity}/>}
+        {tab==='timeline'&&<TimelineTab taskId={task.id} task={task} activity={activity} escalation={taskEscalation}/>}
+      </div>
+    </div>
+  );
+};
+
+export default Detail;
