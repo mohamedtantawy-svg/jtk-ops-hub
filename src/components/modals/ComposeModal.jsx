@@ -6,9 +6,11 @@ import PreviewPopup from './PreviewPopup';
 
 const sanitizeImageUrl=(url)=>{
   if(!url)return '';
-  const trimmed=url.trim();
-  if(/^https?:\/\//i.test(trimmed))return trimmed;
-  if(/^data:image\//i.test(trimmed))return trimmed;
+  try{
+    const parsed=new URL(url.trim());
+    if(parsed.protocol==='http:'||parsed.protocol==='https:')return parsed.href;
+    if(parsed.protocol==='data:'&&parsed.href.startsWith('data:image/'))return parsed.href;
+  }catch(e){}
   return '';
 };
 
