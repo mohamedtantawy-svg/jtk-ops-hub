@@ -120,14 +120,16 @@ let isShuttingDown = false;
 
 async function bootstrap(): Promise<void> {
   // ── Verify DB ─────────────────────────────────────────────────────────────
-  await checkDbConnection();
+  const dbAvailable = await checkDbConnection();
 
   // ── Set statement_timeout on each new DB client ───────────────────────────
-  pool.on('connect', (client) => {
-    client.query('SET statement_timeout = 30000').catch((err: Error) => {
-      logger.warn('Failed to set statement_timeout', { err: err.message });
+  if (dbAvailable) {
+    pool.on('connect', (client) => {
+      client.query('SET statement_timeout = 30000').catch((err: Error) => {
+        logger.warn('Failed to set statement_timeout', { err: err.message });
+      });
     });
-  });
+  }
 
   // ── Verify Redis (optional — runs in degraded mode without it) ───────────
   let redisAvailable = false;
@@ -142,143 +144,138 @@ async function bootstrap(): Promise<void> {
     });
   }
 
-  // ── Repositories ──────────────────────────────────────────────────────────
-  const taskRepo          = new PostgresTaskRepository(pool);
-  const escalationRepo    = new PostgresEscalationRepository(pool);
-  const memberRepo        = new PostgresMemberRepository(pool);
-  const projectRepo       = new PostgresProjectRepository(pool);
-  const noteRepo          = new PostgresNoteRepository(pool);
-  const activityRepo      = new PostgresActivityRepository(pool);
-  const requestRepo       = new PostgresRequestRepository(pool);
-  const announcementRepo  = new PostgresAnnouncementRepository(pool);
+  // ── Repositories (only if DB available) ──────────────────────────────────
+  if (!dbAvailable) {
+    logger.info('Skipping API setup — no database. Serving frontend only.');
+  }
 
-  // ── Integrations (conditional — only instantiate if configured) ───────────
-  const slack   = new SlackAdapter();
-  const jira    = config.JIRA_BASE_URL    ? new JiraAdapter()    : null;
-  const zendesk = config.ZENDESK_SUBDOMAIN ? new ZendeskAdapter() : null;
-  const gmail   = config.GOOGLE_CLIENT_ID  ? new GmailAdapter()   : null;
+  const taskRepo          = dbAvailable ? new PostgresTaskRepository(pool) : null;
+  const escalationRepo    = dbAvailable ? new PostgresEscalationRepository(pool) : null;
+  const memberRepo        = dbAvailable ? new PostgresMemberRepository(pool) : null;
+  const projectRepo       = dbAvailable ? new PostgresProjectRepository(pool) : null;
+  const noteRepo          = dbAvailable ? new PostgresNoteRepository(pool) : null;
+  const activityRepo      = dbAvailable ? new PostgresActivityRepository(pool) : null;
+  const requestRepo       = dbAvailable ? new PostgresRequestRepository(pool) : null;
+  const announcementRepo  = dbAvailable ? new PostgresAnnouncementRepository(pool) : null;
 
-  if (jira)    logger.info('Jira adapter initialized');
-  if (zendesk) logger.info('Zendesk adapter initialized');
-  if (gmail)   logger.info('Gmail adapter initialized');
+  // ── API layer (only if DB available) ────────────────────────────────────
+  let apiRouter: ReturnType<typeof buildRouter> | null = null;
 
-  // ── Event subscribers ─────────────────────────────────────────────────────
-  registerTaskEventSubscribers(activityRepo);
+  if (dbAvailable) {
+    // ── Integrations ──────────────────────────────────────────────────────
+    const slack   = new SlackAdapter();
+    const jira    = config.JIRA_BASE_URL    ? new JiraAdapter()    : null;
+    const zendesk = config.ZENDESK_SUBDOMAIN ? new ZendeskAdapter() : null;
+    const gmail   = config.GOOGLE_CLIENT_ID  ? new GmailAdapter()   : null;
 
-  // ── Auth use cases ──────────────────────────────────────────────────────
-  const loginHandler = new LoginHandler(memberRepo);
+    if (jira)    logger.info('Jira adapter initialized');
+    if (zendesk) logger.info('Zendesk adapter initialized');
+    if (gmail)   logger.info('Gmail adapter initialized');
 
-  // ── Task use cases ──────────────────────────────────────────────────────
-  const createTask    = new CreateTaskHandler(taskRepo);
-  const updateStatus  = new UpdateTaskStatusHandler(taskRepo);
-  const assignTask    = new AssignTaskHandler(taskRepo);
-  const escalateTask  = new EscalateTaskHandler(taskRepo, slack);
-  const snoozeTask    = new SnoozeTaskHandler(taskRepo);
-  const getTasks      = new GetTasksHandler(taskRepo);
-  const getTaskById   = new GetTaskByIdHandler(taskRepo);
+    // ── Event subscribers ─────────────────────────────────────────────────
+    registerTaskEventSubscribers(activityRepo!);
 
-  // ── Escalation use cases ──────────────────────────────────────────────────
-  const createEscalation  = new CreateEscalationHandler(escalationRepo);
-  const respondEscalation = new RespondEscalationHandler(escalationRepo);
-  const resolveEscalation = new ResolveEscalationHandler(escalationRepo);
-  const dismissEscalation = new DismissEscalationHandler(escalationRepo);
-  const getEscalations    = new GetEscalationsHandler(escalationRepo);
-  const getEscalationById = new GetEscalationByIdHandler(escalationRepo);
+    // ── Use cases ─────────────────────────────────────────────────────────
+    const loginHandler = new LoginHandler(memberRepo!);
+    const createTask    = new CreateTaskHandler(taskRepo!);
+    const updateStatus  = new UpdateTaskStatusHandler(taskRepo!);
+    const assignTask    = new AssignTaskHandler(taskRepo!);
+    const escalateTask  = new EscalateTaskHandler(taskRepo!, slack);
+    const snoozeTask    = new SnoozeTaskHandler(taskRepo!);
+    const getTasks      = new GetTasksHandler(taskRepo!);
+    const getTaskById   = new GetTaskByIdHandler(taskRepo!);
 
-  // ── Member use cases ──────────────────────────────────────────────────────
-  const createMember  = new CreateMemberHandler(memberRepo);
-  const updateMember  = new UpdateMemberHandler(memberRepo);
-  const getMembers    = new GetMembersHandler(memberRepo);
-  const getMemberById = new GetMemberByIdHandler(memberRepo);
+    const createEscalation  = new CreateEscalationHandler(escalationRepo!);
+    const respondEscalation = new RespondEscalationHandler(escalationRepo!);
+    const resolveEscalation = new ResolveEscalationHandler(escalationRepo!);
+    const dismissEscalation = new DismissEscalationHandler(escalationRepo!);
+    const getEscalations    = new GetEscalationsHandler(escalationRepo!);
+    const getEscalationById = new GetEscalationByIdHandler(escalationRepo!);
 
-  // ── Project use cases ─────────────────────────────────────────────────────
-  const createProject   = new CreateProjectHandler(projectRepo);
-  const updateProject   = new UpdateProjectHandler(projectRepo);
-  const updateProgress  = new UpdateProgressHandler(projectRepo);
-  const getProjects     = new GetProjectsHandler(projectRepo);
-  const getProjectById  = new GetProjectByIdHandler(projectRepo);
-  const deleteProject   = new DeleteProjectHandler(projectRepo);
+    const createMember  = new CreateMemberHandler(memberRepo!);
+    const updateMember  = new UpdateMemberHandler(memberRepo!);
+    const getMembers    = new GetMembersHandler(memberRepo!);
+    const getMemberById = new GetMemberByIdHandler(memberRepo!);
 
-  // ── Note use cases ──────────────────────────────────────────────────────
-  const createNote      = new CreateNoteHandler(noteRepo, activityRepo);
-  const getNotesByTask  = new GetNotesByTaskHandler(noteRepo);
-  const deleteNote      = new DeleteNoteHandler(noteRepo);
+    const createProject   = new CreateProjectHandler(projectRepo!);
+    const updateProject   = new UpdateProjectHandler(projectRepo!);
+    const updateProgress  = new UpdateProgressHandler(projectRepo!);
+    const getProjects     = new GetProjectsHandler(projectRepo!);
+    const getProjectById  = new GetProjectByIdHandler(projectRepo!);
+    const deleteProject   = new DeleteProjectHandler(projectRepo!);
 
-  // ── Activity use cases ──────────────────────────────────────────────────
-  const getActivityByTask = new GetActivityByTaskHandler(activityRepo);
-  const logActivity       = new LogActivityHandler(activityRepo);
+    const createNote      = new CreateNoteHandler(noteRepo!, activityRepo!);
+    const getNotesByTask  = new GetNotesByTaskHandler(noteRepo!);
+    const deleteNote      = new DeleteNoteHandler(noteRepo!);
 
-  // ── Request use cases ──────────────────────────────────────────────────
-  const createRequest     = new CreateRequestHandler(requestRepo);
-  const updateRequest     = new UpdateRequestHandler(requestRepo);
-  const getRequests       = new GetRequestsHandler(requestRepo);
-  const getRequestById    = new GetRequestByIdHandler(requestRepo);
+    const getActivityByTask = new GetActivityByTaskHandler(activityRepo!);
+    const logActivity       = new LogActivityHandler(activityRepo!);
 
-  // ── Announcement use cases ─────────────────────────────────────────────
-  const createAnnouncement  = new CreateAnnouncementHandler(announcementRepo);
-  const updateAnnouncement  = new UpdateAnnouncementHandler(announcementRepo);
-  const sendAnnouncement    = new SendAnnouncementHandler(announcementRepo);
-  const getAnnouncements    = new GetAnnouncementsHandler(announcementRepo);
-  const getAnnouncementById = new GetAnnouncementByIdHandler(announcementRepo);
-  const markAnnouncementRead = new MarkAnnouncementReadHandler(announcementRepo);
+    const createRequest     = new CreateRequestHandler(requestRepo!);
+    const updateRequest     = new UpdateRequestHandler(requestRepo!);
+    const getRequests       = new GetRequestsHandler(requestRepo!);
+    const getRequestById    = new GetRequestByIdHandler(requestRepo!);
 
-  // ── High-throughput infrastructure (requires Redis) ────────────────────
-  const dbCircuit = new CircuitBreaker({
-    name: 'postgres',
-    failureThreshold: 5,
-    resetTimeoutMs: 30_000,
-  });
+    const createAnnouncement  = new CreateAnnouncementHandler(announcementRepo!);
+    const updateAnnouncement  = new UpdateAnnouncementHandler(announcementRepo!);
+    const sendAnnouncement    = new SendAnnouncementHandler(announcementRepo!);
+    const getAnnouncements    = new GetAnnouncementsHandler(announcementRepo!);
+    const getAnnouncementById = new GetAnnouncementByIdHandler(announcementRepo!);
+    const markAnnouncementRead = new MarkAnnouncementReadHandler(announcementRepo!);
 
-  if (redisAvailable) {
-    const dedupCache = new DedupCache();
-
-    // Wire the circuit breaker to receive ACTUAL DB flush results
-    batchInserter = new BatchTaskInserter(pool, {
-      onFlushSuccess: () => {
-        dbCircuit.execute(async () => {}).catch(() => {});
-      },
-      onFlushFailure: () => {
-        dbCircuit.execute(async () => { throw new Error('DB flush failed'); }).catch(() => {});
-      },
+    // ── High-throughput infrastructure (requires Redis) ──────────────────
+    const dbCircuit = new CircuitBreaker({
+      name: 'postgres',
+      failureThreshold: 5,
+      resetTimeoutMs: 30_000,
     });
 
-    const webhookProcessor = new WebhookJobProcessor(dedupCache, batchInserter, dbCircuit);
-    startWebhookWorker(webhookProcessor.process);
-  } else {
-    logger.info('Webhook queue disabled — Redis not available');
+    if (redisAvailable) {
+      const dedupCache = new DedupCache();
+      batchInserter = new BatchTaskInserter(pool, {
+        onFlushSuccess: () => { dbCircuit.execute(async () => {}).catch(() => {}); },
+        onFlushFailure: () => { dbCircuit.execute(async () => { throw new Error('DB flush failed'); }).catch(() => {}); },
+      });
+      const webhookProcessor = new WebhookJobProcessor(dedupCache, batchInserter, dbCircuit);
+      startWebhookWorker(webhookProcessor.process);
+    } else {
+      logger.info('Webhook queue disabled — Redis not available');
+    }
+
+    if (!config.ZAPIER_WEBHOOK_SECRET && config.NODE_ENV === 'production') {
+      logger.warn('ZAPIER_WEBHOOK_SECRET is not configured — Zapier endpoint is unauthenticated');
+    }
+
+    // ── Controllers ─────────────────────────────────────────────────────────
+    const authController = new AuthController(loginHandler);
+    const taskController = new TaskController(
+      getTasks, getTaskById, createTask, updateStatus, assignTask, escalateTask, snoozeTask, taskRepo!,
+    );
+    const webhookController = new WebhookController(createTask, updateStatus);
+    const escalationController = new EscalationController(
+      getEscalations, getEscalationById, createEscalation, respondEscalation, resolveEscalation, dismissEscalation,
+    );
+    const memberController = new MemberController(
+      getMembers, getMemberById, createMember, updateMember, memberRepo!,
+    );
+    const projectController = new ProjectController(
+      getProjects, getProjectById, createProject, updateProject, updateProgress, deleteProject, pool,
+    );
+    const noteController = new NoteController(getNotesByTask, createNote, deleteNote);
+    const activityController = new ActivityController(getActivityByTask);
+    const requestController = new RequestController(
+      getRequests, getRequestById, createRequest, updateRequest, requestRepo!,
+    );
+    const announcementController = new AnnouncementController(
+      getAnnouncements, getAnnouncementById, createAnnouncement, updateAnnouncement, sendAnnouncement, markAnnouncementRead, announcementRepo!,
+    );
+
+    apiRouter = buildRouter(
+      taskController, webhookController, escalationController, memberController,
+      projectController, authController, noteController, activityController,
+      requestController, announcementController,
+    );
   }
-
-  // Log Zapier secret warning ONCE at startup, not per-request
-  if (!config.ZAPIER_WEBHOOK_SECRET && config.NODE_ENV === 'production') {
-    logger.warn('ZAPIER_WEBHOOK_SECRET is not configured — Zapier endpoint is unauthenticated');
-  }
-
-  // ── Controllers ───────────────────────────────────────────────────────────
-  const authController = new AuthController(loginHandler);
-
-  const taskController = new TaskController(
-    getTasks, getTaskById, createTask, updateStatus, assignTask, escalateTask, snoozeTask, taskRepo,
-  );
-  const webhookController = new WebhookController(createTask, updateStatus);
-  const escalationController = new EscalationController(
-    getEscalations, getEscalationById, createEscalation, respondEscalation, resolveEscalation, dismissEscalation,
-  );
-  const memberController = new MemberController(
-    getMembers, getMemberById, createMember, updateMember, memberRepo,
-  );
-  const projectController = new ProjectController(
-    getProjects, getProjectById, createProject, updateProject, updateProgress, deleteProject, pool,
-  );
-  const noteController = new NoteController(
-    getNotesByTask, createNote, deleteNote,
-  );
-  const activityController = new ActivityController(getActivityByTask);
-  const requestController = new RequestController(
-    getRequests, getRequestById, createRequest, updateRequest, requestRepo,
-  );
-  const announcementController = new AnnouncementController(
-    getAnnouncements, getAnnouncementById, createAnnouncement, updateAnnouncement, sendAnnouncement, markAnnouncementRead, announcementRepo,
-  );
 
   // ── Express app ───────────────────────────────────────────────────────────
   const app = express();
@@ -323,37 +320,32 @@ async function bootstrap(): Promise<void> {
       ]);
 
       res.json({
-        status: 'ok',
+        status: dbAvailable ? 'ok' : 'frontend_only',
         ts: new Date().toISOString(),
         version: process.env.npm_package_version || '1.0.0',
         env: config.NODE_ENV,
         pid: process.pid,
         uptime: Math.floor(process.uptime()),
         memory: {
-          rss: Math.round(process.memoryUsage().rss / 1_048_576),      // MB
+          rss: Math.round(process.memoryUsage().rss / 1_048_576),
           heapUsed: Math.round(process.memoryUsage().heapUsed / 1_048_576),
         },
         db: poolMetrics,
         queue: queueMetrics,
-        circuit: dbCircuit.getMetrics(),
       });
     } catch {
       res.status(503).json({ status: 'degraded' });
     }
   });
 
-  app.use('/api/v1', buildRouter(
-    taskController,
-    webhookController,
-    escalationController,
-    memberController,
-    projectController,
-    authController,
-    noteController,
-    activityController,
-    requestController,
-    announcementController,
-  ));
+  if (apiRouter) {
+    app.use('/api/v1', apiRouter);
+  } else {
+    // No DB — return 503 for all API routes
+    app.use('/api/v1', (_req, res) => {
+      res.status(503).json({ error: 'API unavailable — no database configured' });
+    });
+  }
 
   // ── Serve frontend in production ──────────────────────────────────────────
   if (config.NODE_ENV === 'production') {

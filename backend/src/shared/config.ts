@@ -7,11 +7,11 @@ const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().default(3001),
 
-  // PostgreSQL
-  DATABASE_URL: z.string().min(1),
+  // PostgreSQL (optional — app serves frontend without it)
+  DATABASE_URL: z.string().min(1).optional(),
 
-  // JWT
-  JWT_SECRET: z.string().min(32),
+  // JWT (optional — auth disabled without it)
+  JWT_SECRET: z.string().min(1).optional(),
   JWT_EXPIRES_IN: z.string().default('8h'),
 
   // ── Redis (required for high-throughput queue) ──────────────────────────
