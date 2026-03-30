@@ -134,7 +134,7 @@ const ComposeModal=({onClose,onSend,draft,currentUser})=>{
               </div>
             ):(
               <div style={{position:'relative',borderRadius:12,overflow:'hidden',border:'1px solid #e8e8e8',background:'#fafaf9'}}>
-                <img src={imageUrl} alt="Preview" style={{width:'100%',objectFit:'contain',maxHeight:240,display:'block',margin:'0 auto'}} onError={()=>{setImageUrl('');setImageMode('none');}} />
+                <img src={imageUrl.match(/^https?:\/\//i) ? imageUrl : ''} alt="Preview" style={{width:'100%',objectFit:'contain',maxHeight:240,display:'block',margin:'0 auto'}} onError={()=>{setImageUrl('');setImageMode('none');}} />
 
               </div>
             )}
