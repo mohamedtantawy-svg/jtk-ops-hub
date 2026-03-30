@@ -1,0 +1,32 @@
+export const HOURLY_VOLUME=[
+  {h:'08',v:4},{h:'09',v:14},{h:'10',v:11},{h:'11',v:18},{h:'12',v:7},
+  {h:'13',v:9},{h:'14',v:13},{h:'15',v:8},{h:'16',v:5},{h:'17',v:3},
+];
+
+export const FEED_EVENTS=[
+  {tool:'zendesk',  text:'New ticket: Payroll portal access issue — UK entity',                    time:'9:40'},
+  {tool:'slack',    text:'@hr-ops mention: Background check pending — Talia Moore (US)',           time:'9:40'},
+  {tool:'looker',   text:'⚠️ Anomaly alert: APAC overtime +340% above baseline',                   time:'9:33'},
+  {tool:'gmail',    text:'Maternity leave documentation request — Sophie Harris, UK',              time:'9:35'},
+  {tool:'jira',     text:'Ticket escalated: Onboarding checklist 2 days overdue — Marcus Webb',   time:'9:29'},
+  {tool:'zendesk',  text:'New ticket: Work permit renewal — NL entity, Lucas Dubois',             time:'9:40'},
+  {tool:'workbench',text:'Offboarding triggered: Alex Rivera (US) — access removal pending',      time:'9:39'},
+  {tool:'calendar', text:'Probation review due in 5 days: Lena Fischer (DE)',                     time:'9:31'},
+  {tool:'gmail',    text:'Bonus discrepancy flagged — Camille Moreau, FR entity 2025 cycle',      time:'9:39'},
+  {tool:'jira',     text:'Benefits enrollment closes TODAY — 4 employees unenrolled (AU)',        time:'9:14'},
+  {tool:'zendesk',  text:'Urgent: Mortgage salary slips needed by March 22 — Khalid, AE',        time:'9:38'},
+  {tool:'slack',    text:'New DM: Sensitive HR query received — UK entity',                       time:'9:15'},
+  {tool:'looker',   text:'⚠️ Critical: AMER start date compliance at 72% — 2 hires start Monday', time:'9:20'},
+  {tool:'workbench',text:'⚠️ Alert: 3 work permits expiring within 30 days — NL, AE, BR',         time:'9:35'},
+  {tool:'jira',     text:'⚠️ Compliance training overdue — 7 employees, ES entity (GDPR)',        time:'8:00'},
+  {tool:'zendesk',  text:'Equipment not received — Kyle Brandt (CA) starts Monday',               time:'8:15'},
+  {tool:'gmail',    text:'401k enrollment issue — Sarah Mitchell unable to access Fidelity, US',  time:'9:20'},
+  {tool:'slack',    text:'Salary adjustment not reflected — Karolina Nowak, PL entity',           time:'8:20'},
+  {tool:'jira',     text:'Immigration: EU Blue Card renewal critical — Felix Braun (DE) 50 days', time:'8:00'},
+  {tool:'workbench',text:'Payroll variance flagged: JP entity +7.2% above threshold',             time:'7:15'},
+  {tool:'looker',   text:'⚠️ Turnover spike: AMER Q1 +41% vs prior quarter — US Sales team',     time:'7:30'},
+  {tool:'zendesk',  text:'Payslip discrepancy: ₹8,500 unexplained deduction — Ananya Patel (IN)',time:'7:45'},
+  {tool:'looker',   text:'⚠️ SLA breach risk: 8 tickets approaching threshold — action needed',   time:'9:38'},
+  {tool:'workbench',text:'Onboarding stalled day 5 — Amina Yusuf (ZA), IT access not provisioned',time:'9:25'},
+  {tool:'calendar', text:'APAC probation review due March 28 — Tomoko Ishii (JP)',                time:'8:00'},
+];
