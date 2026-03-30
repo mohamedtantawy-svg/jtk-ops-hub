@@ -1,0 +1,344 @@
+import { useState, useEffect, useRef, useContext } from 'react';
+import { PermissionsContext } from '../../App';
+
+/* Primary tabs always visible in the nav bar */
+const PRIMARY_TABS = [
+  { id: 'briefing',      icon: 'bi-house',            label: 'Home' },
+  { id: 'my-queue',      icon: 'bi-inbox',            label: 'Queue' },
+  { id: 'projects',      icon: 'bi-kanban',           label: 'Projects' },
+  { id: 'escalations',   icon: 'bi-arrow-up-circle',  label: 'Escalations', badge: true },
+  { id: 'hr-reports',    icon: 'bi-clipboard-data',   label: 'Reports' },
+  { id: 'announcements', icon: 'bi-megaphone',        label: 'Announcements' },
+];
+
+/* Secondary tabs under More */
+const MORE_TABS = [
+  { id: 'calendar',      icon: 'bi-calendar3',        label: 'Calendar' },
+  { id: 'knowledge-hub', icon: 'bi-book',             label: 'Knowledge Hub' },
+  { id: 'analytics',     icon: 'bi-bar-chart-line',   label: 'Analytics' },
+  { id: 'slack',         icon: 'bi-slack',            label: 'Slack' },
+  { id: 'team',          icon: 'bi-people',           label: 'Team' },
+  { id: 'comms',         icon: 'bi-chat-dots',        label: 'Comms' },
+  { id: 'gm-reporting',  icon: 'bi-file-earmark-bar-graph', label: 'GM Reporting' },
+];
+
+/* Quick-create actions in the + menu — each mapped to a required permission */
+const CREATE_ACTIONS = [
+  { icon: 'bi-plus-square',       label: 'New Task',         action: 'task',         desc: 'Create a queue task',         perm: 'can_create_task' },
+  { icon: 'bi-arrow-up-circle',   label: 'New Escalation',   action: 'escalation',   desc: 'Raise an escalation',         perm: 'can_create_escalation' },
+  { icon: 'bi-kanban',            label: 'New Project',      action: 'project',       desc: 'Start a project',             perm: 'can_create_project' },
+  { icon: 'bi-megaphone',         label: 'New Announcement', action: 'announcement',  desc: 'Post to the team',            perm: 'can_compose_announcements' },
+  { icon: 'bi-send',              label: 'Outbound Request', action: 'request',       desc: 'Request to another team',     perm: 'can_create_request' },
+  { icon: 'bi-clipboard-data',    label: 'New Report',       action: 'report',        desc: 'Submit an HR report',         viewReq: 'hr-reports' },
+];
+
+const DeelTopNav = ({
+  view, setView, user,
+  onSearch, notifs, markAllRead,
+  escalCount, onLogout,
+  onCreateTask, onCreateEscalation, onCreateProject,
+  onCreateAnnouncement, onCreateRequest, onCreateReport,
+  setSelTask, tasks,
+}) => {
+  const perms = useContext(PermissionsContext);
+  const [showMore,    setShowMore]    = useState(false);
+  const [showCreate,  setShowCreate]  = useState(false);
+  const [showNotifs,  setShowNotifs]  = useState(false);
+  const [showUser,    setShowUser]    = useState(false);
+  const [darkMode,    setDarkMode]    = useState(() => {
+    try { return localStorage.getItem('ops_hub_theme') === 'dark'; } catch(e) { return false; }
+  });
+
+  const moreRef   = useRef(null);
+  const createRef = useRef(null);
+  const notifRef  = useRef(null);
+  const userRef   = useRef(null);
+
+  // Unified outside-click handler for all dropdowns (fixes QA #149)
+  useEffect(() => {
+    const h = (e) => {
+      if (createRef.current && !createRef.current.contains(e.target)) setShowCreate(false);
+      if (moreRef.current && !moreRef.current.contains(e.target)) setShowMore(false);
+      if (notifRef.current && !notifRef.current.contains(e.target)) setShowNotifs(false);
+      if (userRef.current && !userRef.current.contains(e.target)) setShowUser(false);
+    };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+
+  // Cmd+K / Ctrl+K toggle search
+  useEffect(() => {
+    const handleKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        if (onSearch) onSearch();
+      }
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [onSearch]);
+
+  const toggleDark = () => {
+    const next = !darkMode;
+    setDarkMode(next);
+    document.documentElement.setAttribute('data-theme', next ? 'dark' : 'light');
+    try { localStorage.setItem('ops_hub_theme', next ? 'dark' : 'light'); } catch(e) {}
+  };
+
+  const handleCreate = (action) => {
+    setShowCreate(false);
+    if (action === 'task')         { onCreateTask?.(); }
+    else if (action === 'escalation') { onCreateEscalation?.(); }
+    else if (action === 'project')    { onCreateProject?.(); }
+    else if (action === 'announcement') { onCreateAnnouncement?.(); setView('announcements'); }
+    else if (action === 'request')    { onCreateRequest?.(); setView('my-queue'); }
+    else if (action === 'report')     { onCreateReport?.(); setView('hr-reports'); }
+  };
+
+  const unread = notifs ? notifs.filter(n => !n.read).length : 0;
+  const notifCount = unread;
+
+  // All users see the same top nav — no permission gating on tabs
+  const visiblePrimary = PRIMARY_TABS;
+  const visibleMore = MORE_TABS;
+  const visibleCreate = CREATE_ACTIONS.filter(ca => {
+    if (ca.perm && !perms?.canDo(ca.perm)) return false;
+    if (ca.viewReq && !perms?.canView(ca.viewReq)) return false;
+    return true;
+  });
+  const isMoreActive = visibleMore.some(t => t.id === view);
+
+  const dropdown = {
+    position: 'absolute', top: 'calc(100% + 6px)',
+    background: 'var(--surface)', border: '1px solid var(--border)',
+    boxShadow: 'var(--shadow-lg)', zIndex: 300,
+  };
+
+  return (
+    <div className="deel-topnav">
+      {/* ── Left: Logo ─────────────────────────────── */}
+      <div className="deel-logo" style={{ flexShrink: 0, lineHeight: 1, marginRight: 8 }}>
+        <span style={{ fontFamily: "Inter, -apple-system, sans-serif", fontWeight: 800, fontSize: 24, color: 'var(--text)', letterSpacing: '-0.04em' }}>deel.</span>
+      </div>
+
+      {/* ── Center: Primary tabs ──────────────────────────── */}
+      <div className="deel-nav-items">
+        {visiblePrimary.map(tab => {
+          const active = view === tab.id;
+          const badge = tab.badge && escalCount > 0 ? escalCount : 0;
+          return (
+            <div key={tab.id} className={`deel-nav-item${active ? ' active' : ''}`}
+              role="button"
+              tabIndex={0}
+              aria-current={active ? 'page' : undefined}
+              onClick={() => setView(tab.id)}
+              onKeyDown={e => e.key === 'Enter' && setView(tab.id)}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', letterSpacing: '0.01em' }}>
+              <i className={`bi ${tab.icon}`} style={{ fontSize: 14 }}></i>
+              <span>{tab.label}</span>
+              {badge > 0 && (
+                <span style={{
+                  background: 'var(--red-solid)', color: 'white', fontSize: 10,
+                  fontWeight: 700, padding: '1px 6px', borderRadius: 'var(--radius-pill)',
+                  lineHeight: '14px', marginLeft: 2,
+                }}>{badge}</span>
+              )}
+            </div>
+          );
+        })}
+
+        {/* More dropdown */}
+        <div ref={moreRef} style={{ position: 'relative' }}>
+          <div className={`deel-nav-item${isMoreActive ? ' active' : ''}`}
+            role="button"
+            tabIndex={0}
+            onKeyDown={e => e.key === 'Enter' && setShowMore(p => !p)}
+            onClick={() => setShowMore(p => !p)}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', letterSpacing: '0.01em' }}>
+            <i className="bi bi-grid" style={{ fontSize: 14 }}></i>
+            More
+            <i className={`bi bi-chevron-${showMore ? 'up' : 'down'}`} style={{ fontSize: 10 }}></i>
+          </div>
+          {showMore && (
+            <div style={{ ...dropdown, left: 0, borderRadius: 12, padding: '6px 0', minWidth: 200 }}>
+              {visibleMore.map(mt => {
+                const a = view === mt.id;
+                return (
+                  <div key={mt.id}
+                    onClick={() => { setView(mt.id); setShowMore(false); }}
+                    onMouseEnter={e => { if (!a) e.currentTarget.style.background = 'var(--surface-2)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = a ? 'var(--surface-2)' : 'transparent'; }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '9px 16px', cursor: 'pointer', fontSize: 14,
+                      fontWeight: a ? 600 : 400, color: a ? 'var(--purple)' : 'var(--text)',
+                      background: a ? 'var(--surface-2)' : 'transparent', transition: 'background .12s',
+                    }}>
+                    <i className={`bi ${mt.icon}`} style={{ fontSize: 14, width: 20, textAlign: 'center', color: a ? 'var(--purple)' : 'var(--text-muted)' }}></i>
+                    <span style={{ flex: 1 }}>{mt.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Right: Figma icon bar ───────────────────────── */}
+      <div className="deel-nav-right" style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto' }}>
+
+        {/* Apps grid */}
+        <div ref={createRef} style={{ position: 'relative' }}>
+          <button className="deel-icon-btn" onClick={() => setShowCreate(p => !p)} aria-label="Apps" title="Apps">
+            <i className="bi bi-grid-3x3-gap-fill" style={{ fontSize: 16 }}></i>
+          </button>
+          {showCreate && (
+            <div style={{ ...dropdown, right: 0, borderRadius: 14, padding: '8px 0', minWidth: 240, overflow: 'hidden' }}>
+              <div style={{ padding: '6px 16px 8px', fontSize: 10, fontWeight: 700, color: 'var(--text-disabled)', letterSpacing: 'var(--ls-caps)', textTransform: 'uppercase' }}>Quick Create</div>
+              {visibleCreate.map(ca => (
+                <div key={ca.action} role="button" tabIndex={0} aria-label={ca.label}
+                  onClick={() => handleCreate(ca.action)}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleCreate(ca.action); } }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '9px 16px', cursor: 'pointer', transition: 'background .12s' }}>
+                  <div style={{ width: 32, height: 32, borderRadius: 'var(--radius-lg)', background: 'var(--surface-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <i className={`bi ${ca.icon}`} style={{ fontSize: 14, color: 'var(--text-secondary)' }}></i>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', lineHeight: '17px' }}>{ca.label}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: '15px' }}>{ca.desc}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Search */}
+        <button className="deel-icon-btn" onClick={onSearch} aria-label="Search (⌘K)" title="Search (⌘K)">
+          <i className="bi bi-search" style={{ fontSize: 15 }}></i>
+        </button>
+
+        {/* AI / Deel star */}
+        <button className="deel-icon-btn" style={{ position: 'relative' }} aria-label="Deel AI" title="Deel AI">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 2L14.09 8.26L20 9.27L15.55 13.97L16.91 20L12 16.9L7.09 20L8.45 13.97L4 9.27L9.91 8.26L12 2Z" fill="var(--purple)" /></svg>
+        </button>
+
+        {/* Settings */}
+        <button className="deel-icon-btn" onClick={() => setView('settings')} aria-label="Settings" title="Settings">
+          <i className="bi bi-gear" style={{ fontSize: 16 }}></i>
+        </button>
+
+        {/* Notifications */}
+        <div ref={notifRef} style={{ position: 'relative' }}>
+          <button className="deel-icon-btn" onClick={() => setShowNotifs(p => !p)}
+            aria-label="Notifications" title="Notifications" style={{ position: 'relative' }}>
+            <i className="bi bi-bell" style={{ fontSize: 16 }}></i>
+            {notifCount > 0 && (
+              <span className="deel-notif-badge">{notifCount > 99 ? '99+' : notifCount}</span>
+            )}
+          </button>
+          {showNotifs && (
+            <div style={{ ...dropdown, right: 0, borderRadius: 16, width: 380, maxHeight: 440, overflowY: 'auto' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px 14px', borderBottom: '1px solid var(--border)' }}>
+                <span style={{ fontSize: 16, fontWeight: 700 }}>Notifications</span>
+                {notifCount > 0 && (
+                  <button onClick={markAllRead} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 13, fontWeight: 500, cursor: 'pointer', padding: 0 }}>Mark all read</button>
+                )}
+              </div>
+              {notifs && notifs.length > 0 ? notifs.slice(0, 15).map(n => {
+                const handleNotifClick = () => {
+                  setShowNotifs(false); markAllRead?.();
+                  const navType = n.navType || n.type;
+                  if (navType === 'task' || navType === 'new_task' || navType === 'sla') { if (n.taskId && setSelTask && tasks) { const t = tasks.find(tk => tk.id === n.taskId); if (t) setSelTask(t); } setView('my-queue'); }
+                  else if (navType === 'escalation') { setView('escalations'); }
+                  else { setView('briefing'); }
+                };
+                return (
+                <div key={n.id} onClick={handleNotifClick}
+                  onMouseEnter={e => e.currentTarget.style.background = n.read ? 'var(--surface-2)' : 'var(--surface-3)'}
+                  onMouseLeave={e => e.currentTarget.style.background = n.read ? 'var(--surface)' : 'var(--surface-2)'}
+                  style={{ display: 'flex', gap: 12, padding: '12px 20px', borderBottom: '1px solid var(--border-light)', background: n.read ? 'var(--surface)' : 'var(--surface-2)', cursor: 'pointer', transition: 'background .15s', alignItems: 'flex-start' }}>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, marginTop: 6, background: n.read ? 'transparent' : n.type === 'escalation' ? 'var(--red-solid)' : n.type === 'success' ? 'var(--success)' : 'var(--accent)' }}></div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: n.read ? 400 : 600, color: 'var(--text)', lineHeight: '18px' }}>{n.title}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>{n.body}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{n.time}</div>
+                  </div>
+                </div>
+              );}) : (
+                <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <i className="bi bi-bell-slash" style={{ fontSize: 28, display: 'block', marginBottom: 8, color: 'var(--text-disabled)' }}></i>
+                  No notifications yet
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Divider */}
+        <div style={{ width: 1, height: 28, background: 'rgba(0,0,0,0.08)', margin: '0 4px' }}></div>
+
+        {/* User avatar + name + org (Figma style) */}
+        <div ref={userRef} style={{ position: 'relative' }}>
+          <div onClick={() => setShowUser(p => !p)}
+            style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', padding: '4px 8px 4px 4px', borderRadius: 'var(--radius-pill)', transition: 'background .15s' }}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(0,0,0,0.04)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+            <div style={{
+              width: 36, height: 36, borderRadius: '50%', background: 'var(--purple-accent)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: 'white', fontSize: 13, fontWeight: 700, flexShrink: 0,
+            }}>{user?.initials || 'U'}</div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', lineHeight: '16px', whiteSpace: 'nowrap' }}>{user?.name}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: '14px', whiteSpace: 'nowrap' }}>{perms?.accessTypeName || 'Agent'} | {user?.team || 'Ops'}</div>
+            </div>
+            <i className="bi bi-chevron-down" style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 2 }}></i>
+          </div>
+          {showUser && (
+            <div style={{ ...dropdown, right: 0, borderRadius: 14, width: 280, overflow: 'hidden', padding: 0 }}>
+              <div style={{ padding: '16px 16px 14px', borderBottom: '1px solid var(--border-light)', background: 'var(--surface-2)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ width: 42, height: 42, borderRadius: '50%', background: 'var(--purple-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 15, fontWeight: 700, flexShrink: 0 }}>{user?.initials || 'U'}</div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{user?.name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.email}</div>
+                  </div>
+                </div>
+              </div>
+              <div style={{ padding: '4px 0' }}>
+                <div role="button" tabIndex={0}
+                  onClick={() => { setView('settings'); setShowUser(false); }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 500, color: 'var(--text)', transition: 'background .12s' }}>
+                  <i className="bi bi-gear" style={{ fontSize: 14 }} /> Settings
+                </div>
+                <div role="button" tabIndex={0}
+                  onClick={toggleDark}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 500, color: 'var(--text)', transition: 'background .12s' }}>
+                  <i className={darkMode ? 'bi bi-sun' : 'bi bi-moon'} style={{ fontSize: 14 }} /> {darkMode ? 'Light mode' : 'Dark mode'}
+                </div>
+                <div style={{ height: 1, background: 'var(--border-light)', margin: '4px 0' }}></div>
+                <div role="button" tabIndex={0}
+                  onClick={() => { setShowUser(false); if (onLogout) onLogout(); }}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowUser(false); if (onLogout) onLogout(); } }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--red-light)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--red-solid)', transition: 'background .12s' }}>
+                  <i className="bi bi-box-arrow-left" style={{ fontSize: 14 }} /> Sign Out
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default DeelTopNav;

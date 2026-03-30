@@ -1,11 +1,31 @@
-/node_modules
-/.next/
-/out/
-/build
-.DS_Store
+# Logs
+logs
+*.log
 npm-debug.log*
-.env*.local
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Backend
+backend/dist
+backend/node_modules
 .env
-*.tsbuildinfo
-next-env.d.ts
-.claude
+.env.local
+.env.production
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
