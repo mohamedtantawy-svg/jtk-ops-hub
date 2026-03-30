@@ -342,7 +342,7 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
             </div>
             <div style={{flex:1}}>
               <div style={{fontSize:14,fontWeight:500,color:'#1b1b1b'}}>{tool.label}</div>
-              <input value={s.source_urls[key]||''} onChange={e=>{const v=e.target.value;if(v&&!/^https?:\/\//i.test(v.trim())&&v.trim().length>0&&v.trim().includes(':'))return;setNested('source_urls',key,v);}} style={{width:'100%',border:'1px solid #dedede',borderRadius:5,padding:'4px 8px',fontSize:11,color:'#616161',marginTop:3,boxSizing:'border-box',outline:'none'}} placeholder="Base URL"/>
+              <input value={s.source_urls[key]||''} onChange={e=>{const v=e.target.value;if(v.trim().length>0&&/^(javascript|data|vbscript):/i.test(v.trim()))return;setNested('source_urls',key,v);}} style={{width:'100%',border:'1px solid #dedede',borderRadius:5,padding:'4px 8px',fontSize:11,color:'#616161',marginTop:3,boxSizing:'border-box',outline:'none'}} placeholder="Base URL"/>
             </div>
             <button onClick={()=>setNested('sources_enabled',key,!s.sources_enabled[key])} style={{width:40,height:22,borderRadius:11,border:'none',background:s.sources_enabled[key]?'var(--g)':'#dedede',cursor:'pointer',position:'relative',transition:'background .2s',flexShrink:0}}>
               <div style={{width:16,height:16,borderRadius:'50%',background:'white',position:'absolute',top:3,left:s.sources_enabled[key]?21:3,transition:'left .2s',boxShadow:'0 1px 3px rgba(0,0,0,.15)'}}></div>

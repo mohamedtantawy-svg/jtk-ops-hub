@@ -4,6 +4,14 @@ import { FLAGS } from '../../data/constants';
 import { COMMS_TYPES } from '../../data/comms';
 import PreviewPopup from './PreviewPopup';
 
+const sanitizeImageUrl=(url)=>{
+  if(!url)return '';
+  const trimmed=url.trim();
+  if(/^https?:\/\//i.test(trimmed))return trimmed;
+  if(/^data:image\//i.test(trimmed))return trimmed;
+  return '';
+};
+
 const ComposeModal=({onClose,onSend,draft,currentUser})=>{
   const [type,setType]=useState(draft?.type||'announce');
   const [title,setTitle]=useState(draft?.title||'');
@@ -126,15 +134,15 @@ const ComposeModal=({onClose,onSend,draft,currentUser})=>{
                   <div style={{height:1,flex:1,background:'#e8e8e8'}}></div>
                 </div>
                 <div style={{marginTop:8}} onClick={e=>e.stopPropagation()}>
-                  <input placeholder="Paste image URL here..." onKeyDown={e=>{if(e.key==='Enter'&&e.target.value.trim()){setImageUrl(e.target.value.trim());setImageMode('url');}}}
-                    onBlur={e=>{if(e.target.value.trim()){setImageUrl(e.target.value.trim());setImageMode('url');}}}
+                  <input placeholder="Paste image URL here..." onKeyDown={e=>{if(e.key==='Enter'){const safe=sanitizeImageUrl(e.target.value);if(safe){setImageUrl(safe);setImageMode('url');}}}}
+                    onBlur={e=>{const safe=sanitizeImageUrl(e.target.value);if(safe){setImageUrl(safe);setImageMode('url');}}}
                     style={{width:'100%',border:'1px solid #e8e8e8',borderRadius:8,padding:'7px 10px',fontSize:12,outline:'none',boxSizing:'border-box',fontFamily:'inherit',color:'#1b1b1b',textAlign:'center',maxWidth:320}}
                   />
                 </div>
               </div>
             ):(
               <div style={{position:'relative',borderRadius:12,overflow:'hidden',border:'1px solid #e8e8e8',background:'#fafaf9'}}>
-                <img src={imageUrl.match(/^https?:\/\//i) ? imageUrl : ''} alt="Preview" style={{width:'100%',objectFit:'contain',maxHeight:240,display:'block',margin:'0 auto'}} onError={()=>{setImageUrl('');setImageMode('none');}} />
+                <img src={sanitizeImageUrl(imageUrl)} alt="Preview" style={{width:'100%',objectFit:'contain',maxHeight:240,display:'block',margin:'0 auto'}} onError={()=>{setImageUrl('');setImageMode('none');}} />
 
               </div>
             )}
