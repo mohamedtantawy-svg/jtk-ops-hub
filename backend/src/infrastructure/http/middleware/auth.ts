@@ -19,6 +19,10 @@ declare global {
 }
 
 export function requireAuth(req: Request, _res: Response, next: NextFunction): void {
+  if (!config.JWT_SECRET) {
+    return next(new UnauthorizedError('Auth not configured'));
+  }
+
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
     return next(new UnauthorizedError('Missing Bearer token'));
@@ -26,7 +30,7 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction): v
 
   try {
     const token = header.slice(7);
-    req.actor = jwt.verify(token, config.JWT_SECRET) as AuthPayload;
+    req.actor = jwt.verify(token, config.JWT_SECRET) as unknown as AuthPayload;
     next();
   } catch (err) {
     if (err instanceof TokenExpiredError) {

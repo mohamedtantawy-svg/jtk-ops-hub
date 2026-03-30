@@ -31,6 +31,9 @@ export class LoginHandler {
       throw new UnauthorizedError('Account is deactivated');
     }
 
+    if (!config.JWT_SECRET) {
+      throw new UnauthorizedError('Auth not configured');
+    }
     const payload = { sub: member.id, email: member.email, role: member.role, name: member.name };
     const token = (jwt.sign as any)(payload, config.JWT_SECRET, { expiresIn: config.JWT_EXPIRES_IN });
 
