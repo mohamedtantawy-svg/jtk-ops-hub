@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { FLAGS } from '../data/constants';
+import { GoogleLogin } from '@react-oauth/google';
+import { jwtDecode } from 'jwt-decode';
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const wrap = {
@@ -86,6 +88,8 @@ const profileCard = {
   gap: 14,
 };
 
+const hasGoogleClientId = !!process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+
 const LoginScreen = ({ userAccessMap, accessTypes, onLogin }) => {
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
@@ -93,6 +97,30 @@ const LoginScreen = ({ userAccessMap, accessTypes, onLogin }) => {
   const [loading, setLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const inputRef = useRef(null);
+
+  const handleGoogleSuccess = (credentialResponse) => {
+    try {
+      const decoded = jwtDecode(credentialResponse.credential);
+      const googleEmail = decoded.email?.toLowerCase();
+      if (!googleEmail) {
+        setError('Could not read email from Google account.');
+        return;
+      }
+      const profile = userAccessMap[googleEmail];
+      if (!profile) {
+        setError(`No Ops Hub account found for ${googleEmail}. Contact your admin for access.`);
+        return;
+      }
+      if (profile.status === 'inactive') {
+        setError('This account has been deactivated. Contact your admin.');
+        return;
+      }
+      setLoading(true);
+      setTimeout(() => onLogin(googleEmail, true), 400);
+    } catch (e) {
+      setError('Google sign-in failed. Please try again.');
+    }
+  };
 
   // Auto-focus email input
   useEffect(() => {
@@ -237,6 +265,28 @@ const LoginScreen = ({ userAccessMap, accessTypes, onLogin }) => {
                 </div>
               </div>
               <i className="bi-check-circle-fill" style={{ color: '#29811e', fontSize: 18, flexShrink: 0 }} />
+            </div>
+          )}
+
+          {/* Google Sign-In */}
+          {hasGoogleClientId && (
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <GoogleLogin
+                  onSuccess={handleGoogleSuccess}
+                  onError={() => setError('Google sign-in failed. Please try again.')}
+                  size="large"
+                  width="360"
+                  text="signin_with"
+                  shape="rectangular"
+                  theme="outline"
+                />
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '20px 0 0' }}>
+                <div style={{ flex: 1, height: 1, background: '#e0ddd8' }} />
+                <span style={{ fontSize: 12, color: '#9e9e9e', fontWeight: 500 }}>or sign in with email</span>
+                <div style={{ flex: 1, height: 1, background: '#e0ddd8' }} />
+              </div>
             </div>
           )}
 

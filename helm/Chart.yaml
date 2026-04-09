@@ -1,7 +1,8 @@
 apiVersion: v2
-name: playground
+name: jtk-ops-hub-v2
+description: jtk-ops-hub-v2 — deployed via Nexus
 type: application
 version: 0.1.0
-appVersion: "1.0.0"
+appVersion: "0.1.0"
 annotations:
-  deel-tools/template-version: "13"
+  deel-tools/template-version: "16"
