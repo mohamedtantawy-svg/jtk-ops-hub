@@ -12,8 +12,13 @@ metadata:
     sandbox.deel/name: {{ .Values.sandboxName }}
 spec:
   instances: {{ .Values.database.instances }}
-
+  enablePDB: false
   imageName: "ghcr.io/cloudnative-pg/postgresql:{{ .Values.database.postgresVersion }}"
+
+  resources:
+    requests:
+      memory: 128Mi
+      cpu: 100m
 
   bootstrap:
     initdb:
