@@ -10,10 +10,9 @@ app:
   resources:
     requests:
       memory: "128Mi"
-      cpu: "100m"
+      cpu: "300m"
     limits:
-      memory: "128Mi"
-      cpu: "1000m"
+      memory: "1024Mi"
   env: []
 podAnnotations: {}
 database:
