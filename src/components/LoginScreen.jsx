@@ -88,15 +88,24 @@ const profileCard = {
   gap: 14,
 };
 
-const hasGoogleClientId = !!process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
-
 const LoginScreen = ({ userAccessMap, accessTypes, onLogin, onGoogleLogin }) => {
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [matchedUser, setMatchedUser] = useState(null);
   const [loading, setLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
+  const [googleClientId, setGoogleClientId] = useState(process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '');
   const inputRef = useRef(null);
+
+  // Fetch Google Client ID at runtime (build-time env vars are empty in Docker standalone)
+  useEffect(() => {
+    if (!googleClientId) {
+      fetch('/api/v1/config')
+        .then(r => r.ok ? r.json() : null)
+        .then(cfg => { if (cfg?.googleClientId) setGoogleClientId(cfg.googleClientId); })
+        .catch(() => {});
+    }
+  }, []);
 
   const handleGoogleSuccess = async (credentialResponse) => {
     setLoading(true);
@@ -170,7 +179,11 @@ const LoginScreen = ({ userAccessMap, accessTypes, onLogin, onGoogleLogin }) => 
     try {
       await onLogin(trimmed, rememberMe);
     } catch (err) {
-      const msg = err?.body?.error || err?.message || 'Login failed. Please try again.';
+      let msg = err?.body?.error || err?.message || 'Login failed. Please try again.';
+      // Friendlier message for network errors
+      if (msg === 'Failed to fetch' || msg === 'Load failed') {
+        msg = 'Unable to reach the server. Please check your connection and try again.';
+      }
       setError(msg);
       setLoading(false);
     }
@@ -274,7 +287,7 @@ const LoginScreen = ({ userAccessMap, accessTypes, onLogin, onGoogleLogin }) => 
           )}
 
           {/* Google Sign-In */}
-          {hasGoogleClientId && (
+          {googleClientId && (
             <div style={{ marginBottom: 20 }}>
               <div style={{ display: 'flex', justifyContent: 'center' }}>
                 <GoogleLogin
