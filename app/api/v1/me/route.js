@@ -1,20 +1,19 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../src/lib/db';
+import { verifyToken } from '../../../../src/lib/jwt';
 
-function parseToken(req) {
+function extractToken(req) {
   const auth = req.headers.get('authorization');
   if (!auth?.startsWith('Bearer ')) return null;
-  try {
-    return JSON.parse(Buffer.from(auth.slice(7), 'base64').toString());
-  } catch { return null; }
+  return verifyToken(auth.slice(7));
 }
 
 export async function GET(req) {
   try {
-    const token = parseToken(req);
-    if (!token?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const claims = extractToken(req);
+    if (!claims?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { rows } = await query('SELECT * FROM members WHERE email = $1', [token.email]);
+    const { rows } = await query('SELECT * FROM members WHERE email = $1', [claims.email]);
     if (rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
     return NextResponse.json(rows[0]);
