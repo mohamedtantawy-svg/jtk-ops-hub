@@ -90,7 +90,7 @@ const profileCard = {
 
 const hasGoogleClientId = !!process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 
-const LoginScreen = ({ userAccessMap, accessTypes, onLogin }) => {
+const LoginScreen = ({ userAccessMap, accessTypes, onLogin, onGoogleLogin }) => {
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [matchedUser, setMatchedUser] = useState(null);
@@ -98,27 +98,39 @@ const LoginScreen = ({ userAccessMap, accessTypes, onLogin }) => {
   const [rememberMe, setRememberMe] = useState(true);
   const inputRef = useRef(null);
 
-  const handleGoogleSuccess = (credentialResponse) => {
+  const handleGoogleSuccess = async (credentialResponse) => {
+    setLoading(true);
+    setError('');
     try {
+      // Send credential to backend for server-side verification
+      if (onGoogleLogin) {
+        await onGoogleLogin(credentialResponse.credential);
+        return;
+      }
+      // Fallback: client-side decode (dev mode / no backend)
       const decoded = jwtDecode(credentialResponse.credential);
       const googleEmail = decoded.email?.toLowerCase();
       if (!googleEmail) {
         setError('Could not read email from Google account.');
+        setLoading(false);
         return;
       }
       const profile = userAccessMap[googleEmail];
       if (!profile) {
         setError(`No Ops Hub account found for ${googleEmail}. Contact your admin for access.`);
+        setLoading(false);
         return;
       }
       if (profile.status === 'inactive') {
         setError('This account has been deactivated. Contact your admin.');
+        setLoading(false);
         return;
       }
-      setLoading(true);
-      setTimeout(() => onLogin(googleEmail, true), 400);
+      onLogin(googleEmail, true);
     } catch (e) {
-      setError('Google sign-in failed. Please try again.');
+      const msg = e?.body?.error || e?.message || 'Google sign-in failed. Please try again.';
+      setError(msg);
+      setLoading(false);
     }
   };
 
