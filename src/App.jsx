@@ -36,7 +36,7 @@ import EscalationsView from './components/views/EscalationsView';
 import AnnouncementsView from './components/views/AnnouncementsView';
 import CalendarView from './components/views/CalendarView';
 import KnowledgeHub from './components/views/KnowledgeHub';
-// GMReportingView and CommsView removed — duplicates of Reports and Announcements
+import GMReportingView from './components/views/GMReportingView';
 import SettingsView from './components/views/SettingsView';
 import ProjectsView from './components/views/ProjectsView';
 import CreateProjectModal from './components/modals/CreateProjectModal';

@@ -3,7 +3,6 @@ import { TOOLS, FLAGS, SLA_MINS } from '../../data/constants';
 import { MEMBERS } from '../../data/members';
 import { DEFAULT_SETTINGS } from '../../data/settings';
 import { KB_SEARCH_INDEX } from '../../data/knowledge';
-import { COMMS_TYPES } from '../../data/comms';
 import PageHeader from '../ui/PageHeader';
 import Avatar from '../ui/Avatar';
 import EmptyState from '../ui/EmptyState';
@@ -49,7 +48,6 @@ const SETTINGS_GROUPS=[
   {
     label:'Compliance',
     items:[
-      {id:'comms',     icon:'bi-megaphone-fill',           label:'Communications'},
       {id:'kb',        icon:'bi-book-half',                label:'Knowledge Hub Config'},
       {id:'calendar',  icon:'bi-calendar3',                label:'Calendar & Deadlines'},
     ],
@@ -58,7 +56,6 @@ const SETTINGS_GROUPS=[
     label:'Analytics & Reporting',
     items:[
       {id:'analytics', icon:'bi-graph-up',                 label:'Analytics'},
-      {id:'gm_reporting',icon:'bi-bar-chart-line-fill',    label:'GM Reporting'},
       {id:'export',    icon:'bi-cloud-download-fill',      label:'Export & Reporting'},
     ],
   },
@@ -380,26 +377,6 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
         <SeveritySlaTable label="Response SLA by severity" desc="Maximum response time per severity level" obj={s.escal_response_sla_by_severity} settingsKey="escal_response_sla_by_severity"/>
       </div>);
 
-      case 'comms': return(<div>
-        <SectionHeader icon="bi-megaphone-fill" title="Communications" desc="Control who can send announcements and how acknowledgements are enforced."/>
-        <Select label="Who can compose" desc="Which roles can draft and send communications" value={s.comms_who_can_compose} onChange={v=>set('comms_who_can_compose',v)} options={[{value:'admin_only',label:'Admin only'},{value:'leads_admin',label:'Leads & admin'},{value:'all',label:'Everyone'}]}/>
-        <NumberInput label="Acknowledgement deadline" desc="Hours after sending before a reminder is triggered" value={s.comms_ack_deadline_hrs} onChange={v=>set('comms_ack_deadline_hrs',v)} min={1} max={168} suffix="hours"/>
-        <Toggle label="Auto-send reminders" desc="Automatically nudge agents who haven't acknowledged within the deadline" value={s.comms_auto_reminder} onChange={v=>set('comms_auto_reminder',v)}/>
-        <NumberInput label="Reminder interval" desc="Hours between each automatic reminder" value={s.comms_reminder_interval_hrs} onChange={v=>set('comms_reminder_interval_hrs',v)} min={4} max={72} suffix="hours"/>
-        <div style={{marginTop:12,marginBottom:8}}>
-          <div style={{fontSize:13,fontWeight:600,color:'#9e9e9e',letterSpacing:'normal',marginBottom:8}}>ENABLED COMMUNICATION TYPES</div>
-          {Object.entries(COMMS_TYPES).map(([key,ct])=>(
-            <Toggle key={key} label={ct.label} desc={`Allow "${ct.label}" type communications`} value={s.comms_types_enabled[key]} onChange={v=>setNested('comms_types_enabled',key,v)}/>
-          ))}
-        </div>
-
-        <div style={{marginTop:16,marginBottom:8,fontSize:13,fontWeight:600,color:'#9e9e9e',letterSpacing:'normal'}}>COMMS ADVANCED</div>
-        <Toggle label="Show drafts tab" desc="Display a Drafts tab in the communications view" value={s.comms_show_drafts_tab} onChange={v=>set('comms_show_drafts_tab',v)}/>
-        <Select label="Drafts minimum role" desc="Minimum role required to access the drafts tab" value={s.comms_drafts_min_role} onChange={v=>set('comms_drafts_min_role',v)} options={[{value:'admin',label:'Admin only'},{value:'lead',label:'Lead & above'},{value:'agent',label:'All roles'}]}/>
-        <Toggle label="Show ack progress" desc="Display acknowledgement progress bar on sent communications" value={s.comms_show_ack_progress} onChange={v=>set('comms_show_ack_progress',v)}/>
-        <Toggle label="Show member ack list" desc="Display list of individual members who have acknowledged" value={s.comms_show_member_ack_list} onChange={v=>set('comms_show_member_ack_list',v)}/>
-      </div>);
-
       case 'notif': return(<div>
         <SectionHeader icon="bi-bell-fill" title="Notifications" desc="Choose what triggers notifications and how they're delivered."/>
         <Toggle label="Sound notifications" desc="Play a sound when a new notification arrives" value={s.notif_sound} onChange={v=>set('notif_sound',v)}/>
@@ -409,8 +386,7 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
         <Toggle label="SLA warning" desc="Notify when a task approaches its SLA deadline" value={s.notif_sla_warning} onChange={v=>set('notif_sla_warning',v)}/>
         <Toggle label="SLA breach" desc="Notify immediately when an SLA is breached" value={s.notif_sla_breach} onChange={v=>set('notif_sla_breach',v)}/>
         <Toggle label="New escalation" desc="Notify when a task is escalated to you or your team" value={s.notif_escalation} onChange={v=>set('notif_escalation',v)}/>
-        <Toggle label="New communication" desc="Notify when a new announcement or update is published" value={s.notif_comms_new} onChange={v=>set('notif_comms_new',v)}/>
-        <Select label="Email digest" desc="Summary email of all notifications" value={s.notif_digest} onChange={v=>set('notif_digest',v)} options={[{value:'off',label:'Off'},{value:'daily',label:'Daily digest'},{value:'weekly',label:'Weekly digest'}]}/>
+                <Select label="Email digest" desc="Summary email of all notifications" value={s.notif_digest} onChange={v=>set('notif_digest',v)} options={[{value:'off',label:'Off'},{value:'daily',label:'Daily digest'},{value:'weekly',label:'Weekly digest'}]}/>
         <div style={{marginTop:10,marginBottom:6,fontSize:13,fontWeight:600,color:'#9e9e9e',letterSpacing:'normal'}}>NOTIFICATION SOURCES</div>
         <Toggle label="Show Zendesk notifications" desc="Receive notifications from Zendesk tickets" value={s.notificationSources?.zendesk!==false} onChange={v=>setNested('notificationSources','zendesk',v)}/>
         <Toggle label="Show Gmail notifications" desc="Receive notifications from Gmail (off by default to reduce noise)" value={s.notificationSources?.gmail===true} onChange={v=>setNested('notificationSources','gmail',v)}/>
@@ -423,7 +399,7 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
 
       case 'ui': return(<div>
         <SectionHeader icon="bi-palette-fill" title="UI & Display" desc="Customize the interface, default views, and visible columns."/>
-        <Select label="Default view on login" desc="Which page loads when users open the app" value={s.default_view} onChange={v=>set('default_view',v)} options={[{value:'my-queue',label:'My Queue'},{value:'analytics',label:'Analytics'},{value:'team',label:'Team View'},{value:'comms',label:'Communications'},{value:'alerts',label:'Alerts'}]}/>
+        <Select label="Default view on login" desc="Which page loads when users open the app" value={s.default_view} onChange={v=>set('default_view',v)} options={[{value:'my-queue',label:'My Queue'},{value:'analytics',label:'Analytics'},{value:'team',label:'Team View'},{value:'alerts',label:'Alerts'}]}/>
         <Toggle label="Sidebar expanded by default" desc="Start with the sidebar open (vs collapsed icons)" value={s.sidebar_default_open} onChange={v=>set('sidebar_default_open',v)}/>
         <Toggle label="Show onboarding for new users" desc="Display the welcome wizard on first visit" value={s.show_onboarding_new_users} onChange={v=>set('show_onboarding_new_users',v)}/>
         <Toggle label="Compact row mode" desc="Reduce vertical padding in task rows for higher density" value={s.compact_rows} onChange={v=>set('compact_rows',v)}/>
@@ -630,17 +606,6 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
         <StringListEditor label="Targeting scopes" desc="Available targeting scopes when composing announcements" items={s.announcements_targeting_scopes} onChange={v=>setArr('announcements_targeting_scopes',v)}/>
         <Select label="Minimum compose role" desc="Minimum role required to create announcements" value={s.announcements_min_compose_role} onChange={v=>set('announcements_min_compose_role',v)} options={[{value:'admin',label:'Admin only'},{value:'lead',label:'Lead & above'},{value:'agent',label:'All roles'}]}/>
         <Toggle label="Allow pinning" desc="Allow admins to pin announcements to the top of the list" value={s.announcements_allow_pinning} onChange={v=>set('announcements_allow_pinning',v)}/>
-      </div>);
-
-      case 'gm_reporting': return(<div>
-        <SectionHeader icon="bi-bar-chart-line-fill" title="GM Reporting" desc="Configure the General Manager reporting dashboard."/>
-        <Toggle label="Enable GM reporting" desc="Show the GM Reporting module in the sidebar" value={s.gm_reporting_enabled} onChange={v=>set('gm_reporting_enabled',v)}/>
-        <StringListEditor label="Sub-tabs" desc="Available tabs within the GM Reporting view" items={s.gm_reporting_sub_tabs} onChange={v=>setArr('gm_reporting_sub_tabs',v)}/>
-        <StringListEditor label="Countries" desc="Countries included in GM reporting" items={s.gm_reporting_countries} onChange={v=>setArr('gm_reporting_countries',v)}/>
-        <Toggle label="Show export CSV" desc="Display the CSV export button on GM reports" value={s.gm_reporting_show_export_csv} onChange={v=>set('gm_reporting_show_export_csv',v)}/>
-
-        <div style={{marginTop:16,marginBottom:8,fontSize:13,fontWeight:600,color:'#9e9e9e',letterSpacing:'normal'}}>TEAMS</div>
-        <ObjectListEditor label="Reporting teams" desc="Teams tracked in GM reporting with their leads" items={s.gm_reporting_teams} onChange={v=>setArr('gm_reporting_teams',v)} fields={[{key:'name',label:'Team name',flex:1},{key:'lead',label:'Team lead',flex:1}]}/>
       </div>);
 
       case 'danger': return(<div>

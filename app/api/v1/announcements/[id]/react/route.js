@@ -5,7 +5,9 @@ export async function POST(req, { params }) {
   try {
     const { id } = await params;
     const { emoji } = await req.json();
-    if (!emoji) return NextResponse.json({ error: 'Emoji required' }, { status: 400 });
+    if (!emoji || typeof emoji !== 'string' || emoji.trim().length === 0 || emoji.length > 10) {
+      return NextResponse.json({ error: 'Emoji must be a non-empty string (max 10 chars)' }, { status: 400 });
+    }
 
     // Toggle reaction — insert or delete
     const existing = await query(
