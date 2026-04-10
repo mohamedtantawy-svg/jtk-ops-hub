@@ -14,7 +14,6 @@ const NAV_GROUPS = [
     label: 'Workspace',
     items: [
       { id: 'knowledge-hub', icon: 'bi-book',             label: 'Knowledge Hub' },
-      { id: 'comms',         icon: 'bi-chat-dots',        label: 'Comms' },
       { id: 'slack',         icon: 'bi-slack',            label: 'Slack' },
     ],
   },
@@ -25,7 +24,6 @@ const NAV_GROUPS = [
       { id: 'analytics',     icon: 'bi-bar-chart-line',   label: 'Analytics' },
       { id: 'alerts',        icon: 'bi-exclamation-triangle', label: 'Alerts' },
       { id: 'escalations',   icon: 'bi-arrow-up-circle',  label: 'Escalations', badge: true },
-      { id: 'gm-reporting',  icon: 'bi-clipboard-data',   label: 'GM Reporting' },
     ],
   },
 ];

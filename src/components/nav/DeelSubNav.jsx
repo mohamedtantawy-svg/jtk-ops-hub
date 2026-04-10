@@ -7,7 +7,6 @@ const DeelSubNav=({view,subFilter,setSubFilter,tasks,user})=>{
     'projects': [],
     'calendar': [],
     'knowledge-hub': ['Policies','Runbooks','Tools','FAQs'],
-    'comms': [],
     'analytics': ['Overview','SLA','Team Performance','Sources'],
     'settings': ['General','SLA Rules','Notifications','Export'],
   };
