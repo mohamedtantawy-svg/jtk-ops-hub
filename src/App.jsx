@@ -87,22 +87,20 @@ const App=()=>{
   const [userAccessMap,setUserAccessMap]=useState(()=>{try{const s=localStorage.getItem('ops_hub_user_access_map');return s?JSON.parse(s):DEFAULT_USER_ACCESS_MAP;}catch(e){return DEFAULT_USER_ACCESS_MAP;}});
   // ── Login / Logout handlers ────────────────────────────────────────────────
   const handleLogin = useCallback(async (email, remember) => {
-    // Try BE auth first, fall back to local member lookup
-    try {
-      const res = await apiLogin(email);
-      if (res?.token) {
-        localStorage.setItem('ops_hub_token', res.token);
-      }
-    } catch(e) {
-      // Backend offline — continue with local auth
+    // Backend authentication required — no local fallback
+    const res = await apiLogin(email);
+    if (!res?.token) {
+      throw new Error('Authentication failed');
     }
-    const member = MEMBERS.find(m => m.email === email);
+    localStorage.setItem('ops_hub_token', res.token);
+    const userEmail = res.user?.email || email;
+    const member = MEMBERS.find(m => m.email === userEmail) || res.user;
     if (member) {
       setUser(member);
-      setLoggedInEmail(email);
+      setLoggedInEmail(userEmail);
       setView('briefing');
       if (remember) {
-        try { localStorage.setItem('ops_hub_logged_in_email', email); } catch(e) {}
+        try { localStorage.setItem('ops_hub_logged_in_email', userEmail); } catch(e) {}
       }
     }
   }, []);

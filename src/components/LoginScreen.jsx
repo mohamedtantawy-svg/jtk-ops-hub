@@ -152,7 +152,7 @@ const LoginScreen = ({ userAccessMap, accessTypes, onLogin, onGoogleLogin }) => 
     }
   }, [email, userAccessMap, accessTypes]);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     const trimmed = email.trim().toLowerCase();
 
@@ -165,22 +165,15 @@ const LoginScreen = ({ userAccessMap, accessTypes, onLogin, onGoogleLogin }) => 
       return;
     }
 
-    const profile = userAccessMap[trimmed];
-    if (!profile) {
-      setError('No account found with this email. Contact your admin for access.');
-      return;
-    }
-
-    if (profile.status === 'inactive') {
-      setError('This account has been deactivated. Contact your admin.');
-      return;
-    }
-
     setLoading(true);
-    // Brief loading to feel real
-    setTimeout(() => {
-      onLogin(trimmed, rememberMe);
-    }, 600);
+    setError('');
+    try {
+      await onLogin(trimmed, rememberMe);
+    } catch (err) {
+      const msg = err?.body?.error || err?.message || 'Login failed. Please try again.';
+      setError(msg);
+      setLoading(false);
+    }
   };
 
   const initials = matchedUser?.name
