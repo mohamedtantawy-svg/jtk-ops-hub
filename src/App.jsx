@@ -36,8 +36,7 @@ import EscalationsView from './components/views/EscalationsView';
 import AnnouncementsView from './components/views/AnnouncementsView';
 import CalendarView from './components/views/CalendarView';
 import KnowledgeHub from './components/views/KnowledgeHub';
-import GMReportingView from './components/views/GMReportingView';
-// CommsView merged into AnnouncementsView — import kept for legacy route redirect
+// GMReportingView and CommsView removed — duplicates of Reports and Announcements
 import SettingsView from './components/views/SettingsView';
 import ProjectsView from './components/views/ProjectsView';
 import CreateProjectModal from './components/modals/CreateProjectModal';
@@ -470,7 +469,7 @@ const App=()=>{
     if(!perms)return;
     if(view&&!perms.canView(view)){
       // Find first allowed view
-      const fallback=['briefing','my-queue','calendar','projects','escalations','alerts','hr-reports','knowledge-hub','analytics','announcements','slack','team','comms','gm-reporting','settings'].find(v=>perms.canView(v));
+      const fallback=['briefing','my-queue','calendar','projects','escalations','alerts','hr-reports','knowledge-hub','analytics','announcements','slack','team','settings'].find(v=>perms.canView(v));
       setView(fallback||'briefing');
     }
   },[view,perms]);
@@ -541,8 +540,6 @@ const App=()=>{
           {view==='calendar'      &&perms?.canView('calendar')!==false     &&<div className="page-enter"><CalendarView tasks={tasks}/></div>}
           {view==='knowledge-hub' &&perms?.canView('knowledge-hub')!==false&&<div className="page-enter"><KnowledgeHub subFilter={subFilter} user={user}/></div>}
           {view==='hr-reports'    &&perms?.canView('hr-reports')!==false   &&<div className="page-enter"><GMReportingView user={user} addToast={addToast}/></div>}
-          {view==='gm-reporting'  &&perms?.canView('gm-reporting')!==false &&<div className="page-enter"><GMReportingView user={user} addToast={addToast}/></div>}
-          {view==='comms'&&<div className="page-enter"><AnnouncementsView user={user} comms={comms} setComms={setComms} addToast={addToast} tasks={tasks} apiAcknowledge={apiAcknowledge} apiCreate={apiCreate} apiSend={apiSend} apiUpdate={apiUpdate} apiArchive={apiArchive} apiRemove={apiRemove} apiTogglePin={apiTogglePin} apiUnarchive={apiUnarchive} apiComments={apiComments} apiSetComments={apiSetComments} apiLoadComments={apiLoadComments} apiAddComment={apiAddCommentFn} apiDeleteComment={apiDeleteCommentFn} apiLinks={apiLinks} apiLoadLinks={apiLoadLinks} apiLinkAnnouncement={apiLinkAnnouncementFn} apiUnlinkAnnouncement={apiUnlinkAnnouncementFn} apiReact={apiReactFn}/></div>}
           {view==='settings'      &&perms?.canView('settings')!==false     &&<div className="page-enter"><SettingsView settings={settings} setSettings={setSettings} user={user} addToast={addToast} tasks={tasks} setTasks={setTasks} subFilter={subFilter} accessTypes={accessTypes} setAccessTypes={setAccessTypes} userAccessMap={userAccessMap} setUserAccessMap={setUserAccessMap} perms={perms}/></div>}
           {view==='projects'      &&perms?.canView('projects')!==false     &&<div className="page-enter"><ProjectsView projects={projects} setProjects={setProjects} user={user} onNewProject={()=>setProjectModal('create')} onEditProject={(p)=>setProjectModal(p)}/></div>}
       </div>

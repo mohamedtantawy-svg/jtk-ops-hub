@@ -6,13 +6,11 @@ const VIEW_TITLES = {
   projects:      'Projects',
   calendar:      'Calendar',
   'knowledge-hub': 'Knowledge Hub',
-  comms:         'Comms',
   slack:         'Slack',
   team:          'Team',
   analytics:     'Analytics',
   alerts:        'Alerts',
   escalations:   'Escalations',
-  'gm-reporting':'GM Reporting',
   settings:      'Settings',
 };
 

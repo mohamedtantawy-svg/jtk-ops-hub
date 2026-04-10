@@ -27,12 +27,10 @@ const Sidebar=({user,view,setView,tasks,setTask,escalCount,onSearch,open,setOpen
   const overviewItems=[
     pv('team')&&isLA?{id:'team',     icon:'bi-people',         label:perms?.dataScope==='all_tasks'?'All Teams':'My Team',badge:null}:null,
     pv('analytics')&&{id:'analytics',     icon:'bi-bar-chart-line',  label:'Analytics',     badge:null},
-    pv('gm-reporting')&&{id:'gm-reporting',  icon:'bi-flag',           label:'GM Reporting',   badge:gmReportBadge||null},
   ].filter(Boolean);
   const refItems=[
     pv('calendar')&&{id:'calendar',      icon:'bi-calendar3',       label:'Deadlines',     badge:null},
     pv('knowledge-hub')&&{id:'knowledge-hub', icon:'bi-book-half',        label:'Knowledge Hub', badge:null},
-    pv('comms')&&{id:'comms',         icon:'bi-megaphone-fill',   label:'Comms',         badge:commsBadge},
   ].filter(Boolean);
   const allNavs=[...workItems,...overviewItems,...refItems,
     ...(perms?.canView('settings')?[{id:'settings',icon:'bi-gear-fill',label:'Settings',badge:null}]:[])

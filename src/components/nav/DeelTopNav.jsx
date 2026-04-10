@@ -18,8 +18,6 @@ const MORE_TABS = [
   { id: 'analytics',     icon: 'bi-bar-chart-line',   label: 'Analytics' },
   { id: 'slack',         icon: 'bi-slack',            label: 'Slack' },
   { id: 'team',          icon: 'bi-people',           label: 'Team' },
-  { id: 'comms',         icon: 'bi-chat-dots',        label: 'Comms' },
-  { id: 'gm-reporting',  icon: 'bi-file-earmark-bar-graph', label: 'GM Reporting' },
 ];
 
 /* Quick-create actions in the + menu — each mapped to a required permission */
