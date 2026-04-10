@@ -432,7 +432,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 {l:'Open',v:orgOpen.length,c:'var(--g)',iconEl:<i className="bi bi-circle" style={{fontSize:12}}/>},
                 {l:'New',v:orgNew,c:'#1f74b3',iconEl:<i className="bi bi-dot" style={{fontSize:16}}/>},
                 {l:'In Progress',v:orgIP,c:'#ed8d00',iconEl:<i className="bi bi-arrow-repeat" style={{fontSize:12}}/>},
-                {l:'Waiting',v:orgWait,c:'#9e9e9e',iconEl:<i className="bi bi-pause-circle" style={{fontSize:12}}/>},
+                {l:'Pause',v:orgWait,c:'#9e9e9e',iconEl:<i className="bi bi-pause-circle" style={{fontSize:12}}/>},
                 {l:'Resolved',v:orgResolved.length,c:'#29811e',iconEl:<i className="bi bi-check-circle-fill" style={{fontSize:12}}/>},
               ].map(s=>(
                 <div key={s.l} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:'1px solid #f5f5f5'}}>

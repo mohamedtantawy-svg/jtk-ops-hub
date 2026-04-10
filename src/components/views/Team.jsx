@@ -128,7 +128,7 @@ const Team=({user,tasks,setTask,setView})=>{
       {/* Team table */}
       <div style={{background:'white',borderRadius:16,border:'1px solid #e8e8e8',overflow:'hidden',boxShadow:'0 1px 2px rgba(0,0,0,0.04)'}}>
         <div role="row" style={{padding:'12px 16px',borderBottom:'1px solid #f2f2f2',display:'grid',gridTemplateColumns:'1fr 56px 64px 64px 64px 64px 80px',gap:8,background:'#fafaf9'}}>
-          {['Manager / Agent','Team','Open','New','In prog','Waiting','Health'].map(h=><span key={h} role="columnheader" style={{color:'var(--text-muted, #9e9e9e)',fontSize:13,fontWeight:500,textTransform:'none',letterSpacing:'normal',textAlign:h==='Manager / Agent'?'left':'center'}}>{h}</span>)}
+          {['Manager / Agent','Team','Open','New','In prog','Pause','Health'].map(h=><span key={h} role="columnheader" style={{color:'var(--text-muted, #9e9e9e)',fontSize:13,fontWeight:500,textTransform:'none',letterSpacing:'normal',textAlign:h==='Manager / Agent'?'left':'center'}}>{h}</span>)}
         </div>
         {leads.length === 0 && (
           <div style={{padding:'32px 16px',textAlign:'center',color:'#9e9e9e'}}>

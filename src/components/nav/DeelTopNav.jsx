@@ -187,8 +187,8 @@ const DeelTopNav = ({
 
         {/* Apps grid */}
         <div ref={createRef} style={{ position: 'relative' }}>
-          <button className="deel-icon-btn" onClick={() => setShowCreate(p => !p)} aria-label="Apps" title="Apps">
-            <i className="bi bi-grid-3x3-gap-fill" style={{ fontSize: 16 }}></i>
+          <button className="deel-icon-btn" onClick={() => setShowCreate(p => !p)} aria-label="Create new" title="Create new">
+            <i className="bi bi-plus-lg" style={{ fontSize: 18, fontWeight: 700 }}></i>
           </button>
           {showCreate && (
             <div style={{ ...dropdown, right: 0, borderRadius: 14, padding: '8px 0', minWidth: 240, overflow: 'hidden' }}>
@@ -216,11 +216,6 @@ const DeelTopNav = ({
         {/* Search */}
         <button className="deel-icon-btn" onClick={onSearch} aria-label="Search (⌘K)" title="Search (⌘K)">
           <i className="bi bi-search" style={{ fontSize: 15 }}></i>
-        </button>
-
-        {/* AI / Deel star */}
-        <button className="deel-icon-btn" style={{ position: 'relative' }} aria-label="Deel AI" title="Deel AI">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 2L14.09 8.26L20 9.27L15.55 13.97L16.91 20L12 16.9L7.09 20L8.45 13.97L4 9.27L9.91 8.26L12 2Z" fill="var(--purple)" /></svg>
         </button>
 
         {/* Settings */}
