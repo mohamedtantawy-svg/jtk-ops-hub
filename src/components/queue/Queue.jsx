@@ -345,7 +345,8 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
               {value:null,label:'All Status',icon:'bi-grid'},
               {value:'new',label:'New',icon:'bi-circle-fill',dotColor:'#7c3aed'},
               {value:'in_progress',label:'In Progress',icon:'bi-play-circle-fill',dotColor:'#1d4ed8'},
-              {value:'waiting',label:'Waiting',icon:'bi-pause-circle-fill',dotColor:'#6b6560'},
+              {value:'waiting',label:'Pause',icon:'bi-pause-circle-fill',dotColor:'#6b6560'},
+              {value:'escalated',label:'Escalated',icon:'bi-arrow-up-circle-fill',dotColor:'#d42d35'},
               {value:'resolved',label:'Resolved',icon:'bi-check-circle-fill',dotColor:'#15803d'},
             ]}
             onChange={setFStatus}

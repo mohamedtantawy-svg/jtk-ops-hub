@@ -19,7 +19,8 @@ export const QUEUE_SOURCES=['zendesk','jira','workbench','onboarding','offboardi
 export const STATUSES={
   new:        {label:'New',        color:'#1f74b3',bg:'#e8f0fe'},
   in_progress:{label:'In Progress',color:'#e65100',bg:'#fff3e0'},
-  waiting:    {label:'Waiting',    color:'#616161',bg:'#f3f3f3'},
+  waiting:    {label:'Pause',      color:'#616161',bg:'#f3f3f3'},
+  escalated:  {label:'Escalated',  color:'#d42d35',bg:'#fef2f2'},
   resolved:   {label:'Resolved',   color:'#29811e',bg:'#e8f5e9'},
 };
 export const FUNCTIONS={

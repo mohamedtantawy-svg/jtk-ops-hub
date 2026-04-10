@@ -10,6 +10,7 @@ const STATUS_STYLES = {
   new:         { background: 'var(--purple-light, #f5f0ff)', color: 'var(--purple, #7c3aed)' },
   in_progress: { background: 'var(--blue-light, #eff6ff)',   color: 'var(--blue, #1d4ed8)' },
   waiting:     { background: 'var(--surface-3, #f5f3f0)',    color: 'var(--text-secondary, #6b6560)' },
+  escalated:   { background: '#fef2f2',                      color: '#d42d35' },
   resolved:    { background: 'var(--green-light, #f0fdf4)',  color: 'var(--green, #15803d)' },
   open:        { background: 'var(--purple-light, #f5f0ff)', color: 'var(--purple, #7c3aed)' },
 };
@@ -17,7 +18,8 @@ const STATUS_STYLES = {
 const STATUS_LABELS = {
   new: 'New',
   in_progress: 'In Progress',
-  waiting: 'Waiting',
+  waiting: 'Pause',
+  escalated: 'Escalated',
   resolved: 'Resolved',
   open: 'Open',
 };
@@ -25,7 +27,8 @@ const STATUS_LABELS = {
 const STATUS_TOOLTIPS={
   new:'Zendesk: Open | Jira: To Do | Workbench: New',
   in_progress:'Zendesk: On-Hold | Jira: In Progress | Workbench: Active',
-  waiting:'Zendesk: Pending (pauses SLA) | Jira: Blocked | Workbench: Waiting',
+  waiting:'Zendesk: Pending (pauses SLA) | Jira: Blocked | Workbench: Paused',
+  escalated:'Task has been escalated to a manager',
   resolved:'Zendesk: Solved | Jira: Done | Workbench: Completed',
 };
 
