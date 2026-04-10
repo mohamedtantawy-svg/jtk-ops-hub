@@ -15,8 +15,6 @@ export const ALL_VIEWS = [
   'announcements',
   'slack',
   'team',
-  'comms',
-  'gm-reporting',
   'settings',
 ];
 
@@ -32,7 +30,6 @@ export const ALL_ACTIONS = [
   'can_create_escalation',
   'can_respond_escalation',
   // Communication actions
-  'can_compose_comms',
   'can_compose_announcements',
   'can_pin_announcement',
   'can_send_reminder',
@@ -78,8 +75,6 @@ export const VIEW_LABELS = {
   'announcements': 'Announcements',
   'slack':         'Slack',
   'team':          'Team',
-  'comms':         'Comms',
-  'gm-reporting':  'GM Reporting',
   'settings':      'Settings',
 };
 
@@ -92,7 +87,6 @@ export const ACTION_LABELS = {
   'can_escalate':             'Escalate (from ticket)',
   'can_create_escalation':    'Create Escalation',
   'can_respond_escalation':   'Respond to Escalation',
-  'can_compose_comms':        'Compose Comms',
   'can_compose_announcements':'Compose Announcements',
   'can_pin_announcement':     'Pin Announcement',
   'can_send_reminder':        'Send Reminder',
@@ -146,7 +140,6 @@ export const DEFAULT_ACCESS_TYPES = [
       'can_escalate',
       'can_create_escalation',
       'can_respond_escalation',
-      'can_compose_comms',
       'can_compose_announcements',
       'can_pin_announcement',
       'can_send_reminder',
@@ -177,7 +170,6 @@ export const DEFAULT_ACCESS_TYPES = [
       'announcements',
       'slack',
       'team',
-      'comms',
     ],
     actions: [
       'can_create_task',
@@ -211,7 +203,6 @@ export const DEFAULT_ACCESS_TYPES = [
       'knowledge-hub',
       'announcements',
       'slack',
-      'comms',
     ],
     actions: [
       'can_resolve_task',

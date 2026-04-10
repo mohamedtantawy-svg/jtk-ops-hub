@@ -37,13 +37,6 @@ export const DEFAULT_SETTINGS = {
   escal_notify_slack: true,
   escal_require_note: true,
 
-  // ── Communications ──
-  comms_who_can_compose: 'leads_admin', // admin_only | leads_admin | all
-  comms_ack_deadline_hrs: 48,
-  comms_auto_reminder: true,
-  comms_reminder_interval_hrs: 24,
-  comms_types_enabled: { alert: true, announce: true, update: true, guidance: true, kudos: true },
-
   // ── Notifications ──
   notif_sound: true,
   notif_desktop: true,
@@ -51,7 +44,6 @@ export const DEFAULT_SETTINGS = {
   notif_sla_warning: true,
   notif_sla_breach: true,
   notif_escalation: true,
-  notif_comms_new: true,
   notif_digest: 'daily', // off | daily | weekly
   notificationSources: { zendesk: true, gmail: false, jira: true, slack: true, workbench: true, calendar: true, looker: true },
 
@@ -88,8 +80,8 @@ export const DEFAULT_SETTINGS = {
   data_retention_days: 90,
 
   // ── Navigation & Sidebar ──
-  nav_enabled_views: { briefing: true, 'my-queue': true, slack: true, alerts: true, escalations: true, team: true, analytics: true, 'gm-reporting': true, calendar: true, 'knowledge-hub': true, comms: false, projects: true, announcements: true, settings: true },
-  nav_sidebar_order: ['briefing', 'my-queue', 'slack', 'alerts', 'escalations', 'team', 'analytics', 'gm-reporting', 'calendar', 'knowledge-hub', 'projects', 'announcements', 'settings'],
+  nav_enabled_views: { briefing: true, 'my-queue': true, slack: true, alerts: true, escalations: true, team: true, analytics: true, calendar: true, 'knowledge-hub': true, projects: true, announcements: true, settings: true },
+  nav_sidebar_order: ['briefing', 'my-queue', 'slack', 'alerts', 'escalations', 'team', 'analytics', 'calendar', 'knowledge-hub', 'projects', 'announcements', 'settings'],
   nav_quick_create_items: { task: true, escalation: true, project: true, announcement: true, outbound_request: true, report: true },
   nav_show_ticker: true,
   nav_global_search_shortcut: '\u2318K',
@@ -174,17 +166,6 @@ export const DEFAULT_SETTINGS = {
   announcements_min_compose_role: 'lead',
   announcements_allow_pinning: true,
 
-  // ── GM Reporting ──
-  gm_reporting_enabled: true,
-  gm_reporting_sub_tabs: ['overview', 'by_country', 'by_team'],
-  gm_reporting_countries: ['UK', 'US', 'DE', 'FR', 'NL', 'SG', 'BR', 'AU', 'AE', 'CA', 'IN', 'PH', 'JP', 'IL', 'IE'],
-  gm_reporting_teams: [
-    { name: 'EMEA', lead: 'Sarah Miller' },
-    { name: 'APAC', lead: 'Jun Tanaka' },
-    { name: 'AMER', lead: 'Carlos Rivera' },
-  ],
-  gm_reporting_show_export_csv: true,
-
   // ── Knowledge Hub Advanced ──
   kb_show_search_tab: true,
   kb_show_ask_claude_tab: true,
@@ -206,11 +187,6 @@ export const DEFAULT_SETTINGS = {
     { country: 'JP', label: 'Japan Tracker', url: '' },
   ],
 
-  // ── Comms Advanced ──
-  comms_show_drafts_tab: true,
-  comms_drafts_min_role: 'admin',
-  comms_show_ack_progress: true,
-  comms_show_member_ack_list: true,
 };
 
 export const SETTINGS_CATS = [
@@ -219,7 +195,6 @@ export const SETTINGS_CATS = [
   { id: 'sources',       icon: 'bi-plug-fill',              label: 'Source Integrations' },
   { id: 'ai',            icon: 'bi-stars',                  label: 'AI & Suggested Replies' },
   { id: 'escalation',    icon: 'bi-arrow-up-circle-fill',   label: 'Escalation Rules' },
-  { id: 'comms',         icon: 'bi-megaphone-fill',         label: 'Communications' },
   { id: 'notif',         icon: 'bi-bell-fill',              label: 'Notifications' },
   { id: 'ui',            icon: 'bi-palette-fill',           label: 'UI & Display' },
   { id: 'access',        icon: 'bi-shield-lock-fill',       label: 'Access Control' },
@@ -235,6 +210,5 @@ export const SETTINGS_CATS = [
   { id: 'analytics',     icon: 'bi-graph-up',               label: 'Analytics' },
   { id: 'projects',      icon: 'bi-kanban-fill',            label: 'Projects' },
   { id: 'announcements', icon: 'bi-broadcast-pin',          label: 'Announcements' },
-  { id: 'gm_reporting',  icon: 'bi-bar-chart-line-fill',    label: 'GM Reporting' },
   { id: 'danger',        icon: 'bi-exclamation-octagon-fill', label: 'Danger Zone' },
 ];

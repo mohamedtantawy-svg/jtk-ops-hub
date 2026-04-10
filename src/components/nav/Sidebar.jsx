@@ -1,6 +1,5 @@
 import { useState, useContext } from 'react';
 import { MEMBERS } from '../../data/members';
-import { GM_REPORTS } from '../../data/reports';
 import { FLAGS } from '../../data/constants';
 import Avatar from '../ui/Avatar';
 import NotifBell from './NotifBell';
@@ -12,10 +11,8 @@ const Sidebar=({user,view,setView,tasks,setTask,escalCount,onSearch,open,setOpen
   const slkT=tasks.filter(t=>t.source==='slack'&&t.status!=='resolved');
   const alerts=tasks.filter(t=>t.isAlert&&t.status!=='resolved').length;
   const isLA=perms?.dataScope!=='own_tasks_only';
-  const commsBadge=(()=>{const pending=comms.filter(c=>c.status==='sent'&&!c.acks.includes(user.id)&&(c.target==='all'||c.target===user.team||(Array.isArray(c.target)&&c.target.includes(user.id))));return pending.length||null;})();
 
   // Grouped navigation
-  const gmReportBadge=GM_REPORTS.filter(r=>r.status!=='resolved').length;
   const pv=(id)=>perms?.canView(id)!==false;
   const workItems=[
     pv('briefing')&&{id:'briefing',    icon:'bi-sunrise',              label:'Briefing',     badge:null},

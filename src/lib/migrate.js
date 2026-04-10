@@ -130,6 +130,7 @@ CREATE TABLE IF NOT EXISTS announcements (
   status VARCHAR(50) DEFAULT 'draft',
   author_id INTEGER,
   pinned BOOLEAN DEFAULT false,
+  read_by JSONB DEFAULT '[]'::jsonb,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -162,6 +163,37 @@ CREATE TABLE IF NOT EXISTS announcement_links (
   target_id UUID REFERENCES announcements(id) ON DELETE CASCADE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE(source_id, target_id)
+);
+
+-- Project milestones
+CREATE TABLE IF NOT EXISTS project_milestones (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  title VARCHAR(255) NOT NULL,
+  due_date DATE,
+  sort_order INTEGER DEFAULT 0,
+  completed BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Project members (join table)
+CREATE TABLE IF NOT EXISTS project_members (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  member_id INTEGER REFERENCES members(id) ON DELETE CASCADE,
+  role VARCHAR(100) DEFAULT 'contributor',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(project_id, member_id)
+);
+
+-- Project tasks (join table)
+CREATE TABLE IF NOT EXISTS project_tasks (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+  task_id UUID REFERENCES tasks(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(project_id, task_id)
 );
 
 -- Migrations tracking

@@ -4,6 +4,9 @@
 import crypto from 'crypto';
 
 const SECRET = process.env.JWT_SECRET || 'ops-hub-dev-secret-change-in-production';
+if (!process.env.JWT_SECRET && process.env.NODE_ENV === 'production') {
+  console.error('[SECURITY WARNING] JWT_SECRET is not set! Using insecure default. Set JWT_SECRET environment variable.');
+}
 const ALGORITHM = 'HS256';
 const TOKEN_EXPIRY_HOURS = 24;
 

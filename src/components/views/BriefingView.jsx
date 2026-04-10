@@ -594,9 +594,9 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             {[
               {icon:'bi-inbox-fill',label:'Active Requests',value:personal.length,color:'var(--g)',sub:`avg ${teamAvg.toFixed(1)}`,tr:trend(personal.length,yTotal),expandKey:'active-breakdown'},
               {icon:'bi-calendar-event',label:'Meetings',value:todayMeetings.length,color:'#1f74b3',nav:()=>setView('calendar')},
-              {icon:'bi-kanban',label:'Projects',value:srcEntries.length,color:'#8b6dca',nav:()=>setView('gm-reporting')},
+              {icon:'bi-kanban',label:'Projects',value:srcEntries.length,color:'#8b6dca',nav:()=>setView('hr-reports')},
               {icon:'bi-exclamation-triangle-fill',label:'Escalations',value:pendingEscalCount,color:pendingEscalCount>0?'#d42d35':'#616161',alert:pendingEscalCount>0,nav:()=>setView('escalations'),accent:pendingEscalCount>0?'#ffe2de':null},
-              {icon:'bi-megaphone-fill',label:'Announcements',value:unackedCount,color:unackedCount>0?'#ed8d00':'#616161',alert:unackedCount>0,nav:()=>setView('comms'),accent:unackedCount>0?'#fff8e6':null},
+              {icon:'bi-megaphone-fill',label:'Announcements',value:unackedCount,color:unackedCount>0?'#ed8d00':'#616161',alert:unackedCount>0,nav:()=>setView('announcements'),accent:unackedCount>0?'#fff8e6':null},
               {icon:'bi-check-circle-fill',label:'Resolved',value:resolved,color:'#29811e',sub:'today',tr:trend(resolved,yResolved),nav:()=>{setView('my-queue');setTimeout(()=>setSubFilter&&setSubFilter('Resolved'),50);}},
             ].map((m,i)=>(
               <DeelCard key={m.label}
@@ -646,9 +646,9 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             // Pending escalations
             escalations.filter(e=>e.status==='pending').forEach(e=>attentionItems.push({id:'e-'+e.id,icon:'bi-arrow-up-circle-fill',color:'#1f74b3',bg:'#e8f0fe',label:'Escalation Pending',desc:e.task?.subject||e.taskId,sub:e.managerName,nav:()=>setView('escalations')}));
             // Alerts from comms
-            comms.filter(c=>c.status==='sent'&&c.type==='alert'&&!c.acks.includes(user.id)).forEach(c=>attentionItems.push({id:'a-'+c.id,icon:'bi-exclamation-circle-fill',color:'#d42d35',bg:'#ffe2de',label:'Alert',desc:c.title,sub:'Requires acknowledgment',nav:()=>setView('comms')}));
+            comms.filter(c=>c.status==='sent'&&c.type==='alert'&&!c.acks.includes(user.id)).forEach(c=>attentionItems.push({id:'a-'+c.id,icon:'bi-exclamation-circle-fill',color:'#d42d35',bg:'#ffe2de',label:'Alert',desc:c.title,sub:'Requires acknowledgment',nav:()=>setView('announcements')}));
             // New announcements
-            comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='guidance')&&!c.acks.includes(user.id)).forEach(c=>attentionItems.push({id:'n-'+c.id,icon:'bi-megaphone-fill',color:'#ed8d00',bg:'#fff8e6',label:'New Announcement',desc:c.title,sub:'Requires acknowledgment',nav:()=>setView('comms')}));
+            comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='guidance')&&!c.acks.includes(user.id)).forEach(c=>attentionItems.push({id:'n-'+c.id,icon:'bi-megaphone-fill',color:'#ed8d00',bg:'#fff8e6',label:'New Announcement',desc:c.title,sub:'Requires acknowledgment',nav:()=>setView('announcements')}));
             // Projects/deadlines close (calendar events within 3 days)
             const soon=new Date();soon.setDate(soon.getDate()+3);
             CALENDAR_EVENTS.filter(e=>e.type!=='meeting'&&new Date(e.date)<=soon&&new Date(e.date)>=new Date(new Date().toISOString().slice(0,10))).forEach(e=>attentionItems.push({id:'d-'+e.id,icon:'bi-calendar-x-fill',color:'#8b6dca',bg:'#f3eff8',label:'Deadline Soon',desc:e.title,sub:e.dateLabel,nav:()=>setView('calendar')}));
@@ -702,9 +702,9 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
           {[
             {l:'Active Requests',v:total,c:'var(--g)',sub:`${personal.length} yours`,tr:trend(total,yTotal),expandKey:'active-breakdown'},
             {l:'Meetings',v:leadTodayMeetings.length,c:'#1f74b3',nav:()=>setView('calendar')},
-            {l:'Projects',v:srcEntries.length,c:'#8b6dca',nav:()=>setView('gm-reporting')},
+            {l:'Projects',v:srcEntries.length,c:'#8b6dca',nav:()=>setView('hr-reports')},
             {l:'Escalations',v:pendingEscalCount,c:pendingEscalCount>0?'#d42d35':'#616161',alert:pendingEscalCount>0,nav:()=>setView('escalations')},
-            {l:'Announcements',v:unackedCount,c:unackedCount>0?'#ed8d00':'#616161',alert:unackedCount>0,nav:()=>setView('comms')},
+            {l:'Announcements',v:unackedCount,c:unackedCount>0?'#ed8d00':'#616161',alert:unackedCount>0,nav:()=>setView('announcements')},
             {l:'Resolved',v:resolved,c:'#29811e',sub:'today',tr:trend(resolved,yResolved),nav:()=>{setView('my-queue');setTimeout(()=>setSubFilter&&setSubFilter('Resolved'),50);}},
           ].map((m,i,arr)=>(
             <div key={m.l} className={`metric-cell count-up count-up-${i+1}`}
@@ -1060,7 +1060,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 {[
                   {v:'my-queue',icon:'bi-inbox-fill',l:'Queue',c:'var(--g)',bg:'#e8f0fe'},
                   {v:'escalations',icon:'bi-arrow-up-circle-fill',l:'Escalations',c:'#1f74b3',bg:'#e8f0fe'},
-                  {v:'gm-reporting',icon:'bi-flag-fill',l:'Reports',c:'#8b6dca',bg:'#f3eff8'},
+                  {v:'hr-reports',icon:'bi-flag-fill',l:'Reports',c:'#8b6dca',bg:'#f3eff8'},
                   {v:'team',icon:'bi-people-fill',l:'Team',c:'#ed8d00',bg:'#fff8e6'},
                   {v:'analytics',icon:'bi-bar-chart-line-fill',l:'Analytics',c:'#1f74b3',bg:'#e8f0fe'},
                 ].map(a=>(
