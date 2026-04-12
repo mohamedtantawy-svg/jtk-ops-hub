@@ -15,7 +15,7 @@ import { usePermissions } from './hooks/usePermissions';
 import { slaInfo } from './utils/helpers';
 
 // ── API services + normalizers ──────────────────────────────────────────────
-import { login as apiLogin, loginWithGoogle as apiLoginWithGoogle } from './services/authApi';
+import { login as apiLogin } from './services/authApi';
 import { fetchTasks as apiFetchTasks, createTask as apiCreateTask, updateTaskStatus as apiUpdateStatus, assignTask as apiAssignTask, escalateTask as apiEscalateTask, snoozeTask as apiSnoozeTask } from './services/tasksApi';
 import { fetchMembers as apiFetchMembers } from './services/membersApi';
 import { fetchEscalations as apiFetchEscalations, createEscalation as apiCreateEscalation, respondToEscalation as apiRespondEscalation, resolveEscalation as apiResolveEscalation } from './services/escalationsApi';
@@ -104,27 +104,8 @@ const App=()=>{
     }
   }, []);
 
-  const handleGoogleLogin = useCallback(async (credential) => {
-    // Send Google credential to backend for server-side verification
-    try {
-      const res = await apiLoginWithGoogle(credential);
-      if (res?.token) {
-        localStorage.setItem('ops_hub_token', res.token);
-      }
-      if (res?.user) {
-        const email = res.user.email;
-        const member = MEMBERS.find(m => m.email === email) || res.user;
-        setUser(member);
-        setLoggedInEmail(email);
-        setView('briefing');
-        try { localStorage.setItem('ops_hub_logged_in_email', email); } catch(e) {}
-        return;
-      }
-    } catch(e) {
-      // If backend fails, throw so LoginScreen can show error
-      throw e;
-    }
-  }, []);
+  // Google OAuth now uses full-page redirect via platform proxy.
+  // The /auth/callback page handles token storage and redirects back here.
 
   const handleLogout = useCallback(() => {
     setUser(null);
@@ -506,7 +487,6 @@ const App=()=>{
       userAccessMap={userAccessMap}
       accessTypes={accessTypes}
       onLogin={handleLogin}
-      onGoogleLogin={handleGoogleLogin}
     />
   );
 
