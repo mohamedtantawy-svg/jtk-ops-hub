@@ -6,8 +6,21 @@ export async function PATCH(req, { params }) {
     const { id } = await params;
     const { until } = await req.json();
 
+    if (until) {
+      const untilDate = new Date(until);
+      if (isNaN(untilDate.getTime())) {
+        return NextResponse.json({ error: 'Invalid date format for until' }, { status: 400 });
+      }
+      if (untilDate <= new Date()) {
+        return NextResponse.json({ error: 'Snooze date must be in the future' }, { status: 400 });
+      }
+    }
+
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+    const whereClause = isUUID ? 'WHERE id = $2' : 'WHERE external_id = $2';
+
     const { rows } = await query(
-      'UPDATE tasks SET snoozed_until = $1, status = \'snoozed\', updated_at = NOW() WHERE id = $2 OR external_id = $2 RETURNING *',
+      `UPDATE tasks SET snoozed_until = $1, status = 'snoozed', updated_at = NOW() ${whereClause} RETURNING *`,
       [until || null, id]
     );
     if (rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });

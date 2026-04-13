@@ -6,19 +6,27 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const status = searchParams.get('status');
     const managerId = searchParams.get('managerId');
-    const limit = Math.min(parseInt(searchParams.get('limit') || '100', 10), 500);
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
+    const limit = Math.min(500, Math.max(1, parseInt(searchParams.get('limit') || '100')));
+    const offset = (page - 1) * limit;
 
-    let sql = 'SELECT * FROM escalations WHERE 1=1';
+    let whereSql = ' WHERE 1=1';
     const params = [];
     let idx = 1;
 
-    if (status) { sql += ` AND status = $${idx++}`; params.push(status); }
-    if (managerId) { sql += ` AND manager_id = $${idx++}`; params.push(managerId); }
+    if (status) { whereSql += ` AND status = $${idx++}`; params.push(status); }
+    if (managerId) { whereSql += ` AND manager_id = $${idx++}`; params.push(managerId); }
 
-    sql += ` ORDER BY created_at DESC LIMIT $${idx++}`;
-    params.push(limit);
+    const countSql = 'SELECT COUNT(*) FROM escalations' + whereSql;
+    const dataSql = 'SELECT id, task_id, subject, reason, escalated_by, escalated_at, manager_id, manager_name, status, manager_response_status, manager_response, manager_responded_at, manager_responded_by, escalation_source, slack_channel, slack_user, slack_message_url FROM escalations' + whereSql + ` ORDER BY created_at DESC LIMIT $${idx++} OFFSET $${idx++}`;
+    params.push(limit, offset);
 
-    const { rows } = await query(sql, params);
+    const [{ rows }, countResult] = await Promise.all([
+      query(dataSql, params),
+      query(countSql, params.slice(0, -2)),
+    ]);
+
+    const total = parseInt(countResult.rows[0].count, 10);
 
     const items = rows.map(r => ({
       id: r.id, taskId: r.task_id, subject: r.subject, reason: r.reason,
@@ -30,7 +38,7 @@ export async function GET(req) {
       slackChannel: r.slack_channel, slackUser: r.slack_user, slackMessageUrl: r.slack_message_url,
     }));
 
-    return NextResponse.json({ items });
+    return NextResponse.json({ items, page, limit, total });
   } catch (err) {
     console.error('[escalations GET]', err.message);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });

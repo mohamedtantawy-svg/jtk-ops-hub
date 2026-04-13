@@ -127,7 +127,7 @@ export function useAnnouncements() {
   // ── Send ─────────────────────────────────────────────────────────────────
   const send = useCallback(async (id) => {
     if (isOnline) {
-      try { await apiSend(id); } catch (_) { /* fall through */ }
+      try { await apiSend(id); } catch (e) { console.warn('[announcements] API error:', e.message); }
     }
     setComms(prev => prev.map(c => c.id === id ? { ...c, status: 'sent', sentAt: new Date().toISOString() } : c));
   }, [isOnline]);
@@ -135,7 +135,7 @@ export function useAnnouncements() {
   // ── Update ───────────────────────────────────────────────────────────────
   const update = useCallback(async (id, fields) => {
     if (isOnline) {
-      try { await apiUpdate(id, fields); } catch (_) { /* fall through */ }
+      try { await apiUpdate(id, fields); } catch (e) { console.warn('[announcements] API error:', e.message); }
     }
     setComms(prev => prev.map(c => c.id === id ? { ...c, ...fields } : c));
   }, [isOnline]);
@@ -150,14 +150,14 @@ export function useAnnouncements() {
     ));
     // Fire API call in background — don't block UI
     if (isOnline) {
-      try { apiAcknowledge(id); } catch (_) { /* silent */ }
+      try { await apiAcknowledge(id); } catch (e) { console.warn('[announcements] acknowledge failed:', e.message); }
     }
   }, [isOnline]);
 
   // ── Archive ──────────────────────────────────────────────────────────────
   const archive = useCallback(async (id) => {
     if (isOnline) {
-      try { await apiUpdate(id, { status: 'archived' }); } catch (_) { /* fall through */ }
+      try { await apiUpdate(id, { status: 'archived' }); } catch (e) { console.warn('[announcements] API error:', e.message); }
     }
     setComms(prev => prev.map(c => c.id === id ? { ...c, status: 'archived' } : c));
   }, [isOnline]);
@@ -165,7 +165,7 @@ export function useAnnouncements() {
   // ── Delete ───────────────────────────────────────────────────────────────
   const remove = useCallback(async (id) => {
     if (isOnline) {
-      try { await apiDelete(id); } catch (_) { /* fall through */ }
+      try { await apiDelete(id); } catch (e) { console.warn('[announcements] API error:', e.message); }
     }
     setComms(prev => prev.filter(c => c.id !== id));
   }, [isOnline]);
@@ -176,7 +176,7 @@ export function useAnnouncements() {
     if (!comm) return;
     const newPinned = !comm.isPinned;
     if (isOnline) {
-      try { await apiUpdate(id, { isPinned: newPinned }); } catch (_) { /* fall through */ }
+      try { await apiUpdate(id, { isPinned: newPinned }); } catch (e) { console.warn('[announcements] API error:', e.message); }
     }
     setComms(prev => prev.map(c => c.id === id ? { ...c, isPinned: newPinned } : c));
   }, [isOnline, comms]);
@@ -184,7 +184,7 @@ export function useAnnouncements() {
   // ── Unarchive ─────────────────────────────────────────────────────────
   const unarchive = useCallback(async (id) => {
     if (isOnline) {
-      try { await apiUnarchive(id); } catch (_) { /* fall through */ }
+      try { await apiUnarchive(id); } catch (e) { console.warn('[announcements] API error:', e.message); }
     }
     setComms(prev => prev.map(c => c.id === id ? { ...c, status: 'sent' } : c));
   }, [isOnline]);
@@ -202,7 +202,7 @@ export function useAnnouncements() {
       try {
         const data = await apiFetchComments(id);
         if (data?.items) setComments(prev => ({ ...prev, [id]: data.items }));
-      } catch (_) { /* keep local */ }
+      } catch (e) { console.warn('[announcements] fetch error:', e.message); }
     }
   }, [isOnline, comms]);
 
@@ -219,7 +219,7 @@ export function useAnnouncements() {
       try {
         const created = await apiAddComment(id, { body, parentId });
         if (created) { newComment.id = created.id || newComment.id; }
-      } catch (_) { /* fall through */ }
+      } catch (e) { console.warn('[announcements] API error:', e.message); }
     }
     // Return the comment so the caller can enrich it with user info
     return newComment;
@@ -227,7 +227,7 @@ export function useAnnouncements() {
 
   const deleteCommentFn = useCallback(async (announcementId, commentId) => {
     if (isOnline) {
-      try { await apiDeleteComment(announcementId, commentId); } catch (_) { /* fall through */ }
+      try { await apiDeleteComment(announcementId, commentId); } catch (e) { console.warn('[announcements] API error:', e.message); }
     }
     setComments(prev => ({
       ...prev,
@@ -252,13 +252,13 @@ export function useAnnouncements() {
       try {
         const data = await apiFetchLinks(id);
         if (data?.items) setLinks(prev => ({ ...prev, [id]: data.items }));
-      } catch (_) { /* keep local */ }
+      } catch (e) { console.warn('[announcements] fetch error:', e.message); }
     }
   }, [isOnline, comms]);
 
   const linkAnnouncementFn = useCallback(async (id, targetId) => {
     if (isOnline) {
-      try { await apiLinkAnnouncement(id, targetId); } catch (_) { /* fall through */ }
+      try { await apiLinkAnnouncement(id, targetId); } catch (e) { console.warn('[announcements] API error:', e.message); }
     }
     // Add link bidirectionally in local state
     setComms(prev => prev.map(c => {
@@ -284,13 +284,13 @@ export function useAnnouncements() {
     }));
     // Fire API call in background
     if (isOnline) {
-      try { apiReactToAnnouncement(id, emoji); } catch (_) { /* silent */ }
+      try { await apiReactToAnnouncement(id, emoji); } catch (e) { console.warn('[announcements] react error:', e.message); }
     }
   }, [isOnline]);
 
   const unlinkAnnouncementFn = useCallback(async (id, targetId) => {
     if (isOnline) {
-      try { await apiUnlinkAnnouncement(id, targetId); } catch (_) { /* fall through */ }
+      try { await apiUnlinkAnnouncement(id, targetId); } catch (e) { console.warn('[announcements] API error:', e.message); }
     }
     // Remove link bidirectionally
     setComms(prev => prev.map(c => {

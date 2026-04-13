@@ -60,4 +60,5 @@ export const FLAGS={
   IL:'🇮🇱',SA:'🇸🇦',TR:'🇹🇷',PK:'🇵🇰',
 };
 export const DEFAULT_SOURCE_URLS={zendesk:'https://deel.zendesk.com',jira:'https://deel.atlassian.net',gmail:'https://mail.google.com',slack:'https://app.slack.com/client/deel',workbench:'https://workbench.deel.com',calendar:'https://calendar.google.com',looker:'https://deel.looker.com'};
+// SLA_MINS are the default thresholds (in minutes). Runtime values come from settings.sla_thresholds.
 export const SLA_MINS={'Access Issue':240,'Document Request':240,'Offboarding':1440,'Anomaly Alert':120,'Payment Issue':480,'Benefits':1440,'Leave Request':720,'Leave Query':1440,'Scheduling':1440,'Compensation':2880,'Promotion':1440,'Recruitment':1440,'Record Update':1440,'Equipment':2880,'Policy Query':1440,'Onboarding':2880,'Immigration':1440,'Expenses':480,'Amendment':1440,'Compliance':2880};

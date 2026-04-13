@@ -34,7 +34,11 @@ async function verifyIdToken(idToken) {
   if (!res.ok) return null;
   const payload = await res.json();
 
-  if (GOOGLE_CLIENT_ID && payload.aud !== GOOGLE_CLIENT_ID) {
+  if (!GOOGLE_CLIENT_ID) {
+    console.error('[auth/google/callback] GOOGLE_CLIENT_ID not configured');
+    return null;
+  }
+  if (payload.aud !== GOOGLE_CLIENT_ID) {
     console.error('[auth/google/callback] Token audience mismatch:', payload.aud);
     return null;
   }
@@ -73,15 +77,9 @@ export async function POST(req) {
       name = userInfo.name || '';
       picture = userInfo.picture;
     }
-    // Case 3: Proxy sent user info directly (email, name, etc.)
-    else if (body.email) {
-      email = body.email.toLowerCase();
-      name = body.name || '';
-      picture = body.picture || '';
-    }
     else {
       return NextResponse.json(
-        { error: 'No authentication data received' },
+        { error: 'No valid authentication token received. Please sign in with Google.' },
         { status: 400 }
       );
     }
@@ -89,8 +87,9 @@ export async function POST(req) {
     // Enforce domain restriction
     const domain = email.split('@')[1];
     if (domain !== ALLOWED_DOMAIN) {
+      console.warn('[auth/google/callback] Rejected domain:', domain);
       return NextResponse.json(
-        { error: `Only @${ALLOWED_DOMAIN} accounts are allowed` },
+        { error: 'Authentication failed. Please contact your admin for access.' },
         { status: 403 }
       );
     }
@@ -101,9 +100,10 @@ export async function POST(req) {
       [email]
     );
     if (rows.length === 0) {
+      console.warn('[auth/google/callback] No active member found for email');
       return NextResponse.json(
-        { error: 'No Ops Hub account found. Contact your admin for access.' },
-        { status: 404 }
+        { error: 'Authentication failed. Please contact your admin for access.' },
+        { status: 403 }
       );
     }
 

@@ -3,9 +3,11 @@ backend/node_modules
 dist
 backend/dist
 .git
+.next
 .env
 .env.*
 *.log
 .DS_Store
 .vscode
 .idea
+.claude

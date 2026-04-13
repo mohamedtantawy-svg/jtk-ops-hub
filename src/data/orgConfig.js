@@ -21,7 +21,7 @@ export const TITLES = [
   'Director, HR Experience',
 ];
 
-export const REGIONS = ['APAC', 'EMEA', 'AMERICAS'];
+export const REGIONS = ['APAC', 'EMEA', 'AMER'];
 
 export const TEAMS = ['EOR Services', 'New Services', '24/7'];
 

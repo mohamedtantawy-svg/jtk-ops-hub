@@ -7,14 +7,7 @@ export async function login(email) {
   });
 }
 
-/** Exchange a Google ID token credential for an app JWT */
-export async function loginWithGoogle(credential) {
-  return apiFetch('/auth/google', {
-    method: 'POST',
-    body: JSON.stringify({ credential }),
-  });
-}
-
+/** Validate current session and return user profile */
 export async function fetchMe() {
   return apiFetch('/me');
 }
