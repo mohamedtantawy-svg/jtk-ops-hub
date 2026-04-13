@@ -7,21 +7,31 @@ export async function GET(req) {
     const toTeam = searchParams.get('toTeam');
     const status = searchParams.get('status');
     const fromMember = searchParams.get('fromMember');
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
+    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '50')));
+    const offset = (page - 1) * limit;
 
-    let sql = 'SELECT * FROM requests WHERE 1=1';
+    let whereSql = ' WHERE 1=1';
     const params = [];
     let idx = 1;
 
-    if (toTeam) { sql += ` AND to_team = $${idx++}`; params.push(toTeam); }
-    if (status) { sql += ` AND status = $${idx++}`; params.push(status); }
-    if (fromMember) { sql += ` AND from_member_id = $${idx++}`; params.push(fromMember); }
+    if (toTeam) { whereSql += ` AND to_team = $${idx++}`; params.push(toTeam); }
+    if (status) { whereSql += ` AND status = $${idx++}`; params.push(status); }
+    if (fromMember) { whereSql += ` AND from_member_id = $${idx++}`; params.push(fromMember); }
 
-    sql += ' ORDER BY created_at DESC';
+    const countSql = 'SELECT COUNT(*) FROM requests' + whereSql;
+    const dataSql = 'SELECT id, subject, to_team, status, priority, from_member_id, task_id, external_ref, notes, due_date, resolved_at, created_at, updated_at FROM requests' + whereSql + ` ORDER BY created_at DESC LIMIT $${idx++} OFFSET $${idx++}`;
+    params.push(limit, offset);
 
-    const { rows } = await query(sql, params);
+    const [{ rows }, countResult] = await Promise.all([
+      query(dataSql, params),
+      query(countSql, params.slice(0, -2)),
+    ]);
+
+    const total = parseInt(countResult.rows[0].count, 10);
 
     const items = rows.map(r => ({
-      id: r.id, subject: r.subject, description: r.description,
+      id: r.id, subject: r.subject,
       toTeam: r.to_team, status: r.status, priority: r.priority,
       fromMemberId: r.from_member_id, taskId: r.task_id,
       externalRef: r.external_ref, notes: r.notes,
@@ -29,7 +39,7 @@ export async function GET(req) {
       createdAt: r.created_at, updatedAt: r.updated_at,
     }));
 
-    return NextResponse.json({ items });
+    return NextResponse.json({ items, page, limit, total });
   } catch (err) {
     console.error('[requests GET]', err.message);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });

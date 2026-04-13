@@ -3,10 +3,16 @@
 
 import crypto from 'crypto';
 
-const SECRET = process.env.JWT_SECRET || 'ops-hub-dev-secret-change-in-production';
-if (!process.env.JWT_SECRET && process.env.NODE_ENV === 'production') {
-  console.error('[SECURITY WARNING] JWT_SECRET is not set! Using insecure default. Set JWT_SECRET environment variable.');
+function getSecret() {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    // Only warn — can't throw at build time since Next.js builds with NODE_ENV=production
+    console.warn('[SECURITY WARNING] JWT_SECRET not set — using insecure default. Set JWT_SECRET in production!');
+    return 'ops-hub-dev-secret-DO-NOT-USE-IN-PRODUCTION';
+  }
+  return secret;
 }
+const SIGNING_SECRET = getSecret();
 const ALGORITHM = 'HS256';
 const TOKEN_EXPIRY_HOURS = 24;
 
@@ -39,7 +45,7 @@ export function signToken(payload) {
   ];
 
   const signature = crypto
-    .createHmac('sha256', SECRET)
+    .createHmac('sha256', SIGNING_SECRET)
     .update(segments.join('.'))
     .digest('base64url');
 
@@ -60,7 +66,7 @@ export function verifyToken(token) {
   try {
     // Verify signature
     const expected = crypto
-      .createHmac('sha256', SECRET)
+      .createHmac('sha256', SIGNING_SECRET)
       .update(`${parts[0]}.${parts[1]}`)
       .digest('base64url');
 

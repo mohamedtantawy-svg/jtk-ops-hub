@@ -4,7 +4,9 @@ import { query } from '../../../../../src/lib/db';
 export async function GET(req, { params }) {
   try {
     const { id } = await params;
-    const { rows } = await query('SELECT * FROM tasks WHERE id = $1 OR external_id = $1', [id]);
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+    const whereClause = isUUID ? 'WHERE id = $1' : 'WHERE external_id = $1';
+    const { rows } = await query(`SELECT * FROM tasks ${whereClause}`, [id]);
     if (rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
     const r = rows[0];
@@ -25,7 +27,9 @@ export async function GET(req, { params }) {
 export async function DELETE(req, { params }) {
   try {
     const { id } = await params;
-    await query('DELETE FROM tasks WHERE id = $1 OR external_id = $1', [id]);
+    const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+    const whereClause = isUUID ? 'WHERE id = $1' : 'WHERE external_id = $1';
+    await query(`DELETE FROM tasks ${whereClause}`, [id]);
     return new NextResponse(null, { status: 204 });
   } catch (err) {
     console.error('[tasks/id DELETE]', err.message);

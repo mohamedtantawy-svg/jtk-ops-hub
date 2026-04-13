@@ -15,7 +15,7 @@ import { usePermissions } from './hooks/usePermissions';
 import { slaInfo } from './utils/helpers';
 
 // ── API services + normalizers ──────────────────────────────────────────────
-import { login as apiLogin, loginWithGoogle as apiLoginWithGoogle } from './services/authApi';
+import { login as apiLogin, fetchMe as apiFetchMe } from './services/authApi';
 import { fetchTasks as apiFetchTasks, createTask as apiCreateTask, updateTaskStatus as apiUpdateStatus, assignTask as apiAssignTask, escalateTask as apiEscalateTask, snoozeTask as apiSnoozeTask } from './services/tasksApi';
 import { fetchMembers as apiFetchMembers } from './services/membersApi';
 import { fetchEscalations as apiFetchEscalations, createEscalation as apiCreateEscalation, respondToEscalation as apiRespondEscalation, resolveEscalation as apiResolveEscalation } from './services/escalationsApi';
@@ -31,7 +31,6 @@ import Queue from './components/queue/Queue';
 import Slack from './components/views/Slack';
 import Team from './components/views/Team';
 import Analytics from './components/views/Analytics';
-import Alerts from './components/views/Alerts';
 import EscalationsView from './components/views/EscalationsView';
 import AnnouncementsView from './components/views/AnnouncementsView';
 import CalendarView from './components/views/CalendarView';
@@ -84,6 +83,34 @@ const App=()=>{
   const [settings,setSettings]=useState(()=>{try{const s=localStorage.getItem('ops_hub_settings');return s?{...DEFAULT_SETTINGS,...JSON.parse(s)}:DEFAULT_SETTINGS;}catch(e){return DEFAULT_SETTINGS;}});
   const [accessTypes,setAccessTypes]=useState(()=>{try{const s=localStorage.getItem('ops_hub_access_types');return s?JSON.parse(s):DEFAULT_ACCESS_TYPES;}catch(e){return DEFAULT_ACCESS_TYPES;}});
   const [userAccessMap,setUserAccessMap]=useState(()=>{try{const s=localStorage.getItem('ops_hub_user_access_map');return s?JSON.parse(s):DEFAULT_USER_ACCESS_MAP;}catch(e){return DEFAULT_USER_ACCESS_MAP;}});
+  // ── Session revalidation on page load ─────────────────────────────────────
+  useEffect(() => {
+    if (!loggedInEmail) return;
+    const token = localStorage.getItem('ops_hub_token');
+    if (!token) {
+      // No token but have stored email — clear stale session
+      setUser(null);
+      setLoggedInEmail(null);
+      return;
+    }
+    // Validate session with backend
+    apiFetchMe()
+      .then((serverUser) => {
+        if (serverUser?.email) {
+          const member = MEMBERS.find(m => m.email === serverUser.email) || serverUser;
+          setUser(member);
+        }
+      })
+      .catch((err) => {
+        if (err?.status === 401) {
+          // Token expired or invalid — log out
+          setUser(null);
+          setLoggedInEmail(null);
+          try { localStorage.removeItem('ops_hub_logged_in_email'); localStorage.removeItem('ops_hub_token'); } catch(e) {}
+        }
+      });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Login / Logout handlers ────────────────────────────────────────────────
   const handleLogin = useCallback(async (email, remember) => {
     // Backend authentication required — no local fallback
@@ -104,27 +131,8 @@ const App=()=>{
     }
   }, []);
 
-  const handleGoogleLogin = useCallback(async (credential) => {
-    // Send Google credential to backend for server-side verification
-    try {
-      const res = await apiLoginWithGoogle(credential);
-      if (res?.token) {
-        localStorage.setItem('ops_hub_token', res.token);
-      }
-      if (res?.user) {
-        const email = res.user.email;
-        const member = MEMBERS.find(m => m.email === email) || res.user;
-        setUser(member);
-        setLoggedInEmail(email);
-        setView('briefing');
-        try { localStorage.setItem('ops_hub_logged_in_email', email); } catch(e) {}
-        return;
-      }
-    } catch(e) {
-      // If backend fails, throw so LoginScreen can show error
-      throw e;
-    }
-  }, []);
+  // Google OAuth now uses full-page redirect via platform proxy.
+  // The /auth/callback page handles token storage and redirects back here.
 
   const handleLogout = useCallback(() => {
     setUser(null);
@@ -469,7 +477,7 @@ const App=()=>{
     if(!perms)return;
     if(view&&!perms.canView(view)){
       // Find first allowed view
-      const fallback=['briefing','my-queue','calendar','projects','escalations','alerts','hr-reports','knowledge-hub','analytics','announcements','slack','team','settings'].find(v=>perms.canView(v));
+      const fallback=['briefing','my-queue','calendar','projects','escalations','hr-reports','knowledge-hub','analytics','announcements','slack','team','settings'].find(v=>perms.canView(v));
       setView(fallback||'briefing');
     }
   },[view,perms]);
@@ -506,7 +514,6 @@ const App=()=>{
       userAccessMap={userAccessMap}
       accessTypes={accessTypes}
       onLogin={handleLogin}
-      onGoogleLogin={handleGoogleLogin}
     />
   );
 
@@ -534,7 +541,6 @@ const App=()=>{
           {view==='slack'         &&perms?.canView('slack')!==false        &&<div className="page-enter"><Slack tasks={tasks} setTasks={setTasks} onEscalMgr={openEscalModal} addToast={addToast} user={user}/></div>}
           {view==='team'          &&perms?.canView('team')!==false         &&<div className="page-enter"><Team user={user} tasks={tasks} setTask={setSelTask} setView={setView} setUser={setUser}/></div>}
           {view==='analytics'     &&perms?.canView('analytics')!==false    &&<div className="page-enter"><Analytics tasks={tasks} currentUser={user} subFilter={subFilter} escalations={escalations}/></div>}
-          {view==='alerts'        &&perms?.canView('alerts')!==false       &&<div className="page-enter"><Alerts tasks={tasks}/></div>}
           {view==='escalations'   &&perms?.canView('escalations')!==false  &&<div className="page-enter"><EscalationsView escalations={escalations} setEscalations={setEscalations} currentUser={user} onNewEscalation={()=>setCreateEscalModal(true)}/></div>}
           {view==='announcements' &&perms?.canView('announcements')!==false&&<div className="page-enter"><AnnouncementsView user={user} comms={comms} setComms={setComms} addToast={addToast} tasks={tasks} apiAcknowledge={apiAcknowledge} apiCreate={apiCreate} apiSend={apiSend} apiUpdate={apiUpdate} apiArchive={apiArchive} apiRemove={apiRemove} apiTogglePin={apiTogglePin} openCompose={announceCompose} onComposeOpened={()=>setAnnounceCompose(false)} apiUnarchive={apiUnarchive} apiComments={apiComments} apiSetComments={apiSetComments} apiLoadComments={apiLoadComments} apiAddComment={apiAddCommentFn} apiDeleteComment={apiDeleteCommentFn} apiLinks={apiLinks} apiLoadLinks={apiLoadLinks} apiLinkAnnouncement={apiLinkAnnouncementFn} apiUnlinkAnnouncement={apiUnlinkAnnouncementFn} apiReact={apiReactFn}/></div>}
           {view==='calendar'      &&perms?.canView('calendar')!==false     &&<div className="page-enter"><CalendarView tasks={tasks}/></div>}

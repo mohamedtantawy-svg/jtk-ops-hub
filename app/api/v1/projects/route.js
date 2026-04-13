@@ -7,29 +7,37 @@ export async function GET(req) {
     const status = searchParams.get('status');
     const priority = searchParams.get('priority');
     const ownerId = searchParams.get('ownerId');
-    const limit = Math.min(parseInt(searchParams.get('limit') || '100', 10), 500);
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
+    const limit = Math.min(500, Math.max(1, parseInt(searchParams.get('limit') || '100')));
+    const offset = (page - 1) * limit;
 
-    let sql = 'SELECT * FROM projects WHERE 1=1';
+    let whereSql = ' WHERE 1=1';
     const params = [];
     let idx = 1;
 
-    if (status) { sql += ` AND status = $${idx++}`; params.push(status); }
-    if (priority) { sql += ` AND priority = $${idx++}`; params.push(priority); }
-    if (ownerId) { sql += ` AND owner_id = $${idx++}`; params.push(ownerId); }
+    if (status) { whereSql += ` AND status = $${idx++}`; params.push(status); }
+    if (priority) { whereSql += ` AND priority = $${idx++}`; params.push(priority); }
+    if (ownerId) { whereSql += ` AND owner_id = $${idx++}`; params.push(ownerId); }
 
-    sql += ` ORDER BY created_at DESC LIMIT $${idx++}`;
-    params.push(limit);
+    const countSql = 'SELECT COUNT(*) FROM projects' + whereSql;
+    const dataSql = 'SELECT id, title, type, status, priority, owner_id, team_id, deadline, progress, created_at, updated_at FROM projects' + whereSql + ` ORDER BY created_at DESC LIMIT $${idx++} OFFSET $${idx++}`;
+    params.push(limit, offset);
 
-    const { rows } = await query(sql, params);
+    const [{ rows }, countResult] = await Promise.all([
+      query(dataSql, params),
+      query(countSql, params.slice(0, -2)),
+    ]);
+
+    const total = parseInt(countResult.rows[0].count, 10);
 
     const items = rows.map(r => ({
       id: r.id, title: r.title, name: r.title, type: r.type,
       status: r.status, priority: r.priority, ownerId: r.owner_id,
-      teamId: r.team_id, deadline: r.deadline, description: r.description,
+      teamId: r.team_id, deadline: r.deadline,
       progress: r.progress, createdAt: r.created_at, updatedAt: r.updated_at,
     }));
 
-    return NextResponse.json({ items });
+    return NextResponse.json({ items, page, limit, total });
   } catch (err) {
     console.error('[projects GET]', err.message);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });

@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../../../src/lib/db';
+import { requireRole } from '../../../../../../src/lib/auth-helpers';
 
 export async function PATCH(req, { params }) {
   try {
+    const { authorized, user, status, error } = requireRole(req, 'admin', 'manager');
+    if (!authorized) return NextResponse.json({ error }, { status });
+
     const { id } = await params;
     const { rows } = await query(
       'UPDATE members SET is_active = false, updated_at = NOW() WHERE id = $1 RETURNING *',

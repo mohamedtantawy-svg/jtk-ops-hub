@@ -1,3 +1,6 @@
+// IMPORTANT: This seed data must match src/data/members.js
+// TODO: Import MEMBERS from src/data/members.js instead of duplicating
+//
 // Comprehensive seed data for all tables
 // Matches the data shapes expected by the normalize layer and frontend
 
@@ -259,25 +262,25 @@ export const SEED_PROJECTS = [
     progress: 65,
   },
   {
-    title: 'Knowledge Base Migration', type: 'general', status: 'active',
+    title: 'Knowledge Base Migration', type: 'other', status: 'active',
     priority: 'medium', owner_id: 14, team_id: 'ALL',
     deadline: daysFromNow(60), description: 'Migrate all SOPs and process documentation from Notion to the new Knowledge Hub.',
     progress: 20,
   },
   {
-    title: 'AMER Benefits Harmonization', type: 'benefits', status: 'active',
+    title: 'AMER Benefits Harmonization', type: 'process_improvement', status: 'active',
     priority: 'high', owner_id: 13, team_id: 'AMER',
     deadline: daysFromNow(30), description: 'Standardize benefits offerings across US, CA, BR, and MX entities.',
     progress: 50,
   },
   {
-    title: 'Agent Performance Dashboard', type: 'general', status: 'completed',
+    title: 'Agent Performance Dashboard', type: 'reporting', status: 'completed',
     priority: 'medium', owner_id: 14, team_id: 'ALL',
     deadline: daysFromNow(-10), description: 'Build real-time performance dashboards for team leads to track agent metrics.',
     progress: 100,
   },
   {
-    title: 'Payroll Provider Migration — EMEA', type: 'migration', status: 'planning',
+    title: 'Payroll Provider Migration — EMEA', type: 'other', status: 'planning',
     priority: 'high', owner_id: 15, team_id: 'EMEA',
     deadline: daysFromNow(90), description: 'Migrate EMEA payroll processing from legacy provider to new integrated platform.',
     progress: 10,

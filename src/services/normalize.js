@@ -5,7 +5,8 @@
 
 const minsAgo = (dateStr) => {
   if (!dateStr) return 0;
-  return Math.max(0, Math.round((Date.now() - new Date(dateStr).getTime()) / 60000));
+  const result = Math.max(0, Math.round((Date.now() - new Date(dateStr).getTime()) / 60000));
+  return Number.isNaN(result) ? null : result;
 };
 
 // ── Tasks ────────────────────────────────────────────────────────────────────
@@ -44,13 +45,13 @@ export function normalizeTask(t) {
     priority: t.priority || 'medium',
     isAlert: t.priority === 'critical',
     requesterName: t.reporterId || 'System',
-    linkedTickets: [],
+    linkedTickets: t.linkedTickets || t.linked_tickets || [],
     externalUrl: t.externalUrl || '',
     snoozedUntil: t.snoozedUntil ? new Date(t.snoozedUntil).getTime() : null,
     snoozeLabel: t.snoozedUntil ? 'Snoozed' : null,
-    prevStatus: null,
-    aiSummary: '',
-    suggestedReply: '',
+    prevStatus: t.prevStatus || t.prev_status || null,
+    aiSummary: t.aiSummary || t.ai_summary || '',
+    suggestedReply: t.suggestedReply || t.suggested_reply || '',
   };
 }
 
@@ -78,7 +79,7 @@ export function normalizeMember(m) {
   return {
     id: Number(m.id),
     name: m.name || '',
-    initials: (m.name || '').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2),
+    initials: (m.name || '').split(' ').filter(w => w.length > 0).map(w => w[0]).join('').toUpperCase().slice(0, 2),
     role: m.role || 'agent',
     team: m.team || m.region || '',
     region: m.region || m.team || '',
@@ -125,7 +126,7 @@ export function normalizeProject(p) {
     status: p.status || 'active',
     priority: p.priority || 'medium',
     leadId: p.ownerId ? Number(p.ownerId) : null,
-    assigneeIds: [],
+    assigneeIds: p.assigneeIds || p.assignee_ids || [],
     assignScope: 'individuals',
     assignTeam: p.teamId || null,
     deadline: p.deadline || null,

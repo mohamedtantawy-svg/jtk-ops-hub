@@ -6,7 +6,7 @@ export const COMMS_TYPES={
   kudos:    {label:'Kudos',        icon:'bi-trophy-fill',               color:'#29811e',bg:'#F0FDF4',border:'#c2eeb5'},
 };
 
-export const ALL_AGENT_IDS=[1,2,3,4,5,6,7,8,9,10];
+export const ALL_AGENT_IDS=[1,2,3,4,5,6,7,8,9,10,16,17,18,19,20];
 
 export const INITIAL_COMMS=[
   {id:'COM-001',type:'alert',title:'HRX Continuity & Redundancy Plan',body:'Following a review of our regional coverage gaps, we have updated the HRX Continuity & Redundancy Plan for Q2 2026. Key changes include: new escalation paths for APAC after-hours cases, updated backup coverage assignments for urgent termination cases, and revised handoff summary requirements for Manager On Call shifts.\n\nAll agents must review the updated SOP linked below and confirm they understand the new escalation paths for their region.',author:{id:14,name:'Mohamed Tantawy'},sentAt:'2026-03-16',target:'all',status:'sent',acks:[1,2,5,7,9,10],link:'https://letsdeel.slack.com/archives/C03SXFLNUSW/p1773399353629199',priority:'high',isPopup:true,imageUrl:'',reactions:{},comments:[],linkedIds:['COM-004']},

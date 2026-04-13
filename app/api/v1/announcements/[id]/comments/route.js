@@ -1,19 +1,31 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../../../src/lib/db';
+import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 
 export async function GET(req, { params }) {
   try {
     const { id } = await params;
-    const { rows } = await query(
-      'SELECT * FROM announcement_comments WHERE announcement_id = $1 ORDER BY created_at ASC',
-      [id]
-    );
+    const { searchParams } = new URL(req.url);
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
+    const limit = Math.min(500, Math.max(1, parseInt(searchParams.get('limit') || '100')));
+    const offset = (page - 1) * limit;
+
+    const [{ rows }, countResult] = await Promise.all([
+      query(
+        'SELECT id, announcement_id, author_id, author_name, body, parent_id, created_at FROM announcement_comments WHERE announcement_id = $1 ORDER BY created_at ASC LIMIT $2 OFFSET $3',
+        [id, limit, offset]
+      ),
+      query('SELECT COUNT(*) FROM announcement_comments WHERE announcement_id = $1', [id]),
+    ]);
+
+    const total = parseInt(countResult.rows[0].count, 10);
+
     const items = rows.map(r => ({
       id: r.id, announcementId: r.announcement_id, authorId: r.author_id,
       authorName: r.author_name, body: r.body, parentId: r.parent_id,
       createdAt: r.created_at,
     }));
-    return NextResponse.json({ items });
+    return NextResponse.json({ items, page, limit, total });
   } catch (err) {
     console.error('[comments GET]', err.message);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
@@ -22,13 +34,14 @@ export async function GET(req, { params }) {
 
 export async function POST(req, { params }) {
   try {
+    const authUser = getAuthUser(req);
     const { id } = await params;
     const { body, parentId } = await req.json();
     if (!body) return NextResponse.json({ error: 'Body required' }, { status: 400 });
 
     const { rows } = await query(
       'INSERT INTO announcement_comments (announcement_id, body, parent_id, author_name) VALUES ($1, $2, $3, $4) RETURNING *',
-      [id, body, parentId || null, 'User']
+      [id, body, parentId || null, authUser.name || 'User']
     );
     const r = rows[0];
     return NextResponse.json({

@@ -12,10 +12,8 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@react-oauth/google": "^0.13.5",
     "bootstrap-icons": "^1.13.1",
-    "jwt-decode": "^4.0.0",
-    "next": "^15.3.3",
+    "next": "^16.2.3",
     "pg": "^8.20.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"

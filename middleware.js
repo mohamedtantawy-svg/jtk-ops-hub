@@ -3,7 +3,7 @@
 
 import { NextResponse } from 'next/server';
 
-const SECRET = process.env.JWT_SECRET || 'ops-hub-dev-secret-change-in-production';
+const SIGNING_SECRET = process.env.JWT_SECRET || 'ops-hub-dev-secret-DO-NOT-USE-IN-PRODUCTION';
 
 // ── Base64url helpers (Edge-compatible, no Buffer) ────────────────────────────
 
@@ -33,7 +33,7 @@ async function getKey() {
   const enc = new TextEncoder();
   cachedKey = await crypto.subtle.importKey(
     'raw',
-    enc.encode(SECRET),
+    enc.encode(SIGNING_SECRET),
     { name: 'HMAC', hash: 'SHA-256' },
     false,
     ['sign'],
@@ -103,8 +103,16 @@ export async function middleware(request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Token is valid — allow request to proceed
-  return NextResponse.next();
+  // Forward user claims to route handlers via headers
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set('x-user-id', String(payload.sub || ''));
+  requestHeaders.set('x-user-email', payload.email || '');
+  requestHeaders.set('x-user-role', payload.role || '');
+  requestHeaders.set('x-user-name', payload.name || '');
+
+  return NextResponse.next({
+    request: { headers: requestHeaders },
+  });
 }
 
 export const config = {

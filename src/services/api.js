@@ -12,10 +12,10 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || '/api/v1';
  * - Throws on non-2xx with a structured error
  */
 export async function apiFetch(path, options = {}) {
-  const token = localStorage.getItem('ops_hub_token');
+  const token = typeof window !== 'undefined' ? localStorage.getItem('ops_hub_token') : null;
 
   const headers = {
-    'Content-Type': 'application/json',
+    ...(options.body ? { 'Content-Type': 'application/json' } : {}),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(options.headers || {}),
   };

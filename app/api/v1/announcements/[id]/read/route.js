@@ -10,11 +10,6 @@ export async function POST(req, { params }) {
       return NextResponse.json({ error: 'userId is required' }, { status: 400 });
     }
 
-    // Ensure read_by column exists (safe to run repeatedly)
-    await query(`
-      ALTER TABLE announcements ADD COLUMN IF NOT EXISTS read_by JSONB DEFAULT '[]'::jsonb
-    `);
-
     // Add userId to read_by array if not already present
     const { rows } = await query(
       `UPDATE announcements

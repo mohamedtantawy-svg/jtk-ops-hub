@@ -4,9 +4,10 @@ export const getUrl=(t,sourceUrls)=>{const u=sourceUrls||DEFAULT_SOURCE_URLS;ret
 export const rel=(m)=>{ if(m<=0)return'just now'; if(m<60)return`${m}m`; const h=Math.floor(m/60),r=m%60; return r?`${h}h ${r}m`:`${h}h`; };
 export const ageClass=(m,s)=>{ if(s==='resolved'||s==='waiting')return''; if(m>=120)return'age-urgent'; if(m>=60)return'age-hot'; if(m>=30)return'age-warn'; return''; };
 export const ageDot=(m,s)=>{ if(s==='resolved'||s==='waiting'||m<30)return null; if(m>=120)return'#d42d35'; if(m>=60)return'#ed5e2a'; return'#ed8d00'; };
-export const slaInfo=(task)=>{
+export const slaInfo=(task,customThresholds)=>{
   if(task.status==='resolved'||task.status==='waiting')return null;
-  const lim=SLA_MINS[task.type]||1440;
+  const thresholds=customThresholds||SLA_MINS;
+  const lim=thresholds[task.type]||thresholds['Other']||1440;
   const rem=lim-task.minutesAgo;
   if(rem<=0)return{label:'SLA Breached',short:'BREACHED',color:'#d42d35',bg:'#ffe2de',breach:true,remain:rem};
   const pct=task.minutesAgo/lim;

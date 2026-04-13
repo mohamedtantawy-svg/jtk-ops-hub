@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../src/lib/db';
+import { requireRole } from '../../../../src/lib/auth-helpers';
 
 export async function GET(req) {
   try {
@@ -7,20 +8,28 @@ export async function GET(req) {
     const role = searchParams.get('role');
     const region = searchParams.get('region');
     const isActive = searchParams.get('isActive');
-    const limit = Math.min(parseInt(searchParams.get('limit') || '100', 10), 500);
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
+    const limit = Math.min(500, Math.max(1, parseInt(searchParams.get('limit') || '100')));
+    const offset = (page - 1) * limit;
 
-    let sql = 'SELECT * FROM members WHERE 1=1';
+    let whereSql = ' WHERE 1=1';
     const params = [];
     let idx = 1;
 
-    if (role) { sql += ` AND role = $${idx++}`; params.push(role); }
-    if (region) { sql += ` AND region = $${idx++}`; params.push(region); }
-    if (isActive !== null && isActive !== undefined) { sql += ` AND is_active = $${idx++}`; params.push(isActive === 'true'); }
+    if (role) { whereSql += ` AND role = $${idx++}`; params.push(role); }
+    if (region) { whereSql += ` AND region = $${idx++}`; params.push(region); }
+    if (isActive !== null && isActive !== undefined) { whereSql += ` AND is_active = $${idx++}`; params.push(isActive === 'true'); }
 
-    sql += ` ORDER BY id ASC LIMIT $${idx++}`;
-    params.push(limit);
+    const countSql = 'SELECT COUNT(*) FROM members' + whereSql;
+    const dataSql = 'SELECT id, name, initials, role, team, region, country, lead_id, email, avatar_url, is_active, created_at, updated_at FROM members' + whereSql + ` ORDER BY id ASC LIMIT $${idx++} OFFSET $${idx++}`;
+    params.push(limit, offset);
 
-    const { rows } = await query(sql, params);
+    const [{ rows }, countResult] = await Promise.all([
+      query(dataSql, params),
+      query(countSql, params.slice(0, -2)),
+    ]);
+
+    const total = parseInt(countResult.rows[0].count, 10);
 
     const items = rows.map(r => ({
       id: r.id, name: r.name, initials: r.initials, role: r.role,
@@ -29,7 +38,7 @@ export async function GET(req) {
       isActive: r.is_active, createdAt: r.created_at, updatedAt: r.updated_at,
     }));
 
-    return NextResponse.json({ items });
+    return NextResponse.json({ items, page, limit, total });
   } catch (err) {
     console.error('[members GET]', err.message);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
@@ -38,9 +47,28 @@ export async function GET(req) {
 
 export async function POST(req) {
   try {
+    const { authorized, user, status, error } = requireRole(req, 'admin', 'manager');
+    if (!authorized) return NextResponse.json({ error }, { status });
+
     const body = await req.json();
     const { name, role, team, region, country, leadId, email } = body;
     if (!name || !email) return NextResponse.json({ error: 'Name and email required' }, { status: 400 });
+
+    // Email format validation
+    if (!email.includes('@') || !email.toLowerCase().endsWith('@deel.com')) {
+      return NextResponse.json({ error: 'Email must be a valid @deel.com address' }, { status: 400 });
+    }
+
+    // Name length limit
+    if (name.length > 100) {
+      return NextResponse.json({ error: 'Name must be 100 characters or less' }, { status: 400 });
+    }
+
+    // Role whitelist validation
+    const VALID_ROLES = ['admin', 'manager', 'agent'];
+    if (role && !VALID_ROLES.includes(role)) {
+      return NextResponse.json({ error: `Invalid role. Must be one of: ${VALID_ROLES.join(', ')}` }, { status: 400 });
+    }
 
     const initials = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
 

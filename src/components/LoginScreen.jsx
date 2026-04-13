@@ -1,7 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 import { FLAGS } from '../data/constants';
-import { GoogleLogin } from '@react-oauth/google';
-import { jwtDecode } from 'jwt-decode';
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 const wrap = {
@@ -87,61 +85,40 @@ const profileCard = {
   alignItems: 'center',
   gap: 14,
 };
+const googleBtnStyle = {
+  width: '100%',
+  height: 50,
+  background: '#fff',
+  color: '#1b1b1b',
+  border: '1.5px solid #e0ddd8',
+  borderRadius: 14,
+  fontSize: 15,
+  fontWeight: 600,
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+  transition: 'all .2s',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 10,
+};
 
-const LoginScreen = ({ userAccessMap, accessTypes, onLogin, onGoogleLogin }) => {
+const LoginScreen = ({ userAccessMap, accessTypes, onLogin }) => {
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [matchedUser, setMatchedUser] = useState(null);
   const [loading, setLoading] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
-  const [googleClientId, setGoogleClientId] = useState(process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '');
+  const [googleAuthUrl, setGoogleAuthUrl] = useState('');
   const inputRef = useRef(null);
 
-  // Fetch Google Client ID at runtime (build-time env vars are empty in Docker standalone)
+  // Fetch Google auth URL at runtime
   useEffect(() => {
-    if (!googleClientId) {
-      fetch('/api/v1/config')
-        .then(r => r.ok ? r.json() : null)
-        .then(cfg => { if (cfg?.googleClientId) setGoogleClientId(cfg.googleClientId); })
-        .catch(() => {});
-    }
+    fetch('/api/v1/config')
+      .then(r => r.ok ? r.json() : null)
+      .then(cfg => { if (cfg?.googleAuthUrl) setGoogleAuthUrl(cfg.googleAuthUrl); })
+      .catch(() => {});
   }, []);
-
-  const handleGoogleSuccess = async (credentialResponse) => {
-    setLoading(true);
-    setError('');
-    try {
-      // Send credential to backend for server-side verification
-      if (onGoogleLogin) {
-        await onGoogleLogin(credentialResponse.credential);
-        return;
-      }
-      // Fallback: client-side decode (dev mode / no backend)
-      const decoded = jwtDecode(credentialResponse.credential);
-      const googleEmail = decoded.email?.toLowerCase();
-      if (!googleEmail) {
-        setError('Could not read email from Google account.');
-        setLoading(false);
-        return;
-      }
-      const profile = userAccessMap[googleEmail];
-      if (!profile) {
-        setError(`No Ops Hub account found for ${googleEmail}. Contact your admin for access.`);
-        setLoading(false);
-        return;
-      }
-      if (profile.status === 'inactive') {
-        setError('This account has been deactivated. Contact your admin.');
-        setLoading(false);
-        return;
-      }
-      onLogin(googleEmail, true);
-    } catch (e) {
-      const msg = e?.body?.error || e?.message || 'Google sign-in failed. Please try again.';
-      setError(msg);
-      setLoading(false);
-    }
-  };
 
   // Auto-focus email input
   useEffect(() => {
@@ -160,6 +137,12 @@ const LoginScreen = ({ userAccessMap, accessTypes, onLogin, onGoogleLogin }) => 
       setMatchedUser(null);
     }
   }, [email, userAccessMap, accessTypes]);
+
+  const handleGoogleClick = () => {
+    if (googleAuthUrl) {
+      window.location.href = googleAuthUrl;
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -180,7 +163,6 @@ const LoginScreen = ({ userAccessMap, accessTypes, onLogin, onGoogleLogin }) => 
       await onLogin(trimmed, rememberMe);
     } catch (err) {
       let msg = err?.body?.error || err?.message || 'Login failed. Please try again.';
-      // Friendlier message for network errors
       if (msg === 'Failed to fetch' || msg === 'Load failed') {
         msg = 'Unable to reach the server. Please check your connection and try again.';
       }
@@ -287,19 +269,23 @@ const LoginScreen = ({ userAccessMap, accessTypes, onLogin, onGoogleLogin }) => 
           )}
 
           {/* Google Sign-In */}
-          {googleClientId && (
+          {googleAuthUrl && (
             <div style={{ marginBottom: 20 }}>
-              <div style={{ display: 'flex', justifyContent: 'center' }}>
-                <GoogleLogin
-                  onSuccess={handleGoogleSuccess}
-                  onError={() => setError('Google sign-in failed. Please try again.')}
-                  size="large"
-                  width="360"
-                  text="signin_with"
-                  shape="rectangular"
-                  theme="outline"
-                />
-              </div>
+              <button
+                type="button"
+                onClick={handleGoogleClick}
+                style={googleBtnStyle}
+                onMouseEnter={e => { e.currentTarget.style.background = '#f7f5f2'; e.currentTarget.style.borderColor = '#1b1b1b'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.borderColor = '#e0ddd8'; }}
+              >
+                <svg width="18" height="18" viewBox="0 0 48 48">
+                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+                  <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+                  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+                </svg>
+                Sign in with Google
+              </button>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '20px 0 0' }}>
                 <div style={{ flex: 1, height: 1, background: '#e0ddd8' }} />
                 <span style={{ fontSize: 12, color: '#9e9e9e', fontWeight: 500 }}>or sign in with email</span>
