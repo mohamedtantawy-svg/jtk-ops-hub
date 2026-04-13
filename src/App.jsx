@@ -61,10 +61,19 @@ const App=()=>{
   });
 
   const [user,setUser]=useState(()=>{
-    // Restore user from stored email
+    // Restore user from stored email — check MEMBERS first, then JWT token
     if(loggedInEmail){
       const m=MEMBERS.find(mm=>mm.email===loggedInEmail);
       if(m) return m;
+      // User not in hardcoded MEMBERS but has a stored session — create placeholder
+      // Session revalidation useEffect will replace this with server data
+      const token = typeof window !== 'undefined' ? localStorage.getItem('ops_hub_token') : null;
+      if(token){
+        try{
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          return { id: payload.sub||0, email: payload.email||loggedInEmail, name: payload.name||loggedInEmail.split('@')[0], role: payload.role||'member', team:'JTK', initials:(payload.name||loggedInEmail.split('@')[0]).split(' ').map(w=>w[0]?.toUpperCase()).slice(0,2).join('') };
+        }catch(e){}
+      }
     }
     return null;
   });
