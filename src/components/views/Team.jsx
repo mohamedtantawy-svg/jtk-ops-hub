@@ -1,5 +1,5 @@
 import { useState, useContext } from 'react';
-import { PermissionsContext } from '../../App';
+import { PermissionsContext, IntegrationsContext } from '../../App';
 import { MEMBERS } from '../../data/members';
 import { FLAGS, SLA_MINS } from '../../data/constants';
 import Avatar from '../ui/Avatar';
@@ -40,6 +40,7 @@ const Team=({user,tasks,setTask,setView})=>{
   const [showParentalLeave,setShowParentalLeave]=useState(false);
 
   const perms=useContext(PermissionsContext);
+  const { deelData } = useContext(IntegrationsContext);
   const isAdmin=perms?.dataScope==='all_tasks';
   const ns=tasks.filter(t=>t.source!=='slack');
 
@@ -98,6 +99,13 @@ const Team=({user,tasks,setTask,setView})=>{
     <div style={{flex:1,display:'flex',flexDirection:'column',overflowY:'hidden'}}>
       <PageHeader icon={isAdmin?'bi-building':'bi-people-fill'} iconBg="#f3eff8" iconColor="#1f74b3" title={isAdmin?'All Teams Overview':'My Team'} subtitle="Click a lead to expand their agents"/>
       <div style={{flex:1,overflowY:'auto',padding:'16px 24px'}}>
+      {deelData?.isAvailable&&(
+        <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 14px',borderRadius:10,background:'#f0fdf4',border:'1px solid #bbf7d0',marginBottom:14,fontSize:12}}>
+          <span style={{width:6,height:6,borderRadius:'50%',background:'#16a34a',display:'inline-block'}}/>
+          <span style={{fontWeight:600,color:'#16a34a'}}>Deel API Connected</span>
+          <span style={{color:'#616161'}}>— {Array.isArray(deelData.people)?deelData.people.length:0} workers, {Array.isArray(deelData.timeOff)?deelData.timeOff.length:0} time-off requests</span>
+        </div>
+      )}
 
       {/* Region filter for admins/regional managers */}
       {(isAdmin)&&(

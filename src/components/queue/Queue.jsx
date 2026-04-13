@@ -6,7 +6,7 @@ import { SLA_MINS } from '../../data/constants';
 import Detail from './Detail';
 import { ToolBadge, FnBadge, StatusBadge, SlaBadge } from '../ui/Badges';
 import OutboundQueue from './OutboundQueue';
-import { PermissionsContext, SettingsContext } from '../../App';
+import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import Avatar from '../ui/Avatar';
 
 // Load saved filters from localStorage
@@ -41,6 +41,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   // searchRef removed — search handled by global nav
   const perms = useContext(PermissionsContext);
   const settings = useContext(SettingsContext);
+  const { deelData, jiraData } = useContext(IntegrationsContext);
   const isAdmin=perms?.dataScope==='all_tasks'; const isLead=perms?.dataScope==='team_tasks';
   const ns=tasks.filter(t=>t.source!=='slack'&&t.source!=='calendar');
   let vis=ns;

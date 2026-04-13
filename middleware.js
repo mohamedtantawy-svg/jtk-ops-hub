@@ -85,8 +85,8 @@ async function verifyToken(token) {
 export async function middleware(request) {
   const { pathname } = request.nextUrl;
 
-  // Skip auth for auth routes and config endpoint
-  if (pathname.startsWith('/api/v1/auth') || pathname === '/api/v1/config') {
+  // Skip auth for auth routes, config, and integration status endpoint
+  if (pathname.startsWith('/api/v1/auth') || pathname === '/api/v1/config' || pathname === '/api/v1/integrations/status') {
     return NextResponse.next();
   }
 

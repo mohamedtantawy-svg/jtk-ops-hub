@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useContext } from 'react';
 import { TOOLS, STATUSES, FUNCTIONS, FLAGS } from '../../data/constants';
 import { MEMBERS } from '../../data/members';
-import { PermissionsContext, SettingsContext } from '../../App';
+import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import { CALENDAR_EVENTS } from '../../data/calendar';
 import { slaInfo, rel } from '../../utils/helpers';
 import Avatar from '../ui/Avatar';
@@ -39,6 +39,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // ── PERMISSIONS-BASED SCOPE ──────────────────────────────────────────
   const perms=useContext(PermissionsContext);
   const settings=useContext(SettingsContext);
+  const { deelData, jiraData, slackData } = useContext(IntegrationsContext);
   const ds=perms?.dataScope||'own_tasks_only';
   const isOwnScope=ds==='own_tasks_only';
   const isTeamScope=ds==='team_tasks';
@@ -263,6 +264,14 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 <div style={{marginTop:5,fontSize:12,color:'#1f74b3',fontWeight:600,display:'flex',alignItems:'center',gap:5}}>
                   <i className="bi-globe2" style={{fontSize:11}}></i>
                   Viewing: {user.region||'All Regions'}
+                </div>
+              )}
+              {/* Live integrations status */}
+              {(deelData?.isAvailable||jiraData?.isAvailable||slackData?.isAvailable)&&(
+                <div style={{marginTop:6,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+                  {deelData?.isAvailable&&<span style={{fontSize:10.5,fontWeight:600,color:'#16a34a',background:'#dcfce7',padding:'1px 8px',borderRadius:99,display:'inline-flex',alignItems:'center',gap:4}}><span style={{width:5,height:5,borderRadius:'50%',background:'#16a34a',display:'inline-block'}}/>Deel Live</span>}
+                  {jiraData?.isAvailable&&<span style={{fontSize:10.5,fontWeight:600,color:'#0052CC',background:'#e6efff',padding:'1px 8px',borderRadius:99,display:'inline-flex',alignItems:'center',gap:4}}><span style={{width:5,height:5,borderRadius:'50%',background:'#0052CC',display:'inline-block'}}/>Jira Live</span>}
+                  {slackData?.isAvailable&&<span style={{fontSize:10.5,fontWeight:600,color:'#611f69',background:'#f3e8f9',padding:'1px 8px',borderRadius:99,display:'inline-flex',alignItems:'center',gap:4}}><span style={{width:5,height:5,borderRadius:'50%',background:'#611f69',display:'inline-block'}}/>Slack Live</span>}
                 </div>
               )}
             </div>
@@ -575,6 +584,55 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             </div>
           </div>}
         </div>}
+
+        {/* ══════════════════════════════════════════════════════════════════
+            LIVE INTEGRATION DATA — shows real counts when APIs are connected
+            ═════════════════════════════════════════════════════════════════ */}
+        {(deelData?.isAvailable||jiraData?.isAvailable||slackData?.isAvailable)&&(
+          <div style={{marginTop:16,background:'white',border:'1px solid #e8e8e8',borderRadius:16,padding:'16px 20px',boxShadow:'0 1px 2px rgba(0,0,0,0.04)'}}>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14}}>
+              <div style={{width:28,height:28,background:'#dcfce7',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                <i className="bi-cloud-arrow-down-fill" style={{color:'#16a34a',fontSize:12}}></i>
+              </div>
+              <div style={{fontSize:13,fontWeight:600,color:'#16a34a',textTransform:'none',letterSpacing:'normal'}}>Live Data</div>
+              <span style={{fontSize:10,color:'#9e9e9e',marginLeft:'auto'}}>Auto-refreshing</span>
+            </div>
+            <div style={{display:'flex',gap:0,border:'1px solid #e8e8e8',borderRadius:12,overflow:'hidden'}}>
+              {[
+                deelData?.isAvailable && {
+                  label: 'Deel Workers',
+                  value: Array.isArray(deelData.people) ? deelData.people.length : '—',
+                  icon: 'bi-people-fill', color: '#15357a', bg: '#e8edf6',
+                },
+                deelData?.contracts && {
+                  label: 'Active Contracts',
+                  value: Array.isArray(deelData.contracts) ? deelData.contracts.length : '—',
+                  icon: 'bi-file-earmark-text-fill', color: '#15357a', bg: '#e8edf6',
+                },
+                jiraData?.isAvailable && {
+                  label: 'Jira Open Issues',
+                  value: Array.isArray(jiraData.issues) ? jiraData.issues.length : '—',
+                  icon: 'bi-kanban', color: '#0052CC', bg: '#e6efff',
+                },
+                slackData?.isAvailable && {
+                  label: 'Slack Escalations',
+                  value: Array.isArray(slackData.escalationMessages) ? slackData.escalationMessages.length : '—',
+                  icon: 'bi-chat-square-dots', color: '#611f69', bg: '#f3e8f9',
+                },
+              ].filter(Boolean).map((s,i,arr)=>(
+                <div key={s.label} style={{flex:1,padding:'12px 16px',borderRight:i<arr.length-1?'1px solid #e8e8e8':'none',display:'flex',alignItems:'center',gap:10}}>
+                  <div style={{width:32,height:32,background:s.bg,borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                    <i className={s.icon} style={{color:s.color,fontSize:14}}></i>
+                  </div>
+                  <div>
+                    <div style={{fontSize:22,fontWeight:800,color:s.color,lineHeight:1,fontVariantNumeric:'tabular-nums'}}>{s.value}</div>
+                    <div style={{fontSize:11,color:'#616161',marginTop:2,fontWeight:500}}>{s.label}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ══════════════════════════════════════════════════════════════════
             AGENT METRICS — bigger boxes with clear numbers

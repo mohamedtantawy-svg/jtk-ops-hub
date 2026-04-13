@@ -14,6 +14,10 @@ import { DEFAULT_USER_ACCESS_MAP } from './data/members';
 import { ADMIN_LIST_VERSION } from './data/adminEmails';
 import { usePermissions } from './hooks/usePermissions';
 import { slaInfo } from './utils/helpers';
+import { useIntegrations } from './hooks/useIntegrations';
+import { useDeelData } from './hooks/useDeelData';
+import { useJiraData } from './hooks/useJiraData';
+import { useSlackData } from './hooks/useSlackData';
 
 // ── API services + normalizers ──────────────────────────────────────────────
 import { login as apiLogin, fetchMe as apiFetchMe } from './services/authApi';
@@ -54,6 +58,7 @@ import LoginScreen from './components/LoginScreen';
 
 export const PermissionsContext = createContext(null);
 export const SettingsContext = createContext({});
+export const IntegrationsContext = createContext({});
 
 const App=()=>{
   // ── Auth state ─────────────────────────────────────────────────────────────
@@ -211,6 +216,13 @@ const App=()=>{
   const markAllRead=useCallback(()=>setNotifs(prev=>prev.map(n=>({...n,read:true}))),[]);
 
   const perms = usePermissions(user, accessTypes, userAccessMap);
+
+  // ── Live integrations (Deel, Jira, Slack) ─────────────────────────────────
+  const integrations = useIntegrations();
+  const deelData = useDeelData(integrations.isConfigured('deel'));
+  const jiraData = useJiraData(integrations.isConfigured('jira'));
+  const slackData = useSlackData(integrations.isConfigured('slack'));
+  const integrationsCtx = { integrations, deelData, jiraData, slackData };
 
   // ── Toast helpers ──────────────────────────────────────────────────────────
   const addToast=useCallback((type,title,body,onUndo)=>{
@@ -527,6 +539,7 @@ const App=()=>{
 
   return(
     <PermissionsContext.Provider value={perms}>
+    <IntegrationsContext.Provider value={integrationsCtx}>
     <SettingsContext.Provider value={settings}>
     <div style={{minHeight:'100vh',background:'var(--bg)',color:'var(--text)',display:'flex',flexDirection:'column'}} role="application" aria-label="Ops Hub Dashboard">
       <DeelTopNav
@@ -570,6 +583,7 @@ const App=()=>{
       <Toasts toasts={toasts} dismiss={dismissToast}/>
     </div>
     </SettingsContext.Provider>
+    </IntegrationsContext.Provider>
     </PermissionsContext.Provider>
   );
 };
