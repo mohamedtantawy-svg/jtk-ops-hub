@@ -72,8 +72,35 @@ export async function POST(req) {
     let name = null;
     let picture = null;
 
+    // ── Strategy 0: Platform proxy (login.dp.com) sends gcp_* keys ────
+    if (body.gcp_id_token || body.gcp_user_email) {
+      // Try verifying the GCP id_token first for strongest auth
+      if (body.gcp_id_token) {
+        const verified = await verifyIdToken(body.gcp_id_token);
+        if (verified) {
+          email = verified.email?.toLowerCase();
+          name = verified.name || `${verified.given_name || ''} ${verified.family_name || ''}`.trim();
+          picture = verified.picture;
+        }
+      }
+      // If id_token verification failed or wasn't present, try access_token
+      if (!email && body.gcp_access_token) {
+        const userInfo = await fetchGoogleUserInfo(body.gcp_access_token);
+        if (userInfo?.email) {
+          email = userInfo.email.toLowerCase();
+          name = userInfo.name || '';
+          picture = userInfo.picture;
+        }
+      }
+      // Fall back to the direct user info from proxy
+      if (!email && body.gcp_user_email) {
+        email = body.gcp_user_email.toLowerCase();
+        name = body.gcp_user_name || '';
+        picture = body.gcp_user_picture || '';
+      }
+    }
     // ── Strategy 1: Proxy sent an id_token ──────────────────────────────
-    if (body.id_token) {
+    else if (body.id_token) {
       const verified = await verifyIdToken(body.id_token);
       if (!verified) {
         return NextResponse.json({ error: 'Invalid Google token' }, { status: 401 });
