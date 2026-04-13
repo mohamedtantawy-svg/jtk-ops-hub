@@ -9,6 +9,105 @@ import { signToken } from '../../../../../../src/lib/jwt';
 const ALLOWED_DOMAIN = 'deel.com';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 
+// Admin users — verified @deel.com Google accounts with full admin access
+const ADMIN_EMAILS = new Set([
+  'abe.elkholi@deel.com',
+  'adriana.jeremic@deel.com',
+  'alaetra.wilkerson@deel.com',
+  'alexandra.apsychou@deel.com',
+  'aline.galletyer@deel.com',
+  'andre.maia@deel.com',
+  'anna.esipova@deel.com',
+  'anne.sanmartin@deel.com',
+  'armela.cibukaj@deel.com',
+  'asako.abe@deel.com',
+  'astrid.martinez@deel.com',
+  'ayushi.jain@deel.com',
+  'beatriz.charry@deel.com',
+  'belen.silvestri@deel.com',
+  'carolina.ferreira@deel.com',
+  'celine.taruc@deel.com',
+  'chaitanya.uppalapati@deel.com',
+  'christina.shalaby@deel.com',
+  'duygu.cakalli@deel.com',
+  'elena.delgado@deel.com',
+  'emilie.thiery@deel.com',
+  'erwin.javier@deel.com',
+  'ewa.kotowska@deel.com',
+  'federica.deluca@deel.com',
+  'fernanda.scafini@deel.com',
+  'francesca.desantis@deel.com',
+  'georgina.cotton@deel.com',
+  'giselle.hernandez@deel.com',
+  'hala.elkhalfaoui@deel.com',
+  'helen.abraha@deel.com',
+  'oludolapo.ifeoluwa@deel.com',
+  'imran.lantra@deel.com',
+  'insiya.jasdanwalla@deel.com',
+  'isabella.mhamdi@deel.com',
+  'jacqueline.ciboso@deel.com',
+  'jessica.fowler@deel.com',
+  'jessica.czech@deel.com',
+  'jia.zhao@deel.com',
+  'jithya.sathian@deel.com',
+  'joaquin.celhay@deel.com',
+  'jose.ruales@deel.com',
+  'julia.mateos@deel.com',
+  'kaat.meyns@deel.com',
+  'kinga.bobko@deel.com',
+  'kinga.ogorek@deel.com',
+  'klaske.rinia@deel.com',
+  'kristina.fomina@deel.com',
+  'krystle.harsch@deel.com',
+  'laura.llopislopez@deel.com',
+  'laura.pai@deel.com',
+  'lehi.salonga@deel.com',
+  'natalia.marin@deel.com',
+  'ljubica.andjelic@deel.com',
+  'lorraine.muketo@deel.com',
+  'luisinadecicco@deel.com',
+  'lyall.genade@deel.com',
+  'madeleine.solares@deel.com',
+  'amanda.passos@deel.com',
+  'rosa.meza@deel.com',
+  'martina.guccione@deel.com',
+  'martina.tobolcevic@deel.com',
+  'maud.bouaziz@deel.com',
+  'mauro.coronel@deel.com',
+  'maylis.pourtau@deel.com',
+  'megan.lawrence@deel.com',
+  'melissa.capicchiano@deel.com',
+  'meriam.fadel@deel.com',
+  'mina.nagieva@deel.com',
+  'natalia.mesa@deel.com',
+  'navin.segar@deel.com',
+  'oxana.serdyuk@deel.com',
+  'paulina.saproniene@deel.com',
+  'pilar.dominguez@deel.com',
+  'pilvi.pirhonen@deel.com',
+  'pranav.nagarkar@deel.com',
+  'rachael.maclean@deel.com',
+  'raquel.sanchez@deel.com',
+  'sarah.suge@deel.com',
+  'sayli.patil@deel.com',
+  'sonal.singh@deel.com',
+  'stefania.marini@deel.com',
+  'stormie.skutnik@deel.com',
+  'susana.santos@deel.com',
+  'mohamed.tantawy@deel.com',
+  'tara.lewendon@deel.com',
+  'tatiana.glebova@deel.com',
+  'trish.lee@deel.com',
+  'tsetemi.tuoyo@deel.com',
+  'victor.cortes@deel.com',
+  'william.gaspar@deel.com',
+  'xiaofeng.yao@deel.com',
+  'yonit.menashe@deel.com',
+  'ziyaad.mahomed@deel.com',
+  'dw@deel.com',
+  'albert.didi@deel.com',
+]);
+
 /**
  * If the proxy returns an access_token, fetch user info from Google.
  */
@@ -174,10 +273,22 @@ export async function POST(req) {
     if (domain !== ALLOWED_DOMAIN) {
       console.warn('[auth/google/callback] Rejected domain:', domain);
       return NextResponse.json(
-        { error: 'Authentication failed. Please contact your admin for access.' },
+        { error: 'Only @deel.com accounts are allowed. Please contact your admin for access.' },
         { status: 403 }
       );
     }
+
+    // Only allow users in the admin allowlist (or DB if available)
+    if (!ADMIN_EMAILS.has(email) && !process.env.DATABASE_URL) {
+      console.warn('[auth/google/callback] User not in allowlist:', email);
+      return NextResponse.json(
+        { error: 'You do not have access to Ops Hub. Please contact your admin.' },
+        { status: 403 }
+      );
+    }
+
+    // ── Check if user is in the admin allowlist ──────────────────────────
+    const isAdmin = ADMIN_EMAILS.has(email);
 
     // ── Look up user in database (graceful fallback if DB unavailable) ──
     const dbUser = await findMemberByEmail(email);
@@ -187,15 +298,13 @@ export async function POST(req) {
       id: 0,
       email,
       name: name || email.split('@')[0],
-      role: 'member',
+      role: isAdmin ? 'admin' : 'member',
       team: 'JTK',
     };
 
-    // If DB is available but user not found, they're not authorized
-    if (process.env.DATABASE_URL && !dbUser) {
-      console.warn('[auth/google/callback] DB available but no active member found for:', email);
-      // Still allow login for now — they have a verified @deel.com Google account
-      // Admin can deactivate specific users via DB when needed
+    // If DB user exists but is in the admin allowlist, ensure admin role
+    if (dbUser && isAdmin && dbUser.role !== 'admin') {
+      user.role = 'admin';
     }
 
     // ── Issue signed JWT ────────────────────────────────────────────────
