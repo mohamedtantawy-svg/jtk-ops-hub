@@ -511,8 +511,6 @@ const App=()=>{
   // ── If not logged in, show login screen ────────────────────────────────────
   if(!user) return(
     <LoginScreen
-      userAccessMap={userAccessMap}
-      accessTypes={accessTypes}
       onLogin={handleLogin}
     />
   );
