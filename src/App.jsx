@@ -11,6 +11,7 @@ import { useAnnouncements } from './hooks/useAnnouncements';
 import { DEFAULT_SETTINGS } from './data/settings';
 import { DEFAULT_ACCESS_TYPES } from './data/accessControl';
 import { DEFAULT_USER_ACCESS_MAP } from './data/members';
+import { ADMIN_LIST_VERSION } from './data/adminEmails';
 import { usePermissions } from './hooks/usePermissions';
 import { slaInfo } from './utils/helpers';
 
@@ -91,7 +92,7 @@ const App=()=>{
   const [dismissedPopups,setDismissedPopups]=useState([]);
   const [settings,setSettings]=useState(()=>{try{const s=localStorage.getItem('ops_hub_settings');return s?{...DEFAULT_SETTINGS,...JSON.parse(s)}:DEFAULT_SETTINGS;}catch(e){return DEFAULT_SETTINGS;}});
   const [accessTypes,setAccessTypes]=useState(()=>{try{const s=localStorage.getItem('ops_hub_access_types');return s?JSON.parse(s):DEFAULT_ACCESS_TYPES;}catch(e){return DEFAULT_ACCESS_TYPES;}});
-  const [userAccessMap,setUserAccessMap]=useState(()=>{try{const s=localStorage.getItem('ops_hub_user_access_map');if(s){const stored=JSON.parse(s);return{...DEFAULT_USER_ACCESS_MAP,...stored};}return DEFAULT_USER_ACCESS_MAP;}catch(e){return DEFAULT_USER_ACCESS_MAP;}});
+  const [userAccessMap,setUserAccessMap]=useState(()=>{try{const ver=localStorage.getItem('ops_hub_uam_ver');if(ver!==ADMIN_LIST_VERSION){localStorage.removeItem('ops_hub_user_access_map');localStorage.setItem('ops_hub_uam_ver',ADMIN_LIST_VERSION);return{...DEFAULT_USER_ACCESS_MAP};}const s=localStorage.getItem('ops_hub_user_access_map');return s?JSON.parse(s):{...DEFAULT_USER_ACCESS_MAP};}catch(e){return DEFAULT_USER_ACCESS_MAP;}});
   // ── Session revalidation on page load ─────────────────────────────────────
   useEffect(() => {
     if (!loggedInEmail) return;
