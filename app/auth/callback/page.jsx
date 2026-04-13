@@ -34,6 +34,9 @@ export default function AuthCallback() {
       return;
     }
 
+    // Log what the proxy sent back (for debugging)
+    console.log('[auth/callback] Proxy returned keys:', Object.keys(payload));
+
     // Exchange proxy callback data for an app session
     fetch('/api/v1/auth/google/callback', {
       method: 'POST',
@@ -43,7 +46,8 @@ export default function AuthCallback() {
       .then(async (res) => {
         const data = await res.json().catch(() => null);
         if (!res.ok) {
-          throw new Error(data?.error || `Authentication failed (${res.status})`);
+          const debugInfo = data?.debug_keys ? ` [proxy keys: ${data.debug_keys.join(', ')}]` : '';
+          throw new Error((data?.error || `Authentication failed (${res.status})`) + debugInfo);
         }
         return data;
       })
