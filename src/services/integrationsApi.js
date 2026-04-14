@@ -118,8 +118,9 @@ export async function fetchSlackUsers({ email, limit } = {}) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Unified Queue — live sync from Zendesk + Jira
 // ─────────────────────────────────────────────────────────────────────────────
-export async function fetchQueue() {
-  return apiFetch('/queue');
+export async function fetchQueue({ bustCache } = {}) {
+  const qs = bustCache ? `?_t=${Date.now()}` : '';
+  return apiFetch(`/queue${qs}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -349,9 +349,11 @@ export async function GET(req) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Check cache
+  // Check cache (skip if _t param present = manual refresh)
+  const url = new URL(req.url);
+  const bustCache = url.searchParams.has('_t');
   const now = Date.now();
-  if (_cache && now - _cacheTime < CACHE_TTL) {
+  if (!bustCache && _cache && now - _cacheTime < CACHE_TTL) {
     return NextResponse.json(_cache);
   }
 

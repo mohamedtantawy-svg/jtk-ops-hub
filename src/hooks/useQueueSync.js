@@ -138,11 +138,11 @@ export function useQueueSync(enabled = true) {
   const syncCount = useRef(0);
   const intervalRef = useRef(null);
 
-  const sync = useCallback(async () => {
+  const sync = useCallback(async (opts = {}) => {
     if (!enabled) return;
 
     try {
-      const res = await fetchQueue();
+      const res = await fetchQueue(opts);
       const synced = (res?.items || []).map(normalizeQueueItem);
 
       setTasks(prev => {
@@ -188,10 +188,10 @@ export function useQueueSync(enabled = true) {
     };
   }, [sync, enabled]);
 
-  // Manual refresh (force, bypasses cache)
+  // Manual refresh (force, bypasses backend cache)
   const refresh = useCallback(() => {
     setLoading(true);
-    return sync();
+    return sync({ bustCache: true });
   }, [sync]);
 
   return {
