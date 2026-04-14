@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useCallback, createContext } from '
 import { TOOLS, STATUSES, FUNCTIONS, FLAGS } from './data/constants';
 import { INITIAL_PROJECTS } from './data/projects';
 import { INITIAL_REQUESTS } from './data/requests';
-import { MEMBERS, MEMBERS_BY_EMAIL, DEFAULT_USER_ACCESS_MAP } from './data/members';
+import { MEMBERS, MEMBERS_BY_EMAIL, DEFAULT_USER_ACCESS_MAP, TEAM_MEMBERS, getAllReports } from './data/members';
 import { INITIAL_ACTIVITY, INITIAL_NOTES } from './data/tasks';
 import { FEED_EVENTS } from './data/feed';
 import { ALL_AGENT_IDS } from './data/comms';
@@ -84,6 +84,12 @@ const App=()=>{
     }
     return null;
   });
+  // ── Impersonation — TLs/RMs/Admin can "login as" their reports ──────────
+  const [impersonating, setImpersonating] = useState(null);
+  const effectiveUser = React.useMemo(() => {
+    if (!impersonating || !user) return user;
+    return MEMBERS.find(mm => mm.email === impersonating) || user;
+  }, [impersonating, user]);
   const [view,setView]=useState('briefing');
   const [selTask,setSelTask]=useState(null);
   // ── Live queue sync (Zendesk + Jira) ─────────────────────────────────────
@@ -159,6 +165,18 @@ const App=()=>{
     try { localStorage.removeItem('ops_hub_logged_in_email'); localStorage.removeItem('ops_hub_token'); } catch(e) {}
   }, []);
 
+  // ── Impersonation handler ──────────────────────────────────────────────────
+  const handleImpersonate = useCallback((email) => {
+    if (!email) { setImpersonating(null); return; }
+    if (!user) return;
+    const me = MEMBERS_BY_EMAIL[user.email];
+    if (!me || me.access === 'agent') return; // agents can't impersonate
+    if (me.access === 'admin') { setImpersonating(email); setView('briefing'); return; }
+    // TL/RM: verify target is in their reports chain
+    const myReports = getAllReports(user.email);
+    if (myReports.includes(email)) { setImpersonating(email); setView('briefing'); }
+  }, [user]);
+
   const [announceCompose,setAnnounceCompose]=useState(false);
   const [escalModal,setEscalModal]=useState(null);
   const [toasts,setToasts]=useState([]);
@@ -216,7 +234,7 @@ const App=()=>{
   },[]);
   const markAllRead=useCallback(()=>setNotifs(prev=>prev.map(n=>({...n,read:true}))),[]);
 
-  const perms = usePermissions(user, accessTypes, userAccessMap);
+  const perms = usePermissions(effectiveUser, accessTypes, userAccessMap);
 
   // ── Live integrations (Deel, Jira, Slack) ─────────────────────────────────
   const integrations = useIntegrations();
@@ -554,8 +572,21 @@ const App=()=>{
     <IntegrationsContext.Provider value={integrationsCtx}>
     <SettingsContext.Provider value={settings}>
     <div style={{minHeight:'100vh',background:'var(--bg)',color:'var(--text)',display:'flex',flexDirection:'column'}} role="application" aria-label="Ops Hub Dashboard">
+      {impersonating && effectiveUser && (
+        <div style={{position:'fixed',top:0,left:0,right:0,zIndex:101,background:'linear-gradient(90deg,#7c3aed,#6d28d9)',color:'white',padding:'8px 24px',display:'flex',alignItems:'center',justifyContent:'center',gap:12,fontSize:13,fontWeight:600,boxShadow:'0 2px 8px rgba(124,58,237,0.3)',height:36}}>
+          <i className="bi-eye-fill" style={{fontSize:14}}></i>
+          <span>Viewing as <strong>{effectiveUser.name}</strong></span>
+          <span style={{opacity:0.5}}>·</span>
+          <span style={{opacity:0.8,fontWeight:400,fontSize:12}}>{MEMBERS_BY_EMAIL[impersonating]?.title || ''} · {MEMBERS_BY_EMAIL[impersonating]?.team || ''}</span>
+          <button onClick={()=>setImpersonating(null)} style={{marginLeft:8,padding:'4px 14px',borderRadius:128,border:'1px solid rgba(255,255,255,0.3)',background:'rgba(255,255,255,0.15)',color:'white',fontSize:12,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:4,transition:'background .15s'}}
+            onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.25)'} onMouseLeave={e=>e.currentTarget.style.background='rgba(255,255,255,0.15)'}>
+            <i className="bi-box-arrow-left" style={{fontSize:11}}></i>Exit
+          </button>
+        </div>
+      )}
+      {impersonating && <style>{`.deel-topnav{top:36px!important;}`}</style>}
       <DeelTopNav
-        view={view} setView={setView} user={user} setUser={setUser}
+        view={view} setView={setView} user={effectiveUser} setUser={setUser}
         onSearch={()=>setShowSearch(true)} notifs={notifs} markAllRead={markAllRead}
         escalCount={pendingEscal||0} onLogout={handleLogout}
         onCreateTask={()=>setCreateModal(true)}
@@ -566,29 +597,29 @@ const App=()=>{
         onCreateReport={()=>setView('hr-reports')}
         setSelTask={setSelTask} tasks={tasks}
       />
-      <div style={{height:68,flexShrink:0}}/>
-      <DeelSubNav view={view} subFilter={subFilter} setSubFilter={setSubFilter} tasks={tasks} user={user}/>
+      <div style={{height:impersonating?104:68,flexShrink:0}}/>
+      <DeelSubNav view={view} subFilter={subFilter} setSubFilter={setSubFilter} tasks={tasks} user={effectiveUser}/>
       <div className="deel-content" data-region="main-content" aria-label="Main content" style={{display:'flex',overflowX:'hidden',overflowY:'auto',position:'relative',flex:1}}>
-          {view==='briefing'      &&perms?.canView('briefing')!==false     &&<div className="page-enter"><BriefingView user={user} tasks={tasks} setView={setView} setSelTask={setSelTask} comms={comms} escalations={escalations} setSubFilter={setSubFilter}/></div>}
-          {view==='my-queue'      &&perms?.canView('my-queue')!==false     &&<div className="page-enter"><Queue user={user} tasks={tasks} setTasks={setTasks} selTask={liveSelTask} setSelTask={setSelTask} notes={notes} setNotes={setNotes} activity={activity} setActivity={setActivity} addToast={addToast} onEscalMgr={openEscalModal} onReassign={setReassignModal} onSnooze={setSnoozeModal} onCreateTask={()=>setCreateModal(true)} onBulkAction={(ids,action)=>{setBulkIds(ids);if(action==='reassign'){setReassignModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}else if(action==='snooze'){setSnoozeModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}else if(action==='escalate'){setEscalModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}}} subFilter={subFilter} escalations={escalations} requests={requests} setRequests={setRequests} onNewRequest={()=>setRequestModal(true)} queueMode={queueMode} setQueueMode={setQueueMode} fUnassigned={fUnassigned} setFUnassigned={setFUnassigned}/></div>}
-          {view==='slack'         &&perms?.canView('slack')!==false        &&<div className="page-enter"><Slack tasks={tasks} setTasks={setTasks} onEscalMgr={openEscalModal} addToast={addToast} user={user}/></div>}
-          {view==='team'          &&perms?.canView('team')!==false         &&<div className="page-enter"><Team user={user} tasks={tasks} setTask={setSelTask} setView={setView} setUser={setUser}/></div>}
-          {view==='analytics'     &&perms?.canView('analytics')!==false    &&<div className="page-enter"><Analytics tasks={tasks} currentUser={user} subFilter={subFilter} escalations={escalations}/></div>}
-          {view==='escalations'   &&perms?.canView('escalations')!==false  &&<div className="page-enter"><EscalationsView escalations={escalations} setEscalations={setEscalations} currentUser={user} onNewEscalation={()=>setCreateEscalModal(true)}/></div>}
-          {view==='announcements' &&perms?.canView('announcements')!==false&&<div className="page-enter"><AnnouncementsView user={user} comms={comms} setComms={setComms} addToast={addToast} tasks={tasks} apiAcknowledge={apiAcknowledge} apiCreate={apiCreate} apiSend={apiSend} apiUpdate={apiUpdate} apiArchive={apiArchive} apiRemove={apiRemove} apiTogglePin={apiTogglePin} openCompose={announceCompose} onComposeOpened={()=>setAnnounceCompose(false)} apiUnarchive={apiUnarchive} apiComments={apiComments} apiSetComments={apiSetComments} apiLoadComments={apiLoadComments} apiAddComment={apiAddCommentFn} apiDeleteComment={apiDeleteCommentFn} apiLinks={apiLinks} apiLoadLinks={apiLoadLinks} apiLinkAnnouncement={apiLinkAnnouncementFn} apiUnlinkAnnouncement={apiUnlinkAnnouncementFn} apiReact={apiReactFn}/></div>}
+          {view==='briefing'      &&perms?.canView('briefing')!==false     &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={tasks} setView={setView} setSelTask={setSelTask} comms={comms} escalations={escalations} setSubFilter={setSubFilter}/></div>}
+          {view==='my-queue'      &&perms?.canView('my-queue')!==false     &&<div className="page-enter"><Queue user={effectiveUser} tasks={tasks} setTasks={setTasks} selTask={liveSelTask} setSelTask={setSelTask} notes={notes} setNotes={setNotes} activity={activity} setActivity={setActivity} addToast={addToast} onEscalMgr={openEscalModal} onReassign={setReassignModal} onSnooze={setSnoozeModal} onCreateTask={()=>setCreateModal(true)} onBulkAction={(ids,action)=>{setBulkIds(ids);if(action==='reassign'){setReassignModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}else if(action==='snooze'){setSnoozeModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}else if(action==='escalate'){setEscalModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}}} subFilter={subFilter} escalations={escalations} requests={requests} setRequests={setRequests} onNewRequest={()=>setRequestModal(true)} queueMode={queueMode} setQueueMode={setQueueMode} fUnassigned={fUnassigned} setFUnassigned={setFUnassigned}/></div>}
+          {view==='slack'         &&perms?.canView('slack')!==false        &&<div className="page-enter"><Slack tasks={tasks} setTasks={setTasks} onEscalMgr={openEscalModal} addToast={addToast} user={effectiveUser}/></div>}
+          {view==='team'          &&perms?.canView('team')!==false         &&<div className="page-enter"><Team user={effectiveUser} tasks={tasks} setTask={setSelTask} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
+          {view==='analytics'     &&perms?.canView('analytics')!==false    &&<div className="page-enter"><Analytics tasks={tasks} currentUser={effectiveUser} subFilter={subFilter} escalations={escalations}/></div>}
+          {view==='escalations'   &&perms?.canView('escalations')!==false  &&<div className="page-enter"><EscalationsView escalations={escalations} setEscalations={setEscalations} currentUser={effectiveUser} onNewEscalation={()=>setCreateEscalModal(true)}/></div>}
+          {view==='announcements' &&perms?.canView('announcements')!==false&&<div className="page-enter"><AnnouncementsView user={effectiveUser} comms={comms} setComms={setComms} addToast={addToast} tasks={tasks} apiAcknowledge={apiAcknowledge} apiCreate={apiCreate} apiSend={apiSend} apiUpdate={apiUpdate} apiArchive={apiArchive} apiRemove={apiRemove} apiTogglePin={apiTogglePin} openCompose={announceCompose} onComposeOpened={()=>setAnnounceCompose(false)} apiUnarchive={apiUnarchive} apiComments={apiComments} apiSetComments={apiSetComments} apiLoadComments={apiLoadComments} apiAddComment={apiAddCommentFn} apiDeleteComment={apiDeleteCommentFn} apiLinks={apiLinks} apiLoadLinks={apiLoadLinks} apiLinkAnnouncement={apiLinkAnnouncementFn} apiUnlinkAnnouncement={apiUnlinkAnnouncementFn} apiReact={apiReactFn}/></div>}
           {view==='calendar'      &&perms?.canView('calendar')!==false     &&<div className="page-enter"><CalendarView tasks={tasks}/></div>}
-          {view==='knowledge-hub' &&perms?.canView('knowledge-hub')!==false&&<div className="page-enter"><KnowledgeHub subFilter={subFilter} user={user}/></div>}
-          {view==='hr-reports'    &&perms?.canView('hr-reports')!==false   &&<div className="page-enter"><GMReportingView user={user} addToast={addToast}/></div>}
+          {view==='knowledge-hub' &&perms?.canView('knowledge-hub')!==false&&<div className="page-enter"><KnowledgeHub subFilter={subFilter} user={effectiveUser}/></div>}
+          {view==='hr-reports'    &&perms?.canView('hr-reports')!==false   &&<div className="page-enter"><GMReportingView user={effectiveUser} addToast={addToast}/></div>}
           {view==='settings'      &&perms?.canView('settings')!==false     &&<div className="page-enter"><SettingsView settings={settings} setSettings={setSettings} user={user} addToast={addToast} tasks={tasks} setTasks={setTasks} subFilter={subFilter} accessTypes={accessTypes} setAccessTypes={setAccessTypes} userAccessMap={userAccessMap} setUserAccessMap={setUserAccessMap} perms={perms}/></div>}
           {view==='projects'      &&perms?.canView('projects')!==false     &&<div className="page-enter"><ProjectsView projects={projects} setProjects={setProjects} user={user} onNewProject={()=>setProjectModal('create')} onEditProject={(p)=>setProjectModal(p)}/></div>}
       </div>
       {escalModal    &&<EscalModal task={escalModal} bulkCount={bulkIds?.length||0} onConfirm={confirmEscal} onClose={()=>{setEscalModal(null);setBulkIds(null);}}/>}
       {reassignModal &&<ReassignModal task={reassignModal} tasks={tasks} bulkCount={bulkIds?.length||0} onConfirm={confirmReassign} onClose={()=>{setReassignModal(null);setBulkIds(null);}}/>}
       {snoozeModal   &&<SnoozeModal task={snoozeModal} bulkCount={bulkIds?.length||0} onConfirm={confirmSnooze} onClose={()=>{setSnoozeModal(null);setBulkIds(null);}}/>}
-      {createModal   &&<CreateTaskModal onConfirm={confirmCreate} onClose={()=>setCreateModal(false)} currentUser={user}/>}
-      {projectModal  &&<CreateProjectModal onConfirm={confirmProject} onClose={()=>setProjectModal(null)} project={typeof projectModal==='object'?projectModal:null} currentUser={user}/>}
-      {requestModal  &&<CreateRequestModal onConfirm={confirmRequest} onClose={()=>setRequestModal(false)} currentUser={user} tasks={tasks}/>}
-      {createEscalModal&&<CreateEscalationModal onConfirm={confirmManualEscal} onClose={()=>setCreateEscalModal(false)} currentUser={user} tasks={tasks}/>}
+      {createModal   &&<CreateTaskModal onConfirm={confirmCreate} onClose={()=>setCreateModal(false)} currentUser={effectiveUser}/>}
+      {projectModal  &&<CreateProjectModal onConfirm={confirmProject} onClose={()=>setProjectModal(null)} project={typeof projectModal==='object'?projectModal:null} currentUser={effectiveUser}/>}
+      {requestModal  &&<CreateRequestModal onConfirm={confirmRequest} onClose={()=>setRequestModal(false)} currentUser={effectiveUser} tasks={tasks}/>}
+      {createEscalModal&&<CreateEscalationModal onConfirm={confirmManualEscal} onClose={()=>setCreateEscalModal(false)} currentUser={effectiveUser} tasks={tasks}/>}
       {showSearch    &&<GlobalSearch tasks={tasks} setView={setView} setSelTask={setSelTask} onClose={()=>setShowSearch(false)}/>}
       {showOnboard   &&<Onboarding onDismiss={(dontShow)=>{setShowOnboard(false);if(dontShow){try{localStorage.setItem('ops_hub_onboarded','1');}catch(e){}}}}/>}
       {popupQueue.length>0&&<AnnouncementPopup key={popupQueue[0].id} comm={popupQueue[0]} onAcknowledge={handlePopupAcknowledge}/>}
