@@ -16,7 +16,6 @@ const MORE_TABS = [
   { id: 'calendar',      icon: 'bi-calendar3',        label: 'Calendar' },
   { id: 'knowledge-hub', icon: 'bi-book',             label: 'Knowledge Hub' },
   { id: 'analytics',     icon: 'bi-bar-chart-line',   label: 'Analytics' },
-  { id: 'slack',         icon: 'bi-slack',            label: 'Slack' },
   { id: 'team',          icon: 'bi-people',           label: 'Team' },
 ];
 
@@ -26,7 +25,6 @@ const CREATE_ACTIONS = [
   { icon: 'bi-arrow-up-circle',   label: 'New Escalation',   action: 'escalation',   desc: 'Raise an escalation',         perm: 'can_create_escalation' },
   { icon: 'bi-kanban',            label: 'New Project',      action: 'project',       desc: 'Start a project',             perm: 'can_create_project' },
   { icon: 'bi-megaphone',         label: 'New Announcement', action: 'announcement',  desc: 'Post to the team',            perm: 'can_compose_announcements' },
-  { icon: 'bi-send',              label: 'Outbound Request', action: 'request',       desc: 'Request to another team',     perm: 'can_create_request' },
   { icon: 'bi-clipboard-data',    label: 'New Report',       action: 'report',        desc: 'Submit an HR report',         viewReq: 'hr-reports' },
 ];
 
@@ -37,6 +35,7 @@ const DeelTopNav = ({
   onCreateTask, onCreateEscalation, onCreateProject,
   onCreateAnnouncement, onCreateRequest, onCreateReport,
   setSelTask, tasks,
+  managerOnCall, onChangeManagerOnCall,
 }) => {
   const perms = useContext(PermissionsContext);
   const [showMore,    setShowMore]    = useState(false);
@@ -184,6 +183,30 @@ const DeelTopNav = ({
 
       {/* ── Right: Figma icon bar ───────────────────────── */}
       <div className="deel-nav-right" style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto' }}>
+
+        {/* Manager on Call */}
+        {managerOnCall && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px', borderRadius: 'var(--radius-pill)', background: 'var(--surface-2)', marginRight: 4 }}>
+            <div style={{
+              width: 26, height: 26, borderRadius: '50%', background: 'var(--purple-accent)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: 'white', fontSize: 10, fontWeight: 700, flexShrink: 0,
+            }}>{managerOnCall.initials || '??'}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap', lineHeight: '16px' }}>
+              <span style={{ color: 'var(--text-muted)' }}>On Call:</span>{' '}
+              <span style={{ fontWeight: 600, color: 'var(--text)' }}>{managerOnCall.name}</span>
+            </div>
+            <button
+              className="deel-icon-btn"
+              onClick={() => onChangeManagerOnCall && onChangeManagerOnCall(managerOnCall)}
+              aria-label="Change manager on call"
+              title="Change manager on call"
+              style={{ width: 22, height: 22, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <i className="bi bi-pencil" style={{ fontSize: 11, color: 'var(--text-muted)' }}></i>
+            </button>
+          </div>
+        )}
 
         {/* Apps grid */}
         <div ref={createRef} style={{ position: 'relative' }}>

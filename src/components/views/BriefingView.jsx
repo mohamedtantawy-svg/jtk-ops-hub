@@ -135,7 +135,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // sparkPath is used for SVG sparkline visualization
 
   // ── Team data ─────────────────────────────────────────────────────────
-  const leads=MEMBERS.filter(m=>m.role==='lead').map(ld=>{
+  const leads=MEMBERS.filter(m=>m.role==='team_lead'||m.role==='regional_manager').map(ld=>{
     const ag=allAgentsWL.filter(a=>a.team===ld.team);
     const tt=ag.reduce((s,a)=>s+a.tc,0);const tb=ag.reduce((s,a)=>s+a.br,0);const avg=ag.length?tt/ag.length:0;
     const r=teamAvg>0?avg/teamAvg:0;
@@ -143,8 +143,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   });
   const helpers=isOwnScope?allAgentsWL.filter(m=>m.team===user.team&&m.id!==user.id&&m.tc<personal.length).slice(0,3):[];
   const hmMembers=isTeamScope?allAgentsWL.filter(m=>m.team===user.team):isAllScope?allAgentsWL:[];
-  const regions=['EMEA','AMER','APAC'];
-  const regionIcons={EMEA:'bi-globe-europe-africa',AMER:'bi-globe-americas',APAC:'bi-globe-asia-australia'};
+  const regions=['EMEA','APAC','LATAM','NAM'];
+  const regionIcons={EMEA:'bi-globe-europe-africa',APAC:'bi-globe-asia-australia',LATAM:'bi-globe-americas',NAM:'bi-globe-americas'};
   const rStats=regions.map(r=>{
     const ra=allAgentsWL.filter(a=>a.team===r);const tt=ra.reduce((s,a)=>s+a.tc,0);const tb=ra.reduce((s,a)=>s+a.br,0);
     const avg=ra.length?tt/ra.length:0;const ratio=teamAvg>0?avg/teamAvg:0;
@@ -157,7 +157,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     if(as?.breach&&!bs?.breach)return-1;if(!as?.breach&&bs?.breach)return 1;
     if(as&&!as.breach&&!bs)return-1;if(!as&&bs&&!bs.breach)return 1;
     return b.minutesAgo-a.minutesAgo;
-  }).slice(0,isOwnScope?5:8);
+  }).slice(0,isOwnScope?8:15);
 
   // ── Recent activity ───────────────────────────────────────────────────
   const recentAct=[...scope].filter(t=>t.updatedMinsAgo!==undefined&&t.updatedMinsAgo<t.minutesAgo).sort((a,b)=>a.updatedMinsAgo-b.updatedMinsAgo).slice(0,4).map(t=>{
@@ -250,7 +250,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
       <div style={{flex:1,overflowY:'auto'}}>
 
         {/* ── HERO ───────────────────────────────────────────────────────── */}
-        <div style={{background:'linear-gradient(135deg, #f3eff8 0%, #e8e0f5 50%, #f7f5f2 100%)',padding:'16px 24px 12px',position:'relative',overflow:'hidden'}}>
+        <div style={{background:'linear-gradient(135deg, #f3eff8 0%, #e8e0f5 50%, #f7f5f2 100%)',padding:'10px 24px 12px',position:'relative',overflow:'hidden'}}>
 
           <div style={{display:'flex',alignItems:'center',gap:20,position:'relative',zIndex:1}}>
             {/* Greeting + Role */}

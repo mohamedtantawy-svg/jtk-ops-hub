@@ -31,6 +31,11 @@ function normalizeQueueItem(item) {
     ? Math.max(0, Math.round((now - updatedAt.getTime()) / 60000))
     : minutesAgo;
 
+  const lastResponseAt = item.lastCustomerResponseAt ? new Date(item.lastCustomerResponseAt) : null;
+  const minutesSinceLastResponse = lastResponseAt
+    ? Math.max(0, Math.round((now - lastResponseAt.getTime()) / 60000))
+    : updatedMinsAgo;
+
   const receivedAt = createdAt
     ? createdAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
     : '';
@@ -50,9 +55,11 @@ function normalizeQueueItem(item) {
     assigneeId: member ? member.id : null,
     assigneeEmail: item.assigneeEmail || null,
     assigneeName: item.assigneeName || (member ? member.name : null),
-    country: '', // not available from external systems directly
+    country: item.country || '',
     minutesAgo,
     updatedMinsAgo,
+    minutesSinceLastResponse,
+    lastCustomerResponseAt: item.lastCustomerResponseAt || null,
     receivedAt,
     status: item.status || 'new',
     type: item.type || 'Policy Query',
@@ -130,7 +137,18 @@ function mergeSyncResults(current, synced) {
 
 // ── Hook ─────────────────────────────────────────────────────────────────────
 export function useQueueSync(enabled = true) {
-  const [tasks, setTasks] = useState([]);
+  const [tasks, setTasks] = useState(() => {
+    try {
+      const cached = localStorage.getItem('ops_hub_queue_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.ts && Date.now() - parsed.ts < 10 * 60 * 1000) { // 10 min TTL
+          return parsed.items || [];
+        }
+      }
+    } catch (e) {}
+    return [];
+  });
   const [meta, setMeta] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -158,6 +176,8 @@ export function useQueueSync(enabled = true) {
       setLastSync(new Date().toISOString());
       setError(null);
       syncCount.current += 1;
+      // Cache to localStorage for instant loads
+      try { localStorage.setItem('ops_hub_queue_cache', JSON.stringify({ items: synced, ts: Date.now() })); } catch(e) {}
     } catch (err) {
       console.warn('[useQueueSync] Sync failed:', err.message);
       setError(err.message);

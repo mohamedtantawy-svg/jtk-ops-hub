@@ -86,6 +86,85 @@ const JIRA_PRIORITY_MAP = {
   lowest:   'low',
 };
 
+// ── Country code detection from tags, subject, or requester email ────────────
+const COUNTRY_KEYWORDS = {
+  'united kingdom': 'UK', 'uk': 'UK', 'england': 'UK', 'britain': 'UK',
+  'germany': 'DE', 'german': 'DE', 'deutschland': 'DE',
+  'united states': 'US', 'usa': 'US', 'us': 'US', 'america': 'US',
+  'france': 'FR', 'french': 'FR',
+  'netherlands': 'NL', 'dutch': 'NL', 'holland': 'NL',
+  'singapore': 'SG',
+  'brazil': 'BR', 'brasil': 'BR',
+  'australia': 'AU', 'australian': 'AU',
+  'uae': 'AE', 'emirates': 'AE', 'dubai': 'AE',
+  'canada': 'CA', 'canadian': 'CA',
+  'japan': 'JP', 'japanese': 'JP',
+  'india': 'IN', 'indian': 'IN',
+  'mexico': 'MX', 'mexican': 'MX',
+  'korea': 'KR', 'korean': 'KR', 'south korea': 'KR',
+  'spain': 'ES', 'spanish': 'ES',
+  'italy': 'IT', 'italian': 'IT',
+  'poland': 'PL', 'polish': 'PL',
+  'south africa': 'ZA',
+  'nigeria': 'NG', 'nigerian': 'NG',
+  'philippines': 'PH', 'filipino': 'PH',
+  'indonesia': 'ID', 'indonesian': 'ID',
+  'thailand': 'TH', 'thai': 'TH',
+  'colombia': 'CO', 'colombian': 'CO',
+  'argentina': 'AR', 'argentine': 'AR',
+  'chile': 'CL', 'chilean': 'CL',
+  'peru': 'PE', 'peruvian': 'PE',
+  'portugal': 'PT', 'portuguese': 'PT',
+  'romania': 'RO', 'romanian': 'RO',
+  'israel': 'IL', 'israeli': 'IL',
+  'turkey': 'TR', 'turkish': 'TR',
+  'egypt': 'EG', 'egyptian': 'EG',
+  'kenya': 'KE', 'kenyan': 'KE',
+  'ghana': 'GH', 'ghanaian': 'GH',
+  'pakistan': 'PK', 'pakistani': 'PK',
+  'sweden': 'SE', 'swedish': 'SE',
+  'norway': 'NO', 'norwegian': 'NO',
+  'denmark': 'DK', 'danish': 'DK',
+  'finland': 'FI', 'finnish': 'FI',
+  'ireland': 'IE', 'irish': 'IE',
+  'austria': 'AT', 'austrian': 'AT',
+  'switzerland': 'CH', 'swiss': 'CH',
+  'belgium': 'BE', 'belgian': 'BE',
+  'czech': 'CZ', 'czechia': 'CZ',
+  'hungary': 'HU', 'hungarian': 'HU',
+  'greece': 'GR', 'greek': 'GR',
+  'vietnam': 'VN', 'vietnamese': 'VN',
+  'malaysia': 'MY', 'malaysian': 'MY',
+  'taiwan': 'TW', 'taiwanese': 'TW',
+  'hong kong': 'HK',
+  'china': 'CN', 'chinese': 'CN',
+  'saudi': 'SA', 'saudi arabia': 'SA',
+};
+
+function detectCountry(subject, tags = []) {
+  // Check tags first (most reliable)
+  for (const tag of tags) {
+    const t = tag.toLowerCase().trim();
+    // Direct ISO code match (2 letters)
+    if (t.length === 2 && Object.values(COUNTRY_KEYWORDS).includes(t.toUpperCase())) return t.toUpperCase();
+    if (COUNTRY_KEYWORDS[t]) return COUNTRY_KEYWORDS[t];
+  }
+  // Check subject line
+  const subLower = (subject || '').toLowerCase();
+  // Match longer keywords first to avoid false positives
+  const sorted = Object.entries(COUNTRY_KEYWORDS).sort((a, b) => b[0].length - a[0].length);
+  for (const [keyword, code] of sorted) {
+    // Use word boundary matching for short keywords
+    if (keyword.length <= 2) {
+      const regex = new RegExp(`\\b${keyword}\\b`, 'i');
+      if (regex.test(subLower)) return code;
+    } else if (subLower.includes(keyword)) {
+      return code;
+    }
+  }
+  return '';
+}
+
 // ── Tag / label → function type mapping ──────────────────────────────────────
 const TYPE_KEYWORDS = {
   onboarding:    'Onboarding',
@@ -241,10 +320,12 @@ async function fetchZendeskQueue() {
         status: ZD_STATUS_MAP[t.status] || 'new',
         priority: ZD_PRIORITY_MAP[t.priority] || 'medium',
         type: detectType(t.subject, t.tags || []),
+        country: detectCountry(t.subject, t.tags || []),
         assigneeEmail: assignee.email || null,
         assigneeName: assignee.name || null,
         requesterName: requester.name || 'Unknown',
         requesterEmail: requester.email || null,
+        lastCustomerResponseAt: t.updated_at, // Zendesk updated_at tracks last activity; this is a reasonable proxy
         createdAt: t.created_at,
         updatedAt: t.updated_at,
         externalUrl: ZD_SUBDOMAIN
@@ -322,10 +403,12 @@ async function fetchJiraQueue() {
         status: JIRA_STATUS_MAP[statusName.toLowerCase()] || 'in_progress',
         priority: JIRA_PRIORITY_MAP[priorityName.toLowerCase()] || 'medium',
         type: detectType(f.summary, [], f.labels || []),
+        country: detectCountry(f.summary, f.labels || []),
         assigneeEmail: assignee.emailAddress || null,
         assigneeName: assignee.displayName || null,
         requesterName: reporter.displayName || 'System',
         requesterEmail: reporter.emailAddress || null,
+        lastCustomerResponseAt: f.updated, // Jira updated tracks last activity
         createdAt: f.created,
         updatedAt: f.updated,
         externalUrl: JIRA_BASE ? `${JIRA_BASE}/browse/${issue.key}` : '',

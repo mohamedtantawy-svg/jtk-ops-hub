@@ -301,13 +301,10 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
 
       {/* ── Single Header — matches Announcements ── */}
-      <div data-role="queue-header" style={{padding:'16px 32px 12px',background:'white',borderBottom:'1px solid #e8e8e8',flexShrink:0}}>
+      <div data-role="queue-header" style={{padding:'8px 32px 12px',background:'white',borderBottom:'1px solid #e8e8e8',flexShrink:0}}>
         {/* Line 1: Title + counts + badge + Start Working */}
         <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:12}}>
-          <div style={{display:'flex',alignItems:'center',gap:8}}>
-            <i className="bi-inbox-fill" style={{fontSize:18,color:'#1f74b3'}}></i>
-            <span style={{fontSize:18,fontWeight:700,color:'#1b1b1b'}}>{isAdmin?'All Tasks':isLead?`${user.team} Queue`:'My Queue'}</span>
-          </div>
+          {(isAdmin||isLead)&&<span style={{fontSize:13,fontWeight:600,color:'#616161'}}>{isAdmin?'All Tasks':`${user.team}`}</span>}
           <span style={{fontSize:12,color:'#9e9e9e',display:'flex',alignItems:'center',gap:5}}>
             <i className="bi-layers" style={{fontSize:11}}></i>
             <span style={{fontWeight:600,color:'#1b1b1b'}}>{open.length}</span> open

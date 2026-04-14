@@ -1,4 +1,4 @@
-import { useState, useContext, useMemo } from 'react';
+import { useState, useContext, useMemo, useRef, useEffect, useCallback } from 'react';
 import { PermissionsContext, IntegrationsContext } from '../../App';
 import { TEAM_MEMBERS, MEMBERS_BY_EMAIL, getDirectReports, getAllReports } from '../../data/members';
 import { FLAGS, SLA_MINS } from '../../data/constants';
@@ -40,6 +40,12 @@ const ACCESS_BADGE = {
   agent:            { label:'Agent',        bg:'#f7f5f2', color:'#616161' },
 };
 
+const TEAM_OPTIONS = ['All', 'EMEA', 'APAC', 'LATAM', 'NAM', 'LATAM + NAM'];
+const ROLE_OPTIONS = ['agent', 'team_lead', 'regional_manager', 'admin'];
+const REGION_OPTIONS = ['EMEA', 'APAC', 'LATAM', 'NAM', 'LATAM + NAM'];
+
+const EMPTY_FORM = { name: '', email: '', team: 'EMEA', role: 'agent', region: 'EMEA', country: '' };
+
 const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, impersonating }) => {
   const [expanded, setExpanded] = useState(new Set());
   const [regionFilter, setRegionFilter] = useState('all');
@@ -47,6 +53,98 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
   const [copyDone, setCopyDone] = useState(false);
   const [hoveredRow, setHoveredRow] = useState(null);
   const [showParentalLeave, setShowParentalLeave] = useState(false);
+
+  // ── User management state ───────────────────────────────────────────────
+  const [localMembers, setLocalMembers] = useState(TEAM_MEMBERS);
+  const [onLeaveSet, setOnLeaveSet] = useState(new Set());
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addForm, setAddForm] = useState({ ...EMPTY_FORM });
+  const [actionMenuOpen, setActionMenuOpen] = useState(null); // email of member whose menu is open
+  const [editAllocEmail, setEditAllocEmail] = useState(null); // email of member being re-allocated
+  const [confirmRemove, setConfirmRemove] = useState(null);   // email of member pending removal
+  const actionMenuRef = useRef(null);
+
+  // Close action menu on outside click
+  useEffect(() => {
+    const handler = (e) => {
+      if (actionMenuRef.current && !actionMenuRef.current.contains(e.target)) {
+        setActionMenuOpen(null);
+      }
+    };
+    if (actionMenuOpen) document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [actionMenuOpen]);
+
+  // ── Local member helpers (mirror the module helpers but on localMembers) ──
+  const localMembersByEmail = useMemo(() =>
+    Object.fromEntries(localMembers.map(m => [m.email, m])), [localMembers]);
+
+  const localGetDirectReports = useCallback((email) => {
+    if (!email) return [];
+    const e = email.toLowerCase();
+    return localMembers.filter(m => m.managerEmail === e);
+  }, [localMembers]);
+
+  const localGetAllReports = useCallback((email) => {
+    if (!email) return [];
+    const reports = new Set();
+    const queue = [email.toLowerCase()];
+    while (queue.length > 0) {
+      const mgr = queue.shift();
+      for (const m of localMembers) {
+        if (m.managerEmail === mgr && !reports.has(m.email)) {
+          reports.add(m.email);
+          queue.push(m.email);
+        }
+      }
+    }
+    return [...reports];
+  }, [localMembers]);
+
+  // ── Add Member handler ──────────────────────────────────────────────────
+  const handleAddMember = () => {
+    if (!addForm.name.trim() || !addForm.email.trim()) return;
+    const initials = addForm.name.trim().split(' ').map(n => n[0] || '').join('').slice(0, 2).toUpperCase();
+    const newMember = {
+      email: addForm.email.trim().toLowerCase(),
+      name: addForm.name.trim(),
+      initials,
+      title: 'HR Experience Specialist',
+      access: addForm.role,
+      managerEmail: (user?.email || '').toLowerCase(),
+      team: addForm.team,
+      service: 'EOR',
+      startDate: new Date().toISOString().slice(0, 10),
+      country: addForm.country.trim() || null,
+    };
+    setLocalMembers(prev => [...prev, newMember]);
+    setAddForm({ ...EMPTY_FORM });
+    setShowAddModal(false);
+  };
+
+  // ── Change allocation handler ───────────────────────────────────────────
+  const handleChangeAllocation = (email, newTeam) => {
+    setLocalMembers(prev => prev.map(m => m.email === email ? { ...m, team: newTeam } : m));
+    setEditAllocEmail(null);
+    setActionMenuOpen(null);
+  };
+
+  // ── Toggle on-leave ─────────────────────────────────────────────────────
+  const handleToggleLeave = (email) => {
+    setOnLeaveSet(prev => {
+      const next = new Set(prev);
+      next.has(email) ? next.delete(email) : next.add(email);
+      return next;
+    });
+    setActionMenuOpen(null);
+  };
+
+  // ── Remove member ───────────────────────────────────────────────────────
+  const handleRemoveMember = (email) => {
+    setLocalMembers(prev => prev.filter(m => m.email !== email));
+    setConfirmRemove(null);
+    setActionMenuOpen(null);
+  };
 
   const perms = useContext(PermissionsContext);
   const { deelData } = useContext(IntegrationsContext);
@@ -100,18 +198,18 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
   // ── Build hierarchy tree from current user ──────────────────────────────
   // Get direct reports of the effective user
   const userEmail = (user?.email || '').toLowerCase();
-  const userMember = MEMBERS_BY_EMAIL[userEmail];
+  const userMember = localMembersByEmail[userEmail];
 
   // For the "Login as" feature: who can be impersonated
   const realUserEmail = (realUser?.email || '').toLowerCase();
-  const realUserMember = MEMBERS_BY_EMAIL[realUserEmail];
+  const realUserMember = localMembersByEmail[realUserEmail];
   const realUserAllReports = useMemo(() => {
     if (!realUserMember) return new Set();
     if (['admin', 'regional_manager', 'team_lead'].includes(realUserMember.access)) {
-      return new Set(getAllReports(realUserEmail));
+      return new Set(localGetAllReports(realUserEmail));
     }
     return new Set();
-  }, [realUserEmail, realUserMember]);
+  }, [realUserEmail, realUserMember, localGetAllReports]);
 
   const canLoginAs = (targetEmail) => {
     if (!realUserMember) return false;
@@ -124,10 +222,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
   // Build the tree of people to display
   const visibleMembers = useMemo(() => {
     if (!userMember) return [];
-    // Admin sees their direct reports (the RMs)
-    // RM/TL sees their direct reports
-    // Agent sees nothing (no reports)
-    let directReports = getDirectReports(userEmail);
+    let directReports = localGetDirectReports(userEmail);
 
     // Apply region filter
     if (regionFilter !== 'all') {
@@ -137,10 +232,10 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
       });
     }
     return directReports;
-  }, [userEmail, userMember, regionFilter]);
+  }, [userEmail, userMember, regionFilter, localGetDirectReports]);
 
   // Compute overall stats for KPI cards — user + all emails under them
-  const allReportEmails = useMemo(() => [userEmail, ...getAllReports(userEmail)], [userEmail]);
+  const allReportEmails = useMemo(() => [userEmail, ...localGetAllReports(userEmail)], [userEmail, localGetAllReports]);
   const ov = useMemo(() => statsByEmails(allReportEmails), [allReportEmails, ns]);
 
   // EOD summary
@@ -160,15 +255,16 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
   // ── Render a member row ─────────────────────────────────────────────────
   const renderMemberRow = (member, depth = 0) => {
     const email = member.email;
-    const subReports = getDirectReports(email);
+    const subReports = localGetDirectReports(email);
     const hasSubReports = subReports.length > 0;
     const isExpanded = expanded.has(email);
     const isManager = hasSubReports;
     const badge = ACCESS_BADGE[member.access] || ACCESS_BADGE.agent;
     const isHovered = hoveredRow === email;
+    const isOnLeave = onLeaveSet.has(email);
 
     // Stats: for managers, aggregate self + all reports; for agents, just self
-    const reportEmails = hasSubReports ? [email, ...getAllReports(email)] : [email];
+    const reportEmails = hasSubReports ? [email, ...localGetAllReports(email)] : [email];
     const s = statsByEmails(reportEmails);
     const health = slaHealth(email);
 
@@ -182,6 +278,8 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
     }
 
     const showLoginAs = canLoginAs(email) && onImpersonate;
+    const isMenuOpen = actionMenuOpen === email;
+    const isEditingAlloc = editAllocEmail === email;
 
     return (
       <div key={email}>
@@ -193,7 +291,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
             minHeight: 48,
             borderBottom: '1px solid #f2f2f2',
             display: 'grid',
-            gridTemplateColumns: '1fr 56px 64px 64px 64px 64px 80px',
+            gridTemplateColumns: '1fr 56px 64px 64px 64px 64px 80px 32px',
             gap: 8,
             alignItems: 'center',
             cursor: isManager ? 'pointer' : 'default',
@@ -213,6 +311,9 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
               <div style={{ fontSize: 13, fontWeight: isManager ? 700 : 500, color: '#1b1b1b', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                 {member.name}
                 <span style={{ background: badge.bg, color: badge.color, fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 128 }}>{badge.label}</span>
+                {isOnLeave && (
+                  <span style={{ background: '#fff8e6', color: '#ed8d00', fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 128 }}>On Leave</span>
+                )}
                 {isManager && (
                   <span style={{ fontSize: 10, color: '#9e9e9e', fontWeight: 500 }}>
                     {subReports.length} report{subReports.length !== 1 ? 's' : ''}
@@ -247,9 +348,28 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
               </button>
             )}
           </div>
-          <span style={{ textAlign: 'center', fontSize: 11, color: '#616161', background: '#f7f5f2', borderRadius: 128, padding: '2px 8px', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {member.team}
-          </span>
+          {/* Team badge — or inline allocation editor */}
+          {isEditingAlloc ? (
+            <div style={{ position: 'relative' }} onClick={e => e.stopPropagation()}>
+              <select
+                value={member.team}
+                onChange={e => handleChangeAllocation(email, e.target.value)}
+                onBlur={() => setEditAllocEmail(null)}
+                autoFocus
+                style={{
+                  width: 72, padding: '2px 4px', fontSize: 11, borderRadius: 8,
+                  border: '1px solid #7c3aed', outline: 'none', background: 'white',
+                  color: '#1b1b1b', fontWeight: 600, cursor: 'pointer',
+                }}
+              >
+                {TEAM_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+          ) : (
+            <span style={{ textAlign: 'center', fontSize: 11, color: '#616161', background: '#f7f5f2', borderRadius: 128, padding: '2px 8px', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {member.team}
+            </span>
+          )}
           <span style={{ textAlign: 'center', fontSize: isManager ? 15 : 14, fontWeight: isManager ? 700 : 600, color: '#1b1b1b', fontVariantNumeric: 'tabular-nums' }}>{s.total}</span>
           <span style={{ textAlign: 'center', fontSize: isManager ? 14 : 13, fontWeight: isManager ? 600 : 500, color: '#1f74b3', fontVariantNumeric: 'tabular-nums' }}>{s.n}</span>
           <span style={{ textAlign: 'center', fontSize: isManager ? 14 : 13, fontWeight: isManager ? 600 : 500, color: '#ed8d00', fontVariantNumeric: 'tabular-nums' }}>{s.ip}</span>
@@ -259,6 +379,110 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
             <span style={{ fontSize: 10, color: health === 'red' ? '#d42d35' : health === 'yellow' ? '#ed8d00' : '#29811e', fontWeight: 600 }}>
               {health === 'red' ? 'Breached' : health === 'yellow' ? 'At Risk' : 'Healthy'}
             </span>
+          </div>
+
+          {/* Action menu (three dots) */}
+          <div style={{ position: 'relative', display: 'flex', justifyContent: 'center' }} onClick={e => e.stopPropagation()}>
+            <button
+              onClick={() => setActionMenuOpen(isMenuOpen ? null : email)}
+              style={{
+                width: 24, height: 24, borderRadius: 6, border: 'none',
+                background: isMenuOpen ? '#f3eff8' : (isHovered ? '#f7f5f2' : 'transparent'),
+                cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: '#616161', fontSize: 13, transition: 'background .1s',
+                opacity: isHovered || isMenuOpen ? 1 : 0,
+              }}
+              title="Actions"
+            >
+              <i className="bi-three-dots-vertical" />
+            </button>
+            {isMenuOpen && (
+              <div
+                ref={actionMenuRef}
+                style={{
+                  position: 'absolute', top: 28, right: 0, zIndex: 100,
+                  background: 'white', border: '1px solid #e8e8e8', borderRadius: 10,
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.10)', minWidth: 160,
+                  padding: '4px 0', overflow: 'hidden',
+                }}
+              >
+                <button
+                  onClick={() => { setEditAllocEmail(email); setActionMenuOpen(null); }}
+                  style={{
+                    width: '100%', padding: '8px 14px', border: 'none', background: 'transparent',
+                    fontSize: 12, fontWeight: 500, color: '#1b1b1b', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#f9f8f6'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                >
+                  <i className="bi-arrow-left-right" style={{ fontSize: 12, color: '#7c3aed' }} />
+                  Edit Allocation
+                </button>
+                <button
+                  onClick={() => handleToggleLeave(email)}
+                  style={{
+                    width: '100%', padding: '8px 14px', border: 'none', background: 'transparent',
+                    fontSize: 12, fontWeight: 500, color: '#1b1b1b', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#f9f8f6'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                >
+                  <i className={isOnLeave ? 'bi-person-check' : 'bi-calendar-x'} style={{ fontSize: 12, color: '#ed8d00' }} />
+                  {isOnLeave ? 'End Leave' : 'Set On Leave'}
+                </button>
+                <div style={{ height: 1, background: '#f2f2f2', margin: '2px 0' }} />
+                <button
+                  onClick={() => setConfirmRemove(email)}
+                  style={{
+                    width: '100%', padding: '8px 14px', border: 'none', background: 'transparent',
+                    fontSize: 12, fontWeight: 500, color: '#d42d35', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#fff5f5'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                >
+                  <i className="bi-person-x" style={{ fontSize: 12 }} />
+                  Remove
+                </button>
+              </div>
+            )}
+
+            {/* Confirm remove dialog */}
+            {confirmRemove === email && (
+              <div
+                style={{
+                  position: 'absolute', top: 28, right: 0, zIndex: 110,
+                  background: 'white', border: '1px solid #e8e8e8', borderRadius: 10,
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.12)', minWidth: 200,
+                  padding: '14px 16px',
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#1b1b1b', marginBottom: 6 }}>Remove {member.name}?</div>
+                <div style={{ fontSize: 11, color: '#616161', marginBottom: 12 }}>This will remove them from the team list.</div>
+                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                  <button
+                    onClick={() => setConfirmRemove(null)}
+                    style={{
+                      padding: '4px 12px', borderRadius: 128, border: '1px solid #e8e8e8',
+                      background: 'white', fontSize: 11, fontWeight: 600, color: '#616161', cursor: 'pointer',
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => handleRemoveMember(email)}
+                    style={{
+                      padding: '4px 12px', borderRadius: 128, border: 'none',
+                      background: '#d42d35', fontSize: 11, fontWeight: 700, color: 'white', cursor: 'pointer',
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -284,7 +508,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 14px', borderRadius: 128, background: '#f3eff8', border: '1px solid #7c3aed33' }}>
             <i className="bi-person-badge" style={{ color: '#7c3aed', fontSize: 13 }} />
             <span style={{ fontSize: 12, fontWeight: 600, color: '#7c3aed' }}>
-              Viewing as {MEMBERS_BY_EMAIL[impersonating.toLowerCase()]?.name || impersonating}
+              Viewing as {localMembersByEmail[impersonating.toLowerCase()]?.name || impersonating}
             </span>
             <button
               onClick={() => onImpersonate && onImpersonate(null)}
@@ -307,31 +531,52 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
           </div>
         )}
 
-        {/* Region filter for admins / regional managers */}
-        {(isAdmin || (userMember && userMember.access === 'regional_manager')) && (
-          <div style={{ display: 'flex', background: '#f7f5f2', borderRadius: 128, padding: 3, gap: 2, marginBottom: 16, width: 'fit-content', flexWrap: 'wrap' }}>
-            {REGIONS.map(r => {
-              const active = regionFilter === r.id;
-              return (
-                <button
-                  key={r.id}
-                  onClick={() => setRegionFilter(r.id)}
-                  style={{
-                    padding: '5px 14px', borderRadius: 128, border: 'none',
-                    background: active ? 'white' : 'transparent',
-                    color: active ? '#1b1b1b' : '#616161',
-                    fontSize: 12, fontWeight: active ? 700 : 500,
-                    cursor: 'pointer',
-                    boxShadow: active ? '0 1px 3px rgba(0,0,0,0.08)' : undefined,
-                    transition: 'all .15s',
-                  }}
-                >
-                  {r.label}
-                </button>
-              );
-            })}
-          </div>
-        )}
+        {/* Region filter + Add Member button */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+          {(isAdmin || (userMember && userMember.access === 'regional_manager')) && (
+            <div style={{ display: 'flex', background: '#f7f5f2', borderRadius: 128, padding: 3, gap: 2, width: 'fit-content', flexWrap: 'wrap' }}>
+              {REGIONS.map(r => {
+                const active = regionFilter === r.id;
+                return (
+                  <button
+                    key={r.id}
+                    onClick={() => setRegionFilter(r.id)}
+                    style={{
+                      padding: '5px 14px', borderRadius: 128, border: 'none',
+                      background: active ? 'white' : 'transparent',
+                      color: active ? '#1b1b1b' : '#616161',
+                      fontSize: 12, fontWeight: active ? 700 : 500,
+                      cursor: 'pointer',
+                      boxShadow: active ? '0 1px 3px rgba(0,0,0,0.08)' : undefined,
+                      transition: 'all .15s',
+                    }}
+                  >
+                    {r.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <button
+            onClick={() => setShowAddModal(true)}
+            style={{
+              padding: '5px 14px', borderRadius: 128,
+              border: '1px solid #e8e8e8',
+              background: 'white',
+              color: '#1b1b1b',
+              fontSize: 12, fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 5,
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              transition: 'all .15s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = '#f9f8f6'; e.currentTarget.style.borderColor = '#d0d0d0'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'white'; e.currentTarget.style.borderColor = '#e8e8e8'; }}
+          >
+            <i className="bi-plus" style={{ fontSize: 13, fontWeight: 700 }} />
+            Add Member
+          </button>
+        </div>
 
         {/* KPI cards */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 22 }}>
@@ -365,10 +610,10 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
 
         {/* Team table */}
         <div style={{ background: 'white', borderRadius: 16, border: '1px solid #e8e8e8', overflow: 'hidden', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
-          <div role="row" style={{ padding: '12px 16px', borderBottom: '1px solid #f2f2f2', display: 'grid', gridTemplateColumns: '1fr 56px 64px 64px 64px 64px 80px', gap: 8, background: '#fafaf9' }}>
-            {['Manager / Agent', 'Team', 'Open', 'New', 'In prog', 'Pause', 'Health'].map(h => (
+          <div role="row" style={{ padding: '12px 16px', borderBottom: '1px solid #f2f2f2', display: 'grid', gridTemplateColumns: '1fr 56px 64px 64px 64px 64px 80px 32px', gap: 8, background: '#fafaf9' }}>
+            {['Manager / Agent', 'Team', 'Open', 'New', 'In prog', 'Pause', 'Health', ''].map((h, i) => (
               <span
-                key={h}
+                key={h || `col-${i}`}
                 role="columnheader"
                 style={{ color: 'var(--text-muted, #9e9e9e)', fontSize: 13, fontWeight: 500, textTransform: 'none', letterSpacing: 'normal', textAlign: h === 'Manager / Agent' ? 'left' : 'center' }}
               >
@@ -517,6 +762,163 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
         </div>
 
       </div>
+
+      {/* ── Add Member Modal ────────────────────────────────────────────── */}
+      {showAddModal && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 1000,
+            background: 'rgba(0,0,0,0.3)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}
+          onClick={() => setShowAddModal(false)}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: 'white', borderRadius: 16, padding: '28px 32px',
+              width: 420, maxWidth: '90vw', boxShadow: '0 8px 32px rgba(0,0,0,0.16)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: '#1b1b1b' }}>Add Team Member</div>
+              <button
+                onClick={() => setShowAddModal(false)}
+                style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: '#f7f5f2', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#616161', fontSize: 14 }}
+              >
+                <i className="bi-x-lg" />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {/* Name */}
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Name</label>
+                <input
+                  type="text"
+                  value={addForm.name}
+                  onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="Full name"
+                  style={{
+                    width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
+                    fontSize: 13, color: '#1b1b1b', outline: 'none', boxSizing: 'border-box',
+                  }}
+                  onFocus={e => e.currentTarget.style.borderColor = '#7c3aed'}
+                  onBlur={e => e.currentTarget.style.borderColor = '#e8e8e8'}
+                />
+              </div>
+
+              {/* Email */}
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Email</label>
+                <input
+                  type="email"
+                  value={addForm.email}
+                  onChange={e => setAddForm(f => ({ ...f, email: e.target.value }))}
+                  placeholder="name@deel.com"
+                  style={{
+                    width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
+                    fontSize: 13, color: '#1b1b1b', outline: 'none', boxSizing: 'border-box',
+                  }}
+                  onFocus={e => e.currentTarget.style.borderColor = '#7c3aed'}
+                  onBlur={e => e.currentTarget.style.borderColor = '#e8e8e8'}
+                />
+              </div>
+
+              {/* Team + Role row */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Team</label>
+                  <select
+                    value={addForm.team}
+                    onChange={e => setAddForm(f => ({ ...f, team: e.target.value }))}
+                    style={{
+                      width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
+                      fontSize: 13, color: '#1b1b1b', background: 'white', cursor: 'pointer',
+                    }}
+                  >
+                    {TEAM_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Role</label>
+                  <select
+                    value={addForm.role}
+                    onChange={e => setAddForm(f => ({ ...f, role: e.target.value }))}
+                    style={{
+                      width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
+                      fontSize: 13, color: '#1b1b1b', background: 'white', cursor: 'pointer',
+                    }}
+                  >
+                    {ROLE_OPTIONS.map(r => (
+                      <option key={r} value={r}>{ACCESS_BADGE[r]?.label || r}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Region + Country row */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Region</label>
+                  <select
+                    value={addForm.region}
+                    onChange={e => setAddForm(f => ({ ...f, region: e.target.value }))}
+                    style={{
+                      width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
+                      fontSize: 13, color: '#1b1b1b', background: 'white', cursor: 'pointer',
+                    }}
+                  >
+                    {REGION_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Country</label>
+                  <input
+                    type="text"
+                    value={addForm.country}
+                    onChange={e => setAddForm(f => ({ ...f, country: e.target.value }))}
+                    placeholder="e.g. DE, US, SG"
+                    style={{
+                      width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
+                      fontSize: 13, color: '#1b1b1b', outline: 'none', boxSizing: 'border-box',
+                    }}
+                    onFocus={e => e.currentTarget.style.borderColor = '#7c3aed'}
+                    onBlur={e => e.currentTarget.style.borderColor = '#e8e8e8'}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 22 }}>
+              <button
+                onClick={() => setShowAddModal(false)}
+                style={{
+                  padding: '8px 18px', borderRadius: 128, border: '1px solid #e8e8e8',
+                  background: 'white', fontSize: 13, fontWeight: 600, color: '#616161', cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddMember}
+                disabled={!addForm.name.trim() || !addForm.email.trim()}
+                style={{
+                  padding: '8px 18px', borderRadius: 128, border: 'none',
+                  background: (!addForm.name.trim() || !addForm.email.trim()) ? '#e8e8e8' : '#7c3aed',
+                  fontSize: 13, fontWeight: 700,
+                  color: (!addForm.name.trim() || !addForm.email.trim()) ? '#9e9e9e' : 'white',
+                  cursor: (!addForm.name.trim() || !addForm.email.trim()) ? 'not-allowed' : 'pointer',
+                  transition: 'all .15s',
+                }}
+              >
+                Add Member
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

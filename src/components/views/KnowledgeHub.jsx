@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
 import { KB_SEARCH_INDEX, KB_ARTICLES } from '../../data/knowledge';
-import PageHeader from '../ui/PageHeader';
 
 // ── Country Resources (D) ────────────────────────────────────────────────────
 const COUNTRY_RESOURCES=[
@@ -40,13 +39,16 @@ const getMockResponse=(msg)=>{
 
 const KnowledgeHub=({subFilter, user})=>{
   // ── Section tab (Search / Ask Claude) ─────────────────────────────────────
-  const [kbTab,setKbTab]=useState('search');
+  const [kbTab,setKbTab]=useState(subFilter==='Ask Claude'?'claude':'search');
 
   // ── Inner content tab (under Search) ──────────────────────────────────────
   const [search,setSearch]=useState('');
   const tabMap={'Policies':'policies','Runbooks':'processes','Tools':'looker','FAQs':'sla'};
   const [tab,setTab]=useState(subFilter?tabMap[subFilter]||'sla':'sla');
-  useEffect(()=>{if(subFilter&&tabMap[subFilter])setTab(tabMap[subFilter]);},[subFilter]);
+  useEffect(()=>{
+    if(subFilter==='Ask Claude'){setKbTab('claude');return;}
+    if(subFilter&&tabMap[subFilter]){setKbTab('search');setTab(tabMap[subFilter]);}
+  },[subFilter]);
 
   // ── Claude chat state (B) ──────────────────────────────────────────────────
   const [messages,setMessages]=useState([
@@ -220,7 +222,6 @@ const KnowledgeHub=({subFilter, user})=>{
 
   return(
     <div style={{flex:1,display:'flex',flexDirection:'column',overflowY:'hidden'}}>
-      <PageHeader icon="bi-book-half" iconBg="#f3eff8" iconColor="#1f74b3" title="HRX Knowledge Hub" subtitle="SLA Table · Looker Reports · Processes · Channels · Policies · Quick Links"/>
       <div style={{flex:1,overflowY:'auto',padding:'16px 24px'}}>
 
         {/* ── KB / Claude toggle (B) ───────────────────────────────────────── */}

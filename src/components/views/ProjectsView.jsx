@@ -158,12 +158,6 @@ export default function ProjectsView({ projects, setProjects, user, onNewProject
     if (selProject?.id === id) setSelProject(prev => ({ ...prev, status, progress: status === 'completed' ? 100 : prev.progress }));
   };
 
-  const counts = {
-    active: projects.filter(p => p.status === 'active').length,
-    completed: projects.filter(p => p.status === 'completed').length,
-    planning: projects.filter(p => p.status === 'planning').length,
-  };
-
   const thStyle = {
     padding:'10px 16px', fontSize:13, fontWeight:500, color:'#9e9e9e',
     textTransform:'none', letterSpacing:'normal', textAlign:'left',
@@ -192,28 +186,8 @@ export default function ProjectsView({ projects, setProjects, user, onNewProject
           })}
         </div>
 
-        {/* Page header */}
+        {/* Filter bar */}
         <div style={{ padding:'16px 24px 0', flexShrink:0 }}>
-          <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:20 }}>
-            <div>
-              <h1 style={{ fontSize:20, fontWeight:700, color:'#1b1b1b', margin:0 }}>Projects</h1>
-              <p style={{ fontSize:13, color:'#9e9e9e', margin:'4px 0 0' }}>
-                {counts.active} active · {counts.planning} planning · {counts.completed} completed
-              </p>
-            </div>
-            <button onClick={onNewProject} style={{
-              display:'flex', alignItems:'center', gap:6, padding:'9px 20px',
-              background:'#1b1b1b', color:'white', border:'none', borderRadius:128,
-              fontSize:14, fontWeight:600, cursor:'pointer', transition:'opacity .15s',
-            }}
-              onMouseEnter={e => e.currentTarget.style.opacity='.85'}
-              onMouseLeave={e => e.currentTarget.style.opacity='1'}
-            >
-              <i className="bi-plus-lg" style={{ fontSize:13 }}/> New Project
-            </button>
-          </div>
-
-          {/* Filter bar */}
           <div style={{ display:'flex', gap:10, marginBottom:20, alignItems:'center', flexWrap:'wrap' }}>
             {/* Search */}
             <div style={{ position:'relative', flex:1, minWidth:200, maxWidth:320 }}>
