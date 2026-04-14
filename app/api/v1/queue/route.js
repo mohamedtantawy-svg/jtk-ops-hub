@@ -2,25 +2,25 @@
 // Unified queue: pulls active tickets from Zendesk + Jira, normalizes to a
 // single shape, and returns a merged list. This is the single source of truth.
 //
-// Zendesk: HR Experience group, statuses new/open/pending/hold
-// Jira:    HR Experience project (HROP), statuses not Done/Closed/Resolved
+// Zendesk: HR Experience group, statuses new/open/pending/hold (paginated)
+// Jira:    Issues assigned to registered app emails (not completed)
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../src/lib/auth-helpers';
 import { searchTickets, showManyUsers, isZendeskConfigured } from '../../../../src/lib/zendesk-api';
 import { searchIssues, isJiraConfigured } from '../../../../src/lib/jira-api';
+import { ADMIN_EMAILS_LIST } from '../../../../src/data/adminEmails';
 
 // ── Config (overridable via env vars) ────────────────────────────────────────
 const ZD_GROUP_NAME = process.env.ZENDESK_HR_GROUP || 'HR Experience';
-const JIRA_PROJECT  = process.env.JIRA_HR_PROJECT  || 'HROP';
 const JIRA_BASE     = process.env.JIRA_BASE_URL    || '';
 const ZD_SUBDOMAIN  = process.env.ZENDESK_SUBDOMAIN || '';
 
-// ── Simple in-memory cache (30s TTL) ─────────────────────────────────────────
+// ── Simple in-memory cache (60s TTL — longer since we paginate now) ──────────
 let _cache = null;
 let _cacheTime = 0;
-const CACHE_TTL = 30_000; // 30 seconds
+const CACHE_TTL = 60_000; // 60 seconds
 
 // ── Zendesk status → app status ──────────────────────────────────────────────
 const ZD_STATUS_MAP = {
@@ -77,6 +77,8 @@ const JIRA_PRIORITY_MAP = {
 const TYPE_KEYWORDS = {
   onboarding:    'Onboarding',
   offboarding:   'Offboarding',
+  termination:   'Offboarding',
+  resignation:   'Offboarding',
   benefits:      'Benefits',
   leave:         'Leave Request',
   pto:           'Leave Request',
@@ -115,19 +117,17 @@ const TYPE_KEYWORDS = {
 };
 
 function detectType(subject, tags = [], labels = []) {
-  // Check tags/labels first (most reliable)
   const allTags = [...tags, ...labels].map(t => t.toLowerCase());
   for (const tag of allTags) {
     for (const [keyword, type] of Object.entries(TYPE_KEYWORDS)) {
       if (tag.includes(keyword)) return type;
     }
   }
-  // Fall back to subject keyword matching
   const subjectLower = (subject || '').toLowerCase();
   for (const [keyword, type] of Object.entries(TYPE_KEYWORDS)) {
     if (subjectLower.includes(keyword)) return type;
   }
-  return 'Policy Query'; // generic default
+  return 'Policy Query';
 }
 
 // ── Extract plain text from Jira ADF ─────────────────────────────────────────
@@ -139,46 +139,80 @@ function adfToText(node) {
   return '';
 }
 
-// ── Fetch Zendesk tickets ────────────────────────────────────────────────────
+// ── Paginated Zendesk search helper ──────────────────────────────────────────
+async function paginatedZendeskSearch(query, { maxPages = 20, perPage = 100 } = {}) {
+  const allResults = [];
+  let page = 1;
+
+  while (page <= maxPages) {
+    const res = await searchTickets(query, { per_page: perPage, page, sort_by: 'updated_at', sort_order: 'desc' });
+    const results = res?.results || [];
+    allResults.push(...results);
+
+    // Stop if we got fewer than perPage (last page) or no next_page
+    if (results.length < perPage || !res?.next_page) break;
+    page++;
+  }
+
+  return allResults;
+}
+
+// ── Batch user lookup with pagination (handles >100 users) ───────────────────
+async function batchFetchUsers(userIds) {
+  const userMap = {};
+  const idArray = [...userIds];
+
+  // Process in batches of 100
+  for (let i = 0; i < idArray.length; i += 100) {
+    const batch = idArray.slice(i, i + 100);
+    try {
+      const res = await showManyUsers(batch);
+      for (const u of (res?.users || [])) {
+        userMap[u.id] = { name: u.name, email: u.email };
+      }
+    } catch (err) {
+      console.warn(`[queue] Zendesk user batch ${i}-${i + batch.length} failed:`, err.message);
+    }
+  }
+
+  return userMap;
+}
+
+// ── Fetch ALL Zendesk tickets (paginated) ────────────────────────────────────
 async function fetchZendeskQueue() {
   if (!isZendeskConfigured()) return { items: [], status: 'skipped', error: null };
 
   try {
-    // Active tickets in HR Experience group
-    const activeQuery = `group:"${ZD_GROUP_NAME}" status<solved`;
-    // Recently solved (last 4 hours) — so the app can show transitions
+    // Zendesk Search API caps at 1,000 results per query.
+    // Split by status to stay under the limit (~1,600 total active tickets).
+    const statusQueries = ['new', 'open', 'pending', 'hold'].map(
+      s => `group:"${ZD_GROUP_NAME}" status:${s}`
+    );
+    // Recently solved (last 4 hours) for transition detection
     const solvedQuery = `group:"${ZD_GROUP_NAME}" status:solved updated<4hours`;
 
-    const [activeRes, solvedRes] = await Promise.allSettled([
-      searchTickets(activeQuery, { per_page: 100, sort_by: 'updated_at', sort_order: 'desc' }),
-      searchTickets(solvedQuery, { per_page: 50, sort_by: 'updated_at', sort_order: 'desc' }),
+    const results = await Promise.all([
+      ...statusQueries.map(q => paginatedZendeskSearch(q, { maxPages: 10 })),
+      paginatedZendeskSearch(solvedQuery, { maxPages: 2 }),
     ]);
 
-    const activeTickets = activeRes.status === 'fulfilled' ? (activeRes.value?.results || []) : [];
-    const solvedTickets = solvedRes.status === 'fulfilled' ? (solvedRes.value?.results || []) : [];
-    const allTickets = [...activeTickets, ...solvedTickets];
+    // Deduplicate (a ticket could theoretically match multiple queries)
+    const seenZd = new Set();
+    const allTickets = [];
+    for (const t of results.flat()) {
+      if (!seenZd.has(t.id)) { seenZd.add(t.id); allTickets.push(t); }
+    }
+    if (allTickets.length === 0) return { items: [], status: 'ok', count: 0, error: null };
 
-    if (allTickets.length === 0) return { items: [], status: 'ok', error: null };
-
-    // Collect unique user IDs (assignees + requesters) for batch lookup
+    // Collect unique user IDs for batch lookup
     const userIds = new Set();
     for (const t of allTickets) {
       if (t.assignee_id) userIds.add(t.assignee_id);
       if (t.requester_id) userIds.add(t.requester_id);
     }
 
-    // Batch-fetch user details
-    const userMap = {};
-    if (userIds.size > 0) {
-      try {
-        const usersRes = await showManyUsers([...userIds]);
-        for (const u of (usersRes?.users || [])) {
-          userMap[u.id] = { name: u.name, email: u.email };
-        }
-      } catch (err) {
-        console.warn('[queue] Zendesk user lookup failed:', err.message);
-      }
-    }
+    // Batch-fetch user details (handles >100 users)
+    const userMap = await batchFetchUsers(userIds);
 
     // Normalize tickets
     const items = allTickets.map(t => {
@@ -190,7 +224,7 @@ async function fetchZendeskQueue() {
         source: 'zendesk',
         externalId: String(t.id),
         subject: t.subject || '(no subject)',
-        description: (t.description || '').substring(0, 1000),
+        description: (t.description || '').substring(0, 500),
         status: ZD_STATUS_MAP[t.status] || 'new',
         priority: ZD_PRIORITY_MAP[t.priority] || 'medium',
         type: detectType(t.subject, t.tags || []),
@@ -207,38 +241,59 @@ async function fetchZendeskQueue() {
       };
     });
 
-    return {
-      items,
-      status: 'ok',
-      count: items.length,
-      error: null,
-    };
+    return { items, status: 'ok', count: items.length, error: null };
   } catch (err) {
     console.error('[queue] Zendesk fetch error:', err.message);
     return { items: [], status: 'error', error: err.message };
   }
 }
 
-// ── Fetch Jira issues ────────────────────────────────────────────────────────
+// ── Build JQL for registered emails ──────────────────────────────────────────
+function buildJiraJql() {
+  // Build assignee IN clause from registered admin emails
+  const emailsList = ADMIN_EMAILS_LIST
+    .map(e => `"${e}"`)
+    .join(', ');
+
+  // Jira: issues assigned to any registered email, not completed
+  // Also include recently done (last 4h) for transition detection
+  return `assignee IN (${emailsList}) AND (status NOT IN (Done, Closed, Resolved, Cancelled) OR (status IN (Done, Closed, Resolved) AND updated >= -4h)) ORDER BY updated DESC`;
+}
+
+// ── Fetch Jira issues (paginated, by registered emails) ─────────────────────
 async function fetchJiraQueue() {
   if (!isJiraConfigured()) return { items: [], status: 'skipped', error: null };
 
   try {
-    // Active issues + recently resolved (last 4 hours)
-    const jql = `project = ${JIRA_PROJECT} AND (status NOT IN (Done, Closed, Resolved, Cancelled) OR (status IN (Done, Closed, Resolved) AND updated >= -4h)) ORDER BY updated DESC`;
+    const jql = buildJiraJql();
+    const allIssues = [];
+    let startAt = 0;
+    const pageSize = 100;
 
-    const result = await searchIssues(jql, {
-      maxResults: 100,
-      fields: [
-        'summary', 'status', 'assignee', 'reporter', 'priority',
-        'created', 'updated', 'issuetype', 'project', 'labels',
-        'description',
-      ],
-    });
+    // Paginate through Jira results
+    while (true) {
+      const result = await searchIssues(jql, {
+        maxResults: pageSize,
+        startAt,
+        fields: [
+          'summary', 'status', 'assignee', 'reporter', 'priority',
+          'created', 'updated', 'issuetype', 'project', 'labels',
+          'description',
+        ],
+      });
 
-    const issues = result?.issues || [];
+      const issues = result?.issues || [];
+      allIssues.push(...issues);
 
-    const items = issues.map(issue => {
+      // Stop if we got fewer than pageSize or total reached
+      const total = result?.total || 0;
+      if (issues.length < pageSize || allIssues.length >= total) break;
+      startAt += pageSize;
+      // Safety: cap at 500 issues
+      if (startAt >= 500) break;
+    }
+
+    const items = allIssues.map(issue => {
       const f = issue.fields || {};
       const statusName = f.status?.name || '';
       const priorityName = f.priority?.name || '';
@@ -250,7 +305,7 @@ async function fetchJiraQueue() {
         source: 'jira',
         externalId: issue.key,
         subject: f.summary || '(no summary)',
-        description: adfToText(f.description).substring(0, 1000),
+        description: adfToText(f.description).substring(0, 500),
         status: JIRA_STATUS_MAP[statusName.toLowerCase()] || 'in_progress',
         priority: JIRA_PRIORITY_MAP[priorityName.toLowerCase()] || 'medium',
         type: detectType(f.summary, [], f.labels || []),
@@ -262,17 +317,12 @@ async function fetchJiraQueue() {
         updatedAt: f.updated,
         externalUrl: JIRA_BASE ? `${JIRA_BASE}/browse/${issue.key}` : '',
         tags: f.labels || [],
-        jiraStatus: statusName, // preserve original for debugging
+        jiraStatus: statusName,
         jiraType: f.issuetype?.name || null,
       };
     });
 
-    return {
-      items,
-      status: 'ok',
-      count: items.length,
-      error: null,
-    };
+    return { items, status: 'ok', count: items.length, error: null };
   } catch (err) {
     console.error('[queue] Jira fetch error:', err.message);
     return { items: [], status: 'error', error: err.message };

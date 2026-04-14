@@ -1,9 +1,9 @@
-import { useState, useMemo, useEffect, useRef, useContext } from 'react';
+import { useState, useMemo, useEffect, useRef, useContext, useCallback } from 'react';
 import { TOOLS, STATUSES, FUNCTIONS, FLAGS } from '../../data/constants';
-import { MEMBERS } from '../../data/members';
+import { MEMBERS, DEFAULT_USER_ACCESS_MAP } from '../../data/members';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import { CALENDAR_EVENTS } from '../../data/calendar';
-import { slaInfo, rel } from '../../utils/helpers';
+import { slaInfo, rel, getVisibleEmails } from '../../utils/helpers';
 import Avatar from '../ui/Avatar';
 import { ToolBadge, FnBadge } from '../ui/Badges';
 
@@ -56,16 +56,22 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const orgOpen=allOrgTasks.filter(t=>t.status!=='resolved');
   const orgResolved=allOrgTasks.filter(t=>t.status==='resolved');
 
-  // ── Scoped metrics ────────────────────────────────────────────────────
-  const scope=tasks.filter(t=>scopeIds.includes(t.assigneeId)&&t.status!=='resolved');
-  const personal=tasks.filter(t=>t.assigneeId===user.id&&t.status!=='resolved');
+  // ── Scoped metrics (hierarchical: own + direct/indirect reports) ────
+  const visibleEmails = useMemo(() => getVisibleEmails(user?.email, DEFAULT_USER_ACCESS_MAP), [user?.email]);
+  const inScope = useCallback(t => {
+    if (scopeIds.includes(t.assigneeId)) return true;
+    if (t.assigneeEmail && visibleEmails.has(t.assigneeEmail.toLowerCase())) return true;
+    return false;
+  }, [scopeIds, visibleEmails]);
+  const scope=tasks.filter(t=>inScope(t)&&t.status!=='resolved');
+  const personal=tasks.filter(t=>(t.assigneeId===user.id||(t.assigneeEmail&&t.assigneeEmail.toLowerCase()===user.email?.toLowerCase()))&&t.status!=='resolved');
   const total=scope.length;
   const breached=scope.filter(t=>{const s=slaInfo(t);return s&&s.breach;});
   const atRisk=scope.filter(t=>{const s=slaInfo(t);return s&&!s.breach;});
   const newT=scope.filter(t=>t.status==='new');
   const ipT=scope.filter(t=>t.status==='in_progress');
   const waitT=scope.filter(t=>t.status==='waiting');
-  const resolved=tasks.filter(t=>scopeIds.includes(t.assigneeId)&&t.status==='resolved').length;
+  const resolved=tasks.filter(t=>inScope(t)&&t.status==='resolved').length;
   const updated=scope.filter(t=>t.updatedMinsAgo!==undefined&&t.updatedMinsAgo<=120).length;
   const manager=user.lead?MEMBERS.find(m=>m.id===user.lead):null;
 

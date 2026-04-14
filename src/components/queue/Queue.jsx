@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useContext } from 'react';
 import { STATUSES, TOOLS, FUNCTIONS, FLAGS, QUEUE_SOURCES } from '../../data/constants';
-import { MEMBERS } from '../../data/members';
-import { slaInfo, rel, getUrl } from '../../utils/helpers';
+import { MEMBERS, DEFAULT_USER_ACCESS_MAP } from '../../data/members';
+import { slaInfo, rel, getUrl, getVisibleEmails } from '../../utils/helpers';
 import { SLA_MINS } from '../../data/constants';
 import Detail from './Detail';
 import { ToolBadge, FnBadge, StatusBadge, SlaBadge } from '../ui/Badges';
@@ -44,11 +44,19 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const { deelData, jiraData, queueSync } = useContext(IntegrationsContext);
   const isAdmin=perms?.dataScope==='all_tasks'; const isLead=perms?.dataScope==='team_tasks';
   const ns=tasks.filter(t=>t.source!=='slack'&&t.source!=='calendar');
+  // Hierarchical visibility: viewer sees own tickets + all direct/indirect reports
+  const visibleEmails = useMemo(
+    () => getVisibleEmails(user?.email, DEFAULT_USER_ACCESS_MAP),
+    [user?.email]
+  );
   let vis=ns;
-  // Filter by assignee: match by ID (legacy) or email (live data)
-  if(!isAdmin) vis=isLead
-    ?ns.filter(t=>{const m=MEMBERS.find(mm=>mm.id===t.assigneeId);return m?.team===user.team||(t.assigneeEmail&&MEMBERS.filter(mm=>mm.team===user.team).some(mm=>mm.email===t.assigneeEmail));})
-    :ns.filter(t=>t.assigneeId===user.id||(t.assigneeEmail&&t.assigneeEmail===user.email));
+  if(!isAdmin) vis=ns.filter(t=>{
+    // Match by legacy member ID
+    if(t.assigneeId===user.id) return true;
+    // Match by email hierarchy (assignee, manager, manager's manager …)
+    if(t.assigneeEmail && visibleEmails.has(t.assigneeEmail.toLowerCase())) return true;
+    return false;
+  });
   if(fTool)       vis=vis.filter(t=>t.source===fTool);
   if(fStatus)     vis=vis.filter(t=>t.status===fStatus);
   if(fUnassigned) vis=vis.filter(t=>!t.assigneeId&&!t.assigneeEmail);
@@ -242,7 +250,11 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
 
   // ── Filter tabs (like Announcements) ──
   const FILTER_TABS = useMemo(()=>{
-    const baseVis=(isAdmin?ns:isLead?ns.filter(tx=>{const m=MEMBERS.find(mm=>mm.id===tx.assigneeId);return m?.team===user.team||(tx.assigneeEmail&&MEMBERS.filter(mm=>mm.team===user.team).some(mm=>mm.email===tx.assigneeEmail));}):ns.filter(tx=>tx.assigneeId===user.id||(tx.assigneeEmail&&tx.assigneeEmail===user.email))).filter(t=>!t.isCalendarBooking);
+    const baseVis=(isAdmin?ns:ns.filter(tx=>{
+      if(tx.assigneeId===user.id) return true;
+      if(tx.assigneeEmail && visibleEmails.has(tx.assigneeEmail.toLowerCase())) return true;
+      return false;
+    })).filter(t=>!t.isCalendarBooking);
     const tabs = [
       {id:'all',label:'All',icon:'bi-grid',count:baseVis.filter(t=>t.status!=='resolved').length},
       ...QUEUE_SOURCES.map(key=>{

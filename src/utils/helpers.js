@@ -1,5 +1,27 @@
 import { SLA_MINS, DEFAULT_SOURCE_URLS } from '../data/constants';
 
+// ── Hierarchical visibility helper ──────────────────────────────────────────
+// Build the set of assignee emails a user can see based on manager chain.
+// A ticket is visible to: the assignee, their manager, manager's manager, … admin.
+// BFS walks DOWN from the viewer to find all direct + indirect reports.
+export function getVisibleEmails(viewerEmail, accessMap) {
+  const visible = new Set();
+  if (!viewerEmail) return visible;
+  visible.add(viewerEmail.toLowerCase());
+  const queue = [viewerEmail.toLowerCase()];
+  while (queue.length > 0) {
+    const mgr = queue.shift();
+    for (const [email, data] of Object.entries(accessMap)) {
+      const eLower = email.toLowerCase();
+      if (data.managerEmail && data.managerEmail.toLowerCase() === mgr && !visible.has(eLower)) {
+        visible.add(eLower);
+        queue.push(eLower);
+      }
+    }
+  }
+  return visible;
+}
+
 export const getUrl=(t,sourceUrls)=>{const u=sourceUrls||DEFAULT_SOURCE_URLS;return({zendesk:`${u.zendesk||DEFAULT_SOURCE_URLS.zendesk}/agent/tickets/${encodeURIComponent(t.id.replace('ZD-',''))}`,jira:`${u.jira||DEFAULT_SOURCE_URLS.jira}/browse/${t.id}`,gmail:`${u.gmail||DEFAULT_SOURCE_URLS.gmail}/mail/u/0/#inbox`,slack:`${u.slack||DEFAULT_SOURCE_URLS.slack}/hr-ops`,calendar:`${u.calendar||DEFAULT_SOURCE_URLS.calendar}/`,looker:`${u.looker||DEFAULT_SOURCE_URLS.looker}/dashboards`,workbench:`${u.workbench||DEFAULT_SOURCE_URLS.workbench}/tasks/${encodeURIComponent(t.id.replace('WB-',''))}`})[t.source]||'';};
 export const rel=(m)=>{ if(m<=0)return'just now'; if(m<60)return`${m}m`; const h=Math.floor(m/60),r=m%60; return r?`${h}h ${r}m`:`${h}h`; };
 export const ageClass=(m,s)=>{ if(s==='resolved'||s==='waiting')return''; if(m>=120)return'age-urgent'; if(m>=60)return'age-hot'; if(m>=30)return'age-warn'; return''; };
