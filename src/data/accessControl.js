@@ -1,5 +1,14 @@
 // ---------------------------------------------------------------------------
 // Access Control — views, actions, admin powers, data scopes & default types
+//
+// Access levels (from Access Mapping spreadsheet):
+//   Agent           → sees own work only, all tabs except settings
+//   Team Lead       → sees own + direct reports' work, all tabs except settings
+//   Regional Manager→ sees own + all reports chain, all tabs INCLUDING settings
+//   Admin/Director  → sees everyone, all tabs INCLUDING settings, full power
+//
+// All levels can create tasks, escalate, reassign, etc.
+// Only RM + Admin can access Settings and admin powers.
 // ---------------------------------------------------------------------------
 
 export const ALL_VIEWS = [
@@ -55,6 +64,7 @@ export const ALL_ADMIN_POWERS = [
 export const DATA_SCOPES = [
   'own_tasks_only',
   'team_tasks',
+  'regional_tasks',
   'all_tasks',
 ];
 
@@ -106,21 +116,28 @@ export const ADMIN_POWER_LABELS = {
 };
 
 export const DATA_SCOPE_LABELS = {
-  own_tasks_only: 'Own tasks only',
-  team_tasks:     'Team tasks',
-  all_tasks:      'All tasks',
+  own_tasks_only:  'Own tasks only',
+  team_tasks:      'Team tasks (direct reports)',
+  regional_tasks:  'Regional tasks (full reporting chain)',
+  all_tasks:       'All tasks',
 };
 
 // ---------------------------------------------------------------------------
-// Default access types
+// Views available to each tier
+// ---------------------------------------------------------------------------
+const VIEWS_ALL = [...ALL_VIEWS];
+const VIEWS_NO_SETTINGS = ALL_VIEWS.filter(v => v !== 'settings');
+
+// ---------------------------------------------------------------------------
+// Default access types — these define the 4-tier permission system
 // ---------------------------------------------------------------------------
 
 export const DEFAULT_ACCESS_TYPES = [
   {
     id: 'at_admin',
     name: 'Admin',
-    description: 'Full access to all views, actions, and admin powers',
-    views: [...ALL_VIEWS],
+    description: 'Full access to all views, actions, and admin powers. Sees all tasks.',
+    views: VIEWS_ALL,
     actions: [...ALL_ACTIONS],
     adminPowers: [...ALL_ADMIN_POWERS],
     dataScope: 'all_tasks',
@@ -129,63 +146,19 @@ export const DEFAULT_ACCESS_TYPES = [
   {
     id: 'at_regional_mgr',
     name: 'Regional Manager',
-    description: 'Org-wide visibility with team management capabilities',
-    views: ALL_VIEWS.filter((v) => v !== 'settings'),
-    actions: [
-      'can_create_task',
-      'can_resolve_task',
-      'can_snooze_task',
-      'can_reassign',
-      'can_bulk_action',
-      'can_escalate',
-      'can_create_escalation',
-      'can_respond_escalation',
-      'can_compose_announcements',
-      'can_pin_announcement',
-      'can_send_reminder',
-      'can_create_project',
-      'can_edit_project',
-      'can_delete_project',
-      'can_create_request',
-      'can_export',
-      'can_manage_team',
-    ],
-    adminPowers: ['can_manage_users', 'can_manage_org'],
-    dataScope: 'all_tasks',
+    description: 'Full access including settings. Sees own work + TL summaries + all team members under TLs.',
+    views: VIEWS_ALL,
+    actions: [...ALL_ACTIONS],
+    adminPowers: [...ALL_ADMIN_POWERS],
+    dataScope: 'regional_tasks',
     isDefault: true,
   },
   {
     id: 'at_lead',
     name: 'Team Lead',
-    description: 'Team-scoped visibility with escalation and project management',
-    views: [
-      'briefing',
-      'my-queue',
-      'calendar',
-      'projects',
-      'escalations',
-      'alerts',
-      'knowledge-hub',
-      'analytics',
-      'announcements',
-      'slack',
-      'team',
-    ],
-    actions: [
-      'can_create_task',
-      'can_resolve_task',
-      'can_snooze_task',
-      'can_reassign',
-      'can_bulk_action',
-      'can_escalate',
-      'can_create_escalation',
-      'can_respond_escalation',
-      'can_compose_announcements',
-      'can_send_reminder',
-      'can_create_project',
-      'can_edit_project',
-      'can_create_request',
-    ],
+    description: 'All views except settings. Sees own work + direct team members\' work.',
+    views: VIEWS_NO_SETTINGS,
+    actions: [...ALL_ACTIONS],
     adminPowers: [],
     dataScope: 'team_tasks',
     isDefault: true,
@@ -193,23 +166,9 @@ export const DEFAULT_ACCESS_TYPES = [
   {
     id: 'at_agent',
     name: 'Agent',
-    description: 'Personal task queue with basic escalation capability',
-    views: [
-      'briefing',
-      'my-queue',
-      'calendar',
-      'escalations',
-      'alerts',
-      'knowledge-hub',
-      'announcements',
-      'slack',
-    ],
-    actions: [
-      'can_resolve_task',
-      'can_snooze_task',
-      'can_escalate',
-      'can_create_request',
-    ],
+    description: 'All views except settings. Sees own work only.',
+    views: VIEWS_NO_SETTINGS,
+    actions: [...ALL_ACTIONS],
     adminPowers: [],
     dataScope: 'own_tasks_only',
     isDefault: true,

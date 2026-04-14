@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useCallback, createContext } from '
 import { TOOLS, STATUSES, FUNCTIONS, FLAGS } from './data/constants';
 import { INITIAL_PROJECTS } from './data/projects';
 import { INITIAL_REQUESTS } from './data/requests';
-import { MEMBERS } from './data/members';
+import { MEMBERS, MEMBERS_BY_EMAIL, DEFAULT_USER_ACCESS_MAP } from './data/members';
 import { INITIAL_ACTIVITY, INITIAL_NOTES } from './data/tasks';
 import { FEED_EVENTS } from './data/feed';
 import { ALL_AGENT_IDS } from './data/comms';
@@ -11,7 +11,6 @@ import { useAnnouncements } from './hooks/useAnnouncements';
 import { useQueueSync } from './hooks/useQueueSync';
 import { DEFAULT_SETTINGS } from './data/settings';
 import { DEFAULT_ACCESS_TYPES } from './data/accessControl';
-import { DEFAULT_USER_ACCESS_MAP } from './data/members';
 import { ADMIN_LIST_VERSION } from './data/adminEmails';
 import { usePermissions } from './hooks/usePermissions';
 import { slaInfo } from './utils/helpers';
@@ -28,6 +27,7 @@ import { fetchEscalations as apiFetchEscalations, createEscalation as apiCreateE
 import { fetchProjects as apiFetchProjects, createProject as apiCreateProject, updateProject as apiUpdateProject } from './services/projectsApi';
 import { fetchRequests as apiFetchRequests, createRequest as apiCreateRequest, updateRequest as apiUpdateRequest } from './services/requestsApi';
 import { createNote as apiCreateNote } from './services/notesApi';
+import { reassignQueueTicket } from './services/integrationsApi';
 import { normalizeTask, normalizeEscalation, normalizeProject, normalizeRequest, normalizeMember, denormalizeTaskForCreate, feStatusToBe } from './services/normalize';
 
 import DeelTopNav from './components/nav/DeelTopNav';
@@ -291,22 +291,33 @@ const App=()=>{
     apiCreateEscalation({taskId:form.taskId||undefined,subject:form.subject,reason:form.reason,managerId:form.managerId?String(form.managerId):undefined}).catch(()=>{});
   },[user,addToast,perms]);
 
-  // ── Reassign handler (gated by can_reassign) ──────────────────────────────
-  const confirmReassign=useCallback((task,newId,note)=>{
+  // ── Reassign handler (email-based — pushes to Zendesk/Jira) ────────────────
+  const confirmReassign=useCallback((task,newEmail,note)=>{
     if(!perms?.canDo('can_reassign'))return;
-    const newAgent=MEMBERS.find(m=>m.id===newId);
+    const member=MEMBERS_BY_EMAIL[newEmail];
+    const newName=member?.name||newEmail;
+    const newMemberId=member?MEMBERS.findIndex(m=>m.email===newEmail)+1:null;
     const now=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
     if(bulkIds&&bulkIds.length>0){
       const idSet=new Set(bulkIds);
-      setTasks(prev=>prev.map(t=>idSet.has(t.id)?{...t,assigneeId:newId}:t));
-      setActivity(prev=>{const next={...prev};bulkIds.forEach(id=>{next[id]=[...(next[id]||[]),{type:'assigned',text:`Bulk reassigned to ${newAgent?.name ?? 'Agent'}${note?` — ${note}`:''}`,user:user.name,time:now}];});return next;});
-      addToast('success','Bulk Reassign',`${bulkIds.length} tasks → ${newAgent?.name?.split(' ')[0] ?? 'Agent'}`);
+      setTasks(prev=>prev.map(t=>idSet.has(t.id)?{...t,assigneeId:newMemberId,assigneeEmail:newEmail,assigneeName:newName}:t));
+      setActivity(prev=>{const next={...prev};bulkIds.forEach(id=>{next[id]=[...(next[id]||[]),{type:'assigned',text:`Bulk reassigned to ${newName}${note?` — ${note}`:''}`,user:user.name,time:now}];});return next;});
+      addToast('success','Bulk Reassign',`${bulkIds.length} tasks → ${newName.split(' ')[0]}`);
+      // Push each ticket to Zendesk/Jira in background
+      bulkIds.forEach(id=>{
+        reassignQueueTicket(id,newEmail).catch(err=>console.warn(`[reassign] ${id} failed:`,err.message));
+      });
     } else {
-      setTasks(prev=>prev.map(t=>t.id===task.id?{...t,assigneeId:newId}:t));
-      setActivity(prev=>({...prev,[task.id]:[...(prev[task.id]||[]),{type:'assigned',text:`Reassigned to ${newAgent?.name ?? 'Agent'}${note?` — ${note}`:''}`,user:user.name,time:now}]}));
-      addToast('success','Task Reassigned',`→ ${newAgent?.name?.split(' ')[0] ?? 'Agent'} · ${task.id}`);
-      // BE sync
-      apiAssignTask(task._beId||task.id,String(newId)).catch(()=>{});
+      setTasks(prev=>prev.map(t=>t.id===task.id?{...t,assigneeId:newMemberId,assigneeEmail:newEmail,assigneeName:newName}:t));
+      setActivity(prev=>({...prev,[task.id]:[...(prev[task.id]||[]),{type:'assigned',text:`Reassigned to ${newName}${note?` — ${note}`:''}`,user:user.name,time:now}]}));
+      addToast('success','Task Reassigned',`→ ${newName.split(' ')[0]} · ${task.id}`);
+      // Push to Zendesk/Jira (real reassignment)
+      reassignQueueTicket(task.id,newEmail).catch(err=>{
+        console.warn('[reassign] Push to source failed:',err.message);
+        addToast('warning','Sync Warning',`Local reassign ok, but source system update failed for ${task.id}`);
+      });
+      // Legacy BE sync
+      apiAssignTask(task._beId||task.id,String(newMemberId||'')).catch(()=>{});
     }
     setReassignModal(null);
     setBulkIds(null);

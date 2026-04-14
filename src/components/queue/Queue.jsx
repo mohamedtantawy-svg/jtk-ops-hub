@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useContext } from 'react';
 import { STATUSES, TOOLS, FUNCTIONS, FLAGS, QUEUE_SOURCES } from '../../data/constants';
-import { MEMBERS, DEFAULT_USER_ACCESS_MAP } from '../../data/members';
+import { MEMBERS } from '../../data/members';
 import { slaInfo, rel, getUrl, getVisibleEmails } from '../../utils/helpers';
 import { SLA_MINS } from '../../data/constants';
 import Detail from './Detail';
@@ -46,7 +46,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const ns=tasks.filter(t=>t.source!=='slack'&&t.source!=='calendar');
   // Hierarchical visibility: viewer sees own tickets + all direct/indirect reports
   const visibleEmails = useMemo(
-    () => getVisibleEmails(user?.email, DEFAULT_USER_ACCESS_MAP),
+    () => getVisibleEmails(user?.email),
     [user?.email]
   );
   let vis=ns;

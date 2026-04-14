@@ -123,6 +123,14 @@ export async function fetchQueue({ bustCache } = {}) {
   return apiFetch(`/queue${qs}`);
 }
 
+// Reassign a ticket in Zendesk/Jira via our backend
+export async function reassignQueueTicket(ticketId, assigneeEmail) {
+  return apiFetch('/queue/reassign', {
+    method: 'POST',
+    body: JSON.stringify({ ticketId, assigneeEmail }),
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Zendesk
 // ─────────────────────────────────────────────────────────────────────────────

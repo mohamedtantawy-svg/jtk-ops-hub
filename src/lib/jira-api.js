@@ -134,6 +134,21 @@ export async function getTransitions(issueKey) {
   return jiraFetch(`/issue/${issueKey}/transitions`);
 }
 
+// ── Reassign Issue ──────────────────────────────────────────────────────
+
+export async function reassignIssue(issueKey, assigneeEmail) {
+  // Look up Jira account by email
+  const users = await jiraFetch(`/user/search?query=${encodeURIComponent(assigneeEmail)}`);
+  const user = users?.[0];
+  if (!user) throw new Error(`Jira user not found for email: ${assigneeEmail}`);
+
+  // Update the issue's assignee
+  return jiraFetch(`/issue/${issueKey}/assignee`, {
+    method: 'PUT',
+    body: JSON.stringify({ accountId: user.accountId }),
+  });
+}
+
 // ── Projects ─────────────────────────────────────────────────────────────────
 
 export async function listProjects(params = {}) {

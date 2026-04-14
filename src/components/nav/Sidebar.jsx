@@ -1,5 +1,5 @@
 import { useState, useContext, useMemo } from 'react';
-import { MEMBERS, DEFAULT_USER_ACCESS_MAP } from '../../data/members';
+import { MEMBERS } from '../../data/members';
 import { FLAGS } from '../../data/constants';
 import { getVisibleEmails } from '../../utils/helpers';
 import Avatar from '../ui/Avatar';
@@ -8,7 +8,7 @@ import { PermissionsContext } from '../../App';
 
 const Sidebar=({user,view,setView,tasks,setTask,escalCount,onSearch,open,setOpen,notifs,markAllRead,onCreateTask,comms})=>{
   const perms = useContext(PermissionsContext);
-  const visibleEmails = useMemo(() => getVisibleEmails(user?.email, DEFAULT_USER_ACCESS_MAP), [user?.email]);
+  const visibleEmails = useMemo(() => getVisibleEmails(user?.email), [user?.email]);
   const myT=tasks.filter(t=>t.source!=='slack'&&(t.assigneeId===user.id||(t.assigneeEmail&&visibleEmails.has(t.assigneeEmail.toLowerCase())))&&t.status!=='resolved');
   const slkT=tasks.filter(t=>t.source==='slack'&&t.status!=='resolved');
   const alerts=tasks.filter(t=>t.isAlert&&t.status!=='resolved').length;

@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useContext, useCallback } from 'react';
 import { TOOLS, STATUSES, FUNCTIONS, FLAGS } from '../../data/constants';
-import { MEMBERS, DEFAULT_USER_ACCESS_MAP } from '../../data/members';
+import { MEMBERS } from '../../data/members';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import { CALENDAR_EVENTS } from '../../data/calendar';
 import { slaInfo, rel, getVisibleEmails } from '../../utils/helpers';
@@ -57,7 +57,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const orgResolved=allOrgTasks.filter(t=>t.status==='resolved');
 
   // ── Scoped metrics (hierarchical: own + direct/indirect reports) ────
-  const visibleEmails = useMemo(() => getVisibleEmails(user?.email, DEFAULT_USER_ACCESS_MAP), [user?.email]);
+  const visibleEmails = useMemo(() => getVisibleEmails(user?.email), [user?.email]);
   const inScope = useCallback(t => {
     if (scopeIds.includes(t.assigneeId)) return true;
     if (t.assigneeEmail && visibleEmails.has(t.assigneeEmail.toLowerCase())) return true;
