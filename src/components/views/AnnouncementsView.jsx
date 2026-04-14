@@ -226,13 +226,6 @@ const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowle
                 Start Acknowledging ({pendingForMe.length})
               </button>
             )}
-            {isLA && (
-              <button onClick={() => { setEditDraft(null); setShowCompose(true); }}
-                style={{ height: 36, padding: '0 18px', borderRadius: 128, border: 'none', background: '#1b1b1b', color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 7 }}>
-                <i className="bi-plus-lg" style={{ fontSize: 14 }}></i>
-                New
-              </button>
-            )}
           </div>
         </div>
 

@@ -155,3 +155,17 @@ export async function fetchZendeskGroups() {
 export async function fetchZendeskViews() {
   return apiFetch('/integrations/zendesk/views');
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ticket Comments & Actions
+// ─────────────────────────────────────────────────────────────────────────────
+export async function fetchTicketComments(ticketId) {
+  return apiFetch(`/queue/${ticketId}/comments`);
+}
+
+export async function postTicketAction(ticketId, actionPayload) {
+  return apiFetch(`/queue/${ticketId}/actions`, {
+    method: 'POST',
+    body: JSON.stringify(actionPayload),
+  });
+}

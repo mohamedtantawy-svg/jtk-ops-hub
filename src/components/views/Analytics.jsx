@@ -3,7 +3,6 @@ import { TOOLS, FUNCTIONS, FLAGS } from '../../data/constants';
 import { MEMBERS } from '../../data/members';
 import { HOURLY_VOLUME } from '../../data/feed';
 import { SettingsContext } from '../../App';
-import PageHeader from '../ui/PageHeader';
 import Avatar from '../ui/Avatar';
 
 const DATE_RANGES = [
@@ -108,7 +107,6 @@ const Analytics=({tasks,currentUser,subFilter,escalations=[]})=>{
   if(tasks.length===0){
     return(
       <div style={{flex:1,overflowY:'auto',padding:'0'}}>
-        <PageHeader icon="bi-bar-chart-line" iconBg="#f3eff8" iconColor="#1f74b3" title="Analytics" subtitle={todayStr}/>
         <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:300,color:'#9e9e9e'}}>
           <i className="bi-bar-chart" style={{fontSize:40,marginBottom:12,opacity:.4}}></i>
           <div style={{fontSize:15,fontWeight:600}}>No data available for the selected period</div>
@@ -120,19 +118,9 @@ const Analytics=({tasks,currentUser,subFilter,escalations=[]})=>{
 
   return(
     <div style={{flex:1,overflowY:'auto',padding:'0'}}>
-      {/* Header with filters */}
-      <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',padding:'24px 24px 0',flexWrap:'wrap',gap:12}}>
-        <div>
-          <div style={{display:'flex',alignItems:'center',gap:10}}>
-            <div style={{width:40,height:40,background:'#f3eff8',borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center'}}>
-              <i className="bi-bar-chart-line" style={{color:'#1f74b3',fontSize:18}}></i>
-            </div>
-            <div>
-              <h1 style={{fontSize:20,fontWeight:700,color:'#1b1b1b',margin:0}}>Analytics</h1>
-              <p style={{fontSize:13,color:'#9e9e9e',margin:'3px 0 0'}}>{subtitleText}</p>
-            </div>
-          </div>
-        </div>
+      {/* Filters */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 24px 0',flexWrap:'wrap',gap:10}}>
+        <p style={{fontSize:13,color:'#9e9e9e',margin:0}}>{subtitleText}</p>
         <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
           {/* Region filter */}
           {settings.analytics_show_region_filter!==false&&<div style={{display:'flex',background:'#f7f5f2',borderRadius:128,padding:3,gap:2}}>

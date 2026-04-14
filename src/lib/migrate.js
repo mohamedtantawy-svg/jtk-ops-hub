@@ -241,7 +241,7 @@ CREATE INDEX IF NOT EXISTS idx_members_active ON members(is_active);
 -- ── Check constraints ────────────────────────────────────────────────────────
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_tasks_status') THEN
-    ALTER TABLE tasks ADD CONSTRAINT chk_tasks_status CHECK (status IN ('open','in_progress','escalated','snoozed','resolved','closed'));
+    ALTER TABLE tasks ADD CONSTRAINT chk_tasks_status CHECK (status IN ('open','new','pending','in_progress','escalated','snoozed','waiting','resolved','closed'));
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_tasks_priority') THEN
     ALTER TABLE tasks ADD CONSTRAINT chk_tasks_priority CHECK (priority IN ('critical','high','medium','low'));

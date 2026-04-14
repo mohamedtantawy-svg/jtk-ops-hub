@@ -158,67 +158,201 @@ function DayCell({ cell, isToday, isSelected, isWeekend, onClick }) {
   );
 }
 
-function DayDetailPanel({ selectedDay, events }) {
+function TodayStrip({ todayStr, todayEvents }) {
   return (
     <div style={{
-      width: '40%',
-      flexShrink: 0,
       background: 'var(--surface)',
-      borderLeft: '1px solid var(--border)',
+      border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-md)',
+      boxShadow: 'var(--shadow-sm)',
+      padding: '12px 20px',
+      maxHeight: 120,
       display: 'flex',
       flexDirection: 'column',
-      overflow: 'hidden',
+      gap: 8,
     }}>
-      {/* Panel header */}
-      <div style={{
-        padding: '16px 18px 12px',
-        borderBottom: '1px solid var(--border)',
-        flexShrink: 0,
-      }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)', marginBottom: 2 }}>
-          {selectedDay ? formatDetailHeader(selectedDay) : 'Day Events'}
+      {/* Strip header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        <div style={{
+          width: 28,
+          height: 28,
+          borderRadius: 'var(--radius-pill)',
+          background: 'var(--purple)',
+          color: '#fff',
+          fontSize: 12,
+          fontWeight: 700,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+        }}>
+          {new Date(todayStr + 'T00:00:00').getDate()}
         </div>
-        {selectedDay && (
-          <div style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 500 }}>
-            {events.length === 0 ? 'No events' : `${events.length} event${events.length !== 1 ? 's' : ''}`}
-          </div>
-        )}
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)' }}>
+          Today
+        </span>
+        <span style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 500 }}>
+          {formatDetailHeader(todayStr)}
+        </span>
+        <span style={{
+          fontSize: 11,
+          fontWeight: 600,
+          color: 'var(--purple)',
+          background: '#ede9fe',
+          borderRadius: 'var(--radius-pill)',
+          padding: '2px 10px',
+          marginLeft: 4,
+        }}>
+          {todayEvents.length} event{todayEvents.length !== 1 ? 's' : ''}
+        </span>
       </div>
 
-      {/* Body */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '16px 18px' }}>
-        {!selectedDay ? (
+      {/* Horizontal scrollable event pills */}
+      <div style={{
+        display: 'flex',
+        gap: 8,
+        overflowX: 'auto',
+        flex: 1,
+        minHeight: 0,
+        paddingBottom: 2,
+      }}>
+        {todayEvents.length === 0 ? (
           <div style={{
             display: 'flex',
-            flexDirection: 'column',
             alignItems: 'center',
-            justifyContent: 'center',
-            height: '100%',
-            gap: 10,
+            gap: 6,
             color: 'var(--text-3)',
+            fontSize: 12,
+            fontWeight: 500,
+            padding: '4px 0',
           }}>
-            <i className="bi-calendar2" style={{ fontSize: 36, color: 'var(--border)' }} />
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)' }}>Select a day</div>
-            <div style={{ fontSize: 12, textAlign: 'center', maxWidth: 180 }}>
-              Click any date on the calendar to view its events
-            </div>
-          </div>
-        ) : events.length === 0 ? (
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            height: 200,
-            gap: 10,
-            color: 'var(--text-3)',
-          }}>
-            <i className="bi-calendar2" style={{ fontSize: 34, color: 'var(--border)' }} />
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-2)' }}>No events today</div>
-            <div style={{ fontSize: 12 }}>This day has no scheduled events.</div>
+            <i className="bi-calendar2-check" style={{ fontSize: 14 }} />
+            No events scheduled for today
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          todayEvents.map((evt) => {
+            const c = getEventColour(evt.type);
+            const meta = TYPE_CONFIG[evt.type] || { label: evt.type, icon: 'bi-calendar2' };
+            return (
+              <div
+                key={evt.id}
+                style={{
+                  background: c.bg,
+                  border: `1px solid ${c.border}`,
+                  borderRadius: 8,
+                  padding: '6px 12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  flexShrink: 0,
+                  minWidth: 160,
+                  maxWidth: 280,
+                }}
+              >
+                <i className={meta.icon} style={{ color: c.text, fontSize: 13, flexShrink: 0 }} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: c.text,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}>
+                    {evt.title}
+                  </div>
+                  {evt.time && (
+                    <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-2)', marginTop: 1 }}>
+                      {formatTime(evt.time)}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ExpandedDayEvents({ selectedDay, events, onClose }) {
+  if (!selectedDay) return null;
+
+  return (
+    <div style={{
+      background: 'var(--surface)',
+      border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-md)',
+      boxShadow: 'var(--shadow-sm)',
+      overflow: 'hidden',
+    }}>
+      {/* Section header */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '12px 20px',
+        borderBottom: '1px solid var(--border)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <i className="bi-calendar2-event" style={{ fontSize: 14, color: 'var(--purple)' }} />
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)' }}>
+            {formatDetailHeader(selectedDay)}
+          </span>
+          <span style={{
+            fontSize: 11,
+            fontWeight: 600,
+            color: 'var(--text-3)',
+            background: 'var(--bg)',
+            borderRadius: 'var(--radius-pill)',
+            padding: '2px 10px',
+          }}>
+            {events.length === 0 ? 'No events' : `${events.length} event${events.length !== 1 ? 's' : ''}`}
+          </span>
+        </div>
+        <button
+          onClick={onClose}
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            color: 'var(--text-3)',
+            fontSize: 16,
+            padding: '2px 6px',
+            borderRadius: 'var(--radius-sm, 4px)',
+            display: 'flex',
+            alignItems: 'center',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = 'var(--bg)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'none'}
+        >
+          <i className="bi-x-lg" />
+        </button>
+      </div>
+
+      {/* Events body */}
+      <div style={{ padding: '12px 20px' }}>
+        {events.length === 0 ? (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            padding: '16px 0',
+            color: 'var(--text-3)',
+            fontSize: 12,
+            fontWeight: 500,
+          }}>
+            <i className="bi-calendar2" style={{ fontSize: 18, color: 'var(--border)' }} />
+            No events scheduled for this day
+          </div>
+        ) : (
+          <div style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 10,
+          }}>
             {events.map((evt) => {
               const c = getEventColour(evt.type);
               const meta = TYPE_CONFIG[evt.type] || { label: evt.type, icon: 'bi-calendar2' };
@@ -230,11 +364,13 @@ function DayDetailPanel({ selectedDay, events }) {
                     border: '1px solid var(--border)',
                     borderLeft: `4px solid ${c.text}`,
                     borderRadius: 10,
-                    padding: '12px 14px',
+                    padding: '10px 14px',
                     boxShadow: 'var(--shadow-sm)',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 12,
+                    gap: 10,
+                    flex: '1 1 280px',
+                    maxWidth: 420,
                     transition: 'box-shadow 0.15s',
                   }}
                   onMouseEnter={e => e.currentTarget.style.boxShadow = 'var(--shadow-md)'}
@@ -242,31 +378,28 @@ function DayDetailPanel({ selectedDay, events }) {
                 >
                   {/* Icon badge */}
                   <div style={{
-                    width: 36,
-                    height: 36,
+                    width: 32,
+                    height: 32,
                     background: c.bg,
-                    borderRadius: 9,
+                    borderRadius: 8,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     flexShrink: 0,
                   }}>
-                    <i className={meta.icon} style={{ color: c.text, fontSize: 15 }} />
+                    <i className={meta.icon} style={{ color: c.text, fontSize: 14 }} />
                   </div>
 
                   {/* Content */}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    {/* Type + time row */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
                       <span style={{
                         fontSize: 10,
                         fontWeight: 700,
                         color: c.text,
                         background: c.bg,
                         borderRadius: 'var(--radius-pill)',
-                        padding: '2px 8px',
-                        textTransform: 'none',
-                        letterSpacing: 'normal',
+                        padding: '1px 7px',
                       }}>
                         {meta.label}
                       </span>
@@ -276,79 +409,33 @@ function DayDetailPanel({ selectedDay, events }) {
                         </span>
                       )}
                     </div>
-
-                    {/* Title */}
                     <div style={{
                       fontSize: 13,
                       fontWeight: 600,
                       color: 'var(--text-1)',
-                      marginBottom: evt.description || evt.attendees ? 4 : 0,
                       lineHeight: 1.35,
+                      marginBottom: evt.description ? 3 : 0,
                     }}>
                       {evt.title}
                     </div>
-
-                    {/* Description */}
                     {evt.description && (
                       <div style={{
-                        fontSize: 11.5,
+                        fontSize: 11,
                         color: 'var(--text-3)',
-                        lineHeight: 1.45,
-                        marginBottom: evt.attendees ? 5 : 0,
+                        lineHeight: 1.4,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
                       }}>
                         {evt.description}
                       </div>
                     )}
-
-                    {/* Attendees */}
-                    {evt.attendees && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <i className="bi-people" style={{ fontSize: 11, color: 'var(--text-3)' }} />
-                        <span style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 500 }}>
-                          {evt.attendees} attendee{evt.attendees !== 1 ? 's' : ''}
-                        </span>
-                      </div>
-                    )}
                   </div>
-
-                  {/* Chevron */}
-                  <i className="bi-chevron-right" style={{ fontSize: 13, color: 'var(--text-3)', flexShrink: 0 }} />
                 </div>
               );
             })}
           </div>
         )}
-      </div>
-
-      {/* Add Event footer */}
-      <div style={{
-        padding: '14px 18px',
-        borderTop: '1px solid var(--border)',
-        flexShrink: 0,
-      }}>
-        <button
-          style={{
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 7,
-            padding: '9px 0',
-            background: 'transparent',
-            border: '1px dashed var(--purple)',
-            borderRadius: 'var(--radius-pill)',
-            color: 'var(--purple)',
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: 'pointer',
-            transition: 'background 0.12s',
-          }}
-          onMouseEnter={e => e.currentTarget.style.background = '#f5f3ff'}
-          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-        >
-          <i className="bi-plus-circle" style={{ fontSize: 14 }} />
-          Add Event
-        </button>
       </div>
     </div>
   );
@@ -421,6 +508,8 @@ const CalendarView = ({ tasks }) => {
     setSelectedDay(prev => prev === dateStr ? null : dateStr);
   };
 
+  const todayEvents = CALENDAR_EVENTS.filter(e => e.date === todayStr);
+
   const selectedEvents = selectedDay
     ? CALENDAR_EVENTS.filter(e => e.date === selectedDay)
     : [];
@@ -443,195 +532,195 @@ const CalendarView = ({ tasks }) => {
         subtitle="Monthly calendar view with upcoming deadlines, reviews & meetings"
       />
 
-      {/* Two-panel body */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+      {/* Stacked layout: Today strip → Calendar grid → Expanded day events */}
+      <div style={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'auto',
+        padding: '20px 24px',
+        gap: 16,
+      }}>
 
-        {/* ── LEFT: Calendar grid (60%) ─────────────────────────── */}
+        {/* ── TOP: Today's events strip (full width, compact) ── */}
+        <TodayStrip todayStr={todayStr} todayEvents={todayEvents} />
+
+        {/* ── MIDDLE: Calendar grid (full width) ─────────────── */}
         <div style={{
-          width: '60%',
+          background: 'var(--surface)',
+          borderRadius: 'var(--radius-md)',
+          boxShadow: 'var(--shadow-sm)',
+          border: '1px solid var(--border)',
+          overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
-          overflow: 'hidden',
-          padding: '20px 24px',
-          gap: 0,
         }}>
 
-          {/* Calendar card */}
+          {/* Month navigation header */}
           <div style={{
-            background: 'var(--surface)',
-            borderRadius: 'var(--radius-md)',
-            boxShadow: 'var(--shadow-sm)',
-            border: '1px solid var(--border)',
-            overflow: 'hidden',
             display: 'flex',
-            flexDirection: 'column',
-            flex: 1,
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '16px 20px 12px',
+            borderBottom: '1px solid var(--border)',
           }}>
+            <button
+              onClick={() => goMonth(-1)}
+              style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-pill)',
+                padding: '6px 12px',
+                cursor: 'pointer',
+                color: 'var(--text-2)',
+                fontSize: 13,
+                display: 'flex',
+                alignItems: 'center',
+                boxShadow: 'var(--shadow-sm)',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--bg)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
+            >
+              <i className="bi-chevron-left" />
+            </button>
 
-            {/* Month navigation header */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '16px 20px 12px',
-              borderBottom: '1px solid var(--border)',
-            }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-1)' }}>
+                {MONTHS[currentMonth]} {currentYear}
+              </span>
               <button
-                onClick={() => goMonth(-1)}
+                onClick={goToday}
                 style={{
                   background: 'var(--surface)',
                   border: '1px solid var(--border)',
                   borderRadius: 'var(--radius-pill)',
-                  padding: '6px 12px',
+                  padding: '4px 13px',
                   cursor: 'pointer',
-                  color: 'var(--text-2)',
-                  fontSize: 13,
-                  display: 'flex',
-                  alignItems: 'center',
+                  color: 'var(--purple)',
+                  fontSize: 12,
+                  fontWeight: 600,
                   boxShadow: 'var(--shadow-sm)',
                 }}
                 onMouseEnter={e => e.currentTarget.style.background = 'var(--bg)'}
                 onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
               >
-                <i className="bi-chevron-left" />
+                Today
               </button>
+            </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-1)' }}>
-                  {MONTHS[currentMonth]} {currentYear}
-                </span>
-                <button
-                  onClick={goToday}
-                  style={{
-                    background: 'var(--surface)',
-                    border: '1px solid var(--border)',
-                    borderRadius: 'var(--radius-pill)',
-                    padding: '4px 13px',
-                    cursor: 'pointer',
-                    color: 'var(--purple)',
-                    fontSize: 12,
-                    fontWeight: 600,
-                    boxShadow: 'var(--shadow-sm)',
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'var(--bg)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
-                >
-                  Today
-                </button>
+            <button
+              onClick={() => goMonth(1)}
+              style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-pill)',
+                padding: '6px 12px',
+                cursor: 'pointer',
+                color: 'var(--text-2)',
+                fontSize: 13,
+                display: 'flex',
+                alignItems: 'center',
+                boxShadow: 'var(--shadow-sm)',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--bg)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
+            >
+              <i className="bi-chevron-right" />
+            </button>
+          </div>
+
+          {/* Day-of-week headers: Mon -> Sun */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(7, 1fr)',
+            borderBottom: '1px solid var(--border)',
+          }}>
+            {DAY_LABELS.map((d, i) => (
+              <div
+                key={d}
+                style={{
+                  textAlign: 'center',
+                  fontSize: 'var(--font-xs, 11px)',
+                  fontWeight: 600,
+                  color: 'var(--text-muted)',
+                  letterSpacing: 'normal',
+                  textTransform: 'none',
+                  padding: '10px 0',
+                  background: (i === 5 || i === 6) ? '#fafafa' : 'var(--surface)',
+                  borderRight: i < 6 ? '1px solid var(--border)' : 'none',
+                }}
+              >
+                {d}
               </div>
+            ))}
+          </div>
 
-              <button
-                onClick={() => goMonth(1)}
-                style={{
-                  background: 'var(--surface)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-pill)',
-                  padding: '6px 12px',
-                  cursor: 'pointer',
-                  color: 'var(--text-2)',
-                  fontSize: 13,
-                  display: 'flex',
-                  alignItems: 'center',
-                  boxShadow: 'var(--shadow-sm)',
-                }}
-                onMouseEnter={e => e.currentTarget.style.background = 'var(--bg)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
-              >
-                <i className="bi-chevron-right" />
-              </button>
-            </div>
+          {/* Grid rows */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(7, 1fr)',
+          }}>
+            {calendarDays.map((cell, i) => {
+              const isToday    = cell.date === todayStr;
+              const isSelected = cell.date === selectedDay;
+              const colIndex   = i % 7;
+              const isWeekend  = colIndex === 5 || colIndex === 6;
 
-            {/* Day-of-week headers: Mon → Sun */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(7, 1fr)',
-              borderBottom: '1px solid var(--border)',
-            }}>
-              {DAY_LABELS.map((d, i) => (
-                <div
-                  key={d}
+              return (
+                <DayCell
+                  key={i}
+                  cell={cell}
+                  isToday={isToday}
+                  isSelected={isSelected}
+                  isWeekend={isWeekend}
+                  onClick={handleDayClick}
+                />
+              );
+            })}
+          </div>
+
+          {/* Legend */}
+          <div style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 'var(--space-4)',
+            padding: '12px 20px',
+            borderTop: '1px solid var(--border)',
+          }}>
+            {legendEntries.map(({ key, label }) => {
+              const c = EVENT_COLOURS[key];
+              return (
+                <span
+                  key={key}
                   style={{
-                    textAlign: 'center',
-                    fontSize: 'var(--font-xs, 11px)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    fontSize: 11,
                     fontWeight: 600,
-                    color: 'var(--text-muted)',
-                    letterSpacing: 'normal',
-                    textTransform: 'none',
-                    padding: '10px 0',
-                    background: (i === 5 || i === 6) ? '#fafafa' : 'var(--surface)',
-                    borderRight: i < 6 ? '1px solid var(--border)' : 'none',
+                    color: 'var(--text-3)',
                   }}
                 >
-                  {d}
-                </div>
-              ))}
-            </div>
-
-            {/* Grid rows */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(7, 1fr)',
-              flex: 1,
-              overflow: 'hidden',
-            }}>
-              {calendarDays.map((cell, i) => {
-                const isToday    = cell.date === todayStr;
-                const isSelected = cell.date === selectedDay;
-                const colIndex   = i % 7;
-                const isWeekend  = colIndex === 5 || colIndex === 6;
-
-                return (
-                  <DayCell
-                    key={i}
-                    cell={cell}
-                    isToday={isToday}
-                    isSelected={isSelected}
-                    isWeekend={isWeekend}
-                    onClick={handleDayClick}
-                  />
-                );
-              })}
-            </div>
-
-            {/* Legend */}
-            <div style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 'var(--space-4)',
-              padding: '12px 20px',
-              borderTop: '1px solid var(--border)',
-            }}>
-              {legendEntries.map(({ key, label }) => {
-                const c = EVENT_COLOURS[key];
-                return (
-                  <span
-                    key={key}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 5,
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: 'var(--text-3)',
-                    }}
-                  >
-                    <span style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: 3,
-                      background: c.text,
-                      display: 'inline-block',
-                    }} />
-                    {label}
-                  </span>
-                );
-              })}
-            </div>
+                  <span style={{
+                    width: 10,
+                    height: 10,
+                    borderRadius: 3,
+                    background: c.text,
+                    display: 'inline-block',
+                  }} />
+                  {label}
+                </span>
+              );
+            })}
           </div>
         </div>
 
-        {/* ── RIGHT: Day detail panel (40%) ────────────────────── */}
-        <DayDetailPanel selectedDay={selectedDay} events={selectedEvents} />
+        {/* ── BOTTOM: Expanded day events (when a day is clicked) */}
+        <ExpandedDayEvents
+          selectedDay={selectedDay}
+          events={selectedEvents}
+          onClose={() => setSelectedDay(null)}
+        />
       </div>
     </div>
   );
