@@ -5,6 +5,7 @@ import { NextResponse } from 'next/server';
 import { isDeelConfigured } from '../../../../../src/lib/deel-api';
 import { isJiraConfigured } from '../../../../../src/lib/jira-api';
 import { isSlackConfigured } from '../../../../../src/lib/slack-api';
+import { isZendeskConfigured } from '../../../../../src/lib/zendesk-api';
 
 export async function GET() {
   return NextResponse.json({
@@ -26,6 +27,12 @@ export async function GET() {
         label: 'Slack',
         description: 'Channels, messages, users',
         endpoints: ['/integrations/slack/channels', '/integrations/slack/users'],
+      },
+      zendesk: {
+        configured: isZendeskConfigured(),
+        label: 'Zendesk',
+        description: 'Tickets, search, users, views, groups',
+        endpoints: ['/integrations/zendesk/tickets', '/integrations/zendesk/search', '/integrations/zendesk/users', '/integrations/zendesk/views', '/integrations/zendesk/groups'],
       },
     },
   });
