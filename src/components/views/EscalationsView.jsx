@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useContext } from 'react';
-import { PermissionsContext, SettingsContext } from '../../App';
+import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import { MEMBERS } from '../../data/members';
 import { FLAGS } from '../../data/constants';
 import Avatar from '../ui/Avatar';
@@ -371,6 +371,7 @@ const EscalationsView = ({ escalations, setEscalations, currentUser, onNewEscala
 
   const perms = useContext(PermissionsContext);
   const settings = useContext(SettingsContext);
+  const { jiraData, slackData } = useContext(IntegrationsContext);
   const isAdmin = perms?.dataScope==='all_tasks';
   const isLead  = perms?.dataScope==='team_tasks';
   const isMgr   = isAdmin || isLead;
@@ -565,6 +566,23 @@ const EscalationsView = ({ escalations, setEscalations, currentUser, onNewEscala
             );
           })}
         </div>
+        {/* Live integration indicators */}
+        {(jiraData?.isAvailable||slackData?.isAvailable)&&(
+          <div style={{display:'flex',gap:8,padding:'8px 0',flexWrap:'wrap'}}>
+            {slackData?.isAvailable&&slackData.escalationMessages&&(
+              <span style={{fontSize:11,fontWeight:600,color:'#611f69',background:'#f3e8f9',padding:'3px 10px',borderRadius:99,display:'inline-flex',alignItems:'center',gap:5}}>
+                <span style={{width:5,height:5,borderRadius:'50%',background:'#611f69',display:'inline-block'}}/>
+                {slackData.escalationMessages.length} Slack escalation messages
+              </span>
+            )}
+            {jiraData?.isAvailable&&(
+              <span style={{fontSize:11,fontWeight:600,color:'#0052CC',background:'#e6efff',padding:'3px 10px',borderRadius:99,display:'inline-flex',alignItems:'center',gap:5}}>
+                <span style={{width:5,height:5,borderRadius:'50%',background:'#0052CC',display:'inline-block'}}/>
+                {jiraData.issues?.length||0} Jira issues linked
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Local success toast */}

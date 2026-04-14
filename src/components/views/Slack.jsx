@@ -1,5 +1,5 @@
 import { useState, useContext } from 'react';
-import { PermissionsContext, SettingsContext } from '../../App';
+import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import { MEMBERS } from '../../data/members';
 import { FLAGS } from '../../data/constants';
 import { rel, getUrl } from '../../utils/helpers';
@@ -65,12 +65,21 @@ const Slack=({tasks,setTasks,onEscalMgr,addToast,user})=>{
 
   const perms=useContext(PermissionsContext);
   const settings=useContext(SettingsContext);
+  const { slackData } = useContext(IntegrationsContext);
   const isAgent=perms?.dataScope==='own_tasks_only';
 
   return(
     <div style={{flex:1,display:'flex',flexDirection:'column',overflowY:'hidden'}}>
       <PageHeader icon="bi-chat-dots-fill" iconBg="#f3eff8" iconColor="#c4b1f9" title="Slack Messages" subtitle={`${open.length} open · Review and action each message`}/>
       <div style={{flex:1,overflowY:'auto',padding:'16px 24px'}}>
+      {slackData?.isAvailable&&(
+        <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 14px',borderRadius:10,background:'#f0fdf4',border:'1px solid #bbf7d0',marginBottom:14,fontSize:12}}>
+          <span style={{width:6,height:6,borderRadius:'50%',background:'#16a34a',display:'inline-block'}}/>
+          <span style={{fontWeight:600,color:'#16a34a'}}>Slack API Connected</span>
+          <span style={{color:'#616161'}}>— {slackData.channels?.length||0} channels visible{slackData.escalationMessages?`, ${slackData.escalationMessages.length} escalation messages`:''}</span>
+          <button onClick={slackData.refresh} style={{marginLeft:'auto',fontSize:11,color:'#616161',background:'white',border:'1px solid #e8e8e8',borderRadius:6,padding:'2px 8px',cursor:'pointer'}}>Refresh</button>
+        </div>
+      )}
 
       {/* ── Internal pill tabs ─────────────────────────────────────────── */}
       <div style={{display:'flex',background:'#f7f5f2',borderRadius:128,padding:3,gap:2,marginBottom:20,width:'fit-content'}}>

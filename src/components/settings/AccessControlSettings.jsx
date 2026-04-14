@@ -562,9 +562,9 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
         })}
       </div>
 
-      {activeTab===0&&<AccessTypesList/>}
-      {activeTab===1&&<AccessTypeEditor/>}
-      {activeTab===2&&<PeopleDirectory/>}
+      {activeTab===0&&AccessTypesList()}
+      {activeTab===1&&AccessTypeEditor()}
+      {activeTab===2&&PeopleDirectory()}
     </div>
   );
 };

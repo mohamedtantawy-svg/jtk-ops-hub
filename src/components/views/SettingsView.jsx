@@ -8,6 +8,7 @@ import Avatar from '../ui/Avatar';
 import EmptyState from '../ui/EmptyState';
 import ZapierSettings from '../settings/ZapierSettings';
 import AccessControlSettings from '../settings/AccessControlSettings';
+import IntegrationsSettings from '../settings/IntegrationsSettings';
 
 const SETTINGS_GROUPS=[
   {
@@ -17,6 +18,7 @@ const SETTINGS_GROUPS=[
       {id:'queue',     icon:'bi-inbox-fill',              label:'Queue & Tasks'},
       {id:'sources',   icon:'bi-plug-fill',               label:'Source Integrations'},
       {id:'zapier',    icon:'bi-lightning-charge-fill',    label:'Zapier Integrations'},
+      {id:'live',      icon:'bi-cloud-arrow-down-fill',    label:'Live Integrations'},
     ],
   },
   {
@@ -352,6 +354,8 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
       </div>);
 
       case 'zapier': return(<div style={{margin:'-20px -28px',height:'calc(100% + 40px)'}}><ZapierSettings addToast={addToast} tasks={tasks} setTasks={setTasks}/></div>);
+
+      case 'live': return(<div style={{margin:'-20px -28px',height:'calc(100% + 40px)'}}><IntegrationsSettings addToast={addToast}/></div>);
 
       case 'ai': return(<div>
         <SectionHeader icon="bi-stars" title="AI & Suggested Replies" desc="Control how AI-generated reply suggestions behave for your team."/>

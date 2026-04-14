@@ -99,10 +99,11 @@ export const ADMIN_EMAILS_LIST = [
   'ziyaad.mahomed@deel.com',
   'dw@deel.com',
   'albert.didi@deel.com',
+  'alex@deel.com',
 ];
 
 export const ADMIN_EMAILS = new Set(ADMIN_EMAILS_LIST);
 
 // Bump this version whenever the admin list changes to force-refresh
 // all users' localStorage on next page load.
-export const ADMIN_LIST_VERSION = '2';
+export const ADMIN_LIST_VERSION = '3';

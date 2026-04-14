@@ -61,6 +61,17 @@ const _buildAccessMap = () => {
     country: 'AE',
   });
 
+  Object.assign(map['alex@deel.com'], {
+    name: 'Alex Bouaziz',
+    title: 'CEO & Co-Founder',
+    startDate: '2019-01-01',
+    managerEmail: null,
+    region: 'ALL',
+    team: 'Executive',
+    department: 'Executive',
+    country: 'US',
+  });
+
   return map;
 };
 
