@@ -42,24 +42,37 @@ const ZD_PRIORITY_MAP = {
 
 // ── Jira status → app status (case-insensitive lookup) ───────────────────────
 const JIRA_STATUS_MAP = {
+  // New / To Do
   'to do':               'new',
   'open':                'new',
   'backlog':             'new',
   'new':                 'new',
+  // In Progress (active work)
   'in progress':         'in_progress',
   'in review':           'in_progress',
   'in development':      'in_progress',
   'code review':         'in_progress',
   'under review':        'in_progress',
+  'hrx review':          'in_progress',
+  'prm review':          'in_progress',
+  'eor signing':         'in_progress',
+  // Waiting (blocked on external party)
   'blocked':             'waiting',
   'waiting for support': 'waiting',
   'on hold':             'waiting',
   'pending':             'waiting',
+  'client approval':     'waiting',
+  'pending wet ink':     'waiting',
+  'pending end date':    'waiting',
+  'pending another team':'waiting',
+  // Resolved / Done
   'done':                'resolved',
   'closed':              'resolved',
   'resolved':            'resolved',
+  'solved':              'resolved',
   'completed':           'resolved',
   'cancelled':           'resolved',
+  'rejected':            'resolved',
 };
 
 // ── Jira priority → app priority ─────────────────────────────────────────────
@@ -257,7 +270,7 @@ function buildJiraJql() {
 
   // Jira: issues assigned to any registered email, not completed
   // Also include recently done (last 4h) for transition detection
-  return `assignee IN (${emailsList}) AND (status NOT IN (Done, Closed, Resolved, Cancelled) OR (status IN (Done, Closed, Resolved) AND updated >= -4h)) ORDER BY updated DESC`;
+  return `assignee IN (${emailsList}) AND (status NOT IN (Done, Closed, Resolved, Solved, Cancelled, Rejected, Completed) OR (status IN (Done, Closed, Resolved, Solved, Completed) AND updated >= -4h)) ORDER BY updated DESC`;
 }
 
 // ── Fetch Jira issues (paginated, by registered emails) ─────────────────────
