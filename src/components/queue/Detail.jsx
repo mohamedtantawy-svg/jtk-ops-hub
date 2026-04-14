@@ -63,7 +63,7 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
     return () => document.removeEventListener('mousedown', h);
   }, [showTranslateDD]);
 
-  const assignee=MEMBERS.find(m=>m.id===task.assigneeId);
+  const assignee=MEMBERS.find(m=>m.id===task.assigneeId)||(task.assigneeEmail?MEMBERS.find(m=>m.email===task.assigneeEmail):null)||{id:null,name:task.assigneeName||'Unassigned',initials:(task.assigneeName||'U').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(),email:task.assigneeEmail};
   const taskEscalation=escalations.find(e=>e.taskId===task.id);
   const sla=slaInfo(task);
 

@@ -3,14 +3,14 @@ import React, { useState, useEffect, useRef, useCallback, createContext } from '
 import { TOOLS, STATUSES, FUNCTIONS, FLAGS } from './data/constants';
 import { INITIAL_PROJECTS } from './data/projects';
 import { INITIAL_REQUESTS } from './data/requests';
-import { MEMBERS } from './data/members';
-import { TASKS0, INITIAL_ACTIVITY, INITIAL_NOTES } from './data/tasks';
+import { MEMBERS, MEMBERS_BY_EMAIL, DEFAULT_USER_ACCESS_MAP } from './data/members';
+import { INITIAL_ACTIVITY, INITIAL_NOTES } from './data/tasks';
 import { FEED_EVENTS } from './data/feed';
 import { ALL_AGENT_IDS } from './data/comms';
 import { useAnnouncements } from './hooks/useAnnouncements';
+import { useQueueSync } from './hooks/useQueueSync';
 import { DEFAULT_SETTINGS } from './data/settings';
 import { DEFAULT_ACCESS_TYPES } from './data/accessControl';
-import { DEFAULT_USER_ACCESS_MAP } from './data/members';
 import { ADMIN_LIST_VERSION } from './data/adminEmails';
 import { usePermissions } from './hooks/usePermissions';
 import { slaInfo } from './utils/helpers';
@@ -27,6 +27,7 @@ import { fetchEscalations as apiFetchEscalations, createEscalation as apiCreateE
 import { fetchProjects as apiFetchProjects, createProject as apiCreateProject, updateProject as apiUpdateProject } from './services/projectsApi';
 import { fetchRequests as apiFetchRequests, createRequest as apiCreateRequest, updateRequest as apiUpdateRequest } from './services/requestsApi';
 import { createNote as apiCreateNote } from './services/notesApi';
+import { reassignQueueTicket } from './services/integrationsApi';
 import { normalizeTask, normalizeEscalation, normalizeProject, normalizeRequest, normalizeMember, denormalizeTaskForCreate, feStatusToBe } from './services/normalize';
 
 import DeelTopNav from './components/nav/DeelTopNav';
@@ -85,7 +86,10 @@ const App=()=>{
   });
   const [view,setView]=useState('briefing');
   const [selTask,setSelTask]=useState(null);
-  const [tasks,setTasks]=useState(TASKS0);
+  // ── Live queue sync (Zendesk + Jira) ─────────────────────────────────────
+  const queueSync = useQueueSync(!!user);
+  const tasks = queueSync.tasks;
+  const setTasks = queueSync.setTasks;
   const [feed,setFeed]=useState(FEED_EVENTS);
   const [notes,setNotes]=useState(INITIAL_NOTES);
   const [escalations,setEscalations]=useState([
@@ -180,28 +184,25 @@ const App=()=>{
   const [fUnassigned,setFUnassigned]=useState(false);
   const [backendOnline,setBackendOnline]=useState(false);
 
-  // ── Fetch data from BE on mount (graceful fallback to mock data) ──────────
+  // ── Fetch supplementary data from BE on mount (escalations, projects, requests) ──
+  // Tasks are now handled by useQueueSync (live from Zendesk + Jira)
   useEffect(()=>{
     if(!user) return;
     let cancelled=false;
     (async()=>{
       try{
-        const [tasksRes, escalRes, projRes, reqRes]=await Promise.all([
-          apiFetchTasks({limit:200}).catch(()=>null),
+        const [escalRes, projRes, reqRes]=await Promise.all([
           apiFetchEscalations({limit:100}).catch(()=>null),
           apiFetchProjects({limit:100}).catch(()=>null),
           apiFetchRequests({}).catch(()=>null),
         ]);
         if(cancelled) return;
-        if(tasksRes?.items){
-          setBackendOnline(true);
-          setTasks(tasksRes.items.map(normalizeTask).filter(Boolean));
-        }
+        setBackendOnline(true);
         if(escalRes?.items) setEscalations(escalRes.items.map(normalizeEscalation).filter(Boolean));
         if(projRes?.items) setProjects(projRes.items.map(normalizeProject).filter(Boolean));
         if(reqRes?.items) setRequests(reqRes.items.map(normalizeRequest).filter(Boolean));
       }catch(e){
-        // Backend unreachable — keep using mock data
+        // Backend unreachable — keep using local data
         if(!cancelled) setBackendOnline(false);
       }
     })();
@@ -222,7 +223,7 @@ const App=()=>{
   const deelData = useDeelData(integrations.isConfigured('deel'));
   const jiraData = useJiraData(integrations.isConfigured('jira'));
   const slackData = useSlackData(integrations.isConfigured('slack'));
-  const integrationsCtx = { integrations, deelData, jiraData, slackData };
+  const integrationsCtx = { integrations, deelData, jiraData, slackData, queueSync };
 
   // ── Toast helpers ──────────────────────────────────────────────────────────
   const addToast=useCallback((type,title,body,onUndo)=>{
@@ -290,22 +291,33 @@ const App=()=>{
     apiCreateEscalation({taskId:form.taskId||undefined,subject:form.subject,reason:form.reason,managerId:form.managerId?String(form.managerId):undefined}).catch(()=>{});
   },[user,addToast,perms]);
 
-  // ── Reassign handler (gated by can_reassign) ──────────────────────────────
-  const confirmReassign=useCallback((task,newId,note)=>{
+  // ── Reassign handler (email-based — pushes to Zendesk/Jira) ────────────────
+  const confirmReassign=useCallback((task,newEmail,note)=>{
     if(!perms?.canDo('can_reassign'))return;
-    const newAgent=MEMBERS.find(m=>m.id===newId);
+    const member=MEMBERS_BY_EMAIL[newEmail];
+    const newName=member?.name||newEmail;
+    const newMemberId=member?MEMBERS.findIndex(m=>m.email===newEmail)+1:null;
     const now=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
     if(bulkIds&&bulkIds.length>0){
       const idSet=new Set(bulkIds);
-      setTasks(prev=>prev.map(t=>idSet.has(t.id)?{...t,assigneeId:newId}:t));
-      setActivity(prev=>{const next={...prev};bulkIds.forEach(id=>{next[id]=[...(next[id]||[]),{type:'assigned',text:`Bulk reassigned to ${newAgent?.name ?? 'Agent'}${note?` — ${note}`:''}`,user:user.name,time:now}];});return next;});
-      addToast('success','Bulk Reassign',`${bulkIds.length} tasks → ${newAgent?.name?.split(' ')[0] ?? 'Agent'}`);
+      setTasks(prev=>prev.map(t=>idSet.has(t.id)?{...t,assigneeId:newMemberId,assigneeEmail:newEmail,assigneeName:newName}:t));
+      setActivity(prev=>{const next={...prev};bulkIds.forEach(id=>{next[id]=[...(next[id]||[]),{type:'assigned',text:`Bulk reassigned to ${newName}${note?` — ${note}`:''}`,user:user.name,time:now}];});return next;});
+      addToast('success','Bulk Reassign',`${bulkIds.length} tasks → ${newName.split(' ')[0]}`);
+      // Push each ticket to Zendesk/Jira in background
+      bulkIds.forEach(id=>{
+        reassignQueueTicket(id,newEmail).catch(err=>console.warn(`[reassign] ${id} failed:`,err.message));
+      });
     } else {
-      setTasks(prev=>prev.map(t=>t.id===task.id?{...t,assigneeId:newId}:t));
-      setActivity(prev=>({...prev,[task.id]:[...(prev[task.id]||[]),{type:'assigned',text:`Reassigned to ${newAgent?.name ?? 'Agent'}${note?` — ${note}`:''}`,user:user.name,time:now}]}));
-      addToast('success','Task Reassigned',`→ ${newAgent?.name?.split(' ')[0] ?? 'Agent'} · ${task.id}`);
-      // BE sync
-      apiAssignTask(task._beId||task.id,String(newId)).catch(()=>{});
+      setTasks(prev=>prev.map(t=>t.id===task.id?{...t,assigneeId:newMemberId,assigneeEmail:newEmail,assigneeName:newName}:t));
+      setActivity(prev=>({...prev,[task.id]:[...(prev[task.id]||[]),{type:'assigned',text:`Reassigned to ${newName}${note?` — ${note}`:''}`,user:user.name,time:now}]}));
+      addToast('success','Task Reassigned',`→ ${newName.split(' ')[0]} · ${task.id}`);
+      // Push to Zendesk/Jira (real reassignment)
+      reassignQueueTicket(task.id,newEmail).catch(err=>{
+        console.warn('[reassign] Push to source failed:',err.message);
+        addToast('warning','Sync Warning',`Local reassign ok, but source system update failed for ${task.id}`);
+      });
+      // Legacy BE sync
+      apiAssignTask(task._beId||task.id,String(newMemberId||'')).catch(()=>{});
     }
     setReassignModal(null);
     setBulkIds(null);

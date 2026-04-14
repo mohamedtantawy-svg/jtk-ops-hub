@@ -46,20 +46,33 @@ export async function jiraFetch(endpoint, options = {}) {
 // ── Search (JQL) ─────────────────────────────────────────────────────────────
 
 export async function searchIssues(jql, params = {}) {
-  const body = {
-    jql,
-    maxResults: params.maxResults || 50,
-    startAt: params.startAt || 0,
-    fields: params.fields || [
-      'summary', 'status', 'assignee', 'reporter', 'priority',
-      'created', 'updated', 'issuetype', 'project', 'labels',
-      'comment', 'description',
-    ],
-  };
-  return jiraFetch('/search', {
-    method: 'POST',
-    body: JSON.stringify(body),
-  });
+  const fields = params.fields || [
+    'summary', 'status', 'assignee', 'reporter', 'priority',
+    'created', 'updated', 'issuetype', 'project', 'labels',
+    'comment', 'description',
+  ];
+  const maxResults = params.maxResults || 50;
+
+  // Jira Cloud has migrated to /search/jql (GET) — use query params
+  const qs = new URLSearchParams();
+  qs.set('jql', jql);
+  qs.set('maxResults', String(maxResults));
+  qs.set('fields', fields.join(','));
+  if (params.startAt) qs.set('startAt', String(params.startAt));
+
+  try {
+    return await jiraFetch(`/search/jql?${qs.toString()}`);
+  } catch (err) {
+    // Fall back to legacy POST /search if new endpoint fails
+    if (err.status === 404 || err.status === 405) {
+      const body = { jql, maxResults, startAt: params.startAt || 0, fields };
+      return jiraFetch('/search', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+    }
+    throw err;
+  }
 }
 
 // ── Single Issue ─────────────────────────────────────────────────────────────
@@ -119,6 +132,21 @@ export async function transitionIssue(issueKey, transitionId) {
 
 export async function getTransitions(issueKey) {
   return jiraFetch(`/issue/${issueKey}/transitions`);
+}
+
+// ── Reassign Issue ──────────────────────────────────────────────────────
+
+export async function reassignIssue(issueKey, assigneeEmail) {
+  // Look up Jira account by email
+  const users = await jiraFetch(`/user/search?query=${encodeURIComponent(assigneeEmail)}`);
+  const user = users?.[0];
+  if (!user) throw new Error(`Jira user not found for email: ${assigneeEmail}`);
+
+  // Update the issue's assignee
+  return jiraFetch(`/issue/${issueKey}/assignee`, {
+    method: 'PUT',
+    body: JSON.stringify({ accountId: user.accountId }),
+  });
 }
 
 // ── Projects ─────────────────────────────────────────────────────────────────

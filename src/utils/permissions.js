@@ -1,3 +1,5 @@
+import { TEAM_MEMBERS, MEMBERS_BY_EMAIL, getVisibleEmailsForAccess, ALL_EMAILS_SET } from '../data/members';
+
 // Resolve the access type for a user given their email
 export const resolveUserPermissions = (userEmail, accessTypes, userAccessMap) => {
   if (!userEmail || !userAccessMap || !accessTypes) return null;
@@ -18,23 +20,38 @@ export const getDataScope = (accessType) => accessType?.dataScope || 'own_tasks_
 export const hasAdminPower = (accessType, powerId) =>
   Array.isArray(accessType?.adminPowers) && accessType.adminPowers.includes(powerId);
 
-// Scope tasks based on permissions + user context
-export const scopeTasks = (tasks, user, accessType, allMembers) => {
+// ── Scope tasks based on access level + hierarchy ─────────────────────────
+// Uses getVisibleEmailsForAccess which checks the manager chain:
+//   Agent           → own tasks only
+//   Team Lead       → own + direct reports
+//   Regional Manager→ own + all reports (TLs + their agents)
+//   Admin           → all tasks
+export const scopeTasks = (tasks, user, accessType, _allMembers) => {
   const scope = getDataScope(accessType);
   if (scope === 'all_tasks') return tasks;
-  if (scope === 'team_tasks') {
-    const teamMembers = allMembers.filter(m => m.team === user.team || m.region === user.region);
-    const teamIds = teamMembers.map(m => m.id);
-    return tasks.filter(t => teamIds.includes(t.assigneeId) || t.assigneeId === user.id || !t.assigneeId);
-  }
-  // own_tasks_only
-  return tasks.filter(t => t.assigneeId === user.id || !t.assigneeId);
+
+  // Build the set of visible emails based on the user's position in the hierarchy
+  const visibleEmails = getVisibleEmailsForAccess(user?.email);
+
+  return tasks.filter(t => {
+    // Match by email (primary — live data from Zendesk/Jira)
+    if (t.assigneeEmail && visibleEmails.has(t.assigneeEmail.toLowerCase())) return true;
+    // Match by member ID (backward compat — legacy data)
+    if (t.assigneeId) {
+      const member = TEAM_MEMBERS[t.assigneeId - 1];
+      if (member && visibleEmails.has(member.email)) return true;
+    }
+    // Unassigned tickets visible to everyone
+    if (!t.assigneeId && !t.assigneeEmail) return true;
+    return false;
+  });
 };
 
-// Scope members based on data scope
-export const scopeMembers = (members, user, accessType) => {
+// ── Scope members for team views ──────────────────────────────────────────
+export const scopeMembers = (allMembers, user, accessType) => {
   const scope = getDataScope(accessType);
-  if (scope === 'all_tasks') return members;
-  if (scope === 'team_tasks') return members.filter(m => m.team === user.team || m.region === user.region);
-  return members.filter(m => m.id === user.id);
+  if (scope === 'all_tasks') return allMembers;
+
+  const visibleEmails = getVisibleEmailsForAccess(user?.email);
+  return allMembers.filter(m => visibleEmails.has(m.email?.toLowerCase()));
 };

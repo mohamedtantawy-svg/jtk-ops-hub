@@ -1,13 +1,15 @@
-import { useState, useContext } from 'react';
+import { useState, useContext, useMemo } from 'react';
 import { MEMBERS } from '../../data/members';
 import { FLAGS } from '../../data/constants';
+import { getVisibleEmails } from '../../utils/helpers';
 import Avatar from '../ui/Avatar';
 import NotifBell from './NotifBell';
 import { PermissionsContext } from '../../App';
 
 const Sidebar=({user,view,setView,tasks,setTask,escalCount,onSearch,open,setOpen,notifs,markAllRead,onCreateTask,comms})=>{
   const perms = useContext(PermissionsContext);
-  const myT=tasks.filter(t=>t.source!=='slack'&&t.assigneeId===user.id&&t.status!=='resolved');
+  const visibleEmails = useMemo(() => getVisibleEmails(user?.email), [user?.email]);
+  const myT=tasks.filter(t=>t.source!=='slack'&&(t.assigneeId===user.id||(t.assigneeEmail&&visibleEmails.has(t.assigneeEmail.toLowerCase())))&&t.status!=='resolved');
   const slkT=tasks.filter(t=>t.source==='slack'&&t.status!=='resolved');
   const alerts=tasks.filter(t=>t.isAlert&&t.status!=='resolved').length;
   const isLA=perms?.dataScope!=='own_tasks_only';

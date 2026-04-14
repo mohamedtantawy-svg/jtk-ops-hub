@@ -141,3 +141,27 @@ export async function createTicket(data) {
     body: JSON.stringify({ ticket: data }),
   });
 }
+
+// ── Reassign Ticket ─────────────────────────────────────────────────────
+
+export async function reassignTicket(ticketId, assigneeEmail) {
+  // First look up the Zendesk user by email
+  const searchRes = await zendeskFetch(`/users/search.json?query=email:${encodeURIComponent(assigneeEmail)}`);
+  const user = searchRes?.users?.[0];
+  if (!user) throw new Error(`Zendesk user not found for email: ${assigneeEmail}`);
+
+  // Update the ticket's assignee
+  return zendeskFetch(`/tickets/${ticketId}.json`, {
+    method: 'PUT',
+    body: JSON.stringify({ ticket: { assignee_id: user.id } }),
+  });
+}
+
+// ── Batch Users (resolve IDs → emails/names) ───────────────────────────
+
+export async function showManyUsers(ids) {
+  if (!ids || ids.length === 0) return { users: [] };
+  // Zendesk allows up to 100 IDs per call
+  const batch = ids.slice(0, 100);
+  return zendeskFetch(`/users/show_many.json?ids=${batch.join(',')}`);
+}

@@ -114,3 +114,44 @@ export async function fetchSlackUsers({ email, limit } = {}) {
   const qs = params.toString();
   return apiFetch(`/integrations/slack/users${qs ? `?${qs}` : ''}`);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Unified Queue — live sync from Zendesk + Jira
+// ─────────────────────────────────────────────────────────────────────────────
+export async function fetchQueue({ bustCache } = {}) {
+  const qs = bustCache ? `?_t=${Date.now()}` : '';
+  return apiFetch(`/queue${qs}`);
+}
+
+// Reassign a ticket in Zendesk/Jira via our backend
+export async function reassignQueueTicket(ticketId, assigneeEmail) {
+  return apiFetch('/queue/reassign', {
+    method: 'POST',
+    body: JSON.stringify({ ticketId, assigneeEmail }),
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Zendesk
+// ─────────────────────────────────────────────────────────────────────────────
+export async function fetchZendeskTickets({ page, per_page, sort_by, sort_order } = {}) {
+  const params = new URLSearchParams();
+  if (page) params.set('page', String(page));
+  if (per_page) params.set('per_page', String(per_page));
+  if (sort_by) params.set('sort_by', sort_by);
+  if (sort_order) params.set('sort_order', sort_order);
+  const qs = params.toString();
+  return apiFetch(`/integrations/zendesk/tickets${qs ? `?${qs}` : ''}`);
+}
+
+export async function searchZendeskTickets(query) {
+  return apiFetch(`/integrations/zendesk/search?query=${encodeURIComponent(query)}`);
+}
+
+export async function fetchZendeskGroups() {
+  return apiFetch('/integrations/zendesk/groups');
+}
+
+export async function fetchZendeskViews() {
+  return apiFetch('/integrations/zendesk/views');
+}
