@@ -160,6 +160,7 @@ const App=()=>{
   // The /auth/callback page handles token storage and redirects back here.
 
   const handleLogout = useCallback(() => {
+    setImpersonating(null);
     setUser(null);
     setLoggedInEmail(null);
     try { localStorage.removeItem('ops_hub_logged_in_email'); localStorage.removeItem('ops_hub_token'); } catch(e) {}
@@ -171,7 +172,7 @@ const App=()=>{
     if (!user) return;
     const me = MEMBERS_BY_EMAIL[user.email];
     if (!me || me.access === 'agent') return; // agents can't impersonate
-    if (me.access === 'admin') { setImpersonating(email); setView('briefing'); return; }
+    if (me.access === 'admin') { if (!MEMBERS_BY_EMAIL[email]) return; setImpersonating(email); setView('briefing'); return; }
     // TL/RM: verify target is in their reports chain
     const myReports = getAllReports(user.email);
     if (myReports.includes(email)) { setImpersonating(email); setView('briefing'); }

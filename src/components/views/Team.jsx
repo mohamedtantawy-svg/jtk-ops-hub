@@ -139,8 +139,8 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
     return directReports;
   }, [userEmail, userMember, regionFilter]);
 
-  // Compute overall stats for KPI cards — all emails under this user
-  const allReportEmails = useMemo(() => getAllReports(userEmail), [userEmail]);
+  // Compute overall stats for KPI cards — user + all emails under them
+  const allReportEmails = useMemo(() => [userEmail, ...getAllReports(userEmail)], [userEmail]);
   const ov = useMemo(() => statsByEmails(allReportEmails), [allReportEmails, ns]);
 
   // EOD summary
@@ -226,19 +226,18 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
             {isManager && (
               <i className={`bi-chevron-${isExpanded ? 'up' : 'down'}`} style={{ fontSize: 11, color: '#9e9e9e', marginLeft: 4, flexShrink: 0 }} />
             )}
-            {showLoginAs && (isHovered || true) && (
+            {showLoginAs && isHovered && (
               <button
                 onClick={(e) => { e.stopPropagation(); onImpersonate(email); }}
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: 4,
                   padding: '3px 10px', borderRadius: 128,
                   border: '1px solid #7c3aed33',
-                  background: isHovered ? '#7c3aed' : '#f3eff8',
-                  color: isHovered ? 'white' : '#7c3aed',
+                  background: '#7c3aed',
+                  color: 'white',
                   fontSize: 10, fontWeight: 700,
                   cursor: 'pointer', flexShrink: 0,
                   transition: 'all .15s',
-                  opacity: isHovered ? 1 : 0.7,
                   whiteSpace: 'nowrap',
                 }}
                 title={`Login as ${member.name}`}
@@ -265,7 +264,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
 
         {/* Expandable sub-reports */}
         {isManager && (
-          <div style={{ maxHeight: isExpanded ? `${filteredSubReports.length * 120}px` : 0, overflow: 'hidden', transition: 'max-height 0.25s ease' }}>
+          <div style={{ maxHeight: isExpanded ? '9999px' : 0, overflow: 'hidden', transition: isExpanded ? 'max-height 0.4s ease-in' : 'max-height 0.25s ease-out' }}>
             {filteredSubReports.map(sub => renderMemberRow(sub, depth + 1))}
           </div>
         )}
@@ -389,7 +388,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
 
         {/* ── Parental Leave Tracker ──────────────────────────────────── */}
         {(() => {
-          const plData = perms?.dataScope === 'all_tasks' && user.region && user.region !== 'ALL'
+          const plData = perms?.dataScope === 'all_tasks' && user?.region && user.region !== 'ALL'
             ? PARENTAL_LEAVE_DATA.filter(p => p.region === user.region)
             : PARENTAL_LEAVE_DATA;
           return (
