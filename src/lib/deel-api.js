@@ -3,7 +3,10 @@
 // Docs: https://developer.deel.com
 
 const DEEL_API_KEY = process.env.DEEL_API_KEY || '';
-const DEEL_BASE = process.env.DEEL_API_BASE_URL || 'https://api.letsdeel.com/rest/v2';
+
+// Normalize base URL — env var may or may not include /rest/v2
+const _rawBase = (process.env.DEEL_API_BASE_URL || 'https://api.letsdeel.com').replace(/\/+$/, '');
+const DEEL_BASE = _rawBase.endsWith('/rest/v2') ? _rawBase : `${_rawBase}/rest/v2`;
 
 export function isDeelConfigured() {
   return !!DEEL_API_KEY;
