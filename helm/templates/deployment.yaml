@@ -59,6 +59,10 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.sandboxName }}-pg-app
                   key: uri
+            - name: DB_SSL
+              value: "true"
+            - name: DB_SSL_REJECT_UNAUTHORIZED
+              value: "false"
             {{- end }}
             {{- if .Values.app.env }}
             {{- toYaml .Values.app.env | nindent 12 }}
