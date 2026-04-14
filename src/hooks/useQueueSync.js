@@ -16,7 +16,7 @@ import { MEMBERS } from '../data/members';
 import { ADMIN_EMAILS } from '../data/adminEmails';
 
 const SYNC_INTERVAL = 3 * 60 * 1000; // 3 minutes
-const INITIAL_DELAY = 500; // small delay on mount to not block first paint
+const INITIAL_DELAY = 100; // minimal delay on mount to not block first paint
 
 // ── Normalize a queue item from the backend into the frontend task shape ─────
 function normalizeQueueItem(item) {
@@ -150,7 +150,16 @@ export function useQueueSync(enabled = true) {
     return [];
   });
   const [meta, setMeta] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => {
+    try {
+      const cached = localStorage.getItem('ops_hub_queue_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.ts && Date.now() - parsed.ts < 10 * 60 * 1000) return false;
+      }
+    } catch(e) {}
+    return true;
+  });
   const [error, setError] = useState(null);
   const [lastSync, setLastSync] = useState(null);
   const syncCount = useRef(0);
