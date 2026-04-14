@@ -41,14 +41,17 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   // searchRef removed — search handled by global nav
   const perms = useContext(PermissionsContext);
   const settings = useContext(SettingsContext);
-  const { deelData, jiraData } = useContext(IntegrationsContext);
+  const { deelData, jiraData, queueSync } = useContext(IntegrationsContext);
   const isAdmin=perms?.dataScope==='all_tasks'; const isLead=perms?.dataScope==='team_tasks';
   const ns=tasks.filter(t=>t.source!=='slack'&&t.source!=='calendar');
   let vis=ns;
-  if(!isAdmin) vis=isLead?ns.filter(t=>MEMBERS.find(m=>m.id===t.assigneeId)?.team===user.team):ns.filter(t=>t.assigneeId===user.id);
+  // Filter by assignee: match by ID (legacy) or email (live data)
+  if(!isAdmin) vis=isLead
+    ?ns.filter(t=>{const m=MEMBERS.find(mm=>mm.id===t.assigneeId);return m?.team===user.team||(t.assigneeEmail&&MEMBERS.filter(mm=>mm.team===user.team).some(mm=>mm.email===t.assigneeEmail));})
+    :ns.filter(t=>t.assigneeId===user.id||(t.assigneeEmail&&t.assigneeEmail===user.email));
   if(fTool)       vis=vis.filter(t=>t.source===fTool);
   if(fStatus)     vis=vis.filter(t=>t.status===fStatus);
-  if(fUnassigned) vis=vis.filter(t=>!t.assigneeId);
+  if(fUnassigned) vis=vis.filter(t=>!t.assigneeId&&!t.assigneeEmail);
   if(fCtry.length) vis=vis.filter(t=>fCtry.includes(t.country));
   if(fSla==='ok')       vis=vis.filter(t=>{const s=slaInfo(t);return s&&s.ok;});
   if(fSla==='at_risk')  vis=vis.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;});
@@ -68,7 +71,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     });
     if(sort==='newest')return [...arr].sort((a,b)=>a.minutesAgo-b.minutesAgo);
     if(sort==='oldest')return [...arr].sort((a,b)=>b.minutesAgo-a.minutesAgo);
-    if(sort==='assignee')return [...arr].sort((a,b)=>(MEMBERS.find(m=>m.id===a.assigneeId)?.name||'').localeCompare(MEMBERS.find(m=>m.id===b.assigneeId)?.name||''));
+    if(sort==='assignee')return [...arr].sort((a,b)=>(MEMBERS.find(m=>m.id===a.assigneeId)?.name||a.assigneeName||'').localeCompare(MEMBERS.find(m=>m.id===b.assigneeId)?.name||b.assigneeName||''));
     return arr;
   };
   const sorted=sortFn(vis.filter(t=>t.status!=='resolved'&&t.status!=='waiting'));
@@ -239,7 +242,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
 
   // ── Filter tabs (like Announcements) ──
   const FILTER_TABS = useMemo(()=>{
-    const baseVis=(isAdmin?ns:isLead?ns.filter(tx=>MEMBERS.find(m=>m.id===tx.assigneeId)?.team===user.team):ns.filter(tx=>tx.assigneeId===user.id)).filter(t=>!t.isCalendarBooking);
+    const baseVis=(isAdmin?ns:isLead?ns.filter(tx=>{const m=MEMBERS.find(mm=>mm.id===tx.assigneeId);return m?.team===user.team||(tx.assigneeEmail&&MEMBERS.filter(mm=>mm.team===user.team).some(mm=>mm.email===tx.assigneeEmail));}):ns.filter(tx=>tx.assigneeId===user.id||(tx.assigneeEmail&&tx.assigneeEmail===user.email))).filter(t=>!t.isCalendarBooking);
     const tabs = [
       {id:'all',label:'All',icon:'bi-grid',count:baseVis.filter(t=>t.status!=='resolved').length},
       ...QUEUE_SOURCES.map(key=>{
@@ -317,6 +320,15 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
             </div>
           )}
           <div style={{marginLeft:'auto',display:'flex',gap:8,alignItems:'center'}}>
+            {/* Live sync indicator */}
+            {queueSync&&(
+              <div style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:queueSync.isLive?'#29811e':'#9e9e9e'}}>
+                <span style={{width:6,height:6,borderRadius:'50%',background:queueSync.loading?'#ed8d00':queueSync.isLive?'#29811e':'#d42d35',animation:queueSync.loading?'pulse 1s infinite':'none'}}/>
+                <span>{queueSync.loading?'Syncing...':queueSync.isLive?'Live':'Offline'}</span>
+                {queueSync.meta&&<span style={{color:'#bbb'}}>ZD:{queueSync.meta.zendesk?.count||0} JR:{queueSync.meta.jira?.count||0}</span>}
+                <button onClick={()=>queueSync.refresh()} title="Force refresh" style={{border:'none',background:'transparent',cursor:'pointer',padding:2,color:'#9e9e9e',fontSize:12,display:'flex'}}><i className="bi-arrow-clockwise"/></button>
+              </div>
+            )}
             {open.length>0&&(
               <button onClick={startWorkMode}
                 style={{height:36,padding:'0 18px',borderRadius:128,border:'none',background:'#1f74b3',color:'white',fontSize:13,fontWeight:700,cursor:'pointer',display:'flex',alignItems:'center',gap:7,transition:'all .15s'}}>
@@ -491,7 +503,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
 // ── Table row component (replaces TaskRow for table layout) ──
 const QueueRow=({task,selected,checked,onCheck,onClick,onAction,onEscalMgr,currentUser,slaAgeClass,settings,perms,compact,onSnooze})=>{
   const [hov,setHov]=useState(false);
-  const assignee=MEMBERS.find(m=>m.id===task.assigneeId)||{name:'Unassigned'};
+  const assignee=MEMBERS.find(m=>m.id===task.assigneeId)||(task.assigneeEmail?MEMBERS.find(m=>m.email===task.assigneeEmail):null)||{name:task.assigneeName||'Unassigned'};
   const sla=slaInfo(task);
   const isActive=task.status!=='resolved'&&task.status!=='waiting';
   const fn=FUNCTIONS[task.type];
@@ -595,7 +607,7 @@ const WorkModeOverlay=({task,remaining,totalOpen,skipped,onResolve,onEscalate,on
     );
   }
 
-  const assignee=MEMBERS.find(m=>m.id===task.assigneeId);
+  const assignee=MEMBERS.find(m=>m.id===task.assigneeId)||(task.assigneeEmail?MEMBERS.find(m=>m.email===task.assigneeEmail):null)||{name:task.assigneeName||'Unassigned',initials:(task.assigneeName||'U').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()};
   const sla=slaInfo(task);
   const fn=FUNCTIONS[task.type];
   const tool=TOOLS[task.source];

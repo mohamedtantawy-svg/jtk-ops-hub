@@ -26,7 +26,7 @@ const TaskRow=({task,index,selected,onClick,onAction,onEscalMgr,compact,checked,
   const perms=useContext(PermissionsContext);
   const settings=useContext(SettingsContext);
   const [hov,setHov]=useState(false);
-  const assignee=MEMBERS.find(m=>m.id===task.assigneeId)||{name:'Unassigned',country:'',team:''};
+  const assignee=MEMBERS.find(m=>m.id===task.assigneeId)||(task.assigneeEmail?MEMBERS.find(m=>m.email===task.assigneeEmail):null)||{name:task.assigneeName||'Unassigned',country:'',team:''};
   const dot=ageDot(task.minutesAgo,task.status);
   const sla=slaInfo(task);
   const hasUpdate=task.updatedMinsAgo!==task.minutesAgo;

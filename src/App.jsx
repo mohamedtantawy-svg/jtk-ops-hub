@@ -4,10 +4,11 @@ import { TOOLS, STATUSES, FUNCTIONS, FLAGS } from './data/constants';
 import { INITIAL_PROJECTS } from './data/projects';
 import { INITIAL_REQUESTS } from './data/requests';
 import { MEMBERS } from './data/members';
-import { TASKS0, INITIAL_ACTIVITY, INITIAL_NOTES } from './data/tasks';
+import { INITIAL_ACTIVITY, INITIAL_NOTES } from './data/tasks';
 import { FEED_EVENTS } from './data/feed';
 import { ALL_AGENT_IDS } from './data/comms';
 import { useAnnouncements } from './hooks/useAnnouncements';
+import { useQueueSync } from './hooks/useQueueSync';
 import { DEFAULT_SETTINGS } from './data/settings';
 import { DEFAULT_ACCESS_TYPES } from './data/accessControl';
 import { DEFAULT_USER_ACCESS_MAP } from './data/members';
@@ -85,7 +86,10 @@ const App=()=>{
   });
   const [view,setView]=useState('briefing');
   const [selTask,setSelTask]=useState(null);
-  const [tasks,setTasks]=useState(TASKS0);
+  // ── Live queue sync (Zendesk + Jira) ─────────────────────────────────────
+  const queueSync = useQueueSync(!!user);
+  const tasks = queueSync.tasks;
+  const setTasks = queueSync.setTasks;
   const [feed,setFeed]=useState(FEED_EVENTS);
   const [notes,setNotes]=useState(INITIAL_NOTES);
   const [escalations,setEscalations]=useState([
@@ -180,28 +184,25 @@ const App=()=>{
   const [fUnassigned,setFUnassigned]=useState(false);
   const [backendOnline,setBackendOnline]=useState(false);
 
-  // ── Fetch data from BE on mount (graceful fallback to mock data) ──────────
+  // ── Fetch supplementary data from BE on mount (escalations, projects, requests) ──
+  // Tasks are now handled by useQueueSync (live from Zendesk + Jira)
   useEffect(()=>{
     if(!user) return;
     let cancelled=false;
     (async()=>{
       try{
-        const [tasksRes, escalRes, projRes, reqRes]=await Promise.all([
-          apiFetchTasks({limit:200}).catch(()=>null),
+        const [escalRes, projRes, reqRes]=await Promise.all([
           apiFetchEscalations({limit:100}).catch(()=>null),
           apiFetchProjects({limit:100}).catch(()=>null),
           apiFetchRequests({}).catch(()=>null),
         ]);
         if(cancelled) return;
-        if(tasksRes?.items){
-          setBackendOnline(true);
-          setTasks(tasksRes.items.map(normalizeTask).filter(Boolean));
-        }
+        setBackendOnline(true);
         if(escalRes?.items) setEscalations(escalRes.items.map(normalizeEscalation).filter(Boolean));
         if(projRes?.items) setProjects(projRes.items.map(normalizeProject).filter(Boolean));
         if(reqRes?.items) setRequests(reqRes.items.map(normalizeRequest).filter(Boolean));
       }catch(e){
-        // Backend unreachable — keep using mock data
+        // Backend unreachable — keep using local data
         if(!cancelled) setBackendOnline(false);
       }
     })();
@@ -222,7 +223,7 @@ const App=()=>{
   const deelData = useDeelData(integrations.isConfigured('deel'));
   const jiraData = useJiraData(integrations.isConfigured('jira'));
   const slackData = useSlackData(integrations.isConfigured('slack'));
-  const integrationsCtx = { integrations, deelData, jiraData, slackData };
+  const integrationsCtx = { integrations, deelData, jiraData, slackData, queueSync };
 
   // ── Toast helpers ──────────────────────────────────────────────────────────
   const addToast=useCallback((type,title,body,onUndo)=>{

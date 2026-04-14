@@ -141,3 +141,12 @@ export async function createTicket(data) {
     body: JSON.stringify({ ticket: data }),
   });
 }
+
+// ── Batch Users (resolve IDs → emails/names) ───────────────────────────
+
+export async function showManyUsers(ids) {
+  if (!ids || ids.length === 0) return { users: [] };
+  // Zendesk allows up to 100 IDs per call
+  const batch = ids.slice(0, 100);
+  return zendeskFetch(`/users/show_many.json?ids=${batch.join(',')}`);
+}

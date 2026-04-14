@@ -155,12 +155,12 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
 
   // ── Recent activity ───────────────────────────────────────────────────
   const recentAct=[...scope].filter(t=>t.updatedMinsAgo!==undefined&&t.updatedMinsAgo<t.minutesAgo).sort((a,b)=>a.updatedMinsAgo-b.updatedMinsAgo).slice(0,4).map(t=>{
-    const who=MEMBERS.find(m=>m.id===t.assigneeId);
+    const who=MEMBERS.find(m=>m.id===t.assigneeId)||(t.assigneeEmail?MEMBERS.find(m=>m.email===t.assigneeEmail):null);
     // Derive event type for priority icon
     const evType=t.isAlert?'alert':t.status==='resolved'?'success':t.status==='new'?'new_task':'info';
     const evIcon=evType==='alert'?'bi-exclamation-circle':evType==='success'?'bi-check-circle':evType==='new_task'?'bi-plus-circle':'bi-info-circle';
     const evColor=evType==='alert'?'#d42d35':evType==='success'?'#29811e':evType==='new_task'?'#1f74b3':'#9e9e9e';
-    return {id:t.id,subject:t.subject,who:who?.name?.split(' ')[0]||'System',ago:rel(t.updatedMinsAgo),icon:TOOLS[t.source]?.icon||'bi-circle',color:TOOLS[t.source]?.color||'#bebebe',evIcon,evColor};
+    return {id:t.id,subject:t.subject,who:who?.name?.split(' ')[0]||t.assigneeName?.split(' ')[0]||'System',ago:rel(t.updatedMinsAgo),icon:TOOLS[t.source]?.icon||'bi-circle',color:TOOLS[t.source]?.color||'#bebebe',evIcon,evColor};
   });
 
   // ── SVG Ring ──────────────────────────────────────────────────────────

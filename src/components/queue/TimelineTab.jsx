@@ -3,7 +3,7 @@ import { MEMBERS } from '../../data/members';
 
 const TimelineTab=({taskId,task,activity,escalation})=>{
   // Events derive from activity state — memoize in production
-  const baseEvents=activity[taskId]||[{type:'created',text:`Task received from ${TOOLS[task.source]?.label}`,user:'System',time:task.receivedAt},{type:'assigned',text:`Assigned to ${MEMBERS.find(m=>m.id===task.assigneeId)?.name}`,user:'System',time:task.receivedAt}];
+  const baseEvents=activity[taskId]||[{type:'created',text:`Task received from ${TOOLS[task.source]?.label}`,user:'System',time:task.receivedAt},{type:'assigned',text:`Assigned to ${MEMBERS.find(m=>m.id===task.assigneeId)?.name||task.assigneeName||'Unassigned'}`,user:'System',time:task.receivedAt}];
   // Append escalation events to timeline
   const escEvents=[];
   if(escalation){
