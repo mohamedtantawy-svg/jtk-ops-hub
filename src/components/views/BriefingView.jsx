@@ -6,6 +6,12 @@ import { CALENDAR_EVENTS } from '../../data/calendar';
 import { slaInfo, rel, getVisibleEmails } from '../../utils/helpers';
 import Avatar from '../ui/Avatar';
 import { ToolBadge, FnBadge } from '../ui/Badges';
+import PersonalChecklist from '../home/PersonalChecklist';
+import OOOAlert from '../home/OOOAlert';
+import TeamRequestsToMe from '../home/TeamRequestsToMe';
+import DailySummary from '../home/DailySummary';
+import StaleTickets from '../home/StaleTickets';
+import ApproachingBreach from '../home/ApproachingBreach';
 
 const SOURCE_COLOURS = {
   gmail: '#ea4335', zendesk: '#03363d', jira: '#0052cc',
@@ -13,12 +19,18 @@ const SOURCE_COLOURS = {
   slack: '#611f69', calendar: '#1967d2',
 };
 
-const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSubFilter})=>{
+const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSubFilter,requests=[]})=>{
   const [expandedSource,setExpandedSource]=useState(null);
   const [expandedSla,setExpandedSla]=useState(null);
   const [ackBannerIdx,setAckBannerIdx]=useState(0);
   const [showHealthBreakdown,setShowHealthBreakdown]=useState(false);
   const [startDatesExpanded,setStartDatesExpanded]=useState(true);
+  const [onLeaveEmails] = useState(() => {
+    try {
+      const stored = localStorage.getItem('ops_hub_on_leave');
+      return stored ? new Set(JSON.parse(stored)) : new Set();
+    } catch(e) { return new Set(); }
+  });
   const healthBreakdownRef=useRef(null);
   const now=new Date();
   const hour=now.getHours();
@@ -895,6 +907,31 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
 
             {/* ── COL 2: Context Panel ──────────────────────────────────────── */}
             <div style={{display:'flex',flexDirection:'column',gap:16}}>
+
+              {/* ── DailySummary — role-adaptive ─────────────────────────────── */}
+              {isOwnScope && <DailySummary tasks={personal} escalations={escalations} scope="personal" />}
+              {isTeamScope && <DailySummary tasks={scope} escalations={escalations} scope="team" />}
+              {isExec && <DailySummary tasks={allOrgTasks} escalations={escalations} scope="org" />}
+
+              {/* ── ApproachingBreach — all roles ────────────────────────────── */}
+              {isOwnScope && <ApproachingBreach tasks={personal} slaInfo={slaInfo} onViewTask={task => { setSelTask(task); setView('my-queue'); }} />}
+              {isTeamScope && <ApproachingBreach tasks={scope} slaInfo={slaInfo} onViewTask={task => { setSelTask(task); setView('my-queue'); }} />}
+              {isExec && <ApproachingBreach tasks={orgOpen} slaInfo={slaInfo} onViewTask={task => { setSelTask(task); setView('my-queue'); }} />}
+
+              {/* ── OOOAlert in right column — team lead & admin ─────────────── */}
+              {isTeamScope && <OOOAlert tasks={scope} onLeaveEmails={onLeaveEmails} members={MEMBERS} onReassign={task => { setSelTask(task); setView('my-queue'); }} />}
+              {isExec && <OOOAlert tasks={allOrgTasks} onLeaveEmails={onLeaveEmails} members={MEMBERS} onReassign={task => { setSelTask(task); setView('my-queue'); }} />}
+
+              {/* ── TeamRequestsToMe — team lead & admin ────────────────────── */}
+              {isTeamScope && <TeamRequestsToMe requests={requests} currentUser={user} members={MEMBERS} />}
+              {isExec && <TeamRequestsToMe requests={requests} currentUser={user} members={MEMBERS} />}
+
+              {/* ── StaleTickets — team lead & admin ─────────────────────────── */}
+              {isTeamScope && <StaleTickets tasks={scope} defaultDays={3} />}
+              {isExec && <StaleTickets tasks={orgOpen} defaultDays={3} />}
+
+              {/* ── PersonalChecklist — all roles ────────────────────────────── */}
+              <PersonalChecklist />
 
               {/* AGENT: Team Availability */}
               {isOwnScope&&<DeelCard style={{padding:0,overflow:'hidden'}}>
