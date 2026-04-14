@@ -239,19 +239,25 @@ CREATE INDEX IF NOT EXISTS idx_members_region ON members(region);
 CREATE INDEX IF NOT EXISTS idx_members_active ON members(is_active);
 
 -- ── Check constraints ────────────────────────────────────────────────────────
+-- First: fix any rows with invalid data so constraints can be applied cleanly
+UPDATE tasks SET status = 'open' WHERE status NOT IN ('open','new','pending','in_progress','escalated','snoozed','waiting','resolved','closed');
+UPDATE tasks SET priority = 'medium' WHERE priority NOT IN ('critical','high','medium','low');
+UPDATE escalations SET status = 'pending' WHERE status NOT IN ('pending','in_progress','resolved','dismissed');
+UPDATE projects SET progress = LEAST(100, GREATEST(0, COALESCE(progress, 0))) WHERE progress < 0 OR progress > 100 OR progress IS NULL;
+
 DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_tasks_status') THEN
-    ALTER TABLE tasks ADD CONSTRAINT chk_tasks_status CHECK (status IN ('open','new','pending','in_progress','escalated','snoozed','waiting','resolved','closed'));
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_tasks_priority') THEN
-    ALTER TABLE tasks ADD CONSTRAINT chk_tasks_priority CHECK (priority IN ('critical','high','medium','low'));
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_escalations_status') THEN
-    ALTER TABLE escalations ADD CONSTRAINT chk_escalations_status CHECK (status IN ('pending','in_progress','resolved','dismissed'));
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chk_projects_progress') THEN
-    ALTER TABLE projects ADD CONSTRAINT chk_projects_progress CHECK (progress >= 0 AND progress <= 100);
-  END IF;
+  -- Drop and recreate check constraints to ensure they match current code
+  ALTER TABLE tasks DROP CONSTRAINT IF EXISTS chk_tasks_status;
+  ALTER TABLE tasks ADD CONSTRAINT chk_tasks_status CHECK (status IN ('open','new','pending','in_progress','escalated','snoozed','waiting','resolved','closed'));
+
+  ALTER TABLE tasks DROP CONSTRAINT IF EXISTS chk_tasks_priority;
+  ALTER TABLE tasks ADD CONSTRAINT chk_tasks_priority CHECK (priority IN ('critical','high','medium','low'));
+
+  ALTER TABLE escalations DROP CONSTRAINT IF EXISTS chk_escalations_status;
+  ALTER TABLE escalations ADD CONSTRAINT chk_escalations_status CHECK (status IN ('pending','in_progress','resolved','dismissed'));
+
+  ALTER TABLE projects DROP CONSTRAINT IF EXISTS chk_projects_progress;
+  ALTER TABLE projects ADD CONSTRAINT chk_projects_progress CHECK (progress >= 0 AND progress <= 100);
 END $$;
 
 DO $$ BEGIN

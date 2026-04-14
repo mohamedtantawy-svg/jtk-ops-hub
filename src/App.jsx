@@ -202,7 +202,7 @@ const App=()=>{
   const [fUnassigned,setFUnassigned]=useState(false);
   const [backendOnline,setBackendOnline]=useState(false);
   const [managerOnCall, setManagerOnCall] = useState(() => {
-    try { const m = localStorage.getItem('ops_hub_manager_on_call'); return m ? JSON.parse(m) : { name: 'Omar Khalil', initials: 'OK' }; } catch(e) { return { name: 'Omar Khalil', initials: 'OK' }; }
+    try { const m = localStorage.getItem('ops_hub_manager_on_call'); return m ? JSON.parse(m) : { name: 'Omar Khalil', initials: 'OK', avatarUrl: 'https://api.dicebear.com/7.x/initials/svg?seed=Omar%20Khalil&backgroundColor=6b3fa0&textColor=ffffff&fontSize=40' }; } catch(e) { return { name: 'Omar Khalil', initials: 'OK', avatarUrl: 'https://api.dicebear.com/7.x/initials/svg?seed=Omar%20Khalil&backgroundColor=6b3fa0&textColor=ffffff&fontSize=40' }; }
   });
   const [createReportModal, setCreateReportModal] = useState(false);
 
