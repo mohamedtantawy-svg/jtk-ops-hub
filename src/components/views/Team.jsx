@@ -56,7 +56,9 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
 
   // ── User management state ───────────────────────────────────────────────
   const [localMembers, setLocalMembers] = useState(TEAM_MEMBERS);
-  const [onLeaveSet, setOnLeaveSet] = useState(new Set());
+  const [onLeaveSet, setOnLeaveSet] = useState(() => {
+    try { const d = localStorage.getItem('ops_hub_on_leave'); return d ? new Set(JSON.parse(d)) : new Set(); } catch(e) { return new Set(); }
+  });
   const [showAddModal, setShowAddModal] = useState(false);
   const [addForm, setAddForm] = useState({ ...EMPTY_FORM });
   const [actionMenuOpen, setActionMenuOpen] = useState(null); // email of member whose menu is open
@@ -134,6 +136,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
     setOnLeaveSet(prev => {
       const next = new Set(prev);
       next.has(email) ? next.delete(email) : next.add(email);
+      try { localStorage.setItem('ops_hub_on_leave', JSON.stringify([...next])); } catch(e) {}
       return next;
     });
     setActionMenuOpen(null);
