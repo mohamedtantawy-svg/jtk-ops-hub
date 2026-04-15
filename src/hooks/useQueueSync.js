@@ -16,6 +16,7 @@ import { MEMBERS } from '../data/members';
 import { ADMIN_EMAILS } from '../data/adminEmails';
 
 const SYNC_INTERVAL = 3 * 60 * 1000; // 3 minutes
+const LOCAL_CACHE_TTL = 3 * 60 * 1000; // 3 min localStorage TTL — matches sync interval
 const INITIAL_DELAY = 100; // minimal delay on mount to not block first paint
 
 // ── Normalize a queue item from the backend into the frontend task shape ─────
@@ -142,20 +143,29 @@ export function useQueueSync(enabled = true) {
       const cached = localStorage.getItem('ops_hub_queue_cache');
       if (cached) {
         const parsed = JSON.parse(cached);
-        if (parsed.ts && Date.now() - parsed.ts < 10 * 60 * 1000) { // 10 min TTL
+        if (parsed.ts && Date.now() - parsed.ts < LOCAL_CACHE_TTL) {
           return parsed.items || [];
         }
       }
     } catch (e) {}
     return [];
   });
-  const [meta, setMeta] = useState(null);
+  const [meta, setMeta] = useState(() => {
+    try {
+      const cached = localStorage.getItem('ops_hub_queue_cache');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.ts && Date.now() - parsed.ts < LOCAL_CACHE_TTL) return parsed.meta || null;
+      }
+    } catch(e) {}
+    return null;
+  });
   const [loading, setLoading] = useState(() => {
     try {
       const cached = localStorage.getItem('ops_hub_queue_cache');
       if (cached) {
         const parsed = JSON.parse(cached);
-        if (parsed.ts && Date.now() - parsed.ts < 10 * 60 * 1000) return false;
+        if (parsed.ts && Date.now() - parsed.ts < LOCAL_CACHE_TTL) return false;
       }
     } catch(e) {}
     return true;
@@ -185,8 +195,8 @@ export function useQueueSync(enabled = true) {
       setLastSync(new Date().toISOString());
       setError(null);
       syncCount.current += 1;
-      // Cache to localStorage for instant loads
-      try { localStorage.setItem('ops_hub_queue_cache', JSON.stringify({ items: synced, ts: Date.now() })); } catch(e) {}
+      // Cache to localStorage for instant loads (includes meta for badge counts)
+      try { localStorage.setItem('ops_hub_queue_cache', JSON.stringify({ items: synced, meta: res?.meta || null, ts: Date.now() })); } catch(e) {}
     } catch (err) {
       console.warn('[useQueueSync] Sync failed:', err.message);
       setError(err.message);

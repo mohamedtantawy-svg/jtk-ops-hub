@@ -1,28 +1,41 @@
 // ── useSlackData hook ────────────────────────────────────────────────────────
 // Fetches Slack channel data for escalations and HR ops channels.
-// Falls back gracefully if the integration is not configured.
+// Caches in localStorage. Staggered load to avoid mount stampede.
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   fetchSlackChannels, fetchSlackChannelHistory, sendSlackMessage,
 } from '../services/integrationsApi';
 
-const CACHE_TTL = 60 * 1000; // 1 minute (Slack messages are more real-time)
+const CACHE_TTL = 2 * 60 * 1000; // 2 minutes
+const CACHE_KEY = 'ops_hub_slack_data';
+const LOAD_DELAY = 3000; // lowest priority — load last
+
+function readCache() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed.ts && Date.now() - parsed.ts < CACHE_TTL) return parsed;
+    }
+  } catch {}
+  return null;
+}
 
 export function useSlackData(enabled = true) {
-  const [channels, setChannels] = useState(null);
-  const [escalationMessages, setEscalationMessages] = useState(null);
-  const [hrOpsMessages, setHrOpsMessages] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const cached = readCache();
+  const [channels, setChannels] = useState(cached?.channels || null);
+  const [escalationMessages, setEscalationMessages] = useState(cached?.escalationMessages || null);
+  const [hrOpsMessages, setHrOpsMessages] = useState(cached?.hrOpsMessages || null);
+  const [loading, setLoading] = useState(!cached && enabled);
   const [error, setError] = useState(null);
-  const lastFetch = useRef(0);
+  const lastFetch = useRef(cached ? cached.ts : 0);
 
-  // Channel IDs — configured via env vars, or discovered from channel list
-  const [escalationChannelId, setEscalationChannelId] = useState(null);
-  const [hrOpsChannelId, setHrOpsChannelId] = useState(null);
+  const [escalationChannelId, setEscalationChannelId] = useState(cached?.escalationChannelId || null);
+  const [hrOpsChannelId, setHrOpsChannelId] = useState(cached?.hrOpsChannelId || null);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (force = false) => {
     if (!enabled) return;
-    if (Date.now() - lastFetch.current < CACHE_TTL) return;
+    if (!force && Date.now() - lastFetch.current < CACHE_TTL) return;
 
     setLoading(true);
     setError(null);
@@ -31,15 +44,18 @@ export function useSlackData(enabled = true) {
       const chanList = chanRes?.channels || [];
       setChannels(chanList);
 
-      // Auto-discover well-known channels
       const escChan = chanList.find(c => c.name === 'escalations' || c.name === 'hr-escalations');
       const hrOpsChan = chanList.find(c => c.name === 'hr-ops' || c.name === 'hrop-ops');
+
+      let escMsgs = escalationMessages;
+      let hrMsgs = hrOpsMessages;
 
       if (escChan) {
         setEscalationChannelId(escChan.id);
         try {
           const hist = await fetchSlackChannelHistory(escChan.id, { limit: 30 });
-          setEscalationMessages(hist?.messages || []);
+          escMsgs = hist?.messages || [];
+          setEscalationMessages(escMsgs);
         } catch {}
       }
 
@@ -47,11 +63,22 @@ export function useSlackData(enabled = true) {
         setHrOpsChannelId(hrOpsChan.id);
         try {
           const hist = await fetchSlackChannelHistory(hrOpsChan.id, { limit: 30 });
-          setHrOpsMessages(hist?.messages || []);
+          hrMsgs = hist?.messages || [];
+          setHrOpsMessages(hrMsgs);
         } catch {}
       }
 
       lastFetch.current = Date.now();
+      try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify({
+          channels: chanList,
+          escalationMessages: escMsgs,
+          hrOpsMessages: hrMsgs,
+          escalationChannelId: escChan?.id || null,
+          hrOpsChannelId: hrOpsChan?.id || null,
+          ts: Date.now(),
+        }));
+      } catch {}
     } catch (err) {
       console.warn('[useSlackData] Failed:', err.message);
       setError(err.message);
@@ -60,13 +87,17 @@ export function useSlackData(enabled = true) {
     }
   }, [enabled]);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    if (!enabled) { setLoading(false); return; }
+    if (lastFetch.current > 0 && Date.now() - lastFetch.current < CACHE_TTL) return;
+    const timer = setTimeout(() => refresh(), LOAD_DELAY);
+    return () => clearTimeout(timer);
+  }, [refresh, enabled]);
 
   const sendMessage = useCallback(async (channelId, text, opts = {}) => {
     try {
       const res = await sendSlackMessage(channelId, text, opts);
-      // Refresh messages after sending
-      setTimeout(refresh, 500);
+      setTimeout(() => refresh(true), 500);
       return res;
     } catch (err) {
       console.error('[useSlackData] Send failed:', err.message);
@@ -86,7 +117,7 @@ export function useSlackData(enabled = true) {
   return {
     channels, escalationMessages, hrOpsMessages,
     escalationChannelId, hrOpsChannelId,
-    loading, error, refresh,
+    loading, error, refresh: () => refresh(true),
     sendMessage, fetchHistory,
     isAvailable: !!channels,
   };
