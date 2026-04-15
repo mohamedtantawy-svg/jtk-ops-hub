@@ -427,26 +427,58 @@ async function fetchJiraQueue() {
 }
 
 // ── Main handler ─────────────────────────────────────────────────────────────
+// Supports per-source fetching via ?source=zendesk|jira for independent sync.
+// Without ?source, fetches both (legacy/combined mode).
 export async function GET(req) {
   const user = getAuthUser(req);
   if (!user.email) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Check cache (skip if _t param present = manual refresh)
   const url = new URL(req.url);
   const bustCache = url.searchParams.has('_t');
+  const source = url.searchParams.get('source'); // 'zendesk' | 'jira' | null (both)
 
-  // Try persistent cache first (survives restarts)
+  // ── Per-source fetch (new: independent sync per source) ───────────────────
+  if (source === 'zendesk' || source === 'jira') {
+    const cacheKey = `queue_${source}`;
+    const ttl = source === 'zendesk' ? 2 * 60_000 : 3 * 60_000; // ZD 2min, Jira 3min
+
+    if (!bustCache) {
+      const fresh = cacheGet(cacheKey, ttl);
+      if (fresh) return NextResponse.json(fresh);
+    }
+
+    let result;
+    try {
+      const fetched = source === 'zendesk' ? await fetchZendeskQueue() : await fetchJiraQueue();
+      result = {
+        source,
+        items: fetched.items,
+        meta: { count: fetched.count || 0, status: fetched.status, error: fetched.error },
+        syncedAt: new Date().toISOString(),
+      };
+      cacheSet(cacheKey, result);
+    } catch (fetchErr) {
+      const stale = cacheGet(cacheKey, STALE_TTL);
+      if (stale) {
+        console.warn(`[queue/${source}] Fetch failed, returning stale:`, fetchErr.message);
+        return NextResponse.json({ ...stale, _stale: true });
+      }
+      return NextResponse.json({ error: fetchErr.message }, { status: 500 });
+    }
+
+    return NextResponse.json(result);
+  }
+
+  // ── Combined fetch (legacy: both sources in one call) ─────────────────────
   if (!bustCache) {
     const fresh = cacheGet(CACHE_KEY, CACHE_TTL);
     if (fresh) return NextResponse.json(fresh);
   }
 
-  // Stale-while-revalidate: if we have stale data, return it and refresh in background
   const stale = !bustCache ? cacheGet(CACHE_KEY, STALE_TTL) : null;
 
-  // Fetch from both systems in parallel
   let response;
   try {
     const [zendesk, jira] = await Promise.all([
@@ -454,7 +486,6 @@ export async function GET(req) {
       fetchJiraQueue(),
     ]);
 
-    // Merge and deduplicate by id
     const seen = new Set();
     const items = [];
     for (const item of [...zendesk.items, ...jira.items]) {
@@ -475,15 +506,16 @@ export async function GET(req) {
       },
     };
 
-    // Persist to cache
+    // Also populate per-source caches so subsequent per-source fetches are instant
+    cacheSet('queue_zendesk', { source: 'zendesk', items: zendesk.items, meta: { count: zendesk.count || 0, status: zendesk.status, error: zendesk.error }, syncedAt: response.meta.syncedAt });
+    cacheSet('queue_jira', { source: 'jira', items: jira.items, meta: { count: jira.count || 0, status: jira.status, error: jira.error }, syncedAt: response.meta.syncedAt });
     cacheSet(CACHE_KEY, response);
   } catch (fetchErr) {
-    // If fetch failed but we have stale data, return stale with a warning
     if (stale) {
       console.warn('[queue] Fetch failed, returning stale cache:', fetchErr.message);
       return NextResponse.json({ ...stale, _stale: true });
     }
-    throw fetchErr;
+    return NextResponse.json({ error: fetchErr.message }, { status: 500 });
   }
 
   return NextResponse.json(response);
