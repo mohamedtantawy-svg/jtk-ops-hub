@@ -13,7 +13,9 @@ import Avatar from '../ui/Avatar';
 import { useOnboardingData } from '../../hooks/useOnboardingData';
 import { useOffboardingData } from '../../hooks/useOffboardingData';
 import { useChangeRequestData } from '../../hooks/useChangeRequestData';
+import { useWorkbenchData } from '../../hooks/useWorkbenchData';
 import ChangeRequestPanel from './ChangeRequestPanel';
+import WorkbenchPanel from './WorkbenchPanel';
 import ErrorBoundary from '../ui/ErrorBoundary';
 
 // ── Work Source Button config ──
@@ -65,6 +67,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const onboardingData = useOnboardingData(true);
   const offboardingData = useOffboardingData(true);
   const changeRequestData = useChangeRequestData(true);
+  const workbenchData = useWorkbenchData(true);
   const isAdmin=perms?.dataScope==='all_tasks'; const isLead=perms?.dataScope==='team_tasks';
   const ns=tasks.filter(t=>t.source!=='slack'&&t.source!=='calendar');
   // Hierarchical visibility: viewer sees own tickets + all direct/indirect reports
@@ -496,11 +499,17 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
         </ErrorBoundary>
       )}
       {workSource==='workbench'&&(
-        <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:40,background:'#fafaf9',textAlign:'center'}}>
-          <i className="bi-grid-3x3-gap" style={{fontSize:40,color:'#0369a1',opacity:0.4,marginBottom:12}}/>
-          <div style={{fontSize:15,fontWeight:600,color:'#1b1b1b',marginBottom:6}}>Workbench</div>
-          <div style={{fontSize:13,color:'#9e9e9e'}}>HRX workbench tasks will be connected here</div>
-        </div>
+        <ErrorBoundary>
+        <WorkbenchPanel
+          tasks={workbenchData.tasks}
+          counts={workbenchData.counts}
+          byTaskType={workbenchData.byTaskType}
+          byCountry={workbenchData.byCountry}
+          loading={workbenchData.loading}
+          error={workbenchData.error}
+          onRefresh={workbenchData.refresh}
+        />
+        </ErrorBoundary>
       )}
       {/* Zendesk & Jira buttons filter the main queue — no separate panels needed */}
       {workSource==='change_request'&&(
