@@ -3,6 +3,7 @@
 // Each entry shows: employee name, country, action required, contract link.
 import { useState, useMemo } from 'react';
 import { FLAGS } from '../../data/constants';
+import { fetchDeelHealth } from '../../services/integrationsApi';
 
 const STATUS_CONFIG = {
   onboarding_overdue: { label: 'Overdue', color: '#d42d35', bg: '#fef2f2', icon: 'bi-exclamation-triangle-fill', border: '#fca5a5' },
@@ -63,6 +64,21 @@ export default function OnboardingPanel({ byCountry = [], counts = {}, loading, 
 
   const totalFiltered = filtered.reduce((sum, g) => sum + g.people.length, 0);
 
+  const [diagResult, setDiagResult] = useState(null);
+  const [diagLoading, setDiagLoading] = useState(false);
+
+  const runDiagnostic = async () => {
+    setDiagLoading(true);
+    try {
+      const res = await fetchDeelHealth();
+      setDiagResult(res);
+    } catch (e) {
+      setDiagResult({ error: e.message });
+    } finally {
+      setDiagLoading(false);
+    }
+  };
+
   if (error && byCountry.length === 0) {
     const isAuth = error.includes('401') || error.includes('400') || error.toLowerCase().includes('not authorized') || error.toLowerCase().includes('unauthorized') || error.toLowerCase().includes('unsupported authorization');
     return (
@@ -79,9 +95,19 @@ export default function OnboardingPanel({ byCountry = [], counts = {}, loading, 
             Check that DEEL_API_KEY and DEEL_API_BASE_URL are set correctly on Nexus. Base URL should be https://api.letsdeel.com
           </div>
         )}
-        <button onClick={onRefresh} style={{ padding: '8px 20px', borderRadius: 128, border: '1px solid #e8e8e8', background: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#1b1b1b' }}>
-          <i className="bi-arrow-clockwise" style={{ marginRight: 6 }} />Retry
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={onRefresh} style={{ padding: '8px 20px', borderRadius: 128, border: '1px solid #e8e8e8', background: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#1b1b1b' }}>
+            <i className="bi-arrow-clockwise" style={{ marginRight: 6 }} />Retry
+          </button>
+          <button onClick={runDiagnostic} disabled={diagLoading} style={{ padding: '8px 20px', borderRadius: 128, border: '1px solid #e8e8e8', background: 'white', fontSize: 13, fontWeight: 500, cursor: 'pointer', color: '#616161' }}>
+            <i className="bi-bug" style={{ marginRight: 6 }} />{diagLoading ? 'Testing...' : 'Test Connection'}
+          </button>
+        </div>
+        {diagResult && (
+          <div style={{ marginTop: 16, padding: 16, background: '#fafaf9', borderRadius: 8, border: '1px solid #e8e8e8', textAlign: 'left', maxWidth: 540, fontSize: 11, fontFamily: 'monospace', whiteSpace: 'pre-wrap', color: '#616161', lineHeight: '1.6' }}>
+            {JSON.stringify(diagResult, null, 2)}
+          </div>
+        )}
       </div>
     );
   }
