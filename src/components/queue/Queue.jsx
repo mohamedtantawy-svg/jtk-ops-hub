@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useContext } from 'react';
-import { STATUSES, TOOLS, FUNCTIONS, FLAGS, QUEUE_SOURCES, getFlag } from '../../data/constants';
+import { STATUSES, TOOLS, FUNCTIONS, FLAGS, getFlag } from '../../data/constants';
 import { MEMBERS } from '../../data/members';
 import { slaInfo, rel, getUrl, getVisibleEmails } from '../../utils/helpers';
 import { SLA_MINS } from '../../data/constants';
@@ -120,10 +120,14 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     if(t.assigneeEmail && visibleEmails.has(t.assigneeEmail.toLowerCase())) return true;
     return false;
   });
+  // Baseline: agent-scoped tasks BEFORE any queue filters — used for stable counts
+  const baseVis=vis.filter(t=>!t.isCalendarBooking);
   if(fTool)       vis=vis.filter(t=>t.source===fTool);
   if(fStatus)     vis=vis.filter(t=>t.status===fStatus);
   if(fUnassigned) vis=vis.filter(t=>!t.assigneeId&&!t.assigneeEmail);
   if(fCtry.length) vis=vis.filter(t=>fCtry.includes(t.country));
+  // Snapshot BEFORE SLA filter — SLA pills use this so they never vanish when clicked
+  const visPreSla=vis.filter(t=>!t.isCalendarBooking);
   if(fSla==='ok')       vis=vis.filter(t=>{const s=slaInfo(t);return s&&s.ok;});
   if(fSla==='at_risk')  vis=vis.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;});
   if(fSla==='breached') vis=vis.filter(t=>{const s=slaInfo(t);return s&&s.breach;});
@@ -152,12 +156,12 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const done=vis.filter(t=>t.status==='resolved');
   const filteredTasks=[...active,...snoozed,...done];
   const all=filteredTasks;
-  // Item #9: Country filter shows countries from the agent's visible tasks only
+  // Item #9: Country filter — stable list from baseVis (unaffected by fTool/fStatus)
   const allCtry=useMemo(()=>{
-    const ctrySet = new Set(vis.map(t=>t.country).filter(Boolean));
+    const ctrySet = new Set(baseVis.map(t=>t.country).filter(Boolean));
     for(const r of allSourceRows) if(r.country) ctrySet.add(r.country);
     return [...ctrySet];
-  },[vis,allSourceRows]);
+  },[baseVis,allSourceRows]);
   const hasActiveFilters=!!(fTool||fStatus||fCtry.length>0||fSla||fUnassigned||search);
 
   // Work mode queue — only active tasks (excludes snoozed/waiting)
@@ -199,11 +203,11 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const visibleIds=new Set(vis.map(t=>t.id));
   const compact=!!selTask;
   const recentTasks=recentIds.map(id=>tasks.find(t=>t.id===id)).filter(Boolean);
-  // SLA pills scoped to the agent's visible tasks (not global ns)
-  const visActive=vis.filter(t=>t.status!=='resolved'&&t.status!=='waiting');
-  const atRiskCount=visActive.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;}).length;
-  const breachedCount=visActive.filter(t=>{const s=slaInfo(t);return s&&s.breach;}).length;
-  const onTrackCount=visActive.length-atRiskCount-breachedCount;
+  // SLA pills — use visPreSla so they never vanish when an SLA filter is active
+  const slaBase=visPreSla.filter(t=>t.status!=='resolved'&&t.status!=='waiting');
+  const atRiskCount=slaBase.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;}).length;
+  const breachedCount=slaBase.filter(t=>{const s=slaInfo(t);return s&&s.breach;}).length;
+  const onTrackCount=slaBase.length-atRiskCount-breachedCount;
   const activeFilterCount=[fTool,fStatus,fCtry.length>0?true:null,fSla||null,fUnassigned||null].filter(Boolean).length;
 
   // Persist filters to localStorage
@@ -318,23 +322,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     return()=>document.removeEventListener('keydown',kd);
   },[workMode,workSkip,workResolve,workEscalate,workReassign]);
 
-  // ── Filter tabs (like Announcements) ──
-  const FILTER_TABS = useMemo(()=>{
-    const baseVis=(isAdmin?ns:ns.filter(tx=>{
-      if(tx.assigneeId===user.id) return true;
-      if(tx.assigneeEmail && visibleEmails.has(tx.assigneeEmail.toLowerCase())) return true;
-      return false;
-    })).filter(t=>!t.isCalendarBooking);
-    const tabs = [
-      {id:'all',label:'All',icon:'bi-grid',count:baseVis.filter(t=>t.status!=='resolved').length},
-      ...QUEUE_SOURCES.map(key=>{
-        const t=TOOLS[key];if(!t)return null;
-        const cnt=baseVis.filter(tx=>tx.source===key&&tx.status!=='resolved').length;
-        return {id:key,label:t.label,icon:t.icon,count:cnt};
-      }).filter(Boolean),
-    ];
-    return tabs;
-  },[ns,isAdmin,isLead,user,visibleEmails]);
+  // FILTER_TABS removed — replaced by WORK_SOURCES buttons
 
   // tabBtnStyle kept for potential reuse
   const tabBtnStyle = (active) => ({
@@ -375,12 +363,12 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
         {/* Line 1: Title + total counts across ALL queues (Item #7) + Start Working */}
         <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:10}}>
           {(isAdmin||isLead)&&<span style={{fontSize:13,fontWeight:600,color:'#616161'}}>{isAdmin?'All Tasks':`${user.team}`}</span>}
-          {/* Item #7: Total tasks across ALL queues */}
+          {/* Item #7: Stable totals from baseVis (not affected by active filters) */}
           <span style={{fontSize:12,color:'#9e9e9e',display:'flex',alignItems:'center',gap:5}}>
             <i className="bi-layers" style={{fontSize:11}}></i>
-            <span style={{fontWeight:600,color:'#1b1b1b'}}>{open.length + allSourceRows.length}</span> open
-            {snoozed.length>0&&<span> &middot; <span style={{fontWeight:600,color:'#616161'}}>{snoozed.length}</span> paused</span>}
-            {done.length>0&&<span> &middot; <span style={{fontWeight:600,color:'#29811e'}}>{done.length}</span> resolved</span>}
+            <span style={{fontWeight:600,color:'#1b1b1b'}}>{baseVis.filter(t=>t.status!=='resolved'&&t.status!=='waiting').length + allSourceRows.length}</span> open
+            {baseVis.filter(t=>t.status==='waiting').length>0&&<span> &middot; <span style={{fontWeight:600,color:'#616161'}}>{baseVis.filter(t=>t.status==='waiting').length}</span> paused</span>}
+            {baseVis.filter(t=>t.status==='resolved').length>0&&<span> &middot; <span style={{fontWeight:600,color:'#29811e'}}>{baseVis.filter(t=>t.status==='resolved').length}</span> resolved</span>}
           </span>
           <div style={{marginLeft:'auto',display:'flex',gap:8,alignItems:'center'}}>
             {/* Live sync indicator */}
@@ -392,23 +380,26 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
                 <button onClick={()=>queueSync.refresh()} title="Force refresh" style={{border:'none',background:'transparent',cursor:'pointer',padding:2,color:'#9e9e9e',fontSize:12,display:'flex'}}><i className="bi-arrow-clockwise"/></button>
               </div>
             )}
-            {/* Item #6: SLA status pills moved to right side */}
+            {/* SLA filter pills — always visible when count > 0, with labels */}
             {onTrackCount>0&&(
-              <div onClick={()=>setFSla(fSla==='ok'?null:'ok')} style={{display:'flex',alignItems:'center',gap:6,background:fSla==='ok'?'#dcfce7':'#f0fdf4',border:`1px solid ${fSla==='ok'?'#15803d':'#bbf7d0'}`,borderRadius:128,padding:'4px 12px',cursor:'pointer',transition:'all .15s'}}>
-                <i className="bi-check-circle-fill" style={{color:'#15803d',fontSize:12}}></i>
-                <span style={{fontSize:12,fontWeight:700,color:'#166534'}}>{onTrackCount}</span>
+              <div onClick={()=>setFSla(fSla==='ok'?null:'ok')} style={{display:'flex',alignItems:'center',gap:5,background:fSla==='ok'?'#dcfce7':'#f0fdf4',border:`${fSla==='ok'?'2':'1'}px solid ${fSla==='ok'?'#15803d':'#bbf7d0'}`,borderRadius:128,padding:'5px 14px',cursor:'pointer',transition:'all .15s',flexShrink:0,boxShadow:fSla==='ok'?'0 0 0 2px #15803d30':'none'}}>
+                <i className="bi-check-circle-fill" style={{color:'#15803d',fontSize:13}}></i>
+                <span style={{fontSize:13,fontWeight:700,color:'#166534'}}>{onTrackCount}</span>
+                <span style={{fontSize:11,fontWeight:500,color:'#166534'}}>On Track</span>
               </div>
             )}
             {atRiskCount>0&&(
-              <div onClick={()=>setFSla(fSla==='at_risk'?null:'at_risk')} style={{display:'flex',alignItems:'center',gap:6,background:fSla==='at_risk'?'#fef3c7':'#fff8e6',border:`1px solid ${fSla==='at_risk'?'#ed8d00':'#ffe27c'}`,borderRadius:128,padding:'4px 12px',cursor:'pointer',transition:'all .15s'}}>
-                <i className="bi-exclamation-circle-fill" style={{color:'#ed8d00',fontSize:12}}></i>
-                <span style={{fontSize:12,fontWeight:700,color:'#92400E'}}>{atRiskCount}</span>
+              <div onClick={()=>setFSla(fSla==='at_risk'?null:'at_risk')} style={{display:'flex',alignItems:'center',gap:5,background:fSla==='at_risk'?'#fef3c7':'#fff8e6',border:`${fSla==='at_risk'?'2':'1'}px solid ${fSla==='at_risk'?'#ed8d00':'#ffe27c'}`,borderRadius:128,padding:'5px 14px',cursor:'pointer',transition:'all .15s',flexShrink:0,boxShadow:fSla==='at_risk'?'0 0 0 2px #ed8d0030':'none'}}>
+                <i className="bi-exclamation-circle-fill" style={{color:'#ed8d00',fontSize:13}}></i>
+                <span style={{fontSize:13,fontWeight:700,color:'#92400E'}}>{atRiskCount}</span>
+                <span style={{fontSize:11,fontWeight:500,color:'#92400E'}}>At Risk</span>
               </div>
             )}
             {breachedCount>0&&(
-              <div onClick={()=>setFSla(fSla==='breached'?null:'breached')} style={{display:'flex',alignItems:'center',gap:6,background:fSla==='breached'?'#fecaca':'#ffe2de',border:`1px solid ${fSla==='breached'?'#d42d35':'#fca5a5'}`,borderRadius:128,padding:'4px 12px',cursor:'pointer',transition:'all .15s'}}>
-                <i className="bi-x-circle-fill" style={{color:'#d42d35',fontSize:12}}></i>
-                <span style={{fontSize:12,fontWeight:700,color:'#991b1b'}}>{breachedCount}</span>
+              <div onClick={()=>setFSla(fSla==='breached'?null:'breached')} style={{display:'flex',alignItems:'center',gap:5,background:fSla==='breached'?'#fecaca':'#ffe2de',border:`${fSla==='breached'?'2':'1'}px solid ${fSla==='breached'?'#d42d35':'#fca5a5'}`,borderRadius:128,padding:'5px 14px',cursor:'pointer',transition:'all .15s',flexShrink:0,boxShadow:fSla==='breached'?'0 0 0 2px #d42d3530':'none'}}>
+                <i className="bi-x-circle-fill" style={{color:'#d42d35',fontSize:13}}></i>
+                <span style={{fontSize:13,fontWeight:700,color:'#991b1b'}}>{breachedCount}</span>
+                <span style={{fontSize:11,fontWeight:500,color:'#991b1b'}}>Breached</span>
               </div>
             )}
             {open.length>0&&(
@@ -422,15 +413,15 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
         </div>
 
         {/* Line 2: Work Source buttons */}
+        {(()=>{
+          // Hoist Jira/Zendesk counts outside .map() — computed from baseVis (stable)
+          const jiraCount = baseVis.filter(t=>t.source==='jira'&&t.status!=='resolved').length;
+          const zdCount = baseVis.filter(t=>t.source==='zendesk'&&t.status!=='resolved').length;
+          return(
         <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:workSource&&workSource!=='zendesk'&&workSource!=='jira'?0:10,flexWrap:'nowrap',overflowX:'auto',paddingBottom:2}}>
           {WORK_SOURCES.map(ws=>{
-            // Zendesk & Jira filter the main queue by source instead of showing a panel
             const isQueueFilter = ws.id === 'zendesk' || ws.id === 'jira';
             const isActive = isQueueFilter ? (fTool === ws.id && !workSource) : workSource === ws.id;
-            // Item #1: Work source buttons show agent-scoped task counts
-            // Jira/Zendesk counts come from the main queue (already agent-filtered via vis)
-            const jiraCount = vis.filter(t=>t.source==='jira'&&t.status!=='resolved').length;
-            const zdCount = vis.filter(t=>t.source==='zendesk'&&t.status!=='resolved').length;
             const count = ws.id === 'all_sources'
               ? (onboardingRows.length + offboardingRows.length + amendmentRows.length + redlineRows.length + workbenchRows.length + jiraCount + zdCount)
               : ws.id === 'onboarding' ? onboardingRows.length
@@ -475,6 +466,8 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
             );
           })}
         </div>
+          );
+        })()}
 
         {/* Line 3: Queue filters — only show when viewing the main queue (no work source panel) */}
         {!workSource&&(

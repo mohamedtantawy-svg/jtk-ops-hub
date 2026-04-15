@@ -112,10 +112,16 @@ export default function SourceTable({
       return bTime - aTime; // newest first
     });
     if (sort === 'sla') return arr.sort((a, b) => {
-      // Workbench tasks have slaRemaining (seconds). Non-workbench use age.
+      // Workbench tasks have slaRemaining (seconds) — use it when available
+      const aHasSla = a.slaRemaining != null;
+      const bHasSla = b.slaRemaining != null;
+      if (aHasSla && bHasSla) return a.slaRemaining - b.slaRemaining; // lowest remaining first
+      if (aHasSla) return -1; // SLA tasks before non-SLA
+      if (bHasSla) return 1;
+      // Fallback: oldest (most SLA-critical) first
       const aAge = a.createdAt ? (Date.now() - new Date(a.createdAt).getTime()) : 0;
       const bAge = b.createdAt ? (Date.now() - new Date(b.createdAt).getTime()) : 0;
-      return bAge - aAge; // oldest (most SLA-critical) first
+      return bAge - aAge;
     });
     return arr;
   }, [filtered, sort]);
@@ -307,7 +313,7 @@ function SourceRow({ row, showSource }) {
       {/* Country */}
       <td style={{ ...tdStyle, fontSize: 12, whiteSpace: 'nowrap' }}>
         {flag && <span style={{ marginRight: 3 }}>{flag}</span>}
-        <span style={{ color: '#616161', fontWeight: 500 }}>{row.country || '--'}</span>
+        <span style={{ color: '#616161', fontWeight: 500 }}>{countryDisplay || '--'}</span>
       </td>
 
       {/* Assignee */}
