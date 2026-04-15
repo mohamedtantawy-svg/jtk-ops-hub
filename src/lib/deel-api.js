@@ -60,6 +60,8 @@ async function _deelFetch(path, options = {}) {
       Authorization: `Bearer ${DEEL_API_KEY}`,
       Accept: 'application/json',
       'Content-Type': 'application/json',
+      Origin: 'https://admin.deel.network',
+      Referer: 'https://admin.deel.network/',
       ...options.headers,
     },
     signal: options.signal || AbortSignal.timeout(20000),
