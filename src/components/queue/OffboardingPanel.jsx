@@ -72,11 +72,18 @@ export default function OffboardingPanel({ byCountry = [], counts = {}, loading,
   const totalFiltered = filtered.reduce((sum, g) => sum + g.people.length, 0);
 
   if (error && byCountry.length === 0) {
+    const is401 = error.includes('401') || error.toLowerCase().includes('not authorized') || error.toLowerCase().includes('unauthorized');
     return (
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 40, textAlign: 'center' }}>
-        <i className="bi-exclamation-triangle" style={{ fontSize: 40, color: '#ed8d00', marginBottom: 12 }} />
-        <div style={{ fontSize: 15, fontWeight: 600, color: '#1b1b1b', marginBottom: 6 }}>Unable to load offboarding data</div>
-        <div style={{ fontSize: 13, color: '#9e9e9e', marginBottom: 16 }}>{error}</div>
+        <i className={is401 ? 'bi-shield-lock' : 'bi-exclamation-triangle'} style={{ fontSize: 40, color: is401 ? '#d42d35' : '#ed8d00', marginBottom: 12 }} />
+        <div style={{ fontSize: 15, fontWeight: 600, color: '#1b1b1b', marginBottom: 6 }}>
+          {is401 ? 'Deel API token expired' : 'Unable to load offboarding data'}
+        </div>
+        <div style={{ fontSize: 13, color: '#9e9e9e', marginBottom: 16, maxWidth: 400 }}>
+          {is401
+            ? 'The Deel API key needs to be refreshed. Go to Deel Developer Portal → API Tokens → regenerate, then update the DEEL_API_KEY env var on Nexus.'
+            : error}
+        </div>
         <button onClick={onRefresh} style={{ padding: '8px 20px', borderRadius: 128, border: '1px solid #e8e8e8', background: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#1b1b1b' }}>
           <i className="bi-arrow-clockwise" style={{ marginRight: 6 }} />Retry
         </button>
