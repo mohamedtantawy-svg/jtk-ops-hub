@@ -4,7 +4,8 @@ export const TOOLS={
   workbench:     {label:'Workbench',      icon:'bi-tools',            color:'#29811e',bg:'#e8f5e9',dot:'#29811e'},
   onboarding:    {label:'Onboarding',     icon:'bi-person-plus-fill', color:'#1f74b3',bg:'#e8f0fe',dot:'#1f74b3'},
   offboarding:   {label:'Offboarding',    icon:'bi-person-dash-fill', color:'#d42d35',bg:'#ffe2de',dot:'#d42d35'},
-  change_request:{label:'Change Request', icon:'bi-pencil-square',    color:'#ed8d00',bg:'#fff8e6',dot:'#ed8d00'},
+  amendments:    {label:'Amendments',     icon:'bi-pencil-square',    color:'#ed8d00',bg:'#fff8e6',dot:'#ed8d00'},
+  redlines:      {label:'Redlines',       icon:'bi-file-earmark-diff',color:'#7c3aed',bg:'#f3eff8',dot:'#7c3aed'},
   gmail:         {label:'Gmail',          icon:'bi-envelope',         color:'#c62828',bg:'#fce4ec',dot:'#c62828'},
   slack:         {label:'Slack',          icon:'bi-chat-dots',        color:'#c4b1f9',bg:'#f3eff8',dot:'#c4b1f9'},
   calendar:      {label:'Calendar',       icon:'bi-calendar3',        color:'#1565c0',bg:'#e3f2fd',dot:'#1565c0'},
@@ -15,7 +16,7 @@ export const TOOLS={
   custom:        {label:'Custom',        icon:'bi-puzzle',           color:'#616161',bg:'#f3f3f3',dot:'#616161'},
 };
 // Source types shown as queue filters (excludes slack, calendar, looker)
-export const QUEUE_SOURCES=['zendesk','jira','workbench','onboarding','offboarding','change_request','gmail'];
+export const QUEUE_SOURCES=['zendesk','jira','workbench','onboarding','offboarding','amendments','redlines','gmail'];
 export const STATUSES={
   new:        {label:'New',        color:'#1f74b3',bg:'#e8f0fe'},
   in_progress:{label:'In Progress',color:'#e65100',bg:'#fff3e0'},

@@ -6,26 +6,33 @@ import { SLA_MINS } from '../../data/constants';
 import Detail from './Detail';
 import { ToolBadge, FnBadge, StatusBadge, SlaBadge } from '../ui/Badges';
 import OutboundQueue from './OutboundQueue';
-import OnboardingPanel from './OnboardingPanel';
-import OffboardingPanel from './OffboardingPanel';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import Avatar from '../ui/Avatar';
 import { useOnboardingData } from '../../hooks/useOnboardingData';
 import { useOffboardingData } from '../../hooks/useOffboardingData';
 import { useChangeRequestData } from '../../hooks/useChangeRequestData';
 import { useWorkbenchData } from '../../hooks/useWorkbenchData';
-import ChangeRequestPanel from './ChangeRequestPanel';
-import WorkbenchPanel from './WorkbenchPanel';
+import SourceTable from './SourceTable';
 import ErrorBoundary from '../ui/ErrorBoundary';
+import {
+  normalizeOnboarding,
+  normalizeOffboarding,
+  normalizeAmendments,
+  normalizeRedlines,
+  normalizeWorkbench,
+} from '../../utils/normalizeSourceRows';
 
 // ── Work Source Button config ──
+// Item #12: Split "Change Request" into "Amendments" and "Redlines"
 const WORK_SOURCES = [
+  { id: 'all_sources',     label: 'All',             icon: 'bi-grid',             color: '#1b1b1b', bg: '#f3f3f3' },
   { id: 'onboarding',      label: 'Onboarding',      icon: 'bi-person-plus-fill', color: '#7c3aed', bg: '#f3eff8' },
   { id: 'offboarding',     label: 'Offboarding',     icon: 'bi-person-dash-fill', color: '#d42d35', bg: '#fef2f2' },
+  { id: 'amendments',      label: 'Amendments',      icon: 'bi-pencil-square',    color: '#ed8d00', bg: '#fff8e6' },
+  { id: 'redlines',        label: 'Redlines',        icon: 'bi-file-earmark-diff',color: '#7c3aed', bg: '#f3eff8' },
   { id: 'workbench',       label: 'Workbench',       icon: 'bi-grid-3x3-gap-fill',color: '#0369a1', bg: '#eff6ff' },
   { id: 'jira',            label: 'Jira',            icon: 'bi-kanban-fill',      color: '#1f74b3', bg: '#e8f0fe' },
   { id: 'zendesk',         label: 'Zendesk',         icon: 'bi-headset',          color: '#29811e', bg: '#e8f5e9' },
-  { id: 'change_request',  label: 'Change Request',  icon: 'bi-pencil-square',    color: '#ed8d00', bg: '#fff8e6' },
 ];
 
 // Load saved filters from localStorage
@@ -49,7 +56,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const [showMeetingInvites,setShowMeetingInvites]=useState(false);
   const [search,setSearch]=useState('');
   const [fSla,setFSla]=useState(null); // null | 'ok' | 'at_risk' | 'breached'
-  const [sort,setSort]=useState(saved?.sort||'oldest');
+  const [sort,setSort]=useState(saved?.sort||'sla'); // Item #5: Default SLA sort oldest→newest
   const [checkedIds,setCheckedIds]=useState(new Set());
   const [recentIds,setRecentIds]=useState([]);
   // Work mode state
@@ -68,6 +75,18 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const offboardingData = useOffboardingData(true);
   const changeRequestData = useChangeRequestData(true);
   const workbenchData = useWorkbenchData(true);
+
+  // ── Normalized rows for SourceTable (Item #3) ──
+  const onboardingRows = useMemo(() => normalizeOnboarding(onboardingData.items), [onboardingData.items]);
+  const offboardingRows = useMemo(() => normalizeOffboarding(offboardingData.items), [offboardingData.items]);
+  const amendmentRows = useMemo(() => normalizeAmendments(changeRequestData.amendments), [changeRequestData.amendments]);
+  const redlineRows = useMemo(() => normalizeRedlines(changeRequestData.redlines), [changeRequestData.redlines]);
+  const workbenchRows = useMemo(() => normalizeWorkbench(workbenchData.tasks), [workbenchData.tasks]);
+  // Item #4: "All" view — combine all sources into unified list
+  const allSourceRows = useMemo(() => [
+    ...onboardingRows, ...offboardingRows, ...amendmentRows, ...redlineRows, ...workbenchRows,
+  ], [onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows]);
+
   const isAdmin=perms?.dataScope==='all_tasks'; const isLead=perms?.dataScope==='team_tasks';
   const ns=tasks.filter(t=>t.source!=='slack'&&t.source!=='calendar');
   // Hierarchical visibility: viewer sees own tickets + all direct/indirect reports
@@ -115,7 +134,12 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const done=vis.filter(t=>t.status==='resolved');
   const filteredTasks=[...active,...snoozed,...done];
   const all=filteredTasks;
-  const allCtry=[...new Set(ns.map(t=>t.country))];
+  // Item #9: Country filter shows countries from ALL active tasks (all sources)
+  const allCtry=useMemo(()=>{
+    const ctrySet = new Set(ns.map(t=>t.country).filter(Boolean));
+    for(const r of allSourceRows) if(r.country) ctrySet.add(r.country);
+    return [...ctrySet];
+  },[ns,allSourceRows]);
   const hasActiveFilters=!!(fTool||fStatus||fCtry.length>0||fSla||fUnassigned||search);
 
   // Work mode queue — only active tasks (excludes snoozed/waiting)
@@ -328,32 +352,16 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
 
       {/* ── Single Header — matches Announcements ── */}
       <div data-role="queue-header" style={{padding:'8px 32px 12px',background:'white',borderBottom:'1px solid #e8e8e8',flexShrink:0}}>
-        {/* Line 1: Title + counts + badge + Start Working */}
+        {/* Line 1: Title + total counts across ALL queues (Item #7) + Start Working */}
         <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:10}}>
           {(isAdmin||isLead)&&<span style={{fontSize:13,fontWeight:600,color:'#616161'}}>{isAdmin?'All Tasks':`${user.team}`}</span>}
+          {/* Item #7: Total tasks across ALL queues */}
           <span style={{fontSize:12,color:'#9e9e9e',display:'flex',alignItems:'center',gap:5}}>
             <i className="bi-layers" style={{fontSize:11}}></i>
-            <span style={{fontWeight:600,color:'#1b1b1b'}}>{open.length}</span> open
-            {done.length>0&&<span> &middot; {done.length} resolved</span>}
+            <span style={{fontWeight:600,color:'#1b1b1b'}}>{open.length + allSourceRows.length}</span> open
+            {snoozed.length>0&&<span> &middot; <span style={{fontWeight:600,color:'#616161'}}>{snoozed.length}</span> paused</span>}
+            {done.length>0&&<span> &middot; <span style={{fontWeight:600,color:'#29811e'}}>{done.length}</span> resolved</span>}
           </span>
-          {onTrackCount>0&&(
-            <div onClick={()=>setFSla(fSla==='ok'?null:'ok')} style={{display:'flex',alignItems:'center',gap:6,background:fSla==='ok'?'#dcfce7':'#f0fdf4',border:`1px solid ${fSla==='ok'?'#15803d':'#bbf7d0'}`,borderRadius:128,padding:'4px 12px',cursor:'pointer',transition:'all .15s'}}>
-              <i className="bi-check-circle-fill" style={{color:'#15803d',fontSize:12}}></i>
-              <span style={{fontSize:12,fontWeight:700,color:'#166534'}}>{onTrackCount} on track</span>
-            </div>
-          )}
-          {atRiskCount>0&&(
-            <div onClick={()=>setFSla(fSla==='at_risk'?null:'at_risk')} style={{display:'flex',alignItems:'center',gap:6,background:fSla==='at_risk'?'#fef3c7':'#fff8e6',border:`1px solid ${fSla==='at_risk'?'#ed8d00':'#ffe27c'}`,borderRadius:128,padding:'4px 12px',cursor:'pointer',transition:'all .15s'}}>
-              <i className="bi-exclamation-circle-fill" style={{color:'#ed8d00',fontSize:12}}></i>
-              <span style={{fontSize:12,fontWeight:700,color:'#92400E'}}>{atRiskCount} at risk</span>
-            </div>
-          )}
-          {breachedCount>0&&(
-            <div onClick={()=>setFSla(fSla==='breached'?null:'breached')} style={{display:'flex',alignItems:'center',gap:6,background:fSla==='breached'?'#fecaca':'#ffe2de',border:`1px solid ${fSla==='breached'?'#d42d35':'#fca5a5'}`,borderRadius:128,padding:'4px 12px',cursor:'pointer',transition:'all .15s'}}>
-              <i className="bi-x-circle-fill" style={{color:'#d42d35',fontSize:12}}></i>
-              <span style={{fontSize:12,fontWeight:700,color:'#991b1b'}}>{breachedCount} breached</span>
-            </div>
-          )}
           <div style={{marginLeft:'auto',display:'flex',gap:8,alignItems:'center'}}>
             {/* Live sync indicator */}
             {queueSync&&(
@@ -362,6 +370,25 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
                 <span>{queueSync.loading?'Syncing...':queueSync.isLive?'Live':'Offline'}</span>
                 {queueSync.meta&&<span style={{color:'#bbb'}}>ZD:{queueSync.meta.zendesk?.count||0} JR:{queueSync.meta.jira?.count||0}</span>}
                 <button onClick={()=>queueSync.refresh()} title="Force refresh" style={{border:'none',background:'transparent',cursor:'pointer',padding:2,color:'#9e9e9e',fontSize:12,display:'flex'}}><i className="bi-arrow-clockwise"/></button>
+              </div>
+            )}
+            {/* Item #6: SLA status pills moved to right side */}
+            {onTrackCount>0&&(
+              <div onClick={()=>setFSla(fSla==='ok'?null:'ok')} style={{display:'flex',alignItems:'center',gap:6,background:fSla==='ok'?'#dcfce7':'#f0fdf4',border:`1px solid ${fSla==='ok'?'#15803d':'#bbf7d0'}`,borderRadius:128,padding:'4px 12px',cursor:'pointer',transition:'all .15s'}}>
+                <i className="bi-check-circle-fill" style={{color:'#15803d',fontSize:12}}></i>
+                <span style={{fontSize:12,fontWeight:700,color:'#166534'}}>{onTrackCount}</span>
+              </div>
+            )}
+            {atRiskCount>0&&(
+              <div onClick={()=>setFSla(fSla==='at_risk'?null:'at_risk')} style={{display:'flex',alignItems:'center',gap:6,background:fSla==='at_risk'?'#fef3c7':'#fff8e6',border:`1px solid ${fSla==='at_risk'?'#ed8d00':'#ffe27c'}`,borderRadius:128,padding:'4px 12px',cursor:'pointer',transition:'all .15s'}}>
+                <i className="bi-exclamation-circle-fill" style={{color:'#ed8d00',fontSize:12}}></i>
+                <span style={{fontSize:12,fontWeight:700,color:'#92400E'}}>{atRiskCount}</span>
+              </div>
+            )}
+            {breachedCount>0&&(
+              <div onClick={()=>setFSla(fSla==='breached'?null:'breached')} style={{display:'flex',alignItems:'center',gap:6,background:fSla==='breached'?'#fecaca':'#ffe2de',border:`1px solid ${fSla==='breached'?'#d42d35':'#fca5a5'}`,borderRadius:128,padding:'4px 12px',cursor:'pointer',transition:'all .15s'}}>
+                <i className="bi-x-circle-fill" style={{color:'#d42d35',fontSize:12}}></i>
+                <span style={{fontSize:12,fontWeight:700,color:'#991b1b'}}>{breachedCount}</span>
               </div>
             )}
             {open.length>0&&(
@@ -375,19 +402,29 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
         </div>
 
         {/* Line 2: Work Source buttons */}
-        <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:workSource&&workSource!=='zendesk'&&workSource!=='jira'?0:10,flexWrap:'nowrap',overflowX:'auto'}}>
+        <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:workSource&&workSource!=='zendesk'&&workSource!=='jira'?0:10,flexWrap:'nowrap',overflowX:'auto',paddingBottom:2}}>
           {WORK_SOURCES.map(ws=>{
             // Zendesk & Jira filter the main queue by source instead of showing a panel
             const isQueueFilter = ws.id === 'zendesk' || ws.id === 'jira';
             const isActive = isQueueFilter ? (fTool === ws.id && !workSource) : workSource === ws.id;
-            const count=ws.id==='onboarding'?onboardingData.counts.total:ws.id==='offboarding'?offboardingData.counts.total:ws.id==='jira'?(queueSync?.meta?.jira?.count||0):ws.id==='zendesk'?(queueSync?.meta?.zendesk?.count||0):null;
+            // Item #1: All work source buttons show task counts
+            const count = ws.id === 'all_sources'
+              ? (onboardingData.counts.total + offboardingData.counts.total + changeRequestData.amendmentCounts.total + changeRequestData.redlineCounts.total + workbenchData.counts.total + (queueSync?.meta?.jira?.count||0) + (queueSync?.meta?.zendesk?.count||0))
+              : ws.id === 'onboarding' ? onboardingData.counts.total
+              : ws.id === 'offboarding' ? offboardingData.counts.total
+              : ws.id === 'amendments' ? changeRequestData.amendmentCounts.total
+              : ws.id === 'redlines' ? changeRequestData.redlineCounts.total
+              : ws.id === 'workbench' ? workbenchData.counts.total
+              : ws.id === 'jira' ? (queueSync?.meta?.jira?.count||0)
+              : ws.id === 'zendesk' ? (queueSync?.meta?.zendesk?.count||0)
+              : 0;
             const handleClick = () => {
               if (isQueueFilter) {
                 // Toggle source filter on the queue — clear any active panel
                 setWorkSource(null);
                 setFTool(fTool === ws.id ? null : ws.id);
               } else {
-                // Show dedicated panel (onboarding, offboarding, etc.)
+                // Show dedicated panel (onboarding, offboarding, workbench, amendments, redlines, all)
                 setFTool(null);
                 setWorkSource(isActive ? null : ws.id);
               }
@@ -406,13 +443,11 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
                 }}>
                 <i className={ws.icon} style={{fontSize:12}}></i>
                 {ws.label}
-                {count>0&&(
-                  <span style={{
-                    padding:'1px 7px',borderRadius:128,fontSize:10,fontWeight:700,
-                    background:isActive?`${ws.color}20`:'#f2f2f2',
-                    color:isActive?ws.color:'#9e9e9e',
-                  }}>{count}</span>
-                )}
+                <span style={{
+                  padding:'1px 7px',borderRadius:128,fontSize:10,fontWeight:700,
+                  background:isActive?`${ws.color}20`:'#f2f2f2',
+                  color:isActive?ws.color:'#9e9e9e',
+                }}>{count}</span>
               </button>
             );
           })}
@@ -475,58 +510,92 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
         )}
       </div>
 
-      {/* ── Work Source Panels ── */}
+      {/* ── Work Source Panels — all use standardized SourceTable (Item #3) ── */}
+      {workSource==='all_sources'&&(
+        <ErrorBoundary>
+        <SourceTable
+          rows={allSourceRows}
+          loading={onboardingData.loading||offboardingData.loading||changeRequestData.loading||workbenchData.loading}
+          error={null}
+          onRefresh={()=>{onboardingData.refresh();offboardingData.refresh();changeRequestData.refresh();workbenchData.refresh();}}
+          showSourceColumn={true}
+          emptyLabel="No tasks across any source"
+          emptySubLabel="All queues are clear"
+          sortDefault="oldest"
+        />
+        </ErrorBoundary>
+      )}
       {workSource==='onboarding'&&(
         <ErrorBoundary>
-        <OnboardingPanel
-          byCountry={onboardingData.byCountry}
-          counts={onboardingData.counts}
+        <SourceTable
+          rows={onboardingRows}
           loading={onboardingData.loading}
           error={onboardingData.error}
           onRefresh={onboardingData.refresh}
+          emptyIcon="bi-person-plus"
+          emptyLabel="No actionable onboarding tasks"
+          emptySubLabel="All onboarding tasks are handled"
+          sortDefault="oldest"
         />
         </ErrorBoundary>
       )}
       {workSource==='offboarding'&&(
         <ErrorBoundary>
-        <OffboardingPanel
-          byCountry={offboardingData.byCountry}
-          counts={offboardingData.counts}
+        <SourceTable
+          rows={offboardingRows}
           loading={offboardingData.loading}
           error={offboardingData.error}
           onRefresh={offboardingData.refresh}
+          emptyIcon="bi-person-dash"
+          emptyLabel="No active offboarding cases"
+          emptySubLabel="All termination cases have been resolved"
+          sortDefault="oldest"
+        />
+        </ErrorBoundary>
+      )}
+      {workSource==='amendments'&&(
+        <ErrorBoundary>
+        <SourceTable
+          rows={amendmentRows}
+          loading={changeRequestData.loading}
+          error={changeRequestData.error}
+          onRefresh={changeRequestData.refresh}
+          emptyIcon="bi-pencil-square"
+          emptyLabel="No actionable amendments"
+          emptySubLabel="All amendments are handled"
+          sortDefault="oldest"
+        />
+        </ErrorBoundary>
+      )}
+      {workSource==='redlines'&&(
+        <ErrorBoundary>
+        <SourceTable
+          rows={redlineRows}
+          loading={changeRequestData.loading}
+          error={changeRequestData.error}
+          onRefresh={changeRequestData.refresh}
+          emptyIcon="bi-file-earmark-diff"
+          emptyLabel="No actionable redlines"
+          emptySubLabel="All redlines are handled"
+          sortDefault="oldest"
         />
         </ErrorBoundary>
       )}
       {workSource==='workbench'&&(
         <ErrorBoundary>
-        <WorkbenchPanel
-          tasks={workbenchData.tasks}
-          counts={workbenchData.counts}
-          byTaskType={workbenchData.byTaskType}
-          byCountry={workbenchData.byCountry}
+        <SourceTable
+          rows={workbenchRows}
           loading={workbenchData.loading}
           error={workbenchData.error}
           onRefresh={workbenchData.refresh}
+          emptyIcon="bi-grid-3x3-gap"
+          emptyLabel="No workbench tasks"
+          emptySubLabel="All tasks are processed"
+          sortDefault="oldest"
         />
         </ErrorBoundary>
       )}
       {/* Zendesk & Jira buttons filter the main queue — no separate panels needed */}
-      {workSource==='change_request'&&(
-        <ErrorBoundary>
-        <ChangeRequestPanel
-          amendments={changeRequestData.amendments}
-          redlines={changeRequestData.redlines}
-          amendmentsByCountry={changeRequestData.amendmentsByCountry}
-          redlinesByCountry={changeRequestData.redlinesByCountry}
-          amendmentCounts={changeRequestData.amendmentCounts}
-          redlineCounts={changeRequestData.redlineCounts}
-          loading={changeRequestData.loading}
-          error={changeRequestData.error}
-          onRefresh={changeRequestData.refresh}
-        />
-        </ErrorBoundary>
-      )}
 
       {/* ── Table (shown when no work source is active) ── */}
       {!workSource&&<div style={{flex:1,overflowY:'auto',background:'#fafaf9'}}>

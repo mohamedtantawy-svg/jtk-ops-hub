@@ -1,0 +1,135 @@
+// ── normalizeSourceRows ──────────────────────────────────────────────────────
+// Converts data from each Deel API hook into a unified row format
+// for the SourceTable component.
+//
+// Row shape:
+// {
+//   id, source, subject, function, country, assignee,
+//   createdAt, updatedAt, status: { label, severity, color },
+//   taskUrl, slaRemaining, slaBreachStatus
+// }
+
+const DEEL_CONTRACT_BASE = 'https://app.deel.com/contracts';
+const DEEL_ADMIN_BASE = 'https://admin.deel.network';
+
+// ── Date formatter for subject lines ──
+function fmtShortDate(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d)) return '';
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+// ── Onboarding → normalized rows ──
+export function normalizeOnboarding(items = []) {
+  return items.map(p => {
+    // Friendly flow step: "Onboarding.ComplianceDocs.AwaitingReview" → "Compliance Docs · Awaiting Review"
+    const flowParts = (p.flowStep || '').split('.').slice(1);
+    const flowDisplay = flowParts.map(part => part.replace(/([A-Z])/g, ' $1').trim()).join(' · ');
+    const startStr = fmtShortDate(p.startDate);
+
+    return {
+      id: p.id || p.oid || '',
+      source: 'onboarding',
+      subject: startStr ? `${p.name || 'Unknown'} — ${startStr}` : (p.name || 'Unknown'),
+      function: flowDisplay || 'Onboarding',
+      country: p.country || '',
+      assignee: p.assignee || '',
+      createdAt: p.taskCreatedAt || p.createdAt || '',
+      updatedAt: p.taskCreatedAt || '',
+      status: p.action || { label: 'In Progress', severity: 'active', color: '#1d4ed8' },
+      taskUrl: p.oid ? `${DEEL_CONTRACT_BASE}/${p.oid}` : '',
+      slaRemaining: null,
+      slaBreachStatus: null,
+    };
+  });
+}
+
+// ── Offboarding → normalized rows ──
+export function normalizeOffboarding(items = []) {
+  return items.map(c => {
+    const endStr = fmtShortDate(c.endDate || c.desiredEndDate);
+    return {
+      id: String(c.id || ''),
+      source: 'offboarding',
+      subject: endStr ? `${c.name || 'Unknown'} — ${endStr}` : (c.name || 'Unknown'),
+      function: c.reason
+        ? (c.reason || '').replace(/_/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase()).toLowerCase().replace(/^\w/, ch => ch.toUpperCase())
+        : 'Termination',
+      country: c.country || '',
+      assignee: c.exAssignee || '',
+      createdAt: c.requestedDate || c.createdAt || '',
+      updatedAt: c.updatedAt || '',
+      status: c.status || { label: 'Awaiting Triage', severity: 'warning', color: '#ed8d00' },
+      taskUrl: c.contractUrl || (c.contractOid ? `${DEEL_CONTRACT_BASE}/${c.contractOid}` : ''),
+      jiraUrl: c.jiraUrl || '',   // Item #10: Preserve Jira link for offboarding tasks
+      slaRemaining: null,
+      slaBreachStatus: null,
+    };
+  });
+}
+
+// ── Amendments → normalized rows ──
+export function normalizeAmendments(items = []) {
+  return items.map(a => {
+    const effectiveStr = fmtShortDate(a.effectiveDate);
+    const changesSummary = a.changes?.length > 0
+      ? a.changes.map(c => c.label || c.dataPoint).filter(Boolean).join(', ')
+      : '';
+    return {
+      id: String(a.id || ''),
+      source: 'amendments',
+      subject: effectiveStr ? `${a.employeeName || 'Unknown'} — ${effectiveStr}` : (a.employeeName || 'Unknown'),
+      function: changesSummary || `${a.type || 'Amendment'} Amendment`,
+      country: a.country || '',
+      assignee: '',  // Amendments don't have assignee in current data
+      createdAt: a.createdAt || '',
+      updatedAt: a.updatedAt || '',
+      status: a.displayStatus || { label: 'Amendment', severity: 'active', color: '#1d4ed8' },
+      taskUrl: a.contractOid ? `${DEEL_CONTRACT_BASE}/${a.contractOid}` : '',
+      slaRemaining: null,
+      slaBreachStatus: null,
+    };
+  });
+}
+
+// ── Redlines → normalized rows ──
+export function normalizeRedlines(items = []) {
+  return items.map(r => {
+    const typeLabel = r.type === 'templateRedline' ? 'Template' : r.type === 'contractRedline' ? 'Contract' : r.type || '';
+    return {
+      id: String(r.id || ''),
+      source: 'redlines',
+      subject: r.orgName || 'Unknown Org',
+      function: `${typeLabel} Redline${r.countries?.length ? ' · ' + r.countries.join(', ') : ''}`,
+      country: r.countryCode || (r.countries?.[0] || ''),
+      assignee: '',  // Redlines don't have assignee in current data
+      createdAt: r.createdAt || '',
+      updatedAt: r.updatedAt || '',
+      status: r.displayStatus || { label: 'Redline', severity: 'active', color: '#1d4ed8' },
+      taskUrl: '',  // Redlines don't have a direct external URL
+      slaRemaining: null,
+      slaBreachStatus: null,
+    };
+  });
+}
+
+// ── Workbench → normalized rows ──
+export function normalizeWorkbench(items = []) {
+  return items.map(t => ({
+    id: String(t.id || ''),
+    source: 'workbench',
+    subject: t.name || 'Untitled Task',
+    function: t.taskType || t.sourceType || 'Workbench',
+    country: t.country || '',
+    assignee: t.assignee?.name || '',
+    createdAt: t.createdAt || '',
+    updatedAt: t.updatedAt || '',
+    status: t.displayStatus || { label: t.status || 'Unknown', severity: 'info', color: '#616161' },
+    taskUrl: t.contractOid
+      ? `${DEEL_ADMIN_BASE}/contracts/${t.contractOid}/overview`
+      : '',
+    slaRemaining: t.slaRemaining,
+    slaBreachStatus: t.slaBreachStatus || '',
+  }));
+}

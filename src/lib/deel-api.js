@@ -162,11 +162,24 @@ export async function listOnboardingPeople(params = {}) {
 
   const rawItems = res?.result || [];
 
+  // Paginate through all pages using offset — cap at 1000 items / 20 iterations
+  let allItems = [...rawItems];
+  let currentCursor = res?.cursor;
+  let iterations = 0;
+  while (currentCursor && iterations < 20 && allItems.length < 1000) {
+    iterations++;
+    const nextRes = await deelFetch(`/admin/eor/employee-manager/list/Onboarding.ActionableQueue?actionableQueueFilters%5Boffset%5D=${allItems.length}`);
+    const nextItems = nextRes?.result || [];
+    if (nextItems.length === 0) break;
+    allItems.push(...nextItems);
+    currentCursor = nextRes?.cursor;
+  }
+
   // Get the actionable queue total from the statuses tree
   const onboardingStatus = res?.statuses?.find(s => s.name === 'Onboarding');
-  const actionableTotal = onboardingStatus?.actionableTasksTotal || rawItems.length;
+  const actionableTotal = onboardingStatus?.actionableTasksTotal || allItems.length;
 
-  const items = rawItems.map(p => ({
+  const items = allItems.map(p => ({
     id:                p.onboardingId || p.oid || '',
     oid:               p.oid || '',                              // contract OID
     name:              p.employeeName || '',
@@ -183,7 +196,7 @@ export async function listOnboardingPeople(params = {}) {
     isHourly:          p.timeTracking?.isHourly || false,
   }));
 
-  return { items, total: actionableTotal, cursor: res?.cursor || null };
+  return { items, total: actionableTotal, cursor: currentCursor || null };
 }
 
 // ── Offboarding / Terminations (Admin API) ──────────────────────────────────
@@ -275,7 +288,7 @@ export async function listRedlineRequests(params = {}) {
   qs.set('sortBy', 'createdAt');
   qs.set('sortOrder', 'desc');
   qs.set('status', params.status || 'preparingDocuments.legalReview');
-  if (params.limit) qs.set('limit', String(params.limit));
+  qs.set('limit', String(params.limit || 200));
   const res = await deelFetch(`/admin/eor-experience/redline-requests?${qs.toString()}`);
 
   const rawItems = res?.redlines || [];
@@ -330,7 +343,7 @@ export async function listAmendmentRequests(params = {}) {
   qs.set('sortBy', 'createdAt');
   qs.set('sortOrder', 'desc');
   qs.set('statuses', params.statuses || 'PreparingDocuments.AmendmentRequested');
-  if (params.limit) qs.set('limit', String(params.limit));
+  qs.set('limit', String(params.limit || 200));
   const res = await deelFetch(`/admin/eor-experience/amendments-requests?${qs.toString()}`);
 
   const rawItems = res?.data || [];
@@ -396,12 +409,24 @@ export async function listWorkbenchTasks(params = {}) {
   ];
   for (const id of teamIds) qs.append('teamIds[]', id);
 
-  qs.set('limit', String(params.limit || 50));
+  qs.set('limit', String(params.limit || 200));
 
   const res = await deelFetch(`/admin/ops_workbench/tasks?${qs.toString()}`);
   const rawItems = res?.result || [];
 
-  const items = rawItems.map(t => ({
+  // Paginate: keep fetching until no cursor or safety cap of 500 items
+  let allItems = [...rawItems];
+  let cursor = res?.cursor;
+  while (cursor && allItems.length < 500) {
+    qs.set('cursor', cursor);
+    const nextRes = await deelFetch(`/admin/ops_workbench/tasks?${qs.toString()}`);
+    const nextItems = nextRes?.result || [];
+    if (nextItems.length === 0) break;
+    allItems.push(...nextItems);
+    cursor = nextRes?.cursor;
+  }
+
+  const items = allItems.map(t => ({
     id:               t.id || '',
     name:             t.name || '',
     description:      t.description || '',
@@ -436,7 +461,7 @@ export async function listWorkbenchTasks(params = {}) {
     escalations:      t.escalations || [],
   }));
 
-  return { items, total: res?.count || items.length, cursor: res?.cursor || null };
+  return { items, total: res?.count || items.length, cursor: cursor || null };
 }
 
 // ── Payslips (REST v2 API) ──────────────────────────────────────────────────
