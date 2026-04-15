@@ -78,6 +78,7 @@ async function buildOffboardingResult() {
       noticePeriod: c.noticePeriod || 0,
       organizationName: c.organizationName || '',
       exAssignee: c.exAssignee || '',
+      exAssigneeEmail: c.exAssigneeEmail || '',       // agent email (if API provides it)
       reason: c.reason || '',
       isResignation: c.isResignation || false,
       jiraUrl: c.jiraUrl || '',

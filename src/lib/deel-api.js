@@ -241,7 +241,8 @@ export async function listOffboardingCases() {
     updatedAt: c.updatedAt || '',
     status: c.status || '',                           // e.g. "AWAITING_TRIAGE"
     organizationName: c.organizationName || '',       // client company name
-    exAssignee: c.exAssignee || '',                   // assigned agent
+    exAssignee: c.exAssignee || '',                   // assigned agent (name string)
+    exAssigneeEmail: c.exAssigneeEmail || c.exAssignee?.email || '',  // assigned agent email (if available)
     reason: c.requestData?.reason || '',              // termination reason enum
     isResignation: c.requestData?.isEmployeeResignation || false,
     jiraUrl: c.requestData?.jiraTicket?.jiraWebURL || '',

@@ -96,7 +96,10 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   // Rows with no assigneeEmail (amendments, redlines) are hidden from agents.
   const filterSourceRows = useCallback((rows) => {
     if (isAdmin) return rows;
-    return rows.filter(r => r.assigneeEmail && visibleEmails.has(r.assigneeEmail));
+    return rows.filter(r => {
+      const email = (r.assigneeEmail || '').toLowerCase();
+      return email && visibleEmails.has(email);
+    });
   }, [isAdmin, visibleEmails]);
 
   const onboardingRows = useMemo(() => filterSourceRows(onboardingRowsAll), [onboardingRowsAll, filterSourceRows]);
@@ -149,12 +152,12 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const done=vis.filter(t=>t.status==='resolved');
   const filteredTasks=[...active,...snoozed,...done];
   const all=filteredTasks;
-  // Item #9: Country filter shows countries from ALL active tasks (all sources)
+  // Item #9: Country filter shows countries from the agent's visible tasks only
   const allCtry=useMemo(()=>{
-    const ctrySet = new Set(ns.map(t=>t.country).filter(Boolean));
+    const ctrySet = new Set(vis.map(t=>t.country).filter(Boolean));
     for(const r of allSourceRows) if(r.country) ctrySet.add(r.country);
     return [...ctrySet];
-  },[ns,allSourceRows]);
+  },[vis,allSourceRows]);
   const hasActiveFilters=!!(fTool||fStatus||fCtry.length>0||fSla||fUnassigned||search);
 
   // Work mode queue — only active tasks (excludes snoozed/waiting)
@@ -331,7 +334,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       }).filter(Boolean),
     ];
     return tabs;
-  },[ns,isAdmin,isLead,user]);
+  },[ns,isAdmin,isLead,user,visibleEmails]);
 
   // tabBtnStyle kept for potential reuse
   const tabBtnStyle = (active) => ({
