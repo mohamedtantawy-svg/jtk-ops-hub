@@ -6,8 +6,20 @@ import { SLA_MINS } from '../../data/constants';
 import Detail from './Detail';
 import { ToolBadge, FnBadge, StatusBadge, SlaBadge } from '../ui/Badges';
 import OutboundQueue from './OutboundQueue';
+import OnboardingPanel from './OnboardingPanel';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import Avatar from '../ui/Avatar';
+import { useOnboardingData } from '../../hooks/useOnboardingData';
+
+// ── Work Source Button config ──
+const WORK_SOURCES = [
+  { id: 'onboarding',      label: 'Onboarding',      icon: 'bi-person-plus-fill', color: '#7c3aed', bg: '#f3eff8' },
+  { id: 'offboarding',     label: 'Offboarding',     icon: 'bi-person-dash-fill', color: '#d42d35', bg: '#fef2f2' },
+  { id: 'workbench',       label: 'Workbench',       icon: 'bi-grid-3x3-gap-fill',color: '#0369a1', bg: '#eff6ff' },
+  { id: 'jira',            label: 'Jira',            icon: 'bi-kanban-fill',      color: '#1f74b3', bg: '#e8f0fe' },
+  { id: 'zendesk',         label: 'Zendesk',         icon: 'bi-headset',          color: '#29811e', bg: '#e8f5e9' },
+  { id: 'change_request',  label: 'Change Request',  icon: 'bi-pencil-square',    color: '#ed8d00', bg: '#fff8e6' },
+];
 
 // Load saved filters from localStorage
 const loadFilters = () => {
@@ -38,10 +50,14 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const [workIndex,setWorkIndex]=useState(0);
   const [workSkipped,setWorkSkipped]=useState(new Set());
   const pendingCloseRefs=useRef({});
+  // Work source — which panel to show (null = normal queue)
+  const [workSource,setWorkSource]=useState(null);
   // searchRef removed — search handled by global nav
   const perms = useContext(PermissionsContext);
   const settings = useContext(SettingsContext);
   const { deelData, jiraData, queueSync } = useContext(IntegrationsContext);
+  // Onboarding data from Deel API
+  const onboardingData = useOnboardingData(true);
   const isAdmin=perms?.dataScope==='all_tasks'; const isLead=perms?.dataScope==='team_tasks';
   const ns=tasks.filter(t=>t.source!=='slack'&&t.source!=='calendar');
   // Hierarchical visibility: viewer sees own tickets + all direct/indirect reports
@@ -303,7 +319,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       {/* ── Single Header — matches Announcements ── */}
       <div data-role="queue-header" style={{padding:'8px 32px 12px',background:'white',borderBottom:'1px solid #e8e8e8',flexShrink:0}}>
         {/* Line 1: Title + counts + badge + Start Working */}
-        <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:12}}>
+        <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:10}}>
           {(isAdmin||isLead)&&<span style={{fontSize:13,fontWeight:600,color:'#616161'}}>{isAdmin?'All Tasks':`${user.team}`}</span>}
           <span style={{fontSize:12,color:'#9e9e9e',display:'flex',alignItems:'center',gap:5}}>
             <i className="bi-layers" style={{fontSize:11}}></i>
@@ -347,17 +363,41 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
             )}
           </div>
         </div>
-        {/* Line 2: Filters — all custom dropdowns + unassigned toggle */}
+
+        {/* Line 2: Work Source buttons */}
+        <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:workSource?0:10,flexWrap:'nowrap',overflowX:'auto'}}>
+          {WORK_SOURCES.map(ws=>{
+            const isActive=workSource===ws.id;
+            const count=ws.id==='onboarding'?onboardingData.counts.total:ws.id==='jira'?(queueSync?.meta?.jira?.count||0):ws.id==='zendesk'?(queueSync?.meta?.zendesk?.count||0):null;
+            return(
+              <button key={ws.id} onClick={()=>setWorkSource(isActive?null:ws.id)}
+                style={{
+                  height:34,display:'inline-flex',alignItems:'center',gap:6,
+                  padding:'0 14px',borderRadius:10,
+                  border:isActive?`1.5px solid ${ws.color}`:'1px solid #e8e8e8',
+                  background:isActive?ws.bg:'white',
+                  color:isActive?ws.color:'#616161',
+                  fontSize:12,fontWeight:isActive?700:500,cursor:'pointer',
+                  transition:'all .15s',whiteSpace:'nowrap',
+                  boxShadow:isActive?`0 1px 4px ${ws.color}18`:'none',
+                }}>
+                <i className={ws.icon} style={{fontSize:12}}></i>
+                {ws.label}
+                {count>0&&(
+                  <span style={{
+                    padding:'1px 7px',borderRadius:128,fontSize:10,fontWeight:700,
+                    background:isActive?`${ws.color}20`:'#f2f2f2',
+                    color:isActive?ws.color:'#9e9e9e',
+                  }}>{count}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Line 3: Queue filters — only show when viewing the main queue (no work source panel) */}
+        {!workSource&&(
         <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'nowrap'}}>
-          {/* Source dropdown */}
-          <FilterDropdown
-            icon="bi-funnel"
-            label="Source"
-            value={fTool}
-            options={[{value:null,label:'All Sources',icon:'bi-grid',count:FILTER_TABS[0]?.count},...FILTER_TABS.slice(1).map(f=>({value:f.id,label:f.label,icon:f.icon,count:f.count}))]}
-            onChange={setFTool}
-            activeColor="#1f74b3"
-          />
           {/* Status dropdown */}
           <FilterDropdown
             icon="bi-circle"
@@ -409,10 +449,57 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
             </button>
           )}
         </div>
+        )}
       </div>
 
-      {/* ── Table ── */}
-      <div style={{flex:1,overflowY:'auto',background:'#fafaf9'}}>
+      {/* ── Work Source Panels ── */}
+      {workSource==='onboarding'&&(
+        <OnboardingPanel
+          byCountry={onboardingData.byCountry}
+          counts={onboardingData.counts}
+          loading={onboardingData.loading}
+          error={onboardingData.error}
+          onRefresh={onboardingData.refresh}
+        />
+      )}
+      {workSource==='offboarding'&&(
+        <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:40,background:'#fafaf9',textAlign:'center'}}>
+          <i className="bi-person-dash" style={{fontSize:40,color:'#d42d35',opacity:0.4,marginBottom:12}}/>
+          <div style={{fontSize:15,fontWeight:600,color:'#1b1b1b',marginBottom:6}}>Offboarding</div>
+          <div style={{fontSize:13,color:'#9e9e9e'}}>Termination tasks will be connected here</div>
+        </div>
+      )}
+      {workSource==='workbench'&&(
+        <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:40,background:'#fafaf9',textAlign:'center'}}>
+          <i className="bi-grid-3x3-gap" style={{fontSize:40,color:'#0369a1',opacity:0.4,marginBottom:12}}/>
+          <div style={{fontSize:15,fontWeight:600,color:'#1b1b1b',marginBottom:6}}>Workbench</div>
+          <div style={{fontSize:13,color:'#9e9e9e'}}>HRX workbench tasks will be connected here</div>
+        </div>
+      )}
+      {workSource==='jira'&&(
+        <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:40,background:'#fafaf9',textAlign:'center'}}>
+          <i className="bi-kanban" style={{fontSize:40,color:'#1f74b3',opacity:0.4,marginBottom:12}}/>
+          <div style={{fontSize:15,fontWeight:600,color:'#1b1b1b',marginBottom:6}}>Jira Tasks</div>
+          <div style={{fontSize:13,color:'#9e9e9e'}}>Jira issue queue will be connected here</div>
+        </div>
+      )}
+      {workSource==='zendesk'&&(
+        <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:40,background:'#fafaf9',textAlign:'center'}}>
+          <i className="bi-headset" style={{fontSize:40,color:'#29811e',opacity:0.4,marginBottom:12}}/>
+          <div style={{fontSize:15,fontWeight:600,color:'#1b1b1b',marginBottom:6}}>Zendesk Tickets</div>
+          <div style={{fontSize:13,color:'#9e9e9e'}}>Zendesk ticket queue will be connected here</div>
+        </div>
+      )}
+      {workSource==='change_request'&&(
+        <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:40,background:'#fafaf9',textAlign:'center'}}>
+          <i className="bi-pencil-square" style={{fontSize:40,color:'#ed8d00',opacity:0.4,marginBottom:12}}/>
+          <div style={{fontSize:15,fontWeight:600,color:'#1b1b1b',marginBottom:6}}>Change Requests</div>
+          <div style={{fontSize:13,color:'#9e9e9e'}}>Amendment / change request queue will be connected here</div>
+        </div>
+      )}
+
+      {/* ── Table (shown when no work source is active) ── */}
+      {!workSource&&<div style={{flex:1,overflowY:'auto',background:'#fafaf9'}}>
         {all.length===0?(
           hasActiveFilters
             ? <div style={{textAlign:'center',padding:'60px 20px',color:'var(--text-muted)'}}>
@@ -454,7 +541,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
             </tbody>
           </table>
         )}
-      </div>
+      </div>}
 
       {/* ── Detail pane ── */}
       {selTask&&(

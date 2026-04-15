@@ -211,6 +211,7 @@
     @keyframes slideIn{from{transform:translateX(20px);opacity:0;}to{transform:translateX(0);opacity:1;}}
     .slide-in{animation:slideIn .2s ease;}
     @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.3;}}.pulse{animation:pulse 1.6s ease infinite;}
+    @keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}.spin{animation:spin 1s linear infinite;}
     @keyframes barGrow{from{width:0;}to{width:var(--w);}}.bar-grow{animation:barGrow .7s ease forwards;}
     @keyframes slideInRight{from{transform:translateX(110%);opacity:0;}to{transform:translateX(0);opacity:1;}}
     .toast-enter{animation:slideInRight .3s ease forwards;}
