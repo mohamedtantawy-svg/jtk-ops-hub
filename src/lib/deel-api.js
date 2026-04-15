@@ -5,7 +5,20 @@
 
 import { withRetry } from './retry';
 
-const DEEL_API_KEY = process.env.DEEL_API_KEY || '';
+// ── Sanitize API key ─────────────────────────────────────────────────────────
+// Guard against common env-var copy-paste mistakes:
+// - leading/trailing whitespace or newlines
+// - accidentally including "Bearer " prefix
+// - surrounding quotes
+function sanitizeToken(raw) {
+  if (!raw) return '';
+  let t = raw.trim().replace(/^["']+|["']+$/g, '');       // strip wrapping quotes
+  t = t.replace(/^Bearer\s+/i, '');                        // strip accidental "Bearer " prefix
+  t = t.replace(/[\r\n]+/g, '');                           // strip newlines
+  return t;
+}
+
+const DEEL_API_KEY = sanitizeToken(process.env.DEEL_API_KEY || '');
 
 // Normalize base URL — env var may or may not include /rest/v2
 const _rawBase = (process.env.DEEL_API_BASE_URL || 'https://api.letsdeel.com').replace(/\/+$/, '');
@@ -13,6 +26,23 @@ const DEEL_BASE = _rawBase.endsWith('/rest/v2') ? _rawBase : `${_rawBase}/rest/v
 
 export function isDeelConfigured() {
   return !!DEEL_API_KEY;
+}
+
+/**
+ * Return diagnostic info about the current Deel API configuration.
+ * Used by the health-check endpoint — never exposes the full token.
+ */
+export function getDeelDiagnostics() {
+  const keyLen = DEEL_API_KEY.length;
+  const keyPreview = keyLen > 10 ? `${DEEL_API_KEY.substring(0, 6)}...${DEEL_API_KEY.substring(keyLen - 4)}` : '(too short)';
+  return {
+    configured: !!DEEL_API_KEY,
+    baseUrl: DEEL_BASE,
+    rawBaseEnv: process.env.DEEL_API_BASE_URL || '(not set, using default)',
+    tokenLength: keyLen,
+    tokenPreview: keyPreview,
+    tokenLooksLikeJwt: DEEL_API_KEY.split('.').length === 3,
+  };
 }
 
 /**
@@ -28,15 +58,23 @@ async function _deelFetch(endpoint, options = {}) {
     ...options,
     headers: {
       Authorization: `Bearer ${DEEL_API_KEY}`,
+      Accept: 'application/json',
       'Content-Type': 'application/json',
       ...options.headers,
     },
     signal: options.signal || AbortSignal.timeout(20000),
+    // Disable Next.js fetch caching — we manage our own cache layer
+    cache: 'no-store',
   });
 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    const err = new Error(`Deel API ${res.status}: ${body.substring(0, 200)}`);
+    // Detect S3/CDN error (request hit wrong endpoint)
+    const isS3Error = body.includes('<Error>') || body.includes('NoSuchBucket') || body.includes('Unsupported Authorization');
+    const hint = isS3Error
+      ? ` [CDN/S3 error — request to ${url} did not reach the Deel API. Check DEEL_API_BASE_URL env var.]`
+      : '';
+    const err = new Error(`Deel API ${res.status} @ ${url}: ${body.substring(0, 200)}${hint}`);
     err.status = res.status;
     throw err;
   }

@@ -12,6 +12,10 @@ export async function fetchIntegrationStatus() {
 // ─────────────────────────────────────────────────────────────────────────────
 // Deel Admin API
 // ─────────────────────────────────────────────────────────────────────────────
+export async function fetchDeelHealth() {
+  return apiFetch('/integrations/deel/health');
+}
+
 export async function fetchDeelPeople({ search, email, limit, offset } = {}) {
   const params = new URLSearchParams();
   if (search) params.set('search', search);
