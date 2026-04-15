@@ -80,6 +80,14 @@ export async function fetchDeelRedlines({ status, bustCache } = {}) {
   return apiFetch(`/integrations/deel/redlines${qs ? `?${qs}` : ''}`);
 }
 
+export async function fetchDeelWorkbench({ limit, bustCache } = {}) {
+  const params = new URLSearchParams();
+  if (limit) params.set('limit', String(limit));
+  if (bustCache) params.set('bust', '1');
+  const qs = params.toString();
+  return apiFetch(`/integrations/deel/workbench${qs ? `?${qs}` : ''}`);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Jira
 // ─────────────────────────────────────────────────────────────────────────────

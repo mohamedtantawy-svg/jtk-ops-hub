@@ -366,6 +366,79 @@ export async function listAmendmentRequests(params = {}) {
   return { items, total: items.length, cursor: res?.cursor || null };
 }
 
+// ── OpsWorkbench Tasks (Admin API) ─────────────────────────────────────────
+
+/**
+ * Fetches OpsWorkbench tasks from the admin API.
+ * Uses /admin/ops_workbench/tasks — same endpoint as admin.deel.network.
+ *
+ * Query params:
+ *   status[] — array of statuses: TO_DO, IN_PROGRESS, ON_HOLD, ESCALATED
+ *   teamIds[] — array of team UUIDs (HRX Operations, HRX Termination)
+ *   limit — max results per page (default 30)
+ *
+ * Response shape: { count: number, result: [...tasks...], cursor: string }
+ * Each task has: id, name, description, status, country, assignee, creator,
+ * createdAt, updatedAt, dueAt, slaTime, slaRemaining, slaBreachStatus,
+ * taskConfiguration (name, sourceType, team), highPriority, contractOid, etc.
+ */
+export async function listWorkbenchTasks(params = {}) {
+  const qs = new URLSearchParams();
+
+  // Statuses to fetch (default: all actionable)
+  const statuses = params.statuses || ['TO_DO', 'IN_PROGRESS', 'ON_HOLD', 'ESCALATED'];
+  for (const s of statuses) qs.append('status[]', s);
+
+  // HRX team IDs
+  const teamIds = params.teamIds || [
+    'f06e236b-85a2-4380-979f-f36acec498b4', // HRX Termination
+    'f235fd21-c5a0-4804-badf-2cc3dc76191e', // HRX Operations
+  ];
+  for (const id of teamIds) qs.append('teamIds[]', id);
+
+  qs.set('limit', String(params.limit || 50));
+
+  const res = await deelFetch(`/admin/ops_workbench/tasks?${qs.toString()}`);
+  const rawItems = res?.result || [];
+
+  const items = rawItems.map(t => ({
+    id:               t.id || '',
+    name:             t.name || '',
+    description:      t.description || '',
+    status:           t.status || '',                              // TO_DO, IN_PROGRESS, etc.
+    statusCategory:   t.customStatus?.statusCategory || t.status,
+    country:          t.country || '',                             // 2-letter code
+    assignee:         t.assignee ? { id: t.assignee.id, email: t.assignee.email, name: t.assignee.name } : null,
+    creator:          t.creator ? { id: t.creator.id, email: t.creator.email, name: t.creator.name } : null,
+    createdAt:        t.createdAt || '',
+    updatedAt:        t.updatedAt || '',
+    dueAt:            t.dueAt || null,
+    completedAt:      t.completedAt || null,
+    // SLA
+    slaTime:          t.slaTime || null,                           // SLA window in seconds
+    slaRemaining:     t.slaRemaining || null,                      // seconds remaining
+    slaBreachStatus:  t.slaBreachStatus || '',                     // SLA_NOT_STARTED, SLA_NOT_BREACHED, SLA_PAUSED
+    slaState:         t.slaState || '',                            // NOT_STARTED, RUNNING, PAUSED
+    // Task type
+    taskType:         t.taskConfiguration?.name || '',             // e.g. "HRX Escalation"
+    sourceType:       t.taskConfiguration?.sourceType || '',       // e.g. "HRX_ESCALATION"
+    teamName:         t.taskConfiguration?.team?.name || '',       // e.g. "HRX Operations"
+    // Priority & refs
+    highPriority:     t.highPriority || 0,
+    contractOid:      t.contractOid || '',
+    organizationId:   t.organizationId || null,
+    origin:           t.origin || '',                              // NATS, PUBLIC_REQUEST, etc.
+    // Escalation
+    reasonForEscalation: t.reasonForEscalation || '',
+    // Linked items
+    jiraIssues:       t.jiraIssues || [],
+    zendeskTickets:   t.zendeskTickets || [],
+    escalations:      t.escalations || [],
+  }));
+
+  return { items, total: res?.count || items.length, cursor: res?.cursor || null };
+}
+
 // ── Payslips (REST v2 API) ──────────────────────────────────────────────────
 
 export async function getPayslips(contractId) {
