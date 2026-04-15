@@ -626,7 +626,7 @@ const App=()=>{
       {projectModal  &&<CreateProjectModal onConfirm={confirmProject} onClose={()=>setProjectModal(null)} project={typeof projectModal==='object'?projectModal:null} currentUser={effectiveUser}/>}
       {requestModal  &&<CreateRequestModal onConfirm={confirmRequest} onClose={()=>setRequestModal(false)} currentUser={effectiveUser} tasks={tasks}/>}
       {createEscalModal&&<CreateEscalationModal onConfirm={confirmManualEscal} onClose={()=>setCreateEscalModal(false)} currentUser={effectiveUser} tasks={tasks}/>}
-      {showSearch    &&<GlobalSearch tasks={tasks} setView={setView} setSelTask={setSelTask} onClose={()=>setShowSearch(false)}/>}
+      {showSearch    &&<GlobalSearch tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={setSelTask} onClose={()=>setShowSearch(false)}/>}
       {showOnboard   &&<Onboarding onDismiss={(dontShow)=>{setShowOnboard(false);if(dontShow){try{localStorage.setItem('ops_hub_onboarded','1');}catch(e){}}}}/>}
       {popupQueue.length>0&&<AnnouncementPopup key={popupQueue[0].id} comm={popupQueue[0]} onAcknowledge={handlePopupAcknowledge}/>}
       <Toasts toasts={toasts} dismiss={dismissToast}/>
