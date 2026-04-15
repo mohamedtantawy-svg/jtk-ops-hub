@@ -368,12 +368,25 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
         </div>
 
         {/* Line 2: Work Source buttons */}
-        <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:workSource?0:10,flexWrap:'nowrap',overflowX:'auto'}}>
+        <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:workSource&&workSource!=='zendesk'&&workSource!=='jira'?0:10,flexWrap:'nowrap',overflowX:'auto'}}>
           {WORK_SOURCES.map(ws=>{
-            const isActive=workSource===ws.id;
+            // Zendesk & Jira filter the main queue by source instead of showing a panel
+            const isQueueFilter = ws.id === 'zendesk' || ws.id === 'jira';
+            const isActive = isQueueFilter ? (fTool === ws.id && !workSource) : workSource === ws.id;
             const count=ws.id==='onboarding'?onboardingData.counts.total:ws.id==='offboarding'?offboardingData.counts.total:ws.id==='jira'?(queueSync?.meta?.jira?.count||0):ws.id==='zendesk'?(queueSync?.meta?.zendesk?.count||0):null;
+            const handleClick = () => {
+              if (isQueueFilter) {
+                // Toggle source filter on the queue — clear any active panel
+                setWorkSource(null);
+                setFTool(fTool === ws.id ? null : ws.id);
+              } else {
+                // Show dedicated panel (onboarding, offboarding, etc.)
+                setFTool(null);
+                setWorkSource(isActive ? null : ws.id);
+              }
+            };
             return(
-              <button key={ws.id} onClick={()=>setWorkSource(isActive?null:ws.id)}
+              <button key={ws.id} onClick={handleClick}
                 style={{
                   height:34,display:'inline-flex',alignItems:'center',gap:6,
                   padding:'0 14px',borderRadius:10,
@@ -481,20 +494,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           <div style={{fontSize:13,color:'#9e9e9e'}}>HRX workbench tasks will be connected here</div>
         </div>
       )}
-      {workSource==='jira'&&(
-        <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:40,background:'#fafaf9',textAlign:'center'}}>
-          <i className="bi-kanban" style={{fontSize:40,color:'#1f74b3',opacity:0.4,marginBottom:12}}/>
-          <div style={{fontSize:15,fontWeight:600,color:'#1b1b1b',marginBottom:6}}>Jira Tasks</div>
-          <div style={{fontSize:13,color:'#9e9e9e'}}>Jira issue queue will be connected here</div>
-        </div>
-      )}
-      {workSource==='zendesk'&&(
-        <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:40,background:'#fafaf9',textAlign:'center'}}>
-          <i className="bi-headset" style={{fontSize:40,color:'#29811e',opacity:0.4,marginBottom:12}}/>
-          <div style={{fontSize:15,fontWeight:600,color:'#1b1b1b',marginBottom:6}}>Zendesk Tickets</div>
-          <div style={{fontSize:13,color:'#9e9e9e'}}>Zendesk ticket queue will be connected here</div>
-        </div>
-      )}
+      {/* Zendesk & Jira buttons filter the main queue — no separate panels needed */}
       {workSource==='change_request'&&(
         <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:40,background:'#fafaf9',textAlign:'center'}}>
           <i className="bi-pencil-square" style={{fontSize:40,color:'#ed8d00',opacity:0.4,marginBottom:12}}/>
