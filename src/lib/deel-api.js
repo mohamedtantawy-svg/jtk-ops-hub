@@ -92,6 +92,56 @@ export async function getOrganization() {
   return deelFetch('/organizations/current');
 }
 
+// ── Onboarding People ────────────────────────────────────────────────────────
+
+export async function listOnboardingPeople(params = {}) {
+  const qs = new URLSearchParams();
+  // Fetch people in onboarding statuses
+  const statuses = params.statuses || 'onboarding,onboarding_at_risk,onboarding_overdue,pending_invite';
+  qs.set('hiring_statuses[]', statuses.split(',')[0]);
+  // Deel API needs repeated params for arrays — build manually
+  const statusArr = statuses.split(',');
+  const limit = params.limit || '200';
+  const offset = params.offset || '0';
+
+  // Build URL with repeated hiring_statuses[] params
+  const parts = statusArr.map(s => `hiring_statuses[]=${encodeURIComponent(s.trim())}`);
+  parts.push(`limit=${limit}`);
+  parts.push(`offset=${offset}`);
+  // Request specific fields to keep payload small
+  parts.push(...[
+    'fields[]=' + encodeURIComponent('id'),
+    'fields[]=' + encodeURIComponent('full_name'),
+    'fields[]=' + encodeURIComponent('country'),
+    'fields[]=' + encodeURIComponent('country_name'),
+    'fields[]=' + encodeURIComponent('email'),
+    'fields[]=' + encodeURIComponent('hiring_status'),
+    'fields[]=' + encodeURIComponent('start_date'),
+    'fields[]=' + encodeURIComponent('employments[0].id'),
+    'fields[]=' + encodeURIComponent('employments[0].hiring_status'),
+    'fields[]=' + encodeURIComponent('employments[0].new_hiring_status'),
+    'fields[]=' + encodeURIComponent('employments[0].contract_status'),
+    'fields[]=' + encodeURIComponent('employments[0].country'),
+    'fields[]=' + encodeURIComponent('employments[0].start_date'),
+    'fields[]=' + encodeURIComponent('employments[0].hiring_type'),
+    'fields[]=' + encodeURIComponent('employments[0].job_title'),
+    'fields[]=' + encodeURIComponent('employments[0].team'),
+  ]);
+
+  return deelFetch(`/people?${parts.join('&')}`);
+}
+
+// ── Contract Amendments ─────────────────────────────────────────────────────
+
+export async function listAmendments(params = {}) {
+  const qs = new URLSearchParams();
+  if (params.limit) qs.set('limit', String(params.limit));
+  if (params.offset) qs.set('offset', String(params.offset));
+  if (params.statuses) qs.set('statuses', params.statuses);
+  const q = qs.toString();
+  return deelFetch(`/contracts/amendments${q ? `?${q}` : ''}`);
+}
+
 // ── Invoices ─────────────────────────────────────────────────────────────────
 
 export async function listInvoices(params = {}) {

@@ -47,6 +47,14 @@ export async function fetchDeelOrg() {
   return apiFetch('/integrations/deel/org');
 }
 
+export async function fetchDeelOnboarding({ limit, offset } = {}) {
+  const params = new URLSearchParams();
+  if (limit) params.set('limit', String(limit));
+  if (offset) params.set('offset', String(offset));
+  const qs = params.toString();
+  return apiFetch(`/integrations/deel/onboarding${qs ? `?${qs}` : ''}`);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Jira
 // ─────────────────────────────────────────────────────────────────────────────
