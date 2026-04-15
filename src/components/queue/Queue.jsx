@@ -4,7 +4,7 @@ import { MEMBERS } from '../../data/members';
 import { slaInfo, rel, getUrl, getVisibleEmails } from '../../utils/helpers';
 import { SLA_MINS } from '../../data/constants';
 import Detail from './Detail';
-import { ToolBadge, FnBadge, StatusBadge, SlaBadge } from '../ui/Badges';
+import { ToolBadge, StatusBadge, SlaBadge } from '../ui/Badges';
 import OutboundQueue from './OutboundQueue';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import Avatar from '../ui/Avatar';
