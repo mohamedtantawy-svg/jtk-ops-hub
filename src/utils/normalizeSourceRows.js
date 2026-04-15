@@ -15,13 +15,21 @@ const DEEL_CONTRACT_BASE = 'https://app.deel.com/contracts';
 const DEEL_ADMIN_BASE = 'https://admin.deel.network';
 
 // ── Name → email lookup for sources that only provide assignee name ──
+// Normalize accents/diacritics for robust matching (André → andre)
+function stripAccents(s) {
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
 const _nameToEmail = new Map();
+const _nameToEmailNorm = new Map(); // accent-stripped fallback
 for (const m of TEAM_MEMBERS) {
   _nameToEmail.set(m.name.toLowerCase(), m.email);
+  _nameToEmailNorm.set(stripAccents(m.name.toLowerCase()), m.email);
 }
 function resolveEmailByName(name) {
   if (!name) return '';
-  return _nameToEmail.get(name.toLowerCase()) || '';
+  const lower = name.toLowerCase();
+  // Exact match first, then accent-stripped fallback
+  return _nameToEmail.get(lower) || _nameToEmailNorm.get(stripAccents(lower)) || '';
 }
 
 // ── Date formatter for subject lines ──
@@ -71,7 +79,7 @@ export function normalizeOffboarding(items = []) {
         : 'Termination',
       country: c.country || '',
       assignee: c.exAssignee || '',
-      assigneeEmail: resolveEmailByName(c.exAssignee).toLowerCase(),
+      assigneeEmail: (c.exAssigneeEmail || resolveEmailByName(c.exAssignee) || '').toLowerCase(),
       createdAt: c.requestedDate || c.createdAt || '',
       updatedAt: c.updatedAt || '',
       status: c.status || { label: 'Awaiting Triage', severity: 'warning', color: '#ed8d00' },
