@@ -1,6 +1,7 @@
 // ── useChangeRequestData hook ────────────────────────────────────────────────
 // Fetches amendments + redlines from the Deel Admin API.
-// Groups by country. Caches in localStorage with 5-minute TTL.
+// Groups by country. Caches in localStorage.
+// Stale-while-revalidate: always shows previous data until fresh data arrives.
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { fetchDeelAmendments, fetchDeelRedlines } from '../services/integrationsApi';
 
@@ -13,24 +14,30 @@ function loadCache(key) {
     const cached = localStorage.getItem(key);
     if (cached) {
       const parsed = JSON.parse(cached);
-      if (parsed.ts && Date.now() - parsed.ts < CACHE_TTL) return parsed.items || [];
+      if (parsed.items?.length > 0) return { items: parsed.items, ts: parsed.ts || 0 };
     }
   } catch (e) {}
-  return [];
+  return { items: [], ts: 0 };
 }
 
 export function useChangeRequestData(enabled = true) {
-  const [amendments, setAmendments] = useState(() => loadCache(CACHE_KEY_AMENDMENTS));
-  const [redlines, setRedlines] = useState(() => loadCache(CACHE_KEY_REDLINES));
+  const cachedA = useMemo(() => loadCache(CACHE_KEY_AMENDMENTS), []);
+  const cachedR = useMemo(() => loadCache(CACHE_KEY_REDLINES), []);
+  const [amendments, setAmendments] = useState(cachedA.items);
+  const [redlines, setRedlines] = useState(cachedR.items);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const lastFetch = useRef(0);
+  const lastFetch = useRef(
+    cachedA.ts > 0 && cachedR.ts > 0 && Date.now() - Math.min(cachedA.ts, cachedR.ts) < CACHE_TTL
+      ? Math.min(cachedA.ts, cachedR.ts) : 0
+  );
 
   const refresh = useCallback(async (force = false) => {
     if (!enabled) return;
     if (!force && Date.now() - lastFetch.current < CACHE_TTL) return;
 
-    setLoading(true);
+    // Only show loading if both are empty (first load ever)
+    setLoading(prev => (amendments.length === 0 && redlines.length === 0) ? true : prev);
     setError(null);
     try {
       // Fetch both in parallel
@@ -42,8 +49,13 @@ export function useChangeRequestData(enabled = true) {
       const fetchedAmendments = amendRes?.items || [];
       const fetchedRedlines = redlineRes?.items || [];
 
-      setAmendments(fetchedAmendments);
-      setRedlines(fetchedRedlines);
+      // Only replace if we got data or current is empty
+      if (fetchedAmendments.length > 0 || amendments.length === 0) {
+        setAmendments(fetchedAmendments);
+      }
+      if (fetchedRedlines.length > 0 || redlines.length === 0) {
+        setRedlines(fetchedRedlines);
+      }
       lastFetch.current = Date.now();
 
       try {
@@ -53,10 +65,11 @@ export function useChangeRequestData(enabled = true) {
     } catch (err) {
       console.warn('[useChangeRequestData] Failed:', err.message);
       setError(err.message);
+      // Keep existing data on error
     } finally {
       setLoading(false);
     }
-  }, [enabled]);
+  }, [enabled, amendments.length, redlines.length]);
 
   useEffect(() => { refresh(); }, [refresh]);
 

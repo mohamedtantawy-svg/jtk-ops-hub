@@ -1,37 +1,43 @@
 // ── useOffboardingData hook ─────────────────────────────────────────────────
 // Fetches active EOR termination cases from the Deel Admin API.
-// Groups by country. Caches in localStorage with 5-minute TTL.
+// Groups by country. Caches in localStorage.
+// Stale-while-revalidate: always shows previous data until fresh data arrives.
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { fetchDeelOffboarding } from '../services/integrationsApi';
 
 const CACHE_TTL = 5 * 60 * 1000;
 const CACHE_KEY = 'ops_hub_offboarding_cache';
 
+function loadCache() {
+  try {
+    const cached = localStorage.getItem(CACHE_KEY);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (parsed.items?.length > 0) return { items: parsed.items, ts: parsed.ts || 0 };
+    }
+  } catch (e) {}
+  return { items: [], ts: 0 };
+}
+
 export function useOffboardingData(enabled = true) {
-  const [items, setItems] = useState(() => {
-    try {
-      const cached = localStorage.getItem(CACHE_KEY);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (parsed.ts && Date.now() - parsed.ts < CACHE_TTL) return parsed.items || [];
-      }
-    } catch (e) {}
-    return [];
-  });
+  const cached = useMemo(() => loadCache(), []);
+  const [items, setItems] = useState(cached.items);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const lastFetch = useRef(0);
+  const lastFetch = useRef(cached.ts > 0 && Date.now() - cached.ts < CACHE_TTL ? cached.ts : 0);
 
   const refresh = useCallback(async (force = false) => {
     if (!enabled) return;
     if (!force && Date.now() - lastFetch.current < CACHE_TTL) return;
 
-    setLoading(true);
+    setLoading(prev => items.length === 0 ? true : prev);
     setError(null);
     try {
       const res = await fetchDeelOffboarding({ bustCache: force });
       const fetched = res?.items || [];
-      setItems(fetched);
+      if (fetched.length > 0 || items.length === 0) {
+        setItems(fetched);
+      }
       lastFetch.current = Date.now();
       try {
         localStorage.setItem(CACHE_KEY, JSON.stringify({ items: fetched, ts: Date.now() }));
@@ -42,7 +48,7 @@ export function useOffboardingData(enabled = true) {
     } finally {
       setLoading(false);
     }
-  }, [enabled]);
+  }, [enabled, items.length]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
