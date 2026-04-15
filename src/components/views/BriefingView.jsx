@@ -173,7 +173,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
 
   // ── Recent activity ───────────────────────────────────────────────────
   const recentAct=[...scope].filter(t=>t.updatedMinsAgo!==undefined&&t.updatedMinsAgo<t.minutesAgo).sort((a,b)=>a.updatedMinsAgo-b.updatedMinsAgo).slice(0,4).map(t=>{
-    const who=MEMBERS.find(m=>m.id===t.assigneeId)||(t.assigneeEmail?MEMBERS.find(m=>m.email===t.assigneeEmail):null);
+    const who=MEMBERS.find(m=>m.id===t.assigneeId)||(t.assigneeEmail?MEMBERS.find(m=>m.email.toLowerCase()===t.assigneeEmail.toLowerCase()):null);
     // Derive event type for priority icon
     const evType=t.isAlert?'alert':t.status==='resolved'?'success':t.status==='new'?'new_task':'info';
     const evIcon=evType==='alert'?'bi-exclamation-circle':evType==='success'?'bi-check-circle':evType==='new_task'?'bi-plus-circle':'bi-info-circle';

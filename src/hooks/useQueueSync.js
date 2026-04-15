@@ -45,7 +45,7 @@ function normalizeQueueItem(item) {
     : '';
 
   const member = item.assigneeEmail
-    ? MEMBERS.find(m => m.email === item.assigneeEmail)
+    ? MEMBERS.find(m => m.email.toLowerCase() === item.assigneeEmail.toLowerCase())
     : null;
 
   return {

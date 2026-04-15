@@ -2,7 +2,7 @@
 // Shows amendments + redlines from Deel Admin API, with tab navigation.
 // Two tabs: Amendments (grouped by country) and Redlines (grouped by country).
 import { useState, useMemo } from 'react';
-import { FLAGS } from '../../data/constants';
+import { FLAGS, getFlag, getCountryName } from '../../data/constants';
 import { fetchDeelHealth } from '../../services/integrationsApi';
 
 const SEV_CONFIG = {
@@ -235,7 +235,7 @@ export default function ChangeRequestPanel({
       {/* Country groups */}
       {groups.map(group => {
         const isExpanded = expandedCountries.has(group.country) || expandedCountries.has('_all');
-        const flag = FLAGS[group.country] || '';
+        const flag = getFlag(group.country);
 
         return (
           <div key={group.country} style={{ borderBottom: '1px solid #f0efed' }}>
@@ -243,7 +243,7 @@ export default function ChangeRequestPanel({
               style={{ padding: '10px 24px', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', background: isExpanded ? '#f9f8f6' : 'white', transition: 'background .15s', position: 'sticky', top: 0, zIndex: 1 }}>
               <i className={isExpanded ? 'bi-chevron-down' : 'bi-chevron-right'} style={{ fontSize: 10, color: '#9e9e9e', width: 14 }} />
               <span style={{ fontSize: 16 }}>{flag}</span>
-              <span style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b' }}>{group.country}</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b' }}>{getCountryName(group.country)}</span>
               <span style={{ fontSize: 12, color: '#9e9e9e' }}>{group.items.length} {group.items.length === 1 ? 'item' : 'items'}</span>
               {group.warningCount > 0 && (
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 8px', borderRadius: 128, background: '#fef3c7', color: '#92400e', fontSize: 10, fontWeight: 700 }}>

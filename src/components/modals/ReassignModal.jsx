@@ -6,7 +6,7 @@ import Avatar from '../ui/Avatar';
 const ReassignModal=({task,tasks,bulkCount,onConfirm,onClose})=>{
   const isBulk=bulkCount>0;
   // Track selection by email (primary) for live tickets
-  const currentEmail = task.assigneeEmail || TEAM_MEMBERS.find(m=>m.email===task.assigneeEmail)?.email || null;
+  const currentEmail = task.assigneeEmail || null;
   const [selEmail,setSelEmail]=useState(currentEmail);
   const [note,setNote]=useState('');
   const [search,setSearch]=useState('');

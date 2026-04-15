@@ -59,6 +59,49 @@ export const FLAGS={
   // Middle East & South Asia
   IL:'🇮🇱',SA:'🇸🇦',TR:'🇹🇷',PK:'🇵🇰',
 };
+// Reverse lookup: country name → code (for APIs that return full names like "Philippines")
+const COUNTRY_NAME_TO_CODE={
+  'United Kingdom':'UK','United States':'US','Germany':'DE','France':'FR','Netherlands':'NL',
+  'Singapore':'SG','Brazil':'BR','Australia':'AU','United Arab Emirates':'AE','Canada':'CA',
+  'Philippines':'PH','India':'IN','Japan':'JP','South Korea':'KR','Indonesia':'ID',
+  'Thailand':'TH','Malaysia':'MY','Vietnam':'VN','China':'CN','Taiwan':'TW','Hong Kong':'HK',
+  'Mexico':'MX','Colombia':'CO','Argentina':'AR','Chile':'CL','Peru':'PE',
+  'Spain':'ES','Italy':'IT','Portugal':'PT','Poland':'PL','Romania':'RO','Czech Republic':'CZ',
+  'Czechia':'CZ','Hungary':'HU','Sweden':'SE','Norway':'NO','Denmark':'DK','Finland':'FI',
+  'Ireland':'IE','Austria':'AT','Switzerland':'CH','Belgium':'BE','Greece':'GR',
+  'South Africa':'ZA','Nigeria':'NG','Kenya':'KE','Egypt':'EG','Ghana':'GH',
+  'Israel':'IL','Saudi Arabia':'SA','Turkey':'TR','Türkiye':'TR','Pakistan':'PK',
+};
+// Reverse lookup: code → name
+const COUNTRY_CODE_TO_NAME = Object.fromEntries(
+  Object.entries(COUNTRY_NAME_TO_CODE).map(([name, code]) => [code, name])
+);
+/**
+ * Resolve a country code ("PH") to full name ("Philippines").
+ * Returns the original string if no match (already a name or unknown code).
+ */
+export function getCountryName(country) {
+  if (!country) return '';
+  if (COUNTRY_CODE_TO_NAME[country]) return COUNTRY_CODE_TO_NAME[country];
+  if (COUNTRY_CODE_TO_NAME[country.toUpperCase()]) return COUNTRY_CODE_TO_NAME[country.toUpperCase()];
+  return country;
+}
+/**
+ * Resolve a country string (code like "PH" or name like "Philippines") to a flag emoji.
+ * Returns empty string if no match found.
+ */
+export function getFlag(country) {
+  if (!country) return '';
+  // Direct code match
+  if (FLAGS[country]) return FLAGS[country];
+  // Name → code lookup
+  const code = COUNTRY_NAME_TO_CODE[country];
+  if (code && FLAGS[code]) return FLAGS[code];
+  // Case-insensitive fallback
+  const upper = country.toUpperCase();
+  if (FLAGS[upper]) return FLAGS[upper];
+  return '';
+}
 export const DEFAULT_SOURCE_URLS={zendesk:'https://deel.zendesk.com',jira:'https://deel.atlassian.net',gmail:'https://mail.google.com',slack:'https://app.slack.com/client/deel',workbench:'https://workbench.deel.com',calendar:'https://calendar.google.com',looker:'https://deel.looker.com'};
 // SLA_MINS are the default thresholds (in minutes). Runtime values come from settings.sla_thresholds.
 export const SLA_MINS={'Access Issue':240,'Document Request':240,'Offboarding':1440,'Anomaly Alert':120,'Payment Issue':480,'Benefits':1440,'Leave Request':720,'Leave Query':1440,'Scheduling':1440,'Compensation':2880,'Promotion':1440,'Recruitment':1440,'Record Update':1440,'Equipment':2880,'Policy Query':1440,'Onboarding':2880,'Immigration':1440,'Expenses':480,'Amendment':1440,'Compliance':2880};

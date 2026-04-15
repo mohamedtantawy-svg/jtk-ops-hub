@@ -1,7 +1,7 @@
 import { useState, useContext } from 'react';
 import { PermissionsContext, SettingsContext } from '../../App';
 import { MEMBERS } from '../../data/members';
-import { TOOLS, FLAGS } from '../../data/constants';
+import { TOOLS, FLAGS, getFlag } from '../../data/constants';
 import { ageDot, ageClass, slaInfo, rel, getUrl } from '../../utils/helpers';
 import { ToolBadge, FnBadge, StatusBadge, SlaBadge } from '../ui/Badges';
 import Avatar from '../ui/Avatar';
@@ -26,7 +26,7 @@ const TaskRow=({task,index,selected,onClick,onAction,onEscalMgr,compact,checked,
   const perms=useContext(PermissionsContext);
   const settings=useContext(SettingsContext);
   const [hov,setHov]=useState(false);
-  const assignee=MEMBERS.find(m=>m.id===task.assigneeId)||(task.assigneeEmail?MEMBERS.find(m=>m.email===task.assigneeEmail):null)||{name:task.assigneeName||'Unassigned',country:'',team:''};
+  const assignee=MEMBERS.find(m=>m.id===task.assigneeId)||(task.assigneeEmail?MEMBERS.find(m=>m.email.toLowerCase()===task.assigneeEmail.toLowerCase()):null)||{name:task.assigneeName||'Unassigned',country:'',team:''};
   const dot=ageDot(task.minutesAgo,task.status);
   const sla=slaInfo(task);
   const hasUpdate=task.updatedMinsAgo!==task.minutesAgo;
@@ -79,7 +79,7 @@ const TaskRow=({task,index,selected,onClick,onAction,onEscalMgr,compact,checked,
       </div>
       {/* 4. Country */}
       <div style={{display:'flex',alignItems:'center',gap:4,justifyContent:'center'}}>
-        {task.country&&<span>{FLAGS[task.country]||''}</span>}
+        {task.country&&<span>{getFlag(task.country)}</span>}
         <span style={{fontSize:11,color:'#616161',fontWeight:500}}>{task.country||''}</span>
       </div>
       {/* 5. Assignee */}

@@ -69,7 +69,7 @@ const App=()=>{
   const [user,setUser]=useState(()=>{
     // Restore user from stored email — check MEMBERS first, then JWT token
     if(loggedInEmail){
-      const m=MEMBERS.find(mm=>mm.email===loggedInEmail);
+      const m=MEMBERS.find(mm=>mm.email.toLowerCase()===loggedInEmail.toLowerCase());
       if(m) return m;
       // User not in hardcoded MEMBERS but has a stored session — create placeholder
       // Session revalidation useEffect will replace this with server data
@@ -87,7 +87,7 @@ const App=()=>{
   const [impersonating, setImpersonating] = useState(null);
   const effectiveUser = React.useMemo(() => {
     if (!impersonating || !user) return user;
-    return MEMBERS.find(mm => mm.email === impersonating) || user;
+    return MEMBERS.find(mm => mm.email.toLowerCase() === impersonating.toLowerCase()) || user;
   }, [impersonating, user]);
   const [view,setView]=useState('briefing');
   const [selTask,setSelTask]=useState(null);
@@ -121,7 +121,7 @@ const App=()=>{
     apiFetchMe()
       .then((serverUser) => {
         if (serverUser?.email) {
-          const member = MEMBERS.find(m => m.email === serverUser.email) || serverUser;
+          const member = MEMBERS.find(m => m.email.toLowerCase() === serverUser.email.toLowerCase()) || serverUser;
           setUser(member);
         }
       })
@@ -144,7 +144,7 @@ const App=()=>{
     }
     localStorage.setItem('ops_hub_token', res.token);
     const userEmail = res.user?.email || email;
-    const member = MEMBERS.find(m => m.email === userEmail) || res.user;
+    const member = MEMBERS.find(m => m.email.toLowerCase() === userEmail.toLowerCase()) || res.user;
     if (member) {
       setUser(member);
       setLoggedInEmail(userEmail);
@@ -318,7 +318,7 @@ const App=()=>{
     if(!perms?.canDo('can_reassign'))return;
     const member=MEMBERS_BY_EMAIL[newEmail];
     const newName=member?.name||newEmail;
-    const newMemberId=member?MEMBERS.findIndex(m=>m.email===newEmail)+1:null;
+    const newMemberId=member?MEMBERS.findIndex(m=>m.email.toLowerCase()===newEmail.toLowerCase())+1:null;
     const now=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
     if(bulkIds&&bulkIds.length>0){
       const idSet=new Set(bulkIds);
