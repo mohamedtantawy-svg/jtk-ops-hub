@@ -47,6 +47,11 @@ export async function fetchDeelOrg() {
   return apiFetch('/integrations/deel/org');
 }
 
+export async function fetchDeelOffboarding({ bustCache } = {}) {
+  const qs = bustCache ? '?bust=1' : '';
+  return apiFetch(`/integrations/deel/offboarding${qs}`);
+}
+
 export async function fetchDeelOnboarding({ limit, offset } = {}) {
   const params = new URLSearchParams();
   if (limit) params.set('limit', String(limit));
