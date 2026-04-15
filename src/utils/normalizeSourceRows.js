@@ -4,13 +4,25 @@
 //
 // Row shape:
 // {
-//   id, source, subject, function, country, assignee,
+//   id, source, subject, function, country, assignee, assigneeEmail,
 //   createdAt, updatedAt, status: { label, severity, color },
 //   taskUrl, slaRemaining, slaBreachStatus
 // }
 
+import { TEAM_MEMBERS } from '../data/members';
+
 const DEEL_CONTRACT_BASE = 'https://app.deel.com/contracts';
 const DEEL_ADMIN_BASE = 'https://admin.deel.network';
+
+// ── Name → email lookup for sources that only provide assignee name ──
+const _nameToEmail = new Map();
+for (const m of TEAM_MEMBERS) {
+  _nameToEmail.set(m.name.toLowerCase(), m.email);
+}
+function resolveEmailByName(name) {
+  if (!name) return '';
+  return _nameToEmail.get(name.toLowerCase()) || '';
+}
 
 // ── Date formatter for subject lines ──
 function fmtShortDate(dateStr) {
@@ -35,6 +47,7 @@ export function normalizeOnboarding(items = []) {
       function: flowDisplay || 'Onboarding',
       country: p.country || '',
       assignee: p.assignee || '',
+      assigneeEmail: (p.assigneeEmail || resolveEmailByName(p.assignee) || '').toLowerCase(),
       createdAt: p.taskCreatedAt || p.createdAt || '',
       updatedAt: p.taskCreatedAt || '',
       status: p.action || { label: 'In Progress', severity: 'active', color: '#1d4ed8' },
@@ -58,6 +71,7 @@ export function normalizeOffboarding(items = []) {
         : 'Termination',
       country: c.country || '',
       assignee: c.exAssignee || '',
+      assigneeEmail: resolveEmailByName(c.exAssignee).toLowerCase(),
       createdAt: c.requestedDate || c.createdAt || '',
       updatedAt: c.updatedAt || '',
       status: c.status || { label: 'Awaiting Triage', severity: 'warning', color: '#ed8d00' },
@@ -83,6 +97,7 @@ export function normalizeAmendments(items = []) {
       function: changesSummary || `${a.type || 'Amendment'} Amendment`,
       country: a.country || '',
       assignee: '',  // Amendments don't have assignee in current data
+      assigneeEmail: '',
       createdAt: a.createdAt || '',
       updatedAt: a.updatedAt || '',
       status: a.displayStatus || { label: 'Amendment', severity: 'active', color: '#1d4ed8' },
@@ -104,6 +119,7 @@ export function normalizeRedlines(items = []) {
       function: `${typeLabel} Redline${r.countries?.length ? ' · ' + r.countries.join(', ') : ''}`,
       country: r.countryCode || (r.countries?.[0] || ''),
       assignee: '',  // Redlines don't have assignee in current data
+      assigneeEmail: '',
       createdAt: r.createdAt || '',
       updatedAt: r.updatedAt || '',
       status: r.displayStatus || { label: 'Redline', severity: 'active', color: '#1d4ed8' },
@@ -123,6 +139,7 @@ export function normalizeWorkbench(items = []) {
     function: t.taskType || t.sourceType || 'Workbench',
     country: t.country || '',
     assignee: t.assignee?.name || '',
+    assigneeEmail: (t.assignee?.email || '').toLowerCase(),
     createdAt: t.createdAt || '',
     updatedAt: t.updatedAt || '',
     status: t.displayStatus || { label: t.status || 'Unknown', severity: 'info', color: '#616161' },

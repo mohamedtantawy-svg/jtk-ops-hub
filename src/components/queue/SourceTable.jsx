@@ -4,7 +4,6 @@
 // Expects normalized rows with a common shape.
 import { useState, useMemo } from 'react';
 import { TOOLS, getFlag, getCountryName } from '../../data/constants';
-import { ToolBadge } from '../ui/Badges';
 import Avatar from '../ui/Avatar';
 
 // ── Date formatters ──
@@ -36,7 +35,7 @@ function slaAge(dateStr) {
 
 function slaBadge(createdAt) {
   const mins = slaAge(createdAt);
-  if (mins == null) return null;
+  if (mins == null || mins < 0) return null; // guard against future dates
   const days = Math.floor(mins / 1440);
   const hrs = Math.floor((mins % 1440) / 60);
   if (days >= 7) return { label: `${days}d`, color: '#d42d35', bg: '#fef2f2', severity: 'breached' };
