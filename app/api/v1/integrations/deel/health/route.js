@@ -21,15 +21,22 @@ export async function GET(req) {
     }, { status: 503 });
   }
 
-  // Make a minimal test call to the Deel API
-  const testUrl = `${diag.baseUrl}/organizations/current`;
+  // Sanitize token the same way deel-api.js does
+  const token = (process.env.DEEL_API_KEY || '')
+    .trim()
+    .replace(/^["']+|["']+$/g, '')
+    .replace(/^Bearer\s+/i, '')
+    .replace(/[\r\n]+/g, '');
+
+  // Test with /people?limit=1 — this is the actual endpoint we need for onboarding/offboarding
+  const testUrl = `${diag.baseUrl}/people?limit=1&fields[]=id&fields[]=full_name`;
   const startMs = Date.now();
   let testResult;
 
   try {
     const res = await fetch(testUrl, {
       headers: {
-        Authorization: `Bearer ${process.env.DEEL_API_KEY?.trim().replace(/^["']+|["']+$/g, '').replace(/^Bearer\s+/i, '').replace(/[\r\n]+/g, '')}`,
+        Authorization: `Bearer ${token}`,
         Accept: 'application/json',
         'Content-Type': 'application/json',
       },
@@ -44,15 +51,29 @@ export async function GET(req) {
     if (res.ok) {
       let parsed;
       try { parsed = JSON.parse(body); } catch { parsed = null; }
+      const total = parsed?.page?.total_rows ?? parsed?.data?.length ?? '?';
       testResult = {
         status: 'ok',
         httpStatus: res.status,
         elapsed: `${elapsed}ms`,
         contentType,
-        orgName: parsed?.data?.name || parsed?.name || '(parsed ok)',
+        totalPeople: total,
+        message: `Connected! Found ${total} people in your org.`,
       };
     } else {
       const isS3 = body.includes('<Error>') || body.includes('NoSuchBucket') || body.includes('Unsupported Authorization');
+      const is401 = res.status === 401;
+      const is403 = res.status === 403;
+
+      let help;
+      if (isS3) {
+        help = 'Request hit a CDN/S3 bucket instead of the Deel API. Check DEEL_API_BASE_URL env var.';
+      } else if (is401 || is403) {
+        help = 'Token is missing required scopes. Go to Deel Dashboard → More → Developer → Access Tokens → generate a new Organization Token with scopes: people:read, contracts:read. Then update DEEL_API_KEY on Nexus.';
+      } else {
+        help = `Deel API returned HTTP ${res.status}. Check DEEL_API_KEY is valid.`;
+      }
+
       testResult = {
         status: 'error',
         httpStatus: res.status,
@@ -60,9 +81,8 @@ export async function GET(req) {
         contentType,
         bodyPreview: body.substring(0, 300),
         isS3CdnError: isS3,
-        help: isS3
-          ? 'The request hit a CDN/S3 bucket instead of the Deel API. The base URL is likely wrong or DNS is resolving incorrectly. Try setting DEEL_API_BASE_URL=https://api.letsdeel.com on Nexus.'
-          : `Deel API returned HTTP ${res.status}. Check DEEL_API_KEY is valid.`,
+        isScopeError: is401 || is403,
+        help,
       };
     }
   } catch (err) {
@@ -71,7 +91,7 @@ export async function GET(req) {
       status: 'network_error',
       error: err.message,
       elapsed: `${elapsed}ms`,
-      help: 'Could not reach the Deel API. Check network connectivity and DNS resolution from the Nexus server.',
+      help: 'Could not reach the Deel API. Check network connectivity from the Nexus server.',
     };
   }
 
