@@ -54,40 +54,81 @@ async function buildOffboardingResult() {
   const now = new Date();
 
   const items = raw.map(c => {
-    const endDate = c.terminationDate ? new Date(c.terminationDate) : null;
+    // Use endDate (last working day) or desiredEndDate as fallback
+    const endDateStr = c.endDate || c.desiredEndDate || '';
+    const endDate = endDateStr ? new Date(endDateStr) : null;
     const daysUntilEnd = endDate ? Math.ceil((endDate - now) / (1000 * 60 * 60 * 24)) : null;
 
     return {
-      id: c.contractId,
-      name: c.name,
-      email: c.email,
+      id: c.id,                                           // termination ID
+      contractId: c.contractId,
+      contractOid: c.contractOid || '',
+      name: c.name || '',
+      email: c.email || '',
       country: c.country || '',
       jobTitle: c.jobTitle || '',
       team: c.team || '',
       hiringType: c.hiringType || 'eor',
-      endDate: c.terminationDate || '',
+      endDate: endDateStr,
+      desiredEndDate: c.desiredEndDate || '',
       startDate: c.startDate || '',
       requestedDate: c.createdAt || '',
       updatedAt: c.updatedAt || '',
       daysUntilEnd,
       noticePeriod: c.noticePeriod || 0,
-      clientEmail: c.clientEmail || '',
-      creatorName: c.creatorName || '',
-      creatorEmail: c.creatorEmail || '',
-      status: deriveStatus(daysUntilEnd),
-      contractUrl: `https://app.deel.com/contracts/${c.contractId}`,
+      organizationName: c.organizationName || '',
+      exAssignee: c.exAssignee || '',
+      reason: c.reason || '',
+      isResignation: c.isResignation || false,
+      jiraUrl: c.jiraUrl || '',
+      adminStatus: c.status || '',                        // raw admin status
+      status: deriveStatus(c.status, daysUntilEnd),
+      contractUrl: c.contractOid
+        ? `https://app.deel.com/contracts/${c.contractOid}`
+        : '',
     };
   });
 
-  items.sort((a, b) => (a.daysUntilEnd ?? 9999) - (b.daysUntilEnd ?? 9999));
+  // Sort: AWAITING_TRIAGE first, then by days until end
+  items.sort((a, b) => {
+    const aUrgent = a.adminStatus === 'AWAITING_TRIAGE' ? 0 : 1;
+    const bUrgent = b.adminStatus === 'AWAITING_TRIAGE' ? 0 : 1;
+    if (aUrgent !== bUrgent) return aUrgent - bUrgent;
+    return (a.daysUntilEnd ?? 9999) - (b.daysUntilEnd ?? 9999);
+  });
+
   return { items, total: items.length };
 }
 
-function deriveStatus(daysUntilEnd) {
-  if (daysUntilEnd === null) return { label: 'Unknown', severity: 'info', color: '#9e9e9e' };
-  if (daysUntilEnd < 0)  return { label: 'Overdue', severity: 'critical', color: '#d42d35' };
-  if (daysUntilEnd <= 14) return { label: 'Imminent', severity: 'critical', color: '#d42d35' };
-  if (daysUntilEnd <= 30) return { label: 'Awaiting Action', severity: 'warning', color: '#ed8d00' };
-  if (daysUntilEnd <= 90) return { label: 'In Progress', severity: 'active', color: '#1d4ed8' };
+/**
+ * Derive display status from the admin API status string + days until end.
+ * Admin statuses: AWAITING_TRIAGE, PROCESSING, COMPLETED, CANCELLED, etc.
+ */
+function deriveStatus(adminStatus, daysUntilEnd) {
+  const s = (adminStatus || '').toUpperCase();
+
+  if (s === 'COMPLETED' || s === 'DONE')
+    return { label: 'Completed', severity: 'info', color: '#616161' };
+  if (s === 'CANCELLED' || s === 'CANCELED')
+    return { label: 'Cancelled', severity: 'info', color: '#9e9e9e' };
+  if (s === 'AWAITING_TRIAGE')
+    return { label: 'Awaiting Triage', severity: 'warning', color: '#ed8d00' };
+
+  // For active cases, also factor in timeline urgency
+  if (daysUntilEnd !== null && daysUntilEnd < 0)
+    return { label: 'Overdue', severity: 'critical', color: '#d42d35' };
+  if (daysUntilEnd !== null && daysUntilEnd <= 14)
+    return { label: 'Imminent', severity: 'critical', color: '#d42d35' };
+
+  if (s === 'PROCESSING' || s === 'IN_PROGRESS')
+    return { label: 'Processing', severity: 'active', color: '#1d4ed8' };
+
+  // Fallback: use days-based logic
+  if (daysUntilEnd === null)
+    return { label: adminStatus || 'Unknown', severity: 'info', color: '#9e9e9e' };
+  if (daysUntilEnd <= 30)
+    return { label: 'Awaiting Action', severity: 'warning', color: '#ed8d00' };
+  if (daysUntilEnd <= 90)
+    return { label: 'In Progress', severity: 'active', color: '#1d4ed8' };
   return { label: 'Scheduled', severity: 'info', color: '#616161' };
 }

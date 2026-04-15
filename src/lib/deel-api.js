@@ -169,34 +169,39 @@ export async function listOffboardingCases() {
     if (cursor) params.push(`cursor=${encodeURIComponent(cursor)}`);
 
     const res = await deelFetch(`/admin/eor/terminations_v3?${params.join('&')}`);
-    const items = res?.data || res?.rows || res || [];
-    const dataArr = Array.isArray(items) ? items : (Array.isArray(res?.data) ? res.data : []);
+
+    // Admin API returns { cursor, terminations: [...], count: { total, ... } }
+    const dataArr = res?.terminations || [];
 
     for (const c of dataArr) {
       allTerminations.push({
-        contractId: c.contract_id || c.id || c.contractId,
-        title: c.title || c.contract_title || '',
-        name: c.worker_name || c.employee_name || c.full_name || c.name || '',
-        email: c.worker_email || c.employee_email || c.email || '',
-        terminationDate: c.termination_date || c.last_working_day || c.end_date || '',
-        createdAt: c.created_at || c.request_date || '',
-        updatedAt: c.updated_at || '',
-        team: c.team || c.team_name || '',
-        country: c.country || c.employment_country || c.country_name || '',
-        jobTitle: c.job_title || c.position || '',
-        hiringType: c.hiring_type || c.contract_type || 'eor',
-        startDate: c.start_date || c.effective_date || '',
-        noticePeriod: c.notice_period || 0,
-        clientEmail: c.client_email || c.manager_email || '',
-        creatorName: c.creator_name || c.requested_by || '',
-        creatorEmail: c.creator_email || '',
-        status: c.status || c.termination_status || '',
-        isArchived: c.is_archived || false,
+        id: c.id,                                         // termination ID (e.g. 165810)
+        contractId: c.eorContractId || c.contractOid || '',
+        contractOid: c.contractOid || '',                 // short OID (e.g. "35jp4gq")
+        name: c.name || '',
+        email: c.email || '',
+        country: c.employmentCountry || '',
+        jobTitle: c.jobTitle || '',
+        team: c.team || '',
+        hiringType: c.type || 'eor',                     // e.g. "TERMINATION"
+        startDate: c.startDate || '',
+        endDate: c.endDate || '',                         // last working day (may be null)
+        desiredEndDate: c.desiredEndDate || '',
+        createdAt: c.createdAt || '',
+        updatedAt: c.updatedAt || '',
+        status: c.status || '',                           // e.g. "AWAITING_TRIAGE", "PROCESSING"
+        organizationName: c.organizationName || '',       // client company name
+        exAssignee: c.exAssignee || '',                   // assigned agent
+        reason: c.requestData?.reason || '',              // termination reason enum
+        isResignation: c.requestData?.isEmployeeResignation || false,
+        jiraUrl: c.requestData?.jiraTicket?.jiraWebURL || '',
+        noticePeriod: c.noticePeriod || 0,
+        isArchived: c.isArchived || false,
       });
     }
 
-    // Handle pagination — look for cursor in various response shapes
-    const nextCursor = res?.page?.cursor || res?.cursor || res?.next_cursor;
+    // Cursor-based pagination — cursor is at res.cursor
+    const nextCursor = res?.cursor;
     if (!nextCursor || dataArr.length < PAGE_SIZE) break;
     cursor = nextCursor;
     page++;
