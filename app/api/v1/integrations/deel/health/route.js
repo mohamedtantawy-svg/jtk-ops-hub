@@ -1,6 +1,5 @@
 // ── GET /api/v1/integrations/deel/health ─────────────────────────────────────
 // Diagnostic endpoint: tests the Deel API connection and returns detailed info.
-// Helps debug auth/URL issues without exposing the full token.
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { isDeelConfigured, getDeelDiagnostics } from '../../../../../../src/lib/deel-api';
@@ -21,15 +20,23 @@ export async function GET(req) {
     }, { status: 503 });
   }
 
-  // Make a minimal test call to the Deel API
-  const testUrl = `${diag.baseUrl}/organizations/current`;
+  // Sanitize token
+  const token = (process.env.DEEL_API_KEY || '')
+    .trim()
+    .replace(/^["']+|["']+$/g, '')
+    .replace(/^Bearer\s+/i, '')
+    .replace(/[\r\n]+/g, '');
+
+  // Test with admin profile endpoint (known to work)
+  const testUrl = `${diag.baseUrl}/admin/admin_profile/me`;
   const startMs = Date.now();
   let testResult;
 
   try {
     const res = await fetch(testUrl, {
       headers: {
-        Authorization: `Bearer ${process.env.DEEL_API_KEY?.trim().replace(/^["']+|["']+$/g, '').replace(/^Bearer\s+/i, '').replace(/[\r\n]+/g, '')}`,
+        'x-auth-token': token,
+        Authorization: `Bearer ${token}`,
         Accept: 'application/json',
         'Content-Type': 'application/json',
       },
@@ -44,15 +51,29 @@ export async function GET(req) {
     if (res.ok) {
       let parsed;
       try { parsed = JSON.parse(body); } catch { parsed = null; }
+      const adminName = parsed?.full_name || parsed?.data?.full_name || parsed?.name || parsed?.email || '(ok)';
       testResult = {
         status: 'ok',
         httpStatus: res.status,
         elapsed: `${elapsed}ms`,
         contentType,
-        orgName: parsed?.data?.name || parsed?.name || '(parsed ok)',
+        adminUser: adminName,
+        message: `Connected to Deel Admin API as ${adminName}`,
       };
     } else {
       const isS3 = body.includes('<Error>') || body.includes('NoSuchBucket') || body.includes('Unsupported Authorization');
+      const is401 = res.status === 401;
+      const is403 = res.status === 403;
+
+      let help;
+      if (isS3) {
+        help = 'Request hit CDN/S3 instead of Deel API. Check DEEL_API_BASE_URL.';
+      } else if (is401 || is403) {
+        help = 'Token rejected. Get a fresh token from admin.deel.network Admin Debug Tool and update DEEL_API_KEY on Nexus.';
+      } else {
+        help = `Deel API returned HTTP ${res.status}.`;
+      }
+
       testResult = {
         status: 'error',
         httpStatus: res.status,
@@ -60,9 +81,7 @@ export async function GET(req) {
         contentType,
         bodyPreview: body.substring(0, 300),
         isS3CdnError: isS3,
-        help: isS3
-          ? 'The request hit a CDN/S3 bucket instead of the Deel API. The base URL is likely wrong or DNS is resolving incorrectly. Try setting DEEL_API_BASE_URL=https://api.letsdeel.com on Nexus.'
-          : `Deel API returned HTTP ${res.status}. Check DEEL_API_KEY is valid.`,
+        help,
       };
     }
   } catch (err) {
@@ -71,7 +90,7 @@ export async function GET(req) {
       status: 'network_error',
       error: err.message,
       elapsed: `${elapsed}ms`,
-      help: 'Could not reach the Deel API. Check network connectivity and DNS resolution from the Nexus server.',
+      help: 'Could not reach the Deel API. Check network connectivity.',
     };
   }
 

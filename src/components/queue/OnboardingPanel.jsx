@@ -92,7 +92,7 @@ export default function OnboardingPanel({ byCountry = [], counts = {}, loading, 
         </div>
         {isAuth && (
           <div style={{ fontSize: 11, color: '#b0a8a0', marginBottom: 16, maxWidth: 400 }}>
-            Check that DEEL_API_KEY and DEEL_API_BASE_URL are set correctly on Nexus. Base URL should be https://api.letsdeel.com
+            Token may be missing required scopes. Go to Deel Dashboard → More → Developer → Access Tokens and generate a new Organization Token with scopes: people:read, contracts:read
           </div>
         )}
         <div style={{ display: 'flex', gap: 8 }}>
