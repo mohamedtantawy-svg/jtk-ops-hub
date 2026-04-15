@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useContext } from 'react';
 import { PermissionsContext, SettingsContext } from '../../App';
 import { MEMBERS } from '../../data/members';
-import { TOOLS, STATUSES, FLAGS, SLA_MINS } from '../../data/constants';
+import { TOOLS, STATUSES, FLAGS, SLA_MINS, getFlag } from '../../data/constants';
 import { slaInfo, rel, getUrl } from '../../utils/helpers';
 import { ToolBadge, FnBadge, StatusBadge } from '../ui/Badges';
 import Avatar from '../ui/Avatar';
@@ -78,7 +78,7 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
     return () => document.removeEventListener('mousedown', h);
   }, [showTranslateDD]);
 
-  const assignee=MEMBERS.find(m=>m.id===task.assigneeId)||(task.assigneeEmail?MEMBERS.find(m=>m.email===task.assigneeEmail):null)||{id:null,name:task.assigneeName||'Unassigned',initials:(task.assigneeName||'U').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(),email:task.assigneeEmail};
+  const assignee=MEMBERS.find(m=>m.id===task.assigneeId)||(task.assigneeEmail?MEMBERS.find(m=>m.email.toLowerCase()===task.assigneeEmail.toLowerCase()):null)||{id:null,name:task.assigneeName||'Unassigned',initials:(task.assigneeName||'U').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(),email:task.assigneeEmail};
   const taskEscalation=escalations.find(e=>e.taskId===task.id);
   const sla=slaInfo(task);
 
@@ -193,7 +193,7 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
             <div style={{display:'flex',flexWrap:'wrap',gap:6,alignItems:'center',padding:'10px 14px',background:'#fafaf9',borderRadius:10,border:'1px solid #f2f2f2'}}>
               {[
                 {l:'Assignee',v:<span style={{display:'inline-flex',alignItems:'center',gap:4}}><Avatar name={assignee?.name||'Unassigned'} size={18}/>{assignee?.name||'Unassigned'}</span>},
-                {l:'Country',v:`${FLAGS[task.country]||''} ${task.country||'--'}`},
+                {l:'Country',v:`${getFlag(task.country)} ${task.country||'--'}`},
                 {l:'Received',v:task.receivedAt||'--'},
                 {l:'Updated',v:task.updatedMinsAgo!=null?rel(task.updatedMinsAgo):'--'},
                 ...(task.requesterName?[{l:'Requester',v:task.requesterName}]:[])

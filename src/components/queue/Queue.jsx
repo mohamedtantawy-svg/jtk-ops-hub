@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useContext } from 'react';
-import { STATUSES, TOOLS, FUNCTIONS, FLAGS, QUEUE_SOURCES } from '../../data/constants';
+import { STATUSES, TOOLS, FUNCTIONS, FLAGS, QUEUE_SOURCES, getFlag } from '../../data/constants';
 import { MEMBERS } from '../../data/members';
 import { slaInfo, rel, getUrl, getVisibleEmails } from '../../utils/helpers';
 import { SLA_MINS } from '../../data/constants';
@@ -14,6 +14,7 @@ import { useOnboardingData } from '../../hooks/useOnboardingData';
 import { useOffboardingData } from '../../hooks/useOffboardingData';
 import { useChangeRequestData } from '../../hooks/useChangeRequestData';
 import ChangeRequestPanel from './ChangeRequestPanel';
+import ErrorBoundary from '../ui/ErrorBoundary';
 
 // ── Work Source Button config ──
 const WORK_SOURCES = [
@@ -438,7 +439,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
             icon="bi-geo-alt"
             label="Country"
             value={fCtry[0]||null}
-            options={[{value:null,label:'All Countries',icon:'bi-globe'},...allCtry.sort().map(c=>({value:c,label:`${FLAGS[c]||''} ${c}`}))]}
+            options={[{value:null,label:'All Countries',icon:'bi-globe'},...allCtry.sort().map(c=>({value:c,label:`${getFlag(c)} ${c}`}))]}
             onChange={v=>setFCtry(v?[v]:[])}
             activeColor="#1f74b3"
           />
@@ -473,6 +474,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
 
       {/* ── Work Source Panels ── */}
       {workSource==='onboarding'&&(
+        <ErrorBoundary>
         <OnboardingPanel
           byCountry={onboardingData.byCountry}
           counts={onboardingData.counts}
@@ -480,8 +482,10 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           error={onboardingData.error}
           onRefresh={onboardingData.refresh}
         />
+        </ErrorBoundary>
       )}
       {workSource==='offboarding'&&(
+        <ErrorBoundary>
         <OffboardingPanel
           byCountry={offboardingData.byCountry}
           counts={offboardingData.counts}
@@ -489,6 +493,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           error={offboardingData.error}
           onRefresh={offboardingData.refresh}
         />
+        </ErrorBoundary>
       )}
       {workSource==='workbench'&&(
         <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:40,background:'#fafaf9',textAlign:'center'}}>
@@ -499,6 +504,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       )}
       {/* Zendesk & Jira buttons filter the main queue — no separate panels needed */}
       {workSource==='change_request'&&(
+        <ErrorBoundary>
         <ChangeRequestPanel
           amendments={changeRequestData.amendments}
           redlines={changeRequestData.redlines}
@@ -510,6 +516,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           error={changeRequestData.error}
           onRefresh={changeRequestData.refresh}
         />
+        </ErrorBoundary>
       )}
 
       {/* ── Table (shown when no work source is active) ── */}
@@ -613,7 +620,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
 // ── Table row component (replaces TaskRow for table layout) ──
 const QueueRow=({task,selected,checked,onCheck,onClick,onAction,onEscalMgr,currentUser,slaAgeClass,settings,perms,compact,onSnooze})=>{
   const [hov,setHov]=useState(false);
-  const assignee=MEMBERS.find(m=>m.id===task.assigneeId)||(task.assigneeEmail?MEMBERS.find(m=>m.email===task.assigneeEmail):null)||{name:task.assigneeName||'Unassigned'};
+  const assignee=MEMBERS.find(m=>m.id===task.assigneeId)||(task.assigneeEmail?MEMBERS.find(m=>m.email.toLowerCase()===task.assigneeEmail.toLowerCase()):null)||{name:task.assigneeName||'Unassigned'};
   const sla=slaInfo(task);
   const isActive=task.status!=='resolved'&&task.status!=='waiting';
   const fn=FUNCTIONS[task.type];
@@ -660,7 +667,7 @@ const QueueRow=({task,selected,checked,onCheck,onClick,onAction,onEscalMgr,curre
       </td>
       {/* Country */}
       <td style={{...tdStyle,fontSize:12}}>
-        {task.country&&<span>{FLAGS[task.country]||''} <span style={{color:'#616161',fontWeight:500}}>{task.country}</span></span>}
+        {task.country&&<span>{getFlag(task.country)} <span style={{color:'#616161',fontWeight:500}}>{task.country}</span></span>}
       </td>
       {/* Assignee */}
       <td style={tdStyle}>
@@ -717,7 +724,7 @@ const WorkModeOverlay=({task,remaining,totalOpen,skipped,onResolve,onEscalate,on
     );
   }
 
-  const assignee=MEMBERS.find(m=>m.id===task.assigneeId)||(task.assigneeEmail?MEMBERS.find(m=>m.email===task.assigneeEmail):null)||{name:task.assigneeName||'Unassigned',initials:(task.assigneeName||'U').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()};
+  const assignee=MEMBERS.find(m=>m.id===task.assigneeId)||(task.assigneeEmail?MEMBERS.find(m=>m.email.toLowerCase()===task.assigneeEmail.toLowerCase()):null)||{name:task.assigneeName||'Unassigned',initials:(task.assigneeName||'U').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()};
   const sla=slaInfo(task);
   const fn=FUNCTIONS[task.type];
   const tool=TOOLS[task.source];
@@ -766,7 +773,7 @@ const WorkModeOverlay=({task,remaining,totalOpen,skipped,onResolve,onEscalate,on
 
         {/* Meta grid */}
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'8px 24px',marginBottom:16,padding:'12px 16px',background:'#f9f8f6',borderRadius:10,border:'1px solid #f0efed'}}>
-          <div><span style={metaLabel}>Country</span><span style={metaValue}>{FLAGS[task.country]||''} {task.country||'—'}</span></div>
+          <div><span style={metaLabel}>Country</span><span style={metaValue}>{getFlag(task.country)} {task.country||'—'}</span></div>
           <div><span style={metaLabel}>Assignee</span><span style={metaValue}>{assignee?<span style={{display:'inline-flex',alignItems:'center',gap:4}}><Avatar name={assignee.name} size="xs"/>{assignee.name}</span>:'Unassigned'}</span></div>
           <div><span style={metaLabel}>Received</span><span style={metaValue}>{relTime(task.minutesAgo)}</span></div>
           <div><span style={metaLabel}>Requester</span><span style={metaValue}>{task.requesterName||'—'}</span></div>

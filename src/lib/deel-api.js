@@ -57,7 +57,9 @@ async function _deelFetch(path, options = {}) {
     ...options,
     headers: {
       'x-auth-token': DEEL_API_KEY,
+      Authorization: `Bearer ${DEEL_API_KEY}`,
       Accept: 'application/json, text/plain, */*',
+      'Content-Type': 'application/json',
       Origin: 'https://admin.deel.network',
       Referer: 'https://admin.deel.network/',
       'x-app-host': 'app.deel.com',

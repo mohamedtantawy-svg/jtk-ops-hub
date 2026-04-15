@@ -2,7 +2,7 @@
 // Shows actionable onboarding tasks from Deel Admin API, grouped by country.
 // Each task has: employee name, country, flow step, start date, tag, assignee.
 import { useState, useMemo } from 'react';
-import { FLAGS } from '../../data/constants';
+import { FLAGS, getFlag } from '../../data/constants';
 import { fetchDeelHealth } from '../../services/integrationsApi';
 
 const SEV_CONFIG = {
@@ -148,7 +148,7 @@ export default function OnboardingPanel({ byCountry = [], counts = {}, loading, 
       {/* Country groups */}
       {filtered.map(group => {
         const isExpanded = expandedCountries.has(group.country) || expandedCountries.has('_all');
-        const flag = FLAGS[group.country] || '';
+        const flag = getFlag(group.country);
 
         return (
           <div key={group.country} style={{ borderBottom: '1px solid #f0efed' }}>
