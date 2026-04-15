@@ -23,40 +23,39 @@ export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url);
     const offset = searchParams.get('offset') || '0';
+    const debug = searchParams.get('debug') === '1';
 
-    // Return fresh cache if available
+    // Return fresh cache if available (skip in debug mode)
     const cacheKeyFull = `${CACHE_KEY}_${offset}`;
-    const fresh = cacheGet(cacheKeyFull, CACHE_TTL);
-    if (fresh) return NextResponse.json(fresh);
+    if (!debug) {
+      const fresh = cacheGet(cacheKeyFull, CACHE_TTL);
+      if (fresh) return NextResponse.json(fresh);
+    }
 
     let responseData;
     try {
       const result = await listOnboardingPeople({ offset });
 
-      // The admin API may return data in various shapes — handle flexibly
-      const rawItems = result?.data || result?.rows || result?.items || (Array.isArray(result) ? result : []);
+      // Debug mode: return raw shape info for diagnosis
+      if (debug) {
+        return NextResponse.json({
+          _debug: true,
+          _raw: result._raw,
+          _itemCount: result.items.length,
+          _sampleItem: result.items[0] || null,
+        });
+      }
 
-      const items = rawItems.map(p => {
-        // Admin API fields may differ from REST v2 — map flexibly
-        const emp = p.employments?.[0] || p.employment || {};
-        return {
-          id: p.id || p.contract_id || p.employee_id || '',
-          name: p.full_name || p.employee_name || p.worker_name || p.name || '',
-          email: p.email || p.worker_email || p.employee_email || '',
-          country: emp.country || p.country || p.employment_country || '',
-          countryName: p.country_name || p.employment_country_name || '',
-          hiringStatus: p.hiring_status || p.status || p.onboarding_status || '',
-          startDate: emp.start_date || p.start_date || p.effective_date || '',
-          jobTitle: emp.job_title || p.job_title || p.position || '',
-          hiringType: emp.hiring_type || p.hiring_type || p.contract_type || '',
-          contractId: emp.id || p.contract_id || '',
-          contractStatus: emp.contract_status || p.contract_status || '',
-          team: emp.team?.name || p.team || p.team_name || '',
-          action: deriveAction(p.hiring_status || p.status || p.onboarding_status || '', emp),
-        };
-      });
+      const items = result.items.map(p => ({
+        ...p,
+        action: deriveAction(p.hiringStatus),
+      }));
 
-      responseData = { items, total: items.length, page: result?.page || {} };
+      responseData = {
+        items,
+        total: items.length,
+        _apiTotal: result._raw?.totalFromApi,
+      };
       cacheSet(cacheKeyFull, responseData);
     } catch (fetchErr) {
       const stale = cacheGet(cacheKeyFull, STALE_TTL);
@@ -74,10 +73,16 @@ export async function GET(req) {
   }
 }
 
-function deriveAction(status, emp) {
+/**
+ * Derive an action descriptor from the hiring/onboarding status.
+ * Handles both snake_case and SCREAMING_CASE admin statuses.
+ */
+function deriveAction(status) {
   const s = (status || '').toLowerCase();
-  if (s.includes('overdue')) return { label: 'Overdue', severity: 'critical', description: 'Onboarding overdue - immediate action required' };
-  if (s.includes('risk'))    return { label: 'At Risk', severity: 'warning', description: 'Onboarding at risk - attention needed' };
-  if (s.includes('pending') || s.includes('invite')) return { label: 'Pending Invite', severity: 'info', description: 'Invitation not yet sent' };
+  if (s.includes('overdue'))                          return { label: 'Overdue', severity: 'critical', description: 'Onboarding overdue — immediate action required' };
+  if (s.includes('risk'))                             return { label: 'At Risk', severity: 'warning', description: 'Onboarding at risk — attention needed' };
+  if (s.includes('pending') || s.includes('invite'))  return { label: 'Pending Invite', severity: 'info', description: 'Invitation not yet sent' };
+  if (s.includes('blocked') || s.includes('stuck'))   return { label: 'Blocked', severity: 'critical', description: 'Onboarding blocked' };
+  if (s.includes('awaiting'))                         return { label: 'Awaiting Action', severity: 'warning', description: 'Awaiting action' };
   return { label: 'In Progress', severity: 'active', description: 'Onboarding steps in progress' };
 }

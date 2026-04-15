@@ -1,31 +1,32 @@
 // ── OnboardingPanel ─────────────────────────────────────────────────────────
-// Shows onboarding tasks from Deel API, grouped by country.
-// Each entry shows: employee name, country, action required, contract link.
+// Shows actionable onboarding tasks from Deel Admin API, grouped by country.
+// Driven by action.severity from the server — no hardcoded status strings.
 import { useState, useMemo } from 'react';
 import { FLAGS } from '../../data/constants';
 import { fetchDeelHealth } from '../../services/integrationsApi';
 
-const STATUS_CONFIG = {
-  onboarding_overdue: { label: 'Overdue', color: '#d42d35', bg: '#fef2f2', icon: 'bi-exclamation-triangle-fill', border: '#fca5a5' },
-  onboarding_at_risk: { label: 'At Risk', color: '#92400e', bg: '#fef3c7', icon: 'bi-exclamation-circle-fill', border: '#ffe27c' },
-  onboarding:         { label: 'In Progress', color: '#1d4ed8', bg: '#eff6ff', icon: 'bi-arrow-repeat', border: '#bddcf0' },
-  pending_invite:     { label: 'Pending Invite', color: '#616161', bg: '#f7f5f2', icon: 'bi-envelope', border: '#e8e8e8' },
+// Severity-based styling (matches action.severity from server)
+const SEV_CONFIG = {
+  critical: { label: 'Overdue',        color: '#d42d35', bg: '#fef2f2', icon: 'bi-exclamation-triangle-fill', border: '#fca5a5' },
+  warning:  { label: 'At Risk',        color: '#92400e', bg: '#fef3c7', icon: 'bi-exclamation-circle-fill',   border: '#ffe27c' },
+  active:   { label: 'In Progress',    color: '#1d4ed8', bg: '#eff6ff', icon: 'bi-arrow-repeat',              border: '#bddcf0' },
+  info:     { label: 'Pending Invite', color: '#616161', bg: '#f7f5f2', icon: 'bi-envelope',                  border: '#e8e8e8' },
 };
 
 const HIRING_TYPE_LABELS = {
-  eor: 'EOR',
-  contractor: 'Contractor',
-  direct_employee: 'Direct Employee',
+  eor: 'EOR', EOR: 'EOR',
+  contractor: 'Contractor', CONTRACTOR: 'Contractor',
+  direct_employee: 'Direct Employee', DIRECT_EMPLOYEE: 'Direct Employee',
   hris_direct_employee: 'HRIS Direct',
   hris_direct_contractor: 'HRIS Contractor',
-  peo: 'PEO',
+  peo: 'PEO', PEO: 'PEO',
 };
 
 const DEEL_CONTRACT_BASE = 'https://app.deel.com/contracts';
 
 export default function OnboardingPanel({ byCountry = [], counts = {}, loading, error, onRefresh }) {
   const [expandedCountries, setExpandedCountries] = useState(new Set(['_all']));
-  const [statusFilter, setStatusFilter] = useState(null); // null = all
+  const [statusFilter, setStatusFilter] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
 
   const toggleCountry = (ctry) => {
@@ -44,17 +45,28 @@ export default function OnboardingPanel({ byCountry = [], counts = {}, loading, 
   };
   const collapseAll = () => setExpandedCountries(new Set());
 
-  // Filter by status + search
+  // Filter by severity + search
+  const FILTER_MAP = {
+    critical: p => p.action?.severity === 'critical',
+    warning:  p => p.action?.severity === 'warning',
+    active:   p => p.action?.severity === 'active',
+    info:     p => p.action?.severity === 'info',
+  };
+
   const filtered = useMemo(() => {
     return byCountry.map(group => {
       let people = group.people;
-      if (statusFilter) people = people.filter(p => p.hiringStatus === statusFilter);
+      if (statusFilter && FILTER_MAP[statusFilter]) {
+        people = people.filter(FILTER_MAP[statusFilter]);
+      }
       if (searchTerm) {
         const q = searchTerm.toLowerCase();
         people = people.filter(p =>
           p.name?.toLowerCase().includes(q) ||
+          p.email?.toLowerCase().includes(q) ||
           p.jobTitle?.toLowerCase().includes(q) ||
           p.team?.toLowerCase().includes(q) ||
+          p.organizationName?.toLowerCase().includes(q) ||
           p.contractId?.toLowerCase().includes(q)
         );
       }
@@ -64,9 +76,9 @@ export default function OnboardingPanel({ byCountry = [], counts = {}, loading, 
 
   const totalFiltered = filtered.reduce((sum, g) => sum + g.people.length, 0);
 
+  // Diagnostics
   const [diagResult, setDiagResult] = useState(null);
   const [diagLoading, setDiagLoading] = useState(false);
-
   const runDiagnostic = async () => {
     setDiagLoading(true);
     try {
@@ -79,6 +91,7 @@ export default function OnboardingPanel({ byCountry = [], counts = {}, loading, 
     }
   };
 
+  // Error state
   if (error && byCountry.length === 0) {
     const isAuth = error.includes('401') || error.includes('400') || error.toLowerCase().includes('not authorized') || error.toLowerCase().includes('unauthorized') || error.toLowerCase().includes('unsupported authorization');
     return (
@@ -87,12 +100,10 @@ export default function OnboardingPanel({ byCountry = [], counts = {}, loading, 
         <div style={{ fontSize: 15, fontWeight: 600, color: '#1b1b1b', marginBottom: 6 }}>
           {isAuth ? 'Deel API authentication failed' : 'Unable to load onboarding data'}
         </div>
-        <div style={{ fontSize: 13, color: '#9e9e9e', marginBottom: 16, maxWidth: 480 }}>
-          {error}
-        </div>
+        <div style={{ fontSize: 13, color: '#9e9e9e', marginBottom: 16, maxWidth: 480 }}>{error}</div>
         {isAuth && (
           <div style={{ fontSize: 11, color: '#b0a8a0', marginBottom: 16, maxWidth: 400 }}>
-            Token may be missing required scopes. Go to Deel Dashboard → More → Developer → Access Tokens and generate a new Organization Token with scopes: people:read, contracts:read
+            Ensure DEEL_API_KEY on Nexus contains a valid admin token from admin.deel.network Admin Debug Tool.
           </div>
         )}
         <div style={{ display: 'flex', gap: 8 }}>
@@ -116,31 +127,26 @@ export default function OnboardingPanel({ byCountry = [], counts = {}, loading, 
     <div style={{ flex: 1, overflowY: 'auto', background: '#fafaf9' }}>
       {/* Summary bar */}
       <div style={{ padding: '12px 24px', background: 'white', borderBottom: '1px solid #f0efed', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        {/* Status pills */}
         <StatusPill label="All" count={counts.total} active={!statusFilter} onClick={() => setStatusFilter(null)} color="#1b1b1b" />
-        {counts.overdue > 0 && <StatusPill label="Overdue" count={counts.overdue} active={statusFilter === 'onboarding_overdue'} onClick={() => setStatusFilter(statusFilter === 'onboarding_overdue' ? null : 'onboarding_overdue')} color="#d42d35" />}
-        {counts.atRisk > 0 && <StatusPill label="At Risk" count={counts.atRisk} active={statusFilter === 'onboarding_at_risk'} onClick={() => setStatusFilter(statusFilter === 'onboarding_at_risk' ? null : 'onboarding_at_risk')} color="#ed8d00" />}
-        <StatusPill label="In Progress" count={counts.onboarding} active={statusFilter === 'onboarding'} onClick={() => setStatusFilter(statusFilter === 'onboarding' ? null : 'onboarding')} color="#1d4ed8" />
-        <StatusPill label="Pending Invite" count={counts.pendingInvite} active={statusFilter === 'pending_invite'} onClick={() => setStatusFilter(statusFilter === 'pending_invite' ? null : 'pending_invite')} color="#616161" />
+        {counts.critical > 0 && <StatusPill label="Overdue" count={counts.critical} active={statusFilter === 'critical'} onClick={() => setStatusFilter(statusFilter === 'critical' ? null : 'critical')} color="#d42d35" />}
+        {counts.warning > 0 && <StatusPill label="At Risk" count={counts.warning} active={statusFilter === 'warning'} onClick={() => setStatusFilter(statusFilter === 'warning' ? null : 'warning')} color="#ed8d00" />}
+        {counts.active > 0 && <StatusPill label="In Progress" count={counts.active} active={statusFilter === 'active'} onClick={() => setStatusFilter(statusFilter === 'active' ? null : 'active')} color="#1d4ed8" />}
+        {counts.info > 0 && <StatusPill label="Pending" count={counts.info} active={statusFilter === 'info'} onClick={() => setStatusFilter(statusFilter === 'info' ? null : 'info')} color="#616161" />}
 
         <div style={{ flex: 1 }} />
 
-        {/* Search */}
         <div style={{ position: 'relative' }}>
           <i className="bi-search" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: '#9e9e9e' }} />
           <input
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
-            placeholder="Search by name, title..."
+            placeholder="Search name, title, org..."
             style={{ width: 200, height: 32, paddingLeft: 30, paddingRight: 10, borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 12, outline: 'none' }}
           />
         </div>
 
-        {/* Expand/Collapse */}
         <button onClick={expandAll} title="Expand all" style={iconBtnStyle}><i className="bi-arrows-expand" style={{ fontSize: 12 }} /></button>
         <button onClick={collapseAll} title="Collapse all" style={iconBtnStyle}><i className="bi-arrows-collapse" style={{ fontSize: 12 }} /></button>
-
-        {/* Refresh */}
         <button onClick={onRefresh} title="Refresh data" style={{ ...iconBtnStyle, color: loading ? '#ed8d00' : '#9e9e9e' }}>
           <i className={loading ? 'bi-arrow-clockwise spin' : 'bi-arrow-clockwise'} style={{ fontSize: 12 }} />
         </button>
@@ -148,7 +154,7 @@ export default function OnboardingPanel({ byCountry = [], counts = {}, loading, 
         <span style={{ fontSize: 11, color: '#9e9e9e' }}>{totalFiltered} {totalFiltered === 1 ? 'person' : 'people'}</span>
       </div>
 
-      {/* Loading state */}
+      {/* Loading */}
       {loading && byCountry.length === 0 && (
         <div style={{ textAlign: 'center', padding: 60 }}>
           <i className="bi-arrow-clockwise spin" style={{ fontSize: 28, color: '#9e9e9e', display: 'block', marginBottom: 12 }} />
@@ -156,12 +162,12 @@ export default function OnboardingPanel({ byCountry = [], counts = {}, loading, 
         </div>
       )}
 
-      {/* Empty state */}
+      {/* Empty */}
       {!loading && filtered.length === 0 && (
         <div style={{ textAlign: 'center', padding: 60 }}>
           <i className="bi-person-check" style={{ fontSize: 40, color: '#c0c0c0', display: 'block', marginBottom: 12 }} />
           <div style={{ fontSize: 15, fontWeight: 600, color: '#1b1b1b', marginBottom: 6 }}>
-            {searchTerm || statusFilter ? 'No matches' : 'No onboarding in progress'}
+            {searchTerm || statusFilter ? 'No matches' : 'No actionable onboarding tasks'}
           </div>
           <div style={{ fontSize: 13, color: '#9e9e9e' }}>
             {searchTerm || statusFilter ? 'Try adjusting the filters' : 'All employees are fully onboarded'}
@@ -176,20 +182,12 @@ export default function OnboardingPanel({ byCountry = [], counts = {}, loading, 
 
         return (
           <div key={group.country} style={{ borderBottom: '1px solid #f0efed' }}>
-            {/* Country header */}
             <div
               onClick={() => toggleCountry(group.country)}
               style={{
-                padding: '10px 24px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                cursor: 'pointer',
-                background: isExpanded ? '#f9f8f6' : 'white',
-                transition: 'background .15s',
-                position: 'sticky',
-                top: 0,
-                zIndex: 1,
+                padding: '10px 24px', display: 'flex', alignItems: 'center', gap: 10,
+                cursor: 'pointer', background: isExpanded ? '#f9f8f6' : 'white',
+                transition: 'background .15s', position: 'sticky', top: 0, zIndex: 1,
               }}
             >
               <i className={isExpanded ? 'bi-chevron-down' : 'bi-chevron-right'} style={{ fontSize: 10, color: '#9e9e9e', width: 14 }} />
@@ -208,7 +206,6 @@ export default function OnboardingPanel({ byCountry = [], counts = {}, loading, 
               )}
             </div>
 
-            {/* People rows */}
             {isExpanded && (
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
@@ -223,29 +220,9 @@ export default function OnboardingPanel({ byCountry = [], counts = {}, loading, 
                   </tr>
                 </thead>
                 <tbody>
-                  {group.people.map(person => {
-                    const cfg = STATUS_CONFIG[person.hiringStatus] || STATUS_CONFIG.onboarding;
-                    const typeLabel = HIRING_TYPE_LABELS[person.hiringType] || person.hiringType || '--';
-                    const contractUrl = person.contractId ? `${DEEL_CONTRACT_BASE}/${person.contractId}` : null;
-                    const startDate = person.startDate
-                      ? new Date(person.startDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-                      : '--';
-                    const isOverdue = person.hiringStatus === 'onboarding_overdue';
-                    const isAtRisk = person.hiringStatus === 'onboarding_at_risk';
-
-                    return (
-                      <PersonRow
-                        key={person.id || person.contractId}
-                        person={person}
-                        cfg={cfg}
-                        typeLabel={typeLabel}
-                        contractUrl={contractUrl}
-                        startDate={startDate}
-                        isOverdue={isOverdue}
-                        isAtRisk={isAtRisk}
-                      />
-                    );
-                  })}
+                  {group.people.map(person => (
+                    <PersonRow key={person.id || person.contractId || person.name} person={person} />
+                  ))}
                 </tbody>
               </table>
             )}
@@ -258,9 +235,20 @@ export default function OnboardingPanel({ byCountry = [], counts = {}, loading, 
 
 // ── Sub-components ──
 
-function PersonRow({ person, cfg, typeLabel, contractUrl, startDate, isOverdue, isAtRisk }) {
+function PersonRow({ person }) {
   const [hov, setHov] = useState(false);
+  const sev = person.action?.severity || 'active';
+  const cfg = SEV_CONFIG[sev] || SEV_CONFIG.active;
+  const actionLabel = person.action?.label || cfg.label;
+  const isOverdue = sev === 'critical';
+  const isAtRisk = sev === 'warning';
   const rowBg = isOverdue ? '#fffbfb' : isAtRisk ? '#fffdf5' : 'white';
+
+  const typeLabel = HIRING_TYPE_LABELS[person.hiringType] || person.hiringType || '--';
+  const contractUrl = person.contractId ? `${DEEL_CONTRACT_BASE}/${person.contractId}` : null;
+  const startDate = person.startDate
+    ? new Date(person.startDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+    : '--';
 
   return (
     <tr
@@ -273,7 +261,7 @@ function PersonRow({ person, cfg, typeLabel, contractUrl, startDate, isOverdue, 
         borderLeft: isOverdue ? '3px solid #d42d35' : isAtRisk ? '3px solid #ed8d00' : '3px solid transparent',
       }}
     >
-      {/* Employee name */}
+      {/* Employee */}
       <td style={{ ...tdStyle, textAlign: 'left', paddingLeft: 36 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <div style={{
@@ -286,6 +274,7 @@ function PersonRow({ person, cfg, typeLabel, contractUrl, startDate, isOverdue, 
           <div>
             <div style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', lineHeight: 1.2 }}>{person.name}</div>
             {person.email && <div style={{ fontSize: 10, color: '#9e9e9e' }}>{person.email}</div>}
+            {person.organizationName && <div style={{ fontSize: 10, color: '#b0a8a0' }}>{person.organizationName}</div>}
           </div>
         </div>
       </td>
@@ -325,8 +314,13 @@ function PersonRow({ person, cfg, typeLabel, contractUrl, startDate, isOverdue, 
           fontSize: 10, fontWeight: 700, whiteSpace: 'nowrap',
         }}>
           <i className={cfg.icon} style={{ fontSize: 9 }} />
-          {cfg.label}
+          {actionLabel}
         </span>
+        {person.hiringStatus && person.hiringStatus !== actionLabel && (
+          <div style={{ fontSize: 9, color: '#b0a8a0', marginTop: 2, maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={person.hiringStatus}>
+            {person.hiringStatus}
+          </div>
+        )}
       </td>
 
       {/* Contract link */}
@@ -348,7 +342,7 @@ function PersonRow({ person, cfg, typeLabel, contractUrl, startDate, isOverdue, 
             }}
           >
             <i className="bi-box-arrow-up-right" style={{ fontSize: 9 }} />
-            {person.contractId}
+            Deel
           </a>
         ) : (
           <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>
@@ -369,8 +363,7 @@ function StatusPill({ label, count, active, onClick, color }) {
         background: active ? `${color}10` : 'white',
         color: active ? color : '#616161',
         fontSize: 12, fontWeight: active ? 600 : 500,
-        cursor: 'pointer', transition: 'all .15s',
-        whiteSpace: 'nowrap',
+        cursor: 'pointer', transition: 'all .15s', whiteSpace: 'nowrap',
       }}
     >
       {label}

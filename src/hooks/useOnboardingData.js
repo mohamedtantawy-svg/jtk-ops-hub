@@ -48,6 +48,18 @@ export function useOnboardingData(enabled = true) {
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  // Classify severity from action or hiringStatus — handles both
+  // snake_case ("onboarding_overdue") and admin API labels ("Overdue")
+  const getSeverity = (item) => {
+    const sev = item.action?.severity;
+    if (sev) return sev;
+    const s = (item.hiringStatus || '').toLowerCase();
+    if (s.includes('overdue') || s.includes('blocked')) return 'critical';
+    if (s.includes('risk') || s.includes('awaiting')) return 'warning';
+    if (s.includes('pending') || s.includes('invite')) return 'info';
+    return 'active';
+  };
+
   // Group by country
   const byCountry = useMemo(() => {
     const map = {};
@@ -56,34 +68,32 @@ export function useOnboardingData(enabled = true) {
       if (!map[ctry]) map[ctry] = [];
       map[ctry].push(item);
     }
-    // Sort countries alphabetically, but put items with overdue first
     return Object.entries(map)
       .sort(([a, aItems], [b, bItems]) => {
-        const aHasOverdue = aItems.some(i => i.hiringStatus === 'onboarding_overdue');
-        const bHasOverdue = bItems.some(i => i.hiringStatus === 'onboarding_overdue');
-        if (aHasOverdue && !bHasOverdue) return -1;
-        if (!aHasOverdue && bHasOverdue) return 1;
-        return a.localeCompare(b);
+        // Countries with critical items first
+        const aHasCrit = aItems.some(i => getSeverity(i) === 'critical');
+        const bHasCrit = bItems.some(i => getSeverity(i) === 'critical');
+        if (aHasCrit && !bHasCrit) return -1;
+        if (!aHasCrit && bHasCrit) return 1;
+        return bItems.length - aItems.length;
       })
       .map(([country, people]) => ({
         country,
         people: people.sort((a, b) => {
-          const order = { onboarding_overdue: 0, onboarding_at_risk: 1, onboarding: 2, pending_invite: 3 };
-          return (order[a.hiringStatus] ?? 9) - (order[b.hiringStatus] ?? 9);
+          const sevOrder = { critical: 0, warning: 1, active: 2, info: 3 };
+          return (sevOrder[getSeverity(a)] ?? 9) - (sevOrder[getSeverity(b)] ?? 9);
         }),
-        overdueCount: people.filter(p => p.hiringStatus === 'onboarding_overdue').length,
-        atRiskCount: people.filter(p => p.hiringStatus === 'onboarding_at_risk').length,
+        overdueCount: people.filter(p => getSeverity(p) === 'critical').length,
+        atRiskCount: people.filter(p => getSeverity(p) === 'warning').length,
       }));
   }, [items]);
 
-  // Summary counts
+  // Summary counts — use action.severity from the server
   const counts = useMemo(() => {
-    const c = { total: items.length, onboarding: 0, overdue: 0, atRisk: 0, pendingInvite: 0 };
+    const c = { total: items.length, critical: 0, warning: 0, active: 0, info: 0 };
     for (const i of items) {
-      if (i.hiringStatus === 'onboarding') c.onboarding++;
-      else if (i.hiringStatus === 'onboarding_overdue') c.overdue++;
-      else if (i.hiringStatus === 'onboarding_at_risk') c.atRisk++;
-      else if (i.hiringStatus === 'pending_invite') c.pendingInvite++;
+      const sev = getSeverity(i);
+      if (c[sev] !== undefined) c[sev]++;
     }
     return c;
   }, [items]);

@@ -140,74 +140,136 @@ export async function getOrganization() {
 // ── Onboarding (Admin API) ───────────────────────────────────────────────────
 
 /**
- * Fetches onboarding queue from the admin API.
+ * Fetches onboarding actionable queue from the admin API.
  * Uses /admin/eor/employee-manager/list/Onboarding.ActionableQueue
  * — the same endpoint as admin.deel.network's onboarding dashboard.
+ *
+ * Returns { items: [...normalized...], _raw: { topKeys, arrayKey, totalFromApi } }
+ * so the route handler has both clean data and debug info.
  */
 export async function listOnboardingPeople(params = {}) {
   const offset = params.offset || '0';
   const qs = `actionableQueueFilters%5Boffset%5D=${offset}`;
-  return deelFetch(`/admin/eor/employee-manager/list/Onboarding.ActionableQueue?${qs}`);
+  const res = await deelFetch(`/admin/eor/employee-manager/list/Onboarding.ActionableQueue?${qs}`);
+
+  // ── Auto-discover the data array ──────────────────────────────────────────
+  // Admin API endpoints use different top-level keys. Try known names first,
+  // then fall back to finding the first array property in the response.
+  const topKeys = res ? Object.keys(res) : [];
+  let rawItems = null;
+  let arrayKey = null;
+
+  // Try well-known keys
+  const KNOWN_KEYS = ['data', 'rows', 'items', 'employees', 'people', 'records',
+                       'actionableQueue', 'queue', 'onboardings', 'contracts', 'results'];
+  for (const key of KNOWN_KEYS) {
+    if (Array.isArray(res?.[key])) {
+      rawItems = res[key];
+      arrayKey = key;
+      break;
+    }
+  }
+
+  // Fallback: find first array value in response
+  if (!rawItems && res && typeof res === 'object') {
+    for (const [key, val] of Object.entries(res)) {
+      if (Array.isArray(val) && val.length > 0) {
+        rawItems = val;
+        arrayKey = key;
+        break;
+      }
+    }
+  }
+
+  // Last resort: response itself might be an array
+  if (!rawItems && Array.isArray(res)) {
+    rawItems = res;
+    arrayKey = '(root)';
+  }
+
+  rawItems = rawItems || [];
+
+  // ── Normalize each item ───────────────────────────────────────────────────
+  // Admin API uses camelCase (like terminations). Try camelCase first, snake_case fallback.
+  const items = rawItems.map(p => {
+    const emp = p.employments?.[0] || p.employment || {};
+    return {
+      id:             p.id || p.contractId || p.eorContractId || p.contract_id || p.employee_id || '',
+      name:           p.name || p.full_name || p.employee_name || p.worker_name || '',
+      email:          p.email || p.worker_email || p.employee_email || '',
+      country:        p.employmentCountry || p.country || emp.country || p.employment_country || '',
+      countryName:    p.countryName || p.country_name || '',
+      hiringStatus:   p.hiringStatus || p.hiring_status || p.status || p.onboarding_status || '',
+      startDate:      p.startDate || p.start_date || emp.start_date || p.effective_date || '',
+      jobTitle:       p.jobTitle || p.job_title || emp.job_title || p.position || '',
+      hiringType:     p.hiringType || p.hiring_type || emp.hiring_type || p.contract_type || p.type || '',
+      contractId:     p.contractOid || p.contractId || p.contract_id || emp.id || '',
+      contractStatus: p.contractStatus || p.contract_status || emp.contract_status || '',
+      team:           p.team || emp.team?.name || p.team_name || '',
+      organizationName: p.organizationName || p.organization_name || '',
+      exAssignee:     p.exAssignee || p.assignee || '',
+    };
+  });
+
+  return {
+    items,
+    _raw: {
+      topKeys,
+      arrayKey,
+      totalFromApi: res?.count?.total || res?.total || res?.page?.total || rawItems.length,
+      firstItemKeys: rawItems[0] ? Object.keys(rawItems[0]) : [],
+    },
+  };
 }
 
 // ── Offboarding / Terminations (Admin API) ──────────────────────────────────
 
 /**
- * Fetches active EOR termination cases from the admin API.
+ * Fetches AWAITING_TRIAGE termination cases from the admin API.
  * Uses /admin/eor/terminations_v3 — the same endpoint as admin.deel.network.
- * Handles cursor-based pagination.
+ * Filters to status=AWAITING_TRIAGE only (actionable items).
+ *
+ * NOTE: The endpoint does NOT accept "limit" or "cursor" as query params
+ * (returns 400). It may accept filters via POST body or specific param names.
+ * For now we call it without params and filter client-side.
  */
 export async function listOffboardingCases() {
-  const PAGE_SIZE = 50;
-  const allTerminations = [];
-  let cursor = null;
-  let page = 0;
-  const MAX_PAGES = 20;
+  // Call without query params — the endpoint rejects limit/cursor
+  const res = await deelFetch('/admin/eor/terminations_v3');
 
-  while (page < MAX_PAGES) {
-    const params = [`limit=${PAGE_SIZE}`];
-    if (cursor) params.push(`cursor=${encodeURIComponent(cursor)}`);
+  // Admin API returns { cursor, terminations: [...], count: { total, ... } }
+  const dataArr = res?.terminations || [];
 
-    const res = await deelFetch(`/admin/eor/terminations_v3?${params.join('&')}`);
+  // Filter to actionable items only: AWAITING_TRIAGE
+  const actionable = dataArr.filter(c => {
+    const status = (c.status || '').toUpperCase();
+    return status === 'AWAITING_TRIAGE';
+  });
 
-    // Admin API returns { cursor, terminations: [...], count: { total, ... } }
-    const dataArr = res?.terminations || [];
-
-    for (const c of dataArr) {
-      allTerminations.push({
-        id: c.id,                                         // termination ID (e.g. 165810)
-        contractId: c.eorContractId || c.contractOid || '',
-        contractOid: c.contractOid || '',                 // short OID (e.g. "35jp4gq")
-        name: c.name || '',
-        email: c.email || '',
-        country: c.employmentCountry || '',
-        jobTitle: c.jobTitle || '',
-        team: c.team || '',
-        hiringType: c.type || 'eor',                     // e.g. "TERMINATION"
-        startDate: c.startDate || '',
-        endDate: c.endDate || '',                         // last working day (may be null)
-        desiredEndDate: c.desiredEndDate || '',
-        createdAt: c.createdAt || '',
-        updatedAt: c.updatedAt || '',
-        status: c.status || '',                           // e.g. "AWAITING_TRIAGE", "PROCESSING"
-        organizationName: c.organizationName || '',       // client company name
-        exAssignee: c.exAssignee || '',                   // assigned agent
-        reason: c.requestData?.reason || '',              // termination reason enum
-        isResignation: c.requestData?.isEmployeeResignation || false,
-        jiraUrl: c.requestData?.jiraTicket?.jiraWebURL || '',
-        noticePeriod: c.noticePeriod || 0,
-        isArchived: c.isArchived || false,
-      });
-    }
-
-    // Cursor-based pagination — cursor is at res.cursor
-    const nextCursor = res?.cursor;
-    if (!nextCursor || dataArr.length < PAGE_SIZE) break;
-    cursor = nextCursor;
-    page++;
-  }
-
-  return allTerminations;
+  return actionable.map(c => ({
+    id: c.id,                                         // termination ID (e.g. 165810)
+    contractId: c.eorContractId || c.contractOid || '',
+    contractOid: c.contractOid || '',                 // short OID (e.g. "35jp4gq")
+    name: c.name || '',
+    email: c.email || '',
+    country: c.employmentCountry || '',
+    jobTitle: c.jobTitle || '',
+    team: c.team || '',
+    hiringType: c.type || 'eor',                     // e.g. "TERMINATION"
+    startDate: c.startDate || '',
+    endDate: c.endDate || '',                         // last working day (may be null)
+    desiredEndDate: c.desiredEndDate || '',
+    createdAt: c.createdAt || '',
+    updatedAt: c.updatedAt || '',
+    status: c.status || '',                           // e.g. "AWAITING_TRIAGE"
+    organizationName: c.organizationName || '',       // client company name
+    exAssignee: c.exAssignee || '',                   // assigned agent
+    reason: c.requestData?.reason || '',              // termination reason enum
+    isResignation: c.requestData?.isEmployeeResignation || false,
+    jiraUrl: c.requestData?.jiraTicket?.jiraWebURL || '',
+    noticePeriod: c.noticePeriod || 0,
+    isArchived: c.isArchived || false,
+  }));
 }
 
 // ── Contract Amendments (REST v2 API) ───────────────────────────────────────
