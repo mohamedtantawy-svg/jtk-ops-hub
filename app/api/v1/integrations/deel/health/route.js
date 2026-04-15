@@ -1,6 +1,5 @@
 // ── GET /api/v1/integrations/deel/health ─────────────────────────────────────
 // Diagnostic endpoint: tests the Deel API connection and returns detailed info.
-// Helps debug auth/URL issues without exposing the full token.
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { isDeelConfigured, getDeelDiagnostics } from '../../../../../../src/lib/deel-api';
@@ -21,14 +20,14 @@ export async function GET(req) {
     }, { status: 503 });
   }
 
-  // Sanitize token the same way deel-api.js does
+  // Sanitize token
   const token = (process.env.DEEL_API_KEY || '')
     .trim()
     .replace(/^["']+|["']+$/g, '')
     .replace(/^Bearer\s+/i, '')
     .replace(/[\r\n]+/g, '');
 
-  // Test with /people?limit=1 — this is the actual endpoint we need for onboarding/offboarding
+  // Test with /people?limit=1
   const testUrl = `${diag.baseUrl}/people?limit=1&fields[]=id&fields[]=full_name`;
   const startMs = Date.now();
   let testResult;
@@ -36,6 +35,7 @@ export async function GET(req) {
   try {
     const res = await fetch(testUrl, {
       headers: {
+        'x-auth-token': token,
         Authorization: `Bearer ${token}`,
         Accept: 'application/json',
         'Content-Type': 'application/json',
@@ -67,11 +67,11 @@ export async function GET(req) {
 
       let help;
       if (isS3) {
-        help = 'Request hit a CDN/S3 bucket instead of the Deel API. Check DEEL_API_BASE_URL env var.';
+        help = 'Request hit CDN/S3 instead of Deel API. Check DEEL_API_BASE_URL.';
       } else if (is401 || is403) {
-        help = 'Token is missing required scopes. Go to Deel Dashboard → More → Developer → Access Tokens → generate a new Organization Token with scopes: people:read, contracts:read. Then update DEEL_API_KEY on Nexus.';
+        help = 'Token rejected. Get a fresh token from admin.deel.network Admin Debug Tool and update DEEL_API_KEY on Nexus.';
       } else {
-        help = `Deel API returned HTTP ${res.status}. Check DEEL_API_KEY is valid.`;
+        help = `Deel API returned HTTP ${res.status}.`;
       }
 
       testResult = {
@@ -81,7 +81,6 @@ export async function GET(req) {
         contentType,
         bodyPreview: body.substring(0, 300),
         isS3CdnError: isS3,
-        isScopeError: is401 || is403,
         help,
       };
     }
@@ -91,7 +90,7 @@ export async function GET(req) {
       status: 'network_error',
       error: err.message,
       elapsed: `${elapsed}ms`,
-      help: 'Could not reach the Deel API. Check network connectivity from the Nexus server.',
+      help: 'Could not reach the Deel API. Check network connectivity.',
     };
   }
 

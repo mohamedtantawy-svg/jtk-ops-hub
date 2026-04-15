@@ -1,15 +1,11 @@
 // ── Deel Admin API client ────────────────────────────────────────────────────
-// Server-side only. Proxies calls to the Deel REST API using the org's API token.
+// Server-side only. Proxies calls to the Deel Admin API.
+// Uses the admin token from admin.deel.network (x-auth-token header).
 // Includes automatic retry with exponential backoff on transient failures.
-// Docs: https://developer.deel.com
 
 import { withRetry } from './retry';
 
 // ── Sanitize API key ─────────────────────────────────────────────────────────
-// Guard against common env-var copy-paste mistakes:
-// - leading/trailing whitespace or newlines
-// - accidentally including "Bearer " prefix
-// - surrounding quotes
 function sanitizeToken(raw) {
   if (!raw) return '';
   let t = raw.trim().replace(/^["']+|["']+$/g, '');       // strip wrapping quotes
@@ -20,8 +16,10 @@ function sanitizeToken(raw) {
 
 const DEEL_API_KEY = sanitizeToken(process.env.DEEL_API_KEY || '');
 
-// Normalize base URL — env var may or may not include /rest/v2
-const _rawBase = (process.env.DEEL_API_BASE_URL || 'https://api.letsdeel.com').replace(/\/+$/, '');
+// ── Base URL ─────────────────────────────────────────────────────────────────
+// Default: Deel admin API (api-prod-admin.letsdeel.com)
+// The admin API uses /rest/v2 paths with x-auth-token authentication
+const _rawBase = (process.env.DEEL_API_BASE_URL || 'https://api-prod-admin.letsdeel.com').replace(/\/+$/, '');
 const DEEL_BASE = _rawBase.endsWith('/rest/v2') ? _rawBase : `${_rawBase}/rest/v2`;
 
 export function isDeelConfigured() {
@@ -38,7 +36,7 @@ export function getDeelDiagnostics() {
   return {
     configured: !!DEEL_API_KEY,
     baseUrl: DEEL_BASE,
-    rawBaseEnv: process.env.DEEL_API_BASE_URL || '(not set, using default)',
+    rawBaseEnv: process.env.DEEL_API_BASE_URL || '(not set, using default: api-prod-admin.letsdeel.com)',
     tokenLength: keyLen,
     tokenPreview: keyPreview,
     tokenLooksLikeJwt: DEEL_API_KEY.split('.').length === 3,
@@ -47,6 +45,8 @@ export function getDeelDiagnostics() {
 
 /**
  * Raw fetch wrapper — no retry. Used internally.
+ * Sends token as both x-auth-token (admin API) and Authorization: Bearer (public API)
+ * so it works with either endpoint.
  */
 async function _deelFetch(endpoint, options = {}) {
   if (!DEEL_API_KEY) {
@@ -57,19 +57,20 @@ async function _deelFetch(endpoint, options = {}) {
   const res = await fetch(url, {
     ...options,
     headers: {
+      // Admin API auth (admin.deel.network tokens)
+      'x-auth-token': DEEL_API_KEY,
+      // Public API auth (developer portal tokens) — kept for compatibility
       Authorization: `Bearer ${DEEL_API_KEY}`,
       Accept: 'application/json',
       'Content-Type': 'application/json',
       ...options.headers,
     },
     signal: options.signal || AbortSignal.timeout(20000),
-    // Disable Next.js fetch caching — we manage our own cache layer
     cache: 'no-store',
   });
 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    // Detect S3/CDN error (request hit wrong endpoint)
     const isS3Error = body.includes('<Error>') || body.includes('NoSuchBucket') || body.includes('Unsupported Authorization');
     const hint = isS3Error
       ? ` [CDN/S3 error — request to ${url} did not reach the Deel API. Check DEEL_API_BASE_URL env var.]`
@@ -143,11 +144,7 @@ export async function getOrganization() {
 // ── Onboarding People ────────────────────────────────────────────────────────
 
 export async function listOnboardingPeople(params = {}) {
-  const qs = new URLSearchParams();
-  // Fetch people in onboarding statuses
   const statuses = params.statuses || 'onboarding,onboarding_at_risk,onboarding_overdue,pending_invite';
-  qs.set('hiring_statuses[]', statuses.split(',')[0]);
-  // Deel API needs repeated params for arrays — build manually
   const statusArr = statuses.split(',');
   const limit = params.limit || '200';
   const offset = params.offset || '0';
