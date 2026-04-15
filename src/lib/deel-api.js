@@ -254,6 +254,114 @@ export async function listInvoices(params = {}) {
   return deelFetch(`/rest/v2/invoices${q ? `?${q}` : ''}`);
 }
 
+// ── Redline Requests (Admin API) ────────────────────────────────────────────
+
+/**
+ * Fetches redline requests from the admin API.
+ * Uses /admin/eor-experience/redline-requests — same as admin.deel.network.
+ * Filters to "Preparing Documents → Legal Review" status.
+ *
+ * Response shape: { redlines: [...], cursor, totalCount }
+ * Each redline has: id, status (IN_REVIEW), type (templateRedline/contractRedline),
+ * creatorOrganization, template (with countryCode/countries), items[], participants[],
+ * workbenchProcess with redlineLegalReviewTask details.
+ */
+export async function listRedlineRequests(params = {}) {
+  const qs = new URLSearchParams();
+  qs.set('sortBy', 'createdAt');
+  qs.set('sortOrder', 'desc');
+  qs.set('status', params.status || 'preparingDocuments.legalReview');
+  if (params.limit) qs.set('limit', String(params.limit));
+  const res = await deelFetch(`/admin/eor-experience/redline-requests?${qs.toString()}`);
+
+  const rawItems = res?.redlines || [];
+
+  const items = rawItems.map(r => ({
+    id:                r.id || '',
+    type:              r.type || '',                                  // templateRedline | contractRedline
+    status:            r.status || '',                                // IN_REVIEW etc.
+    createdAt:         r.createdAt || '',
+    updatedAt:         r.updatedAt || '',
+    orgName:           r.creatorOrganization?.name || '',
+    orgId:             r.creatorOrganization?.id || '',
+    countryCode:       r.template?.countryCode || '',
+    countries:         r.template?.countries || [],                   // array of country names
+    templateName:      r.template?.name || '',
+    // Items — the actual redline changes requested
+    changes:           (r.items || []).map(item => ({
+      id:              item.id || '',
+      requestedChange: item.itemSettings?.requestedChange || '',
+      status:          item.status || '',
+    })),
+    changesCount:      (r.items || []).length,
+    // Workbench task info
+    workbenchStatus:   r.workbenchProcess?.redlineLegalReviewTask?.opsWorkbenchTask?.status || '',
+    customStatusName:  r.workbenchProcess?.redlineLegalReviewTask?.opsWorkbenchTask?.customStatusName || '',
+    assigneeId:        r.workbenchProcess?.redlineLegalReviewTask?.opsWorkbenchTask?.assigneeId || null,
+    // Participants
+    participants:      (r.participants || []).map(p => ({
+      name:            p.name || '',
+      role:            p.role || '',
+      email:           p.email || '',
+    })),
+  }));
+
+  return { items, total: res?.totalCount || items.length, cursor: res?.cursor || null };
+}
+
+// ── Amendment Requests (Admin API) ──────────────────────────────────────────
+
+/**
+ * Fetches amendment requests from the admin API.
+ * Uses /admin/eor-experience/amendments-requests — same as admin.deel.network.
+ * Filters to "Preparing Documents → Amendment Requested" and related statuses.
+ *
+ * Response shape: { filter: {...}, cursor, data: [...] }
+ * Each amendment has: id, eorContractId, type (OPS/CUSTOM/LEGAL),
+ * contract (with contractOid, employeeLegalName, employmentCountry),
+ * items[] (dataPoint, previousValue, newValue), effectiveDate, amendmentStatuses[].
+ */
+export async function listAmendmentRequests(params = {}) {
+  const qs = new URLSearchParams();
+  qs.set('sortBy', 'createdAt');
+  qs.set('sortOrder', 'desc');
+  qs.set('statuses', params.statuses || 'PreparingDocuments.AmendmentRequested');
+  if (params.limit) qs.set('limit', String(params.limit));
+  const res = await deelFetch(`/admin/eor-experience/amendments-requests?${qs.toString()}`);
+
+  const rawItems = res?.data || [];
+
+  const items = rawItems.map(a => ({
+    id:                a.id || '',
+    eorContractId:     a.eorContractId || '',
+    type:              a.type || '',                                  // OPS, CUSTOM, LEGAL
+    contractOid:       a.contract?.contractOid || '',
+    employeeName:      a.contract?.employeeLegalName || '',
+    country:           a.contract?.employmentCountry || '',
+    clientName:        a.contract?.clientLegalEntityName || a.contract?.organizationName || '',
+    effectiveDate:     a.effectiveDate || '',
+    createdAt:         a.createdAt || '',
+    updatedAt:         a.updatedAt || '',
+    // Amendment items — what's being changed
+    changes:           (a.items || []).map(item => ({
+      dataPoint:       item.dataPoint || '',
+      label:           item.item || '',
+      previousValue:   item.previousValue || '',
+      newValue:        item.newValue || '',
+    })),
+    changesCount:      (a.items || []).length,
+    // Statuses
+    statuses:          (a.amendmentStatuses || []).map(s => ({
+      status:          s.status || '',
+      label:           s.label || '',
+      updatedAt:       s.updatedAt || '',
+    })),
+    currentStatus:     (a.amendmentStatuses || []).find(s => s.status)?.status || '',
+  }));
+
+  return { items, total: items.length, cursor: res?.cursor || null };
+}
+
 // ── Payslips (REST v2 API) ──────────────────────────────────────────────────
 
 export async function getPayslips(contractId) {

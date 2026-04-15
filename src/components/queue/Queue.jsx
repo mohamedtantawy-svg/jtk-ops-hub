@@ -12,6 +12,8 @@ import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../
 import Avatar from '../ui/Avatar';
 import { useOnboardingData } from '../../hooks/useOnboardingData';
 import { useOffboardingData } from '../../hooks/useOffboardingData';
+import { useChangeRequestData } from '../../hooks/useChangeRequestData';
+import ChangeRequestPanel from './ChangeRequestPanel';
 
 // ── Work Source Button config ──
 const WORK_SOURCES = [
@@ -61,6 +63,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   // Onboarding data from Deel API
   const onboardingData = useOnboardingData(true);
   const offboardingData = useOffboardingData(true);
+  const changeRequestData = useChangeRequestData(true);
   const isAdmin=perms?.dataScope==='all_tasks'; const isLead=perms?.dataScope==='team_tasks';
   const ns=tasks.filter(t=>t.source!=='slack'&&t.source!=='calendar');
   // Hierarchical visibility: viewer sees own tickets + all direct/indirect reports
@@ -496,11 +499,17 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       )}
       {/* Zendesk & Jira buttons filter the main queue — no separate panels needed */}
       {workSource==='change_request'&&(
-        <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:40,background:'#fafaf9',textAlign:'center'}}>
-          <i className="bi-pencil-square" style={{fontSize:40,color:'#ed8d00',opacity:0.4,marginBottom:12}}/>
-          <div style={{fontSize:15,fontWeight:600,color:'#1b1b1b',marginBottom:6}}>Change Requests</div>
-          <div style={{fontSize:13,color:'#9e9e9e'}}>Amendment / change request queue will be connected here</div>
-        </div>
+        <ChangeRequestPanel
+          amendments={changeRequestData.amendments}
+          redlines={changeRequestData.redlines}
+          amendmentsByCountry={changeRequestData.amendmentsByCountry}
+          redlinesByCountry={changeRequestData.redlinesByCountry}
+          amendmentCounts={changeRequestData.amendmentCounts}
+          redlineCounts={changeRequestData.redlineCounts}
+          loading={changeRequestData.loading}
+          error={changeRequestData.error}
+          onRefresh={changeRequestData.refresh}
+        />
       )}
 
       {/* ── Table (shown when no work source is active) ── */}
