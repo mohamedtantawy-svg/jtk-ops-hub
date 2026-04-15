@@ -1,6 +1,9 @@
 // ── Deel Admin API client ────────────────────────────────────────────────────
 // Server-side only. Proxies calls to the Deel REST API using the org's API token.
+// Includes automatic retry with exponential backoff on transient failures.
 // Docs: https://developer.deel.com
+
+import { withRetry } from './retry';
 
 const DEEL_API_KEY = process.env.DEEL_API_KEY || '';
 
@@ -13,10 +16,9 @@ export function isDeelConfigured() {
 }
 
 /**
- * Generic fetch wrapper for Deel API.
- * Adds auth header, timeout, and JSON parsing.
+ * Raw fetch wrapper — no retry. Used internally.
  */
-export async function deelFetch(endpoint, options = {}) {
+async function _deelFetch(endpoint, options = {}) {
   if (!DEEL_API_KEY) {
     throw new Error('DEEL_API_KEY is not configured');
   }
@@ -29,7 +31,7 @@ export async function deelFetch(endpoint, options = {}) {
       'Content-Type': 'application/json',
       ...options.headers,
     },
-    signal: options.signal || AbortSignal.timeout(15000),
+    signal: options.signal || AbortSignal.timeout(20000),
   });
 
   if (!res.ok) {
@@ -41,6 +43,14 @@ export async function deelFetch(endpoint, options = {}) {
 
   if (res.status === 204) return null;
   return res.json();
+}
+
+/**
+ * Deel API fetch with automatic retry (3 attempts, exponential backoff).
+ * Retries on network errors and 5xx. Does NOT retry 4xx.
+ */
+export async function deelFetch(endpoint, options = {}) {
+  return withRetry(() => _deelFetch(endpoint, options), { label: 'Deel', maxRetries: 2 });
 }
 
 // ── People / Workers ─────────────────────────────────────────────────────────

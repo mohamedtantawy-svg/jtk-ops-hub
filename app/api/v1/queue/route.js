@@ -11,16 +11,17 @@ import { getAuthUser } from '../../../../src/lib/auth-helpers';
 import { searchTickets, showManyUsers, isZendeskConfigured } from '../../../../src/lib/zendesk-api';
 import { searchIssues, isJiraConfigured } from '../../../../src/lib/jira-api';
 import { ADMIN_EMAILS_LIST } from '../../../../src/data/adminEmails';
+import { cacheGet, cacheSet } from '../../../../src/lib/server-cache';
 
 // ── Config (overridable via env vars) ────────────────────────────────────────
 const ZD_GROUP_NAME = process.env.ZENDESK_HR_GROUP || 'HR Experience';
 const JIRA_BASE     = process.env.JIRA_BASE_URL    || '';
 const ZD_SUBDOMAIN  = process.env.ZENDESK_SUBDOMAIN || '';
 
-// ── Simple in-memory cache (shared across all users in this process) ────────
-let _cache = null;
-let _cacheTime = 0;
-const CACHE_TTL = 3 * 60_000; // 3 minutes — matches client poll interval
+// ── Persistent cache (survives restarts via filesystem) ─────────────────────
+const CACHE_KEY = 'queue';
+const CACHE_TTL = 3 * 60_000;       // fresh for 3 minutes
+const STALE_TTL = 30 * 60_000;      // serve stale up to 30 minutes while refreshing
 
 // ── Zendesk status → app status ──────────────────────────────────────────────
 const ZD_STATUS_MAP = {
@@ -435,41 +436,55 @@ export async function GET(req) {
   // Check cache (skip if _t param present = manual refresh)
   const url = new URL(req.url);
   const bustCache = url.searchParams.has('_t');
-  const now = Date.now();
-  if (!bustCache && _cache && now - _cacheTime < CACHE_TTL) {
-    return NextResponse.json(_cache);
+
+  // Try persistent cache first (survives restarts)
+  if (!bustCache) {
+    const fresh = cacheGet(CACHE_KEY, CACHE_TTL);
+    if (fresh) return NextResponse.json(fresh);
   }
+
+  // Stale-while-revalidate: if we have stale data, return it and refresh in background
+  const stale = !bustCache ? cacheGet(CACHE_KEY, STALE_TTL) : null;
 
   // Fetch from both systems in parallel
-  const [zendesk, jira] = await Promise.all([
-    fetchZendeskQueue(),
-    fetchJiraQueue(),
-  ]);
+  let response;
+  try {
+    const [zendesk, jira] = await Promise.all([
+      fetchZendeskQueue(),
+      fetchJiraQueue(),
+    ]);
 
-  // Merge and deduplicate by id
-  const seen = new Set();
-  const items = [];
-  for (const item of [...zendesk.items, ...jira.items]) {
-    if (!seen.has(item.id)) {
-      seen.add(item.id);
-      items.push(item);
+    // Merge and deduplicate by id
+    const seen = new Set();
+    const items = [];
+    for (const item of [...zendesk.items, ...jira.items]) {
+      if (!seen.has(item.id)) {
+        seen.add(item.id);
+        items.push(item);
+      }
     }
+
+    response = {
+      items,
+      meta: {
+        zendesk: { count: zendesk.count || 0, status: zendesk.status, error: zendesk.error },
+        jira:    { count: jira.count || 0,    status: jira.status,    error: jira.error },
+        syncedAt: new Date().toISOString(),
+        totalActive: items.filter(i => i.status !== 'resolved').length,
+        totalResolved: items.filter(i => i.status === 'resolved').length,
+      },
+    };
+
+    // Persist to cache
+    cacheSet(CACHE_KEY, response);
+  } catch (fetchErr) {
+    // If fetch failed but we have stale data, return stale with a warning
+    if (stale) {
+      console.warn('[queue] Fetch failed, returning stale cache:', fetchErr.message);
+      return NextResponse.json({ ...stale, _stale: true });
+    }
+    throw fetchErr;
   }
-
-  const response = {
-    items,
-    meta: {
-      zendesk: { count: zendesk.count || 0, status: zendesk.status, error: zendesk.error },
-      jira:    { count: jira.count || 0,    status: jira.status,    error: jira.error },
-      syncedAt: new Date().toISOString(),
-      totalActive: items.filter(i => i.status !== 'resolved').length,
-      totalResolved: items.filter(i => i.status === 'resolved').length,
-    },
-  };
-
-  // Cache
-  _cache = response;
-  _cacheTime = now;
 
   return NextResponse.json(response);
 }

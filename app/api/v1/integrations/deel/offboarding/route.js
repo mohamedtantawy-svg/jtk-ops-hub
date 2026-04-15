@@ -2,13 +2,15 @@
 // Returns active EOR termination cases from the Deel Admin API.
 // Pages through all EOR in_progress contracts, filters for those with
 // termination_date set, enriches with country from EOR details.
-// Caches server-side for 5 minutes to avoid hammering the Deel API.
+// Uses persistent file cache (survives restarts) + stale-while-revalidate.
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { listOffboardingCases, isDeelConfigured } from '../../../../../../src/lib/deel-api';
+import { cacheGet, cacheSet } from '../../../../../../src/lib/server-cache';
 
-let cache = { data: null, ts: 0 };
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const CACHE_KEY = 'deel_offboarding';
+const CACHE_TTL = 5 * 60 * 1000;    // fresh for 5 minutes
+const STALE_TTL = 60 * 60 * 1000;   // serve stale up to 60 minutes (offboarding data is slow-moving)
 
 export async function GET(req) {
   const user = getAuthUser(req);
@@ -23,51 +25,66 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const bustCache = searchParams.get('bust') === '1';
 
-    // Return cached if fresh
-    if (!bustCache && cache.data && Date.now() - cache.ts < CACHE_TTL) {
-      return NextResponse.json(cache.data);
+    // Return fresh cache if available
+    if (!bustCache) {
+      const fresh = cacheGet(CACHE_KEY, CACHE_TTL);
+      if (fresh) return NextResponse.json(fresh);
     }
 
-    const raw = await listOffboardingCases();
-    const now = new Date();
-
-    const items = raw.map(c => {
-      const endDate = c.terminationDate ? new Date(c.terminationDate) : null;
-      const daysUntilEnd = endDate ? Math.ceil((endDate - now) / (1000 * 60 * 60 * 24)) : null;
-
-      return {
-        id: c.contractId,
-        name: c.name,
-        email: c.email,
-        country: c.country || '',
-        jobTitle: c.jobTitle || '',
-        team: c.team || '',
-        hiringType: c.hiringType || 'eor',
-        endDate: c.terminationDate || '',
-        startDate: c.startDate || '',
-        requestedDate: c.createdAt || '',
-        updatedAt: c.updatedAt || '',
-        daysUntilEnd,
-        noticePeriod: c.noticePeriod || 0,
-        clientEmail: c.clientEmail || '',
-        creatorName: c.creatorName || '',
-        creatorEmail: c.creatorEmail || '',
-        status: deriveStatus(daysUntilEnd),
-        contractUrl: `https://app.deel.com/contracts/${c.contractId}`,
-      };
-    });
-
-    // Sort: most urgent first (lowest daysUntilEnd)
-    items.sort((a, b) => (a.daysUntilEnd ?? 9999) - (b.daysUntilEnd ?? 9999));
-
-    const result = { items, total: items.length };
-    cache = { data: result, ts: Date.now() };
+    // Try to fetch fresh data
+    let result;
+    try {
+      result = await buildOffboardingResult();
+      cacheSet(CACHE_KEY, result);
+    } catch (fetchErr) {
+      // If fetch fails, try returning stale cache
+      const stale = cacheGet(CACHE_KEY, STALE_TTL);
+      if (stale) {
+        console.warn('[offboarding] Fetch failed, returning stale cache:', fetchErr.message);
+        return NextResponse.json({ ...stale, _stale: true });
+      }
+      throw fetchErr;
+    }
 
     return NextResponse.json(result);
   } catch (err) {
     console.error('[integrations/deel/offboarding]', err.message);
     return NextResponse.json({ error: err.message }, { status: err.status || 500 });
   }
+}
+
+async function buildOffboardingResult() {
+  const raw = await listOffboardingCases();
+  const now = new Date();
+
+  const items = raw.map(c => {
+    const endDate = c.terminationDate ? new Date(c.terminationDate) : null;
+    const daysUntilEnd = endDate ? Math.ceil((endDate - now) / (1000 * 60 * 60 * 24)) : null;
+
+    return {
+      id: c.contractId,
+      name: c.name,
+      email: c.email,
+      country: c.country || '',
+      jobTitle: c.jobTitle || '',
+      team: c.team || '',
+      hiringType: c.hiringType || 'eor',
+      endDate: c.terminationDate || '',
+      startDate: c.startDate || '',
+      requestedDate: c.createdAt || '',
+      updatedAt: c.updatedAt || '',
+      daysUntilEnd,
+      noticePeriod: c.noticePeriod || 0,
+      clientEmail: c.clientEmail || '',
+      creatorName: c.creatorName || '',
+      creatorEmail: c.creatorEmail || '',
+      status: deriveStatus(daysUntilEnd),
+      contractUrl: `https://app.deel.com/contracts/${c.contractId}`,
+    };
+  });
+
+  items.sort((a, b) => (a.daysUntilEnd ?? 9999) - (b.daysUntilEnd ?? 9999));
+  return { items, total: items.length };
 }
 
 function deriveStatus(daysUntilEnd) {
