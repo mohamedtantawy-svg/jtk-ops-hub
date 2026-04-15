@@ -27,8 +27,8 @@ export async function GET(req) {
     .replace(/^Bearer\s+/i, '')
     .replace(/[\r\n]+/g, '');
 
-  // Test with /people?limit=1
-  const testUrl = `${diag.baseUrl}/people?limit=1&fields[]=id&fields[]=full_name`;
+  // Test with admin profile endpoint (known to work)
+  const testUrl = `${diag.baseUrl}/admin/admin_profile/me`;
   const startMs = Date.now();
   let testResult;
 
@@ -51,14 +51,14 @@ export async function GET(req) {
     if (res.ok) {
       let parsed;
       try { parsed = JSON.parse(body); } catch { parsed = null; }
-      const total = parsed?.page?.total_rows ?? parsed?.data?.length ?? '?';
+      const adminName = parsed?.full_name || parsed?.data?.full_name || parsed?.name || parsed?.email || '(ok)';
       testResult = {
         status: 'ok',
         httpStatus: res.status,
         elapsed: `${elapsed}ms`,
         contentType,
-        totalPeople: total,
-        message: `Connected! Found ${total} people in your org.`,
+        adminUser: adminName,
+        message: `Connected to Deel Admin API as ${adminName}`,
       };
     } else {
       const isS3 = body.includes('<Error>') || body.includes('NoSuchBucket') || body.includes('Unsupported Authorization');

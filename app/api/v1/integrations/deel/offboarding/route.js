@@ -1,7 +1,6 @@
 // ── GET /api/v1/integrations/deel/offboarding ───────────────────────────────
 // Returns active EOR termination cases from the Deel Admin API.
-// Pages through all EOR in_progress contracts, filters for those with
-// termination_date set, enriches with country from EOR details.
+// Uses /admin/eor/terminations_v3 — the same endpoint as admin.deel.network.
 // Uses persistent file cache (survives restarts) + stale-while-revalidate.
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
@@ -10,7 +9,7 @@ import { cacheGet, cacheSet } from '../../../../../../src/lib/server-cache';
 
 const CACHE_KEY = 'deel_offboarding';
 const CACHE_TTL = 5 * 60 * 1000;    // fresh for 5 minutes
-const STALE_TTL = 60 * 60 * 1000;   // serve stale up to 60 minutes (offboarding data is slow-moving)
+const STALE_TTL = 60 * 60 * 1000;   // serve stale up to 60 minutes
 
 export async function GET(req) {
   const user = getAuthUser(req);
@@ -25,19 +24,16 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const bustCache = searchParams.get('bust') === '1';
 
-    // Return fresh cache if available
     if (!bustCache) {
       const fresh = cacheGet(CACHE_KEY, CACHE_TTL);
       if (fresh) return NextResponse.json(fresh);
     }
 
-    // Try to fetch fresh data
     let result;
     try {
       result = await buildOffboardingResult();
       cacheSet(CACHE_KEY, result);
     } catch (fetchErr) {
-      // If fetch fails, try returning stale cache
       const stale = cacheGet(CACHE_KEY, STALE_TTL);
       if (stale) {
         console.warn('[offboarding] Fetch failed, returning stale cache:', fetchErr.message);

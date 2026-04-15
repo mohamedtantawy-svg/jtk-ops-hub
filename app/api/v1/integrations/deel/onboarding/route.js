@@ -1,5 +1,6 @@
 // ── GET /api/v1/integrations/deel/onboarding ────────────────────────────────
-// Proxies to Deel Admin API: list people in onboarding statuses.
+// Proxies to Deel Admin API: onboarding actionable queue.
+// Uses /admin/eor/employee-manager/list/Onboarding.ActionableQueue
 // Uses persistent cache + stale-while-revalidate.
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
@@ -21,38 +22,37 @@ export async function GET(req) {
 
   try {
     const { searchParams } = new URL(req.url);
-    const limit = searchParams.get('limit') || '200';
     const offset = searchParams.get('offset') || '0';
 
     // Return fresh cache if available
-    const cacheKeyFull = `${CACHE_KEY}_${limit}_${offset}`;
+    const cacheKeyFull = `${CACHE_KEY}_${offset}`;
     const fresh = cacheGet(cacheKeyFull, CACHE_TTL);
     if (fresh) return NextResponse.json(fresh);
 
     let responseData;
     try {
-      const result = await listOnboardingPeople({ limit, offset });
+      const result = await listOnboardingPeople({ offset });
 
-      const people = (result?.data || []).filter(p =>
-        ['onboarding', 'onboarding_at_risk', 'onboarding_overdue', 'pending_invite'].includes(p.hiring_status)
-      );
+      // The admin API may return data in various shapes — handle flexibly
+      const rawItems = result?.data || result?.rows || result?.items || (Array.isArray(result) ? result : []);
 
-      const items = people.map(p => {
-        const emp = p.employments?.[0] || {};
+      const items = rawItems.map(p => {
+        // Admin API fields may differ from REST v2 — map flexibly
+        const emp = p.employments?.[0] || p.employment || {};
         return {
-          id: p.id,
-          name: p.full_name,
-          email: p.email,
-          country: emp.country || p.country || '',
-          countryName: p.country_name || '',
-          hiringStatus: p.hiring_status,
-          startDate: emp.start_date || p.start_date || '',
-          jobTitle: emp.job_title || '',
-          hiringType: emp.hiring_type || '',
-          contractId: emp.id || '',
-          contractStatus: emp.contract_status || '',
-          team: emp.team?.name || '',
-          action: deriveAction(p.hiring_status, emp),
+          id: p.id || p.contract_id || p.employee_id || '',
+          name: p.full_name || p.employee_name || p.worker_name || p.name || '',
+          email: p.email || p.worker_email || p.employee_email || '',
+          country: emp.country || p.country || p.employment_country || '',
+          countryName: p.country_name || p.employment_country_name || '',
+          hiringStatus: p.hiring_status || p.status || p.onboarding_status || '',
+          startDate: emp.start_date || p.start_date || p.effective_date || '',
+          jobTitle: emp.job_title || p.job_title || p.position || '',
+          hiringType: emp.hiring_type || p.hiring_type || p.contract_type || '',
+          contractId: emp.id || p.contract_id || '',
+          contractStatus: emp.contract_status || p.contract_status || '',
+          team: emp.team?.name || p.team || p.team_name || '',
+          action: deriveAction(p.hiring_status || p.status || p.onboarding_status || '', emp),
         };
       });
 
@@ -75,15 +75,9 @@ export async function GET(req) {
 }
 
 function deriveAction(status, emp) {
-  switch (status) {
-    case 'onboarding_overdue':
-      return { label: 'Overdue', severity: 'critical', description: 'Onboarding overdue - immediate action required' };
-    case 'onboarding_at_risk':
-      return { label: 'At Risk', severity: 'warning', description: 'Onboarding at risk - attention needed' };
-    case 'pending_invite':
-      return { label: 'Pending Invite', severity: 'info', description: 'Invitation not yet sent' };
-    case 'onboarding':
-    default:
-      return { label: 'In Progress', severity: 'active', description: 'Onboarding steps in progress' };
-  }
+  const s = (status || '').toLowerCase();
+  if (s.includes('overdue')) return { label: 'Overdue', severity: 'critical', description: 'Onboarding overdue - immediate action required' };
+  if (s.includes('risk'))    return { label: 'At Risk', severity: 'warning', description: 'Onboarding at risk - attention needed' };
+  if (s.includes('pending') || s.includes('invite')) return { label: 'Pending Invite', severity: 'info', description: 'Invitation not yet sent' };
+  return { label: 'In Progress', severity: 'active', description: 'Onboarding steps in progress' };
 }

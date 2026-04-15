@@ -1,6 +1,8 @@
 // ── Deel Admin API client ────────────────────────────────────────────────────
-// Server-side only. Proxies calls to the Deel Admin API.
-// Uses the admin token from admin.deel.network (x-auth-token header).
+// Server-side only. Proxies calls to the Deel internal admin API.
+// Base: https://api-prod-admin.letsdeel.com
+// Auth: x-auth-token header (token from admin.deel.network Admin Debug Tool)
+// Admin endpoints use /admin/... paths (NOT /rest/v2)
 // Includes automatic retry with exponential backoff on transient failures.
 
 import { withRetry } from './retry';
@@ -8,19 +10,18 @@ import { withRetry } from './retry';
 // ── Sanitize API key ─────────────────────────────────────────────────────────
 function sanitizeToken(raw) {
   if (!raw) return '';
-  let t = raw.trim().replace(/^["']+|["']+$/g, '');       // strip wrapping quotes
-  t = t.replace(/^Bearer\s+/i, '');                        // strip accidental "Bearer " prefix
-  t = t.replace(/[\r\n]+/g, '');                           // strip newlines
+  let t = raw.trim().replace(/^["']+|["']+$/g, '');
+  t = t.replace(/^Bearer\s+/i, '');
+  t = t.replace(/[\r\n]+/g, '');
   return t;
 }
 
 const DEEL_API_KEY = sanitizeToken(process.env.DEEL_API_KEY || '');
 
 // ── Base URL ─────────────────────────────────────────────────────────────────
-// Default: Deel admin API (api-prod-admin.letsdeel.com)
-// The admin API uses /rest/v2 paths with x-auth-token authentication
-const _rawBase = (process.env.DEEL_API_BASE_URL || 'https://api-prod-admin.letsdeel.com').replace(/\/+$/, '');
-const DEEL_BASE = _rawBase.endsWith('/rest/v2') ? _rawBase : `${_rawBase}/rest/v2`;
+// Admin API at api-prod-admin.letsdeel.com — no path prefix needed,
+// each function specifies the full path (/admin/eor/..., /rest/v2/..., etc.)
+const DEEL_BASE = (process.env.DEEL_API_BASE_URL || 'https://api-prod-admin.letsdeel.com').replace(/\/+$/, '');
 
 export function isDeelConfigured() {
   return !!DEEL_API_KEY;
@@ -28,7 +29,6 @@ export function isDeelConfigured() {
 
 /**
  * Return diagnostic info about the current Deel API configuration.
- * Used by the health-check endpoint — never exposes the full token.
  */
 export function getDeelDiagnostics() {
   const keyLen = DEEL_API_KEY.length;
@@ -45,21 +45,18 @@ export function getDeelDiagnostics() {
 
 /**
  * Raw fetch wrapper — no retry. Used internally.
- * Sends token as both x-auth-token (admin API) and Authorization: Bearer (public API)
- * so it works with either endpoint.
+ * Uses x-auth-token for admin API authentication.
  */
-async function _deelFetch(endpoint, options = {}) {
+async function _deelFetch(path, options = {}) {
   if (!DEEL_API_KEY) {
     throw new Error('DEEL_API_KEY is not configured');
   }
 
-  const url = `${DEEL_BASE}${endpoint}`;
+  const url = `${DEEL_BASE}${path}`;
   const res = await fetch(url, {
     ...options,
     headers: {
-      // Admin API auth (admin.deel.network tokens)
       'x-auth-token': DEEL_API_KEY,
-      // Public API auth (developer portal tokens) — kept for compatibility
       Authorization: `Bearer ${DEEL_API_KEY}`,
       Accept: 'application/json',
       'Content-Type': 'application/json',
@@ -85,14 +82,13 @@ async function _deelFetch(endpoint, options = {}) {
 }
 
 /**
- * Deel API fetch with automatic retry (3 attempts, exponential backoff).
- * Retries on network errors and 5xx. Does NOT retry 4xx.
+ * Deel API fetch with automatic retry.
  */
-export async function deelFetch(endpoint, options = {}) {
-  return withRetry(() => _deelFetch(endpoint, options), { label: 'Deel', maxRetries: 2 });
+export async function deelFetch(path, options = {}) {
+  return withRetry(() => _deelFetch(path, options), { label: 'Deel', maxRetries: 2 });
 }
 
-// ── People / Workers ─────────────────────────────────────────────────────────
+// ── People / Workers (REST v2 API) ──────────────────────────────────────────
 
 export async function listPeople(params = {}) {
   const qs = new URLSearchParams();
@@ -100,14 +96,14 @@ export async function listPeople(params = {}) {
   if (params.offset) qs.set('offset', String(params.offset));
   if (params.search) qs.set('search', params.search);
   const q = qs.toString();
-  return deelFetch(`/people${q ? `?${q}` : ''}`);
+  return deelFetch(`/rest/v2/people${q ? `?${q}` : ''}`);
 }
 
 export async function getPersonByEmail(email) {
-  return deelFetch(`/people?search=${encodeURIComponent(email)}`);
+  return deelFetch(`/rest/v2/people?search=${encodeURIComponent(email)}`);
 }
 
-// ── Contracts ────────────────────────────────────────────────────────────────
+// ── Contracts (REST v2 API) ─────────────────────────────────────────────────
 
 export async function listContracts(params = {}) {
   const qs = new URLSearchParams();
@@ -117,14 +113,14 @@ export async function listContracts(params = {}) {
   if (params.types) qs.set('types', params.types);
   if (params.search) qs.set('search', params.search);
   const q = qs.toString();
-  return deelFetch(`/contracts${q ? `?${q}` : ''}`);
+  return deelFetch(`/rest/v2/contracts${q ? `?${q}` : ''}`);
 }
 
 export async function getContract(id) {
-  return deelFetch(`/contracts/${id}`);
+  return deelFetch(`/rest/v2/contracts/${id}`);
 }
 
-// ── Time Off ─────────────────────────────────────────────────────────────────
+// ── Time Off (REST v2 API) ──────────────────────────────────────────────────
 
 export async function listTimeOffRequests(params = {}) {
   const qs = new URLSearchParams();
@@ -132,119 +128,84 @@ export async function listTimeOffRequests(params = {}) {
   if (params.status) qs.set('status', params.status);
   if (params.limit) qs.set('limit', String(params.limit));
   const q = qs.toString();
-  return deelFetch(`/time-off${q ? `?${q}` : ''}`);
+  return deelFetch(`/rest/v2/time-off${q ? `?${q}` : ''}`);
 }
 
-// ── Organization ─────────────────────────────────────────────────────────────
+// ── Organization (REST v2 API) ──────────────────────────────────────────────
 
 export async function getOrganization() {
-  return deelFetch('/organizations/current');
+  return deelFetch('/rest/v2/organizations/current');
 }
 
-// ── Onboarding People ────────────────────────────────────────────────────────
-
-export async function listOnboardingPeople(params = {}) {
-  const statuses = params.statuses || 'onboarding,onboarding_at_risk,onboarding_overdue,pending_invite';
-  const statusArr = statuses.split(',');
-  const limit = params.limit || '200';
-  const offset = params.offset || '0';
-
-  // Build URL with repeated hiring_statuses[] params
-  const parts = statusArr.map(s => `hiring_statuses[]=${encodeURIComponent(s.trim())}`);
-  parts.push(`limit=${limit}`);
-  parts.push(`offset=${offset}`);
-  // Request specific fields to keep payload small
-  parts.push(...[
-    'fields[]=' + encodeURIComponent('id'),
-    'fields[]=' + encodeURIComponent('full_name'),
-    'fields[]=' + encodeURIComponent('country'),
-    'fields[]=' + encodeURIComponent('country_name'),
-    'fields[]=' + encodeURIComponent('email'),
-    'fields[]=' + encodeURIComponent('hiring_status'),
-    'fields[]=' + encodeURIComponent('start_date'),
-    'fields[]=' + encodeURIComponent('employments[0].id'),
-    'fields[]=' + encodeURIComponent('employments[0].hiring_status'),
-    'fields[]=' + encodeURIComponent('employments[0].new_hiring_status'),
-    'fields[]=' + encodeURIComponent('employments[0].contract_status'),
-    'fields[]=' + encodeURIComponent('employments[0].country'),
-    'fields[]=' + encodeURIComponent('employments[0].start_date'),
-    'fields[]=' + encodeURIComponent('employments[0].hiring_type'),
-    'fields[]=' + encodeURIComponent('employments[0].job_title'),
-    'fields[]=' + encodeURIComponent('employments[0].team'),
-  ]);
-
-  return deelFetch(`/people?${parts.join('&')}`);
-}
-
-// ── Offboarding / Termination cases ─────────────────────────────────────────
+// ── Onboarding (Admin API) ───────────────────────────────────────────────────
 
 /**
- * Pages through ALL EOR in_progress contracts, returns only those
- * with a termination_date set (= active offboarding cases).
- * Enriches each with employment_country from the EOR details endpoint.
+ * Fetches onboarding queue from the admin API.
+ * Uses /admin/eor/employee-manager/list/Onboarding.ActionableQueue
+ * — the same endpoint as admin.deel.network's onboarding dashboard.
+ */
+export async function listOnboardingPeople(params = {}) {
+  const offset = params.offset || '0';
+  const qs = `actionableQueueFilters%5Boffset%5D=${offset}`;
+  return deelFetch(`/admin/eor/employee-manager/list/Onboarding.ActionableQueue?${qs}`);
+}
+
+// ── Offboarding / Terminations (Admin API) ──────────────────────────────────
+
+/**
+ * Fetches active EOR termination cases from the admin API.
+ * Uses /admin/eor/terminations_v3 — the same endpoint as admin.deel.network.
+ * Handles cursor-based pagination.
  */
 export async function listOffboardingCases() {
-  const PAGE_SIZE = 100;
+  const PAGE_SIZE = 50;
   const allTerminations = [];
   let cursor = null;
   let page = 0;
-  const MAX_PAGES = 25; // safety limit
+  const MAX_PAGES = 20;
 
-  // 1. Page through contracts and collect those with termination_date
   while (page < MAX_PAGES) {
-    const params = [`types[]=eor`, `statuses[]=in_progress`, `limit=${PAGE_SIZE}`];
-    if (cursor) params.push(`after_cursor=${encodeURIComponent(cursor)}`);
+    const params = [`limit=${PAGE_SIZE}`];
+    if (cursor) params.push(`cursor=${encodeURIComponent(cursor)}`);
 
-    const res = await deelFetch(`/contracts?${params.join('&')}`);
-    const contracts = res?.data || [];
+    const res = await deelFetch(`/admin/eor/terminations_v3?${params.join('&')}`);
+    const items = res?.data || res?.rows || res || [];
+    const dataArr = Array.isArray(items) ? items : (Array.isArray(res?.data) ? res.data : []);
 
-    for (const c of contracts) {
-      if (c.termination_date) {
-        allTerminations.push({
-          contractId: c.id,
-          title: c.title,
-          name: c.worker?.full_name || c.title?.split(' - ')[0] || '',
-          email: c.worker?.email || '',
-          terminationDate: c.termination_date,
-          createdAt: c.created_at,
-          updatedAt: c.updated_at,
-          team: c.client?.team?.name || '',
-          isArchived: c.is_archived || false,
-          noticePeriod: c.notice_period || 0,
-          clientEmail: c.invitations?.client_email || '',
-        });
-      }
+    for (const c of dataArr) {
+      allTerminations.push({
+        contractId: c.contract_id || c.id || c.contractId,
+        title: c.title || c.contract_title || '',
+        name: c.worker_name || c.employee_name || c.full_name || c.name || '',
+        email: c.worker_email || c.employee_email || c.email || '',
+        terminationDate: c.termination_date || c.last_working_day || c.end_date || '',
+        createdAt: c.created_at || c.request_date || '',
+        updatedAt: c.updated_at || '',
+        team: c.team || c.team_name || '',
+        country: c.country || c.employment_country || c.country_name || '',
+        jobTitle: c.job_title || c.position || '',
+        hiringType: c.hiring_type || c.contract_type || 'eor',
+        startDate: c.start_date || c.effective_date || '',
+        noticePeriod: c.notice_period || 0,
+        clientEmail: c.client_email || c.manager_email || '',
+        creatorName: c.creator_name || c.requested_by || '',
+        creatorEmail: c.creator_email || '',
+        status: c.status || c.termination_status || '',
+        isArchived: c.is_archived || false,
+      });
     }
 
-    cursor = res?.page?.cursor;
-    if (!cursor || contracts.length < PAGE_SIZE) break;
+    // Handle pagination — look for cursor in various response shapes
+    const nextCursor = res?.page?.cursor || res?.cursor || res?.next_cursor;
+    if (!nextCursor || dataArr.length < PAGE_SIZE) break;
+    cursor = nextCursor;
     page++;
-  }
-
-  // 2. Enrich with country from EOR details (parallel, batched)
-  const BATCH_SIZE = 10;
-  for (let i = 0; i < allTerminations.length; i += BATCH_SIZE) {
-    const batch = allTerminations.slice(i, i + BATCH_SIZE);
-    const details = await Promise.allSettled(
-      batch.map(t => deelFetch(`/contracts/${t.contractId}/eor-contract-details`).catch(() => null))
-    );
-    details.forEach((result, idx) => {
-      if (result.status === 'fulfilled' && result.value) {
-        const d = result.value;
-        allTerminations[i + idx].country = d.employment_country || '';
-        allTerminations[i + idx].jobTitle = d.job_title_name || '';
-        allTerminations[i + idx].hiringType = d.contract_type || 'eor';
-        allTerminations[i + idx].startDate = d.effective_plain_date || d.start_date || '';
-        allTerminations[i + idx].creatorEmail = d.creator?.email || '';
-        allTerminations[i + idx].creatorName = d.creator?.name || '';
-      }
-    });
   }
 
   return allTerminations;
 }
 
-// ── Contract Amendments ─────────────────────────────────────────────────────
+// ── Contract Amendments (REST v2 API) ───────────────────────────────────────
 
 export async function listAmendments(params = {}) {
   const qs = new URLSearchParams();
@@ -252,10 +213,10 @@ export async function listAmendments(params = {}) {
   if (params.offset) qs.set('offset', String(params.offset));
   if (params.statuses) qs.set('statuses', params.statuses);
   const q = qs.toString();
-  return deelFetch(`/contracts/amendments${q ? `?${q}` : ''}`);
+  return deelFetch(`/rest/v2/contracts/amendments${q ? `?${q}` : ''}`);
 }
 
-// ── Invoices ─────────────────────────────────────────────────────────────────
+// ── Invoices (REST v2 API) ──────────────────────────────────────────────────
 
 export async function listInvoices(params = {}) {
   const qs = new URLSearchParams();
@@ -263,11 +224,11 @@ export async function listInvoices(params = {}) {
   if (params.offset) qs.set('offset', String(params.offset));
   if (params.statuses) qs.set('statuses', params.statuses);
   const q = qs.toString();
-  return deelFetch(`/invoices${q ? `?${q}` : ''}`);
+  return deelFetch(`/rest/v2/invoices${q ? `?${q}` : ''}`);
 }
 
-// ── Payslips ─────────────────────────────────────────────────────────────────
+// ── Payslips (REST v2 API) ──────────────────────────────────────────────────
 
 export async function getPayslips(contractId) {
-  return deelFetch(`/contracts/${contractId}/payslips`);
+  return deelFetch(`/rest/v2/contracts/${contractId}/payslips`);
 }
