@@ -7,9 +7,11 @@ import Detail from './Detail';
 import { ToolBadge, FnBadge, StatusBadge, SlaBadge } from '../ui/Badges';
 import OutboundQueue from './OutboundQueue';
 import OnboardingPanel from './OnboardingPanel';
+import OffboardingPanel from './OffboardingPanel';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import Avatar from '../ui/Avatar';
 import { useOnboardingData } from '../../hooks/useOnboardingData';
+import { useOffboardingData } from '../../hooks/useOffboardingData';
 
 // ── Work Source Button config ──
 const WORK_SOURCES = [
@@ -58,6 +60,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const { deelData, jiraData, queueSync } = useContext(IntegrationsContext);
   // Onboarding data from Deel API
   const onboardingData = useOnboardingData(true);
+  const offboardingData = useOffboardingData(true);
   const isAdmin=perms?.dataScope==='all_tasks'; const isLead=perms?.dataScope==='team_tasks';
   const ns=tasks.filter(t=>t.source!=='slack'&&t.source!=='calendar');
   // Hierarchical visibility: viewer sees own tickets + all direct/indirect reports
@@ -368,7 +371,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
         <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:workSource?0:10,flexWrap:'nowrap',overflowX:'auto'}}>
           {WORK_SOURCES.map(ws=>{
             const isActive=workSource===ws.id;
-            const count=ws.id==='onboarding'?onboardingData.counts.total:ws.id==='jira'?(queueSync?.meta?.jira?.count||0):ws.id==='zendesk'?(queueSync?.meta?.zendesk?.count||0):null;
+            const count=ws.id==='onboarding'?onboardingData.counts.total:ws.id==='offboarding'?offboardingData.counts.total:ws.id==='jira'?(queueSync?.meta?.jira?.count||0):ws.id==='zendesk'?(queueSync?.meta?.zendesk?.count||0):null;
             return(
               <button key={ws.id} onClick={()=>setWorkSource(isActive?null:ws.id)}
                 style={{
@@ -463,11 +466,13 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
         />
       )}
       {workSource==='offboarding'&&(
-        <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:40,background:'#fafaf9',textAlign:'center'}}>
-          <i className="bi-person-dash" style={{fontSize:40,color:'#d42d35',opacity:0.4,marginBottom:12}}/>
-          <div style={{fontSize:15,fontWeight:600,color:'#1b1b1b',marginBottom:6}}>Offboarding</div>
-          <div style={{fontSize:13,color:'#9e9e9e'}}>Termination tasks will be connected here</div>
-        </div>
+        <OffboardingPanel
+          byCountry={offboardingData.byCountry}
+          counts={offboardingData.counts}
+          loading={offboardingData.loading}
+          error={offboardingData.error}
+          onRefresh={offboardingData.refresh}
+        />
       )}
       {workSource==='workbench'&&(
         <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:40,background:'#fafaf9',textAlign:'center'}}>

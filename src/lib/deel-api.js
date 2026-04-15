@@ -131,6 +131,74 @@ export async function listOnboardingPeople(params = {}) {
   return deelFetch(`/people?${parts.join('&')}`);
 }
 
+// ── Offboarding / Termination cases ─────────────────────────────────────────
+
+/**
+ * Pages through ALL EOR in_progress contracts, returns only those
+ * with a termination_date set (= active offboarding cases).
+ * Enriches each with employment_country from the EOR details endpoint.
+ */
+export async function listOffboardingCases() {
+  const PAGE_SIZE = 100;
+  const allTerminations = [];
+  let cursor = null;
+  let page = 0;
+  const MAX_PAGES = 25; // safety limit
+
+  // 1. Page through contracts and collect those with termination_date
+  while (page < MAX_PAGES) {
+    const params = [`types[]=eor`, `statuses[]=in_progress`, `limit=${PAGE_SIZE}`];
+    if (cursor) params.push(`after_cursor=${encodeURIComponent(cursor)}`);
+
+    const res = await deelFetch(`/contracts?${params.join('&')}`);
+    const contracts = res?.data || [];
+
+    for (const c of contracts) {
+      if (c.termination_date) {
+        allTerminations.push({
+          contractId: c.id,
+          title: c.title,
+          name: c.worker?.full_name || c.title?.split(' - ')[0] || '',
+          email: c.worker?.email || '',
+          terminationDate: c.termination_date,
+          createdAt: c.created_at,
+          updatedAt: c.updated_at,
+          team: c.client?.team?.name || '',
+          isArchived: c.is_archived || false,
+          noticePeriod: c.notice_period || 0,
+          clientEmail: c.invitations?.client_email || '',
+        });
+      }
+    }
+
+    cursor = res?.page?.cursor;
+    if (!cursor || contracts.length < PAGE_SIZE) break;
+    page++;
+  }
+
+  // 2. Enrich with country from EOR details (parallel, batched)
+  const BATCH_SIZE = 10;
+  for (let i = 0; i < allTerminations.length; i += BATCH_SIZE) {
+    const batch = allTerminations.slice(i, i + BATCH_SIZE);
+    const details = await Promise.allSettled(
+      batch.map(t => deelFetch(`/contracts/${t.contractId}/eor-contract-details`).catch(() => null))
+    );
+    details.forEach((result, idx) => {
+      if (result.status === 'fulfilled' && result.value) {
+        const d = result.value;
+        allTerminations[i + idx].country = d.employment_country || '';
+        allTerminations[i + idx].jobTitle = d.job_title_name || '';
+        allTerminations[i + idx].hiringType = d.contract_type || 'eor';
+        allTerminations[i + idx].startDate = d.effective_plain_date || d.start_date || '';
+        allTerminations[i + idx].creatorEmail = d.creator?.email || '';
+        allTerminations[i + idx].creatorName = d.creator?.name || '';
+      }
+    });
+  }
+
+  return allTerminations;
+}
+
 // ── Contract Amendments ─────────────────────────────────────────────────────
 
 export async function listAmendments(params = {}) {
