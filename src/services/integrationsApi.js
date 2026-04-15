@@ -64,6 +64,22 @@ export async function fetchDeelOnboarding({ limit, offset } = {}) {
   return apiFetch(`/integrations/deel/onboarding${qs ? `?${qs}` : ''}`);
 }
 
+export async function fetchDeelAmendments({ statuses, bustCache } = {}) {
+  const params = new URLSearchParams();
+  if (statuses) params.set('statuses', statuses);
+  if (bustCache) params.set('bust', '1');
+  const qs = params.toString();
+  return apiFetch(`/integrations/deel/amendments${qs ? `?${qs}` : ''}`);
+}
+
+export async function fetchDeelRedlines({ status, bustCache } = {}) {
+  const params = new URLSearchParams();
+  if (status) params.set('status', status);
+  if (bustCache) params.set('bust', '1');
+  const qs = params.toString();
+  return apiFetch(`/integrations/deel/redlines${qs ? `?${qs}` : ''}`);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Jira
 // ─────────────────────────────────────────────────────────────────────────────
