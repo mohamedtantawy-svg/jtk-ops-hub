@@ -15,5 +15,4 @@ RUN npm install --no-save pg pg-hstore
 EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
-ENV NODE_OPTIONS="--max-old-space-size=896"
 CMD ["node", "server.js"]
