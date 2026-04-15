@@ -114,22 +114,6 @@ const DeelSidebar = ({ view, setView, user, escalCount }) => {
 
       {/* Bottom utilities */}
       <div style={{ borderTop: '1px solid var(--border-light)', padding: 'var(--space-2) var(--space-2) var(--space-1)' }}>
-        {/* Settings */}
-        <div onClick={() => setView('settings')}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 'var(--space-3)', padding: '9px 10px',
-            borderRadius: 'var(--radius-lg)', cursor: 'pointer', transition: 'background .12s',
-            color: view === 'settings' ? 'var(--text)' : 'var(--text-secondary)',
-            background: view === 'settings' ? 'var(--surface-3)' : 'transparent',
-            fontWeight: view === 'settings' ? 'var(--fw-semibold)' : 'var(--fw-normal)',
-            fontSize: 'var(--font-md)', marginBottom: 1,
-          }}
-          onMouseEnter={e => { if (view !== 'settings') e.currentTarget.style.background = 'var(--surface-2)'; }}
-          onMouseLeave={e => { if (view !== 'settings') e.currentTarget.style.background = 'transparent'; }}>
-          <i className="bi bi-gear" style={{ fontSize: 16, width: 18, textAlign: 'center', color: view === 'settings' ? 'var(--text)' : 'var(--text-muted)' }}></i>
-          <span style={{ flex: 1 }}>Settings</span>
-        </div>
-
         {/* Dark mode */}
         <div onClick={toggleDarkMode}
           style={{

@@ -291,11 +291,6 @@ const DeelTopNav = ({
           <i className="bi bi-search" style={{ fontSize: 15 }}></i>
         </button>
 
-        {/* Settings */}
-        <button className="deel-icon-btn" onClick={() => setView('settings')} aria-label="Settings" title="Settings">
-          <i className="bi bi-gear" style={{ fontSize: 16 }}></i>
-        </button>
-
         {/* Notifications */}
         <div ref={notifRef} style={{ position: 'relative' }}>
           <button className="deel-icon-btn" onClick={() => setShowNotifs(p => !p)}
