@@ -17,10 +17,10 @@ const ZD_GROUP_NAME = process.env.ZENDESK_HR_GROUP || 'HR Experience';
 const JIRA_BASE     = process.env.JIRA_BASE_URL    || '';
 const ZD_SUBDOMAIN  = process.env.ZENDESK_SUBDOMAIN || '';
 
-// ── Simple in-memory cache (60s TTL — longer since we paginate now) ──────────
+// ── Simple in-memory cache (shared across all users in this process) ────────
 let _cache = null;
 let _cacheTime = 0;
-const CACHE_TTL = 60_000; // 60 seconds
+const CACHE_TTL = 3 * 60_000; // 3 minutes — matches client poll interval
 
 // ── Zendesk status → app status ──────────────────────────────────────────────
 const ZD_STATUS_MAP = {
