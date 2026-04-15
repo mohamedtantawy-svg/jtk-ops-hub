@@ -12,13 +12,6 @@ const STATUS_CONFIG = {
   info:     { icon: 'bi-clock',                     border: '#e8e8e8' },
 };
 
-const HIRING_TYPE_LABELS = {
-  eor: 'EOR',
-  contractor: 'Contractor',
-  direct_employee: 'Direct Employee',
-};
-
-const DEEL_CONTRACT_BASE = 'https://app.deel.com/contracts';
 
 export default function OffboardingPanel({ byCountry = [], counts = {}, loading, error, onRefresh }) {
   const [expandedCountries, setExpandedCountries] = useState(new Set(['_all']));
@@ -41,20 +34,19 @@ export default function OffboardingPanel({ byCountry = [], counts = {}, loading,
   };
   const collapseAll = () => setExpandedCountries(new Set());
 
-  // Map status filter to severity for matching
+  // Map status filter to matching predicate
   const FILTER_MAP = {
-    overdue:    s => s.label === 'Overdue',
-    imminent:   s => s.label === 'Imminent',
-    awaiting:   s => s.label === 'Awaiting Action',
-    inProgress: s => s.label === 'In Progress',
-    scheduled:  s => s.label === 'Scheduled',
+    critical:       p => p.status?.severity === 'critical',
+    awaitingTriage: p => p.adminStatus === 'AWAITING_TRIAGE',
+    processing:     p => p.adminStatus === 'PROCESSING' || p.adminStatus === 'IN_PROGRESS',
+    other:          p => !['critical'].includes(p.status?.severity) && !['AWAITING_TRIAGE', 'PROCESSING', 'IN_PROGRESS'].includes(p.adminStatus),
   };
 
   const filtered = useMemo(() => {
     return byCountry.map(group => {
       let people = group.people;
       if (statusFilter && FILTER_MAP[statusFilter]) {
-        people = people.filter(p => FILTER_MAP[statusFilter](p.status));
+        people = people.filter(FILTER_MAP[statusFilter]);
       }
       if (searchTerm) {
         const q = searchTerm.toLowerCase();
@@ -62,8 +54,9 @@ export default function OffboardingPanel({ byCountry = [], counts = {}, loading,
           p.name?.toLowerCase().includes(q) ||
           p.email?.toLowerCase().includes(q) ||
           p.jobTitle?.toLowerCase().includes(q) ||
-          p.clientEmail?.toLowerCase().includes(q) ||
-          p.creatorName?.toLowerCase().includes(q)
+          p.organizationName?.toLowerCase().includes(q) ||
+          p.exAssignee?.toLowerCase().includes(q) ||
+          p.reason?.toLowerCase().includes(q)
         );
       }
       return { ...group, people };
@@ -125,11 +118,10 @@ export default function OffboardingPanel({ byCountry = [], counts = {}, loading,
       {/* Summary bar */}
       <div style={{ padding: '12px 24px', background: 'white', borderBottom: '1px solid #f0efed', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <StatusPill label="All" count={counts.total} active={!statusFilter} onClick={() => setStatusFilter(null)} color="#1b1b1b" />
-        {counts.overdue > 0 && <StatusPill label="Overdue" count={counts.overdue} active={statusFilter === 'overdue'} onClick={() => setStatusFilter(statusFilter === 'overdue' ? null : 'overdue')} color="#d42d35" />}
-        {counts.imminent > 0 && <StatusPill label="Imminent" count={counts.imminent} active={statusFilter === 'imminent'} onClick={() => setStatusFilter(statusFilter === 'imminent' ? null : 'imminent')} color="#d42d35" />}
-        <StatusPill label="Awaiting Action" count={counts.awaiting} active={statusFilter === 'awaiting'} onClick={() => setStatusFilter(statusFilter === 'awaiting' ? null : 'awaiting')} color="#ed8d00" />
-        <StatusPill label="In Progress" count={counts.inProgress} active={statusFilter === 'inProgress'} onClick={() => setStatusFilter(statusFilter === 'inProgress' ? null : 'inProgress')} color="#1d4ed8" />
-        {counts.scheduled > 0 && <StatusPill label="Scheduled" count={counts.scheduled} active={statusFilter === 'scheduled'} onClick={() => setStatusFilter(statusFilter === 'scheduled' ? null : 'scheduled')} color="#616161" />}
+        {counts.critical > 0 && <StatusPill label="Urgent" count={counts.critical} active={statusFilter === 'critical'} onClick={() => setStatusFilter(statusFilter === 'critical' ? null : 'critical')} color="#d42d35" />}
+        {counts.awaitingTriage > 0 && <StatusPill label="Awaiting Triage" count={counts.awaitingTriage} active={statusFilter === 'awaitingTriage'} onClick={() => setStatusFilter(statusFilter === 'awaitingTriage' ? null : 'awaitingTriage')} color="#ed8d00" />}
+        {counts.processing > 0 && <StatusPill label="Processing" count={counts.processing} active={statusFilter === 'processing'} onClick={() => setStatusFilter(statusFilter === 'processing' ? null : 'processing')} color="#1d4ed8" />}
+        {counts.other > 0 && <StatusPill label="Other" count={counts.other} active={statusFilter === 'other'} onClick={() => setStatusFilter(statusFilter === 'other' ? null : 'other')} color="#616161" />}
 
         <div style={{ flex: 1 }} />
 
@@ -216,9 +208,9 @@ export default function OffboardingPanel({ byCountry = [], counts = {}, loading,
                     <th style={{ ...thStyle, width: 90 }}>Days Left</th>
                     <th style={{ ...thStyle, width: 100 }}>End Date</th>
                     <th style={{ ...thStyle, width: 100 }}>Requested</th>
-                    <th style={{ ...thStyle, width: 70 }}>Type</th>
-                    <th style={{ ...thStyle, width: 150 }}>Assigned HR</th>
-                    <th style={{ ...thStyle, width: 80 }}>Contract</th>
+                    <th style={{ ...thStyle, width: 120 }}>Reason</th>
+                    <th style={{ ...thStyle, width: 130 }}>Assignee</th>
+                    <th style={{ ...thStyle, width: 100 }}>Links</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -244,11 +236,12 @@ function PersonRow({ person }) {
   const isUrgent = sev === 'critical';
   const isWarning = sev === 'warning';
   const rowBg = isUrgent ? '#fffbfb' : isWarning ? '#fffdf5' : 'white';
-  const typeLabel = HIRING_TYPE_LABELS[person.hiringType] || person.hiringType || '--';
 
   const endDate = person.endDate
     ? new Date(person.endDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-    : '--';
+    : person.desiredEndDate
+      ? new Date(person.desiredEndDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+      : '--';
   const requestedDate = person.requestedDate
     ? new Date(person.requestedDate).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
     : '--';
@@ -269,8 +262,12 @@ function PersonRow({ person }) {
     }
   }
 
-  const hrPerson = person.clientEmail || person.creatorEmail || '';
-  const contractUrl = person.contractUrl || (person.id ? `${DEEL_CONTRACT_BASE}/${person.id}` : null);
+  // Format reason: TERMINATION_REASON_ENUM → Termination Reason
+  const reason = (person.reason || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).toLowerCase();
+  const reasonDisplay = reason ? reason.charAt(0).toUpperCase() + reason.slice(1) : '';
+  const isResignation = person.isResignation;
+
+  const contractUrl = person.contractUrl || '';
 
   return (
     <tr
@@ -296,6 +293,7 @@ function PersonRow({ person }) {
           <div>
             <div style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', lineHeight: 1.2 }}>{person.name}</div>
             {person.jobTitle && <div style={{ fontSize: 10, color: '#9e9e9e' }}>{person.jobTitle}</div>}
+            {person.organizationName && <div style={{ fontSize: 10, color: '#b0a8a0' }}>{person.organizationName}</div>}
           </div>
         </div>
       </td>
@@ -313,6 +311,9 @@ function PersonRow({ person }) {
           <i className={cfg.icon} style={{ fontSize: 9 }} />
           {person.status?.label || 'Unknown'}
         </span>
+        {isResignation && (
+          <div style={{ fontSize: 9, color: '#9e9e9e', marginTop: 2 }}>Resignation</div>
+        )}
       </td>
 
       {/* Days left */}
@@ -330,44 +331,43 @@ function PersonRow({ person }) {
         {requestedDate}
       </td>
 
-      {/* Type */}
-      <td style={tdStyle}>
-        <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 128, background: '#f2f2f2', color: '#616161', whiteSpace: 'nowrap' }}>
-          {typeLabel}
-        </span>
-      </td>
-
-      {/* Assigned HR */}
-      <td style={{ ...tdStyle, fontSize: 11, color: '#616161' }}>
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', maxWidth: 160, textAlign: 'center' }}>
-          {hrPerson || '--'}
-        </span>
-      </td>
-
-      {/* Contract link */}
-      <td style={tdStyle}>
-        {contractUrl ? (
-          <a
-            href={contractUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={e => e.stopPropagation()}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-              padding: '3px 10px', borderRadius: 6,
-              background: hov ? '#e8f0fe' : '#f5f4f2',
-              color: hov ? '#1f74b3' : '#9e9e9e',
-              fontSize: 10, fontWeight: 600, textDecoration: 'none',
-              transition: 'all .15s', whiteSpace: 'nowrap',
-              border: hov ? '1px solid #c8d9f0' : '1px solid transparent',
-            }}
-          >
-            <i className="bi-box-arrow-up-right" style={{ fontSize: 9 }} />
-            Deel
-          </a>
+      {/* Reason */}
+      <td style={{ ...tdStyle, maxWidth: 120 }}>
+        {reasonDisplay ? (
+          <span style={{ fontSize: 10, fontWeight: 500, color: '#616161', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={reasonDisplay}>
+            {reasonDisplay}
+          </span>
         ) : (
           <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>
         )}
+      </td>
+
+      {/* Assignee */}
+      <td style={{ ...tdStyle, fontSize: 11, color: '#616161' }}>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', maxWidth: 130, textAlign: 'center' }}>
+          {person.exAssignee || '--'}
+        </span>
+      </td>
+
+      {/* Links */}
+      <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
+        <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
+          {contractUrl && (
+            <a href={contractUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+              style={{ ...linkBtnStyle, background: hov ? '#e8f0fe' : '#f5f4f2', color: hov ? '#1f74b3' : '#9e9e9e', border: hov ? '1px solid #c8d9f0' : '1px solid transparent' }}
+              title="Open in Deel">
+              <i className="bi-box-arrow-up-right" style={{ fontSize: 9 }} />Deel
+            </a>
+          )}
+          {person.jiraUrl && (
+            <a href={person.jiraUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+              style={{ ...linkBtnStyle, background: hov ? '#e0ecff' : '#f5f4f2', color: hov ? '#0052CC' : '#9e9e9e', border: hov ? '1px solid #b3d4ff' : '1px solid transparent' }}
+              title="Open Jira ticket">
+              <i className="bi-kanban" style={{ fontSize: 9 }} />Jira
+            </a>
+          )}
+          {!contractUrl && !person.jiraUrl && <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>}
+        </div>
       </td>
     </tr>
   );
@@ -405,3 +405,4 @@ function StatusPill({ label, count, active, onClick, color }) {
 const iconBtnStyle = { width: 32, height: 32, borderRadius: 8, border: '1px solid #e8e8e8', background: 'white', color: '#9e9e9e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
 const thStyle = { padding: '8px 12px', fontSize: 10, fontWeight: 600, color: '#9e9e9e', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center', whiteSpace: 'nowrap', borderBottom: '1px solid #e8e8e8' };
 const tdStyle = { padding: '8px 12px', textAlign: 'center', verticalAlign: 'middle' };
+const linkBtnStyle = { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6, fontSize: 10, fontWeight: 600, textDecoration: 'none', transition: 'all .15s', whiteSpace: 'nowrap', cursor: 'pointer' };

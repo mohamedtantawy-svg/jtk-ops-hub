@@ -56,32 +56,32 @@ export function useOffboardingData(enabled = true) {
     }
     return Object.entries(map)
       .sort(([, aItems], [, bItems]) => {
-        // Countries with imminent/overdue cases first
-        const aUrgent = aItems.some(i => (i.daysUntilEnd ?? 999) <= 14);
-        const bUrgent = bItems.some(i => (i.daysUntilEnd ?? 999) <= 14);
+        // Countries with critical/warning cases first
+        const isUrgent = i => i.status?.severity === 'critical' || i.status?.severity === 'warning';
+        const aUrgent = aItems.some(isUrgent);
+        const bUrgent = bItems.some(isUrgent);
         if (aUrgent && !bUrgent) return -1;
         if (!aUrgent && bUrgent) return 1;
         return bItems.length - aItems.length; // then by count desc
       })
       .map(([country, people]) => ({
         country,
-        people: people.sort((a, b) => (a.daysUntilEnd ?? 9999) - (b.daysUntilEnd ?? 9999)),
-        urgentCount: people.filter(p => (p.daysUntilEnd ?? 999) <= 14).length,
-        warningCount: people.filter(p => (p.daysUntilEnd ?? 999) > 14 && (p.daysUntilEnd ?? 999) <= 30).length,
+        people,
+        urgentCount: people.filter(p => p.status?.severity === 'critical').length,
+        warningCount: people.filter(p => p.status?.severity === 'warning').length,
       }));
   }, [items]);
 
-  // Summary counts
+  // Summary counts — use the server-computed status label
   const counts = useMemo(() => {
-    const c = { total: items.length, overdue: 0, imminent: 0, awaiting: 0, inProgress: 0, scheduled: 0 };
+    const c = { total: items.length, critical: 0, awaitingTriage: 0, processing: 0, other: 0 };
     for (const i of items) {
-      const d = i.daysUntilEnd;
-      if (d === null) continue;
-      if (d < 0) c.overdue++;
-      else if (d <= 14) c.imminent++;
-      else if (d <= 30) c.awaiting++;
-      else if (d <= 90) c.inProgress++;
-      else c.scheduled++;
+      const sev = i.status?.severity;
+      const label = i.adminStatus || '';
+      if (sev === 'critical') c.critical++;
+      else if (label === 'AWAITING_TRIAGE') c.awaitingTriage++;
+      else if (label === 'PROCESSING' || label === 'IN_PROGRESS') c.processing++;
+      else c.other++;
     }
     return c;
   }, [items]);
