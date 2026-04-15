@@ -233,7 +233,7 @@ function adfToText(node) {
 }
 
 // ── Paginated Zendesk search helper ──────────────────────────────────────────
-async function paginatedZendeskSearch(query, { maxPages = 20, perPage = 100 } = {}) {
+async function paginatedZendeskSearch(query, { maxPages = 5, perPage = 100 } = {}) {
   const allResults = [];
   let page = 1;
 
@@ -277,22 +277,25 @@ async function fetchZendeskQueue() {
 
   try {
     // Zendesk Search API caps at 1,000 results per query.
-    // Split by status to stay under the limit (~1,600 total active tickets).
+    // Fetch active statuses sequentially to limit peak memory usage.
+    // Each query is capped at 5 pages (500 tickets).
+    const seenZd = new Set();
+    const allTickets = [];
+
     const statusQueries = ['new', 'open', 'pending', 'hold'].map(
       s => `group:"${ZD_GROUP_NAME}" status:${s}`
     );
-    // Recently solved (last 4 hours) for transition detection
+    // Fetch each status sequentially (not parallel) to reduce peak memory
+    for (const q of statusQueries) {
+      const results = await paginatedZendeskSearch(q, { maxPages: 5 });
+      for (const t of results) {
+        if (!seenZd.has(t.id)) { seenZd.add(t.id); allTickets.push(t); }
+      }
+    }
+    // Recently solved (last 4 hours) for transition detection — 1 page only
     const solvedQuery = `group:"${ZD_GROUP_NAME}" status:solved updated<4hours`;
-
-    const results = await Promise.all([
-      ...statusQueries.map(q => paginatedZendeskSearch(q, { maxPages: 10 })),
-      paginatedZendeskSearch(solvedQuery, { maxPages: 2 }),
-    ]);
-
-    // Deduplicate (a ticket could theoretically match multiple queries)
-    const seenZd = new Set();
-    const allTickets = [];
-    for (const t of results.flat()) {
+    const solvedResults = await paginatedZendeskSearch(solvedQuery, { maxPages: 1 });
+    for (const t of solvedResults) {
       if (!seenZd.has(t.id)) { seenZd.add(t.id); allTickets.push(t); }
     }
     if (allTickets.length === 0) return { items: [], status: 'ok', count: 0, error: null };
@@ -317,7 +320,7 @@ async function fetchZendeskQueue() {
         source: 'zendesk',
         externalId: String(t.id),
         subject: t.subject || '(no subject)',
-        description: (t.description || '').substring(0, 500),
+        description: (t.description || '').substring(0, 200),
         status: ZD_STATUS_MAP[t.status] || 'new',
         priority: ZD_PRIORITY_MAP[t.priority] || 'medium',
         type: detectType(t.subject, t.tags || []),
@@ -384,8 +387,8 @@ async function fetchJiraQueue() {
       const total = result?.total || 0;
       if (issues.length < pageSize || allIssues.length >= total) break;
       startAt += pageSize;
-      // Safety: cap at 500 issues
-      if (startAt >= 500) break;
+      // Safety: cap at 300 issues to limit memory usage
+      if (startAt >= 300) break;
     }
 
     const items = allIssues.map(issue => {
@@ -400,7 +403,7 @@ async function fetchJiraQueue() {
         source: 'jira',
         externalId: issue.key,
         subject: f.summary || '(no summary)',
-        description: adfToText(f.description).substring(0, 500),
+        description: adfToText(f.description).substring(0, 200),
         status: JIRA_STATUS_MAP[statusName.toLowerCase()] || 'in_progress',
         priority: JIRA_PRIORITY_MAP[priorityName.toLowerCase()] || 'medium',
         type: detectType(f.summary, [], f.labels || []),
@@ -506,9 +509,8 @@ export async function GET(req) {
       },
     };
 
-    // Also populate per-source caches so subsequent per-source fetches are instant
-    cacheSet('queue_zendesk', { source: 'zendesk', items: zendesk.items, meta: { count: zendesk.count || 0, status: zendesk.status, error: zendesk.error }, syncedAt: response.meta.syncedAt });
-    cacheSet('queue_jira', { source: 'jira', items: jira.items, meta: { count: jira.count || 0, status: jira.status, error: jira.error }, syncedAt: response.meta.syncedAt });
+    // Cache combined result only — per-source caches are populated independently
+    // to avoid tripling memory usage by storing the same data 3x.
     cacheSet(CACHE_KEY, response);
   } catch (fetchErr) {
     if (stale) {

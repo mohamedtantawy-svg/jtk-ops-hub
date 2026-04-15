@@ -77,15 +77,11 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const workbenchData = useWorkbenchData(true);
 
   // ── Normalized rows for SourceTable (Item #3) ──
-  const onboardingRows = useMemo(() => normalizeOnboarding(onboardingData.items), [onboardingData.items]);
-  const offboardingRows = useMemo(() => normalizeOffboarding(offboardingData.items), [offboardingData.items]);
-  const amendmentRows = useMemo(() => normalizeAmendments(changeRequestData.amendments), [changeRequestData.amendments]);
-  const redlineRows = useMemo(() => normalizeRedlines(changeRequestData.redlines), [changeRequestData.redlines]);
-  const workbenchRows = useMemo(() => normalizeWorkbench(workbenchData.tasks), [workbenchData.tasks]);
-  // Item #4: "All" view — combine all sources into unified list
-  const allSourceRows = useMemo(() => [
-    ...onboardingRows, ...offboardingRows, ...amendmentRows, ...redlineRows, ...workbenchRows,
-  ], [onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows]);
+  const onboardingRowsAll = useMemo(() => normalizeOnboarding(onboardingData.items), [onboardingData.items]);
+  const offboardingRowsAll = useMemo(() => normalizeOffboarding(offboardingData.items), [offboardingData.items]);
+  const amendmentRowsAll = useMemo(() => normalizeAmendments(changeRequestData.amendments), [changeRequestData.amendments]);
+  const redlineRowsAll = useMemo(() => normalizeRedlines(changeRequestData.redlines), [changeRequestData.redlines]);
+  const workbenchRowsAll = useMemo(() => normalizeWorkbench(workbenchData.tasks), [workbenchData.tasks]);
 
   const isAdmin=perms?.dataScope==='all_tasks'; const isLead=perms?.dataScope==='team_tasks';
   const ns=tasks.filter(t=>t.source!=='slack'&&t.source!=='calendar');
@@ -94,6 +90,25 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     () => getVisibleEmails(user?.email),
     [user?.email]
   );
+
+  // ── Agent-scoped source rows: filter Deel API rows by assigneeEmail ──
+  // Admins see all. Leads/agents see only rows assigned to their visible emails.
+  // Rows with no assigneeEmail (amendments, redlines) are hidden from agents.
+  const filterSourceRows = useCallback((rows) => {
+    if (isAdmin) return rows;
+    return rows.filter(r => r.assigneeEmail && visibleEmails.has(r.assigneeEmail));
+  }, [isAdmin, visibleEmails]);
+
+  const onboardingRows = useMemo(() => filterSourceRows(onboardingRowsAll), [onboardingRowsAll, filterSourceRows]);
+  const offboardingRows = useMemo(() => filterSourceRows(offboardingRowsAll), [offboardingRowsAll, filterSourceRows]);
+  const amendmentRows = useMemo(() => filterSourceRows(amendmentRowsAll), [amendmentRowsAll, filterSourceRows]);
+  const redlineRows = useMemo(() => filterSourceRows(redlineRowsAll), [redlineRowsAll, filterSourceRows]);
+  const workbenchRows = useMemo(() => filterSourceRows(workbenchRowsAll), [workbenchRowsAll, filterSourceRows]);
+  // Item #4: "All" view — combine all agent-scoped sources into unified list
+  const allSourceRows = useMemo(() => [
+    ...onboardingRows, ...offboardingRows, ...amendmentRows, ...redlineRows, ...workbenchRows,
+  ], [onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows]);
+
   let vis=ns;
   if(!isAdmin) vis=ns.filter(t=>{
     // Match by legacy member ID
@@ -181,9 +196,11 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const visibleIds=new Set(vis.map(t=>t.id));
   const compact=!!selTask;
   const recentTasks=recentIds.map(id=>tasks.find(t=>t.id===id)).filter(Boolean);
-  const atRiskCount=ns.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;}).length;
-  const breachedCount=ns.filter(t=>{const s=slaInfo(t);return s&&s.breach;}).length;
-  const onTrackCount=ns.filter(t=>t.status!=='resolved'&&t.status!=='waiting').length-atRiskCount-breachedCount;
+  // SLA pills scoped to the agent's visible tasks (not global ns)
+  const visActive=vis.filter(t=>t.status!=='resolved'&&t.status!=='waiting');
+  const atRiskCount=visActive.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;}).length;
+  const breachedCount=visActive.filter(t=>{const s=slaInfo(t);return s&&s.breach;}).length;
+  const onTrackCount=visActive.length-atRiskCount-breachedCount;
   const activeFilterCount=[fTool,fStatus,fCtry.length>0?true:null,fSla||null,fUnassigned||null].filter(Boolean).length;
 
   // Persist filters to localStorage
@@ -407,16 +424,19 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
             // Zendesk & Jira filter the main queue by source instead of showing a panel
             const isQueueFilter = ws.id === 'zendesk' || ws.id === 'jira';
             const isActive = isQueueFilter ? (fTool === ws.id && !workSource) : workSource === ws.id;
-            // Item #1: All work source buttons show task counts
+            // Item #1: Work source buttons show agent-scoped task counts
+            // Jira/Zendesk counts come from the main queue (already agent-filtered via vis)
+            const jiraCount = vis.filter(t=>t.source==='jira'&&t.status!=='resolved').length;
+            const zdCount = vis.filter(t=>t.source==='zendesk'&&t.status!=='resolved').length;
             const count = ws.id === 'all_sources'
-              ? (onboardingData.counts.total + offboardingData.counts.total + changeRequestData.amendmentCounts.total + changeRequestData.redlineCounts.total + workbenchData.counts.total + (queueSync?.meta?.jira?.count||0) + (queueSync?.meta?.zendesk?.count||0))
-              : ws.id === 'onboarding' ? onboardingData.counts.total
-              : ws.id === 'offboarding' ? offboardingData.counts.total
-              : ws.id === 'amendments' ? changeRequestData.amendmentCounts.total
-              : ws.id === 'redlines' ? changeRequestData.redlineCounts.total
-              : ws.id === 'workbench' ? workbenchData.counts.total
-              : ws.id === 'jira' ? (queueSync?.meta?.jira?.count||0)
-              : ws.id === 'zendesk' ? (queueSync?.meta?.zendesk?.count||0)
+              ? (onboardingRows.length + offboardingRows.length + amendmentRows.length + redlineRows.length + workbenchRows.length + jiraCount + zdCount)
+              : ws.id === 'onboarding' ? onboardingRows.length
+              : ws.id === 'offboarding' ? offboardingRows.length
+              : ws.id === 'amendments' ? amendmentRows.length
+              : ws.id === 'redlines' ? redlineRows.length
+              : ws.id === 'workbench' ? workbenchRows.length
+              : ws.id === 'jira' ? jiraCount
+              : ws.id === 'zendesk' ? zdCount
               : 0;
             const handleClick = () => {
               if (isQueueFilter) {

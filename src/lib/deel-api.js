@@ -162,11 +162,11 @@ export async function listOnboardingPeople(params = {}) {
 
   const rawItems = res?.result || [];
 
-  // Paginate through all pages using offset — cap at 1000 items / 20 iterations
+  // Paginate through all pages using offset — cap at 300 items / 6 iterations
   let allItems = [...rawItems];
   let currentCursor = res?.cursor;
   let iterations = 0;
-  while (currentCursor && iterations < 20 && allItems.length < 1000) {
+  while (currentCursor && iterations < 6 && allItems.length < 300) {
     iterations++;
     const nextRes = await deelFetch(`/admin/eor/employee-manager/list/Onboarding.ActionableQueue?actionableQueueFilters%5Boffset%5D=${allItems.length}`);
     const nextItems = nextRes?.result || [];
@@ -192,6 +192,7 @@ export async function listOnboardingPeople(params = {}) {
     tag:               p.tag || '',                              // e.g. "VIP EOR"
     avatarUrl:         p.avatarUrl || '',
     assignee:          p.assignee?.name || '',
+    assigneeEmail:     p.assignee?.email || '',
     assigneeId:        p.assigneeId || null,
     isHourly:          p.timeTracking?.isHourly || false,
   }));
@@ -414,10 +415,10 @@ export async function listWorkbenchTasks(params = {}) {
   const res = await deelFetch(`/admin/ops_workbench/tasks?${qs.toString()}`);
   const rawItems = res?.result || [];
 
-  // Paginate: keep fetching until no cursor or safety cap of 500 items
+  // Paginate: keep fetching until no cursor or safety cap of 300 items
   let allItems = [...rawItems];
   let cursor = res?.cursor;
-  while (cursor && allItems.length < 500) {
+  while (cursor && allItems.length < 300) {
     qs.set('cursor', cursor);
     const nextRes = await deelFetch(`/admin/ops_workbench/tasks?${qs.toString()}`);
     const nextItems = nextRes?.result || [];
