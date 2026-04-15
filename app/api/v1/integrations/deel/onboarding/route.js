@@ -1,6 +1,7 @@
 // ── GET /api/v1/integrations/deel/onboarding ────────────────────────────────
 // Proxies to Deel Admin API: onboarding actionable queue.
 // Uses /admin/eor/employee-manager/list/Onboarding.ActionableQueue
+// Response: { statuses, result: [...tasks...], cursor }
 // Uses persistent cache + stale-while-revalidate.
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
@@ -23,39 +24,22 @@ export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url);
     const offset = searchParams.get('offset') || '0';
-    const debug = searchParams.get('debug') === '1';
 
-    // Return fresh cache if available (skip in debug mode)
     const cacheKeyFull = `${CACHE_KEY}_${offset}`;
-    if (!debug) {
-      const fresh = cacheGet(cacheKeyFull, CACHE_TTL);
-      if (fresh) return NextResponse.json(fresh);
-    }
+    const fresh = cacheGet(cacheKeyFull, CACHE_TTL);
+    if (fresh) return NextResponse.json(fresh);
 
     let responseData;
     try {
       const result = await listOnboardingPeople({ offset });
 
-      // Debug mode: return raw shape info for diagnosis
-      if (debug) {
-        return NextResponse.json({
-          _debug: true,
-          _raw: result._raw,
-          _itemCount: result.items.length,
-          _sampleItem: result.items[0] || null,
-        });
-      }
-
       const items = result.items.map(p => ({
         ...p,
-        action: deriveAction(p.hiringStatus),
+        // Derive a friendly action label from the onboardingFlowStep
+        action: deriveAction(p.flowStep),
       }));
 
-      responseData = {
-        items,
-        total: items.length,
-        _apiTotal: result._raw?.totalFromApi,
-      };
+      responseData = { items, total: result.total };
       cacheSet(cacheKeyFull, responseData);
     } catch (fetchErr) {
       const stale = cacheGet(cacheKeyFull, STALE_TTL);
@@ -74,15 +58,29 @@ export async function GET(req) {
 }
 
 /**
- * Derive an action descriptor from the hiring/onboarding status.
- * Handles both snake_case and SCREAMING_CASE admin statuses.
+ * Derive action label + severity from the onboarding flow step.
+ * Flow steps look like: "Onboarding.ComplianceDocs.AwaitingReview",
+ * "Onboarding.EA.EASigning.AwaitingToSendEA", etc.
  */
-function deriveAction(status) {
-  const s = (status || '').toLowerCase();
-  if (s.includes('overdue'))                          return { label: 'Overdue', severity: 'critical', description: 'Onboarding overdue — immediate action required' };
-  if (s.includes('risk'))                             return { label: 'At Risk', severity: 'warning', description: 'Onboarding at risk — attention needed' };
-  if (s.includes('pending') || s.includes('invite'))  return { label: 'Pending Invite', severity: 'info', description: 'Invitation not yet sent' };
-  if (s.includes('blocked') || s.includes('stuck'))   return { label: 'Blocked', severity: 'critical', description: 'Onboarding blocked' };
-  if (s.includes('awaiting'))                         return { label: 'Awaiting Action', severity: 'warning', description: 'Awaiting action' };
-  return { label: 'In Progress', severity: 'active', description: 'Onboarding steps in progress' };
+function deriveAction(flowStep) {
+  const s = (flowStep || '').toLowerCase();
+
+  // Extract the last segment as the task type
+  const parts = (flowStep || '').split('.');
+  const lastPart = parts[parts.length - 1] || '';
+  // Convert camelCase to friendly: "AwaitingReview" → "Awaiting Review"
+  const friendly = lastPart.replace(/([A-Z])/g, ' $1').trim();
+
+  if (s.includes('awaitingreview'))
+    return { label: 'Awaiting Review', severity: 'warning', step: flowStep };
+  if (s.includes('awaitingtosendea'))
+    return { label: 'Awaiting EA Send', severity: 'warning', step: flowStep };
+  if (s.includes('awaitingcountersign') || s.includes('awaitingaffiliate'))
+    return { label: 'Awaiting Countersign', severity: 'active', step: flowStep };
+  if (s.includes('rejected'))
+    return { label: 'Rejected', severity: 'critical', step: flowStep };
+  if (s.includes('overdue'))
+    return { label: 'Overdue', severity: 'critical', step: flowStep };
+
+  return { label: friendly || 'In Progress', severity: 'active', step: flowStep };
 }
