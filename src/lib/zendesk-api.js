@@ -1,7 +1,10 @@
 // ── Zendesk API client ───────────────────────────────────────────────────────
 // Server-side only. Proxies calls to the Zendesk REST API using token auth.
+// Includes automatic retry with exponential backoff on transient failures.
 // Auth: {email}/token:{api_token} encoded as Basic auth.
 // Docs: https://developer.zendesk.com/api-reference
+
+import { withRetry } from './retry';
 
 const ZENDESK_SUBDOMAIN = process.env.ZENDESK_SUBDOMAIN || ''; // e.g. "letsdeel"
 const ZENDESK_EMAIL = process.env.ZENDESK_EMAIL || '';
@@ -16,10 +19,9 @@ export function isZendeskConfigured() {
 }
 
 /**
- * Generic fetch wrapper for Zendesk REST API v2.
- * Uses Basic auth with email/token format.
+ * Raw fetch wrapper — no retry.
  */
-export async function zendeskFetch(endpoint, options = {}) {
+async function _zendeskFetch(endpoint, options = {}) {
   if (!isZendeskConfigured()) {
     throw new Error('Zendesk API is not configured (ZENDESK_SUBDOMAIN, ZENDESK_EMAIL, ZENDESK_API_TOKEN)');
   }
@@ -35,7 +37,7 @@ export async function zendeskFetch(endpoint, options = {}) {
       Accept: 'application/json',
       ...options.headers,
     },
-    signal: options.signal || AbortSignal.timeout(15000),
+    signal: options.signal || AbortSignal.timeout(20000),
   });
 
   if (!res.ok) {
@@ -47,6 +49,13 @@ export async function zendeskFetch(endpoint, options = {}) {
 
   if (res.status === 204) return null;
   return res.json();
+}
+
+/**
+ * Zendesk API fetch with automatic retry (3 attempts, exponential backoff).
+ */
+export async function zendeskFetch(endpoint, options = {}) {
+  return withRetry(() => _zendeskFetch(endpoint, options), { label: 'Zendesk', maxRetries: 2 });
 }
 
 // ── Tickets ─────────────────────────────────────────────────────────────────

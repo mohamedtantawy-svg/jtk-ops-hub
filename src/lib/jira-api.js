@@ -1,6 +1,9 @@
 // ── Jira / Atlassian API client ──────────────────────────────────────────────
 // Server-side only. Proxies calls to the Atlassian REST API.
+// Includes automatic retry with exponential backoff on transient failures.
 // Uses API token auth (email + token) for Jira Cloud.
+
+import { withRetry } from './retry';
 
 const JIRA_BASE_URL = process.env.JIRA_BASE_URL || ''; // e.g. https://deel.atlassian.net
 const JIRA_USER_EMAIL = process.env.JIRA_USER_EMAIL || '';
@@ -11,9 +14,9 @@ export function isJiraConfigured() {
 }
 
 /**
- * Generic fetch wrapper for Jira REST API v3.
+ * Raw fetch wrapper — no retry.
  */
-export async function jiraFetch(endpoint, options = {}) {
+async function _jiraFetch(endpoint, options = {}) {
   if (!isJiraConfigured()) {
     throw new Error('Jira API is not configured (JIRA_BASE_URL, JIRA_USER_EMAIL, JIRA_API_TOKEN)');
   }
@@ -29,7 +32,7 @@ export async function jiraFetch(endpoint, options = {}) {
       Accept: 'application/json',
       ...options.headers,
     },
-    signal: options.signal || AbortSignal.timeout(15000),
+    signal: options.signal || AbortSignal.timeout(20000),
   });
 
   if (!res.ok) {
@@ -41,6 +44,13 @@ export async function jiraFetch(endpoint, options = {}) {
 
   if (res.status === 204) return null;
   return res.json();
+}
+
+/**
+ * Jira API fetch with automatic retry (3 attempts, exponential backoff).
+ */
+export async function jiraFetch(endpoint, options = {}) {
+  return withRetry(() => _jiraFetch(endpoint, options), { label: 'Jira', maxRetries: 2 });
 }
 
 // ── Search (JQL) ─────────────────────────────────────────────────────────────
