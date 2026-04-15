@@ -136,6 +136,14 @@ export async function fetchQueue({ bustCache } = {}) {
   return apiFetch(`/queue${qs}`);
 }
 
+// Per-source queue fetch (independent sync per source)
+export async function fetchQueueBySource(source, { bustCache } = {}) {
+  const params = new URLSearchParams();
+  params.set('source', source);
+  if (bustCache) params.set('_t', String(Date.now()));
+  return apiFetch(`/queue?${params.toString()}`);
+}
+
 // Reassign a ticket in Zendesk/Jira via our backend
 export async function reassignQueueTicket(ticketId, assigneeEmail) {
   return apiFetch('/queue/reassign', {
