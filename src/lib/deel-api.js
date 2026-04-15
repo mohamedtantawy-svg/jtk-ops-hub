@@ -225,61 +225,51 @@ export async function listOnboardingPeople(params = {}) {
 // ── Offboarding / Terminations (Admin API) ──────────────────────────────────
 
 /**
- * Fetches active EOR termination cases from the admin API.
+ * Fetches AWAITING_TRIAGE termination cases from the admin API.
  * Uses /admin/eor/terminations_v3 — the same endpoint as admin.deel.network.
- * Handles cursor-based pagination.
+ * Filters to status=AWAITING_TRIAGE only (actionable items).
+ *
+ * NOTE: The endpoint does NOT accept "limit" or "cursor" as query params
+ * (returns 400). It may accept filters via POST body or specific param names.
+ * For now we call it without params and filter client-side.
  */
 export async function listOffboardingCases() {
-  const PAGE_SIZE = 50;
-  const allTerminations = [];
-  let cursor = null;
-  let page = 0;
-  const MAX_PAGES = 20;
+  // Call without query params — the endpoint rejects limit/cursor
+  const res = await deelFetch('/admin/eor/terminations_v3');
 
-  while (page < MAX_PAGES) {
-    const params = [`limit=${PAGE_SIZE}`];
-    if (cursor) params.push(`cursor=${encodeURIComponent(cursor)}`);
+  // Admin API returns { cursor, terminations: [...], count: { total, ... } }
+  const dataArr = res?.terminations || [];
 
-    const res = await deelFetch(`/admin/eor/terminations_v3?${params.join('&')}`);
+  // Filter to actionable items only: AWAITING_TRIAGE
+  const actionable = dataArr.filter(c => {
+    const status = (c.status || '').toUpperCase();
+    return status === 'AWAITING_TRIAGE';
+  });
 
-    // Admin API returns { cursor, terminations: [...], count: { total, ... } }
-    const dataArr = res?.terminations || [];
-
-    for (const c of dataArr) {
-      allTerminations.push({
-        id: c.id,                                         // termination ID (e.g. 165810)
-        contractId: c.eorContractId || c.contractOid || '',
-        contractOid: c.contractOid || '',                 // short OID (e.g. "35jp4gq")
-        name: c.name || '',
-        email: c.email || '',
-        country: c.employmentCountry || '',
-        jobTitle: c.jobTitle || '',
-        team: c.team || '',
-        hiringType: c.type || 'eor',                     // e.g. "TERMINATION"
-        startDate: c.startDate || '',
-        endDate: c.endDate || '',                         // last working day (may be null)
-        desiredEndDate: c.desiredEndDate || '',
-        createdAt: c.createdAt || '',
-        updatedAt: c.updatedAt || '',
-        status: c.status || '',                           // e.g. "AWAITING_TRIAGE", "PROCESSING"
-        organizationName: c.organizationName || '',       // client company name
-        exAssignee: c.exAssignee || '',                   // assigned agent
-        reason: c.requestData?.reason || '',              // termination reason enum
-        isResignation: c.requestData?.isEmployeeResignation || false,
-        jiraUrl: c.requestData?.jiraTicket?.jiraWebURL || '',
-        noticePeriod: c.noticePeriod || 0,
-        isArchived: c.isArchived || false,
-      });
-    }
-
-    // Cursor-based pagination — cursor is at res.cursor
-    const nextCursor = res?.cursor;
-    if (!nextCursor || dataArr.length < PAGE_SIZE) break;
-    cursor = nextCursor;
-    page++;
-  }
-
-  return allTerminations;
+  return actionable.map(c => ({
+    id: c.id,                                         // termination ID (e.g. 165810)
+    contractId: c.eorContractId || c.contractOid || '',
+    contractOid: c.contractOid || '',                 // short OID (e.g. "35jp4gq")
+    name: c.name || '',
+    email: c.email || '',
+    country: c.employmentCountry || '',
+    jobTitle: c.jobTitle || '',
+    team: c.team || '',
+    hiringType: c.type || 'eor',                     // e.g. "TERMINATION"
+    startDate: c.startDate || '',
+    endDate: c.endDate || '',                         // last working day (may be null)
+    desiredEndDate: c.desiredEndDate || '',
+    createdAt: c.createdAt || '',
+    updatedAt: c.updatedAt || '',
+    status: c.status || '',                           // e.g. "AWAITING_TRIAGE"
+    organizationName: c.organizationName || '',       // client company name
+    exAssignee: c.exAssignee || '',                   // assigned agent
+    reason: c.requestData?.reason || '',              // termination reason enum
+    isResignation: c.requestData?.isEmployeeResignation || false,
+    jiraUrl: c.requestData?.jiraTicket?.jiraWebURL || '',
+    noticePeriod: c.noticePeriod || 0,
+    isArchived: c.isArchived || false,
+  }));
 }
 
 // ── Contract Amendments (REST v2 API) ───────────────────────────────────────
