@@ -226,6 +226,24 @@ CREATE INDEX IF NOT EXISTS idx_escalations_status ON escalations(status);
 CREATE INDEX IF NOT EXISTS idx_escalations_manager ON escalations(manager_id);
 CREATE INDEX IF NOT EXISTS idx_escalations_created ON escalations(created_at DESC);
 
+-- Escalations identity + audit columns (additive, preserves all existing rows)
+ALTER TABLE escalations ADD COLUMN IF NOT EXISTS escalated_by_email VARCHAR(255);
+ALTER TABLE escalations ADD COLUMN IF NOT EXISTS escalated_by_id    INTEGER REFERENCES members(id) ON DELETE SET NULL;
+ALTER TABLE escalations ADD COLUMN IF NOT EXISTS resolved_at        TIMESTAMPTZ;
+ALTER TABLE escalations ADD COLUMN IF NOT EXISTS resolved_by        VARCHAR(255);
+ALTER TABLE escalations ADD COLUMN IF NOT EXISTS severity           VARCHAR(20) DEFAULT 'medium';
+
+CREATE INDEX IF NOT EXISTS idx_escalations_escalated_by_email ON escalations(escalated_by_email);
+CREATE INDEX IF NOT EXISTS idx_escalations_escalated_by_id    ON escalations(escalated_by_id);
+
+-- Best-effort backfill for historical rows whose escalated_by happens to match a members.name
+UPDATE escalations e
+   SET escalated_by_email = m.email,
+       escalated_by_id    = m.id
+  FROM members m
+ WHERE e.escalated_by_email IS NULL
+   AND e.escalated_by = m.name;
+
 CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
 CREATE INDEX IF NOT EXISTS idx_requests_to_team ON requests(to_team);
 CREATE INDEX IF NOT EXISTS idx_requests_from_member ON requests(from_member_id);

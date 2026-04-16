@@ -264,6 +264,37 @@ const App=()=>{
     return()=>{cancelled=true;};
   },[user]);
 
+  // ── Cross-user escalations sync (20 s poll) ───────────────────────────────
+  // The server already enforces role-based scope on GET /escalations, so
+  // the response only contains items the caller is allowed to see. Polling
+  // keeps every user's view of raised / assigned escalations current within
+  // about 20 seconds of another user's action.
+  useEffect(()=>{
+    if(!user) return;
+    let cancelled=false;
+    const poll=async()=>{
+      try{
+        const res=await apiFetchEscalations({limit:100});
+        if(cancelled||!res?.items) return;
+        setEscalations(res.items.map(normalizeEscalation).filter(Boolean));
+      }catch(e){/* silent — next tick will retry */}
+    };
+    const iv=setInterval(poll,20000);
+    return()=>{cancelled=true;clearInterval(iv);};
+  },[user]);
+
+  // ── Hydrate escalations' `.task` field from the live tasks array ─────────
+  // The backend GET only returns `taskId`; we look it up in the current
+  // tasks list so the detail pane and filters can inspect the underlying ticket.
+  useEffect(()=>{
+    if(!tasks||tasks.length===0) return;
+    setEscalations(prev=>prev.map(e=>{
+      if(e.task||!e.taskId) return e;
+      const matched=tasks.find(t=>t._beId===e.taskId||t.id===e.taskId);
+      return matched?{...e,task:matched}:e;
+    }));
+  },[tasks]);
+
   // ── Notification helpers ───────────────────────────────────────────────────
   const addNotif=useCallback((type,title,body)=>{
     const now=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
@@ -300,18 +331,19 @@ const App=()=>{
   const confirmEscal=useCallback((task,reason,mgrId)=>{
     const mgr=mgrId?MEMBERS.find(m=>m.id===mgrId):null;
     const now=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+    const identity={escalatedBy:user.name,escalatedByEmail:(user.email||'').toLowerCase(),escalatedById:user.id||null};
     if(bulkIds&&bulkIds.length>0){
-      const newEscals=bulkIds.map(id=>{const t=tasks.find(tt=>tt.id===id);return t?{id:`ESC-${Date.now()}-${id}`,task:t,taskId:id,reason,escalatedBy:user.name,escalatedAt:now,managerId:mgr?.id||null,managerName:mgr?.name||'Team Lead',status:'pending',managerResponseStatus:'pending_response',managerResponse:null,managerRespondedAt:null,managerRespondedBy:null,escalationSource:'ticket',slackChannel:null,slackUser:null,slackMessageUrl:null}:null;}).filter(Boolean);
+      const newEscals=bulkIds.map(id=>{const t=tasks.find(tt=>tt.id===id);return t?{id:`ESC-${Date.now()}-${id}`,task:t,taskId:id,reason,...identity,escalatedAt:now,managerId:mgr?.id||null,managerName:mgr?.name||'Team Lead',status:'pending',managerResponseStatus:'pending_response',managerResponse:null,managerRespondedAt:null,managerRespondedBy:null,escalationSource:'ticket',slackChannel:null,slackUser:null,slackMessageUrl:null,severity:'medium'}:null;}).filter(Boolean);
       setEscalations(prev=>[...newEscals,...prev]);
       const idSet=new Set(bulkIds);
       setTasks(prev=>prev.map(t=>idSet.has(t.id)?{...t,status:'in_progress'}:t));
       addToast('escalation','Bulk Escalation',`${bulkIds.length} tasks → ${mgr?.name||'Team Lead'}`);
     } else {
-      setEscalations(prev=>[{id:`ESC-${Date.now()}-${task.id}`,task,taskId:task.id,reason,escalatedBy:user.name,escalatedAt:now,managerId:mgr?.id||null,managerName:mgr?.name||'Team Lead',status:'pending',managerResponseStatus:'pending_response',managerResponse:null,managerRespondedAt:null,managerRespondedBy:null,escalationSource:'ticket',slackChannel:null,slackUser:null,slackMessageUrl:null},...prev]);
+      setEscalations(prev=>[{id:`ESC-${Date.now()}-${task.id}`,task,taskId:task.id,reason,...identity,escalatedAt:now,managerId:mgr?.id||null,managerName:mgr?.name||'Team Lead',status:'pending',managerResponseStatus:'pending_response',managerResponse:null,managerRespondedAt:null,managerRespondedBy:null,escalationSource:'ticket',slackChannel:null,slackUser:null,slackMessageUrl:null,severity:'medium'},...prev]);
       setTasks(prev=>prev.map(t=>t.id===task.id?{...t,status:'in_progress'}:t));
       addToast('escalation','Escalated to Manager',`${mgr?.name||'Team Lead'} · ${task.id}`);
       // BE sync
-      apiCreateEscalation({taskId:task._beId||task.id,subject:task.subject,reason,managerId:mgrId?String(mgrId):undefined}).catch(err=>{
+      apiCreateEscalation({taskId:task._beId||task.id,subject:task.subject,reason,managerId:mgrId?String(mgrId):undefined,escalationSource:'ticket'}).catch(err=>{
         console.warn('[escalation] BE sync failed:',err.message);
         addToast('warning','Sync Warning','Escalation saved locally but backend sync failed');
       });
@@ -335,6 +367,8 @@ const App=()=>{
       reason:form.reason,
       subject:form.subject,
       escalatedBy:user.name,
+      escalatedByEmail:(user.email||'').toLowerCase(),
+      escalatedById:user.id||null,
       escalatedAt:now,
       managerId:form.managerId??null,
       managerName:form.managerName??'Team Lead',
@@ -347,11 +381,23 @@ const App=()=>{
       slackChannel:form.slackChannel??null,
       slackUser:form.slackUser??null,
       slackMessageUrl:form.slackMessageUrl??null,
+      severity:form.severity||'medium',
     },...prev]);
     setCreateEscalModal(false);
     addToast('escalation','Escalation Created',form.subject.slice(0,50));
-    // BE sync
-    apiCreateEscalation({taskId:form.taskId||undefined,subject:form.subject,reason:form.reason,managerId:form.managerId?String(form.managerId):undefined}).catch(err=>{
+    // BE sync — forward source + Slack fields + severity so the row stores
+    // the full context (previously these were silently dropped).
+    apiCreateEscalation({
+      taskId:form.taskId||undefined,
+      subject:form.subject,
+      reason:form.reason,
+      managerId:form.managerId?String(form.managerId):undefined,
+      escalationSource:form.escalationSource||'manual',
+      slackChannel:form.slackChannel||null,
+      slackUser:form.slackUser||null,
+      slackMessageUrl:form.slackMessageUrl||null,
+      severity:form.severity||'medium',
+    }).catch(err=>{
       console.warn('[manualEscalation] BE sync failed:',err.message);
       addToast('warning','Sync Warning','Escalation saved locally but backend sync failed');
     });
@@ -667,7 +713,14 @@ const App=()=>{
     return()=>clearInterval(iv);
   },[]);
 
-  const pendingEscal=escalations.filter(e=>e.status==='pending').length;
+  // Scope escalations the same way the server filters them on GET — every
+  // count/list downstream uses `scopedEscalations` so the badge, the Home
+  // "Needs Your Attention" feed, and the Escalations page all agree.
+  const scopedEscalations=React.useMemo(
+    ()=>perms?.scopeEscalations?.(escalations,MEMBERS)||escalations,
+    [escalations,perms]
+  );
+  const pendingEscal=scopedEscalations.filter(e=>e.status==='pending').length;
   // Always derive the LIVE task from tasks[] to avoid stale state in Detail
   const liveSelTask=React.useMemo(()=>selTask?tasks.find(t=>t.id===selTask.id)||null:null,[selTask,tasks]);
 
@@ -713,11 +766,11 @@ const App=()=>{
       <div style={{height:impersonating?104:68,flexShrink:0}}/>
       <DeelSubNav view={view} subFilter={subFilter} setSubFilter={setSubFilter} tasks={tasks} user={effectiveUser}/>
       <div className="deel-content" data-region="main-content" aria-label="Main content" style={{display:'flex',overflowX:'hidden',overflowY:'auto',position:'relative',flex:1}}>
-          {view==='briefing'      &&perms?.canView('briefing')!==false     &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={setSelTask} comms={comms} escalations={escalations} setSubFilter={setSubFilter} requests={requests}/></div>}
-          {view==='my-queue'      &&perms?.canView('my-queue')!==false     &&<div className="page-enter"><Queue user={effectiveUser} tasks={tasks} setTasks={setTasks} selTask={liveSelTask} setSelTask={setSelTask} notes={notes} setNotes={setNotes} activity={activity} setActivity={setActivity} addToast={addToast} onEscalMgr={openEscalModal} onReassign={(t)=>{closeActionModals();setReassignModal(t);}} onSnooze={(t)=>{closeActionModals();setSnoozeModal(t);}} onCreateTask={()=>{closeActionModals();setCreateModal(true);}} onBulkAction={(ids,action)=>{closeActionModals();setBulkIds(ids);if(action==='reassign'){setReassignModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}else if(action==='snooze'){setSnoozeModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}else if(action==='escalate'){setEscalModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}}} subFilter={subFilter} escalations={escalations} requests={requests} setRequests={setRequests} onNewRequest={()=>setRequestModal(true)} queueMode={queueMode} setQueueMode={setQueueMode} fUnassigned={fUnassigned} setFUnassigned={setFUnassigned}/></div>}
+          {view==='briefing'      &&perms?.canView('briefing')!==false     &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={setSelTask} comms={comms} escalations={scopedEscalations} setSubFilter={setSubFilter} requests={requests}/></div>}
+          {view==='my-queue'      &&perms?.canView('my-queue')!==false     &&<div className="page-enter"><Queue user={effectiveUser} tasks={tasks} setTasks={setTasks} selTask={liveSelTask} setSelTask={setSelTask} notes={notes} setNotes={setNotes} activity={activity} setActivity={setActivity} addToast={addToast} onEscalMgr={openEscalModal} onReassign={(t)=>{closeActionModals();setReassignModal(t);}} onSnooze={(t)=>{closeActionModals();setSnoozeModal(t);}} onCreateTask={()=>{closeActionModals();setCreateModal(true);}} onBulkAction={(ids,action)=>{closeActionModals();setBulkIds(ids);if(action==='reassign'){setReassignModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}else if(action==='snooze'){setSnoozeModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}else if(action==='escalate'){setEscalModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}}} subFilter={subFilter} escalations={scopedEscalations} requests={requests} setRequests={setRequests} onNewRequest={()=>setRequestModal(true)} queueMode={queueMode} setQueueMode={setQueueMode} fUnassigned={fUnassigned} setFUnassigned={setFUnassigned}/></div>}
           {view==='team'          &&perms?.canView('team')!==false         &&<div className="page-enter"><Team user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setTask={setSelTask} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
-          {view==='analytics'     &&perms?.canView('analytics')!==false    &&<div className="page-enter"><Analytics tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} currentUser={effectiveUser} subFilter={subFilter} escalations={escalations}/></div>}
-          {view==='escalations'   &&perms?.canView('escalations')!==false  &&<div className="page-enter"><EscalationsView escalations={escalations} setEscalations={setEscalations} currentUser={effectiveUser} onNewEscalation={()=>setCreateEscalModal(true)}/></div>}
+          {view==='analytics'     &&perms?.canView('analytics')!==false    &&<div className="page-enter"><Analytics tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} currentUser={effectiveUser} subFilter={subFilter} escalations={scopedEscalations}/></div>}
+          {view==='escalations'   &&perms?.canView('escalations')!==false  &&<div className="page-enter"><EscalationsView escalations={scopedEscalations} setEscalations={setEscalations} currentUser={effectiveUser} onNewEscalation={()=>setCreateEscalModal(true)}/></div>}
           {view==='announcements' &&perms?.canView('announcements')!==false&&<div className="page-enter"><AnnouncementsView user={effectiveUser} comms={comms} setComms={setComms} addToast={addToast} tasks={tasks} apiAcknowledge={apiAcknowledge} apiCreate={apiCreate} apiSend={apiSend} apiUpdate={apiUpdate} apiArchive={apiArchive} apiRemove={apiRemove} apiTogglePin={apiTogglePin} openCompose={announceCompose} onComposeOpened={()=>setAnnounceCompose(false)} apiUnarchive={apiUnarchive} apiComments={apiComments} apiSetComments={apiSetComments} apiLoadComments={apiLoadComments} apiAddComment={apiAddCommentFn} apiDeleteComment={apiDeleteCommentFn} apiLinks={apiLinks} apiLoadLinks={apiLoadLinks} apiLinkAnnouncement={apiLinkAnnouncementFn} apiUnlinkAnnouncement={apiUnlinkAnnouncementFn} apiReact={apiReactFn}/></div>}
           {view==='calendar'      &&perms?.canView('calendar')!==false     &&<div className="page-enter"><CalendarView tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks}/></div>}
           {view==='knowledge-hub' &&perms?.canView('knowledge-hub')!==false&&<div className="page-enter"><KnowledgeHub subFilter={subFilter} user={effectiveUser}/></div>}

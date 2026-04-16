@@ -149,13 +149,12 @@ const EscalationsView = ({ escalations, setEscalations, currentUser, onNewEscala
     return () => { Object.values(autoRespondTimers.current).forEach(clearTimeout); };
   }, [escalations, setEscalations]);
 
-  // Role filter
+  // Role filter — the `escalations` prop already comes pre-scoped from App.jsx
+  // (which uses perms.scopeEscalations — the same semantics the server enforces
+  // on GET /api/v1/escalations). We accept it as-is. The only adjustment here
+  // is to highlight the items that "need action from me" in a separate section
+  // further below, which is matched on `managerId` — see `myPending`.
   let vis = escalations;
-  if (!isAdmin) {
-    vis = isLead
-      ? escalations.filter(e => MEMBERS.find(m => m.id === e.task?.assigneeId)?.team === currentUser.team || e.escalatedBy === currentUser.name)
-      : escalations.filter(e => e.task?.assigneeId === currentUser.id || e.escalatedBy === currentUser.name);
-  }
 
   // Status + source + severity filters
   if (statusFilter === 'pending')  vis = vis.filter(e => e.status === 'pending');

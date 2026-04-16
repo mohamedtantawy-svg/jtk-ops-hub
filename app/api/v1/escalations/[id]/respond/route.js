@@ -17,9 +17,15 @@ export async function PATCH(req, { params }) {
     if (!response) return NextResponse.json({ error: 'Response required' }, { status: 400 });
 
     const { rows } = await query(
-      `UPDATE escalations SET manager_response = $1, manager_response_status = 'responded',
-       manager_responded_at = NOW(), updated_at = NOW() WHERE id = $2 RETURNING *`,
-      [response, id]
+      `UPDATE escalations
+          SET manager_response = $1,
+              manager_response_status = 'responded',
+              manager_responded_at = NOW(),
+              manager_responded_by = $3,
+              updated_at = NOW()
+        WHERE id = $2
+        RETURNING *`,
+      [response, id, user.name || user.email]
     );
     if (rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
