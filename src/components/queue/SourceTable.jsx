@@ -220,6 +220,7 @@ export default function SourceTable({
                 <th style={{ ...thStyle, width: 110 }}>Function</th>
                 <th style={{ ...thStyle, width: 80 }}>Country</th>
                 <th style={{ ...thStyle, width: 100 }}>Assignee</th>
+                <th style={{ ...thStyle, width: 80 }}>Start Date</th>
                 <th style={{ ...thStyle, width: 80 }}>Created</th>
                 <th style={{ ...thStyle, width: 70 }}>SLA</th>
                 <th style={{ ...thStyle, width: 80 }}>Updated</th>
@@ -327,6 +328,11 @@ const SourceRow = memo(function SourceRow({ row, showSource }) {
             </span>
           </div>
         ) : <span style={{ fontSize: 11, color: '#d42d35', fontWeight: 500 }}>Unassigned</span>}
+      </td>
+
+      {/* Start Date */}
+      <td style={{ ...tdStyle, fontSize: 11, color: '#616161', whiteSpace: 'nowrap' }}>
+        {row.startDate ? fmtDate(row.startDate) : '--'}
       </td>
 
       {/* Created */}

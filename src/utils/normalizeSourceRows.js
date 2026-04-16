@@ -58,7 +58,8 @@ export function normalizeOnboarding(items = []) {
     return {
       id: p.id || p.oid || '',
       source: 'onboarding',
-      subject: startStr ? `${p.name || 'Unknown'} — ${startStr}` : (p.name || 'Unknown'),
+      subject: p.name || 'Unknown',
+      startDate: p.startDate || '',
       function: flowDisplay || 'Onboarding',
       country: p.country || '',
       assignee: p.assignee || '',
