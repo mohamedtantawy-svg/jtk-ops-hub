@@ -16,7 +16,8 @@ const BASE_DELAY = 600; // ms
  * - Throws on non-2xx with a structured error
  */
 export async function apiFetch(path, options = {}) {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('ops_hub_token') : null;
+  let token = null;
+  if (typeof window !== 'undefined') { try { token = localStorage.getItem('ops_hub_token'); } catch {} }
 
   const headers = {
     ...(options.body ? { 'Content-Type': 'application/json' } : {}),
@@ -51,12 +52,14 @@ export async function apiFetch(path, options = {}) {
             // made without a token (e.g. a hook that fires before login),
             // or with an *older* token while a fresh login has since stored
             // a new one, we must NOT nuke the valid session.
-            const currentToken = localStorage.getItem('ops_hub_token');
-            if (token && currentToken === token) {
-              localStorage.removeItem('ops_hub_token');
-              localStorage.removeItem('ops_hub_user');
-              window.dispatchEvent(new CustomEvent('ops-hub-session-expired'));
-            }
+            try {
+              const currentToken = localStorage.getItem('ops_hub_token');
+              if (token && currentToken === token) {
+                localStorage.removeItem('ops_hub_token');
+                localStorage.removeItem('ops_hub_user');
+                window.dispatchEvent(new CustomEvent('ops-hub-session-expired'));
+              }
+            } catch {}
           }
           throw err;
         }
