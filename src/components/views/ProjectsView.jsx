@@ -138,7 +138,7 @@ export default function ProjectsView({ projects, setProjects, user, onNewProject
   }, [projects, subTab, typeFilter, search, sortKey, user]);
 
   const handleUpdateProgress = (id, value) => {
-    if (!perms?.canDo('can_update_project')) return;
+    if (!perms?.canDo('can_edit_project')) return;
     setProjects(prev => prev.map(p => p.id === id ? { ...p, progress: value, updatedAt: new Date().toISOString().split('T')[0] } : p));
     if (selProject?.id === id) setSelProject(prev => ({ ...prev, progress: value }));
   };
@@ -152,7 +152,7 @@ export default function ProjectsView({ projects, setProjects, user, onNewProject
   };
 
   const handleUpdateStatus = (id, status) => {
-    if (!perms?.canDo('can_update_project')) return;
+    if (!perms?.canDo('can_edit_project')) return;
     setProjects(prev => prev.map(p => p.id === id
       ? { ...p, status, progress: status === 'completed' ? 100 : p.progress, updatedAt: new Date().toISOString().split('T')[0] }
       : p

@@ -43,12 +43,20 @@ export async function apiFetch(path, options = {}) {
         err.status = res.status;
         err.body = body;
 
-        // 401 — token expired or invalid, redirect to login
+        // 401 — token expired or invalid
         if (res.status === 401) {
           if (typeof window !== 'undefined') {
-            localStorage.removeItem('ops_hub_token');
-            localStorage.removeItem('ops_hub_user');
-            window.dispatchEvent(new CustomEvent('ops-hub-session-expired'));
+            // Only invalidate the session when the request actually carried
+            // the current token and it was rejected.  If this request was
+            // made without a token (e.g. a hook that fires before login),
+            // or with an *older* token while a fresh login has since stored
+            // a new one, we must NOT nuke the valid session.
+            const currentToken = localStorage.getItem('ops_hub_token');
+            if (token && currentToken === token) {
+              localStorage.removeItem('ops_hub_token');
+              localStorage.removeItem('ops_hub_user');
+              window.dispatchEvent(new CustomEvent('ops-hub-session-expired'));
+            }
           }
           throw err;
         }
