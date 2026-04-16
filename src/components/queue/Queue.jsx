@@ -228,16 +228,25 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const visibleIds=new Set(vis.map(t=>t.id));
   const compact=!!selTask;
   const recentTasks=recentIds.map(id=>tasks.find(t=>t.id===id)).filter(Boolean);
-  // SLA pills — use visPreSla so they never vanish when an SLA filter is active
-  // Only show for queue tasks (ZD/JR), hide when on a Deel source panel
-  const showSlaPills = !workSource;
+  // SLA pills — always visible across all views (queue, source panels, etc.)
   const {atRiskCount,breachedCount,onTrackCount}=useMemo(()=>{
-    if(!showSlaPills) return {atRiskCount:0,breachedCount:0,onTrackCount:0};
-    const slaBase=visPreSla.filter(t=>t.status!=='resolved'&&t.status!=='waiting');
+    // Determine the base set depending on active view
+    let slaBase;
+    if (workSource === 'onboarding') slaBase = onboardingRows;
+    else if (workSource === 'offboarding') slaBase = offboardingRows;
+    else if (workSource === 'amendments') slaBase = amendmentRows;
+    else if (workSource === 'redlines') slaBase = redlineRows;
+    else if (workSource === 'workbench') slaBase = workbenchRows;
+    else if (workSource === 'all_sources') slaBase = allSourceRows;
+    else if (workSource === 'jira') slaBase = visPreSla.filter(t => t.source === 'jira');
+    else if (workSource === 'zendesk') slaBase = visPreSla.filter(t => t.source === 'zendesk');
+    else slaBase = visPreSla;
+    // Exclude resolved / waiting (snoozed)
+    slaBase = slaBase.filter(t => t.status !== 'resolved' && t.status !== 'waiting');
     const atRisk=slaBase.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;}).length;
     const breached=slaBase.filter(t=>{const s=slaInfo(t);return s&&s.breach;}).length;
     return{atRiskCount:atRisk,breachedCount:breached,onTrackCount:slaBase.length-atRisk-breached};
-  },[visPreSla,showSlaPills]);
+  },[workSource, visPreSla, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, allSourceRows]);
 
   // ── View-aware header counts: reflect active tab (fTool / workSource) ──
   const headerCounts = useMemo(() => {
@@ -442,28 +451,22 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
               </div>
               );
             })()}
-            {/* SLA filter pills — only show for queue views (ZD/JR), hidden on Deel source panels */}
-            {onTrackCount>0&&(
-              <div onClick={()=>setFSla(fSla==='ok'?null:'ok')} style={{display:'flex',alignItems:'center',gap:5,background:fSla==='ok'?'#dcfce7':'#f0fdf4',border:`${fSla==='ok'?'2':'1'}px solid ${fSla==='ok'?'#15803d':'#bbf7d0'}`,borderRadius:128,padding:'5px 14px',cursor:'pointer',transition:'all .15s',flexShrink:0,boxShadow:fSla==='ok'?'0 0 0 2px #15803d30':'none'}}>
+            {/* SLA filter pills — always visible across all views */}
+            <div onClick={()=>setFSla(fSla==='ok'?null:'ok')} style={{display:'flex',alignItems:'center',gap:5,background:fSla==='ok'?'#dcfce7':'#f0fdf4',border:`${fSla==='ok'?'2':'1'}px solid ${fSla==='ok'?'#15803d':'#bbf7d0'}`,borderRadius:128,padding:'5px 14px',cursor:'pointer',transition:'all .15s',flexShrink:0,boxShadow:fSla==='ok'?'0 0 0 2px #15803d30':'none'}}>
                 <i className="bi-check-circle-fill" style={{color:'#15803d',fontSize:13}}></i>
                 <span style={{fontSize:13,fontWeight:700,color:'#166534'}}>{onTrackCount}</span>
                 <span style={{fontSize:11,fontWeight:500,color:'#166534'}}>On Track</span>
               </div>
-            )}
-            {atRiskCount>0&&(
-              <div onClick={()=>setFSla(fSla==='at_risk'?null:'at_risk')} style={{display:'flex',alignItems:'center',gap:5,background:fSla==='at_risk'?'#fef3c7':'#fff8e6',border:`${fSla==='at_risk'?'2':'1'}px solid ${fSla==='at_risk'?'#ed8d00':'#ffe27c'}`,borderRadius:128,padding:'5px 14px',cursor:'pointer',transition:'all .15s',flexShrink:0,boxShadow:fSla==='at_risk'?'0 0 0 2px #ed8d0030':'none'}}>
+            <div onClick={()=>setFSla(fSla==='at_risk'?null:'at_risk')} style={{display:'flex',alignItems:'center',gap:5,background:fSla==='at_risk'?'#fef3c7':'#fff8e6',border:`${fSla==='at_risk'?'2':'1'}px solid ${fSla==='at_risk'?'#ed8d00':'#ffe27c'}`,borderRadius:128,padding:'5px 14px',cursor:'pointer',transition:'all .15s',flexShrink:0,boxShadow:fSla==='at_risk'?'0 0 0 2px #ed8d0030':'none'}}>
                 <i className="bi-exclamation-circle-fill" style={{color:'#ed8d00',fontSize:13}}></i>
                 <span style={{fontSize:13,fontWeight:700,color:'#92400E'}}>{atRiskCount}</span>
                 <span style={{fontSize:11,fontWeight:500,color:'#92400E'}}>At Risk</span>
               </div>
-            )}
-            {breachedCount>0&&(
-              <div onClick={()=>setFSla(fSla==='breached'?null:'breached')} style={{display:'flex',alignItems:'center',gap:5,background:fSla==='breached'?'#fecaca':'#ffe2de',border:`${fSla==='breached'?'2':'1'}px solid ${fSla==='breached'?'#d42d35':'#fca5a5'}`,borderRadius:128,padding:'5px 14px',cursor:'pointer',transition:'all .15s',flexShrink:0,boxShadow:fSla==='breached'?'0 0 0 2px #d42d3530':'none'}}>
+            <div onClick={()=>setFSla(fSla==='breached'?null:'breached')} style={{display:'flex',alignItems:'center',gap:5,background:fSla==='breached'?'#fecaca':'#ffe2de',border:`${fSla==='breached'?'2':'1'}px solid ${fSla==='breached'?'#d42d35':'#fca5a5'}`,borderRadius:128,padding:'5px 14px',cursor:'pointer',transition:'all .15s',flexShrink:0,boxShadow:fSla==='breached'?'0 0 0 2px #d42d3530':'none'}}>
                 <i className="bi-x-circle-fill" style={{color:'#d42d35',fontSize:13}}></i>
                 <span style={{fontSize:13,fontWeight:700,color:'#991b1b'}}>{breachedCount}</span>
                 <span style={{fontSize:11,fontWeight:500,color:'#991b1b'}}>Breached</span>
               </div>
-            )}
             {open.length>0&&(
               <button onClick={startWorkMode}
                 style={{height:36,padding:'0 18px',borderRadius:128,border:'none',background:'#1f74b3',color:'white',fontSize:13,fontWeight:700,cursor:'pointer',display:'flex',alignItems:'center',gap:7,transition:'all .15s'}}>
