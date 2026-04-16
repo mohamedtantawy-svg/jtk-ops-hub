@@ -55,11 +55,12 @@ const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowle
     return c.status==='sent'&&canSee(c);
   }),[comms,filter,isLA,user]);
 
-  const pendingForMe=useMemo(()=>comms.filter(c=>c.status==='sent'&&targetMatch(c)&&!c.acks.includes(user.id)&&!(c.author&&c.author.id===user.id)),[comms,user]);
+  const uid=Number(user.id);
+  const pendingForMe=useMemo(()=>comms.filter(c=>c.status==='sent'&&targetMatch(c)&&!c.acks.includes(uid)&&!(c.author&&c.author.id===user.id)),[comms,user,uid]);
 
   const acknowledge=(id)=>{
-    if(apiAcknowledge) apiAcknowledge(id, user.id);
-    else setComms(prev=>prev.map(c=>c.id===id&&!c.acks.includes(user.id)?{...c,acks:[...c.acks,user.id]}:c));
+    if(apiAcknowledge) apiAcknowledge(id, uid);
+    else setComms(prev=>prev.map(c=>c.id===id&&!c.acks.includes(uid)?{...c,acks:[...c.acks,uid]}:c));
   };
   const acknowledgeAll=()=>{
     pendingForMe.forEach(c=>acknowledge(c.id));
@@ -124,7 +125,7 @@ const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowle
   //    (using the canonical matcher so AMERICAS = NAM ∪ LATAM etc).
   // 2) Role-scope that list so TLs only see their team, agents only see self,
   //    while admins and regional managers see everyone.
-  const accessType=perms?.accessType;
+  const accessType=perms?.raw;
   const getAckMembers=(comm)=>{
     let audienceMembers;
     if (Array.isArray(comm.target)) {
@@ -274,7 +275,7 @@ const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowle
             <tbody>
               {visible.map(comm => {
                 const t = COMMS_TYPES[comm.type] || COMMS_TYPES.update;
-                const iAcked = comm.acks.includes(user.id);
+                const iAcked = comm.acks.includes(uid);
                 const overdue = !iAcked && isOverdue(comm);
                 const ackMembers = getAckMembers(comm);
                 const ackedCount = comm.acks.filter(id => ackMembers.find(x => x.member.id === id)).length;
@@ -705,7 +706,7 @@ function WalkthroughOverlay({ comm, remaining, onAcknowledge, onSkip, onExit, on
 // ── Detail overlay — view single announcement ──
 function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setComms, apiComments, apiSetComments, apiLoadComments, apiAddComment, apiDeleteComment, apiLinks, apiLoadLinks, apiLinkAnnouncement, apiUnlinkAnnouncement, setDetailId, onReact }) {
   const t = COMMS_TYPES[comm.type] || COMMS_TYPES.update;
-  const iAcked = comm.acks.includes(user.id);
+  const iAcked = comm.acks.includes(Number(user.id));
   const PRIO_COLORS={high:'#d42d35',medium:'#ed8d00',low:'#29811e',critical:'#d42d35'};
 
   // ── Emoji floaters ──

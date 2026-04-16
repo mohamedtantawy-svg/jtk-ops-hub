@@ -50,11 +50,13 @@ export async function GET(req) {
                       LIMIT $${idx++} OFFSET $${idx++}`;
     params.push(limit, offset);
 
-    // Look up caller's team once (used for server-side audience scope unless admin)
+    // Look up caller's info once (team for audience scope, id for author match)
     let callerTeam = null;
-    if (user.role !== 'admin') {
-      const r = await query('SELECT team FROM members WHERE LOWER(email) = LOWER($1) LIMIT 1', [user.email]);
+    let callerId = user.id ? Number(user.id) : null;
+    if (user.role !== 'admin' || !callerId) {
+      const r = await query('SELECT id, team FROM members WHERE LOWER(email) = LOWER($1) LIMIT 1', [user.email]);
       callerTeam = r.rows[0]?.team || null;
+      if (!callerId) callerId = r.rows[0]?.id || null;
     }
 
     const [{ rows }, countResult] = await Promise.all([
@@ -62,17 +64,33 @@ export async function GET(req) {
       query(countSql, params.slice(0, -2)),
     ]);
 
-    // Filter by audience server-side (admin sees everything unfiltered)
+    // Filter by audience server-side (admin sees everything unfiltered).
+    // Always include announcements authored by the caller regardless of target.
     const filtered = user.role === 'admin'
       ? rows
-      : rows.filter(r => matchesAudience(r.target, callerTeam));
+      : rows.filter(r =>
+          (callerId && r.author_id === callerId) || matchesAudience(r.target, callerTeam)
+        );
+
+    // Read canonical acks from announcement_acks table (source of truth)
+    const announcementIds = filtered.map(r => r.id);
+    let acksMap = {};
+    if (announcementIds.length > 0) {
+      const acksResult = await query(
+        'SELECT announcement_id, ARRAY_AGG(user_id) AS user_ids FROM announcement_acks WHERE announcement_id = ANY($1) GROUP BY announcement_id',
+        [announcementIds]
+      );
+      for (const row of acksResult.rows) {
+        acksMap[row.announcement_id] = row.user_ids.map(Number);
+      }
+    }
 
     const items = filtered.map(r => ({
       id: r.id, type: r.type, title: r.title, body: r.body,
       target: r.target, priority: r.priority, isPopup: r.is_popup,
       imageUrl: r.image_url, link: r.link, status: r.status,
       authorId: r.author_id, pinned: r.pinned,
-      acks: Array.isArray(r.read_by) ? r.read_by : [],
+      acks: acksMap[r.id] || [],
       soundKey: r.sound_key || 'chime',
       sentAt: r.sent_at,
       createdAt: r.created_at, updatedAt: r.updated_at,
