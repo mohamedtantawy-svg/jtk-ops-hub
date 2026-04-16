@@ -76,8 +76,17 @@ export default function SourceTable({
   sortDefault = 'oldest',    // 'oldest' | 'newest' | 'sla'
 }) {
   const [searchTerm, setSearchTerm] = useState('');
-  const [sort, setSort] = useState(sortDefault);
+  // Column-based sorting: col name + direction
+  const defaultCol = sortDefault === 'startDate' ? 'startDate' : sortDefault === 'sla' ? 'sla' : 'createdAt';
+  const defaultDir = sortDefault === 'newest' ? 'desc' : 'asc';
+  const [sortCol, setSortCol] = useState(defaultCol);
+  const [sortDir, setSortDir] = useState(defaultDir); // 'asc' | 'desc'
   const [statusFilter, setStatusFilter] = useState(null);
+
+  const toggleSort = (col) => {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('asc'); }
+  };
 
   // Filter
   const filtered = useMemo(() => {
@@ -98,33 +107,37 @@ export default function SourceTable({
     return r;
   }, [rows, searchTerm, statusFilter]);
 
-  // Sort
+  // Sort by column + direction
   const sorted = useMemo(() => {
     const arr = [...filtered];
-    if (sort === 'oldest') return arr.sort((a, b) => {
-      const aTime = a.createdAt ? new Date(a.createdAt).getTime() : Infinity;
-      const bTime = b.createdAt ? new Date(b.createdAt).getTime() : Infinity;
-      return aTime - bTime; // oldest first
+    const dir = sortDir === 'desc' ? -1 : 1;
+
+    const getVal = (row) => {
+      switch (sortCol) {
+        case 'subject':   return (row.subject || '').toLowerCase();
+        case 'country':   return (row.country || '').toLowerCase();
+        case 'assignee':  return (row.assignee || '').toLowerCase();
+        case 'startDate': return row.startDate ? new Date(row.startDate).getTime() : Infinity;
+        case 'createdAt': return row.createdAt ? new Date(row.createdAt).getTime() : Infinity;
+        case 'updatedAt': return row.updatedAt ? new Date(row.updatedAt).getTime() : 0;
+        case 'status':    return (row.status?.label || '').toLowerCase();
+        case 'sla': {
+          if (row.slaRemaining != null) return row.slaRemaining;
+          if (row.createdAt) return -(Date.now() - new Date(row.createdAt).getTime());
+          return 0;
+        }
+        default: return 0;
+      }
+    };
+
+    return arr.sort((a, b) => {
+      const aVal = getVal(a);
+      const bVal = getVal(b);
+      if (aVal < bVal) return -1 * dir;
+      if (aVal > bVal) return 1 * dir;
+      return 0;
     });
-    if (sort === 'newest') return arr.sort((a, b) => {
-      const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return bTime - aTime; // newest first
-    });
-    if (sort === 'sla') return arr.sort((a, b) => {
-      // Workbench tasks have slaRemaining (seconds) — use it when available
-      const aHasSla = a.slaRemaining != null;
-      const bHasSla = b.slaRemaining != null;
-      if (aHasSla && bHasSla) return a.slaRemaining - b.slaRemaining; // lowest remaining first
-      if (aHasSla) return -1; // SLA tasks before non-SLA
-      if (bHasSla) return 1;
-      // Fallback: oldest (most SLA-critical) first
-      const aAge = a.createdAt ? (Date.now() - new Date(a.createdAt).getTime()) : 0;
-      const bAge = b.createdAt ? (Date.now() - new Date(b.createdAt).getTime()) : 0;
-      return bAge - aAge;
-    });
-    return arr;
-  }, [filtered, sort]);
+  }, [filtered, sortCol, sortDir]);
 
   // Status counts
   const counts = useMemo(() => {
@@ -157,13 +170,6 @@ export default function SourceTable({
           </div>
         )}
 
-        {/* Sort */}
-        <select value={sort} onChange={e => setSort(e.target.value)}
-          style={{ height: 32, padding: '0 8px', borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 12, color: '#616161', background: 'white', cursor: 'pointer', outline: 'none' }}>
-          <option value="oldest">Oldest first</option>
-          <option value="newest">Newest first</option>
-          <option value="sla">SLA urgency</option>
-        </select>
 
         {onRefresh && (
           <button onClick={onRefresh} title="Refresh" style={{ ...iconBtnStyle, color: loading ? '#ed8d00' : '#9e9e9e' }}>
@@ -216,13 +222,13 @@ export default function SourceTable({
             <thead>
               <tr style={{ background: '#f5f4f2', position: 'sticky', top: 0, zIndex: 2 }}>
                 {showSourceColumn && <th style={{ ...thStyle, width: 80 }}>Source</th>}
-                <th style={{ ...thStyle, textAlign: 'left', minWidth: 220 }}>Employee</th>
-                <th style={{ ...thStyle, width: 100 }}>Country</th>
-                <th style={{ ...thStyle, width: 110 }}>Assignee</th>
-                <th style={{ ...thStyle, width: 90 }}>Start Date</th>
-                <th style={{ ...thStyle, width: 70 }}>SLA</th>
-                <th style={{ ...thStyle, width: 90 }}>Updated</th>
-                <th style={{ ...thStyle, width: 130 }}>Status</th>
+                <SortTh col="subject"   label="Employee"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, textAlign: 'left', minWidth: 220 }} />
+                <SortTh col="country"   label="Country"    sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 100 }} />
+                <SortTh col="assignee"  label="Assignee"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 110 }} />
+                <SortTh col="startDate" label="Start Date" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 90 }} />
+                <SortTh col="sla"       label="SLA"        sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 70 }} />
+                <SortTh col="updatedAt" label="Updated"    sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 90 }} />
+                <SortTh col="status"    label="Status"     sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 130 }} />
                 <th style={{ ...thStyle, width: 70 }}>Task</th>
                 <th style={{ ...thStyle, width: 70 }}>Contract</th>
               </tr>
@@ -455,6 +461,22 @@ function StatusPill({ label, count, active, onClick, color }) {
         </span>
       )}
     </button>
+  );
+}
+
+// ── Sortable table header ──
+function SortTh({ col, label, sortCol, sortDir, onSort, style }) {
+  const active = sortCol === col;
+  return (
+    <th style={{ ...style, cursor: 'pointer', userSelect: 'none' }} onClick={() => onSort(col)}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        {label}
+        <span style={{ display: 'inline-flex', flexDirection: 'column', lineHeight: 1, gap: 0, fontSize: 7, marginTop: -1 }}>
+          <i className="bi-caret-up-fill" style={{ color: active && sortDir === 'asc' ? '#1b1b1b' : '#ccc' }} />
+          <i className="bi-caret-down-fill" style={{ color: active && sortDir === 'desc' ? '#1b1b1b' : '#ccc', marginTop: -3 }} />
+        </span>
+      </span>
+    </th>
   );
 }
 

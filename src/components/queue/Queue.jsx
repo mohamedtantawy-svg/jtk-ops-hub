@@ -614,7 +614,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           emptyIcon="bi-person-plus"
           emptyLabel="No actionable onboarding tasks"
           emptySubLabel="All onboarding tasks are handled"
-          sortDefault="oldest"
+          sortDefault="startDate"
         />
         </ErrorBoundary>
       )}
