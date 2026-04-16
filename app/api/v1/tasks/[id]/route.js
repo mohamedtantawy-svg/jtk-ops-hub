@@ -8,8 +8,15 @@ export async function GET(req, { params }) {
   try {
     const { id } = await params;
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-    const whereClause = isUUID ? 'WHERE id = $1' : 'WHERE external_id = $1';
-    const { rows } = await query(`SELECT * FROM tasks ${whereClause}`, [id]);
+
+    // Role-based scoping: non-admin/non-RM users can only access tasks assigned to them or unassigned
+    let whereClause = isUUID ? 'WHERE t.id = $1' : 'WHERE t.external_id = $1';
+    const params_arr = [id];
+    if (user.role !== 'admin' && user.role !== 'regional_manager') {
+      whereClause += ` AND (t.assignee_id IN (SELECT id FROM members WHERE email = $2) OR t.assignee_id IS NULL)`;
+      params_arr.push(user.email);
+    }
+    const { rows } = await query(`SELECT * FROM tasks t ${whereClause}`, params_arr);
     if (rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
     const r = rows[0];
