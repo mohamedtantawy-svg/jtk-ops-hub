@@ -57,6 +57,11 @@ export function useAnnouncements() {
   // ── Initial load — try API, fall back to static data ─────────────────────
   useEffect(() => {
     if (loadedRef.current) return;
+    // Don't fire API calls before the user has logged in — there's no token
+    // yet, so the request would get a 401. The api.js 401 handler is now
+    // safe, but there's no point making a doomed request anyway.
+    const hasToken = typeof window !== 'undefined' && !!localStorage.getItem('ops_hub_token');
+    if (!hasToken) return; // will try again on next re-render after login
     loadedRef.current = true;
 
     (async () => {
@@ -71,7 +76,7 @@ export function useAnnouncements() {
         setIsOnline(false);
       }
     })();
-  }, []);
+  });
 
   // ── Refresh from API ─────────────────────────────────────────────────────
   const refresh = useCallback(async () => {

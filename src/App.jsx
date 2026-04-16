@@ -44,6 +44,8 @@ import KnowledgeHub from './components/views/KnowledgeHub';
 import GMReportingView from './components/views/GMReportingView';
 import SettingsView from './components/views/SettingsView';
 import ProjectsView from './components/views/ProjectsView';
+import Slack from './components/views/Slack';
+import Alerts from './components/views/Alerts';
 import CreateProjectModal from './components/modals/CreateProjectModal';
 import CreateRequestModal from './components/modals/CreateRequestModal';
 import CreateEscalationModal from './components/modals/CreateEscalationModal';
@@ -496,6 +498,9 @@ const App=()=>{
   useEffect(()=>{
     const handler=()=>{
       setUser(null);
+      setLoggedInEmail(null);
+      setImpersonating(null);
+      try { localStorage.removeItem('ops_hub_logged_in_email'); } catch(e) {}
       addToast('error','Session Expired','Please log in again.');
     };
     window.addEventListener('ops-hub-session-expired',handler);
@@ -630,6 +635,8 @@ const App=()=>{
           {view==='hr-reports'    &&perms?.canView('hr-reports')!==false   &&<div className="page-enter"><GMReportingView user={effectiveUser} addToast={addToast} createReportModal={createReportModal} setCreateReportModal={setCreateReportModal}/></div>}
           {view==='settings'      &&perms?.canView('settings')!==false     &&<div className="page-enter"><SettingsView settings={settings} setSettings={setSettings} user={user} addToast={addToast} tasks={tasks} setTasks={setTasks} subFilter={subFilter} accessTypes={accessTypes} setAccessTypes={setAccessTypes} userAccessMap={userAccessMap} setUserAccessMap={setUserAccessMap} perms={perms}/></div>}
           {view==='projects'      &&perms?.canView('projects')!==false     &&<div className="page-enter"><ProjectsView projects={projects} setProjects={setProjects} user={user} onNewProject={()=>setProjectModal('create')} onEditProject={(p)=>setProjectModal(p)}/></div>}
+          {view==='slack'         &&perms?.canView('slack')!==false        &&<div className="page-enter"><Slack tasks={tasks.filter(t=>t.source==='slack')} setTasks={setTasks} onEscalMgr={openEscalModal} addToast={addToast} user={effectiveUser}/></div>}
+          {view==='alerts'        &&perms?.canView('alerts')!==false       &&<div className="page-enter"><Alerts tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setTasks={setTasks}/></div>}
       </div>
       {escalModal    &&<EscalModal task={escalModal} bulkCount={bulkIds?.length||0} onConfirm={confirmEscal} onClose={()=>{setEscalModal(null);setBulkIds(null);}}/>}
       {reassignModal &&<ReassignModal task={reassignModal} tasks={tasks} bulkCount={bulkIds?.length||0} onConfirm={confirmReassign} onClose={()=>{setReassignModal(null);setBulkIds(null);}}/>}
