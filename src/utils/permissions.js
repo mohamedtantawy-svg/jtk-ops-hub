@@ -57,3 +57,37 @@ export const scopeMembers = (allMembers, user, accessType) => {
   const visibleEmails = getVisibleEmailsForAccess(user?.email);
   return allMembers.filter(m => visibleEmails.has(m.email?.toLowerCase()));
 };
+
+// ── Scope escalations based on access level + hierarchy ──────────────────
+// Mirrors the server-side filter in app/api/v1/escalations/route.js so the
+// FE badge, "Needs Your Attention" feed, and Escalations page all agree.
+//
+// An escalation is visible to a user when EITHER:
+//   • its raiser (escalatedByEmail) is in the user's visible-email set, OR
+//   • its manager (managerId → email) is in that same set
+//
+// Admins (dataScope='all_tasks') see everything.
+export const scopeEscalations = (escalations, user, accessType, allMembers) => {
+  if (!Array.isArray(escalations)) return [];
+  const scope = getDataScope(accessType);
+  if (scope === 'all_tasks') return escalations;
+
+  const visibleEmails = getVisibleEmailsForAccess(user?.email);
+  // Build an id → email map once so the filter stays O(1) per row
+  const members = Array.isArray(allMembers) && allMembers.length > 0 ? allMembers : TEAM_MEMBERS.map((m, i) => ({ id: i + 1, email: m.email }));
+  const emailById = new Map();
+  for (const m of members) {
+    if (m && m.id != null && m.email) emailById.set(Number(m.id), m.email.toLowerCase());
+  }
+
+  return escalations.filter(e => {
+    const raiser = (e.escalatedByEmail || '').toLowerCase();
+    if (raiser && visibleEmails.has(raiser)) return true;
+    const mgrEmail = emailById.get(Number(e.managerId)) || '';
+    if (mgrEmail && visibleEmails.has(mgrEmail)) return true;
+    // Fallback for legacy rows without escalatedByEmail where the raiser is
+    // literally the current user's display name — helps with in-flight seed data.
+    if (e.escalatedBy && user?.name && e.escalatedBy === user.name) return true;
+    return false;
+  });
+};

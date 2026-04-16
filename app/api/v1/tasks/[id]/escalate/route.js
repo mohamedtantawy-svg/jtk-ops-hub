@@ -22,11 +22,24 @@ export async function PATCH(req, { params }) {
       );
       if (rows.length === 0) return null;
 
-      // Create escalation record
+      // Create escalation record — also persist the caller's identity so the
+      // scoping filter on GET /escalations can match the raiser.
       const { rows: [escalation] } = await client.query(
-        `INSERT INTO escalations (task_id, subject, reason, escalated_by, manager_id, escalation_source)
-         VALUES ($1, $2, $3, $4, $5, 'ticket') RETURNING *`,
-        [rows[0].id, rows[0].subject, reason, authUser.name || 'System', managerId]
+        `INSERT INTO escalations
+           (task_id, subject, reason,
+            escalated_by, escalated_by_email, escalated_by_id,
+            manager_id, manager_name,
+            escalation_source)
+         VALUES ($1, $2, $3,
+                 $4, $5, $6,
+                 $7, (SELECT name FROM members WHERE id = $7),
+                 'ticket')
+         RETURNING *`,
+        [
+          rows[0].id, rows[0].subject, reason,
+          authUser.name || 'System', authUser.email || null, authUser.id || null,
+          managerId,
+        ]
       );
 
       await client.query(

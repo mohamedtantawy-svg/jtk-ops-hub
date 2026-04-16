@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { resolveUserPermissions, canAccessView, canPerformAction, getDataScope, hasAdminPower, scopeTasks, scopeMembers } from '../utils/permissions';
+import { resolveUserPermissions, canAccessView, canPerformAction, getDataScope, hasAdminPower, scopeTasks, scopeMembers, scopeEscalations } from '../utils/permissions';
 
 export const usePermissions = (user, accessTypes, userAccessMap) => {
   return useMemo(() => {
@@ -18,6 +18,7 @@ export const usePermissions = (user, accessTypes, userAccessMap) => {
       accessTypeId: accessType?.id || 'at_agent',
       scopeTasks: (tasks, allMembers) => scopeTasks(tasks, user, accessType, allMembers),
       scopeMembers: (allMembers) => scopeMembers(allMembers, user, accessType),
+      scopeEscalations: (escalations, allMembers) => scopeEscalations(escalations, user, accessType, allMembers),
     };
   }, [user, accessTypes, userAccessMap]);
 };

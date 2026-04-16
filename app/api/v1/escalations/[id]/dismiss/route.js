@@ -14,8 +14,14 @@ export async function PATCH(req, { params }) {
   try {
     const { id } = await params;
     const { rows } = await query(
-      "UPDATE escalations SET status = 'dismissed', updated_at = NOW() WHERE id = $1 RETURNING *",
-      [id]
+      `UPDATE escalations
+          SET status = 'dismissed',
+              resolved_at = NOW(),
+              resolved_by = $2,
+              updated_at = NOW()
+        WHERE id = $1
+        RETURNING *`,
+      [id, user.email]
     );
     if (rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     return NextResponse.json({ ok: true });

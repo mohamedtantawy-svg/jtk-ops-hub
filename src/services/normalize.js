@@ -96,11 +96,13 @@ export function normalizeEscalation(e) {
   if (!e) return null;
   return {
     id: e.id,
-    task: null,
+    task: null, // hydrated client-side in App.jsx by taskId lookup
     taskId: e.taskId || null,
     subject: e.subject || '',
     reason: e.reason || '',
-    escalatedBy: e.escalatedBy || '',
+    escalatedBy:      e.escalatedBy || '',
+    escalatedByEmail: (e.escalatedByEmail || '').toLowerCase() || null,
+    escalatedById:    e.escalatedById ? Number(e.escalatedById) : null,
     escalatedAt: e.escalatedAt ? new Date(e.escalatedAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '',
     managerId: e.managerId ? Number(e.managerId) : null,
     managerName: e.managerName || 'Team Lead',
@@ -113,6 +115,10 @@ export function normalizeEscalation(e) {
     slackChannel: e.slackChannel || null,
     slackUser: e.slackUser || null,
     slackMessageUrl: e.slackMessageUrl || null,
+    severity: e.severity || 'medium',
+    resolvedAt: e.resolvedAt || null,
+    resolvedBy: e.resolvedBy || null,
+    createdAt: e.createdAt || null,
   };
 }
 

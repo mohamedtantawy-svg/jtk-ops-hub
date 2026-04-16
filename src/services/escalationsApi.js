@@ -17,10 +17,18 @@ export async function fetchEscalationById(id) {
   return apiFetch(`/escalations/${id}`);
 }
 
-export async function createEscalation({ taskId, subject, reason, managerId }) {
+export async function createEscalation({
+  taskId, subject, reason, managerId,
+  escalationSource, slackChannel, slackUser, slackMessageUrl,
+  severity,
+}) {
   return apiFetch('/escalations', {
     method: 'POST',
-    body: JSON.stringify({ taskId, subject, reason, managerId }),
+    body: JSON.stringify({
+      taskId, subject, reason, managerId,
+      escalationSource, slackChannel, slackUser, slackMessageUrl,
+      severity,
+    }),
   });
 }
 
