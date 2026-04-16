@@ -668,6 +668,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
               emptyLabel="No actionable onboarding tasks"
               emptySubLabel="All onboarding tasks are handled"
               sortDefault="startDate"
+              hideStatusPills
             />
           )}
           {onboardingSubTab==='paused'&&(
@@ -681,6 +682,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
               emptySubLabel="All contracts are progressing"
               sortDefault="oldest"
               showPausedSla
+              hideStatusPills
             />
           )}
         </div>
