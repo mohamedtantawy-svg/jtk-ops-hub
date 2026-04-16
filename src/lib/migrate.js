@@ -244,6 +244,28 @@ UPDATE escalations e
  WHERE e.escalated_by_email IS NULL
    AND e.escalated_by = m.name;
 
+-- ── Announcements: per-announcement sound + sent timestamp (additive) ───────
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS sound_key VARCHAR(32) DEFAULT 'chime';
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS sent_at   TIMESTAMPTZ;
+
+-- ── Announcement acks: source-of-truth per-user ack rows (never deleted) ────
+CREATE TABLE IF NOT EXISTS announcement_acks (
+  announcement_id UUID REFERENCES announcements(id) ON DELETE CASCADE,
+  user_id         INTEGER NOT NULL,
+  user_email      VARCHAR(255),
+  acked_at        TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (announcement_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ann_acks_user ON announcement_acks(user_id);
+CREATE INDEX IF NOT EXISTS idx_ann_acks_ann  ON announcement_acks(announcement_id);
+
+-- Idempotent backfill from legacy read_by JSONB → announcement_acks rows
+INSERT INTO announcement_acks (announcement_id, user_id, acked_at)
+SELECT a.id, (uid)::int, a.updated_at
+  FROM announcements a, jsonb_array_elements_text(COALESCE(a.read_by, '[]'::jsonb)) uid
+ WHERE NOT EXISTS (SELECT 1 FROM announcement_acks x WHERE x.announcement_id = a.id AND x.user_id = (uid)::int)
+ON CONFLICT DO NOTHING;
+
 CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
 CREATE INDEX IF NOT EXISTS idx_requests_to_team ON requests(to_team);
 CREATE INDEX IF NOT EXISTS idx_requests_from_member ON requests(from_member_id);

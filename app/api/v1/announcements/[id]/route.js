@@ -18,6 +18,9 @@ export async function GET(req, { params }) {
       target: r.target, priority: r.priority, isPopup: r.is_popup,
       imageUrl: r.image_url, link: r.link, status: r.status,
       authorId: r.author_id, pinned: r.pinned,
+      acks: Array.isArray(r.read_by) ? r.read_by : [],
+      soundKey: r.sound_key || 'chime',
+      sentAt: r.sent_at,
       createdAt: r.created_at, updatedAt: r.updated_at,
     });
   } catch (err) {
@@ -40,11 +43,15 @@ export async function PATCH(req, { params }) {
     const { id } = await params;
     const body = await req.json();
 
-    // Enum validation
-    const VALID_TYPES = ['info', 'alert', 'celebration', 'policy', 'update'];
-    const VALID_PRIORITIES = ['low', 'medium', 'high', 'critical'];
-    const VALID_STATUSES = ['draft', 'published', 'archived'];
-    const VALID_TARGETS = ['all', 'managers', 'agents', 'team'];
+    // Enum validation — kept in lockstep with POST + compose UI
+    const VALID_TYPES = ['info', 'alert', 'announce', 'celebration', 'policy', 'update', 'guidance', 'kudos', 'general'];
+    const VALID_PRIORITIES = ['low', 'medium', 'high', 'critical', 'normal'];
+    const VALID_STATUSES = ['draft', 'published', 'sent', 'archived'];
+    const VALID_TARGETS = ['all','global','emea','apac','americas','nam','latam'];
+    const VALID_SOUNDS = ['chime','alert','kudos','none'];
+
+    if (body.target) body.target = String(body.target).toLowerCase();
+
     if (body.type && !VALID_TYPES.includes(body.type)) {
       return NextResponse.json({ error: `Invalid type. Must be one of: ${VALID_TYPES.join(', ')}` }, { status: 400 });
     }
@@ -57,8 +64,11 @@ export async function PATCH(req, { params }) {
     if (body.target && !VALID_TARGETS.includes(body.target)) {
       return NextResponse.json({ error: `Invalid target. Must be one of: ${VALID_TARGETS.join(', ')}` }, { status: 400 });
     }
+    if (body.soundKey && !VALID_SOUNDS.includes(body.soundKey)) {
+      return NextResponse.json({ error: `Invalid soundKey. Must be one of: ${VALID_SOUNDS.join(', ')}` }, { status: 400 });
+    }
 
-    const allowed = ['type', 'title', 'body', 'target', 'priority', 'is_popup', 'image_url', 'link', 'status', 'pinned'];
+    const allowed = ['type', 'title', 'body', 'target', 'priority', 'is_popup', 'image_url', 'link', 'status', 'pinned', 'sound_key'];
     const sets = [];
     const vals = [];
     let idx = 1;

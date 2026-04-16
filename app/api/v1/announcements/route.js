@@ -2,6 +2,20 @@ import { NextResponse } from 'next/server';
 import { query } from '../../../../src/lib/db';
 import { getAuthUser, requireRole } from '../../../../src/lib/auth-helpers';
 
+// Server-side audience match — mirrors src/data/comms.js matchesAudience()
+function matchesAudience(target, memberTeam) {
+  if (!target || target === 'all' || target === 'global') return true;
+  const t = String(target).toLowerCase();
+  const team = String(memberTeam || '').toLowerCase();
+  if (!team) return false;
+  if (t === team) return true;
+  if (team === 'latam + nam' && (t === 'nam' || t === 'latam' || t === 'americas')) return true;
+  if (t === 'americas' && (team === 'nam' || team === 'latam' || team === 'latam + nam')) return true;
+  return false;
+}
+
+const VALID_TARGETS = ['all','global','emea','apac','americas','nam','latam'];
+
 export async function GET(req) {
   try {
     const user = getAuthUser(req);
@@ -28,24 +42,43 @@ export async function GET(req) {
     if (target) { whereSql += ` AND target = $${idx++}`; params.push(target); }
 
     const countSql = 'SELECT COUNT(*) FROM announcements' + whereSql;
-    const dataSql = 'SELECT id, type, title, body, target, priority, is_popup, image_url, link, status, author_id, pinned, created_at, updated_at FROM announcements' + whereSql + ` ORDER BY pinned DESC, created_at DESC LIMIT $${idx++} OFFSET $${idx++}`;
+    const dataSql = `SELECT id, type, title, body, target, priority, is_popup, image_url, link,
+                            status, author_id, pinned, read_by, sound_key, sent_at,
+                            created_at, updated_at
+                       FROM announcements${whereSql}
+                      ORDER BY pinned DESC, COALESCE(sent_at, created_at) DESC
+                      LIMIT $${idx++} OFFSET $${idx++}`;
     params.push(limit, offset);
+
+    // Look up caller's team once (used for server-side audience scope unless admin)
+    let callerTeam = null;
+    if (user.role !== 'admin') {
+      const r = await query('SELECT team FROM members WHERE LOWER(email) = LOWER($1) LIMIT 1', [user.email]);
+      callerTeam = r.rows[0]?.team || null;
+    }
 
     const [{ rows }, countResult] = await Promise.all([
       query(dataSql, params),
       query(countSql, params.slice(0, -2)),
     ]);
 
-    const total = parseInt(countResult.rows[0].count, 10);
+    // Filter by audience server-side (admin sees everything unfiltered)
+    const filtered = user.role === 'admin'
+      ? rows
+      : rows.filter(r => matchesAudience(r.target, callerTeam));
 
-    const items = rows.map(r => ({
+    const items = filtered.map(r => ({
       id: r.id, type: r.type, title: r.title, body: r.body,
       target: r.target, priority: r.priority, isPopup: r.is_popup,
       imageUrl: r.image_url, link: r.link, status: r.status,
       authorId: r.author_id, pinned: r.pinned,
+      acks: Array.isArray(r.read_by) ? r.read_by : [],
+      soundKey: r.sound_key || 'chime',
+      sentAt: r.sent_at,
       createdAt: r.created_at, updatedAt: r.updated_at,
     }));
 
+    const total = parseInt(countResult.rows[0].count, 10);
     return NextResponse.json({ items, page, limit, total });
   } catch (err) {
     console.error('[announcements GET]', err.message);
@@ -58,20 +91,42 @@ export async function POST(req) {
     const { authorized, user, status, error } = requireRole(req, 'admin', 'manager');
     if (!authorized) return NextResponse.json({ error }, { status });
 
-    const { type, title, body, target, priority, isPopup, imageUrl, link } = await req.json();
+    const { type, title, body, target, priority, isPopup, imageUrl, link, soundKey } = await req.json();
     if (!title) return NextResponse.json({ error: 'Title required' }, { status: 400 });
 
+    const normalizedTarget = (target || 'all').toLowerCase();
+    if (!VALID_TARGETS.includes(normalizedTarget)) {
+      return NextResponse.json({ error: `Invalid target. Must be one of: ${VALID_TARGETS.join(', ')}` }, { status: 400 });
+    }
+
     const { rows } = await query(
-      `INSERT INTO announcements (type, title, body, target, priority, is_popup, image_url, link)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-      [type || 'info', title, body || '', target || 'all', priority || 'normal', isPopup || false, imageUrl || null, link || null]
+      `INSERT INTO announcements
+         (type, title, body, target, priority, is_popup, image_url, link, author_id, sound_key)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+      [
+        type || 'info',
+        title,
+        body || '',
+        normalizedTarget,
+        priority || 'normal',
+        isPopup || false,
+        imageUrl || null,
+        link || null,
+        user?.id || null,
+        soundKey || 'chime',
+      ]
     );
 
     const r = rows[0];
     return NextResponse.json({
       id: r.id, type: r.type, title: r.title, body: r.body,
       target: r.target, priority: r.priority, isPopup: r.is_popup,
-      status: r.status, createdAt: r.created_at,
+      imageUrl: r.image_url, link: r.link, status: r.status,
+      authorId: r.author_id, pinned: r.pinned,
+      acks: [],
+      soundKey: r.sound_key || 'chime',
+      sentAt: r.sent_at,
+      createdAt: r.created_at,
     }, { status: 201 });
   } catch (err) {
     console.error('[announcements POST]', err.message);

@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useContext, useCallback } from 'react';
 import { TOOLS, STATUSES, FUNCTIONS, FLAGS } from '../../data/constants';
 import { MEMBERS } from '../../data/members';
+import { matchesAudience } from '../../data/comms';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import { CALENDAR_EVENTS } from '../../data/calendar';
 import { slaInfo, rel, getVisibleEmails } from '../../utils/helpers';
@@ -397,11 +398,9 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
         {/* ── PENDING ACKNOWLEDGEMENTS — Deel-style single banner carousel ── */}
         {(()=>{
           const targetMatch=(c)=>{
-            if(c.target==='all')return true;
-            if(c.target===user.team)return true;
             if(Array.isArray(c.target)&&c.target.includes(user.id))return true;
             if(c.author&&c.author.id===user.id)return true;
-            return false;
+            return matchesAudience(c.target, user.team);
           };
           const pendingAcks=comms.filter(c=>c.status==='sent'&&targetMatch(c)&&!c.acks.includes(user.id)&&!(c.author&&c.author.id===user.id));
           if(pendingAcks.length===0)return null;
@@ -713,7 +712,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
           {/* ── Stat cards ──── */}
           {(()=>{
             const pendingEscalCount=escalations.filter(e=>e.status==='pending').length;
-            const unackedComms=comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='alert'||c.type==='guidance')&&!c.acks.includes(user.id));
+            const inAudience=(c)=>matchesAudience(c.target,user.team)||(c.author&&c.author.id===user.id);
+            const unackedComms=comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='alert'||c.type==='guidance')&&!c.acks.includes(user.id)&&inAudience(c));
             const unackedCount=unackedComms.length;
             const todayStr=new Date().toISOString().slice(0,10);
             const todayMeetings=CALENDAR_EVENTS.filter(e=>e.date===todayStr);
@@ -775,10 +775,11 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             atRisk.forEach(t=>attentionItems.push({id:'r-'+t.id,icon:'bi-clock-fill',color:'#ed5e2a',bg:'#fff3e6',label:'At Risk',desc:t.subject,sub:t.id,nav:()=>{setSelTask(t);setView('my-queue');}}));
             // Pending escalations
             escalations.filter(e=>e.status==='pending').forEach(e=>attentionItems.push({id:'e-'+e.id,icon:'bi-arrow-up-circle-fill',color:'#1f74b3',bg:'#e8f0fe',label:'Escalation Pending',desc:e.task?.subject||e.taskId,sub:e.managerName,nav:()=>setView('escalations')}));
-            // Alerts from comms
-            comms.filter(c=>c.status==='sent'&&c.type==='alert'&&!c.acks.includes(user.id)).forEach(c=>attentionItems.push({id:'a-'+c.id,icon:'bi-exclamation-circle-fill',color:'#d42d35',bg:'#ffe2de',label:'Alert',desc:c.title,sub:'Requires acknowledgment',nav:()=>setView('announcements')}));
-            // New announcements
-            comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='guidance')&&!c.acks.includes(user.id)).forEach(c=>attentionItems.push({id:'n-'+c.id,icon:'bi-megaphone-fill',color:'#ed8d00',bg:'#fff8e6',label:'New Announcement',desc:c.title,sub:'Requires acknowledgment',nav:()=>setView('announcements')}));
+            // Alerts from comms (audience-filtered)
+            const inAud=(c)=>matchesAudience(c.target,user.team)||(c.author&&c.author.id===user.id);
+            comms.filter(c=>c.status==='sent'&&c.type==='alert'&&!c.acks.includes(user.id)&&inAud(c)).forEach(c=>attentionItems.push({id:'a-'+c.id,icon:'bi-exclamation-circle-fill',color:'#d42d35',bg:'#ffe2de',label:'Alert',desc:c.title,sub:'Requires acknowledgment',nav:()=>setView('announcements')}));
+            // New announcements (audience-filtered)
+            comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='guidance')&&!c.acks.includes(user.id)&&inAud(c)).forEach(c=>attentionItems.push({id:'n-'+c.id,icon:'bi-megaphone-fill',color:'#ed8d00',bg:'#fff8e6',label:'New Announcement',desc:c.title,sub:'Requires acknowledgment',nav:()=>setView('announcements')}));
             // Projects/deadlines close (calendar events within 3 days)
             const soon=new Date();soon.setDate(soon.getDate()+3);
             CALENDAR_EVENTS.filter(e=>e.type!=='meeting'&&new Date(e.date)<=soon&&new Date(e.date)>=new Date(new Date().toISOString().slice(0,10))).forEach(e=>attentionItems.push({id:'d-'+e.id,icon:'bi-calendar-x-fill',color:'#8b6dca',bg:'#f3eff8',label:'Deadline Soon',desc:e.title,sub:e.dateLabel,nav:()=>setView('calendar')}));
@@ -823,7 +824,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
         {isTeamScope&&<div style={{margin:'12px 24px 0',background:'white',border:'1px solid #e8e8e8',borderRadius:16,padding:'12px 20px'}}>
           {(()=>{
             const pendingEscalCount=escalations.filter(e=>e.status==='pending').length;
-            const unackedCount=comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='alert'||c.type==='guidance')&&!c.acks.includes(user.id)).length;
+            const inAudLead=(c)=>matchesAudience(c.target,user.team)||(c.author&&c.author.id===user.id);
+            const unackedCount=comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='alert'||c.type==='guidance')&&!c.acks.includes(user.id)&&inAudLead(c)).length;
             const leadSrcBreakdown=Object.entries(scope.reduce((a,t)=>{a[t.source]=(a[t.source]||0)+1;return a;},{})).sort((a,b)=>b[1]-a[1]);
             const leadTodayStr=new Date().toISOString().slice(0,10);
             const leadTodayMeetings=CALENDAR_EVENTS.filter(e=>e.date===leadTodayStr);

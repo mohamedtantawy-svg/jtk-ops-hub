@@ -1,4 +1,4 @@
-import { TEAM_MEMBERS, MEMBERS_BY_EMAIL, getVisibleEmailsForAccess, ALL_EMAILS_SET } from '../data/members';
+import { TEAM_MEMBERS, MEMBERS_BY_EMAIL, getVisibleEmailsForAccess, getDirectReports, ALL_EMAILS_SET } from '../data/members';
 
 // Resolve the access type for a user given their email
 export const resolveUserPermissions = (userEmail, accessTypes, userAccessMap) => {
@@ -90,4 +90,24 @@ export const scopeEscalations = (escalations, user, accessType, allMembers) => {
     if (e.escalatedBy && user?.name && e.escalatedBy === user.name) return true;
     return false;
   });
+};
+
+// ── Scope the ack tracker roster on the Announcements page ───────────────
+// Controls WHO shows up in the ack / pending list for a given announcement:
+//   admin / regional_manager → full roster (everyone in the audience)
+//   team_lead                → self + direct reports only
+//   agent                    → self only
+// The set is reduced AFTER the audience filter runs.
+export const scopeAckMembers = (members, user, accessType) => {
+  if (!Array.isArray(members)) return [];
+  const scope = getDataScope(accessType);
+  if (scope === 'all_tasks' || scope === 'regional_tasks') return members;
+  const email = (user?.email || '').toLowerCase();
+  if (!email) return members;
+  if (scope === 'team_tasks') {
+    const visible = new Set([email, ...getDirectReports(email).map(m => m.email.toLowerCase())]);
+    return members.filter(m => visible.has((m.email || '').toLowerCase()));
+  }
+  // own_tasks_only → just self
+  return members.filter(m => (m.email || '').toLowerCase() === email);
 };

@@ -20,10 +20,10 @@ export async function fetchAnnouncementById(id) {
 }
 
 // ── Create announcement ──────────────────────────────────────────────────────
-export async function createAnnouncement({ type, title, body, target, priority, isPopup, imageUrl, link }) {
+export async function createAnnouncement({ type, title, body, target, priority, isPopup, imageUrl, link, soundKey }) {
   return apiFetch('/announcements', {
     method: 'POST',
-    body: JSON.stringify({ type, title, body, target, priority, isPopup, imageUrl, link }),
+    body: JSON.stringify({ type, title, body, target, priority, isPopup, imageUrl, link, soundKey }),
   });
 }
 

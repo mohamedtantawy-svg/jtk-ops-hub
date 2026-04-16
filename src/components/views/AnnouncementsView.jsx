@@ -1,7 +1,8 @@
 import { useState, useContext, useMemo, useCallback, useEffect, useRef } from 'react';
 import { PermissionsContext, SettingsContext } from '../../App';
-import { COMMS_TYPES } from '../../data/comms';
+import { COMMS_TYPES, matchesAudience } from '../../data/comms';
 import { MEMBERS } from '../../data/members';
+import { scopeAckMembers } from '../../utils/permissions';
 import Avatar from '../ui/Avatar';
 import EmptyState from '../ui/EmptyState';
 import ComposeModal from '../modals/ComposeModal';
@@ -35,11 +36,11 @@ const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowle
 
   const enabledTypes=settings.comms_types_enabled||{alert:true,announce:true,update:true,guidance:true,kudos:true};
 
+  // Audience match uses the canonical matcher so NAM/LATAM/AMERICAS and
+  // LATAM+NAM dual-region members all resolve correctly.
   const targetMatch=(c)=>{
-    if(c.target==='all')return true;
-    if(c.target===user.team)return true;
     if(Array.isArray(c.target)&&c.target.includes(user.id))return true;
-    return false;
+    return matchesAudience(c.target, user.team);
   };
   const canSee=(c)=>{
     if(c.author&&c.author.id===user.id)return true;
@@ -91,9 +92,9 @@ const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowle
     if(addToast) addToast('info','Reminder Sent',`Nudge sent for: ${comm.title.slice(0,40)}`);
   };
 
-  const handleSend=async ({type,title,body,target,priority,status,isPopup,imageUrl,link})=>{
+  const handleSend=async ({type,title,body,target,priority,status,isPopup,imageUrl,link,soundKey})=>{
     const now=new Date().toISOString().slice(0,10);
-    const draft={type,title,body,target,priority,isPopup:isPopup||false,imageUrl:imageUrl||'',link:link||'',author:{id:user.id,name:user.name}};
+    const draft={type,title,body,target,priority,isPopup:isPopup||false,imageUrl:imageUrl||'',link:link||'',soundKey:soundKey||'chime',author:{id:user.id,name:user.name}};
     if(editDraft){
       // Update existing
       if(apiUpdate) apiUpdate(editDraft.id, draft);
@@ -119,13 +120,21 @@ const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowle
     else setComms(prev=>prev.filter(c=>c.id!==id));
   };
 
+  // 1) Expand the announcement's audience → the full list of recipient members
+  //    (using the canonical matcher so AMERICAS = NAM ∪ LATAM etc).
+  // 2) Role-scope that list so TLs only see their team, agents only see self,
+  //    while admins and regional managers see everyone.
+  const accessType=perms?.accessType;
   const getAckMembers=(comm)=>{
-    const targetIds=comm.target==='all'?MEMBERS.map(m=>m.id):
-      comm.target==='EMEA'?MEMBERS.filter(m=>m.team==='EMEA').map(m=>m.id):
-      comm.target==='APAC'?MEMBERS.filter(m=>m.team==='APAC').map(m=>m.id):
-      comm.target==='AMER'?MEMBERS.filter(m=>m.team==='AMER').map(m=>m.id):
-      Array.isArray(comm.target)?comm.target:MEMBERS.map(m=>m.id);
-    return targetIds.map(id=>({member:MEMBERS.find(m=>m.id===id),acked:comm.acks.includes(id)})).filter(x=>x.member!=null);
+    let audienceMembers;
+    if (Array.isArray(comm.target)) {
+      const set=new Set(comm.target);
+      audienceMembers=MEMBERS.filter(m=>set.has(m.id));
+    } else {
+      audienceMembers=MEMBERS.filter(m=>matchesAudience(comm.target, m.team));
+    }
+    const scoped=scopeAckMembers(audienceMembers, user, accessType);
+    return scoped.map(m=>({ member:m, acked:comm.acks.includes(m.id) }));
   };
 
   const ackDeadlineHrs=settings.comms_ack_deadline_hrs||48;
