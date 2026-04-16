@@ -216,15 +216,13 @@ export default function SourceTable({
             <thead>
               <tr style={{ background: '#f5f4f2', position: 'sticky', top: 0, zIndex: 2 }}>
                 {showSourceColumn && <th style={{ ...thStyle, width: 80 }}>Source</th>}
-                <th style={{ ...thStyle, textAlign: 'left', minWidth: 200 }}>Subject</th>
-                <th style={{ ...thStyle, width: 110 }}>Function</th>
-                <th style={{ ...thStyle, width: 80 }}>Country</th>
-                <th style={{ ...thStyle, width: 100 }}>Assignee</th>
-                <th style={{ ...thStyle, width: 80 }}>Start Date</th>
-                <th style={{ ...thStyle, width: 80 }}>Created</th>
+                <th style={{ ...thStyle, textAlign: 'left', minWidth: 220 }}>Employee</th>
+                <th style={{ ...thStyle, width: 100 }}>Country</th>
+                <th style={{ ...thStyle, width: 110 }}>Assignee</th>
+                <th style={{ ...thStyle, width: 90 }}>Start Date</th>
                 <th style={{ ...thStyle, width: 70 }}>SLA</th>
-                <th style={{ ...thStyle, width: 80 }}>Updated</th>
-                <th style={{ ...thStyle, width: 100 }}>Status</th>
+                <th style={{ ...thStyle, width: 90 }}>Updated</th>
+                <th style={{ ...thStyle, width: 130 }}>Status</th>
                 <th style={{ ...thStyle, width: 70 }}>Task</th>
                 <th style={{ ...thStyle, width: 70 }}>Contract</th>
               </tr>
@@ -308,15 +306,6 @@ const SourceRow = memo(function SourceRow({ row, showSource }) {
         </div>
       </td>
 
-      {/* Function */}
-      <td style={tdStyle}>
-        {row.function ? (
-          <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: 128, background: '#f2f2f2', color: '#616161', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }} title={row.function}>
-            {row.function}
-          </span>
-        ) : <span style={{ color: '#d5d5d5' }}>--</span>}
-      </td>
-
       {/* Country */}
       <td style={{ ...tdStyle, fontSize: 12, whiteSpace: 'nowrap' }}>
         {flag && <span style={{ marginRight: 3 }}>{flag}</span>}
@@ -340,15 +329,9 @@ const SourceRow = memo(function SourceRow({ row, showSource }) {
         {row.startDate ? fmtDate(row.startDate) : '--'}
       </td>
 
-      {/* Created */}
-      <td style={{ ...tdStyle, fontSize: 11, color: '#616161', whiteSpace: 'nowrap' }}>
-        {fmtDate(row.createdAt)}
-      </td>
-
       {/* SLA (age-based) */}
       <td style={tdStyle}>
         {row.slaRemaining != null ? (
-          // Workbench-style SLA with remaining time
           <WorkbenchSlaBadge slaRemaining={row.slaRemaining} slaBreachStatus={row.slaBreachStatus} />
         ) : sla ? (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 8px', borderRadius: 128, background: sla.bg, color: sla.color, fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' }}>
