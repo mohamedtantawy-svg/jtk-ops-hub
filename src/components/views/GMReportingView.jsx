@@ -1,5 +1,6 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useContext } from 'react';
 import { GM_REPORTS } from '../../data/reports';
+import { PermissionsContext } from '../../App';
 
 const DATE_RANGES = [
   { id:'7d',  label:'Last 7 Days',  days:7  },
@@ -8,6 +9,12 @@ const DATE_RANGES = [
 ];
 
 const GMReportingView=({user,addToast,createReportModal,setCreateReportModal})=>{
+  const perms=useContext(PermissionsContext);
+  if(perms&&perms.canView('hr-reports')===false)return(
+    <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',padding:40}}>
+      <div style={{textAlign:'center',color:'#9e9e9e'}}><i className="bi-shield-lock" style={{fontSize:32,display:'block',marginBottom:8,opacity:.5}}></i><div style={{fontSize:14,fontWeight:600}}>Access Denied</div><div style={{fontSize:12,marginTop:4}}>You don't have permission to view this page.</div></div>
+    </div>
+  );
   const [selReportId,setSelReportId]=useState(null);
   const [filterStatus,setFilterStatus]=useState('all');
   const [filterType,setFilterType]=useState('all');
@@ -253,6 +260,13 @@ function OriginalReportsSection({filteredReports,reportCounts,filterType,setFilt
               <div key={h} style={{fontSize:13,fontWeight:500,color:'#9e9e9e',textTransform:'none',letterSpacing:'normal'}}>{h}</div>
             ))}
           </div>
+          {filteredReports.length===0&&(
+            <div style={{padding:'48px 24px',textAlign:'center',color:'#9e9e9e'}}>
+              <i className="bi-inbox" style={{fontSize:28,display:'block',marginBottom:10,opacity:.4}}></i>
+              <div style={{fontSize:14,fontWeight:600,marginBottom:4}}>No reports match your filters</div>
+              <div style={{fontSize:12}}>Try adjusting the status, type, or date range filters.</div>
+            </div>
+          )}
           {filteredReports.map(r=>(
             <div key={r.id} onClick={()=>setSelReportId(r.id)} style={{display:'grid',gridTemplateColumns:'100px 100px 1fr 100px 90px 80px 80px',alignItems:'center',padding:'14px 16px',borderBottom:'1px solid #f2f2f2',cursor:'pointer',background:selReport?.id===r.id?'#f9f8f6':'white',borderLeft:selReport?.id===r.id?'3px solid #1b1b1b':'3px solid transparent',transition:'all .12s'}}
               onMouseEnter={e=>e.currentTarget.style.background='#f9f8f6'} onMouseLeave={e=>e.currentTarget.style.background=selReport?.id===r.id?'#f9f8f6':'white'}>

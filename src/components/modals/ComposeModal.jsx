@@ -26,6 +26,7 @@ const ComposeModal=({onClose,onSend,draft,currentUser})=>{
   const [showPreview,setShowPreview]=useState(false);
   const [imageMode,setImageMode]=useState(draft?.imageUrl?'url':'none'); // 'none' | 'upload' | 'url'
   const [dragActive,setDragActive]=useState(false);
+  const [submitting,setSubmitting]=useState(false);
   const fileInputRef=useRef(null);
   // Valid if title + (body or image)
   const valid=title.trim().length>0&&(body.trim().length>0||!!imageUrl);
@@ -33,10 +34,11 @@ const ComposeModal=({onClose,onSend,draft,currentUser})=>{
   const buildDraft=(status)=>({type,title,body,target,priority,status,isPopup,imageUrl,link});
 
   const handleSendWithPreview=()=>{
-    if(!valid)return;
+    if(!valid||submitting)return;
     if(isPopup){
       setShowPreview(true);
     } else {
+      setSubmitting(true);
       onSend(buildDraft('sent'));
       onClose();
     }
@@ -200,10 +202,10 @@ const ComposeModal=({onClose,onSend,draft,currentUser})=>{
           <button onClick={()=>{if(valid){onSend(buildDraft('draft'));setTimeout(()=>onClose(),200);}}} disabled={!valid} style={{background:'white',border:'1px solid #dedede',color:valid?'#1b1b1b':'#dedede',borderRadius:128,padding:'10px 24px',fontSize:13,cursor:valid?'pointer':'not-allowed',fontWeight:500}}>
             Save Draft
           </button>
-          <button onClick={handleSendWithPreview} disabled={!valid} style={{background:valid?'#1b1b1b':'#dedede',color:'white',border:'none',borderRadius:128,padding:'10px 24px',fontSize:13,cursor:valid?'pointer':'not-allowed',fontWeight:500,display:'flex',alignItems:'center',gap:6}}>
+          <button onClick={handleSendWithPreview} disabled={!valid||submitting} style={{background:valid&&!submitting?'#1b1b1b':'#dedede',color:'white',border:'none',borderRadius:128,padding:'10px 24px',fontSize:13,cursor:valid&&!submitting?'pointer':'not-allowed',fontWeight:500,display:'flex',alignItems:'center',gap:6,opacity:submitting?.6:1}}>
             {isPopup&&<i className="bi-eye" style={{fontSize:11}}></i>}
             <i className="bi-send-fill" style={{fontSize:11}}></i>
-            {isPopup?'Preview & Send':'Send Now'}
+            {submitting?'Sending…':isPopup?'Preview & Send':'Send Now'}
           </button>
         </div>
       </div>

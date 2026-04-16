@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 const SnoozeModal=({task,bulkCount,onConfirm,onClose})=>{
   const isBulk=bulkCount>0;
   const [sel,setSel]=useState('1h');
+  const [submitting,setSubmitting]=useState(false);
   const confirmBtnRef=useRef(null);
   useEffect(()=>{ confirmBtnRef.current?.focus(); },[]);
   const now=new Date();
@@ -46,7 +47,7 @@ const SnoozeModal=({task,bulkCount,onConfirm,onClose})=>{
         </div>
         <div style={{padding:'0 24px 24px 24px',display:'flex',gap:8,justifyContent:'flex-end',borderTop:'1px solid var(--border)',paddingTop:'var(--space-4)',marginTop:'var(--space-4)'}}>
           <button onClick={onClose} style={{background:'white',border:'1px solid #dedede',color:'#1b1b1b',borderRadius:128,padding:'10px 24px',fontSize:13,fontWeight:500,cursor:'pointer'}}>Cancel</button>
-          <button ref={confirmBtnRef} onClick={()=>onConfirm(task,sel)} style={{background:'#1b1b1b',color:'white',border:'none',borderRadius:128,padding:'10px 24px',fontSize:13,fontWeight:500,cursor:'pointer',display:'flex',alignItems:'center',gap:5}}><i className="bi-alarm" style={{fontSize:13}}></i>{isBulk?`Snooze ${bulkCount} Tasks`:'Snooze Task'}</button>
+          <button ref={confirmBtnRef} disabled={submitting} onClick={()=>{if(submitting)return;setSubmitting(true);onConfirm(task,sel);}} style={{background:submitting?'#dedede':'#1b1b1b',color:'white',border:'none',borderRadius:128,padding:'10px 24px',fontSize:13,fontWeight:500,cursor:submitting?'not-allowed':'pointer',display:'flex',alignItems:'center',gap:5,opacity:submitting?.6:1}}><i className="bi-alarm" style={{fontSize:13}}></i>{submitting?'Snoozing…':isBulk?`Snooze ${bulkCount} Tasks`:'Snooze Task'}</button>
         </div>
       </div>
     </div>

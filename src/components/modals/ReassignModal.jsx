@@ -12,6 +12,7 @@ const ReassignModal=({task,tasks,bulkCount,onConfirm,onClose})=>{
   const [search,setSearch]=useState('');
   const [teamFilter,setTeamFilter]=useState('all');
   const [accessFilter,setAccessFilter]=useState('all');
+  const [submitting,setSubmitting]=useState(false);
   const noteRef=useRef(null);
   const searchRef=useRef(null);
 
@@ -134,7 +135,7 @@ const ReassignModal=({task,tasks,bulkCount,onConfirm,onClose})=>{
         </div>
         <div style={{padding:'0 24px 24px 24px',display:'flex',gap:8,justifyContent:'flex-end',borderTop:'1px solid var(--border)',paddingTop:'var(--space-4)',marginTop:'var(--space-4)'}}>
           <button onClick={onClose} style={{background:'white',border:'1px solid #dedede',color:'#1b1b1b',borderRadius:128,padding:'10px 24px',fontSize:13,fontWeight:500,cursor:'pointer'}}>Cancel</button>
-          <button disabled={!selEmail} onClick={()=>onConfirm(task,selEmail,note)} style={{background:selEmail?'#1b1b1b':'#ccc',color:'white',border:'none',borderRadius:128,padding:'10px 24px',fontSize:13,fontWeight:500,cursor:selEmail?'pointer':'not-allowed',display:'flex',alignItems:'center',gap:5}}><i className="bi-person-check" style={{fontSize:13}}></i>{isBulk?`Reassign ${bulkCount} Tasks`:'Reassign'}</button>
+          <button disabled={!selEmail||submitting} onClick={()=>{if(submitting)return;setSubmitting(true);onConfirm(task,selEmail,note);}} style={{background:selEmail&&!submitting?'#1b1b1b':'#ccc',color:'white',border:'none',borderRadius:128,padding:'10px 24px',fontSize:13,fontWeight:500,cursor:selEmail&&!submitting?'pointer':'not-allowed',display:'flex',alignItems:'center',gap:5,opacity:submitting?.6:1}}><i className="bi-person-check" style={{fontSize:13}}></i>{submitting?'Reassigning…':isBulk?`Reassign ${bulkCount} Tasks`:'Reassign'}</button>
         </div>
       </div>
     </div>

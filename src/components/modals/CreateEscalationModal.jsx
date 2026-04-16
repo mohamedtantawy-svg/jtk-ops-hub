@@ -38,10 +38,12 @@ export default function CreateEscalationModal({ onConfirm, onClose, currentUser,
     return () => document.removeEventListener('keydown', handler);
   }, [onClose]);
 
+  const [submitting, setSubmitting] = useState(false);
   const canSubmit = subject.trim() && reason.trim() && managerId;
 
   const handleSubmit = () => {
-    if (!canSubmit) return;
+    if (!canSubmit || submitting) return;
+    setSubmitting(true);
     const mgr = MEMBERS.find(m => m.id === Number(managerId));
     const linkedTask = tasks.find(t => t.id === linkedTaskId) ?? null;
     const channel = SLACK_CHANNELS.find(c => c.id === slackChannel);
@@ -202,16 +204,17 @@ export default function CreateEscalationModal({ onConfirm, onClose, currentUser,
             }}>Cancel</button>
             <button
               onClick={handleSubmit}
-              disabled={!canSubmit}
+              disabled={!canSubmit||submitting}
               style={{
                 padding:'9px 22px', borderRadius:128, fontSize:14, fontWeight:600,
                 border:'none', display:'flex', alignItems:'center', gap:6,
-                background: canSubmit ? '#d42d35' : '#e8e8e8',
-                color: canSubmit ? 'white' : '#9e9e9e',
-                cursor: canSubmit ? 'pointer' : 'not-allowed', transition:'all .15s',
+                background: canSubmit&&!submitting ? '#d42d35' : '#e8e8e8',
+                color: canSubmit&&!submitting ? 'white' : '#9e9e9e',
+                cursor: canSubmit&&!submitting ? 'pointer' : 'not-allowed', transition:'all .15s',
+                opacity: submitting ? .6 : 1,
               }}
             >
-              <i className="bi-arrow-up-circle-fill" style={{ fontSize:13 }}/>Escalate
+              <i className="bi-arrow-up-circle-fill" style={{ fontSize:13 }}/>{submitting?'Escalating…':'Escalate'}
             </button>
           </div>
         </div>

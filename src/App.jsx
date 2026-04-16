@@ -492,6 +492,16 @@ const App=()=>{
     return()=>document.removeEventListener('keydown',h);
   },[escalModal,reassignModal,snoozeModal,createModal]);
 
+  // ── Session expiry listener — triggers when api.js gets 401 ─────────
+  useEffect(()=>{
+    const handler=()=>{
+      setUser(null);
+      addToast('error','Session Expired','Please log in again.');
+    };
+    window.addEventListener('ops-hub-session-expired',handler);
+    return()=>window.removeEventListener('ops-hub-session-expired',handler);
+  },[addToast]);
+
   // ── Dark mode: apply saved theme on mount ──────────────────────────────
   useEffect(()=>{
     try{

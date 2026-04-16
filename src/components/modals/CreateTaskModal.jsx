@@ -5,6 +5,7 @@ import { SLA_MINS, FLAGS, TOOLS } from '../../data/constants';
 const CreateTaskModal=({onConfirm,onClose,currentUser})=>{
   const [form,setForm]=useState({source:'zendesk',type:'Access Issue',country:'UK',assigneeId:currentUser.id,subject:'',body:'',link:'',deadline:''});
   const [submitted,setSubmitted]=useState(false);
+  const [submitting,setSubmitting]=useState(false);
   const subjectRef=useRef(null);
   useEffect(()=>{ subjectRef.current?.focus(); },[]);
   const upd=(k,v)=>setForm(f=>({...f,[k]:v}));
@@ -21,6 +22,8 @@ const CreateTaskModal=({onConfirm,onClose,currentUser})=>{
       setSubmitted(true);
       return;
     }
+    if(submitting) return;
+    setSubmitting(true);
     onConfirm(form);
   };
 
@@ -70,7 +73,7 @@ const CreateTaskModal=({onConfirm,onClose,currentUser})=>{
         </div>
         <div style={{padding:'0 24px 24px 24px',display:'flex',gap:8,justifyContent:'flex-end',flexShrink:0,borderTop:'1px solid var(--border)',paddingTop:'var(--space-4)',marginTop:'var(--space-4)'}}>
           <button onClick={onClose} style={{background:'white',border:'1px solid #dedede',color:'#1b1b1b',borderRadius:128,padding:'10px 24px',fontSize:13,fontWeight:500,cursor:'pointer'}}>Cancel</button>
-          <button onClick={handleSubmit} style={{background:valid?'#1b1b1b':'#dedede',color:'white',border:'none',borderRadius:128,padding:'10px 24px',fontSize:13,fontWeight:500,cursor:'pointer',display:'flex',alignItems:'center',gap:5}}><i className="bi-plus-circle-fill" style={{fontSize:13}}></i>Create Task</button>
+          <button disabled={submitting} onClick={handleSubmit} style={{background:valid&&!submitting?'#1b1b1b':'#dedede',color:'white',border:'none',borderRadius:128,padding:'10px 24px',fontSize:13,fontWeight:500,cursor:submitting?'not-allowed':'pointer',display:'flex',alignItems:'center',gap:5,opacity:submitting?.6:1}}><i className="bi-plus-circle-fill" style={{fontSize:13}}></i>{submitting?'Creating…':'Create Task'}</button>
         </div>
       </div>
     </div>

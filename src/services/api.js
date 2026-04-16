@@ -43,6 +43,16 @@ export async function apiFetch(path, options = {}) {
         err.status = res.status;
         err.body = body;
 
+        // 401 — token expired or invalid, redirect to login
+        if (res.status === 401) {
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('ops_hub_token');
+            localStorage.removeItem('ops_hub_user');
+            window.dispatchEvent(new CustomEvent('ops-hub-session-expired'));
+          }
+          throw err;
+        }
+
         // Don't retry 4xx (client errors)
         if (res.status >= 400 && res.status < 500) throw err;
 

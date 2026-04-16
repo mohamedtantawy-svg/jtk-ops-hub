@@ -68,17 +68,7 @@ const DeelTopNav = ({
     return () => document.removeEventListener('mousedown', h);
   }, []);
 
-  // Cmd+K / Ctrl+K toggle search
-  useEffect(() => {
-    const handleKey = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        if (onSearch) onSearch();
-      }
-    };
-    document.addEventListener('keydown', handleKey);
-    return () => document.removeEventListener('keydown', handleKey);
-  }, [onSearch]);
+  // Cmd+K handled globally in App.jsx — no duplicate listener needed
 
   const toggleDark = () => {
     const next = !darkMode;
