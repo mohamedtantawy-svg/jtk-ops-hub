@@ -4,6 +4,17 @@ import { MEMBERS } from '../../data/members';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import { CALENDAR_EVENTS } from '../../data/calendar';
 import { slaInfo, rel, getVisibleEmails } from '../../utils/helpers';
+import { useOnboardingData } from '../../hooks/useOnboardingData';
+import { useOffboardingData } from '../../hooks/useOffboardingData';
+import { useChangeRequestData } from '../../hooks/useChangeRequestData';
+import { useWorkbenchData } from '../../hooks/useWorkbenchData';
+import {
+  normalizeOnboarding,
+  normalizeOffboarding,
+  normalizeAmendments,
+  normalizeRedlines,
+  normalizeWorkbench,
+} from '../../utils/normalizeSourceRows';
 import Avatar from '../ui/Avatar';
 import { ToolBadge, FnBadge } from '../ui/Badges';
 import PersonalChecklist from '../home/PersonalChecklist';
@@ -17,6 +28,8 @@ const SOURCE_COLOURS = {
   gmail: '#ea4335', zendesk: '#03363d', jira: '#0052cc',
   workbench: 'var(--purple)', looker: '#4285f4',
   slack: '#611f69', calendar: '#1967d2',
+  onboarding: '#7c3aed', offboarding: '#d42d35',
+  amendments: '#ed8d00', redlines: '#7c3aed',
 };
 
 const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSubFilter,requests=[]})=>{
@@ -52,6 +65,13 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const perms=useContext(PermissionsContext);
   const settings=useContext(SettingsContext);
   const { deelData, jiraData, slackData } = useContext(IntegrationsContext);
+
+  // ── Deel API hooks (onboarding, offboarding, amendments/redlines, workbench) ──
+  const onboardingData = useOnboardingData(true);
+  const offboardingData = useOffboardingData(true);
+  const changeRequestData = useChangeRequestData(true);
+  const workbenchData = useWorkbenchData(true);
+
   const ds=perms?.dataScope||'own_tasks_only';
   const isOwnScope=ds==='own_tasks_only';
   const isTeamScope=ds==='team_tasks';
@@ -70,6 +90,29 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
 
   // ── Scoped metrics (hierarchical: own + direct/indirect reports) ────
   const visibleEmails = useMemo(() => getVisibleEmails(user?.email), [user?.email]);
+
+  // ── Deel API normalized rows (same pattern as Queue.jsx) ─────────────
+  const onboardingRowsAll = useMemo(() => normalizeOnboarding(onboardingData.items), [onboardingData.items]);
+  const offboardingRowsAll = useMemo(() => normalizeOffboarding(offboardingData.items), [offboardingData.items]);
+  const amendmentRowsAll = useMemo(() => normalizeAmendments(changeRequestData.amendments), [changeRequestData.amendments]);
+  const redlineRowsAll = useMemo(() => normalizeRedlines(changeRequestData.redlines), [changeRequestData.redlines]);
+  const workbenchRowsAll = useMemo(() => normalizeWorkbench(workbenchData.tasks), [workbenchData.tasks]);
+
+  // Agent-scoped: admins see all, others only see rows with assigneeEmail in their visibleEmails
+  const filterSourceRows = useCallback((rows) => {
+    if (isAllScope) return rows;
+    return rows.filter(r => {
+      const email = (r.assigneeEmail || '').toLowerCase();
+      return email && visibleEmails.has(email);
+    });
+  }, [isAllScope, visibleEmails]);
+
+  const onboardingRows = useMemo(() => filterSourceRows(onboardingRowsAll), [onboardingRowsAll, filterSourceRows]);
+  const offboardingRows = useMemo(() => filterSourceRows(offboardingRowsAll), [offboardingRowsAll, filterSourceRows]);
+  const amendmentRows = useMemo(() => filterSourceRows(amendmentRowsAll), [amendmentRowsAll, filterSourceRows]);
+  const redlineRows = useMemo(() => filterSourceRows(redlineRowsAll), [redlineRowsAll, filterSourceRows]);
+  const workbenchRows = useMemo(() => filterSourceRows(workbenchRowsAll), [workbenchRowsAll, filterSourceRows]);
+
   const inScope = useCallback(t => {
     if (scopeIds.includes(t.assigneeId)) return true;
     if (t.assigneeEmail && visibleEmails.has(t.assigneeEmail.toLowerCase())) return true;
@@ -89,9 +132,13 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
 
   // ── DYNAMIC CAPACITY — scoped to permission level ──────────────────
   const allAgents=MEMBERS.filter(m=>m.role==='agent'&&scopeIds.includes(m.id)).map(m=>{
-    const mt=tasks.filter(t=>t.assigneeId===m.id&&t.status!=='resolved').length;
-    const br=tasks.filter(t=>t.assigneeId===m.id&&t.status!=='resolved').filter(t=>{const s=slaInfo(t);return s&&s.breach;}).length;
-    return {...m,tc:mt,br};
+    const mTasks=tasks.filter(t=>t.assigneeId===m.id&&t.status!=='resolved');
+    const mt=mTasks.length;
+    const br=mTasks.filter(t=>{const s=slaInfo(t);return s&&s.breach;}).length;
+    const open=mTasks.filter(t=>t.status==='new'||t.status==='in_progress').length;
+    const paused=mTasks.filter(t=>t.status==='waiting').length;
+    const escalated=mTasks.filter(t=>t.status==='escalated').length;
+    return {...m,tc:mt,br,open,paused,escalated};
   }).sort((a,b)=>b.tc-a.tc);
 
   // Team avg = avg tickets across all agents in the relevant scope
@@ -110,7 +157,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     const r=teamAvg>0?m.tc/teamAvg:0;
     const awl=r>=1.4?'High':r>=0.7?'Medium':'Low';
     const awc=awl==='High'?'#d42d35':awl==='Medium'?'#ed8d00':'#29811e';
-    return {...m,wl:awl,wc:awc};
+    const mCapPct=teamAvg>0?Math.min(200,Math.round((m.tc/teamAvg)*100)):0;
+    return {...m,wl:awl,wc:awc,capPct:mCapPct};
   });
 
   // ── Health Score (composite 0-100) — slaCompRate*0.5 + resRate*0.3 + wlScore*0.2 ────────────────────────────────────
@@ -127,7 +175,15 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // ── Source breakdown (org-wide for exec, scoped for others) ───────────
   const srcPool=isExec?orgOpen:scope;
   const srcCounts=srcPool.reduce((a,t)=>{a[t.source]=(a[t.source]||0)+1;return a;},{});
+  // Add Deel API sources (onboarding, offboarding, amendments, redlines, workbench)
+  if (onboardingRows.length)  srcCounts['onboarding']  = (srcCounts['onboarding']  || 0) + onboardingRows.length;
+  if (offboardingRows.length) srcCounts['offboarding'] = (srcCounts['offboarding'] || 0) + offboardingRows.length;
+  if (amendmentRows.length)   srcCounts['amendments']  = (srcCounts['amendments']  || 0) + amendmentRows.length;
+  if (redlineRows.length)     srcCounts['redlines']    = (srcCounts['redlines']    || 0) + redlineRows.length;
+  if (workbenchRows.length)   srcCounts['workbench']   = (srcCounts['workbench']   || 0) + workbenchRows.length;
   const srcEntries=Object.entries(srcCounts).sort((a,b)=>b[1]-a[1]);
+  // Total across all sources (for percentage calculation)
+  const srcTotal = srcEntries.reduce((sum, [, cnt]) => sum + cnt, 0);
 
   // ── Status pipeline (for exec) ────────────────────────────────────────
   const orgNew=orgOpen.filter(t=>t.status==='new').length;
@@ -470,9 +526,10 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             <DeelCard>
               <CardTitle>By Source</CardTitle>
               {srcEntries.map(([src,cnt])=>{
-                const tl=TOOLS[src];const pct=orgOpen.length>0?Math.round(cnt/orgOpen.length*100):0;
+                const tl=TOOLS[src];const pct=srcTotal>0?Math.round(cnt/srcTotal*100):0;
                 const isExpanded=expandedSource===src;
-                const srcTasks=srcPool.filter(t=>t.source===src);
+                const deelApiRowsMap={onboarding:onboardingRows,offboarding:offboardingRows,amendments:amendmentRows,redlines:redlineRows,workbench:workbenchRows};
+                const srcTasks=[...srcPool.filter(t=>t.source===src),...(deelApiRowsMap[src]||[])];
                 const srcBarColor=SOURCE_COLOURS[src]||tl?.color||'#9e9e9e';
                 return(
                   <div key={src}>
@@ -830,6 +887,71 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
 
         {/* ── MAIN CONTENT ────────────────────────────────────────────────── */}
         <div style={{padding:'12px 24px 20px'}}>
+
+          {/* ── TEAM SUMMARY TABLE (managers only) ──────────────────────── */}
+          {isManager&&hmMembers.length>0&&<DeelCard style={{padding:0,overflow:'hidden',marginBottom:20}}>
+            <div style={{padding:'20px 24px 16px',borderBottom:'1px solid #e8e8e8',display:'flex',alignItems:'center',gap:12}}>
+              <div style={{width:36,height:36,borderRadius:12,background:'linear-gradient(135deg,#f3eff8,#EDE9FE)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                <i className="bi-people-fill" style={{fontSize:16,color:'#7c3aed'}}></i>
+              </div>
+              <span style={{fontSize:18,fontWeight:700,color:'#1b1b1b'}}>Team Summary</span>
+              <span style={{fontSize:12,color:'#9e9e9e',marginLeft:'auto',background:'#fafaf9',padding:'3px 12px',borderRadius:128,fontWeight:600,border:'1px solid #e8e8e8'}}>{hmMembers.length} members</span>
+            </div>
+            <div style={{overflowX:'auto'}}>
+              <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                <thead>
+                  <tr style={{background:'#fafaf9',borderBottom:'1px solid #e8e8e8'}}>
+                    <th style={{padding:'12px 24px',textAlign:'left',fontWeight:600,color:'#9e9e9e',fontSize:12}}>Full Name</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}}>Total</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}}>Open</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}}>Paused</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}}>Escalated</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}}>Breaches</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}}>Capacity %</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}}>Workload</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {hmMembers.map((m,i) => (
+                    <tr key={m.id} style={{borderBottom:'1px solid #f0f0f0',transition:'background .15s'}}
+                      onMouseEnter={e=>e.currentTarget.style.background='#fafaf9'}
+                      onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                      <td style={{padding:'14px 24px'}}>
+                        <div style={{display:'flex',alignItems:'center',gap:10}}>
+                          <Avatar name={m.name} size={32}/>
+                          <div>
+                            <div style={{fontWeight:600,color:'#1b1b1b'}}>{m.name}</div>
+                            <div style={{fontSize:11,color:'#9e9e9e'}}>{FLAGS[m.country]} {m.team}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td style={{padding:'14px 16px',textAlign:'center',fontWeight:700,fontSize:16,color:'#1b1b1b'}}>{m.tc}</td>
+                      <td style={{padding:'14px 16px',textAlign:'center',fontWeight:600,color:'#1f74b3'}}>{m.open}</td>
+                      <td style={{padding:'14px 16px',textAlign:'center',fontWeight:600,color:'#ed8d00'}}>{m.paused}</td>
+                      <td style={{padding:'14px 16px',textAlign:'center',fontWeight:600,color:'#7c3aed'}}>{m.escalated}</td>
+                      <td style={{padding:'14px 16px',textAlign:'center'}}>
+                        {m.br > 0
+                          ? <span style={{fontWeight:700,color:'#d42d35',background:'#fef2f2',padding:'3px 10px',borderRadius:128}}>{m.br}</span>
+                          : <span style={{color:'#29811e',fontWeight:600}}>0</span>}
+                      </td>
+                      <td style={{padding:'14px 16px',textAlign:'center'}}>
+                        <div style={{display:'flex',alignItems:'center',gap:6,justifyContent:'center'}}>
+                          <div style={{width:40,height:5,borderRadius:3,background:'#f0f0f0'}}>
+                            <div style={{width:`${Math.min(m.capPct,100)}%`,height:5,borderRadius:3,background:m.capPct>120?'#d42d35':m.capPct>80?'#ed8d00':'#29811e'}}></div>
+                          </div>
+                          <span style={{fontSize:11,fontWeight:600,color:'#616161'}}>{m.capPct}%</span>
+                        </div>
+                      </td>
+                      <td style={{padding:'14px 16px',textAlign:'center'}}>
+                        <span style={{fontSize:11,fontWeight:700,color:m.wc,padding:'3px 12px',borderRadius:128,background:m.wc+'15'}}>{m.wl}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </DeelCard>}
+
           <div style={{display:'grid',gridTemplateColumns:isManager?'1.2fr 1fr':'1.2fr 1fr',gap:20,alignItems:'start'}}>
 
             {/* ── COL 1: Priority Tasks ─────────────────────────────────────── */}
@@ -898,7 +1020,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                     </div>;
                   })}
                 </div>
-                {expandedSource&&<MiniTicketList items={srcPool.filter(t=>t.source===expandedSource)} emptyMsg="No tickets from this source"/>}
+                {expandedSource&&<MiniTicketList items={[...srcPool.filter(t=>t.source===expandedSource),...({onboarding:onboardingRows,offboarding:offboardingRows,amendments:amendmentRows,redlines:redlineRows,workbench:workbenchRows}[expandedSource]||[])]} emptyMsg="No tickets from this source"/>}
               </div>}
             </DeelCard>
 
@@ -978,47 +1100,6 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                       <div style={{textAlign:'right'}}>
                         <span style={{padding:'4px 12px',borderRadius:128,fontSize:11,fontWeight:700,background:r.wc+'10',color:r.wc,border:`1px solid ${r.wc}15`}}>{r.wl}</span>
                         {r.ld&&<div style={{fontSize:10,color:'#616161',marginTop:4}}><i className="bi-person-fill" style={{fontSize:9}}></i> {r.ld.name.split(' ')[0]}</div>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </DeelCard>}
-
-              {/* MANAGER: Team Performance */}
-              {isManager&&hmMembers.length>0&&<DeelCard style={{padding:0,overflow:'hidden'}}>
-                <div style={{padding:'18px 22px 14px',borderBottom:'1px solid #e8e8e8',display:'flex',alignItems:'center',gap:10}}>
-                  <div style={{width:32,height:32,borderRadius:10,background:'linear-gradient(135deg,#f3eff8,#EDE9FE)',display:'flex',alignItems:'center',justifyContent:'center'}}>
-                    <i className="bi-grid-3x3-gap-fill" style={{fontSize:13,color:'#8b6dca'}}></i>
-                  </div>
-                  <span style={{fontSize:16,fontWeight:700,color:'#1b1b1b'}}>{isTeamScope?user.team+' Team':'Team Performance'}</span>
-                  <span style={{fontSize:11,color:'#9e9e9e',marginLeft:'auto',background:'#fafaf9',padding:'2px 10px',borderRadius:128,fontWeight:600,border:'1px solid #e8e8e8'}}>{hmMembers.length}</span>
-                </div>
-                {/* Deel-style table header */}
-                <div style={{display:'grid',gridTemplateColumns:'1fr 60px 60px',gap:0,padding:'8px 22px',background:'#fafaf9',borderBottom:'1px solid #e8e8e8'}}>
-                  <span style={{fontSize:13,fontWeight:500,color:'#9e9e9e',textTransform:'none'}}>Member</span>
-                  <span style={{fontSize:13,fontWeight:500,color:'#9e9e9e',textTransform:'none',textAlign:'center'}}>Tasks</span>
-                  <span style={{fontSize:13,fontWeight:500,color:'#9e9e9e',textTransform:'none',textAlign:'center'}}>Status</span>
-                </div>
-                <div style={{padding:'4px 14px 12px',maxHeight:280,overflowY:'auto'}}>
-                  {hmMembers.map(m=>(
-                    <div key={m.id} style={{display:'grid',gridTemplateColumns:'1fr 60px 60px',gap:0,alignItems:'center',padding:'8px 8px',borderBottom:'1px solid #f5f5f5',transition:'background .15s',borderRadius:8}}
-                      onMouseEnter={e=>e.currentTarget.style.background='#fafaf9'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                      <div style={{display:'flex',alignItems:'center',gap:8}}>
-                        <Avatar name={m.name} size={26}/>
-                        <div>
-                          <div style={{fontSize:12,fontWeight:600,color:'#1b1b1b'}}>{m.name.split(' ')[0]}</div>
-                          <div style={{display:'flex',alignItems:'center',gap:4}}>
-                            <span style={{fontSize:9,color:'#9e9e9e'}}>{FLAGS[m.country]}</span>
-                            <span style={{fontSize:9,padding:'1px 6px',borderRadius:128,background:'#fafaf9',color:'#616161',fontWeight:600,border:'1px solid #e8e8e8'}}>{m.team}</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div style={{textAlign:'center'}}>
-                        <div style={{fontSize:16,fontWeight:700,color:m.wc,fontVariantNumeric:'tabular-nums'}}>{m.tc}</div>
-                      </div>
-                      <div style={{textAlign:'center'}}>
-                        <span style={{fontSize:10,fontWeight:700,color:m.wc,padding:'2px 8px',borderRadius:128,background:m.wc+'10'}}>{m.wl}</span>
-                        {m.br>0&&<div style={{fontSize:8,fontWeight:700,color:'#d42d35',marginTop:2}}>{m.br} SLA</div>}
                       </div>
                     </div>
                   ))}
