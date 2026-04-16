@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useContext } from 'react';
+import { useState, useEffect, useContext } from 'react';
 import { KB_SEARCH_INDEX, KB_ARTICLES } from '../../data/knowledge';
 import { PermissionsContext } from '../../App';
 
@@ -14,29 +14,6 @@ const COUNTRY_RESOURCES=[
   {country:'JP',  flag:'🇯🇵', name:'Japan Labour Standards Tracker',    url:'#'},
 ];
 
-// ── Claude mock responses (B) ────────────────────────────────────────────────
-const getMockResponse=(msg)=>{
-  const m=msg.toLowerCase();
-  if(m.includes('leave')||m.includes('pto')||m.includes('holiday')||m.includes('vacation'))
-    return 'Leave policies vary by country and entity type. UK employees receive a minimum of 28 days (including bank holidays) under the Working Time Regulations. In Germany, the BUrlG mandates at least 20 days on a 5-day week. Singapore employees get 7–14 days annual leave depending on service years under the Employment Act. For parental leave, global policy covers maternity (up to 26 weeks), paternity (up to 5 days statutory, enhanced per country), and shared parental leave where applicable. Need specifics for a particular country or leave type?';
-  if(m.includes('onboard')||m.includes('new hire')||m.includes('day 1')||m.includes('start'))
-    return 'The EOR onboarding process has five key stages: (1) Contract signature via DocuSign — triggered once the start date is confirmed; (2) System provisioning — IT access, email, and Slack within 48h of signature; (3) Benefits enrollment — employee has a 30-day window from start date; (4) Workbench onboarding checklist — all tasks must be completed before the start date; (5) Day-1 readiness confirmation — HR and manager sign-off in Workbench. MHR clients have an additional HRIS integration step. Is there a specific stage you need help with?';
-  if(m.includes('zd')||m.includes('zendesk')||m.includes('ticket')||m.includes('macro')||m.includes('queue'))
-    return 'The ZD workflow for HR Ops follows this path: New tickets land in the **Unassigned** view → agent picks up or is auto-routed by country tag → first response using the appropriate macro within the SLA window → if resolution requires engineering, link the ZD ticket to a Jira issue via the ZD-Jira app → on resolution, use the "Resolution Confirmation" macro and set status to Solved. For escalations: tag the ticket `#escalate-t2`, add an internal note with reason and urgency, then post in #hrx-escalations. CSAT surveys trigger 2h after ticket is Solved. Need the macro library or tagging taxonomy?';
-  if(m.includes('amendment')||m.includes('bonus')||m.includes('salary change')||m.includes('variable comp')||m.includes('retention')||m.includes('signing'))
-    return 'Contract amendments follow a four-step process: (1) **Approval** — compensation changes need finance sign-off; bonuses need manager + finance approval with the bonus agreement template; (2) **Workbench action** — use "Compensation & Benefits Adjustment" for salary changes or "Employment Contract Amendment" for role/title; (3) **Addendum generation** — contract addendum auto-generated via Workbench; employee signs via DocuSign; (4) **Payroll alignment** — confirm effective date aligns with payroll cut-off (usually 15th of the month). Retention and signing bonuses require a separate clawback agreement. Which amendment type do you need guidance on?';
-  if(m.includes('immigrat')||m.includes('visa')||m.includes('work permit')||m.includes('permit')||m.includes('ep ')||m.includes('cos')||m.includes('sponsored'))
-    return 'Immigration processes are handled in partnership with Fragomen. The 12-week renewal trigger rule is critical — permits expiring within 12 weeks must be flagged immediately in the Work Permit Renewal Tracker. For UK Skilled Worker visas: CoS assignment in SMS → Fragomen application → UKVI processing (8–12 weeks). For Singapore EP: apply via myMOM portal, min salary $5,000/month (2025). For Germany: EU Blue Card requires a recognised degree + €43,759 min salary. Always escalate to the immigration specialist if a worker is at risk of illegal working. Need a country-specific guide?';
-  if(m.includes('mhr')||m.includes('managed hr'))
-    return 'MHR (Managed HR) clients receive dedicated HR operations support. Service tiers: Standard (48h response), Gold (24h), Platinum (4h). Monthly deliverables include a reporting pack (headcount, payroll summary, open tickets, SLA performance) pulled from the MHR Client Coverage dashboard in Looker. Client escalations should be copied to the assigned CSM; Platinum client emergencies use the #dedicated-csms channel. MHR onboarding includes entity setup, payroll calendar configuration, benefits configuration, and HRIS integration. Which aspect of MHR do you need help with?';
-  if(m.includes('payroll')||m.includes('salary')||m.includes('pay'))
-    return 'Payroll processing runs on a monthly cycle with a data cut-off typically on the 15th. Key steps: collect change data from Workbench → variance review (flag anything >5% or >$1,000 vs prior month) → payroll specialist approval → disbursement 3 business days before pay date → post-payroll reconciliation. For off-cycle urgent payments, raise via the Off-Cycle Payroll request form (Finance portal). Discrepancies >$500 require escalation to the Payroll Specialist via #hrx-payroll. Need the reconciliation checklist or off-cycle process?';
-  if(m.includes('benefit')||m.includes('pension')||m.includes('401k')||m.includes('insurance')||m.includes('medical'))
-    return 'Benefits enrollment is available during two windows: (1) New hire window — 30 days from start date; (2) Annual open enrollment — typically Q4. Benefits vary by country: UK offers private medical (Bupa/AXA), auto-enrolment pension (min 5% EE + 3% ER), and cycle-to-work. US offers 401k (3% match), HDHP/PPO health plans, FSA/HSA. Singapore provides statutory CPF contributions plus supplemental medical. Late enrollment requests require manager approval and may have evidence of insurability requirements. Which country or benefit type can I help with?';
-  if(m.includes('compli')||m.includes('gdpr')||m.includes('audit')||m.includes('right to work'))
-    return 'Compliance checks in HR Ops cover: (1) Monthly Redline Workbench Controls — pull the exception report from Looker, clear all flagged records by day 5 of each month; (2) Right-to-Work — UK requires online share code or manual document check before first day (List A/B documents); (3) GDPR — DSAR requests must be acknowledged within 3 days and completed within 30 days; data retention schedules apply per country; (4) EOR contract mandatory clauses — reviewed quarterly by Legal. For audit documentation, use the Compliance Audit Documentation Guide in the Policies tab. Need anything specific?';
-  return "I can help you with HR policies, Zendesk workflows, Jira procedures, and Deel platform guidance. Try asking about leave policies, onboarding steps, ZD macros, contract amendments, work permits, payroll processing, benefits enrollment, or MHR procedures.";
-};
 
 const KnowledgeHub=({subFilter, user})=>{
   const perms=useContext(PermissionsContext);
@@ -45,41 +22,13 @@ const KnowledgeHub=({subFilter, user})=>{
       <div style={{textAlign:'center',color:'#9e9e9e'}}><i className="bi-shield-lock" style={{fontSize:32,display:'block',marginBottom:8,opacity:.5}}></i><div style={{fontSize:14,fontWeight:600}}>Access Denied</div><div style={{fontSize:12,marginTop:4}}>You don't have permission to view this page.</div></div>
     </div>
   );
-  // ── Section tab (Search / Ask Claude) ─────────────────────────────────────
-  const [kbTab,setKbTab]=useState(subFilter==='Ask Claude'?'claude':'search');
-
-  // ── Inner content tab (under Search) ──────────────────────────────────────
+  // ── Inner content tab ──────────────────────────────────────────────────────
   const [search,setSearch]=useState('');
   const tabMap={'Policies':'policies','Runbooks':'processes','Tools':'looker','FAQs':'sla'};
   const [tab,setTab]=useState(subFilter?tabMap[subFilter]||'sla':'sla');
   useEffect(()=>{
-    if(subFilter==='Ask Claude'){setKbTab('claude');return;}
-    if(subFilter&&tabMap[subFilter]){setKbTab('search');setTab(tabMap[subFilter]);}
+    if(subFilter&&tabMap[subFilter]){setTab(tabMap[subFilter]);}
   },[subFilter]);
-
-  // ── Claude chat state (B) ──────────────────────────────────────────────────
-  const [messages,setMessages]=useState([
-    {role:'assistant',text:"Hi! I'm Claude. Ask me anything about HR policies, workflows, or the Deel platform."}
-  ]);
-  const [chatInput,setChatInput]=useState('');
-  const [typing,setTyping]=useState(false);
-  const chatEndRef=useRef(null);
-  useEffect(()=>{
-    if(kbTab==='claude')chatEndRef.current?.scrollIntoView({behavior:'smooth'});
-  },[messages,typing,kbTab]);
-
-  const sendMessage=()=>{
-    const text=chatInput.trim();
-    if(!text||typing)return;
-    setMessages(prev=>[...prev,{role:'user',text}]);
-    setChatInput('');
-    setTyping(true);
-    setTimeout(()=>{
-      const reply=getMockResponse(text);
-      setMessages(prev=>[...prev,{role:'assistant',text:reply}]);
-      setTyping(false);
-    },1200);
-  };
 
   // ── Quick Links personalization state (C) ──────────────────────────────────
   const LS_KEY=`ops_hub_quick_links_${user?.id||'default'}`;
@@ -231,27 +180,10 @@ const KnowledgeHub=({subFilter, user})=>{
     <div style={{flex:1,display:'flex',flexDirection:'column',overflowY:'hidden'}}>
       <div style={{flex:1,overflowY:'auto',padding:'16px 24px'}}>
 
-        {/* ── KB / Claude toggle (B) ───────────────────────────────────────── */}
-        <div style={{display:'flex',gap:6,marginBottom:18,padding:'3px',background:'#f0ece6',borderRadius:128,width:'fit-content'}}>
-          {[['search','bi-search','Knowledge Base'],['claude','bi-stars','Ask Claude']].map(([id,icon,label])=>(
-            <button key={id} onClick={()=>setKbTab(id)} style={{
-              display:'flex',alignItems:'center',gap:6,
-              padding:'7px 18px',
-              borderRadius:128,fontSize:13,fontWeight:600,
-              border:'none',cursor:'pointer',transition:'all .18s',
-              background:kbTab===id?'white':'transparent',
-              color:kbTab===id?'#1b1b1b':'#9e9e9e',
-              boxShadow:kbTab===id?'0 1px 4px rgba(0,0,0,0.10)':'none',
-            }}>
-              <i className={icon} style={{fontSize:12}}></i>{label}
-            </button>
-          ))}
-        </div>
-
         {/* ══════════════════════════════════════════════════════════════════ */}
-        {/* SEARCH PANEL                                                       */}
+        {/* KNOWLEDGE BASE                                                     */}
         {/* ══════════════════════════════════════════════════════════════════ */}
-        {kbTab==='search'&&(<>
+        {(<>
           {/* Search input */}
           <div style={{position:'relative',marginBottom:16}}>
             <i className="bi-search" style={{position:'absolute',left:14,top:'50%',transform:'translateY(-50%)',color:'#9e9e9e',fontSize:13}}></i>
@@ -538,94 +470,8 @@ const KnowledgeHub=({subFilter, user})=>{
           )}
         </>)}
 
-        {/* ══════════════════════════════════════════════════════════════════ */}
-        {/* ASK CLAUDE PANEL (B)                                               */}
-        {/* ══════════════════════════════════════════════════════════════════ */}
-        {kbTab==='claude'&&(
-          <div style={{display:'flex',flexDirection:'column',height:'calc(100vh - 260px)',minHeight:400}}>
-            {/* Chat window */}
-            <div style={{flex:1,overflowY:'auto',display:'flex',flexDirection:'column',gap:12,paddingBottom:12}}>
-              {messages.map((msg,i)=>(
-                <div key={i} style={{display:'flex',justifyContent:msg.role==='user'?'flex-end':'flex-start'}}>
-                  {msg.role==='assistant'&&(
-                    <div style={{width:28,height:28,borderRadius:'50%',background:'#f3eff8',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginRight:8,marginTop:2}}>
-                      <i className="bi-stars" style={{color:'#7c3aed',fontSize:12}}></i>
-                    </div>
-                  )}
-                  <div style={{
-                    maxWidth:'72%',
-                    padding:'10px 14px',
-                    borderRadius:msg.role==='user'?'18px 18px 4px 18px':'18px 18px 18px 4px',
-                    background:msg.role==='user'?'#1f74b3':'white',
-                    color:msg.role==='user'?'white':'#1b1b1b',
-                    fontSize:13,
-                    lineHeight:1.6,
-                    boxShadow:msg.role==='assistant'?'0 1px 4px rgba(0,0,0,0.08)':'none',
-                    border:msg.role==='assistant'?'1px solid #e8e8e8':'none',
-                    whiteSpace:'pre-wrap',
-                    wordBreak:'break-word',
-                  }}>
-                    {msg.text}
-                  </div>
-                </div>
-              ))}
-
-              {typing&&(
-                <div style={{display:'flex',alignItems:'center',gap:8}}>
-                  <div style={{width:28,height:28,borderRadius:'50%',background:'#f3eff8',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                    <i className="bi-stars" style={{color:'#7c3aed',fontSize:12}}></i>
-                  </div>
-                  <div style={{padding:'10px 14px',borderRadius:'18px 18px 18px 4px',background:'white',border:'1px solid #e8e8e8',boxShadow:'0 1px 4px rgba(0,0,0,0.08)',display:'flex',gap:4,alignItems:'center'}}>
-                    {[0,1,2].map(d=>(
-                      <span key={d} style={{width:6,height:6,borderRadius:'50%',background:'#bdbdbd',display:'inline-block',animation:`pulse 1.2s ease-in-out ${d*0.2}s infinite`}}></span>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <div ref={chatEndRef}/>
-            </div>
-
-            {/* Input bar */}
-            <div style={{display:'flex',gap:8,alignItems:'flex-end',paddingTop:12,borderTop:'1px solid #e8e8e8'}}>
-              <textarea
-                rows={1}
-                value={chatInput}
-                onChange={e=>{setChatInput(e.target.value);e.target.style.height='auto';e.target.style.height=Math.min(e.target.scrollHeight,120)+'px';}}
-                onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}}}
-                placeholder="Ask about HR policies, ZD workflows, amendments, immigration..."
-                style={{
-                  flex:1,resize:'none',padding:'10px 14px',
-                  border:'1px solid #e8e8e8',borderRadius:16,fontSize:13,
-                  color:'#1b1b1b',outline:'none',lineHeight:1.5,
-                  fontFamily:'inherit',overflow:'hidden',
-                  transition:'border-color .15s, box-shadow .15s',
-                }}
-                onFocus={e=>{e.target.style.borderColor='#7c3aed';e.target.style.boxShadow='0 0 0 3px rgba(124,58,237,0.1)';}}
-                onBlur={e=>{e.target.style.borderColor='#e8e8e8';e.target.style.boxShadow='none';}}
-              />
-              <button
-                onClick={sendMessage}
-                disabled={!chatInput.trim()||typing}
-                style={{
-                  width:40,height:40,borderRadius:'50%',border:'none',
-                  background:chatInput.trim()&&!typing?'#7c3aed':'#e8e8e8',
-                  color:'white',cursor:chatInput.trim()&&!typing?'pointer':'default',
-                  display:'flex',alignItems:'center',justifyContent:'center',
-                  flexShrink:0,transition:'background .15s',
-                }}>
-                <i className="bi-send-fill" style={{fontSize:13}}></i>
-              </button>
-            </div>
-
-            <div style={{fontSize:11,color:'#bdbdbd',textAlign:'center',marginTop:8}}>
-              Responses are illustrative. Always verify against official Deel policy documents.
-            </div>
-          </div>
-        )}
 
       </div>
-      {/* Typing indicator pulse animation */}
-      <style>{`@keyframes pulse{0%,100%{opacity:.3;transform:scale(1)}50%{opacity:1;transform:scale(1.2)}}`}</style>
     </div>
   );
 };
