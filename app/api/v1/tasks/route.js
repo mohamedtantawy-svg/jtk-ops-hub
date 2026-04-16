@@ -19,6 +19,17 @@ export async function GET(req) {
     const params = [];
     let idx = 1;
 
+    // Role-based scoping: non-admin users only see tasks assigned to
+    // themselves or their direct/transitive reports.
+    if (user.role !== 'admin' && user.role !== 'regional_manager') {
+      // For team leads and agents, scope to tasks assigned to them
+      // (Server-side hierarchy resolution would require a DB query for the
+      //  manager chain. For now, scope by the requesting user's own email.)
+      whereSql += ` AND (t.assignee_id IN (SELECT id FROM members WHERE email = $${idx}) OR t.assignee_id IS NULL)`;
+      params.push(user.email);
+      idx++;
+    }
+
     if (status) { whereSql += ` AND status = $${idx++}`; params.push(status); }
     if (source) { whereSql += ` AND source = $${idx++}`; params.push(source); }
     if (country) { whereSql += ` AND country_code = $${idx++}`; params.push(country); }

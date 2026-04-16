@@ -32,6 +32,10 @@ export async function PATCH(req, { params }) {
     if (!user.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    // Only admins/managers can edit announcements
+    if (!['admin', 'regional_manager', 'manager', 'team_lead'].includes(user.role)) {
+      return NextResponse.json({ error: 'Only managers can edit announcements' }, { status: 403 });
+    }
 
     const { id } = await params;
     const body = await req.json();
@@ -89,6 +93,10 @@ export async function DELETE(req, { params }) {
     const user = getAuthUser(req);
     if (!user.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    // Only admins can delete announcements
+    if (user.role !== 'admin') {
+      return NextResponse.json({ error: 'Only admins can delete announcements' }, { status: 403 });
     }
 
     const { id } = await params;

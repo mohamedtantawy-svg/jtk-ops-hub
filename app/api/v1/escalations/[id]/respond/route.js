@@ -7,6 +7,10 @@ export async function PATCH(req, { params }) {
   if (!user.email) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+  // Only managers/admins can respond to escalations
+  if (!['admin', 'regional_manager', 'manager', 'team_lead'].includes(user.role)) {
+    return NextResponse.json({ error: 'Only managers can respond to escalations' }, { status: 403 });
+  }
   try {
     const { id } = await params;
     const { response } = await req.json();

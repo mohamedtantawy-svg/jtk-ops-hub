@@ -18,6 +18,7 @@ import { useChangeRequestData } from '../../hooks/useChangeRequestData';
 import { useWorkbenchData } from '../../hooks/useWorkbenchData';
 import SourceTable from './SourceTable';
 import ErrorBoundary from '../ui/ErrorBoundary';
+import { updateTaskStatus as apiUpdateStatus } from '../../services/tasksApi';
 import {
   normalizeOnboarding,
   normalizeOffboarding,
@@ -80,6 +81,15 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const [workSource,setWorkSource]=useState(null);
   // searchRef removed — search handled by global nav
   const perms = useContext(PermissionsContext);
+
+  // Wire subFilter from parent (BriefingView "View resolved" etc.) to internal filter
+  useEffect(() => {
+    if (subFilter) {
+      const statusMap = { 'Resolved': 'resolved', 'New': 'new', 'In Progress': 'in_progress', 'Waiting': 'waiting' };
+      const mapped = statusMap[subFilter] || subFilter.toLowerCase();
+      setFStatus(mapped);
+    }
+  }, [subFilter]);
   const settings = useContext(SettingsContext);
   const { deelData, jiraData, queueSync } = useContext(IntegrationsContext);
   // Onboarding data from Deel API
@@ -149,8 +159,8 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
         const sa=slaInfo(a),sb=slaInfo(b);
         if(sa?.breach&&!sb?.breach)return -1; if(!sa?.breach&&sb?.breach)return 1;
         if(sa&&!sb)return -1; if(!sa&&sb)return 1;
-        if(sa&&sb){ const limA=SLA_MINS[a.type]||1440, limB=SLA_MINS[b.type]||1440; return (limA-a.minutesAgo)-(limB-b.minutesAgo); }
-        return b.minutesAgo-a.minutesAgo;
+        if(sa&&sb){ const limA=SLA_MINS[a.type]||1440, limB=SLA_MINS[b.type]||1440; return (limA-(a.minutesSinceLastResponse??a.minutesAgo))-(limB-(b.minutesSinceLastResponse??b.minutesAgo)); }
+        return (b.minutesSinceLastResponse??b.minutesAgo)-(a.minutesSinceLastResponse??a.minutesAgo);
       });
       if(sort==='newest')return [...arr].sort((a,b)=>a.minutesAgo-b.minutesAgo);
       if(sort==='oldest')return [...arr].sort((a,b)=>b.minutesAgo-a.minutesAgo);
@@ -184,6 +194,10 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
         // Only move selection if user is still viewing this task
         setSelTask(prev=>prev?.id===taskId?null:prev);
         delete pendingCloseRefs.current[taskId];
+        // Persist to backend
+        apiUpdateStatus(task._beId||taskId,'resolved').catch(err=>{
+          console.warn('[Queue] Failed to sync close to backend:',err.message);
+        });
       },4000);
       pendingCloseRefs.current[taskId]=tid;
       addToast&&addToast('success',`Closed: ${taskId}`,task.subject.slice(0,46),()=>{
@@ -203,6 +217,10 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     setTasks(prev=>prev.map(t=>t.id===task.id?{...t,status:'resolved'}:t));
     setSelTask(prev=>prev?.id===task.id?null:prev);
     addToast&&addToast('success',`Resolved: ${task.id}`,task.subject.slice(0,46));
+    // Persist to backend — fire-and-forget (optimistic UI)
+    apiUpdateStatus(task._beId||task.id,'resolved').catch(err=>{
+      console.warn('[Queue] Failed to sync resolve to backend:',err.message);
+    });
   },[setTasks,setSelTask,addToast]);
 
   const toggleCheck=useCallback(id=>setCheckedIds(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;}),[]);
@@ -236,6 +254,15 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
 
   // Tick timer removed — SLA ticking now managed in App.jsx
 
+  // Cleanup pending close timers on unmount (prevent stale state mutations)
+  useEffect(()=>{
+    const refs=pendingCloseRefs;
+    return()=>{
+      for(const tid of Object.values(refs.current)){clearTimeout(tid);}
+      refs.current={};
+    };
+  },[]);
+
   // Keyboard shortcuts
   useEffect(()=>{
     const kd=e=>{
@@ -244,10 +271,10 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       const idx=all.findIndex(t=>t.id===selTask?.id);
       if(e.key==='j'){ const n=all[idx+1]||all[0]; if(n){setSelTask(n);setRecentIds(prev=>[n.id,...prev.filter(id=>id!==n.id)].slice(0,3));} }
       if(e.key==='k'){ const n=all[idx>0?idx-1:all.length-1]; if(n){setSelTask(n);setRecentIds(prev=>[n.id,...prev.filter(id=>id!==n.id)].slice(0,3));} }
-      if(e.key==='e'&&selTask) onEscalMgr&&onEscalMgr(selTask);
-      if(e.key==='s'&&selTask) onSnooze&&onSnooze(selTask);
-      if(e.key==='r'&&selTask) onReassign&&onReassign(selTask);
-      if(e.key==='x'&&selTask){ handleResolve(selTask); }
+      if(e.key==='e'&&selTask&&perms?.canDo('can_escalate')!==false) onEscalMgr&&onEscalMgr(selTask);
+      if(e.key==='s'&&selTask&&perms?.canDo('can_snooze')!==false) onSnooze&&onSnooze(selTask);
+      if(e.key==='r'&&selTask&&perms?.canDo('can_reassign')!==false) onReassign&&onReassign(selTask);
+      if(e.key==='x'&&selTask&&perms?.canDo('can_resolve_task')!==false){ handleResolve(selTask); }
       if(e.key==='Escape') setSelTask(null);
     };
     document.addEventListener('keydown',kd);
@@ -260,7 +287,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const slaAgeClass=(task)=>{
     if(task.status==='resolved'||task.status==='waiting')return'';
     const lim=SLA_MINS[task.type]||1440;
-    const rem=lim-task.minutesAgo;
+    const rem=lim-(task.minutesSinceLastResponse??task.minutesAgo);
     if(rem<=0)return'age-urgent';
     const pct=rem/lim;
     if(pct>0.5)return'';
@@ -824,7 +851,7 @@ const WorkModeOverlay=memo(({task,remaining,totalOpen,skipped,onResolve,onEscala
   const fn=FUNCTIONS[task.type];
   const tool=TOOLS[task.source];
   const slaLim=SLA_MINS[task.type]||1440;
-  const slaRem=slaLim-(task.minutesAgo??0);
+  const slaRem=slaLim-(task.minutesSinceLastResponse??task.minutesAgo??0);
   const slaPct=Math.max(0,Math.min(100,(slaRem/slaLim)*100));
   const slaBarColor=slaRem<=0?'#b91c1c':slaPct>50?'#15803d':slaPct>20?'#b45309':'#b91c1c';
   const processed=totalOpen-remaining;

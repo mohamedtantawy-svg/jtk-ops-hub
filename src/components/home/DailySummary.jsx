@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { slaInfo } from '../../utils/helpers';
 
 const DailySummary = ({ tasks = [], escalations = [], scope = 'team' }) => {
   const stats = useMemo(() => {
@@ -7,33 +8,37 @@ const DailySummary = ({ tasks = [], escalations = [], scope = 'team' }) => {
     const msSinceStart = now - startOfDay;
     const minsSinceStart = msSinceStart / 60000;
 
+    // Use updatedMinsAgo as proxy for resolved time (update happens at resolution)
     const resolvedToday = tasks.filter(t =>
       (t.status === 'resolved' || t.status === 'closed') &&
-      t.resolvedMinsAgo != null &&
-      t.resolvedMinsAgo <= minsSinceStart
+      (t.updatedMinsAgo ?? t.minutesAgo) <= minsSinceStart
     );
 
     const newToday = tasks.filter(t =>
-      t.createdMinsAgo != null &&
-      t.createdMinsAgo <= minsSinceStart
+      t.minutesAgo != null &&
+      t.minutesAgo <= minsSinceStart
     );
 
-    const escalatedToday = escalations.filter(e =>
-      e.createdMinsAgo != null &&
-      e.createdMinsAgo <= minsSinceStart
-    );
+    const escalatedToday = escalations.filter(e => {
+      // Escalations may have createdAt timestamp — compute mins ago
+      if (e.createdAt) {
+        const minsAgo = (now - new Date(e.createdAt)) / 60000;
+        return minsAgo <= minsSinceStart;
+      }
+      return false;
+    });
 
-    const breachesToday = tasks.filter(t =>
-      t.slaBreached === true &&
-      t.breachedMinsAgo != null &&
-      t.breachedMinsAgo <= minsSinceStart
-    );
+    // Use canonical slaInfo() to detect breaches
+    const breachesToday = tasks.filter(t => {
+      const s = slaInfo(t);
+      return s && s.breach;
+    });
 
     // Busiest hour calculation
     const hourBuckets = {};
     newToday.forEach(t => {
-      if (t.createdMinsAgo != null) {
-        const createdTime = new Date(now.getTime() - t.createdMinsAgo * 60000);
+      if (t.minutesAgo != null) {
+        const createdTime = new Date(now.getTime() - t.minutesAgo * 60000);
         const hour = createdTime.getHours();
         hourBuckets[hour] = (hourBuckets[hour] || 0) + 1;
       }

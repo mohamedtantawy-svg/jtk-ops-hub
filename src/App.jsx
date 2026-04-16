@@ -260,10 +260,13 @@ const App=()=>{
   const dismissToast=useCallback(id=>setToasts(prev=>prev.filter(t=>t.id!==id)),[]);
 
   // ── Escalation handlers ────────────────────────────────────────────────────
+  // Close all action modals — prevents dual-modal state
+  const closeActionModals=useCallback(()=>{setEscalModal(null);setReassignModal(null);setSnoozeModal(null);setCreateModal(false);setBulkIds(null);},[]);
   const openEscalModal=useCallback(task=>{
     if(!perms?.canDo('can_escalate')){addToast('error','Access Denied','You do not have permission to escalate');return;}
+    closeActionModals();
     setEscalModal(task);
-  },[perms,addToast]);
+  },[perms,addToast,closeActionModals]);
   const confirmEscal=useCallback((task,reason,mgrId)=>{
     const mgr=mgrId?MEMBERS.find(m=>m.id===mgrId):null;
     const now=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
@@ -278,8 +281,13 @@ const App=()=>{
       setTasks(prev=>prev.map(t=>t.id===task.id?{...t,status:'in_progress'}:t));
       addToast('escalation','Escalated to Manager',`${mgr?.name||'Team Lead'} · ${task.id}`);
       // BE sync
-      apiCreateEscalation({taskId:task._beId||task.id,subject:task.subject,reason,managerId:mgrId?String(mgrId):undefined}).catch(()=>{});
-      apiUpdateStatus(task._beId||task.id,'escalated').catch(()=>{});
+      apiCreateEscalation({taskId:task._beId||task.id,subject:task.subject,reason,managerId:mgrId?String(mgrId):undefined}).catch(err=>{
+        console.warn('[escalation] BE sync failed:',err.message);
+        addToast('warning','Sync Warning','Escalation saved locally but backend sync failed');
+      });
+      apiUpdateStatus(task._beId||task.id,'escalated').catch(err=>{
+        console.warn('[escalation] Status sync failed:',err.message);
+      });
     }
     setEscalModal(null);
     setBulkIds(null);
@@ -313,7 +321,10 @@ const App=()=>{
     setCreateEscalModal(false);
     addToast('escalation','Escalation Created',form.subject.slice(0,50));
     // BE sync
-    apiCreateEscalation({taskId:form.taskId||undefined,subject:form.subject,reason:form.reason,managerId:form.managerId?String(form.managerId):undefined}).catch(()=>{});
+    apiCreateEscalation({taskId:form.taskId||undefined,subject:form.subject,reason:form.reason,managerId:form.managerId?String(form.managerId):undefined}).catch(err=>{
+      console.warn('[manualEscalation] BE sync failed:',err.message);
+      addToast('warning','Sync Warning','Escalation saved locally but backend sync failed');
+    });
   },[user,addToast,perms]);
 
   // ── Reassign handler (email-based — pushes to Zendesk/Jira) ────────────────
@@ -328,9 +339,10 @@ const App=()=>{
       setTasks(prev=>prev.map(t=>idSet.has(t.id)?{...t,assigneeId:newMemberId,assigneeEmail:newEmail,assigneeName:newName}:t));
       setActivity(prev=>{const next={...prev};bulkIds.forEach(id=>{next[id]=[...(next[id]||[]),{type:'assigned',text:`Bulk reassigned to ${newName}${note?` — ${note}`:''}`,user:user.name,time:now}];});return next;});
       addToast('success','Bulk Reassign',`${bulkIds.length} tasks → ${newName.split(' ')[0]}`);
-      // Push each ticket to Zendesk/Jira in background
-      bulkIds.forEach(id=>{
-        reassignQueueTicket(id,newEmail).catch(err=>console.warn(`[reassign] ${id} failed:`,err.message));
+      // Push each ticket to Zendesk/Jira in background — track failures
+      const failedIds=[];
+      Promise.allSettled(bulkIds.map(id=>reassignQueueTicket(id,newEmail).catch(err=>{failedIds.push(id);throw err;}))).then(()=>{
+        if(failedIds.length>0) addToast('warning','Partial Sync Failure',`${failedIds.length}/${bulkIds.length} tasks failed to sync to source system`);
       });
     } else {
       setTasks(prev=>prev.map(t=>t.id===task.id?{...t,assigneeId:newMemberId,assigneeEmail:newEmail,assigneeName:newName}:t));
@@ -342,7 +354,9 @@ const App=()=>{
         addToast('warning','Sync Warning',`Local reassign ok, but source system update failed for ${task.id}`);
       });
       // Legacy BE sync
-      apiAssignTask(task._beId||task.id,String(newMemberId||'')).catch(()=>{});
+      apiAssignTask(task._beId||task.id,String(newMemberId||'')).catch(err=>{
+        console.warn('[reassign] Legacy BE sync failed:',err.message);
+      });
     }
     setReassignModal(null);
     setBulkIds(null);
@@ -353,7 +367,7 @@ const App=()=>{
     const iv=setInterval(()=>{
       setTasks(prev=>prev.map(t=>{
         if(t.status==='resolved'||t.status==='waiting')return t;
-        return {...t, minutesAgo:t.minutesAgo+1, updatedMinsAgo:t.updatedMinsAgo+1};
+        return {...t, minutesAgo:t.minutesAgo+1, updatedMinsAgo:t.updatedMinsAgo+1, minutesSinceLastResponse:(t.minutesSinceLastResponse||0)+1};
       }));
     },60000);
     return()=>clearInterval(iv);
@@ -395,7 +409,10 @@ const App=()=>{
       setActivity(prev=>({...prev,[task.id]:[...(prev[task.id]||[]),{type:'status',text:`Snoozed until ${label}`,user:user.name,time:now}]}));
       addToast('info','Task Snoozed',`${task.id} · until ${label}`);
       // BE sync
-      apiSnoozeTask(task._beId||task.id,new Date(snoozedUntil).toISOString()).catch(()=>{});
+      apiSnoozeTask(task._beId||task.id,new Date(snoozedUntil).toISOString()).catch(err=>{
+        console.warn('[snooze] BE sync failed:',err.message);
+        addToast('warning','Sync Warning','Snooze saved locally but backend sync failed');
+      });
     }
     setSnoozeModal(null);
     setBulkIds(null);
@@ -443,12 +460,15 @@ const App=()=>{
     // Use base36 suffix for unique IDs
     const newId=`${pfx[form.source]||'MN'}-${(now.getTime()+Math.floor(Math.random()*999)).toString(36).slice(-4).toUpperCase()}`;
     const agentName=MEMBERS.find(m=>m.id===form.assigneeId)?.name;
-    setTasks(prev=>[{id:newId,source:form.source,subject:form.subject,body:form.body||'',assigneeId:form.assigneeId,country:form.country,receivedAt:t,minutesAgo:0,updatedMinsAgo:0,status:'new',type:form.type,isAlert:false,suggestedReply:''},...prev]);
+    setTasks(prev=>[{id:newId,source:form.source,subject:form.subject,body:form.body||'',assigneeId:form.assigneeId,country:form.country,receivedAt:t,minutesAgo:0,updatedMinsAgo:0,minutesSinceLastResponse:0,status:'new',type:form.type,isAlert:false,suggestedReply:'',_locallyCreated:true},...prev]);
     setActivity(prev=>({...prev,[newId]:[{type:'created',text:'Task created manually',user:user.name,time:t},{type:'assigned',text:`Assigned to ${agentName}`,user:user.name,time:t}]}));
     setCreateModal(false);
     addToast('success','Task Created',`${newId} → ${agentName?.split(' ')[0]}`);
     // BE sync
-    apiCreateTask(denormalizeTaskForCreate({...form,id:newId})).catch(()=>{});
+    apiCreateTask(denormalizeTaskForCreate({...form,id:newId})).catch(err=>{
+      console.warn('[createTask] BE sync failed:',err.message);
+      addToast('warning','Sync Warning','Task created locally but backend sync failed');
+    });
   },[addToast,user,perms]);
 
   // ── Project handlers (gated by can_create_project / can_edit_project) ──────
@@ -467,9 +487,15 @@ const App=()=>{
     addToast('success', projectModal && typeof projectModal==='object' ? 'Project Updated' : 'Project Created', form.name);
     // BE sync
     if(projectModal && typeof projectModal==='object'){
-      apiUpdateProject(projectModal.id,{title:form.name,priority:form.priority,description:form.description}).catch(()=>{});
+      apiUpdateProject(projectModal.id,{title:form.name,priority:form.priority,description:form.description}).catch(err=>{
+        console.warn('[project] Update sync failed:',err.message);
+        addToast('warning','Sync Warning','Project updated locally but backend sync failed');
+      });
     } else {
-      apiCreateProject({title:form.name,priority:form.priority||'medium',description:form.description}).catch(()=>{});
+      apiCreateProject({title:form.name,priority:form.priority||'medium',description:form.description}).catch(err=>{
+        console.warn('[project] Create sync failed:',err.message);
+        addToast('warning','Sync Warning','Project created locally but backend sync failed');
+      });
     }
   },[projectModal,projects.length,user,addToast,perms]);
 
@@ -481,7 +507,10 @@ const App=()=>{
     setRequestModal(false);
     addToast('success','Request Raised',form.subject.slice(0,50));
     // BE sync
-    apiCreateRequest({subject:form.subject,description:form.description,toTeam:form.toTeam,priority:form.priority,taskId:form.linkedTaskId||undefined}).catch(()=>{});
+    apiCreateRequest({subject:form.subject,description:form.description,toTeam:form.toTeam,priority:form.priority,taskId:form.linkedTaskId||undefined}).catch(err=>{
+      console.warn('[request] Create sync failed:',err.message);
+      addToast('warning','Sync Warning','Request created locally but backend sync failed');
+    });
   },[requests.length,addToast,perms]);
 
   // ── Global keyboard shortcuts (⌘K for search) ─────────────────────────────
@@ -625,12 +654,12 @@ const App=()=>{
       <DeelSubNav view={view} subFilter={subFilter} setSubFilter={setSubFilter} tasks={tasks} user={effectiveUser}/>
       <div className="deel-content" data-region="main-content" aria-label="Main content" style={{display:'flex',overflowX:'hidden',overflowY:'auto',position:'relative',flex:1}}>
           {view==='briefing'      &&perms?.canView('briefing')!==false     &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={setSelTask} comms={comms} escalations={escalations} setSubFilter={setSubFilter} requests={requests}/></div>}
-          {view==='my-queue'      &&perms?.canView('my-queue')!==false     &&<div className="page-enter"><Queue user={effectiveUser} tasks={tasks} setTasks={setTasks} selTask={liveSelTask} setSelTask={setSelTask} notes={notes} setNotes={setNotes} activity={activity} setActivity={setActivity} addToast={addToast} onEscalMgr={openEscalModal} onReassign={setReassignModal} onSnooze={setSnoozeModal} onCreateTask={()=>setCreateModal(true)} onBulkAction={(ids,action)=>{setBulkIds(ids);if(action==='reassign'){setReassignModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}else if(action==='snooze'){setSnoozeModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}else if(action==='escalate'){setEscalModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}}} subFilter={subFilter} escalations={escalations} requests={requests} setRequests={setRequests} onNewRequest={()=>setRequestModal(true)} queueMode={queueMode} setQueueMode={setQueueMode} fUnassigned={fUnassigned} setFUnassigned={setFUnassigned}/></div>}
+          {view==='my-queue'      &&perms?.canView('my-queue')!==false     &&<div className="page-enter"><Queue user={effectiveUser} tasks={tasks} setTasks={setTasks} selTask={liveSelTask} setSelTask={setSelTask} notes={notes} setNotes={setNotes} activity={activity} setActivity={setActivity} addToast={addToast} onEscalMgr={openEscalModal} onReassign={(t)=>{closeActionModals();setReassignModal(t);}} onSnooze={(t)=>{closeActionModals();setSnoozeModal(t);}} onCreateTask={()=>{closeActionModals();setCreateModal(true);}} onBulkAction={(ids,action)=>{closeActionModals();setBulkIds(ids);if(action==='reassign'){setReassignModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}else if(action==='snooze'){setSnoozeModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}else if(action==='escalate'){setEscalModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}}} subFilter={subFilter} escalations={escalations} requests={requests} setRequests={setRequests} onNewRequest={()=>setRequestModal(true)} queueMode={queueMode} setQueueMode={setQueueMode} fUnassigned={fUnassigned} setFUnassigned={setFUnassigned}/></div>}
           {view==='team'          &&perms?.canView('team')!==false         &&<div className="page-enter"><Team user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setTask={setSelTask} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
           {view==='analytics'     &&perms?.canView('analytics')!==false    &&<div className="page-enter"><Analytics tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} currentUser={effectiveUser} subFilter={subFilter} escalations={escalations}/></div>}
           {view==='escalations'   &&perms?.canView('escalations')!==false  &&<div className="page-enter"><EscalationsView escalations={escalations} setEscalations={setEscalations} currentUser={effectiveUser} onNewEscalation={()=>setCreateEscalModal(true)}/></div>}
           {view==='announcements' &&perms?.canView('announcements')!==false&&<div className="page-enter"><AnnouncementsView user={effectiveUser} comms={comms} setComms={setComms} addToast={addToast} tasks={tasks} apiAcknowledge={apiAcknowledge} apiCreate={apiCreate} apiSend={apiSend} apiUpdate={apiUpdate} apiArchive={apiArchive} apiRemove={apiRemove} apiTogglePin={apiTogglePin} openCompose={announceCompose} onComposeOpened={()=>setAnnounceCompose(false)} apiUnarchive={apiUnarchive} apiComments={apiComments} apiSetComments={apiSetComments} apiLoadComments={apiLoadComments} apiAddComment={apiAddCommentFn} apiDeleteComment={apiDeleteCommentFn} apiLinks={apiLinks} apiLoadLinks={apiLoadLinks} apiLinkAnnouncement={apiLinkAnnouncementFn} apiUnlinkAnnouncement={apiUnlinkAnnouncementFn} apiReact={apiReactFn}/></div>}
-          {view==='calendar'      &&perms?.canView('calendar')!==false     &&<div className="page-enter"><CalendarView tasks={tasks}/></div>}
+          {view==='calendar'      &&perms?.canView('calendar')!==false     &&<div className="page-enter"><CalendarView tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks}/></div>}
           {view==='knowledge-hub' &&perms?.canView('knowledge-hub')!==false&&<div className="page-enter"><KnowledgeHub subFilter={subFilter} user={effectiveUser}/></div>}
           {view==='hr-reports'    &&perms?.canView('hr-reports')!==false   &&<div className="page-enter"><GMReportingView user={effectiveUser} addToast={addToast} createReportModal={createReportModal} setCreateReportModal={setCreateReportModal}/></div>}
           {view==='settings'      &&perms?.canView('settings')!==false     &&<div className="page-enter"><SettingsView settings={settings} setSettings={setSettings} user={user} addToast={addToast} tasks={tasks} setTasks={setTasks} subFilter={subFilter} accessTypes={accessTypes} setAccessTypes={setAccessTypes} userAccessMap={userAccessMap} setUserAccessMap={setUserAccessMap} perms={perms}/></div>}

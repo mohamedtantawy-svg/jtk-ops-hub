@@ -1,7 +1,8 @@
 // ── GET /api/v1/integrations/test ─────────────────────────────────────────────
 // Live connectivity test — hits each configured API with a lightweight call.
-// Does NOT require auth so it can be used for health checks.
+// Requires auth (JWT verified by middleware).
 import { NextResponse } from 'next/server';
+import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { isDeelConfigured, listPeople } from '../../../../../src/lib/deel-api';
 import { isJiraConfigured, listProjects } from '../../../../../src/lib/jira-api';
 import { isSlackConfigured, listChannels } from '../../../../../src/lib/slack-api';
@@ -50,7 +51,12 @@ async function testZendesk() {
   }
 }
 
-export async function GET() {
+export async function GET(req) {
+  const user = getAuthUser(req);
+  if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  // Only admins can run integration tests
+  if (user.role !== 'admin') return NextResponse.json({ error: 'Admin role required' }, { status: 403 });
+
   const [deel, jira, slack, zendesk] = await Promise.all([
     testDeel(),
     testJira(),
