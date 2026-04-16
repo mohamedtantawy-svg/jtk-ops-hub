@@ -229,12 +229,33 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const compact=!!selTask;
   const recentTasks=recentIds.map(id=>tasks.find(t=>t.id===id)).filter(Boolean);
   // SLA pills — use visPreSla so they never vanish when an SLA filter is active
+  // Only show for queue tasks (ZD/JR), hide when on a Deel source panel
+  const showSlaPills = !workSource;
   const {atRiskCount,breachedCount,onTrackCount}=useMemo(()=>{
+    if(!showSlaPills) return {atRiskCount:0,breachedCount:0,onTrackCount:0};
     const slaBase=visPreSla.filter(t=>t.status!=='resolved'&&t.status!=='waiting');
     const atRisk=slaBase.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;}).length;
     const breached=slaBase.filter(t=>{const s=slaInfo(t);return s&&s.breach;}).length;
     return{atRiskCount:atRisk,breachedCount:breached,onTrackCount:slaBase.length-atRisk-breached};
-  },[visPreSla]);
+  },[visPreSla,showSlaPills]);
+
+  // ── View-aware header counts: reflect active tab (fTool / workSource) ──
+  const headerCounts = useMemo(() => {
+    if (workSource === 'onboarding') return { open: onboardingRows.length, paused: 0, resolved: 0 };
+    if (workSource === 'offboarding') return { open: offboardingRows.length, paused: 0, resolved: 0 };
+    if (workSource === 'amendments') return { open: amendmentRows.length, paused: 0, resolved: 0 };
+    if (workSource === 'redlines') return { open: redlineRows.length, paused: 0, resolved: 0 };
+    if (workSource === 'workbench') return { open: workbenchRows.length, paused: 0, resolved: 0 };
+    if (workSource === 'all_sources') return { open: allSourceRows.length, paused: 0, resolved: 0 };
+    // Queue view (ZD/JR) — use filtered baseVis when fTool is set
+    const base = fTool ? baseVis.filter(t => t.source === fTool) : baseVis;
+    const srcExtra = fTool ? 0 : allSourceRows.length;
+    return {
+      open: base.filter(t => t.status !== 'resolved' && t.status !== 'waiting').length + srcExtra,
+      paused: base.filter(t => t.status === 'waiting').length,
+      resolved: base.filter(t => t.status === 'resolved').length,
+    };
+  }, [workSource, fTool, baseVis, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, allSourceRows]);
   const activeFilterCount=[fTool,fStatus,fCtry.length>0?true:null,fSla||null,fUnassigned||null].filter(Boolean).length;
 
   // Persist filters to localStorage
@@ -399,24 +420,29 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
         {/* Line 1: Title + total counts across ALL queues (Item #7) + Start Working */}
         <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:10}}>
           {(isAdmin||isLead)&&<span style={{fontSize:13,fontWeight:600,color:'#616161'}}>{isAdmin?'All Tasks':`${user.team}`}</span>}
-          {/* Item #7: Stable totals from baseVis (not affected by active filters) */}
+          {/* View-aware totals — change when switching between source tabs */}
           <span style={{fontSize:12,color:'#9e9e9e',display:'flex',alignItems:'center',gap:5}}>
             <i className="bi-layers" style={{fontSize:11}}></i>
-            <span style={{fontWeight:600,color:'#1b1b1b'}}>{baseVis.filter(t=>t.status!=='resolved'&&t.status!=='waiting').length + allSourceRows.length}</span> open
-            {baseVis.filter(t=>t.status==='waiting').length>0&&<span> &middot; <span style={{fontWeight:600,color:'#616161'}}>{baseVis.filter(t=>t.status==='waiting').length}</span> paused</span>}
-            {baseVis.filter(t=>t.status==='resolved').length>0&&<span> &middot; <span style={{fontWeight:600,color:'#29811e'}}>{baseVis.filter(t=>t.status==='resolved').length}</span> resolved</span>}
+            <span style={{fontWeight:600,color:'#1b1b1b'}}>{headerCounts.open}</span> open
+            {headerCounts.paused>0&&<span> &middot; <span style={{fontWeight:600,color:'#616161'}}>{headerCounts.paused}</span> paused</span>}
+            {headerCounts.resolved>0&&<span> &middot; <span style={{fontWeight:600,color:'#29811e'}}>{headerCounts.resolved}</span> resolved</span>}
           </span>
           <div style={{marginLeft:'auto',display:'flex',gap:8,alignItems:'center'}}>
             {/* Live sync indicator */}
-            {queueSync&&(
-              <div style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:queueSync.isLive?'#29811e':'#9e9e9e'}}>
-                <span style={{width:6,height:6,borderRadius:'50%',background:queueSync.loading?'#ed8d00':queueSync.isLive?'#29811e':'#d42d35',animation:queueSync.loading?'pulse 1s infinite':'none'}}/>
-                <span>{queueSync.loading?'Syncing...':queueSync.isLive?'Live':'Offline'}</span>
+            {queueSync&&(()=>{
+              const hasCachedData = ns.length > 0;
+              const syncColor = queueSync.loading ? '#ed8d00' : queueSync.isLive ? '#29811e' : hasCachedData ? '#0369a1' : '#d42d35';
+              const syncLabel = queueSync.loading ? 'Syncing...' : queueSync.isLive ? 'Live' : hasCachedData ? 'Cached' : 'Offline';
+              return(
+              <div style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:syncColor}}>
+                <span style={{width:6,height:6,borderRadius:'50%',background:syncColor,animation:queueSync.loading?'pulse 1s infinite':'none'}}/>
+                <span>{syncLabel}</span>
                 {queueSync.meta&&<span style={{color:'#bbb'}}>ZD:{queueSync.meta.zendesk?.count||0} JR:{queueSync.meta.jira?.count||0}</span>}
                 <button onClick={()=>queueSync.refresh()} title="Force refresh" style={{border:'none',background:'transparent',cursor:'pointer',padding:2,color:'#9e9e9e',fontSize:12,display:'flex'}}><i className="bi-arrow-clockwise"/></button>
               </div>
-            )}
-            {/* SLA filter pills — always visible when count > 0, with labels */}
+              );
+            })()}
+            {/* SLA filter pills — only show for queue views (ZD/JR), hidden on Deel source panels */}
             {onTrackCount>0&&(
               <div onClick={()=>setFSla(fSla==='ok'?null:'ok')} style={{display:'flex',alignItems:'center',gap:5,background:fSla==='ok'?'#dcfce7':'#f0fdf4',border:`${fSla==='ok'?'2':'1'}px solid ${fSla==='ok'?'#15803d':'#bbf7d0'}`,borderRadius:128,padding:'5px 14px',cursor:'pointer',transition:'all .15s',flexShrink:0,boxShadow:fSla==='ok'?'0 0 0 2px #15803d30':'none'}}>
                 <i className="bi-check-circle-fill" style={{color:'#15803d',fontSize:13}}></i>
