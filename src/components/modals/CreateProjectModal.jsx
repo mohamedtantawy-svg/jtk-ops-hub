@@ -29,6 +29,7 @@ export default function CreateProjectModal({ onConfirm, onClose, project, curren
   const [assignTeam, setTeam]       = useState(project?.assignTeam ?? 'EMEA');
   const [assigneeIds, setAssignees] = useState(project?.assigneeIds ?? []);
   const [submitted, setSubmitted]   = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [deadlineError, setDeadlineError] = useState('');
 
   const backdropRef = useRef(null);
@@ -55,6 +56,8 @@ export default function CreateProjectModal({ onConfirm, onClose, project, curren
       setDeadlineError('Deadline cannot be in the past');
       return;
     }
+    if (submitting) return;
+    setSubmitting(true);
     onConfirm({
       name: name.trim(),
       type, status, priority, description,
@@ -268,15 +271,16 @@ export default function CreateProjectModal({ onConfirm, onClose, project, curren
             </button>
             <button
               onClick={handleSubmit}
-              disabled={!name.trim() || !deadline || !!deadlineError}
+              disabled={!name.trim() || !deadline || !!deadlineError || submitting}
               style={{
                 padding:'9px 24px', borderRadius:128, fontSize:14, fontWeight:600,
-                border:'none', background: (!name.trim()||!deadline||deadlineError) ? '#e8e8e8' : '#1b1b1b',
-                color: (!name.trim()||!deadline||deadlineError) ? '#9e9e9e' : 'white',
-                cursor: (!name.trim()||!deadline||deadlineError) ? 'not-allowed' : 'pointer', transition:'all .15s',
+                border:'none', background: (!name.trim()||!deadline||deadlineError||submitting) ? '#e8e8e8' : '#1b1b1b',
+                color: (!name.trim()||!deadline||deadlineError||submitting) ? '#9e9e9e' : 'white',
+                cursor: (!name.trim()||!deadline||deadlineError||submitting) ? 'not-allowed' : 'pointer', transition:'all .15s',
+                opacity: submitting ? .6 : 1,
               }}
             >
-              {editing ? 'Save Changes' : 'Create Project'}
+              {submitting?'Saving…':editing ? 'Save Changes' : 'Create Project'}
             </button>
           </div>
         </div>

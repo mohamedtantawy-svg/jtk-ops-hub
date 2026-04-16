@@ -25,7 +25,7 @@ const GlobalSearch=({tasks,setView,setSelTask,onClose})=>{
   const handleSelect=(r)=>{
     if(!r)return;
     if(r.type==='task'){setSelTask(r.item);setView('my-queue');onClose();}
-    if(r.type==='slack'){setView('slack');onClose();}
+    if(r.type==='slack'){setSelTask(r.item);setView('my-queue');onClose();}
     if(r.type==='kb'){setView('knowledge-hub');onClose();}
   };
 
@@ -98,7 +98,7 @@ const GlobalSearch=({tasks,setView,setSelTask,onClose})=>{
           {qSlack.length>0&&<>
             <div style={sectionHeaderStyle}>SLACK</div>
             {qSlack.map(t=>{globalIdx++;const gi=globalIdx;return(
-              <Row key={t.id} isHighlighted={hlIdx===gi} onClick={()=>{setView('slack');onClose();}}>
+              <Row key={t.id} isHighlighted={hlIdx===gi} onClick={()=>{setSelTask(t);setView('my-queue');onClose();}}>
                 <div style={{width:28,height:28,background:'#f3eff8',borderRadius:7,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><i className="bi-slack" style={{color:'#c4b1f9',fontSize:13}}></i></div>
                 <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:500,color:'#1b1b1b',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{t.subject}</div><div style={{fontSize:11,color:'#9e9e9e'}}>{t.sender} · {t.channel}</div></div>
               </Row>

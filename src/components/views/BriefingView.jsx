@@ -79,7 +79,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const personal=tasks.filter(t=>(t.assigneeId===user.id||(t.assigneeEmail&&t.assigneeEmail.toLowerCase()===user.email?.toLowerCase()))&&t.status!=='resolved');
   const total=scope.length;
   const breached=scope.filter(t=>{const s=slaInfo(t);return s&&s.breach;});
-  const atRisk=scope.filter(t=>{const s=slaInfo(t);return s&&!s.breach;});
+  const atRisk=scope.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;});
   const newT=scope.filter(t=>t.status==='new');
   const ipT=scope.filter(t=>t.status==='in_progress');
   const waitT=scope.filter(t=>t.status==='waiting');
@@ -87,8 +87,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const updated=scope.filter(t=>t.updatedMinsAgo!==undefined&&t.updatedMinsAgo<=120).length;
   const manager=user.lead?MEMBERS.find(m=>m.id===user.lead):null;
 
-  // ── DYNAMIC CAPACITY — based on team average (memoization recommended in production) ──────────────────────────
-  const allAgents=MEMBERS.filter(m=>m.role==='agent').map(m=>{
+  // ── DYNAMIC CAPACITY — scoped to permission level ──────────────────
+  const allAgents=MEMBERS.filter(m=>m.role==='agent'&&scopeIds.includes(m.id)).map(m=>{
     const mt=tasks.filter(t=>t.assigneeId===m.id&&t.status!=='resolved').length;
     const br=tasks.filter(t=>t.assigneeId===m.id&&t.status!=='resolved').filter(t=>{const s=slaInfo(t);return s&&s.breach;}).length;
     return {...m,tc:mt,br};
@@ -121,11 +121,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const hColor=healthScore>=80?'#29811e':healthScore>=60?'#ed8d00':'#d42d35';
   const hLabel=healthScore>=80?'Healthy':healthScore>=60?'Attention':'Critical';
 
-  // ── Simulated "yesterday" trends ──────────────────────────────────────
-  const yTotal=Math.max(1,total+Math.floor(Math.random()*4)-2);
-  const yBreach=Math.max(0,breached.length+Math.floor(Math.random()*3)-1);
-  const yResolved=Math.max(0,resolved+Math.floor(Math.random()*3)-1);
-  const trend=(curr,prev)=>{if(curr===prev)return{dir:'\u2192',pct:0,c:'#bebebe'};const d=curr-prev;const p=prev>0?Math.round(Math.abs(d)/prev*100):curr>0?100:0;return d>0?{dir:'\u2191',pct:p,c:curr===breached.length?'#d42d35':'#ed8d00'}:{dir:'\u2193',pct:p,c:'#29811e'};};
+  // ── Trends (static until historical data endpoint exists) ──────────
+  const trend=()=>({dir:'\u2192',pct:0,c:'#bebebe'});;
 
   // ── Source breakdown (org-wide for exec, scoped for others) ───────────
   const srcPool=isExec?orgOpen:scope;
@@ -137,11 +134,11 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const orgIP=orgOpen.filter(t=>t.status==='in_progress').length;
   const orgWait=orgOpen.filter(t=>t.status==='waiting').length;
   const orgBreach=orgOpen.filter(t=>{const s=slaInfo(t);return s&&s.breach;}).length;
-  const orgAtRisk=orgOpen.filter(t=>{const s=slaInfo(t);return s&&!s.breach;}).length;
+  const orgAtRisk=orgOpen.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;}).length;
   const orgSlaComp=orgOpen.length>0?Math.round(((orgOpen.length-orgBreach)/orgOpen.length)*100):100;
 
-  // ── Sparkline ─────────────────────────────────────────────────────────
-  const sparkData=[2,3,5,8,12,14,11,total,Math.max(1,total-2),Math.max(1,total-4)];
+  // ── Sparkline (flat until historical data endpoint exists) ──────────
+  const sparkData=Array.from({length:10},()=>total);
   const spMax=Math.max(...sparkData,1)||1;const spW=80;const spH=22;
   const sparkPath=sparkData.map((v,i)=>{const x=i/(sparkData.length-1)*spW;const y=spH-(v/spMax)*spH;return(i===0?'M':'L')+x.toFixed(1)+','+y.toFixed(1);}).join(' ');
   // sparkPath is used for SVG sparkline visualization
@@ -222,8 +219,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
 
   // ── SLA filter helpers for expandable SLA panels ──────────────────────
   const orgBreachedTasks=orgOpen.filter(t=>{const s=slaInfo(t);return s&&s.breach;});
-  const orgAtRiskTasks=orgOpen.filter(t=>{const s=slaInfo(t);return s&&!s.breach;});
-  const orgWithinSlaTasks=orgOpen.filter(t=>{const s=slaInfo(t);return !s;});
+  const orgAtRiskTasks=orgOpen.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;});
+  const orgWithinSlaTasks=orgOpen.filter(t=>{const s=slaInfo(t);return !s||(s&&s.ok);});
 
   // ── Average response time (simulated from task age) ─────────────────
   const avgResponseTime=scope.length>0?Math.round(scope.reduce((s,t)=>s+t.minutesAgo,0)/scope.length):0;
@@ -598,7 +595,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             </svg>
             <div style={{fontSize:11,color:'#616161'}}>
               <span style={{fontWeight:700,color:'#1b1b1b'}}>Volume Trend</span> — {orgOpen.length+orgResolved.length} tasks today
-              {trend(total,yTotal).pct>0&&<span style={{marginLeft:6,fontWeight:700,color:trend(total,yTotal).c}}>{trend(total,yTotal).dir}{trend(total,yTotal).pct}% vs yesterday</span>}
+              {trend().pct>0&&<span style={{marginLeft:6,fontWeight:700,color:trend().c}}>{trend().dir}{trend().pct}% vs yesterday</span>}
             </div>
           </div>}
         </div>}
@@ -668,12 +665,12 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             return(<>
           <div style={{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:10}}>
             {[
-              {icon:'bi-inbox-fill',label:'Active Requests',value:personal.length,color:'var(--g)',sub:`avg ${teamAvg.toFixed(1)}`,tr:trend(personal.length,yTotal),expandKey:'active-breakdown'},
+              {icon:'bi-inbox-fill',label:'Active Requests',value:personal.length,color:'var(--g)',sub:`avg ${teamAvg.toFixed(1)}`,tr:trend(),expandKey:'active-breakdown'},
               {icon:'bi-calendar-event',label:'Meetings',value:todayMeetings.length,color:'#1f74b3',nav:()=>setView('calendar')},
-              {icon:'bi-kanban',label:'Projects',value:srcEntries.length,color:'#8b6dca',nav:()=>setView('hr-reports')},
+              {icon:'bi-kanban',label:'Projects',value:srcEntries.length,color:'#8b6dca',nav:()=>setView('projects')},
               {icon:'bi-exclamation-triangle-fill',label:'Escalations',value:pendingEscalCount,color:pendingEscalCount>0?'#d42d35':'#616161',alert:pendingEscalCount>0,nav:()=>setView('escalations'),accent:pendingEscalCount>0?'#ffe2de':null},
               {icon:'bi-megaphone-fill',label:'Announcements',value:unackedCount,color:unackedCount>0?'#ed8d00':'#616161',alert:unackedCount>0,nav:()=>setView('announcements'),accent:unackedCount>0?'#fff8e6':null},
-              {icon:'bi-check-circle-fill',label:'Resolved',value:resolved,color:'#29811e',sub:'today',tr:trend(resolved,yResolved),nav:()=>{setView('my-queue');setTimeout(()=>setSubFilter&&setSubFilter('Resolved'),50);}},
+              {icon:'bi-check-circle-fill',label:'Resolved',value:resolved,color:'#29811e',sub:'today',tr:trend(),nav:()=>{setView('my-queue');setTimeout(()=>setSubFilter&&setSubFilter('Resolved'),50);}},
             ].map((m,i)=>(
               <DeelCard key={m.label}
                 onClick={m.expandKey?()=>setExpandedSla(expandedSla===m.expandKey?null:m.expandKey):m.nav?m.nav:undefined}
@@ -776,12 +773,12 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             return(<>
           <div style={{display:'flex',alignItems:'center',gap:0}}>
           {[
-            {l:'Active Requests',v:total,c:'var(--g)',sub:`${personal.length} yours`,tr:trend(total,yTotal),expandKey:'active-breakdown'},
+            {l:'Active Requests',v:total,c:'var(--g)',sub:`${personal.length} yours`,tr:trend(),expandKey:'active-breakdown'},
             {l:'Meetings',v:leadTodayMeetings.length,c:'#1f74b3',nav:()=>setView('calendar')},
-            {l:'Projects',v:srcEntries.length,c:'#8b6dca',nav:()=>setView('hr-reports')},
+            {l:'Projects',v:srcEntries.length,c:'#8b6dca',nav:()=>setView('projects')},
             {l:'Escalations',v:pendingEscalCount,c:pendingEscalCount>0?'#d42d35':'#616161',alert:pendingEscalCount>0,nav:()=>setView('escalations')},
             {l:'Announcements',v:unackedCount,c:unackedCount>0?'#ed8d00':'#616161',alert:unackedCount>0,nav:()=>setView('announcements')},
-            {l:'Resolved',v:resolved,c:'#29811e',sub:'today',tr:trend(resolved,yResolved),nav:()=>{setView('my-queue');setTimeout(()=>setSubFilter&&setSubFilter('Resolved'),50);}},
+            {l:'Resolved',v:resolved,c:'#29811e',sub:'today',tr:trend(),nav:()=>{setView('my-queue');setTimeout(()=>setSubFilter&&setSubFilter('Resolved'),50);}},
           ].map((m,i,arr)=>(
             <div key={m.l} className={`metric-cell count-up count-up-${i+1}`}
               onClick={m.expandKey?()=>setExpandedSla(expandedSla===m.expandKey?null:m.expandKey):m.nav?m.nav:undefined}
@@ -1068,23 +1065,21 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 </div>
               </DeelCard>}
 
-              {/* ── START DATES ─────────────────────────────────────────── */}
+              {/* ── START DATES (sourced from onboarding tasks when available) ─ */}
               {(()=>{
-                const upcomingStarts=[
-                  {name:'Yuna Park',      country:'KR',date:'2026-04-01',status:'ready'},
-                  {name:'Amara Diallo',   country:'NG',date:'2026-04-07',status:'pending'},
-                  {name:'Marcus Webb',    country:'US',date:'2026-04-10',status:'pending'},
-                  {name:'Isabelle Dupont',country:'NL',date:'2026-04-08',status:'ready'},
-                  {name:'Felix Braun',    country:'DE',date:'2026-04-14',status:'ready'},
-                ];
-                const overdueStarts=[
-                  {name:'Kyle Brandt',    country:'CA',date:'2026-03-18',status:'overdue'},
-                  {name:'Talia Moore',    country:'US',date:'2026-03-23',status:'overdue'},
-                  {name:'Sergio Romero',  country:'MX',date:'2026-03-10',status:'pending'},
-                ];
+                // Derive start-dates from onboarding tasks in the queue when available
+                const onbTasks=scope.filter(t=>t.type?.toLowerCase().includes('onboard'));
+                const upcomingStarts=onbTasks.filter(t=>{
+                  if(!t.deadline)return false;
+                  const d=new Date(t.deadline);
+                  return d>=now&&d<=new Date(now.getTime()+14*86400000);
+                }).map(t=>({name:t.assigneeName||t.subject,country:t.country||'',date:t.deadline,status:t.status==='resolved'?'ready':'pending'}));
+                const overdueStarts=onbTasks.filter(t=>{
+                  if(!t.deadline)return false;
+                  return new Date(t.deadline)<now&&t.status!=='resolved';
+                }).map(t=>({name:t.assigneeName||t.subject,country:t.country||'',date:t.deadline,status:'overdue'}));
+                if(upcomingStarts.length===0&&overdueStarts.length===0)return null;
                 const statusDot={ready:'#29811e',pending:'#ed8d00',overdue:'#d42d35'};
-                const statusLabel={ready:'Ready',pending:'Pending docs',overdue:'Overdue'};
-                const flagMap={KR:'🇰🇷',NG:'🇳🇬',US:'🇺🇸',NL:'🇳🇱',DE:'🇩🇪',CA:'🇨🇦',MX:'🇲🇽'};
                 const fmtDate=d=>new Date(d).toLocaleDateString('en-GB',{day:'numeric',month:'short'});
                 return(
                   <DeelCard style={{padding:0,overflow:'hidden'}}>
@@ -1106,7 +1101,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                             <div key={i} style={{display:'flex',alignItems:'center',gap:6,padding:'5px 0',borderBottom:i<upcomingStarts.length-1?'1px solid #fafafa':'none'}}>
                               <span style={{width:7,height:7,borderRadius:'50%',background:statusDot[e.status],flexShrink:0}}></span>
                               <span style={{fontSize:11,color:'#616161',fontWeight:500,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{e.name}</span>
-                              <span style={{fontSize:10,color:'#9e9e9e'}}>{flagMap[e.country]||''}</span>
+                              <span style={{fontSize:10,color:'#9e9e9e'}}>{FLAGS[e.country]||''}</span>
                               <span style={{fontSize:10,color:'#9e9e9e',whiteSpace:'nowrap'}}>{fmtDate(e.date)}</span>
                             </div>
                           ))}
@@ -1118,7 +1113,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                             <div key={i} style={{display:'flex',alignItems:'center',gap:6,padding:'5px 0',borderBottom:i<overdueStarts.length-1?'1px solid #fafafa':'none'}}>
                               <span style={{width:7,height:7,borderRadius:'50%',background:statusDot[e.status],flexShrink:0}}></span>
                               <span style={{fontSize:11,color:'#616161',fontWeight:500,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{e.name}</span>
-                              <span style={{fontSize:10,color:'#9e9e9e'}}>{flagMap[e.country]||''}</span>
+                              <span style={{fontSize:10,color:'#9e9e9e'}}>{FLAGS[e.country]||''}</span>
                               <span style={{fontSize:10,color:'#d42d35',whiteSpace:'nowrap'}}>{fmtDate(e.date)}</span>
                             </div>
                           ))}

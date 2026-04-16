@@ -13,6 +13,7 @@ const EscalModal=({task,bulkCount,onConfirm,onClose})=>{
   const [search,setSearch]=useState('');
   const [submitted,setSubmitted]=useState(false);
   const [shaking,setShaking]=useState(false);
+  const [submitting,setSubmitting]=useState(false);
   const searchRef=useRef(null);
 
   const truncatedSubject = task.subject.length > 60 ? task.subject.slice(0, 60) + '…' : task.subject;
@@ -41,6 +42,8 @@ const EscalModal=({task,bulkCount,onConfirm,onClose})=>{
       setTimeout(()=>setShaking(false),300);
       return;
     }
+    if(submitting) return;
+    setSubmitting(true);
     onConfirm(task,reason,selId);
   };
 
@@ -122,11 +125,12 @@ const EscalModal=({task,bulkCount,onConfirm,onClose})=>{
         <div style={{padding:'0 24px 24px 24px',display:'flex',gap:8,justifyContent:'flex-end',borderTop:'1px solid var(--border)',paddingTop:'var(--space-4)',marginTop:'var(--space-4)'}}>
           <button onClick={onClose} style={{background:'white',border:'1px solid #dedede',color:'#1b1b1b',borderRadius:128,padding:'10px 24px',fontSize:13,fontWeight:500,cursor:'pointer'}}>Cancel</button>
           <button
+            disabled={submitting}
             className={shaking ? 'shake' : ''}
-            style={{background:'#1b1b1b',color:'white',border:'none',borderRadius:128,padding:'10px 24px',fontSize:13,fontWeight:500,cursor:'pointer',display:'flex',alignItems:'center',gap:6}}
+            style={{background:submitting?'#dedede':'#1b1b1b',color:'white',border:'none',borderRadius:128,padding:'10px 24px',fontSize:13,fontWeight:500,cursor:submitting?'not-allowed':'pointer',display:'flex',alignItems:'center',gap:6,opacity:submitting?.6:1}}
             onClick={handleConfirm}
           >
-            <i className="bi-arrow-up-circle-fill" style={{fontSize:13}}></i>{isBulk?`Escalate ${bulkCount} Tasks`:'Confirm Escalation'}
+            <i className="bi-arrow-up-circle-fill" style={{fontSize:13}}></i>{submitting?'Escalating…':isBulk?`Escalate ${bulkCount} Tasks`:'Confirm Escalation'}
           </button>
         </div>
       </div>

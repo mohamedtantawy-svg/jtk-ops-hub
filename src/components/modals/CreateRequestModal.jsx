@@ -23,6 +23,7 @@ export default function CreateRequestModal({ onConfirm, onClose, currentUser, ta
   const [linkedTaskId, setLinked]   = useState('');
   const [externalRef, setExtRef]    = useState('');
   const [submitted, setSubmitted]   = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const backdropRef = useRef(null);
 
   useEffect(() => {
@@ -33,6 +34,8 @@ export default function CreateRequestModal({ onConfirm, onClose, currentUser, ta
 
   const handleSubmit = () => {
     if (!subject.trim()) { setSubmitted(true); return; }
+    if (submitting) return;
+    setSubmitting(true);
     onConfirm({
       subject: subject.trim(),
       description,
@@ -179,14 +182,15 @@ export default function CreateRequestModal({ onConfirm, onClose, currentUser, ta
             }}>Cancel</button>
             <button
               onClick={handleSubmit}
-              disabled={!subject.trim()}
+              disabled={!subject.trim()||submitting}
               style={{
                 padding:'9px 24px', borderRadius:128, fontSize:14, fontWeight:600, border:'none',
-                background: !subject.trim() ? '#e8e8e8' : '#1b1b1b',
-                color: !subject.trim() ? '#9e9e9e' : 'white',
-                cursor: !subject.trim() ? 'not-allowed' : 'pointer', transition:'all .15s',
+                background: !subject.trim()||submitting ? '#e8e8e8' : '#1b1b1b',
+                color: !subject.trim()||submitting ? '#9e9e9e' : 'white',
+                cursor: !subject.trim()||submitting ? 'not-allowed' : 'pointer', transition:'all .15s',
+                opacity: submitting ? .6 : 1,
               }}
-            >Raise Request</button>
+            >{submitting?'Raising…':'Raise Request'}</button>
           </div>
         </div>
       </div>

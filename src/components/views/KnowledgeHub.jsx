@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useContext } from 'react';
 import { KB_SEARCH_INDEX, KB_ARTICLES } from '../../data/knowledge';
+import { PermissionsContext } from '../../App';
 
 // ── Country Resources (D) ────────────────────────────────────────────────────
 const COUNTRY_RESOURCES=[
@@ -38,6 +39,12 @@ const getMockResponse=(msg)=>{
 };
 
 const KnowledgeHub=({subFilter, user})=>{
+  const perms=useContext(PermissionsContext);
+  if(perms&&perms.canView('knowledge-hub')===false)return(
+    <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',padding:40}}>
+      <div style={{textAlign:'center',color:'#9e9e9e'}}><i className="bi-shield-lock" style={{fontSize:32,display:'block',marginBottom:8,opacity:.5}}></i><div style={{fontSize:14,fontWeight:600}}>Access Denied</div><div style={{fontSize:12,marginTop:4}}>You don't have permission to view this page.</div></div>
+    </div>
+  );
   // ── Section tab (Search / Ask Claude) ─────────────────────────────────────
   const [kbTab,setKbTab]=useState(subFilter==='Ask Claude'?'claude':'search');
 

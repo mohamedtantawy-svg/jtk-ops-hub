@@ -89,7 +89,7 @@ function readSourceCache(source) {
     const raw = localStorage.getItem(cfg.cacheKey);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed.ts && Date.now() - parsed.ts < cfg.cacheTtl * 2) return parsed;
+      if (parsed.ts && Date.now() - parsed.ts < cfg.cacheTtl) return parsed;
     }
   } catch {}
   return null;
