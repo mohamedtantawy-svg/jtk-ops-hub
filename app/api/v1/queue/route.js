@@ -233,7 +233,7 @@ function adfToText(node) {
 }
 
 // ── Paginated Zendesk search helper ──────────────────────────────────────────
-async function paginatedZendeskSearch(query, { maxPages = 5, perPage = 100 } = {}) {
+async function paginatedZendeskSearch(query, { maxPages = 10, perPage = 100 } = {}) {
   const allResults = [];
   let page = 1;
 
@@ -277,8 +277,8 @@ async function fetchZendeskQueue() {
 
   try {
     // Zendesk Search API caps at 1,000 results per query.
-    // Fetch active statuses sequentially to limit peak memory usage.
-    // Each query is capped at 5 pages (500 tickets).
+    // Each status is queried independently so we can pull up to 1,000 per
+    // status (10 pages × 100). Sequential to limit peak memory.
     const seenZd = new Set();
     const allTickets = [];
 
@@ -287,7 +287,7 @@ async function fetchZendeskQueue() {
     );
     // Fetch each status sequentially (not parallel) to reduce peak memory
     for (const q of statusQueries) {
-      const results = await paginatedZendeskSearch(q, { maxPages: 5 });
+      const results = await paginatedZendeskSearch(q, { maxPages: 10 });
       for (const t of results) {
         if (!seenZd.has(t.id)) { seenZd.add(t.id); allTickets.push(t); }
       }
