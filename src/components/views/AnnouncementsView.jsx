@@ -98,14 +98,14 @@ const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowle
     const draft={type,title,body,target,priority,isPopup:isPopup||false,imageUrl:imageUrl||'',link:link||'',soundKey:soundKey||'chime',author:{id:user.id,name:user.name}};
     if(editDraft){
       // Update existing
-      if(apiUpdate) apiUpdate(editDraft.id, draft);
+      if(apiUpdate) await apiUpdate(editDraft.id, draft);
       setComms(prev=>prev.map(c=>c.id===editDraft.id?{...c,...draft,status,sentAt:status==='sent'?now:c.sentAt}:c));
-      if(status==='sent'&&editDraft.status==='draft'&&apiSend) apiSend(editDraft.id);
+      if(status==='sent'&&editDraft.status==='draft'&&apiSend) await apiSend(editDraft.id);
     } else {
       // Create new
       if(apiCreate){
         const created=await apiCreate(draft);
-        if(status==='sent'&&created&&apiSend) apiSend(created.id);
+        if(status==='sent'&&created&&apiSend) await apiSend(created.id);
       } else {
         const maxNum=comms.reduce((mx,c)=>{const n=parseInt(c.id.replace('COM-',''));return n>mx?n:mx;},0);
         const id='COM-'+String(maxNum+1).padStart(3,'0');

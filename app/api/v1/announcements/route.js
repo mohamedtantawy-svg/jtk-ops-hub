@@ -106,7 +106,7 @@ export async function GET(req) {
 
 export async function POST(req) {
   try {
-    const { authorized, user, status, error } = requireRole(req, 'admin', 'manager');
+    const { authorized, user, status, error } = requireRole(req, 'admin', 'regional_manager', 'manager', 'team_lead');
     if (!authorized) return NextResponse.json({ error }, { status });
 
     const { type, title, body, target, priority, isPopup, imageUrl, link, soundKey } = await req.json();
