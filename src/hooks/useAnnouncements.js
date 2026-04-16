@@ -114,19 +114,27 @@ export function useAnnouncements() {
   }, []);
 
   // ── Create ───────────────────────────────────────────────────────────────
+  // Always attempt the API call (don't gate on isOnline — it may be stale).
+  // Only fall back to local if there's no auth token at all.
   const create = useCallback(async (draft) => {
-    if (isOnline) {
+    const hasToken = typeof window !== 'undefined' && !!localStorage.getItem('ops_hub_token');
+    if (hasToken) {
       try {
         const created = await apiCreate(draft);
         const normalised = normalizeApiAnnouncement(created);
-        // Add author info from draft (backend may not return it fully)
         normalised.author = draft.author || normalised.author;
         normalised.acks = [];
         setComms(prev => [normalised, ...prev]);
+        setIsOnline(true);
         return normalised;
-      } catch (_) { /* fall through to local */ }
+      } catch (err) {
+        console.error('[announcements] create failed:', err.message, err.status);
+        // Don't fall through to local — the announcement would be lost on refresh.
+        // Re-throw so the caller knows it failed.
+        throw err;
+      }
     }
-    // Local-only fallback
+    // No token — truly offline / local-only fallback
     const localComm = {
       id: `COM-${Date.now()}`,
       ...draft,
@@ -139,20 +147,19 @@ export function useAnnouncements() {
     };
     setComms(prev => [localComm, ...prev]);
     return localComm;
-  }, [isOnline]);
+  }, []);
 
   // ── Send ─────────────────────────────────────────────────────────────────
   const send = useCallback(async (id) => {
-    if (isOnline) {
+    const hasToken = typeof window !== 'undefined' && !!localStorage.getItem('ops_hub_token');
+    if (hasToken) {
       try {
         await apiSend(id);
-        // Force a refresh so other sessions pick up the new announcement quickly
-        // and the sender sees canonical server state (acks, status, etc.)
         setTimeout(() => refresh(), 500);
-      } catch (e) { console.warn('[announcements] API error:', e.message); }
+      } catch (e) { console.error('[announcements] send failed:', e.message, e.status); }
     }
     setComms(prev => prev.map(c => c.id === id ? { ...c, status: 'sent', sentAt: new Date().toISOString() } : c));
-  }, [isOnline, refresh]);
+  }, [refresh]);
 
   // ── Update ───────────────────────────────────────────────────────────────
   const update = useCallback(async (id, fields) => {

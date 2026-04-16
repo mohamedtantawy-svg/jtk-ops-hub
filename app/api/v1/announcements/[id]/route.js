@@ -10,7 +10,7 @@ export async function GET(req, { params }) {
     }
 
     const { id } = await params;
-    const { rows } = await query('SELECT * FROM announcements WHERE id = $1', [id]);
+    const { rows } = await query('SELECT id, type, title, body, target, priority, is_popup, image_url, link, status, author_id, pinned, sound_key, sent_at, created_at, updated_at FROM announcements WHERE id = $1', [id]);
     if (rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     const r = rows[0];
 

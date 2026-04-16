@@ -725,21 +725,20 @@ const App=()=>{
     }).catch(err => console.warn('[managerOnCall] Failed to save:', err.message));
   }, []);
 
-  // ── Clean up dismissed popups on login ──────────────────────────────────
-  // Remove dismissed IDs for announcements the user has already acked or that
-  // no longer exist — prevents localStorage from growing unbounded.
+  // ── Clean up dismissed popups — only on login, not on every comms change ──
+  // Removes IDs for announcements that no longer exist. Runs once when user
+  // logs in (not on every comms update — that caused popups to flash back).
+  const dismissCleanedRef=React.useRef(false);
   useEffect(()=>{
-    if(!user||!comms.length)return;
+    if(!user||dismissCleanedRef.current)return;
+    dismissCleanedRef.current=true;
     const commsById=new Map(comms.map(c=>[c.id,c]));
     setDismissedPopups(prev=>{
-      const cleaned=prev.filter(id=>{
-        const c=commsById.get(id);
-        // Keep if the announcement still exists, is still a popup, and user hasn't acked
-        return c&&c.isPopup&&c.status==='sent'&&!c.acks.includes(user.id);
-      });
+      // Only remove IDs for announcements that don't exist at all anymore
+      const cleaned=prev.filter(id=>commsById.has(id));
       return cleaned.length===prev.length?prev:cleaned;
     });
-  },[user,comms]);
+  },[user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Popup queue — derived from comms, minus dismissed ones ──────────────
   // Uses the canonical audience matcher so NAM/LATAM/AMERICAS/global and

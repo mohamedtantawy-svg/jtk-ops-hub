@@ -261,11 +261,17 @@ CREATE INDEX IF NOT EXISTS idx_ann_acks_user ON announcement_acks(user_id);
 CREATE INDEX IF NOT EXISTS idx_ann_acks_ann  ON announcement_acks(announcement_id);
 
 -- Idempotent backfill from legacy read_by JSONB → announcement_acks rows
-INSERT INTO announcement_acks (announcement_id, user_id, acked_at)
-SELECT a.id, (uid)::int, a.updated_at
-  FROM announcements a, jsonb_array_elements_text(COALESCE(a.read_by, '[]'::jsonb)) uid
- WHERE NOT EXISTS (SELECT 1 FROM announcement_acks x WHERE x.announcement_id = a.id AND x.user_id = (uid)::int)
-ON CONFLICT DO NOTHING;
+-- Only runs if the read_by column exists (it may not on fresh installs)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='announcements' AND column_name='read_by') THEN
+    INSERT INTO announcement_acks (announcement_id, user_id, acked_at)
+    SELECT a.id, (uid)::int, a.updated_at
+      FROM announcements a, jsonb_array_elements_text(COALESCE(a.read_by, '[]'::jsonb)) uid
+     WHERE NOT EXISTS (SELECT 1 FROM announcement_acks x WHERE x.announcement_id = a.id AND x.user_id = (uid)::int)
+    ON CONFLICT DO NOTHING;
+  END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
 CREATE INDEX IF NOT EXISTS idx_requests_to_team ON requests(to_team);

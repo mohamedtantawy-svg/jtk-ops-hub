@@ -96,21 +96,20 @@ const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowle
   const handleSend=async ({type,title,body,target,priority,status,isPopup,imageUrl,link,soundKey})=>{
     const now=new Date().toISOString().slice(0,10);
     const draft={type,title,body,target,priority,isPopup:isPopup||false,imageUrl:imageUrl||'',link:link||'',soundKey:soundKey||'chime',author:{id:user.id,name:user.name}};
-    if(editDraft){
-      // Update existing
-      if(apiUpdate) await apiUpdate(editDraft.id, draft);
-      setComms(prev=>prev.map(c=>c.id===editDraft.id?{...c,...draft,status,sentAt:status==='sent'?now:c.sentAt}:c));
-      if(status==='sent'&&editDraft.status==='draft'&&apiSend) await apiSend(editDraft.id);
-    } else {
-      // Create new
-      if(apiCreate){
-        const created=await apiCreate(draft);
-        if(status==='sent'&&created&&apiSend) await apiSend(created.id);
+    try {
+      if(editDraft){
+        if(apiUpdate) await apiUpdate(editDraft.id, draft);
+        setComms(prev=>prev.map(c=>c.id===editDraft.id?{...c,...draft,status,sentAt:status==='sent'?now:c.sentAt}:c));
+        if(status==='sent'&&editDraft.status==='draft'&&apiSend) await apiSend(editDraft.id);
       } else {
-        const maxNum=comms.reduce((mx,c)=>{const n=parseInt(c.id.replace('COM-',''));return n>mx?n:mx;},0);
-        const id='COM-'+String(maxNum+1).padStart(3,'0');
-        setComms(prev=>[{id,...draft,status,sentAt:status==='sent'?now:'',acks:[],isPinned:false},...prev]);
+        if(apiCreate){
+          const created=await apiCreate(draft);
+          if(status==='sent'&&created&&apiSend) await apiSend(created.id);
+        }
       }
+    } catch(err) {
+      console.error('[announcements] handleSend failed:', err.message);
+      if(addToast) addToast('error','Send Failed', err.body?.error || err.message || 'Could not save announcement. Check console.');
     }
     setEditDraft(null);
   };
