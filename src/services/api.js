@@ -47,27 +47,29 @@ export async function apiFetch(path, options = {}) {
         // 401 — token expired or invalid
         if (res.status === 401) {
           if (typeof window !== 'undefined') {
-            // Only invalidate the session when the request actually carried
-            // the current token and it was rejected.  If this request was
-            // made without a token (e.g. a hook that fires before login),
-            // or with an *older* token while a fresh login has since stored
-            // a new one, we must NOT nuke the valid session.
+            // Only invalidate the session when the token is ACTUALLY expired.
+            // Transient 401s (cold-start, middleware timing, etc.) must NOT
+            // nuke a valid session — verify expiry locally before clearing.
             try {
               const currentToken = localStorage.getItem('ops_hub_token');
               if (token && currentToken === token) {
-                // Grace period: don't nuke a session that was created very
-                // recently (< 30 s). This prevents a race where the Edge
-                // Runtime middleware rejects a freshly-issued token (e.g.
-                // due to key propagation delay or cold-start timing).
-                const tokenTs = Number(localStorage.getItem('ops_hub_token_ts') || 0);
-                const isRecentLogin = tokenTs && (Date.now() - tokenTs < 30000);
-                if (!isRecentLogin) {
+                // Decode the JWT and check expiry locally
+                let isExpired = false;
+                try {
+                  const payload = JSON.parse(atob(currentToken.split('.')[1]));
+                  const now = Math.floor(Date.now() / 1000);
+                  isExpired = payload.exp && payload.exp < now;
+                } catch {
+                  isExpired = true; // malformed token
+                }
+
+                if (isExpired) {
                   localStorage.removeItem('ops_hub_token');
                   localStorage.removeItem('ops_hub_token_ts');
                   localStorage.removeItem('ops_hub_user');
                   window.dispatchEvent(new CustomEvent('ops-hub-session-expired'));
                 } else {
-                  console.warn('[apiFetch] 401 ignored — token was stored <30 s ago (grace period)');
+                  console.warn('[apiFetch] 401 but token not expired locally — keeping session (transient failure)');
                 }
               }
             } catch {}

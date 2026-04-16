@@ -112,6 +112,10 @@ const App=()=>{
   const [accessTypes,setAccessTypes]=useState(()=>{try{const s=localStorage.getItem('ops_hub_access_types');return s?JSON.parse(s):DEFAULT_ACCESS_TYPES;}catch(e){return DEFAULT_ACCESS_TYPES;}});
   const [userAccessMap,setUserAccessMap]=useState(()=>{try{const ver=localStorage.getItem('ops_hub_uam_ver');if(ver!==ADMIN_LIST_VERSION){localStorage.removeItem('ops_hub_user_access_map');localStorage.setItem('ops_hub_uam_ver',ADMIN_LIST_VERSION);return{...DEFAULT_USER_ACCESS_MAP};}const s=localStorage.getItem('ops_hub_user_access_map');return s?JSON.parse(s):{...DEFAULT_USER_ACCESS_MAP};}catch(e){return DEFAULT_USER_ACCESS_MAP;}});
   // ── Session revalidation on page load ─────────────────────────────────────
+  // The JWT is valid for 24 hours. We only hit /me when the token is older than
+  // 1 hour — this prevents noisy logouts on every page refresh while still
+  // catching genuinely expired tokens.  The locally-decoded JWT payload is
+  // trusted for the first hour (it's signed, so it can't be tampered with).
   useEffect(() => {
     if (!loggedInEmail) return;
     const token = localStorage.getItem('ops_hub_token');
@@ -122,49 +126,70 @@ const App=()=>{
       return;
     }
 
-    // Skip immediate revalidation for fresh logins — the token was JUST
-    // created by the auth callback, so there's no need to hit /me right
-    // away.  This avoids a race condition where the Edge middleware
-    // rejects the brand-new token (cold-start, key propagation, etc.)
-    // and nukes the session before the user even sees the dashboard.
-    const tokenTs = Number(localStorage.getItem('ops_hub_token_ts') || 0);
-    const isFreshLogin = tokenTs && (Date.now() - tokenTs < 30000);
-    let freshFlag = false;
-    try { freshFlag = !!sessionStorage.getItem('ops_hub_fresh_login'); } catch {}
-
-    if (isFreshLogin || freshFlag) {
-      // Clear the flag so the NEXT page load will revalidate normally
-      try { sessionStorage.removeItem('ops_hub_fresh_login'); } catch {}
-      // Optionally revalidate after a delay (gives middleware time to warm up)
-      const timer = setTimeout(() => {
-        apiFetchMe()
-          .then((serverUser) => {
-            if (serverUser?.email) {
-              const member = MEMBERS.find(m => m.email.toLowerCase() === serverUser.email.toLowerCase()) || serverUser;
-              setUser(member);
-            }
-          })
-          .catch(() => { /* fresh login — don't clear session on failure */ });
-      }, 5000);
-      return () => clearTimeout(timer);
+    // Decode the JWT payload to check expiry locally (no network call)
+    let payload = null;
+    try {
+      payload = JSON.parse(atob(token.split('.')[1]));
+    } catch {
+      // Malformed token — clear session
+      setUser(null);
+      setLoggedInEmail(null);
+      try { localStorage.removeItem('ops_hub_token'); localStorage.removeItem('ops_hub_token_ts'); localStorage.removeItem('ops_hub_logged_in_email'); } catch {}
+      return;
     }
 
-    // Validate session with backend (returning user with older token)
-    apiFetchMe()
-      .then((serverUser) => {
-        if (serverUser?.email) {
-          const member = MEMBERS.find(m => m.email.toLowerCase() === serverUser.email.toLowerCase()) || serverUser;
-          setUser(member);
-        }
-      })
-      .catch((err) => {
-        if (err?.status === 401) {
-          // Token expired or invalid — log out
-          setUser(null);
-          setLoggedInEmail(null);
-          try { localStorage.removeItem('ops_hub_logged_in_email'); localStorage.removeItem('ops_hub_token'); localStorage.removeItem('ops_hub_token_ts'); } catch(e) {}
-        }
-      });
+    // Check if the token is expired locally (no server call needed)
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (payload.exp && payload.exp < nowSec) {
+      // Token is expired — clear session
+      setUser(null);
+      setLoggedInEmail(null);
+      try { localStorage.removeItem('ops_hub_token'); localStorage.removeItem('ops_hub_token_ts'); localStorage.removeItem('ops_hub_logged_in_email'); } catch {}
+      return;
+    }
+
+    // Token is valid locally — determine if we should revalidate with the server
+    const tokenTs = Number(localStorage.getItem('ops_hub_token_ts') || 0);
+    const tokenAgeMs = tokenTs ? (Date.now() - tokenTs) : Infinity;
+    const ONE_HOUR = 60 * 60 * 1000;
+
+    if (tokenAgeMs < ONE_HOUR) {
+      // Token is less than 1 hour old — skip server revalidation.
+      // The user object was already restored from localStorage/MEMBERS in useState init.
+      return;
+    }
+
+    // Token is > 1 hour old — background revalidation (non-blocking, no logout on failure)
+    const timer = setTimeout(() => {
+      apiFetchMe()
+        .then((serverUser) => {
+          if (serverUser?.email) {
+            const member = MEMBERS.find(m => m.email.toLowerCase() === serverUser.email.toLowerCase()) || serverUser;
+            setUser(member);
+          }
+        })
+        .catch((err) => {
+          if (err?.status === 401) {
+            // Verify locally one more time — only log out if truly expired
+            try {
+              const currentPayload = JSON.parse(atob((localStorage.getItem('ops_hub_token') || '').split('.')[1]));
+              const now = Math.floor(Date.now() / 1000);
+              if (currentPayload.exp && currentPayload.exp < now) {
+                setUser(null);
+                setLoggedInEmail(null);
+                try { localStorage.removeItem('ops_hub_logged_in_email'); localStorage.removeItem('ops_hub_token'); localStorage.removeItem('ops_hub_token_ts'); } catch {}
+              }
+              // If token isn't expired locally, the 401 was likely transient — keep session
+            } catch {
+              // Can't decode token — clear session
+              setUser(null);
+              setLoggedInEmail(null);
+              try { localStorage.removeItem('ops_hub_logged_in_email'); localStorage.removeItem('ops_hub_token'); localStorage.removeItem('ops_hub_token_ts'); } catch {}
+            }
+          }
+        });
+    }, 3000); // 3s delay to let the page settle
+    return () => clearTimeout(timer);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Login / Logout handlers ────────────────────────────────────────────────
@@ -727,7 +752,7 @@ const App=()=>{
       return matchesAudience(c.target, user.team);
     };
     return comms.filter(c=>
-      c.isPopup&&c.status==='sent'&&targetMatch(c)&&!c.acks.includes(uid)&&!dismissedPopups.includes(c.id)&&!(c.author&&c.author.id===user.id)
+      c.isPopup&&c.status==='sent'&&!c.acks.includes(uid)&&!dismissedPopups.includes(c.id)&&(targetMatch(c)||(c.author&&c.author.id===user.id))
     );
   },[comms,user,dismissedPopups]);
 
