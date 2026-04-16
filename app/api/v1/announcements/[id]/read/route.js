@@ -10,23 +10,36 @@ export async function POST(req, { params }) {
     }
 
     const { id } = await params;
-    const { userId } = await req.json();
 
+    // Resolve user.id — JWT usually carries it, but fall back to DB lookup
+    let userId = user.id ? Number(user.id) : null;
     if (!userId) {
-      return NextResponse.json({ error: 'userId is required' }, { status: 400 });
+      const r = await query('SELECT id FROM members WHERE LOWER(email) = LOWER($1) LIMIT 1', [user.email]);
+      userId = r.rows[0]?.id || null;
+    }
+    if (!userId) {
+      return NextResponse.json({ error: 'Could not resolve user id' }, { status: 400 });
     }
 
-    // Add userId to read_by array if not already present
+    // Source of truth: announcement_acks table. Preserved forever.
+    await query(
+      `INSERT INTO announcement_acks (announcement_id, user_id, user_email)
+       VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+      [id, userId, user.email]
+    );
+
+    // Back-compat: keep read_by JSONB in sync with acks so any legacy code path
+    // that still reads it sees the same data.
     const { rows } = await query(
       `UPDATE announcements
-       SET read_by = CASE
-         WHEN read_by IS NULL THEN jsonb_build_array(to_jsonb($2::int))
-         WHEN NOT read_by @> to_jsonb($2::int)::jsonb THEN read_by || to_jsonb($2::int)::jsonb
-         ELSE read_by
-       END,
-       updated_at = NOW()
-       WHERE id = $1
-       RETURNING id, read_by`,
+          SET read_by = CASE
+            WHEN read_by IS NULL THEN jsonb_build_array(to_jsonb($2::int))
+            WHEN NOT read_by @> to_jsonb($2::int)::jsonb THEN read_by || to_jsonb($2::int)::jsonb
+            ELSE read_by
+          END,
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, read_by`,
       [id, userId]
     );
 
@@ -34,7 +47,7 @@ export async function POST(req, { params }) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ ok: true, read_by: rows[0].read_by });
+    return NextResponse.json({ ok: true, acks: rows[0].read_by || [] });
   } catch (err) {
     console.error('[announcements/read]', err.message);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });

@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { MEMBERS } from '../../data/members';
 import { FLAGS } from '../../data/constants';
-import { COMMS_TYPES } from '../../data/comms';
+import { COMMS_TYPES, AUDIENCES, AUDIENCE_LABELS, SOUND_PRESETS } from '../../data/comms';
 import PreviewPopup from './PreviewPopup';
 
 const sanitizeImageUrl=(url)=>{
@@ -18,9 +18,17 @@ const ComposeModal=({onClose,onSend,draft,currentUser})=>{
   const [type,setType]=useState(draft?.type||'announce');
   const [title,setTitle]=useState(draft?.title||'');
   const [body,setBody]=useState(draft?.body||'');
-  const [target,setTarget]=useState(draft?.target||'all');
+  // Target is canonical lowercase; legacy drafts may be 'EMEA' etc — normalise
+  const normaliseTarget = (t) => {
+    const v = String(t || 'global').toLowerCase();
+    if (v === 'all') return 'global';
+    if (v === 'amer') return 'americas';
+    return v;
+  };
+  const [target,setTarget]=useState(normaliseTarget(draft?.target));
   const [priority,setPriority]=useState(draft?.priority||'medium');
   const [isPopup,setIsPopup]=useState(draft?.isPopup||false);
+  const [soundKey,setSoundKey]=useState(draft?.soundKey||'chime');
   const [imageUrl,setImageUrl]=useState(draft?.imageUrl||'');
   const [link,setLink]=useState(draft?.link||'');
   const [showPreview,setShowPreview]=useState(false);
@@ -31,7 +39,7 @@ const ComposeModal=({onClose,onSend,draft,currentUser})=>{
   // Valid if title + (body or image)
   const valid=title.trim().length>0&&(body.trim().length>0||!!imageUrl);
 
-  const buildDraft=(status)=>({type,title,body,target,priority,status,isPopup,imageUrl,link});
+  const buildDraft=(status)=>({type,title,body,target,priority,status,isPopup,imageUrl,link,soundKey});
 
   const handleSendWithPreview=()=>{
     if(!valid||submitting)return;
@@ -164,10 +172,9 @@ const ComposeModal=({onClose,onSend,draft,currentUser})=>{
             <div style={{flex:1}}>
               <div style={{fontSize:11,fontWeight:700,color:'#616161',letterSpacing:'.05em',marginBottom:5}}>SEND TO</div>
               <select value={target} onChange={e=>setTarget(e.target.value)} style={{width:'100%',border:'1px solid #e8e8e8',borderRadius:8,padding:'8px 10px',fontSize:13,outline:'none',fontFamily:'inherit',color:'#1b1b1b',cursor:'pointer'}}>
-                <option value="all">All Teams</option>
-                <option value="EMEA">EMEA Only</option>
-                <option value="APAC">APAC Only</option>
-                <option value="AMER">AMER Only</option>
+                {AUDIENCES.map(k => (
+                  <option key={k} value={k}>{AUDIENCE_LABELS[k]}</option>
+                ))}
               </select>
             </div>
             <div style={{flex:1}}>
@@ -196,6 +203,18 @@ const ComposeModal=({onClose,onSend,draft,currentUser})=>{
                 <div style={{fontSize:11,color:'#9e9e9e',marginTop:2}}>Recipients must acknowledge before they can dismiss. Plays a notification sound.</div>
               </div>
             </div>
+            {/* Sound picker — only relevant for popup announcements */}
+            {isPopup && (
+              <div style={{marginTop:10,paddingTop:10,borderTop:'1px dashed #e0e0e0',display:'flex',alignItems:'center',gap:10}}>
+                <i className="bi-music-note-beamed" style={{fontSize:13,color:'#616161'}}></i>
+                <div style={{fontSize:12,fontWeight:600,color:'#616161',flexShrink:0}}>Notification Sound</div>
+                <select value={soundKey} onChange={e=>setSoundKey(e.target.value)} style={{flex:1,border:'1px solid #e8e8e8',borderRadius:6,padding:'5px 8px',fontSize:12,outline:'none',fontFamily:'inherit',color:'#1b1b1b',cursor:'pointer',background:'white'}}>
+                  {Object.entries(SOUND_PRESETS).map(([k,v]) => (
+                    <option key={k} value={k}>{v.label}</option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
         </div>
         <div style={{padding:'16px 24px 24px',display:'flex',gap:8,justifyContent:'flex-end'}}>

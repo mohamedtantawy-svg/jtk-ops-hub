@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { SOUND_PRESETS } from '../../data/comms';
 
 const TYPE_CONFIG = {
   alert:    { label: 'Alert',        icon: 'bi-exclamation-triangle-fill', color: '#d42d35', bg: '#ffe2de', border: '#FCA5A5' },
@@ -14,38 +15,28 @@ const PRIORITY_COLORS = {
   low:    '#29811e',
 };
 
-function playNotificationChime() {
+// Play a sound preset defined as a list of [freq, startOffset, duration] tuples.
+// Pass null or undefined to play nothing.
+function playSound(tones) {
+  if (!tones || !tones.length) return;
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const now = ctx.currentTime;
-
-    // First tone (lower)
-    const osc1 = ctx.createOscillator();
-    const gain1 = ctx.createGain();
-    osc1.type = 'sine';
-    osc1.frequency.setValueAtTime(523.25, now); // C5
-    gain1.gain.setValueAtTime(0.18, now);
-    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
-    osc1.connect(gain1);
-    gain1.connect(ctx.destination);
-    osc1.start(now);
-    osc1.stop(now + 0.3);
-
-    // Second tone (higher)
-    const osc2 = ctx.createOscillator();
-    const gain2 = ctx.createGain();
-    osc2.type = 'sine';
-    osc2.frequency.setValueAtTime(659.25, now + 0.15); // E5
-    gain2.gain.setValueAtTime(0.001, now);
-    gain2.gain.setValueAtTime(0.18, now + 0.15);
-    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
-    osc2.connect(gain2);
-    gain2.connect(ctx.destination);
-    osc2.start(now + 0.15);
-    osc2.stop(now + 0.5);
-
-    // Clean up context after sounds finish
-    setTimeout(() => ctx.close(), 600);
+    let maxEnd = 0;
+    for (const [freq, startOffset, duration] of tones) {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now + startOffset);
+      gain.gain.setValueAtTime(0.18, now + startOffset);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + startOffset + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + startOffset);
+      osc.stop(now + startOffset + duration);
+      maxEnd = Math.max(maxEnd, startOffset + duration);
+    }
+    setTimeout(() => ctx.close(), Math.ceil((maxEnd + 0.1) * 1000));
   } catch (_) {
     // Audio not available — silently ignore
   }
@@ -107,10 +98,11 @@ export default function AnnouncementPopup({ comm, onAcknowledge }) {
     return () => document.removeEventListener('keydown', handleKeyDown, true);
   }, []);
 
-  // Play chime on mount
+  // Play the per-announcement sound on mount
   useEffect(() => {
-    playNotificationChime();
-  }, []);
+    const preset = SOUND_PRESETS[comm.soundKey] || SOUND_PRESETS.chime;
+    playSound(preset?.tones);
+  }, [comm.soundKey]);
 
   const [acking, setAcking] = useState(false);
   const handleAcknowledge = useCallback(() => {

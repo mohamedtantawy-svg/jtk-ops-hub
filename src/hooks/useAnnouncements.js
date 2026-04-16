@@ -37,12 +37,14 @@ function normalizeApiAnnouncement(a) {
     sentAt: a.sentAt || '',
     target: a.target,
     status: a.status,
-    acks: a.acks || [],
+    // acks comes from server read_by (numeric user IDs)
+    acks: Array.isArray(a.acks) ? a.acks.map(Number).filter(Boolean) : [],
     link: a.link || '',
     priority: a.priority,
     isPopup: a.isPopup || false,
     imageUrl: a.imageUrl || '',
-    isPinned: a.isPinned || false,
+    isPinned: a.isPinned || a.pinned || false,
+    soundKey: a.soundKey || 'chime',
     reactions: a.reactions || {},
     comments: a.comments || [],
     linkedIds: a.linkedIds || [],
@@ -79,20 +81,21 @@ export function useAnnouncements() {
   });
 
   // ── Refresh from API ─────────────────────────────────────────────────────
+  // Server is the source of truth for acks now (announcement_acks table),
+  // so we replace rather than union with stale local state.
   const refresh = useCallback(async () => {
     try {
       const data = await fetchAnnouncements({ limit: 200 });
-      if (data?.items?.length) {
+      if (data?.items) {
         setComms(prev => {
-          // Merge: keep local acks that we already have
-          const localAcks = {};
-          prev.forEach(c => { localAcks[c.id] = c.acks || []; });
-          return data.items.map(a => {
-            const n = normalizeApiAnnouncement(a);
-            // Merge local acks with whatever came from the server
-            const merged = [...new Set([...(localAcks[n.id] || []), ...(n.acks || [])])];
-            return { ...n, acks: merged };
-          });
+          // Preserve any local-only drafts (INITIAL_COMMS / offline) that
+          // the server doesn't know about yet.
+          const serverIds = new Set(data.items.map(a => a.id));
+          const localOnly = prev.filter(c => !serverIds.has(c.id) && String(c.id).startsWith('COM-'));
+          return [
+            ...data.items.map(normalizeApiAnnouncement),
+            ...localOnly,
+          ];
         });
         setIsOnline(true);
       }
@@ -146,16 +149,24 @@ export function useAnnouncements() {
   }, [isOnline]);
 
   // ── Acknowledge ──────────────────────────────────────────────────────────
+  // Optimistic add → server persist → the 15 s poll in App.jsx picks up the
+  // canonical ack list on the next tick so all sessions agree.
   const acknowledge = useCallback(async (id, userId) => {
-    // Optimistic update — immediately add to acks so popup disappears
+    const uid = Number(userId);
     setComms(prev => prev.map(c =>
-      c.id === id && !c.acks.includes(userId)
-        ? { ...c, acks: [...c.acks, userId] }
+      c.id === id && uid && !c.acks.includes(uid)
+        ? { ...c, acks: [...c.acks, uid] }
         : c
     ));
-    // Fire API call in background — don't block UI
     if (isOnline) {
-      try { await apiAcknowledge(id); } catch (e) { console.warn('[announcements] acknowledge failed:', e.message); }
+      try {
+        const res = await apiAcknowledge(id);
+        // Server returns the canonical acks array — trust it
+        if (res?.acks) {
+          const canonical = res.acks.map(Number).filter(Boolean);
+          setComms(prev => prev.map(c => c.id === id ? { ...c, acks: canonical } : c));
+        }
+      } catch (e) { console.warn('[announcements] acknowledge failed:', e.message); }
     }
   }, [isOnline]);
 

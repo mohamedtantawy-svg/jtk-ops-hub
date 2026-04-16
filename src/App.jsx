@@ -6,7 +6,7 @@ import { INITIAL_REQUESTS } from './data/requests';
 import { MEMBERS, MEMBERS_BY_EMAIL, DEFAULT_USER_ACCESS_MAP, TEAM_MEMBERS, getAllReports } from './data/members';
 import { INITIAL_ACTIVITY, INITIAL_NOTES } from './data/tasks';
 import { FEED_EVENTS } from './data/feed';
-import { ALL_AGENT_IDS } from './data/comms';
+import { ALL_AGENT_IDS, matchesAudience } from './data/comms';
 import { useAnnouncements } from './hooks/useAnnouncements';
 import { useQueueSync } from './hooks/useQueueSync';
 import { DEFAULT_SETTINGS } from './data/settings';
@@ -106,7 +106,7 @@ const App=()=>{
     {id:'ESC-SEED-002',task:null,taskId:null,reason:'Client reporting incorrect salary calculation for March payroll — urgent correction needed before end of day',subject:'Payroll discrepancy — March salary',escalatedBy:'James Okafor',escalatedAt:'11:42',managerId:3,managerName:'Omar Khalil',status:'resolved',managerResponseStatus:'responded',managerResponse:'Payroll team notified, correction processing.',managerRespondedAt:'12:10',managerRespondedBy:'Omar Khalil',escalationSource:'slack',slackChannel:'#hr-urgent',slackUser:'@james.okafor',slackMessageUrl:null},
     {id:'ESC-SEED-003',task:null,taskId:null,reason:'Worker contract termination requires legal sign-off but legal team unresponsive for 48h',subject:'Contract termination — legal sign-off',escalatedBy:'Priya Nair',escalatedAt:'14:05',managerId:3,managerName:'Omar Khalil',status:'pending',managerResponseStatus:'pending_response',managerResponse:null,managerRespondedAt:null,managerRespondedBy:null,escalationSource:'manual',slackChannel:null,slackUser:null,slackMessageUrl:null},
   ]);
-  const { comms, setComms, acknowledge: apiAcknowledge, create: apiCreate, send: apiSend, update: apiUpdate, archive: apiArchive, remove: apiRemove, togglePin: apiTogglePin, isOnline: apiOnline, unarchive: apiUnarchive, comments: apiComments, setComments: apiSetComments, loadComments: apiLoadComments, addComment: apiAddCommentFn, deleteComment: apiDeleteCommentFn, links: apiLinks, loadLinks: apiLoadLinks, linkAnnouncement: apiLinkAnnouncementFn, unlinkAnnouncement: apiUnlinkAnnouncementFn, react: apiReactFn } = useAnnouncements();
+  const { comms, setComms, refresh: apiRefreshAnnouncements, acknowledge: apiAcknowledge, create: apiCreate, send: apiSend, update: apiUpdate, archive: apiArchive, remove: apiRemove, togglePin: apiTogglePin, isOnline: apiOnline, unarchive: apiUnarchive, comments: apiComments, setComments: apiSetComments, loadComments: apiLoadComments, addComment: apiAddCommentFn, deleteComment: apiDeleteCommentFn, links: apiLinks, loadLinks: apiLoadLinks, linkAnnouncement: apiLinkAnnouncementFn, unlinkAnnouncement: apiUnlinkAnnouncementFn, react: apiReactFn } = useAnnouncements();
   const [dismissedPopups,setDismissedPopups]=useState(()=>{try{const d=localStorage.getItem('ops_hub_dismissed_popups');return d?JSON.parse(d):[];}catch(e){return[];}});
   const [settings,setSettings]=useState(()=>{try{const s=localStorage.getItem('ops_hub_settings');return s?{...DEFAULT_SETTINGS,...JSON.parse(s)}:DEFAULT_SETTINGS;}catch(e){return DEFAULT_SETTINGS;}});
   const [accessTypes,setAccessTypes]=useState(()=>{try{const s=localStorage.getItem('ops_hub_access_types');return s?JSON.parse(s):DEFAULT_ACCESS_TYPES;}catch(e){return DEFAULT_ACCESS_TYPES;}});
@@ -301,6 +301,47 @@ const App=()=>{
     setNotifs(prev=>[{id:Date.now()+(Math.random()*10|0),type,title,body,time:now,read:false},...prev.slice(0,49)]);
   },[]);
   const markAllRead=useCallback(()=>setNotifs(prev=>prev.map(n=>({...n,read:true}))),[]);
+
+  // ── Cross-user announcement sync (15 s poll) ───────────────────────────────
+  // Keeps the Home banner, top-nav notification list, popup queue, and the
+  // sender's ack counts current within ~15 seconds of another user's action.
+  // New announcements (first-seen & targeted to this user) fire a notification;
+  // popup ones automatically appear via the popupQueue memo.
+  const seenAnnounceIdsRef=React.useRef(new Set());
+  useEffect(()=>{
+    if(!user||!apiRefreshAnnouncements) return;
+    // Seed the "seen" set with whatever's already in comms at mount so we
+    // don't flood notifications on first login.
+    seenAnnounceIdsRef.current=new Set(comms.map(c=>c.id));
+    let cancelled=false;
+    const poll=async()=>{
+      try{
+        await apiRefreshAnnouncements();
+      }catch(e){/* silent — next tick */}
+      if(cancelled) return;
+    };
+    const iv=setInterval(poll,15000);
+    return()=>{cancelled=true;clearInterval(iv);};
+  // `comms` intentionally excluded — we only want this to re-mount when the user changes.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[user,apiRefreshAnnouncements]);
+
+  // Fire a notification whenever a sent-and-targeted announcement arrives
+  // that we haven't seen before in this session.
+  useEffect(()=>{
+    if(!user) return;
+    const seen=seenAnnounceIdsRef.current;
+    for(const c of comms){
+      if(seen.has(c.id)) continue;
+      seen.add(c.id);
+      if(c.status!=='sent') continue;
+      if(c.author&&c.author.id===user.id) continue;
+      const inAudience=(Array.isArray(c.target)&&c.target.includes(user.id))||matchesAudience(c.target,user.team);
+      if(!inAudience) continue;
+      if(c.acks&&c.acks.includes(user.id)) continue;
+      addNotif(c.type||'announce', c.title, c.body||'');
+    }
+  },[comms,user,addNotif]);
 
   const perms = usePermissions(effectiveUser, accessTypes, userAccessMap);
 
@@ -660,13 +701,13 @@ const App=()=>{
   }, []);
 
   // ── Popup queue — derived from comms, minus dismissed ones ──────────────
+  // Uses the canonical audience matcher so NAM/LATAM/AMERICAS/global and
+  // dual-region members resolve correctly.
   const popupQueue=React.useMemo(()=>{
     if(!user)return [];
     const targetMatch=(c)=>{
-      if(c.target==='all')return true;
-      if(c.target===user.team)return true;
       if(Array.isArray(c.target)&&c.target.includes(user.id))return true;
-      return false;
+      return matchesAudience(c.target, user.team);
     };
     return comms.filter(c=>
       c.isPopup&&c.status==='sent'&&targetMatch(c)&&!c.acks.includes(user.id)&&!dismissedPopups.includes(c.id)&&!(c.author&&c.author.id===user.id)
