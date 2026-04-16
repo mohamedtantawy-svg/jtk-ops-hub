@@ -342,7 +342,7 @@ async function fetchZendeskQueue() {
     return { items, status: 'ok', count: items.length, error: null };
   } catch (err) {
     console.error('[queue] Zendesk fetch error:', err.message);
-    return { items: [], status: 'error', error: err.message };
+    return { items: [], status: 'error', error: 'Zendesk fetch failed' };
   }
 }
 
@@ -425,7 +425,7 @@ async function fetchJiraQueue() {
     return { items, status: 'ok', count: items.length, error: null };
   } catch (err) {
     console.error('[queue] Jira fetch error:', err.message);
-    return { items: [], status: 'error', error: err.message };
+    return { items: [], status: 'error', error: 'Jira fetch failed' };
   }
 }
 

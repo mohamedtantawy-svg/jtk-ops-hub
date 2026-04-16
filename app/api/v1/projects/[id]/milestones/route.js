@@ -1,8 +1,14 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../../../src/lib/db';
+import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 
 export async function GET(req, { params }) {
   try {
+    const user = getAuthUser(req);
+    if (!user.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { id } = await params;
     const { rows } = await query(
       'SELECT * FROM project_milestones WHERE project_id = $1 ORDER BY sort_order ASC, created_at ASC',
@@ -26,6 +32,11 @@ export async function GET(req, { params }) {
 
 export async function POST(req, { params }) {
   try {
+    const user = getAuthUser(req);
+    if (!user.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { id } = await params;
     const body = await req.json();
     if (!body.title) {

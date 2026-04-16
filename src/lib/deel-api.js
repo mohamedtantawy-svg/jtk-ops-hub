@@ -31,15 +31,12 @@ export function isDeelConfigured() {
  * Return diagnostic info about the current Deel API configuration.
  */
 export function getDeelDiagnostics() {
-  const keyLen = DEEL_API_KEY.length;
-  const keyPreview = keyLen > 10 ? `${DEEL_API_KEY.substring(0, 6)}...${DEEL_API_KEY.substring(keyLen - 4)}` : '(too short)';
   return {
     configured: !!DEEL_API_KEY,
     baseUrl: DEEL_BASE,
     rawBaseEnv: process.env.DEEL_API_BASE_URL || '(not set, using default: api-prod-admin.letsdeel.com)',
-    tokenLength: keyLen,
-    tokenPreview: keyPreview,
-    tokenLooksLikeJwt: DEEL_API_KEY.split('.').length === 3,
+    tokenPresent: DEEL_API_KEY.length > 0,
+    // Intentionally omit token preview/length/type to avoid information disclosure
   };
 }
 
@@ -242,7 +239,7 @@ export async function listOffboardingCases() {
     status: c.status || '',                           // e.g. "AWAITING_TRIAGE"
     organizationName: c.organizationName || '',       // client company name
     exAssignee: c.exAssignee || '',                   // assigned agent (name string)
-    exAssigneeEmail: c.exAssigneeEmail || c.exAssignee?.email || '',  // assigned agent email (if available)
+    exAssigneeEmail: c.exAssigneeEmail || '',  // assigned agent email (exAssignee is a name string, not an object)
     reason: c.requestData?.reason || '',              // termination reason enum
     isResignation: c.requestData?.isEmployeeResignation || false,
     jiraUrl: c.requestData?.jiraTicket?.jiraWebURL || '',
@@ -443,7 +440,7 @@ export async function listWorkbenchTasks(params = {}) {
     completedAt:      t.completedAt || null,
     // SLA
     slaTime:          t.slaTime || null,                           // SLA window in seconds
-    slaRemaining:     t.slaRemaining || null,                      // seconds remaining
+    slaRemaining:     t.slaRemaining ?? null,                      // seconds remaining (use ?? to preserve 0)
     slaBreachStatus:  t.slaBreachStatus || '',                     // SLA_NOT_STARTED, SLA_NOT_BREACHED, SLA_PAUSED
     slaState:         t.slaState || '',                            // NOT_STARTED, RUNNING, PAUSED
     // Task type

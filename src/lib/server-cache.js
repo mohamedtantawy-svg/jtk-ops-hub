@@ -11,6 +11,7 @@
 // sweep runs every CLEANUP_INTERVAL ms to remove expired entries.
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, unlinkSync, statSync } from 'fs';
+import { readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
 
 const CACHE_DIR = join(process.env.CACHE_DIR || '/tmp', 'ops-hub-cache');
@@ -78,7 +79,14 @@ if (_cleanupTimer.unref) _cleanupTimer.unref(); // Don't block Node.js shutdown
  * @param {number} ttl — max age in ms
  */
 export function cacheGet(key, ttl) {
-  // Try filesystem first
+  // Try memory first (fast path — no I/O)
+  const mem = memoryFallback.get(key);
+  if (mem && Date.now() - mem.ts < ttl) {
+    touchLRU(key);
+    return mem.data;
+  }
+
+  // Fallback to filesystem (sync for backward compat in staleWhileRevalidate)
   try {
     const filePath = join(CACHE_DIR, `${key}.json`);
     if (existsSync(filePath)) {
@@ -93,13 +101,6 @@ export function cacheGet(key, ttl) {
       }
     }
   } catch {}
-
-  // Fallback to in-memory
-  const mem = memoryFallback.get(key);
-  if (mem && Date.now() - mem.ts < ttl) {
-    touchLRU(key);
-    return mem.data;
-  }
 
   return null;
 }
@@ -118,14 +119,11 @@ export function cacheSet(key, data) {
   touchLRU(key);
   evictIfNeeded();
 
-  // Try to persist to filesystem (non-blocking failure)
-  try {
-    const filePath = join(CACHE_DIR, `${key}.json`);
-    writeFileSync(filePath, JSON.stringify({ data, ts }), 'utf-8');
-  } catch (err) {
-    // Filesystem write failed — memory cache still works
+  // Persist to filesystem asynchronously (non-blocking)
+  const filePath = join(CACHE_DIR, `${key}.json`);
+  writeFile(filePath, JSON.stringify({ data, ts }), 'utf-8').catch(err => {
     console.warn(`[server-cache] Failed to write ${key}:`, err.message);
-  }
+  });
 }
 
 /**

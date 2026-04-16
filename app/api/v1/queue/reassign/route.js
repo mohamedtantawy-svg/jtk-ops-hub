@@ -30,6 +30,15 @@ export async function POST(req) {
     );
   }
 
+  // Validate email format
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(assigneeEmail)) {
+    return NextResponse.json(
+      { error: 'Invalid email format for assigneeEmail' },
+      { status: 400 },
+    );
+  }
+
   try {
     const isZendesk = ticketId.startsWith('ZD-');
 
@@ -52,7 +61,7 @@ export async function POST(req) {
   } catch (err) {
     console.error('[reassign] Error:', err.message);
     return NextResponse.json(
-      { error: err.message || 'Reassignment failed' },
+      { error: 'Reassignment failed' },
       { status: err.status || 500 },
     );
   }

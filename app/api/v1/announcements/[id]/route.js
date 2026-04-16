@@ -1,8 +1,14 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../../src/lib/db';
+import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 
 export async function GET(req, { params }) {
   try {
+    const user = getAuthUser(req);
+    if (!user.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { id } = await params;
     const { rows } = await query('SELECT * FROM announcements WHERE id = $1', [id]);
     if (rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -22,8 +28,32 @@ export async function GET(req, { params }) {
 
 export async function PATCH(req, { params }) {
   try {
+    const user = getAuthUser(req);
+    if (!user.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { id } = await params;
     const body = await req.json();
+
+    // Enum validation
+    const VALID_TYPES = ['info', 'alert', 'celebration', 'policy', 'update'];
+    const VALID_PRIORITIES = ['low', 'medium', 'high', 'critical'];
+    const VALID_STATUSES = ['draft', 'published', 'archived'];
+    const VALID_TARGETS = ['all', 'managers', 'agents', 'team'];
+    if (body.type && !VALID_TYPES.includes(body.type)) {
+      return NextResponse.json({ error: `Invalid type. Must be one of: ${VALID_TYPES.join(', ')}` }, { status: 400 });
+    }
+    if (body.priority && !VALID_PRIORITIES.includes(body.priority)) {
+      return NextResponse.json({ error: `Invalid priority. Must be one of: ${VALID_PRIORITIES.join(', ')}` }, { status: 400 });
+    }
+    if (body.status && !VALID_STATUSES.includes(body.status)) {
+      return NextResponse.json({ error: `Invalid status. Must be one of: ${VALID_STATUSES.join(', ')}` }, { status: 400 });
+    }
+    if (body.target && !VALID_TARGETS.includes(body.target)) {
+      return NextResponse.json({ error: `Invalid target. Must be one of: ${VALID_TARGETS.join(', ')}` }, { status: 400 });
+    }
+
     const allowed = ['type', 'title', 'body', 'target', 'priority', 'is_popup', 'image_url', 'link', 'status', 'pinned'];
     const sets = [];
     const vals = [];
@@ -56,6 +86,11 @@ export async function PATCH(req, { params }) {
 
 export async function DELETE(req, { params }) {
   try {
+    const user = getAuthUser(req);
+    if (!user.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { id } = await params;
     await query('DELETE FROM announcements WHERE id = $1', [id]);
     return new NextResponse(null, { status: 204 });

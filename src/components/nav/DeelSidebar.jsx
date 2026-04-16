@@ -66,9 +66,12 @@ const DeelSidebar = ({ view, setView, user, escalCount }) => {
         </div>
       </div>
 
-      {/* Nav groups */}
+      {/* Nav groups — filtered by permission */}
       <div style={{ flex: 1, overflowY: 'auto', padding: 'var(--space-2)' }}>
-        {NAV_GROUPS.map((group, gi) => (
+        {NAV_GROUPS.map((group, gi) => {
+          const visibleItems = group.items.filter(nav => !perms || perms.canView(nav.id) !== false);
+          if (visibleItems.length === 0) return null;
+          return (
           <div key={gi} style={{ marginBottom: 'var(--space-1)' }}>
             {group.label && (
               <div style={{
@@ -77,7 +80,7 @@ const DeelSidebar = ({ view, setView, user, escalCount }) => {
                 padding: '10px 10px 4px',
               }}>{group.label}</div>
             )}
-            {group.items.map(nav => {
+            {visibleItems.map(nav => {
               const active = view === nav.id;
               const badge = nav.badge && escalCount > 0 ? escalCount : 0;
               return (
@@ -109,7 +112,8 @@ const DeelSidebar = ({ view, setView, user, escalCount }) => {
               );
             })}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Bottom utilities */}

@@ -1,8 +1,14 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../../src/lib/db';
+import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 
 export async function GET(req, { params }) {
   try {
+    const user = getAuthUser(req);
+    if (!user.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { id } = await params;
     const { rows } = await query('SELECT * FROM members WHERE id = $1', [id]);
     if (rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -15,8 +21,20 @@ export async function GET(req, { params }) {
 
 export async function PATCH(req, { params }) {
   try {
+    const user = getAuthUser(req);
+    if (!user.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { id } = await params;
     const body = await req.json();
+
+    // Enum validation for constrained fields
+    const VALID_ROLES = ['admin', 'regional_manager', 'team_lead', 'agent'];
+    if (body.role && !VALID_ROLES.includes(body.role)) {
+      return NextResponse.json({ error: `Invalid role. Must be one of: ${VALID_ROLES.join(', ')}` }, { status: 400 });
+    }
+
     const allowed = ['name', 'role', 'team', 'region', 'country', 'lead_id', 'avatar_url', 'is_active'];
     const sets = [];
     const vals = [];

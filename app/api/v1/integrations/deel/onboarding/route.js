@@ -25,7 +25,7 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const offset = searchParams.get('offset') || '0';
 
-    const cacheKeyFull = `${CACHE_KEY}_${offset}`;
+    const cacheKeyFull = `${CACHE_KEY}_${String(offset).replace(/[^a-zA-Z0-9._-]/g, '_')}`;
     const fresh = cacheGet(cacheKeyFull, CACHE_TTL);
     if (fresh) return NextResponse.json(fresh);
 
@@ -53,7 +53,7 @@ export async function GET(req) {
     return NextResponse.json(responseData);
   } catch (err) {
     console.error('[integrations/deel/onboarding]', err.message);
-    return NextResponse.json({ error: err.message }, { status: err.status || 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: err.status || 500 });
   }
 }
 

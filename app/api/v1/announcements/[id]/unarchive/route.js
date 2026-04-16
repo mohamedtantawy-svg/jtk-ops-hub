@@ -1,8 +1,14 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../../../src/lib/db';
+import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 
 export async function PATCH(req, { params }) {
   try {
+    const user = getAuthUser(req);
+    if (!user.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { id } = await params;
     const { rows } = await query(
       "UPDATE announcements SET status = 'draft', updated_at = NOW() WHERE id = $1 RETURNING *",

@@ -26,7 +26,7 @@ export async function GET(req) {
     const statuses = searchParams.get('statuses') || 'PreparingDocuments.AmendmentRequested';
     const bustCache = searchParams.get('bust') === '1';
 
-    const cacheKeyFull = `${CACHE_KEY}_${statuses}`;
+    const cacheKeyFull = `${CACHE_KEY}_${statuses.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
 
     if (!bustCache) {
       const fresh = cacheGet(cacheKeyFull, CACHE_TTL);
@@ -57,7 +57,7 @@ export async function GET(req) {
     return NextResponse.json(responseData);
   } catch (err) {
     console.error('[integrations/deel/amendments]', err.message);
-    return NextResponse.json({ error: err.message }, { status: err.status || 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: err.status || 500 });
   }
 }
 

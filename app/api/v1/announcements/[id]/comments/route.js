@@ -4,6 +4,11 @@ import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 
 export async function GET(req, { params }) {
   try {
+    const user = getAuthUser(req);
+    if (!user.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { id } = await params;
     const { searchParams } = new URL(req.url);
     const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
@@ -35,6 +40,9 @@ export async function GET(req, { params }) {
 export async function POST(req, { params }) {
   try {
     const authUser = getAuthUser(req);
+    if (!authUser.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     const { id } = await params;
     const { body, parentId } = await req.json();
     if (!body) return NextResponse.json({ error: 'Body required' }, { status: 400 });

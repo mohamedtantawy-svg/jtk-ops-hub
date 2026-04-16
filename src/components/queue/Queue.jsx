@@ -1,7 +1,11 @@
-import { useState, useEffect, useRef, useCallback, useMemo, useContext } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, useContext, memo } from 'react';
 import { STATUSES, TOOLS, FUNCTIONS, FLAGS, getFlag } from '../../data/constants';
-import { MEMBERS } from '../../data/members';
+import { MEMBERS, MEMBERS_BY_EMAIL } from '../../data/members';
 import { slaInfo, rel, getUrl, getVisibleEmails } from '../../utils/helpers';
+
+// ── O(1) member lookups (avoid MEMBERS.find in hot paths) ──
+const MEMBERS_BY_ID = new Map(MEMBERS.map(m => [m.id, m]));
+const MEMBERS_BY_EMAIL_LC = new Map(MEMBERS.map(m => [m.email.toLowerCase(), m]));
 import { SLA_MINS } from '../../data/constants';
 import Detail from './Detail';
 import { ToolBadge, StatusBadge, SlaBadge } from '../ui/Badges';
@@ -21,6 +25,14 @@ import {
   normalizeRedlines,
   normalizeWorkbench,
 } from '../../utils/normalizeSourceRows';
+
+// ── Shared relTime utility (used by QueueRow + WorkModeOverlay) ──
+const relTime=(m)=>{
+  if(m<=0)return'now';
+  if(m<60)return`${m}m ago`;
+  if(m<120){const r=m%60;return r?`1h ${r}m ago`:'1h ago';}
+  return`${Math.floor(m/60)}h ago`;
+};
 
 // ── Work Source Button config ──
 // Item #12: Split "Change Request" into "Amendments" and "Redlines"
@@ -55,7 +67,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const [fCtry,setFCtry]=useState(saved?.fCtry||[]);
   const [showMeetingInvites,setShowMeetingInvites]=useState(false);
   const [search,setSearch]=useState('');
-  const [fSla,setFSla]=useState(null); // null | 'ok' | 'at_risk' | 'breached'
+  const [fSla,setFSla]=useState(saved?.fSla||null); // null | 'ok' | 'at_risk' | 'breached'
   const [sort,setSort]=useState(saved?.sort||'sla'); // Item #5: Default SLA sort oldest→newest
   const [checkedIds,setCheckedIds]=useState(new Set());
   const [recentIds,setRecentIds]=useState([]);
@@ -112,62 +124,57 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     ...onboardingRows, ...offboardingRows, ...amendmentRows, ...redlineRows, ...workbenchRows,
   ], [onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows]);
 
-  let vis=ns;
-  if(!isAdmin) vis=ns.filter(t=>{
-    // Match by legacy member ID
-    if(t.assigneeId===user.id) return true;
-    // Match by email hierarchy (assignee, manager, manager's manager …)
-    if(t.assigneeEmail && visibleEmails.has(t.assigneeEmail.toLowerCase())) return true;
-    return false;
-  });
-  // Baseline: agent-scoped tasks BEFORE any queue filters — used for stable counts
-  const baseVis=vis.filter(t=>!t.isCalendarBooking);
-  if(fTool)       vis=vis.filter(t=>t.source===fTool);
-  if(fStatus)     vis=vis.filter(t=>t.status===fStatus);
-  if(fUnassigned) vis=vis.filter(t=>!t.assigneeId&&!t.assigneeEmail);
-  if(fCtry.length) vis=vis.filter(t=>fCtry.includes(t.country));
-  // Snapshot BEFORE SLA filter — SLA pills use this so they never vanish when clicked
-  const visPreSla=vis.filter(t=>!t.isCalendarBooking);
-  if(fSla==='ok')       vis=vis.filter(t=>{const s=slaInfo(t);return s&&s.ok;});
-  if(fSla==='at_risk')  vis=vis.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;});
-  if(fSla==='breached') vis=vis.filter(t=>{const s=slaInfo(t);return s&&s.breach;});
-  if(!showMeetingInvites) vis=vis.filter(t=>!t.isCalendarBooking);
-  if(search) vis=vis.filter(t=>t.subject.toLowerCase().includes(search.toLowerCase())||t.id.toLowerCase().includes(search.toLowerCase())||t.type.toLowerCase().includes(search.toLowerCase()));
-  const sortFn=(arr)=>{
-    if(sort==='sla'&&settings.sla_enabled!==false)return [...arr].sort((a,b)=>{
-      const sa=slaInfo(a),sb=slaInfo(b);
-      if(sa?.breach&&!sb?.breach)return -1; if(!sa?.breach&&sb?.breach)return 1;
-      if(sa&&!sb)return -1; if(!sa&&sb)return 1;
-      if(sa&&sb){
-        const limA=SLA_MINS[a.type]||1440, limB=SLA_MINS[b.type]||1440;
-        return (limA-a.minutesAgo)-(limB-b.minutesAgo);
-      }
-      return b.minutesAgo-a.minutesAgo;
+  // ── Memoized filter chain — only recomputes when inputs change ──
+  const { vis, baseVis, visPreSla, active, snoozed, open, done, all } = useMemo(() => {
+    let _vis=ns;
+    if(!isAdmin) _vis=ns.filter(t=>{
+      if(t.assigneeId===user.id) return true;
+      if(t.assigneeEmail && visibleEmails.has(t.assigneeEmail.toLowerCase())) return true;
+      return false;
     });
-    if(sort==='newest')return [...arr].sort((a,b)=>a.minutesAgo-b.minutesAgo);
-    if(sort==='oldest')return [...arr].sort((a,b)=>b.minutesAgo-a.minutesAgo);
-    if(sort==='assignee')return [...arr].sort((a,b)=>(MEMBERS.find(m=>m.id===a.assigneeId)?.name||a.assigneeName||'').localeCompare(MEMBERS.find(m=>m.id===b.assigneeId)?.name||b.assigneeName||''));
-    return arr;
-  };
-  const sorted=sortFn(vis.filter(t=>t.status!=='resolved'&&t.status!=='waiting'));
-  const active=sorted;
-  const snoozed=vis.filter(t=>t.status==='waiting');
-  const open=active; // "open" = actionable tasks only (excludes waiting)
-  const done=vis.filter(t=>t.status==='resolved');
-  const filteredTasks=[...active,...snoozed,...done];
-  const all=filteredTasks;
+    const _baseVis=_vis.filter(t=>!t.isCalendarBooking);
+    if(fTool)       _vis=_vis.filter(t=>t.source===fTool);
+    if(fStatus)     _vis=_vis.filter(t=>t.status===fStatus);
+    if(fUnassigned) _vis=_vis.filter(t=>!t.assigneeId&&!t.assigneeEmail);
+    if(fCtry.length) _vis=_vis.filter(t=>fCtry.includes(t.country));
+    const _visPreSla=_vis.filter(t=>!t.isCalendarBooking);
+    if(fSla==='ok')       _vis=_vis.filter(t=>{const s=slaInfo(t);return s&&s.ok;});
+    if(fSla==='at_risk')  _vis=_vis.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;});
+    if(fSla==='breached') _vis=_vis.filter(t=>{const s=slaInfo(t);return s&&s.breach;});
+    if(!showMeetingInvites) _vis=_vis.filter(t=>!t.isCalendarBooking);
+    if(search) { const sl=search.toLowerCase(); _vis=_vis.filter(t=>t.subject.toLowerCase().includes(sl)||t.id.toLowerCase().includes(sl)||t.type.toLowerCase().includes(sl)); }
+    // Sort
+    const sortArr=(arr)=>{
+      if(sort==='sla'&&settings.sla_enabled!==false)return [...arr].sort((a,b)=>{
+        const sa=slaInfo(a),sb=slaInfo(b);
+        if(sa?.breach&&!sb?.breach)return -1; if(!sa?.breach&&sb?.breach)return 1;
+        if(sa&&!sb)return -1; if(!sa&&sb)return 1;
+        if(sa&&sb){ const limA=SLA_MINS[a.type]||1440, limB=SLA_MINS[b.type]||1440; return (limA-a.minutesAgo)-(limB-b.minutesAgo); }
+        return b.minutesAgo-a.minutesAgo;
+      });
+      if(sort==='newest')return [...arr].sort((a,b)=>a.minutesAgo-b.minutesAgo);
+      if(sort==='oldest')return [...arr].sort((a,b)=>b.minutesAgo-a.minutesAgo);
+      if(sort==='assignee')return [...arr].sort((a,b)=>(MEMBERS_BY_ID.get(a.assigneeId)?.name||a.assigneeName||'').localeCompare(MEMBERS_BY_ID.get(b.assigneeId)?.name||b.assigneeName||''));
+      return arr;
+    };
+    const _sorted=sortArr(_vis.filter(t=>t.status!=='resolved'&&t.status!=='waiting'));
+    const _snoozed=_vis.filter(t=>t.status==='waiting');
+    const _done=_vis.filter(t=>t.status==='resolved');
+    const _all=[..._sorted,..._snoozed,..._done];
+    return { vis:_vis, baseVis:_baseVis, visPreSla:_visPreSla, active:_sorted, snoozed:_snoozed, open:_sorted, done:_done, all:_all };
+  }, [ns, isAdmin, user.id, visibleEmails, fTool, fStatus, fUnassigned, fCtry, fSla, showMeetingInvites, search, sort, settings.sla_enabled]);
   // Item #9: Country filter — stable list from baseVis (unaffected by fTool/fStatus)
   const allCtry=useMemo(()=>{
     const ctrySet = new Set(baseVis.map(t=>t.country).filter(Boolean));
     for(const r of allSourceRows) if(r.country) ctrySet.add(r.country);
     return [...ctrySet];
   },[baseVis,allSourceRows]);
-  const hasActiveFilters=!!(fTool||fStatus||fCtry.length>0||fSla||fUnassigned||search);
+  const hasActiveFilters=useMemo(()=>!!(fTool||fStatus||fCtry.length>0||fSla||fUnassigned||search),[fTool,fStatus,fCtry,fSla,fUnassigned,search]);
 
   // Work mode queue — only active tasks (excludes snoozed/waiting)
   const workQueue = useMemo(()=> active.filter(t=>!workSkipped.has(t.id)),[active,workSkipped]);
 
-  const act=(task,action)=>{
+  const act=useCallback((task,action)=>{
     if(action==='close'){
       // Guard: skip if already resolved or pending close
       if(task.status==='resolved'||pendingCloseRefs.current[task.id])return;
@@ -185,11 +192,11 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       });
       return;
     }
-    if(action==='escalate') setTasks(prev=>prev.map(t=>t.id===task.id?{...t,status:'in_progress'}:t));
+    if(action==='escalate') setTasks(prev=>prev.map(t=>t.id===task.id?{...t,status:'escalated'}:t));
     if(action==='reply'){setSelTask(task);setRecentIds(prev=>[task.id,...prev.filter(id=>id!==task.id)].slice(0,3));}
     if(action==='reassign') onReassign&&onReassign(task);
     if(action==='snooze') onSnooze&&onSnooze(task);
-  };
+  },[setTasks,setSelTask,setRecentIds,addToast,onReassign,onSnooze]);
 
   const handleResolve=useCallback((task)=>{
     if(task.status==='resolved')return;
@@ -198,16 +205,18 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     addToast&&addToast('success',`Resolved: ${task.id}`,task.subject.slice(0,46));
   },[setTasks,setSelTask,addToast]);
 
-  const toggleCheck=id=>setCheckedIds(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;});
+  const toggleCheck=useCallback(id=>setCheckedIds(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;}),[]);
   const doBulk=(action)=>{ const ids=[...checkedIds]; if(action==='resolve'){ setTasks(prev=>prev.map(t=>checkedIds.has(t.id)?{...t,status:'resolved'}:t)); addToast&&addToast('success',`${ids.length} tasks resolved`,''); setCheckedIds(new Set()); setSelTask(null); return; } if(onBulkAction){ onBulkAction(ids,action); setCheckedIds(new Set()); } };
   const visibleIds=new Set(vis.map(t=>t.id));
   const compact=!!selTask;
   const recentTasks=recentIds.map(id=>tasks.find(t=>t.id===id)).filter(Boolean);
   // SLA pills — use visPreSla so they never vanish when an SLA filter is active
-  const slaBase=visPreSla.filter(t=>t.status!=='resolved'&&t.status!=='waiting');
-  const atRiskCount=slaBase.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;}).length;
-  const breachedCount=slaBase.filter(t=>{const s=slaInfo(t);return s&&s.breach;}).length;
-  const onTrackCount=slaBase.length-atRiskCount-breachedCount;
+  const {atRiskCount,breachedCount,onTrackCount}=useMemo(()=>{
+    const slaBase=visPreSla.filter(t=>t.status!=='resolved'&&t.status!=='waiting');
+    const atRisk=slaBase.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;}).length;
+    const breached=slaBase.filter(t=>{const s=slaInfo(t);return s&&s.breach;}).length;
+    return{atRiskCount:atRisk,breachedCount:breached,onTrackCount:slaBase.length-atRisk-breached};
+  },[visPreSla]);
   const activeFilterCount=[fTool,fStatus,fCtry.length>0?true:null,fSla||null,fUnassigned||null].filter(Boolean).length;
 
   // Persist filters to localStorage
@@ -423,7 +432,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
             const isQueueFilter = ws.id === 'zendesk' || ws.id === 'jira';
             const isActive = isQueueFilter ? (fTool === ws.id && !workSource) : workSource === ws.id;
             const count = ws.id === 'all_sources'
-              ? (onboardingRows.length + offboardingRows.length + amendmentRows.length + redlineRows.length + workbenchRows.length + jiraCount + zdCount)
+              ? (onboardingRows.length + offboardingRows.length + amendmentRows.length + redlineRows.length + workbenchRows.length)
               : ws.id === 'onboarding' ? onboardingRows.length
               : ws.id === 'offboarding' ? offboardingRows.length
               : ws.id === 'amendments' ? amendmentRows.length
@@ -628,19 +637,19 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
                 <div style={{fontSize:14,color:'#9e9e9e'}}>All caught up</div>
               </div>
         ):(
-          <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+          <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}} role="grid" aria-label="Task queue">
             <thead>
               <tr style={{background:'#f5f4f2',position:'sticky',top:0,zIndex:2}}>
-                <th style={{...thStyle,width:36,padding:'10px 8px'}}><input type="checkbox" className="deel-checkbox" checked={checkedIds.size>0&&checkedIds.size===vis.length} onChange={e=>{if(e.target.checked)setCheckedIds(new Set(vis.map(t=>t.id)));else setCheckedIds(new Set());}} style={{accentColor:'#1f74b3',width:16,height:16,cursor:'pointer'}}/></th>
-                <th style={{...thStyle,width:80}}>Source</th>
-                <th style={{...thStyle,textAlign:'left',minWidth:200}}>Subject</th>
-                <th style={{...thStyle,width:90}}>Function</th>
-                <th style={{...thStyle,width:50}}>Country</th>
-                <th style={{...thStyle,width:80}}>Assignee</th>
-                <th style={{...thStyle,width:68}}>Received</th>
-                {settings.sla_enabled!==false&&<th style={{...thStyle,width:60}}>SLA</th>}
-                <th style={{...thStyle,width:90}}>Status</th>
-                <th style={{...thStyle,width:60}}>Link</th>
+                <th scope="col" style={{...thStyle,width:36,padding:'10px 8px'}}><input type="checkbox" className="deel-checkbox" aria-label="Select all tasks" checked={checkedIds.size>0&&checkedIds.size===vis.length} onChange={e=>{if(e.target.checked)setCheckedIds(new Set(vis.map(t=>t.id)));else setCheckedIds(new Set());}} style={{accentColor:'#1f74b3',width:16,height:16,cursor:'pointer'}}/></th>
+                <th scope="col" style={{...thStyle,width:80}}>Source</th>
+                <th scope="col" style={{...thStyle,textAlign:'left',minWidth:200}}>Subject</th>
+                <th scope="col" style={{...thStyle,width:90}}>Function</th>
+                <th scope="col" style={{...thStyle,width:50}}>Country</th>
+                <th scope="col" style={{...thStyle,width:80}}>Assignee</th>
+                <th scope="col" style={{...thStyle,width:68}}>Received</th>
+                {settings.sla_enabled!==false&&<th scope="col" style={{...thStyle,width:60}}>SLA</th>}
+                <th scope="col" style={{...thStyle,width:90}}>Status</th>
+                <th scope="col" style={{...thStyle,width:60}}>Link</th>
               </tr>
             </thead>
             <tbody>
@@ -658,18 +667,16 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
         )}
       </div>}
 
-      {/* ── Detail pane ── */}
+      {/* ── Detail modal ── */}
       {selTask&&(
-        <div style={{position:'fixed',top:0,right:0,bottom:0,width:480,background:'white',borderLeft:'1px solid #e8e8e8',zIndex:100,boxShadow:'-4px 0 24px rgba(0,0,0,0.08)',display:'flex',flexDirection:'column'}}>
-          <Detail key={selTask.id} task={selTask} onClose={()=>setSelTask(null)} onAction={act} tasks={tasks} setTasks={setTasks} notes={notes} setNotes={setNotes} activity={activity} setActivity={setActivity} currentUser={user} onEscalMgr={onEscalMgr} escalations={escalations} onResolve={handleResolve} addToast={addToast}/>
-        </div>
+        <Detail key={selTask.id} task={selTask} onClose={()=>setSelTask(null)} onAction={act} tasks={tasks} setTasks={setTasks} notes={notes} setNotes={setNotes} activity={activity} setActivity={setActivity} currentUser={user} onEscalMgr={onEscalMgr} escalations={escalations} onResolve={handleResolve} addToast={addToast}/>
       )}
 
       {/* ── Keyboard shortcut strip ── */}
       {selTask&&!workMode&&(
         <div style={{background:'#fafaf9',borderTop:'1px solid #e8e8e8',padding:'6px 20px',display:'flex',alignItems:'center',gap:12,flexShrink:0,flexWrap:'wrap'}}>
           <span style={{fontSize:10.5,color:'#9e9e9e',fontWeight:600,marginRight:4,letterSpacing:'.04em'}}>SHORTCUTS:</span>
-          {[['j/k','navigate'],['e','escalate'],['s','snooze'],['r','reassign'],['x','resolve'],['a','assign to me'],['Esc','close']].map(([k,l])=>(
+          {[['j/k','navigate'],['e','escalate'],['s','snooze'],['r','reassign'],['x','resolve'],['Esc','close']].map(([k,l])=>(
             <span key={k} style={{display:'flex',alignItems:'center',gap:4,fontSize:11,color:'#616161'}}>
               <span style={{background:'#f2f2f2',border:'1px solid #e0e0e0',borderRadius:4,padding:'1px 5px',fontSize:10,fontWeight:600,color:'#1b1b1b',fontFamily:'monospace'}}>{k}</span>{l}
             </span>
@@ -712,21 +719,14 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
 };
 
 // ── Table row component (replaces TaskRow for table layout) ──
-const QueueRow=({task,selected,checked,onCheck,onClick,onAction,onEscalMgr,currentUser,slaAgeClass,settings,perms,compact,onSnooze})=>{
+const QueueRow=memo(({task,selected,checked,onCheck,onClick,onAction,onEscalMgr,currentUser,slaAgeClass,settings,perms,compact,onSnooze})=>{
   const [hov,setHov]=useState(false);
-  const assignee=MEMBERS.find(m=>m.id===task.assigneeId)||(task.assigneeEmail?MEMBERS.find(m=>m.email.toLowerCase()===task.assigneeEmail.toLowerCase()):null)||{name:task.assigneeName||'Unassigned'};
+  const assignee=MEMBERS_BY_ID.get(task.assigneeId)||(task.assigneeEmail?MEMBERS_BY_EMAIL_LC.get(task.assigneeEmail.toLowerCase()):null)||{name:task.assigneeName||'Unassigned'};
   const sla=slaInfo(task);
   const isActive=task.status!=='resolved'&&task.status!=='waiting';
   const fn=FUNCTIONS[task.type];
   const rowAgeClass=slaAgeClass?slaAgeClass(task):'';
   const priColor=task.priority?PRIORITY_DOT[task.priority]:null;
-
-  const relTime=(m)=>{
-    if(m<=0)return'now';
-    if(m<60)return`${m}m ago`;
-    if(m<120){const r=m%60;return r?`1h ${r}m ago`:'1h ago';}
-    return`${Math.floor(m/60)}h ago`;
-  };
 
   return(
     <tr
@@ -738,7 +738,7 @@ const QueueRow=({task,selected,checked,onCheck,onClick,onAction,onEscalMgr,curre
       {/* Checkbox */}
       <td style={{...tdStyle,width:36,padding:'0 8px'}} onClick={e=>{e.stopPropagation();onCheck();}}>
         <div style={{opacity:hov||checked?1:0,transition:'opacity .15s'}}>
-          <input type="checkbox" className="deel-checkbox" checked={checked||false} onChange={()=>{}} style={{accentColor:'#1f74b3',width:16,height:16,cursor:'pointer'}}/>
+          <input type="checkbox" className="deel-checkbox" aria-label={`Select task ${task.id}`} checked={checked||false} onChange={()=>{}} style={{accentColor:'#1f74b3',width:16,height:16,cursor:'pointer'}}/>
         </div>
       </td>
       {/* Source */}
@@ -801,10 +801,11 @@ const QueueRow=({task,selected,checked,onCheck,onClick,onAction,onEscalMgr,curre
       </td>
     </tr>
   );
-};
+});
+QueueRow.displayName='QueueRow';
 
 // ── Work Mode Overlay ──
-const WorkModeOverlay=({task,remaining,totalOpen,skipped,onResolve,onEscalate,onReassign,onSnooze,onSkip,onSetInProgress,onExit,settings})=>{
+const WorkModeOverlay=memo(({task,remaining,totalOpen,skipped,onResolve,onEscalate,onReassign,onSnooze,onSkip,onSetInProgress,onExit,settings})=>{
   if(!task){
     return(
       <div style={overlayStyle}>
@@ -818,7 +819,7 @@ const WorkModeOverlay=({task,remaining,totalOpen,skipped,onResolve,onEscalate,on
     );
   }
 
-  const assignee=MEMBERS.find(m=>m.id===task.assigneeId)||(task.assigneeEmail?MEMBERS.find(m=>m.email.toLowerCase()===task.assigneeEmail.toLowerCase()):null)||{name:task.assigneeName||'Unassigned',initials:(task.assigneeName||'U').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()};
+  const assignee=MEMBERS_BY_ID.get(task.assigneeId)||(task.assigneeEmail?MEMBERS_BY_EMAIL_LC.get(task.assigneeEmail.toLowerCase()):null)||{name:task.assigneeName||'Unassigned',initials:(task.assigneeName||'U').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()};
   const sla=slaInfo(task);
   const fn=FUNCTIONS[task.type];
   const tool=TOOLS[task.source];
@@ -828,13 +829,6 @@ const WorkModeOverlay=({task,remaining,totalOpen,skipped,onResolve,onEscalate,on
   const slaBarColor=slaRem<=0?'#b91c1c':slaPct>50?'#15803d':slaPct>20?'#b45309':'#b91c1c';
   const processed=totalOpen-remaining;
   const progressPct=totalOpen>0?Math.round((processed/totalOpen)*100):0;
-
-  const relTime=(m)=>{
-    if(m<=0)return'now';
-    if(m<60)return`${m}m ago`;
-    if(m<120){const r=m%60;return r?`1h ${r}m ago`:'1h ago';}
-    return`${Math.floor(m/60)}h ago`;
-  };
 
   return(
     <div style={overlayStyle}>
@@ -941,10 +935,11 @@ const WorkModeOverlay=({task,remaining,totalOpen,skipped,onResolve,onEscalate,on
       </div>
     </div>
   );
-};
+});
+WorkModeOverlay.displayName='WorkModeOverlay';
 
 // ── Custom Filter Dropdown ──
-const FilterDropdown=({icon,label,value,options,onChange,activeColor='#1f74b3',isSort})=>{
+const FilterDropdown=memo(({icon,label,value,options,onChange,activeColor='#1f74b3',isSort})=>{
   const [open,setOpen]=useState(false);
   const ref=useRef(null);
   const selected=options.find(o=>o.value===value)||options[0];
@@ -992,7 +987,8 @@ const FilterDropdown=({icon,label,value,options,onChange,activeColor='#1f74b3',i
       )}
     </div>
   );
-};
+});
+FilterDropdown.displayName='FilterDropdown';
 
 // ── Styles ──
 const thStyle={padding:'10px 12px',fontSize:11,fontWeight:600,color:'#9e9e9e',textTransform:'uppercase',letterSpacing:'0.04em',textAlign:'center',whiteSpace:'nowrap',borderBottom:'1px solid #e8e8e8'};

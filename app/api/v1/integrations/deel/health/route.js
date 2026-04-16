@@ -85,10 +85,11 @@ export async function GET(req) {
       };
     }
   } catch (err) {
+    console.error('[integrations/deel/health]', err.message);
     const elapsed = Date.now() - startMs;
     testResult = {
       status: 'network_error',
-      error: err.message,
+      error: 'Health check failed',
       elapsed: `${elapsed}ms`,
       help: 'Could not reach the Deel API. Check network connectivity.',
     };

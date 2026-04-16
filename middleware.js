@@ -3,7 +3,7 @@
 
 import { NextResponse } from 'next/server';
 
-const SIGNING_SECRET = process.env.JWT_SECRET || 'ops-hub-dev-secret-DO-NOT-USE-IN-PRODUCTION';
+const SIGNING_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? (() => { throw new Error('JWT_SECRET must be set in production'); })() : 'ops-hub-dev-secret-DO-NOT-USE-IN-PRODUCTION');
 
 // ── Base64url helpers (Edge-compatible, no Buffer) ────────────────────────────
 

@@ -153,12 +153,14 @@ export function getVisibleEmailsForAccess(email) {
   // Admin sees everyone
   if (member.access === 'admin') return ALL_EMAILS_SET;
 
-  // Regional Manager: own + all reports (TLs + their agents)
-  // Team Lead: own + direct reports
+  // Regional Manager: own + all reports (TLs + their agents — full tree)
+  // Team Lead: own + direct reports only
   // Agent: own only
   const visible = new Set([email.toLowerCase()]);
-  if (member.access === 'regional_manager' || member.access === 'team_lead') {
+  if (member.access === 'regional_manager') {
     for (const r of getAllReports(email)) visible.add(r);
+  } else if (member.access === 'team_lead') {
+    for (const r of getDirectReports(email)) visible.add(r.email);
   }
   return visible;
 }

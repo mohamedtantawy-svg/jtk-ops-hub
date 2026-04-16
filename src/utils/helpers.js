@@ -9,9 +9,10 @@ export const ageClass=(m,s)=>{ if(s==='resolved'||s==='waiting')return''; if(m>=
 export const ageDot=(m,s)=>{ if(s==='resolved'||s==='waiting'||m<30)return null; if(m>=120)return'#d42d35'; if(m>=60)return'#ed5e2a'; return'#ed8d00'; };
 export const slaInfo=(task,customThresholds)=>{
   if(task.status==='resolved'||task.status==='waiting')return null;
-  // SLA is based on time since last customer response (24h response window)
+  // SLA uses task-type-specific thresholds from SLA_MINS (or custom overrides)
   const elapsed = task.minutesSinceLastResponse != null ? task.minutesSinceLastResponse : task.minutesAgo;
-  const lim = 1440; // 24 hours = 1 business day response SLA
+  const thresholds = customThresholds || SLA_MINS;
+  const lim = thresholds[task.type] || SLA_MINS[task.type] || 1440;
   const rem = lim - elapsed;
   if(rem<=0)return{label:'SLA Breached',short:'BREACHED',color:'#d42d35',bg:'#ffe2de',breach:true,remain:rem};
   const pct = elapsed / lim;

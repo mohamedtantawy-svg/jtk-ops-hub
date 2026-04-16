@@ -100,9 +100,9 @@ const DeelTopNav = ({
   const unread = notifs ? notifs.filter(n => !n.read).length : 0;
   const notifCount = unread;
 
-  // All users see the same top nav — no permission gating on tabs
-  const visiblePrimary = PRIMARY_TABS;
-  const visibleMore = MORE_TABS;
+  // Filter tabs by user permissions — hide views the user can't access
+  const visiblePrimary = PRIMARY_TABS.filter(t => !perms || perms.canView(t.id) !== false);
+  const visibleMore = MORE_TABS.filter(t => !perms || perms.canView(t.id) !== false);
   const visibleCreate = CREATE_ACTIONS.filter(ca => {
     if (ca.perm && !perms?.canDo(ca.perm)) return false;
     if (ca.viewReq && !perms?.canView(ca.viewReq)) return false;
