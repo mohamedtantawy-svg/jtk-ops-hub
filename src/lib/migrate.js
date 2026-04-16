@@ -196,6 +196,14 @@ CREATE TABLE IF NOT EXISTS project_tasks (
   UNIQUE(project_id, task_id)
 );
 
+-- App settings (key-value store for shared config like Manager on Call)
+CREATE TABLE IF NOT EXISTS app_settings (
+  key VARCHAR(255) PRIMARY KEY,
+  value JSONB NOT NULL,
+  updated_by VARCHAR(255),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Migrations tracking
 CREATE TABLE IF NOT EXISTS _migrations (
   id SERIAL PRIMARY KEY,
