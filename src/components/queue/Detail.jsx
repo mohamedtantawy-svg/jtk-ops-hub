@@ -86,7 +86,7 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
 
   // SLA progress bar data
   const slaLim=SLA_MINS[task.type]||1440;
-  const slaRem=slaLim-(task.minutesAgo??0);
+  const slaRem=slaLim-((task.minutesSinceLastResponse??task.minutesAgo)??0);
   const slaPct=Math.max(0,Math.min(100,(slaRem/slaLim)*100));
   const slaBarColor = slaRem<=0
     ? 'var(--red, #b91c1c)'

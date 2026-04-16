@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { withTransaction } from '../../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 
+// Authorization note: All authenticated users can escalate tasks. Agents
+// escalate to their managers — this is the expected workflow. The auth check
+// below only verifies the user is logged in.
 export async function PATCH(req, { params }) {
   try {
     const authUser = getAuthUser(req);

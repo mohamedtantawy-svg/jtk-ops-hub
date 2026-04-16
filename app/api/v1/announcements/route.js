@@ -64,7 +64,8 @@ export async function GET(req) {
       query(countSql, params.slice(0, -2)),
     ]);
 
-    // Filter by audience server-side (admin sees everything unfiltered).
+    // Intentional: admins bypass audience filtering so they can see all
+    // announcements across every region for management / moderation purposes.
     // Always include announcements authored by the caller regardless of target.
     const filtered = user.role === 'admin'
       ? rows

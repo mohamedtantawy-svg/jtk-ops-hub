@@ -119,9 +119,9 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
   // ── Derived data from scoped tasks ────────────────────────────────────
   const resolved = all.filter(t => t.status === 'resolved');
   const open = all.filter(t => t.status !== 'resolved');
-  const resolvedWithTime = resolved.filter(t => t.resolvedMins != null && !isNaN(t.resolvedMins));
+  const resolvedWithTime = resolved.filter(t => (t.minutesSinceLastResponse ?? t.minutesAgo) != null);
   const avgRes = resolvedWithTime.length > 0
-    ? Math.round(resolvedWithTime.reduce((a, t) => a + (t.resolvedMins || 0), 0) / resolvedWithTime.length)
+    ? Math.round(resolvedWithTime.reduce((a, t) => a + (t.minutesSinceLastResponse ?? t.minutesAgo ?? 0), 0) / resolvedWithTime.length)
     : '-';
 
   // ── KPI computations from real data ───────────────────────────────────

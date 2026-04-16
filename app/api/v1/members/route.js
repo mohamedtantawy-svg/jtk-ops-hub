@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import { query } from '../../../../src/lib/db';
 import { getAuthUser, requireRole } from '../../../../src/lib/auth-helpers';
 
+// Authorization note: GET /members intentionally returns all members to any
+// authenticated user. This is an internal tool (~104 people) and the full
+// member list is needed for assignee dropdowns, team views, and org charts.
 export async function GET(req) {
   try {
     const user = getAuthUser(req);

@@ -87,7 +87,7 @@ export function useAnnouncements() {
         setIsOnline(false);
       }
     })();
-  });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps — refs + localStorage only; runs once on mount
 
   // ── Refresh from API ─────────────────────────────────────────────────────
   // Server is the source of truth for acks now (announcement_acks table),

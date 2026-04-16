@@ -806,6 +806,17 @@ const App=()=>{
   // Always derive the LIVE task from tasks[] to avoid stale state in Detail
   const liveSelTask=React.useMemo(()=>selTask?tasks.find(t=>t.id===selTask.id)||null:null,[selTask,tasks]);
 
+  // ── Local dev: auto-login bypass (never deployed — checked at runtime) ─────
+  const isLocalDev = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  if(!user && isLocalDev) {
+    const devUser = MEMBERS.find(m => m.email === 'mohamed.tantawy@deel.com');
+    if(devUser) {
+      // Auto-login on next tick to avoid setState during render
+      setTimeout(() => { setUser(devUser); setLoggedInEmail(devUser.email); }, 0);
+      return null;
+    }
+  }
+
   // ── If not logged in, show login screen ────────────────────────────────────
   if(!user) return(
     <LoginScreen

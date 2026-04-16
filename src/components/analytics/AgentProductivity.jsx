@@ -130,7 +130,8 @@ export default function AgentProductivity({ tasks = [], members: membersProp, da
       const resolvedTasks = agentTasks.filter((t) => t.status === 'resolved');
       const withinSla = resolvedTasks.filter((t) => {
         const limit = SLA_MINS[t.type] || 1440;
-        return (t.minutesAgo ?? 0) <= limit;
+        const elapsed = t.minutesSinceLastResponse != null ? t.minutesSinceLastResponse : (t.minutesAgo ?? 0);
+        return elapsed <= limit;
       }).length;
       const slaCompliance = resolvedTasks.length > 0 ? Math.round((withinSla / resolvedTasks.length) * 100) : 100;
 
