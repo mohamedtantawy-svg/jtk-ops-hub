@@ -16,6 +16,7 @@ import { useOnboardingData } from '../../hooks/useOnboardingData';
 import { useOffboardingData } from '../../hooks/useOffboardingData';
 import { useChangeRequestData } from '../../hooks/useChangeRequestData';
 import { useWorkbenchData } from '../../hooks/useWorkbenchData';
+import { usePausedOnboardingData } from '../../hooks/usePausedOnboardingData';
 import SourceTable from './SourceTable';
 import ErrorBoundary from '../ui/ErrorBoundary';
 import { updateTaskStatus as apiUpdateStatus } from '../../services/tasksApi';
@@ -25,6 +26,7 @@ import {
   normalizeAmendments,
   normalizeRedlines,
   normalizeWorkbench,
+  normalizePausedOnboarding,
 } from '../../utils/normalizeSourceRows';
 
 // ── Shared relTime utility (used by QueueRow + WorkModeOverlay) ──
@@ -69,6 +71,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const [showMeetingInvites,setShowMeetingInvites]=useState(false);
   const [search,setSearch]=useState('');
   const [fSla,setFSla]=useState(saved?.fSla||null); // null | 'ok' | 'at_risk' | 'breached'
+  const [onboardingSubTab,setOnboardingSubTab]=useState('action'); // 'action' | 'paused'
   const [sort,setSort]=useState(saved?.sort||'sla'); // Item #5: Default SLA sort oldest→newest
   const [checkedIds,setCheckedIds]=useState(new Set());
   const [recentIds,setRecentIds]=useState([]);
@@ -97,9 +100,11 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const offboardingData = useOffboardingData(true);
   const changeRequestData = useChangeRequestData(true);
   const workbenchData = useWorkbenchData(true);
+  const pausedOnboardingData = usePausedOnboardingData(true);
 
   // ── Normalized rows for SourceTable (Item #3) ──
   const onboardingRowsAll = useMemo(() => normalizeOnboarding(onboardingData.items), [onboardingData.items]);
+  const pausedOnboardingRowsAll = useMemo(() => normalizePausedOnboarding(pausedOnboardingData.items), [pausedOnboardingData.items]);
   const offboardingRowsAll = useMemo(() => normalizeOffboarding(offboardingData.items), [offboardingData.items]);
   const amendmentRowsAll = useMemo(() => normalizeAmendments(changeRequestData.amendments), [changeRequestData.amendments]);
   const redlineRowsAll = useMemo(() => normalizeRedlines(changeRequestData.redlines), [changeRequestData.redlines]);
@@ -125,6 +130,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   }, [isAdmin, visibleEmails]);
 
   const onboardingRows = useMemo(() => filterSourceRows(onboardingRowsAll), [onboardingRowsAll, filterSourceRows]);
+  const pausedOnboardingRows = useMemo(() => filterSourceRows(pausedOnboardingRowsAll), [pausedOnboardingRowsAll, filterSourceRows]);
   const offboardingRows = useMemo(() => filterSourceRows(offboardingRowsAll), [offboardingRowsAll, filterSourceRows]);
   const amendmentRows = useMemo(() => filterSourceRows(amendmentRowsAll), [amendmentRowsAll, filterSourceRows]);
   const redlineRows = useMemo(() => filterSourceRows(redlineRowsAll), [redlineRowsAll, filterSourceRows]);
@@ -229,11 +235,35 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const compact=!!selTask;
   const recentTasks=recentIds.map(id=>tasks.find(t=>t.id===id)).filter(Boolean);
   // SLA pills — always visible across all views (queue, source panels, etc.)
+  // For onboarding: age-based (createdAt) — <3d ok, 3-7d at risk, 7d+ breached
+  // For paused onboarding: 48h countdown from pausedAt
+  // For queue tasks (ZD/Jira): uses slaInfo() with type-specific thresholds
   const {atRiskCount,breachedCount,onTrackCount}=useMemo(()=>{
     // Determine the base set depending on active view
     let slaBase;
-    if (workSource === 'onboarding') slaBase = onboardingRows;
-    else if (workSource === 'offboarding') slaBase = offboardingRows;
+    if (workSource === 'onboarding') {
+      // Onboarding uses age-based SLA from createdAt
+      const rows = onboardingSubTab === 'paused' ? pausedOnboardingRows : onboardingRows;
+      const isPaused = onboardingSubTab === 'paused';
+      let atRisk = 0, breached = 0;
+      for (const r of rows) {
+        if (isPaused) {
+          // 48h countdown from pausedAt
+          const pausedMs = r.pausedAt ? Date.now() - new Date(r.pausedAt).getTime() : 0;
+          const remaining = 48 * 60 * 60 * 1000 - pausedMs;
+          if (remaining <= 0) breached++;
+          else if (remaining < 24 * 60 * 60 * 1000) atRisk++;
+        } else {
+          // Age-based: createdAt
+          const ageMs = r.createdAt ? Date.now() - new Date(r.createdAt).getTime() : 0;
+          const days = ageMs / (1000 * 60 * 60 * 24);
+          if (days >= 7) breached++;
+          else if (days >= 3) atRisk++;
+        }
+      }
+      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: rows.length - atRisk - breached };
+    }
+    if (workSource === 'offboarding') slaBase = offboardingRows;
     else if (workSource === 'amendments') slaBase = amendmentRows;
     else if (workSource === 'redlines') slaBase = redlineRows;
     else if (workSource === 'workbench') slaBase = workbenchRows;
@@ -246,11 +276,11 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     const atRisk=slaBase.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;}).length;
     const breached=slaBase.filter(t=>{const s=slaInfo(t);return s&&s.breach;}).length;
     return{atRiskCount:atRisk,breachedCount:breached,onTrackCount:slaBase.length-atRisk-breached};
-  },[workSource, visPreSla, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, allSourceRows]);
+  },[workSource, onboardingSubTab, visPreSla, onboardingRows, pausedOnboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, allSourceRows]);
 
   // ── View-aware header counts: reflect active tab (fTool / workSource) ──
   const headerCounts = useMemo(() => {
-    if (workSource === 'onboarding') return { open: onboardingRows.length, paused: 0, resolved: 0 };
+    if (workSource === 'onboarding') return { open: onboardingSubTab === 'paused' ? pausedOnboardingRows.length : onboardingRows.length, paused: 0, resolved: 0 };
     if (workSource === 'offboarding') return { open: offboardingRows.length, paused: 0, resolved: 0 };
     if (workSource === 'amendments') return { open: amendmentRows.length, paused: 0, resolved: 0 };
     if (workSource === 'redlines') return { open: redlineRows.length, paused: 0, resolved: 0 };
@@ -606,16 +636,54 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       )}
       {workSource==='onboarding'&&(
         <ErrorBoundary>
-        <SourceTable
-          rows={fCtry.length?onboardingRows.filter(r=>fCtry.includes(r.country)):onboardingRows}
-          loading={onboardingData.loading}
-          error={onboardingData.error}
-          onRefresh={onboardingData.refresh}
-          emptyIcon="bi-person-plus"
-          emptyLabel="No actionable onboarding tasks"
-          emptySubLabel="All onboarding tasks are handled"
-          sortDefault="oldest"
-        />
+        <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
+          {/* Sub-tabs: Action Needed / Paused */}
+          <div style={{display:'flex',gap:6,padding:'10px 24px 0',background:'white'}}>
+            {[
+              {id:'action',label:'Action Needed',count:onboardingRows.length,color:'#ed8d00'},
+              {id:'paused',label:'Paused',count:pausedOnboardingRows.length,color:'#6b6560'},
+            ].map(t=>(
+              <button key={t.id} onClick={()=>setOnboardingSubTab(t.id)} style={{
+                display:'inline-flex',alignItems:'center',gap:6,padding:'7px 16px',borderRadius:128,
+                border:onboardingSubTab===t.id?`1.5px solid ${t.color}`:'1px solid #e8e8e8',
+                background:onboardingSubTab===t.id?`${t.color}10`:'white',
+                color:onboardingSubTab===t.id?t.color:'#616161',
+                fontSize:12,fontWeight:onboardingSubTab===t.id?700:500,cursor:'pointer',transition:'all .15s',
+              }}>
+                {t.label}
+                <span style={{padding:'1px 7px',borderRadius:128,fontSize:10,fontWeight:700,
+                  background:onboardingSubTab===t.id?`${t.color}20`:'#f2f2f2',
+                  color:onboardingSubTab===t.id?t.color:'#9e9e9e',
+                }}>{t.count}</span>
+              </button>
+            ))}
+          </div>
+          {onboardingSubTab==='action'&&(
+            <SourceTable
+              rows={fCtry.length?onboardingRows.filter(r=>fCtry.includes(r.country)):onboardingRows}
+              loading={onboardingData.loading}
+              error={onboardingData.error}
+              onRefresh={onboardingData.refresh}
+              emptyIcon="bi-person-plus"
+              emptyLabel="No actionable onboarding tasks"
+              emptySubLabel="All onboarding tasks are handled"
+              sortDefault="startDate"
+            />
+          )}
+          {onboardingSubTab==='paused'&&(
+            <SourceTable
+              rows={fCtry.length?pausedOnboardingRows.filter(r=>fCtry.includes(r.country)):pausedOnboardingRows}
+              loading={pausedOnboardingData.loading}
+              error={pausedOnboardingData.error}
+              onRefresh={pausedOnboardingData.refresh}
+              emptyIcon="bi-pause-circle"
+              emptyLabel="No paused onboarding contracts"
+              emptySubLabel="All contracts are progressing"
+              sortDefault="oldest"
+              showPausedSla
+            />
+          )}
+        </div>
         </ErrorBoundary>
       )}
       {workSource==='offboarding'&&(

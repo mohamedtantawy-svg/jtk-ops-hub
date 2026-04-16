@@ -58,29 +58,74 @@ export async function GET(req) {
 }
 
 /**
- * Derive action label + severity from the onboarding flow step.
+ * Derive action label + severity + color from the onboarding flow step.
  * Flow steps look like: "Onboarding.ComplianceDocs.AwaitingReview",
- * "Onboarding.EA.EASigning.AwaitingToSendEA", etc.
+ * "Onboarding.EA.EASigning.AwaitingToSendEA",
+ * "Onboarding.EA.EAAdditionalDetails.AwaitingReview", etc.
+ *
+ * We combine the section (ComplianceDocs, EA, etc.) with the action
+ * to produce distinct, color-coded statuses.
  */
 function deriveAction(flowStep) {
   const s = (flowStep || '').toLowerCase();
-
-  // Extract the last segment as the task type
   const parts = (flowStep || '').split('.');
-  const lastPart = parts[parts.length - 1] || '';
-  // Convert camelCase to friendly: "AwaitingReview" → "Awaiting Review"
-  const friendly = lastPart.replace(/([A-Z])/g, ' $1').trim();
 
-  if (s.includes('awaitingreview'))
-    return { label: 'Awaiting Review', severity: 'warning', step: flowStep };
-  if (s.includes('awaitingtosendea'))
-    return { label: 'Awaiting EA Send', severity: 'warning', step: flowStep };
-  if (s.includes('awaitingcountersign') || s.includes('awaitingaffiliate'))
-    return { label: 'Awaiting Countersign', severity: 'active', step: flowStep };
+  // Identify the section (2nd segment): ComplianceDocs, EA, Benefits, etc.
+  const section = parts[1] || '';
+  const sectionLower = section.toLowerCase();
+
+  // ── Critical statuses ──
   if (s.includes('rejected'))
-    return { label: 'Rejected', severity: 'critical', step: flowStep };
+    return { label: 'Rejected', severity: 'critical', color: '#d42d35', step: flowStep };
   if (s.includes('overdue'))
-    return { label: 'Overdue', severity: 'critical', step: flowStep };
+    return { label: 'Overdue', severity: 'critical', color: '#d42d35', step: flowStep };
 
-  return { label: friendly || 'In Progress', severity: 'active', step: flowStep };
+  // ── Compliance Documents ──
+  if (sectionLower === 'compliancedocs') {
+    if (s.includes('awaitingreview'))
+      return { label: 'Compliance Docs Review', severity: 'warning', color: '#ed8d00', step: flowStep };
+    if (s.includes('awaitingupload') || s.includes('pendingupload'))
+      return { label: 'Compliance Docs Upload', severity: 'warning', color: '#ed8d00', step: flowStep };
+    return { label: 'Compliance Docs', severity: 'warning', color: '#ed8d00', step: flowStep };
+  }
+
+  // ── Employment Agreement ──
+  if (sectionLower === 'ea') {
+    if (s.includes('awaitingtosendea'))
+      return { label: 'Awaiting EA Send', severity: 'active', color: '#7c3aed', step: flowStep };
+    if (s.includes('additionaldetails') && s.includes('awaitingreview'))
+      return { label: 'EA Details Review', severity: 'active', color: '#7c3aed', step: flowStep };
+    if (s.includes('easigning'))
+      return { label: 'EA Signing', severity: 'active', color: '#1d4ed8', step: flowStep };
+    if (s.includes('awaitingcountersign') || s.includes('awaitingaffiliate'))
+      return { label: 'EA Countersign', severity: 'active', color: '#1d4ed8', step: flowStep };
+    if (s.includes('awaitingreview'))
+      return { label: 'EA Review', severity: 'active', color: '#7c3aed', step: flowStep };
+    return { label: 'Employment Agreement', severity: 'active', color: '#1d4ed8', step: flowStep };
+  }
+
+  // ── Benefits ──
+  if (sectionLower === 'benefits') {
+    if (s.includes('awaitingreview'))
+      return { label: 'Benefits Review', severity: 'info', color: '#0369a1', step: flowStep };
+    return { label: 'Benefits', severity: 'info', color: '#0369a1', step: flowStep };
+  }
+
+  // ── Payroll ──
+  if (sectionLower === 'payroll' || sectionLower === 'payrollsetup') {
+    return { label: 'Payroll Setup', severity: 'info', color: '#0369a1', step: flowStep };
+  }
+
+  // ── Generic awaiting states ──
+  if (s.includes('awaitingreview'))
+    return { label: 'Awaiting Review', severity: 'warning', color: '#ed8d00', step: flowStep };
+  if (s.includes('awaitingtosend'))
+    return { label: 'Awaiting Send', severity: 'warning', color: '#ed8d00', step: flowStep };
+  if (s.includes('awaitingcountersign') || s.includes('awaitingaffiliate'))
+    return { label: 'Awaiting Countersign', severity: 'active', color: '#1d4ed8', step: flowStep };
+
+  // ── Fallback: humanize the last segment ──
+  const lastPart = parts[parts.length - 1] || '';
+  const friendly = lastPart.replace(/([A-Z])/g, ' $1').trim();
+  return { label: friendly || 'In Progress', severity: 'active', color: '#616161', step: flowStep };
 }

@@ -47,22 +47,28 @@ export const FUNCTIONS={
   'Compliance':      {label:'Compliance',  color:'#7c3aed',bg:'#f5f0ff'},
 };
 export const FLAGS={
-  // Original
-  UK:'🇬🇧',US:'🇺🇸',DE:'🇩🇪',FR:'🇫🇷',NL:'🇳🇱',SG:'🇸🇬',BR:'🇧🇷',AU:'🇦🇺',AE:'🇦🇪',CA:'🇨🇦',
-  // Asia-Pacific
+  // ISO 3166-1 alpha-2 codes — canonical (Deel API returns these)
+  GB:'🇬🇧',US:'🇺🇸',DE:'🇩🇪',FR:'🇫🇷',NL:'🇳🇱',SG:'🇸🇬',BR:'🇧🇷',AU:'🇦🇺',AE:'🇦🇪',CA:'🇨🇦',
   PH:'🇵🇭',IN:'🇮🇳',JP:'🇯🇵',KR:'🇰🇷',ID:'🇮🇩',TH:'🇹🇭',MY:'🇲🇾',VN:'🇻🇳',CN:'🇨🇳',TW:'🇹🇼',HK:'🇭🇰',
-  // Latin America
   MX:'🇲🇽',CO:'🇨🇴',AR:'🇦🇷',CL:'🇨🇱',PE:'🇵🇪',
-  // Europe
   ES:'🇪🇸',IT:'🇮🇹',PT:'🇵🇹',PL:'🇵🇱',RO:'🇷🇴',CZ:'🇨🇿',HU:'🇭🇺',SE:'🇸🇪',NO:'🇳🇴',DK:'🇩🇰',FI:'🇫🇮',IE:'🇮🇪',AT:'🇦🇹',CH:'🇨🇭',BE:'🇧🇪',GR:'🇬🇷',
-  // Africa
   ZA:'🇿🇦',NG:'🇳🇬',KE:'🇰🇪',EG:'🇪🇬',GH:'🇬🇭',
-  // Middle East & South Asia
   IL:'🇮🇱',SA:'🇸🇦',TR:'🇹🇷',PK:'🇵🇰',
+  // Additional ISO codes common in Deel
+  NZ:'🇳🇿',LU:'🇱🇺',LT:'🇱🇹',LV:'🇱🇻',EE:'🇪🇪',SK:'🇸🇰',SI:'🇸🇮',HR:'🇭🇷',BG:'🇧🇬',RS:'🇷🇸',
+  UA:'🇺🇦',BY:'🇧🇾',GE:'🇬🇪',AM:'🇦🇲',AZ:'🇦🇿',KZ:'🇰🇿',UZ:'🇺🇿',
+  QA:'🇶🇦',KW:'🇰🇼',BH:'🇧🇭',OM:'🇴🇲',JO:'🇯🇴',LB:'🇱🇧',
+  UY:'🇺🇾',EC:'🇪🇨',CR:'🇨🇷',PA:'🇵🇦',DO:'🇩🇴',GT:'🇬🇹',PY:'🇵🇾',BO:'🇧🇴',
+  BD:'🇧🇩',LK:'🇱🇰',NP:'🇳🇵',MM:'🇲🇲',KH:'🇰🇭',
+  TZ:'🇹🇿',UG:'🇺🇬',ET:'🇪🇹',SN:'🇸🇳',RW:'🇷🇼',MA:'🇲🇦',TN:'🇹🇳',
+  CY:'🇨🇾',MT:'🇲🇹',IS:'🇮🇸',
+  PR:'🇵🇷',TT:'🇹🇹',JM:'🇯🇲',
+  // Legacy alias — our codebase used "UK" but ISO uses "GB"
+  UK:'🇬🇧',
 };
 // Reverse lookup: country name → code (for APIs that return full names like "Philippines")
 const COUNTRY_NAME_TO_CODE={
-  'United Kingdom':'UK','United States':'US','Germany':'DE','France':'FR','Netherlands':'NL',
+  'United Kingdom':'GB','United States':'US','Germany':'DE','France':'FR','Netherlands':'NL',
   'Singapore':'SG','Brazil':'BR','Australia':'AU','United Arab Emirates':'AE','Canada':'CA',
   'Philippines':'PH','India':'IN','Japan':'JP','South Korea':'KR','Indonesia':'ID',
   'Thailand':'TH','Malaysia':'MY','Vietnam':'VN','China':'CN','Taiwan':'TW','Hong Kong':'HK',
@@ -72,11 +78,24 @@ const COUNTRY_NAME_TO_CODE={
   'Ireland':'IE','Austria':'AT','Switzerland':'CH','Belgium':'BE','Greece':'GR',
   'South Africa':'ZA','Nigeria':'NG','Kenya':'KE','Egypt':'EG','Ghana':'GH',
   'Israel':'IL','Saudi Arabia':'SA','Turkey':'TR','Türkiye':'TR','Pakistan':'PK',
+  'New Zealand':'NZ','Luxembourg':'LU','Lithuania':'LT','Latvia':'LV','Estonia':'EE',
+  'Slovakia':'SK','Slovenia':'SI','Croatia':'HR','Bulgaria':'BG','Serbia':'RS',
+  'Ukraine':'UA','Belarus':'BY','Georgia':'GE','Armenia':'AM','Azerbaijan':'AZ',
+  'Kazakhstan':'KZ','Uzbekistan':'UZ',
+  'Qatar':'QA','Kuwait':'KW','Bahrain':'BH','Oman':'OM','Jordan':'JO','Lebanon':'LB',
+  'Uruguay':'UY','Ecuador':'EC','Costa Rica':'CR','Panama':'PA','Dominican Republic':'DO',
+  'Guatemala':'GT','Paraguay':'PY','Bolivia':'BO',
+  'Bangladesh':'BD','Sri Lanka':'LK','Nepal':'NP','Myanmar':'MM','Cambodia':'KH',
+  'Tanzania':'TZ','Uganda':'UG','Ethiopia':'ET','Senegal':'SN','Rwanda':'RW','Morocco':'MA','Tunisia':'TN',
+  'Cyprus':'CY','Malta':'MT','Iceland':'IS',
+  'Puerto Rico':'PR','Trinidad and Tobago':'TT','Jamaica':'JM',
 };
 // Reverse lookup: code → name
 const COUNTRY_CODE_TO_NAME = Object.fromEntries(
   Object.entries(COUNTRY_NAME_TO_CODE).map(([name, code]) => [code, name])
 );
+// Also add the UK alias to code→name
+COUNTRY_CODE_TO_NAME['UK'] = 'United Kingdom';
 /**
  * Resolve a country code ("PH") to full name ("Philippines").
  * Returns the original string if no match (already a name or unknown code).
@@ -89,7 +108,7 @@ export function getCountryName(country) {
 }
 /**
  * Resolve a country string (code like "PH" or name like "Philippines") to a flag emoji.
- * Returns empty string if no match found.
+ * For any valid 2-letter ISO code, generates the flag dynamically using regional indicators.
  */
 export function getFlag(country) {
   if (!country) return '';
@@ -101,6 +120,10 @@ export function getFlag(country) {
   // Case-insensitive fallback
   const upper = country.toUpperCase();
   if (FLAGS[upper]) return FLAGS[upper];
+  // Dynamic flag from any 2-letter ISO code using regional indicator symbols
+  if (upper.length === 2 && /^[A-Z]{2}$/.test(upper)) {
+    return String.fromCodePoint(...[...upper].map(c => 0x1F1E6 + c.charCodeAt(0) - 65));
+  }
   return '';
 }
 export const DEFAULT_SOURCE_URLS={zendesk:'https://deel.zendesk.com',jira:'https://deel.atlassian.net',gmail:'https://mail.google.com',slack:'https://app.slack.com/client/deel',workbench:'https://workbench.deel.com',calendar:'https://calendar.google.com',looker:'https://deel.looker.com'};

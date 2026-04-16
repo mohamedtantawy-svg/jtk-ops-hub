@@ -73,11 +73,21 @@ export default function SourceTable({
   emptySubLabel = 'All caught up',
   showSourceColumn = false,  // show Source column (for "All" view)
   searchable = true,
-  sortDefault = 'oldest',    // 'oldest' | 'newest' | 'sla'
+  sortDefault = 'oldest',    // 'oldest' | 'newest' | 'sla' | 'startDate'
+  showPausedSla = false,     // use 48h countdown from pausedAt instead of age-based SLA
 }) {
   const [searchTerm, setSearchTerm] = useState('');
-  const [sort, setSort] = useState(sortDefault);
+  // Column-based sorting: col name + direction
+  const defaultCol = sortDefault === 'startDate' ? 'startDate' : sortDefault === 'sla' ? 'sla' : 'createdAt';
+  const defaultDir = sortDefault === 'newest' ? 'desc' : 'asc';
+  const [sortCol, setSortCol] = useState(defaultCol);
+  const [sortDir, setSortDir] = useState(defaultDir); // 'asc' | 'desc'
   const [statusFilter, setStatusFilter] = useState(null);
+
+  const toggleSort = (col) => {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('asc'); }
+  };
 
   // Filter
   const filtered = useMemo(() => {
@@ -98,33 +108,37 @@ export default function SourceTable({
     return r;
   }, [rows, searchTerm, statusFilter]);
 
-  // Sort
+  // Sort by column + direction
   const sorted = useMemo(() => {
     const arr = [...filtered];
-    if (sort === 'oldest') return arr.sort((a, b) => {
-      const aTime = a.createdAt ? new Date(a.createdAt).getTime() : Infinity;
-      const bTime = b.createdAt ? new Date(b.createdAt).getTime() : Infinity;
-      return aTime - bTime; // oldest first
+    const dir = sortDir === 'desc' ? -1 : 1;
+
+    const getVal = (row) => {
+      switch (sortCol) {
+        case 'subject':   return (row.subject || '').toLowerCase();
+        case 'country':   return (row.country || '').toLowerCase();
+        case 'assignee':  return (row.assignee || '').toLowerCase();
+        case 'startDate': return row.startDate ? new Date(row.startDate).getTime() : Infinity;
+        case 'createdAt': return row.createdAt ? new Date(row.createdAt).getTime() : Infinity;
+        case 'updatedAt': return row.updatedAt ? new Date(row.updatedAt).getTime() : 0;
+        case 'status':    return (row.status?.label || '').toLowerCase();
+        case 'sla': {
+          if (row.slaRemaining != null) return row.slaRemaining;
+          if (row.createdAt) return -(Date.now() - new Date(row.createdAt).getTime());
+          return 0;
+        }
+        default: return 0;
+      }
+    };
+
+    return arr.sort((a, b) => {
+      const aVal = getVal(a);
+      const bVal = getVal(b);
+      if (aVal < bVal) return -1 * dir;
+      if (aVal > bVal) return 1 * dir;
+      return 0;
     });
-    if (sort === 'newest') return arr.sort((a, b) => {
-      const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-      return bTime - aTime; // newest first
-    });
-    if (sort === 'sla') return arr.sort((a, b) => {
-      // Workbench tasks have slaRemaining (seconds) — use it when available
-      const aHasSla = a.slaRemaining != null;
-      const bHasSla = b.slaRemaining != null;
-      if (aHasSla && bHasSla) return a.slaRemaining - b.slaRemaining; // lowest remaining first
-      if (aHasSla) return -1; // SLA tasks before non-SLA
-      if (bHasSla) return 1;
-      // Fallback: oldest (most SLA-critical) first
-      const aAge = a.createdAt ? (Date.now() - new Date(a.createdAt).getTime()) : 0;
-      const bAge = b.createdAt ? (Date.now() - new Date(b.createdAt).getTime()) : 0;
-      return bAge - aAge;
-    });
-    return arr;
-  }, [filtered, sort]);
+  }, [filtered, sortCol, sortDir]);
 
   // Status counts
   const counts = useMemo(() => {
@@ -157,13 +171,6 @@ export default function SourceTable({
           </div>
         )}
 
-        {/* Sort */}
-        <select value={sort} onChange={e => setSort(e.target.value)}
-          style={{ height: 32, padding: '0 8px', borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 12, color: '#616161', background: 'white', cursor: 'pointer', outline: 'none' }}>
-          <option value="oldest">Oldest first</option>
-          <option value="newest">Newest first</option>
-          <option value="sla">SLA urgency</option>
-        </select>
 
         {onRefresh && (
           <button onClick={onRefresh} title="Refresh" style={{ ...iconBtnStyle, color: loading ? '#ed8d00' : '#9e9e9e' }}>
@@ -216,20 +223,20 @@ export default function SourceTable({
             <thead>
               <tr style={{ background: '#f5f4f2', position: 'sticky', top: 0, zIndex: 2 }}>
                 {showSourceColumn && <th style={{ ...thStyle, width: 80 }}>Source</th>}
-                <th style={{ ...thStyle, textAlign: 'left', minWidth: 200 }}>Subject</th>
-                <th style={{ ...thStyle, width: 110 }}>Function</th>
-                <th style={{ ...thStyle, width: 80 }}>Country</th>
-                <th style={{ ...thStyle, width: 100 }}>Assignee</th>
-                <th style={{ ...thStyle, width: 80 }}>Created</th>
-                <th style={{ ...thStyle, width: 70 }}>SLA</th>
-                <th style={{ ...thStyle, width: 80 }}>Updated</th>
-                <th style={{ ...thStyle, width: 100 }}>Status</th>
-                <th style={{ ...thStyle, width: 70 }}>Link</th>
+                <SortTh col="subject"   label="Employee"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, textAlign: 'left', minWidth: 220 }} />
+                <SortTh col="country"   label="Country"    sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 100 }} />
+                <SortTh col="assignee"  label="Assignee"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 110 }} />
+                <SortTh col="startDate" label="Start Date" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 90 }} />
+                <SortTh col="sla"       label="SLA"        sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 70 }} />
+                <SortTh col="updatedAt" label="Updated"    sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 90 }} />
+                <SortTh col="status"    label="Status"     sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 130 }} />
+                <th style={{ ...thStyle, width: 70 }}>Task</th>
+                <th style={{ ...thStyle, width: 70 }}>Contract</th>
               </tr>
             </thead>
             <tbody>
               {sorted.map(row => (
-                <SourceRow key={`${row.source}-${row.id}`} row={row} showSource={showSourceColumn} />
+                <SourceRow key={`${row.source}-${row.id}`} row={row} showSource={showSourceColumn} showPausedSla={showPausedSla} />
               ))}
             </tbody>
           </table>
@@ -240,7 +247,7 @@ export default function SourceTable({
 }
 
 // ── Row component ──
-const SourceRow = memo(function SourceRow({ row, showSource }) {
+const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false }) {
   const [hov, setHov] = useState(false);
   const sev = row.status?.severity || 'info';
   const isUrgent = sev === 'critical';
@@ -251,14 +258,19 @@ const SourceRow = memo(function SourceRow({ row, showSource }) {
   const countryDisplay = getCountryName(row.country) || row.country || '';
   const tool = TOOLS[row.source];
 
-  // Status badge colors
+  // Status badge colors — use per-status color when available, fall back to severity
   const sevConfig = {
     critical: { bg: '#fef2f2', color: '#d42d35', border: '#fca5a5', icon: 'bi-exclamation-triangle-fill' },
     warning:  { bg: '#fef3c7', color: '#92400e', border: '#ffe27c', icon: 'bi-exclamation-circle-fill' },
     active:   { bg: '#eff6ff', color: '#1d4ed8', border: '#bddcf0', icon: 'bi-arrow-repeat' },
     info:     { bg: '#f7f5f2', color: '#616161', border: '#e8e8e8', icon: 'bi-clock' },
   };
-  const cfg = sevConfig[sev] || sevConfig.info;
+  const baseCfg = sevConfig[sev] || sevConfig.info;
+  // If the status has its own color, derive bg/border from it
+  const statusColor = row.status?.color;
+  const cfg = statusColor && statusColor !== baseCfg.color
+    ? { ...baseCfg, color: statusColor, bg: statusColor + '12', border: statusColor + '40' }
+    : baseCfg;
 
   return (
     <tr
@@ -301,15 +313,6 @@ const SourceRow = memo(function SourceRow({ row, showSource }) {
         </div>
       </td>
 
-      {/* Function */}
-      <td style={tdStyle}>
-        {row.function ? (
-          <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: 128, background: '#f2f2f2', color: '#616161', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }} title={row.function}>
-            {row.function}
-          </span>
-        ) : <span style={{ color: '#d5d5d5' }}>--</span>}
-      </td>
-
       {/* Country */}
       <td style={{ ...tdStyle, fontSize: 12, whiteSpace: 'nowrap' }}>
         {flag && <span style={{ marginRight: 3 }}>{flag}</span>}
@@ -328,15 +331,16 @@ const SourceRow = memo(function SourceRow({ row, showSource }) {
         ) : <span style={{ fontSize: 11, color: '#d42d35', fontWeight: 500 }}>Unassigned</span>}
       </td>
 
-      {/* Created */}
+      {/* Start Date */}
       <td style={{ ...tdStyle, fontSize: 11, color: '#616161', whiteSpace: 'nowrap' }}>
-        {fmtDate(row.createdAt)}
+        {row.startDate ? fmtDate(row.startDate) : '--'}
       </td>
 
-      {/* SLA (age-based) */}
+      {/* SLA */}
       <td style={tdStyle}>
-        {row.slaRemaining != null ? (
-          // Workbench-style SLA with remaining time
+        {showPausedSla && row.pausedAt ? (
+          <PausedSlaBadge pausedAt={row.pausedAt} />
+        ) : row.slaRemaining != null ? (
           <WorkbenchSlaBadge slaRemaining={row.slaRemaining} slaBreachStatus={row.slaBreachStatus} />
         ) : sla ? (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 8px', borderRadius: 128, background: sla.bg, color: sla.color, fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' }}>
@@ -375,10 +379,9 @@ const SourceRow = memo(function SourceRow({ row, showSource }) {
                 fontSize: 10, fontWeight: 600, textDecoration: 'none', transition: 'all .15s', whiteSpace: 'nowrap',
                 border: hov ? '1px solid #c8d9f0' : '1px solid transparent',
               }}>
-              <i className="bi-box-arrow-up-right" style={{ fontSize: 9 }} />Deel
+              <i className="bi-box-arrow-up-right" style={{ fontSize: 9 }} />Open
             </a>
           )}
-          {/* Item #10: Show Jira link for offboarding tasks */}
           {row.jiraUrl && (
             <a href={row.jiraUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
               style={{
@@ -392,6 +395,21 @@ const SourceRow = memo(function SourceRow({ row, showSource }) {
           )}
           {!row.taskUrl && !row.jiraUrl && <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>}
         </div>
+      </td>
+
+      {/* Contract Link */}
+      <td style={tdStyle}>
+        {row.contractUrl ? (
+          <a href={row.contractUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6,
+              background: hov ? '#f3eff8' : '#f5f4f2', color: hov ? '#6b3fa0' : '#9e9e9e',
+              fontSize: 10, fontWeight: 600, textDecoration: 'none', transition: 'all .15s', whiteSpace: 'nowrap',
+              border: hov ? '1px solid #d4c4f0' : '1px solid transparent',
+            }}>
+            <i className="bi-file-earmark-text" style={{ fontSize: 9 }} />View
+          </a>
+        ) : <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>}
       </td>
     </tr>
   );
@@ -426,6 +444,42 @@ function WorkbenchSlaBadge({ slaRemaining, slaBreachStatus }) {
   );
 }
 
+// ── Paused SLA badge (48h countdown from pausedAt) ──
+function PausedSlaBadge({ pausedAt }) {
+  if (!pausedAt) return <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>;
+  const pausedTime = new Date(pausedAt).getTime();
+  if (isNaN(pausedTime)) return <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>;
+
+  const SLA_MS = 48 * 60 * 60 * 1000; // 48 hours
+  const elapsed = Date.now() - pausedTime;
+  const remaining = SLA_MS - elapsed;
+
+  let label, color, bg;
+  if (remaining <= 0) {
+    // Breached
+    const overMs = Math.abs(remaining);
+    const overHrs = Math.floor(overMs / 3600000);
+    label = overHrs >= 24 ? `${Math.floor(overHrs / 24)}d over` : `${overHrs}h over`;
+    color = '#d42d35'; bg = '#fef2f2';
+  } else {
+    const remHrs = Math.floor(remaining / 3600000);
+    const remMins = Math.floor((remaining % 3600000) / 60000);
+    if (remHrs >= 24) label = `${Math.floor(remHrs / 24)}d ${remHrs % 24}h`;
+    else if (remHrs > 0) label = `${remHrs}h ${remMins}m`;
+    else label = `${remMins}m`;
+
+    if (remHrs < 6) { color = '#d42d35'; bg = '#fef2f2'; }       // < 6h — red
+    else if (remHrs < 24) { color = '#ed8d00'; bg = '#fff8e6'; }  // < 24h — amber
+    else { color = '#15803d'; bg = '#e8f5e9'; }                   // > 24h — green
+  }
+
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 8px', borderRadius: 128, background: bg, color, fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' }}>
+      <i className="bi-hourglass-split" style={{ fontSize: 8 }} /> {label}
+    </span>
+  );
+}
+
 // ── StatusPill ──
 function StatusPill({ label, count, active, onClick, color }) {
   return (
@@ -446,6 +500,22 @@ function StatusPill({ label, count, active, onClick, color }) {
         </span>
       )}
     </button>
+  );
+}
+
+// ── Sortable table header ──
+function SortTh({ col, label, sortCol, sortDir, onSort, style }) {
+  const active = sortCol === col;
+  return (
+    <th style={{ ...style, cursor: 'pointer', userSelect: 'none' }} onClick={() => onSort(col)}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        {label}
+        <span style={{ display: 'inline-flex', flexDirection: 'column', lineHeight: 1, gap: 0, fontSize: 7, marginTop: -1 }}>
+          <i className="bi-caret-up-fill" style={{ color: active && sortDir === 'asc' ? '#1b1b1b' : '#ccc' }} />
+          <i className="bi-caret-down-fill" style={{ color: active && sortDir === 'desc' ? '#1b1b1b' : '#ccc', marginTop: -3 }} />
+        </span>
+      </span>
+    </th>
   );
 }
 

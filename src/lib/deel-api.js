@@ -197,6 +197,53 @@ export async function listOnboardingPeople(params = {}) {
   return { items, total: actionableTotal, cursor: currentCursor || null };
 }
 
+// ── Paused Onboarding (Admin API) ─────────────────────────────────────────────
+
+/**
+ * Fetches paused onboarding contracts from the admin API.
+ * Uses /admin/eor/employee-manager/list/Onboarding.EA.EASigning.Paused
+ * Same response shape as ActionableQueue but with pauseType, statusTag fields.
+ */
+export async function listPausedOnboarding() {
+  const res = await deelFetch('/admin/eor/employee-manager/list/Onboarding.EA.EASigning.Paused');
+
+  const rawItems = res?.result || [];
+
+  // Paginate if needed
+  let allItems = [...rawItems];
+  let currentCursor = res?.cursor;
+  let iterations = 0;
+  while (currentCursor && iterations < 6 && allItems.length < 500) {
+    iterations++;
+    const nextRes = await deelFetch(`/admin/eor/employee-manager/list/Onboarding.EA.EASigning.Paused?actionableQueueFilters%5Boffset%5D=${allItems.length}`);
+    const nextItems = nextRes?.result || [];
+    if (nextItems.length === 0) break;
+    allItems.push(...nextItems);
+    currentCursor = nextRes?.cursor;
+  }
+
+  const items = allItems.map(p => ({
+    id:                p.onboardingId || p.oid || '',
+    oid:               p.oid || '',
+    name:              p.employeeName || '',
+    country:           p.employmentCountry || '',
+    nationality:       p.employeeNationality || '',
+    startDate:         p.desiredStartDate || '',
+    createdAt:         p.createdAt || '',
+    taskCreatedAt:     p.taskCreatedAt || '',               // when it was paused
+    flowStep:          'Onboarding.EA.EASigning.Paused',
+    pauseType:         p.pauseType || '',                    // REDLINE, MANUAL, AMENDMENT, OTHER
+    statusTag:         p.statusTag || '',                    // e.g. "EA Redlined"
+    tag:               p.tag || '',
+    avatarUrl:         p.avatarUrl || '',
+    assignee:          p.assignee?.name || '',
+    assigneeEmail:     p.assignee?.email || '',
+    assigneeId:        p.assigneeId || null,
+  }));
+
+  return { items, total: items.length };
+}
+
 // ── Offboarding / Terminations (Admin API) ──────────────────────────────────
 
 /**

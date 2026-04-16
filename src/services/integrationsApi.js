@@ -64,6 +64,10 @@ export async function fetchDeelOnboarding({ limit, offset } = {}) {
   return apiFetch(`/integrations/deel/onboarding${qs ? `?${qs}` : ''}`);
 }
 
+export async function fetchDeelOnboardingPaused() {
+  return apiFetch('/integrations/deel/onboarding-paused');
+}
+
 export async function fetchDeelAmendments({ statuses, bustCache } = {}) {
   const params = new URLSearchParams();
   if (statuses) params.set('statuses', statuses);
