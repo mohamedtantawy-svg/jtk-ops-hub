@@ -17,7 +17,7 @@ function readCache() {
       const parsed = JSON.parse(raw);
       if (parsed.ts && Date.now() - parsed.ts < CACHE_TTL) return parsed;
     }
-  } catch {}
+  } catch (e) { console.warn('[useSlackData] Cache read failed:', e.message); }
   return null;
 }
 
@@ -56,7 +56,7 @@ export function useSlackData(enabled = true) {
           const hist = await fetchSlackChannelHistory(escChan.id, { limit: 30 });
           escMsgs = hist?.messages || [];
           setEscalationMessages(escMsgs);
-        } catch {}
+        } catch (e) { console.warn('[useSlackData] Escalation channel history fetch failed:', e.message); }
       }
 
       if (hrOpsChan) {
@@ -65,7 +65,7 @@ export function useSlackData(enabled = true) {
           const hist = await fetchSlackChannelHistory(hrOpsChan.id, { limit: 30 });
           hrMsgs = hist?.messages || [];
           setHrOpsMessages(hrMsgs);
-        } catch {}
+        } catch (e) { console.warn('[useSlackData] HR ops channel history fetch failed:', e.message); }
       }
 
       lastFetch.current = Date.now();
@@ -78,7 +78,7 @@ export function useSlackData(enabled = true) {
           hrOpsChannelId: hrOpsChan?.id || null,
           ts: Date.now(),
         }));
-      } catch {}
+      } catch (e) { console.warn('[useSlackData] Cache write failed:', e.message); }
     } catch (err) {
       console.warn('[useSlackData] Failed:', err.message);
       setError(err.message);
@@ -109,7 +109,8 @@ export function useSlackData(enabled = true) {
     try {
       const res = await fetchSlackChannelHistory(channelId, opts);
       return res?.messages || [];
-    } catch {
+    } catch (e) {
+      console.warn('[useSlackData] Fetch history failed:', e.message);
       return [];
     }
   }, []);

@@ -40,14 +40,18 @@ export function useChangeRequestData(enabled = true) {
     setLoading(prev => (amendments.length === 0 && redlines.length === 0) ? true : prev);
     setError(null);
     try {
-      // Fetch both in parallel
-      const [amendRes, redlineRes] = await Promise.all([
+      // Fetch both in parallel — use allSettled so one failure doesn't kill both
+      const [amendResult, redlineResult] = await Promise.allSettled([
         fetchDeelAmendments({ bustCache: force }),
         fetchDeelRedlines({ bustCache: force }),
       ]);
 
-      const fetchedAmendments = amendRes?.items || [];
-      const fetchedRedlines = redlineRes?.items || [];
+      const fetchedAmendments = amendResult.status === 'fulfilled' ? (amendResult.value?.items || []) : [];
+      const fetchedRedlines = redlineResult.status === 'fulfilled' ? (redlineResult.value?.items || []) : [];
+
+      // Log individual failures without blocking the other source
+      if (amendResult.status === 'rejected') console.warn('[useChangeRequestData] Amendments fetch failed:', amendResult.reason?.message);
+      if (redlineResult.status === 'rejected') console.warn('[useChangeRequestData] Redlines fetch failed:', redlineResult.reason?.message);
 
       // Only replace if we got data or current is empty
       if (fetchedAmendments.length > 0 || amendments.length === 0) {

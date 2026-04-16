@@ -253,7 +253,8 @@ export async function listPausedOnboarding() {
     nationality:       p.employeeNationality || '',
     startDate:         p.desiredStartDate || '',
     createdAt:         p.createdAt || '',
-    taskCreatedAt:     p.taskCreatedAt || '',               // when it was paused
+    updatedAt:         p.updatedAt || '',                    // last update (best proxy for pause time)
+    taskCreatedAt:     p.taskCreatedAt || '',               // when the task was created (NOT pause time)
     flowStep:          'Onboarding.EA.EASigning.Paused',
     pauseType:         p.pauseType || '',                    // REDLINE, MANUAL, AMENDMENT, OTHER
     statusTag:         p.statusTag || '',                    // e.g. "EA Redlined"

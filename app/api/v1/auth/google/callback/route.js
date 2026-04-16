@@ -201,10 +201,6 @@ export async function POST(req) {
       team: 'JTK',
     };
 
-    // If DB user exists but is in the admin allowlist, ensure admin role
-    if (dbUser && isAdmin && dbUser.role !== 'admin') {
-      user.role = 'admin';
-    }
 
     // ── Issue signed JWT ────────────────────────────────────────────────
     const token = signToken({

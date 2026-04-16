@@ -94,8 +94,8 @@ export function normalizePausedOnboarding(items = []) {
       assignee: p.assignee || '',
       assigneeEmail: (p.assigneeEmail || resolveEmailByName(p.assignee) || '').toLowerCase(),
       createdAt: p.createdAt || '',
-      updatedAt: p.taskCreatedAt || '',       // "updated" = when it was paused
-      pausedAt: p.taskCreatedAt || '',        // explicit pause timestamp for SLA
+      updatedAt: p.updatedAt || p.taskCreatedAt || '',       // best proxy for when it was paused
+      pausedAt: p.updatedAt || p.taskCreatedAt || '',        // explicit pause timestamp for SLA
       status: { label: `Paused · ${pauseLabel}`, severity: 'warning', color: '#6b6560' },
       taskUrl: p.oid
         ? `${DEEL_ADMIN_BASE}/dashboards/employees/${p.country || 'GLOBAL'}/status/Onboarding.EA.EASigning.Paused/contract/${p.oid}/step/Paused`

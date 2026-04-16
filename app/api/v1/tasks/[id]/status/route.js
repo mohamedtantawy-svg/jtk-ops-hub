@@ -4,6 +4,9 @@ import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 
 const VALID_STATUSES = ['open', 'in_progress', 'escalated', 'snoozed', 'resolved', 'closed'];
 
+// Authorization note: All authenticated users (including agents) can change
+// task status. Agents need this to resolve/close their own tasks. This is
+// intentional — the auth check below only verifies the user is logged in.
 export async function PATCH(req, { params }) {
   try {
     const authUser = getAuthUser(req);

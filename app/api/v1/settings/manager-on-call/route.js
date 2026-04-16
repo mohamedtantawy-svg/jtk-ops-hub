@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getAuthUser } from '../../../../../src/lib/auth-helpers';
+import { getAuthUser, requireRole } from '../../../../../src/lib/auth-helpers';
 import { cacheGet, cacheSet } from '../../../../../src/lib/server-cache';
 
 const CACHE_KEY = 'manager_on_call';
@@ -42,8 +42,8 @@ export async function GET(req) {
 }
 
 export async function PUT(req) {
-  const user = getAuthUser(req);
-  if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const { authorized, user, status, error } = requireRole(req, 'admin', 'regional_manager', 'manager', 'team_lead');
+  if (!authorized) return NextResponse.json({ error }, { status });
 
   const body = await req.json();
   const { name, email, initials, avatarUrl } = body;

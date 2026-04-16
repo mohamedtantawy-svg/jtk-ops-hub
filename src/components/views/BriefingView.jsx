@@ -122,8 +122,15 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const scope=tasks.filter(t=>inScope(t)&&t.status!=='resolved');
   const personal=tasks.filter(t=>(t.assigneeId===user.id||(t.assigneeEmail&&t.assigneeEmail.toLowerCase()===user.email?.toLowerCase()))&&t.status!=='resolved');
   const total=scope.length;
-  const breached=scope.filter(t=>{const s=slaInfo(t);return s&&s.breach;});
-  const atRisk=scope.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;});
+  // Exclude waiting (snoozed) tasks from SLA counts — matches Queue.jsx behaviour
+  const slaScope=scope.filter(t=>t.status!=='waiting');
+  const breached=slaScope.filter(t=>{const s=slaInfo(t);return s&&s.breach;});
+  const atRisk=slaScope.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;});
+  // Onboarding source rows use age-based SLA (3d at-risk, 7d breached) — same as Queue.jsx
+  const onbBreached=onboardingRows.filter(r=>{const ageMs=r.createdAt?Date.now()-new Date(r.createdAt).getTime():0;return ageMs/(1000*60*60*24)>=7;});
+  const onbAtRisk=onboardingRows.filter(r=>{const ageMs=r.createdAt?Date.now()-new Date(r.createdAt).getTime():0;const d=ageMs/(1000*60*60*24);return d>=3&&d<7;});
+  breached.push(...onbBreached);
+  atRisk.push(...onbAtRisk);
   const newT=scope.filter(t=>t.status==='new');
   const ipT=scope.filter(t=>t.status==='in_progress');
   const waitT=scope.filter(t=>t.status==='waiting');
@@ -163,7 +170,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   });
 
   // ── Health Score (composite 0-100) — slaCompRate*0.5 + resRate*0.3 + wlScore*0.2 ────────────────────────────────────
-  const slaCompRate=total>0?Math.round(((total-breached.length)/total)*100):100;
+  const slaTotal=slaScope.length+onboardingRows.length;
+  const slaCompRate=slaTotal>0?Math.round(((slaTotal-breached.length)/slaTotal)*100):100;
   const resRate=resolved+total>0?Math.round((resolved/(resolved+total))*100):0;
   const wlScore=wl==='Low'?100:wl==='Medium'?60:25;
   const healthScore=Math.round(slaCompRate*0.5+resRate*0.3+wlScore*0.2)||0;
@@ -190,9 +198,10 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const orgNew=orgOpen.filter(t=>t.status==='new').length;
   const orgIP=orgOpen.filter(t=>t.status==='in_progress').length;
   const orgWait=orgOpen.filter(t=>t.status==='waiting').length;
-  const orgBreach=orgOpen.filter(t=>{const s=slaInfo(t);return s&&s.breach;}).length;
-  const orgAtRisk=orgOpen.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;}).length;
-  const orgSlaComp=orgOpen.length>0?Math.round(((orgOpen.length-orgBreach)/orgOpen.length)*100):100;
+  const orgSlaPool=orgOpen.filter(t=>t.status!=='waiting');
+  const orgBreach=orgSlaPool.filter(t=>{const s=slaInfo(t);return s&&s.breach;}).length+onbBreached.length;
+  const orgAtRisk=orgSlaPool.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;}).length+onbAtRisk.length;
+  const orgSlaComp=(orgSlaPool.length+onboardingRows.length)>0?Math.round((((orgSlaPool.length+onboardingRows.length)-(orgBreach))/(orgSlaPool.length+onboardingRows.length))*100):100;
 
   // ── Sparkline (flat until historical data endpoint exists) ──────────
   const sparkData=Array.from({length:10},()=>total);
@@ -275,9 +284,9 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   );
 
   // ── SLA filter helpers for expandable SLA panels ──────────────────────
-  const orgBreachedTasks=orgOpen.filter(t=>{const s=slaInfo(t);return s&&s.breach;});
-  const orgAtRiskTasks=orgOpen.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;});
-  const orgWithinSlaTasks=orgOpen.filter(t=>{const s=slaInfo(t);return !s||(s&&s.ok);});
+  const orgBreachedTasks=[...orgSlaPool.filter(t=>{const s=slaInfo(t);return s&&s.breach;}),...onbBreached];
+  const orgAtRiskTasks=[...orgSlaPool.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;}),...onbAtRisk];
+  const orgWithinSlaTasks=orgSlaPool.filter(t=>{const s=slaInfo(t);return !s||(s&&s.ok);});
 
   // ── Average response time (simulated from task age) ─────────────────
   const avgResponseTime=scope.length>0?Math.round(scope.reduce((s,t)=>s+t.minutesAgo,0)/scope.length):0;

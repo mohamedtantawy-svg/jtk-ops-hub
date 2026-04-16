@@ -1,13 +1,12 @@
 import { NextResponse } from 'next/server';
 import { withTransaction } from '../../../../../../src/lib/db';
-import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
+import { requireRole } from '../../../../../../src/lib/auth-helpers';
 
 export async function PATCH(req, { params }) {
   try {
-    const authUser = getAuthUser(req);
-    if (!authUser.email) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    // Only admin, regional_manager, and team_lead can reassign tasks.
+    const { authorized, user: authUser, status, error } = requireRole(req, 'admin', 'regional_manager', 'team_lead');
+    if (!authorized) return NextResponse.json({ error }, { status });
 
     const { id } = await params;
     const { assigneeId } = await req.json();

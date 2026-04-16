@@ -112,7 +112,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const workbenchRowsAll = useMemo(() => normalizeWorkbench(workbenchData.tasks), [workbenchData.tasks]);
 
   const isAdmin=perms?.dataScope==='all_tasks'; const isLead=perms?.dataScope==='team_tasks';
-  const ns=tasks.filter(t=>t.source!=='slack'&&t.source!=='calendar');
+  const ns=(tasks||[]).filter(t=>t.source!=='slack'&&t.source!=='calendar');
   // Hierarchical visibility: viewer sees own tickets + all direct/indirect reports
   const visibleEmails = useMemo(
     () => getVisibleEmails(user?.email),
@@ -146,7 +146,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
         if (drCodes) for (const c of drCodes) ownedCodes.add(c);
       }
     }
-    if (ownedCodes.size === 0) return rows; // no ownership data → show all (fallback)
+    if (ownedCodes.size === 0) return []; // no ownership data → safe default (admins/RMs bypass above)
     return rows.filter(r => {
       const cc = (r.country || '').toUpperCase();
       return cc && ownedCodes.has(cc);
@@ -273,13 +273,15 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       for (const r of rows) {
         if (isPaused) {
           // 48h countdown from pausedAt
-          const pausedMs = r.pausedAt ? Date.now() - new Date(r.pausedAt).getTime() : 0;
+          let pausedMs = r.pausedAt ? Date.now() - new Date(r.pausedAt).getTime() : 0;
+          if (isNaN(pausedMs)) pausedMs = 0;
           const remaining = 48 * 60 * 60 * 1000 - pausedMs;
           if (remaining <= 0) breached++;
           else if (remaining < 24 * 60 * 60 * 1000) atRisk++;
         } else {
           // Age-based: createdAt
-          const ageMs = r.createdAt ? Date.now() - new Date(r.createdAt).getTime() : 0;
+          let ageMs = r.createdAt ? Date.now() - new Date(r.createdAt).getTime() : 0;
+          if (isNaN(ageMs)) ageMs = 0;
           const days = ageMs / (1000 * 60 * 60 * 24);
           if (days >= 7) breached++;
           else if (days >= 3) atRisk++;

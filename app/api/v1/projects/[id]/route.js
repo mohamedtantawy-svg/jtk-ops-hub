@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../../src/lib/db';
-import { getAuthUser } from '../../../../../src/lib/auth-helpers';
+import { getAuthUser, requireRole } from '../../../../../src/lib/auth-helpers';
 
 export async function GET(req, { params }) {
   try {
@@ -85,10 +85,9 @@ export async function PATCH(req, { params }) {
 
 export async function DELETE(req, { params }) {
   try {
-    const user = getAuthUser(req);
-    if (!user.email) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    // Only admin and regional_manager can delete projects.
+    const { authorized, user, status, error } = requireRole(req, 'admin', 'regional_manager');
+    if (!authorized) return NextResponse.json({ error }, { status });
 
     const { id } = await params;
     await query('DELETE FROM projects WHERE id = $1', [id]);
