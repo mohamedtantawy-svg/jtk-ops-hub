@@ -75,6 +75,8 @@ export default function SourceTable({
   searchable = true,
   sortDefault = 'oldest',    // 'oldest' | 'newest' | 'sla' | 'startDate'
   showPausedSla = false,     // use 48h countdown from pausedAt instead of age-based SLA
+  hideStatusPills = false,   // hide the internal All/Action Needed/etc. pills
+  currentUser = null,        // for "Assign me" button on unassigned rows
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   // Column-based sorting: col name + direction
@@ -154,11 +156,13 @@ export default function SourceTable({
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#fafaf9', overflow: 'hidden' }}>
       {/* ── Filter bar ── */}
       <div style={{ padding: '10px 24px', background: 'white', borderBottom: '1px solid #f0efed', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <StatusPill label="All" count={counts.total} active={!statusFilter} onClick={() => setStatusFilter(null)} color="#1b1b1b" />
-        {counts.critical > 0 && <StatusPill label="Critical" count={counts.critical} active={statusFilter === 'critical'} onClick={() => setStatusFilter(statusFilter === 'critical' ? null : 'critical')} color="#d42d35" />}
-        {counts.warning > 0 && <StatusPill label="Action Needed" count={counts.warning} active={statusFilter === 'warning'} onClick={() => setStatusFilter(statusFilter === 'warning' ? null : 'warning')} color="#ed8d00" />}
-        {counts.active > 0 && <StatusPill label="In Progress" count={counts.active} active={statusFilter === 'active'} onClick={() => setStatusFilter(statusFilter === 'active' ? null : 'active')} color="#1d4ed8" />}
-        {counts.info > 0 && <StatusPill label="Other" count={counts.info} active={statusFilter === 'info'} onClick={() => setStatusFilter(statusFilter === 'info' ? null : 'info')} color="#616161" />}
+        {!hideStatusPills && <>
+          <StatusPill label="All" count={counts.total} active={!statusFilter} onClick={() => setStatusFilter(null)} color="#1b1b1b" />
+          {counts.critical > 0 && <StatusPill label="Critical" count={counts.critical} active={statusFilter === 'critical'} onClick={() => setStatusFilter(statusFilter === 'critical' ? null : 'critical')} color="#d42d35" />}
+          {counts.warning > 0 && <StatusPill label="Action Needed" count={counts.warning} active={statusFilter === 'warning'} onClick={() => setStatusFilter(statusFilter === 'warning' ? null : 'warning')} color="#ed8d00" />}
+          {counts.active > 0 && <StatusPill label="In Progress" count={counts.active} active={statusFilter === 'active'} onClick={() => setStatusFilter(statusFilter === 'active' ? null : 'active')} color="#1d4ed8" />}
+          {counts.info > 0 && <StatusPill label="Other" count={counts.info} active={statusFilter === 'info'} onClick={() => setStatusFilter(statusFilter === 'info' ? null : 'info')} color="#616161" />}
+        </>}
 
         <div style={{ flex: 1 }} />
 
@@ -236,7 +240,7 @@ export default function SourceTable({
             </thead>
             <tbody>
               {sorted.map(row => (
-                <SourceRow key={`${row.source}-${row.id}`} row={row} showSource={showSourceColumn} showPausedSla={showPausedSla} />
+                <SourceRow key={`${row.source}-${row.id}`} row={row} showSource={showSourceColumn} showPausedSla={showPausedSla} currentUser={currentUser} />
               ))}
             </tbody>
           </table>
@@ -247,8 +251,9 @@ export default function SourceTable({
 }
 
 // ── Row component ──
-const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false }) {
+const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, currentUser = null }) {
   const [hov, setHov] = useState(false);
+  const [localAssignee, setLocalAssignee] = useState(null);
   const sev = row.status?.severity || 'info';
   const isUrgent = sev === 'critical';
   const isWarning = sev === 'warning';
@@ -321,13 +326,18 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
 
       {/* Assignee */}
       <td style={tdStyle}>
-        {row.assignee ? (
+        {(row.assignee || localAssignee) ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
-            <Avatar name={row.assignee} size="xs" />
+            <Avatar name={localAssignee || row.assignee} size="xs" />
             <span style={{ fontSize: 11, color: '#1b1b1b', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 80 }}>
-              {row.assignee.split(' ')[0]}
+              {(localAssignee || row.assignee).split(' ')[0]}
             </span>
           </div>
+        ) : currentUser?.name ? (
+          <button onClick={e => { e.stopPropagation(); setLocalAssignee(currentUser.name); }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: 128, border: '1px solid #e8e8e8', background: hov ? '#f3eff8' : 'white', color: '#6b3fa0', fontSize: 10, fontWeight: 600, cursor: 'pointer', transition: 'all .15s', whiteSpace: 'nowrap' }}>
+            <i className="bi-person-plus" style={{ fontSize: 9 }} />Assign me
+          </button>
         ) : <span style={{ fontSize: 11, color: '#d42d35', fontWeight: 500 }}>Unassigned</span>}
       </td>
 
