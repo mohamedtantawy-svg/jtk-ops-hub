@@ -28,6 +28,7 @@ import { fetchEscalations as apiFetchEscalations, createEscalation as apiCreateE
 import { fetchProjects as apiFetchProjects, createProject as apiCreateProject, updateProject as apiUpdateProject } from './services/projectsApi';
 import { fetchRequests as apiFetchRequests, createRequest as apiCreateRequest, updateRequest as apiUpdateRequest } from './services/requestsApi';
 import { createNote as apiCreateNote } from './services/notesApi';
+import { apiFetch } from './services/api';
 import { reassignQueueTicket } from './services/integrationsApi';
 import { normalizeTask, normalizeEscalation, normalizeProject, normalizeRequest, normalizeMember, denormalizeTaskForCreate, feStatusToBe } from './services/normalize';
 
@@ -582,6 +583,36 @@ const App=()=>{
   useEffect(()=>{try{localStorage.setItem('ops_hub_dismissed_popups',JSON.stringify(dismissedPopups));}catch(e){}},[dismissedPopups]);
   useEffect(() => { try { localStorage.setItem('ops_hub_manager_on_call', JSON.stringify(managerOnCall)); } catch(e) {} }, [managerOnCall]);
 
+  // ── Manager on Call: fetch from backend + poll every 15s for cross-user sync
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+    const fetchMoc = () => {
+      apiFetch('/settings/manager-on-call')
+        .then(data => {
+          if (active && data?.name) {
+            setManagerOnCall(prev => {
+              if (prev.name === data.name && prev.email === data.email) return prev;
+              return data;
+            });
+          }
+        })
+        .catch(() => {}); // silently fail — keep localStorage value
+    };
+    fetchMoc();
+    const interval = setInterval(fetchMoc, 15000);
+    return () => { active = false; clearInterval(interval); };
+  }, [user]);
+
+  // ── Handler to change Manager on Call — saves to backend for cross-user sync
+  const handleChangeManagerOnCall = useCallback((newMoc) => {
+    setManagerOnCall(newMoc);
+    apiFetch('/settings/manager-on-call', {
+      method: 'PUT',
+      body: JSON.stringify(newMoc),
+    }).catch(err => console.warn('[managerOnCall] Failed to save:', err.message));
+  }, []);
+
   // ── Popup queue — derived from comms, minus dismissed ones ──────────────
   const popupQueue=React.useMemo(()=>{
     if(!user)return [];
@@ -677,7 +708,7 @@ const App=()=>{
         onCreateRequest={()=>setRequestModal(true)}
         onCreateReport={()=>{setView('hr-reports');setCreateReportModal(true);}}
         setSelTask={setSelTask} tasks={tasks}
-        managerOnCall={managerOnCall} onChangeManagerOnCall={setManagerOnCall}
+        managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall}
       />
       <div style={{height:impersonating?104:68,flexShrink:0}}/>
       <DeelSubNav view={view} subFilter={subFilter} setSubFilter={setSubFilter} tasks={tasks} user={effectiveUser}/>
