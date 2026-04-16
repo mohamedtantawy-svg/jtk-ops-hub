@@ -76,6 +76,7 @@ export default function SourceTable({
   sortDefault = 'oldest',    // 'oldest' | 'newest' | 'sla' | 'startDate'
   showPausedSla = false,     // use 48h countdown from pausedAt instead of age-based SLA
   hideStatusPills = false,   // hide the internal All/Action Needed/etc. pills
+  currentUser = null,        // for "Assign me" button on unassigned rows
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   // Column-based sorting: col name + direction
@@ -239,7 +240,7 @@ export default function SourceTable({
             </thead>
             <tbody>
               {sorted.map(row => (
-                <SourceRow key={`${row.source}-${row.id}`} row={row} showSource={showSourceColumn} showPausedSla={showPausedSla} />
+                <SourceRow key={`${row.source}-${row.id}`} row={row} showSource={showSourceColumn} showPausedSla={showPausedSla} currentUser={currentUser} />
               ))}
             </tbody>
           </table>
@@ -250,8 +251,9 @@ export default function SourceTable({
 }
 
 // ── Row component ──
-const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false }) {
+const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, currentUser = null }) {
   const [hov, setHov] = useState(false);
+  const [localAssignee, setLocalAssignee] = useState(null);
   const sev = row.status?.severity || 'info';
   const isUrgent = sev === 'critical';
   const isWarning = sev === 'warning';
@@ -324,13 +326,18 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
 
       {/* Assignee */}
       <td style={tdStyle}>
-        {row.assignee ? (
+        {(row.assignee || localAssignee) ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
-            <Avatar name={row.assignee} size="xs" />
+            <Avatar name={localAssignee || row.assignee} size="xs" />
             <span style={{ fontSize: 11, color: '#1b1b1b', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 80 }}>
-              {row.assignee.split(' ')[0]}
+              {(localAssignee || row.assignee).split(' ')[0]}
             </span>
           </div>
+        ) : currentUser?.name ? (
+          <button onClick={e => { e.stopPropagation(); setLocalAssignee(currentUser.name); }}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: 128, border: '1px solid #e8e8e8', background: hov ? '#f3eff8' : 'white', color: '#6b3fa0', fontSize: 10, fontWeight: 600, cursor: 'pointer', transition: 'all .15s', whiteSpace: 'nowrap' }}>
+            <i className="bi-person-plus" style={{ fontSize: 9 }} />Assign me
+          </button>
         ) : <span style={{ fontSize: 11, color: '#d42d35', fontWeight: 500 }}>Unassigned</span>}
       </td>
 

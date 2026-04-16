@@ -631,6 +631,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           emptyLabel="No tasks across any source"
           emptySubLabel="All queues are clear"
           sortDefault="oldest"
+          currentUser={user}
         />
         </ErrorBoundary>
       )}
@@ -669,6 +670,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
               emptySubLabel="All onboarding tasks are handled"
               sortDefault="startDate"
               hideStatusPills
+              currentUser={user}
             />
           )}
           {onboardingSubTab==='paused'&&(
@@ -683,6 +685,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
               sortDefault="oldest"
               showPausedSla
               hideStatusPills
+              currentUser={user}
             />
           )}
         </div>
@@ -699,6 +702,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           emptyLabel="No active offboarding cases"
           emptySubLabel="All termination cases have been resolved"
           sortDefault="oldest"
+          currentUser={user}
         />
         </ErrorBoundary>
       )}
@@ -713,6 +717,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           emptyLabel="No actionable amendments"
           emptySubLabel="All amendments are handled"
           sortDefault="oldest"
+          currentUser={user}
         />
         </ErrorBoundary>
       )}
@@ -727,6 +732,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           emptyLabel="No actionable redlines"
           emptySubLabel="All redlines are handled"
           sortDefault="oldest"
+          currentUser={user}
         />
         </ErrorBoundary>
       )}
@@ -741,6 +747,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           emptyLabel="No workbench tasks"
           emptySubLabel="All tasks are processed"
           sortDefault="oldest"
+          currentUser={user}
         />
         </ErrorBoundary>
       )}
