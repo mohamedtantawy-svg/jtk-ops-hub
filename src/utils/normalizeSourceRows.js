@@ -75,6 +75,40 @@ export function normalizeOnboarding(items = []) {
   });
 }
 
+// ── Paused Onboarding → normalized rows ──
+export function normalizePausedOnboarding(items = []) {
+  return items.map(p => {
+    // Pause type label: REDLINE → "Redline", MANUAL → "Manual", AMENDMENT → "Amendment"
+    const pauseLabel = (p.pauseType || 'Paused')
+      .replace(/_/g, ' ')
+      .toLowerCase()
+      .replace(/^\w/, c => c.toUpperCase());
+
+    return {
+      id: p.id || p.oid || '',
+      source: 'onboarding',
+      subject: p.name || 'Unknown',
+      startDate: p.startDate || '',
+      function: `Paused · ${pauseLabel}`,
+      country: p.country || '',
+      assignee: p.assignee || '',
+      assigneeEmail: (p.assigneeEmail || resolveEmailByName(p.assignee) || '').toLowerCase(),
+      createdAt: p.createdAt || '',
+      updatedAt: p.taskCreatedAt || '',       // "updated" = when it was paused
+      pausedAt: p.taskCreatedAt || '',        // explicit pause timestamp for SLA
+      status: { label: `Paused · ${pauseLabel}`, severity: 'warning', color: '#6b6560' },
+      taskUrl: p.oid
+        ? `${DEEL_ADMIN_BASE}/dashboards/employees/${p.country || 'GLOBAL'}/status/Onboarding.EA.EASigning.Paused/contract/${p.oid}/step/Paused`
+        : '',
+      contractUrl: DEEL_CONTRACT_URL(p.oid),
+      isPaused: true,
+      pauseType: p.pauseType || '',
+      slaRemaining: null,
+      slaBreachStatus: null,
+    };
+  });
+}
+
 // ── Offboarding → normalized rows ──
 export function normalizeOffboarding(items = []) {
   return items.map(c => {

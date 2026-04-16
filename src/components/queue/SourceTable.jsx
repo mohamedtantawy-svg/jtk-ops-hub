@@ -73,7 +73,8 @@ export default function SourceTable({
   emptySubLabel = 'All caught up',
   showSourceColumn = false,  // show Source column (for "All" view)
   searchable = true,
-  sortDefault = 'oldest',    // 'oldest' | 'newest' | 'sla'
+  sortDefault = 'oldest',    // 'oldest' | 'newest' | 'sla' | 'startDate'
+  showPausedSla = false,     // use 48h countdown from pausedAt instead of age-based SLA
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   // Column-based sorting: col name + direction
@@ -235,7 +236,7 @@ export default function SourceTable({
             </thead>
             <tbody>
               {sorted.map(row => (
-                <SourceRow key={`${row.source}-${row.id}`} row={row} showSource={showSourceColumn} />
+                <SourceRow key={`${row.source}-${row.id}`} row={row} showSource={showSourceColumn} showPausedSla={showPausedSla} />
               ))}
             </tbody>
           </table>
@@ -246,7 +247,7 @@ export default function SourceTable({
 }
 
 // ── Row component ──
-const SourceRow = memo(function SourceRow({ row, showSource }) {
+const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false }) {
   const [hov, setHov] = useState(false);
   const sev = row.status?.severity || 'info';
   const isUrgent = sev === 'critical';
@@ -335,9 +336,11 @@ const SourceRow = memo(function SourceRow({ row, showSource }) {
         {row.startDate ? fmtDate(row.startDate) : '--'}
       </td>
 
-      {/* SLA (age-based) */}
+      {/* SLA */}
       <td style={tdStyle}>
-        {row.slaRemaining != null ? (
+        {showPausedSla && row.pausedAt ? (
+          <PausedSlaBadge pausedAt={row.pausedAt} />
+        ) : row.slaRemaining != null ? (
           <WorkbenchSlaBadge slaRemaining={row.slaRemaining} slaBreachStatus={row.slaBreachStatus} />
         ) : sla ? (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 8px', borderRadius: 128, background: sla.bg, color: sla.color, fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' }}>
@@ -437,6 +440,42 @@ function WorkbenchSlaBadge({ slaRemaining, slaBreachStatus }) {
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 8px', borderRadius: 128, background: sla.bg, color: sla.color, fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' }}>
       <i className="bi-clock" style={{ fontSize: 8 }} />
       {timeStr || sla.label}
+    </span>
+  );
+}
+
+// ── Paused SLA badge (48h countdown from pausedAt) ──
+function PausedSlaBadge({ pausedAt }) {
+  if (!pausedAt) return <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>;
+  const pausedTime = new Date(pausedAt).getTime();
+  if (isNaN(pausedTime)) return <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>;
+
+  const SLA_MS = 48 * 60 * 60 * 1000; // 48 hours
+  const elapsed = Date.now() - pausedTime;
+  const remaining = SLA_MS - elapsed;
+
+  let label, color, bg;
+  if (remaining <= 0) {
+    // Breached
+    const overMs = Math.abs(remaining);
+    const overHrs = Math.floor(overMs / 3600000);
+    label = overHrs >= 24 ? `${Math.floor(overHrs / 24)}d over` : `${overHrs}h over`;
+    color = '#d42d35'; bg = '#fef2f2';
+  } else {
+    const remHrs = Math.floor(remaining / 3600000);
+    const remMins = Math.floor((remaining % 3600000) / 60000);
+    if (remHrs >= 24) label = `${Math.floor(remHrs / 24)}d ${remHrs % 24}h`;
+    else if (remHrs > 0) label = `${remHrs}h ${remMins}m`;
+    else label = `${remMins}m`;
+
+    if (remHrs < 6) { color = '#d42d35'; bg = '#fef2f2'; }       // < 6h — red
+    else if (remHrs < 24) { color = '#ed8d00'; bg = '#fff8e6'; }  // < 24h — amber
+    else { color = '#15803d'; bg = '#e8f5e9'; }                   // > 24h — green
+  }
+
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 8px', borderRadius: 128, background: bg, color, fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' }}>
+      <i className="bi-hourglass-split" style={{ fontSize: 8 }} /> {label}
     </span>
   );
 }
