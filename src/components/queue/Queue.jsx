@@ -81,6 +81,15 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const [workSource,setWorkSource]=useState(null);
   // searchRef removed — search handled by global nav
   const perms = useContext(PermissionsContext);
+
+  // Wire subFilter from parent (BriefingView "View resolved" etc.) to internal filter
+  useEffect(() => {
+    if (subFilter) {
+      const statusMap = { 'Resolved': 'resolved', 'New': 'new', 'In Progress': 'in_progress', 'Waiting': 'waiting' };
+      const mapped = statusMap[subFilter] || subFilter.toLowerCase();
+      setFStatus(mapped);
+    }
+  }, [subFilter]);
   const settings = useContext(SettingsContext);
   const { deelData, jiraData, queueSync } = useContext(IntegrationsContext);
   // Onboarding data from Deel API
