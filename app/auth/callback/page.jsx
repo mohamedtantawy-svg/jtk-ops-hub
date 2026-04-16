@@ -54,9 +54,17 @@ export default function AuthCallback() {
       .then((data) => {
         if (data?.token) {
           localStorage.setItem('ops_hub_token', data.token);
+          // Mark the exact moment the token was stored so that the session
+          // revalidation in App.jsx can skip the immediate fetchMe() call
+          // for fresh logins — the token was JUST created, no need to verify.
+          localStorage.setItem('ops_hub_token_ts', String(Date.now()));
+          try { sessionStorage.setItem('ops_hub_fresh_login', '1'); } catch {}
         }
         if (data?.user?.email) {
           localStorage.setItem('ops_hub_logged_in_email', data.user.email);
+        }
+        if (data?.user) {
+          try { localStorage.setItem('ops_hub_user', JSON.stringify(data.user)); } catch {}
         }
         // Redirect to app — App.jsx will pick up the session from localStorage
         window.location.href = '/';

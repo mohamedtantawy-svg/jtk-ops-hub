@@ -55,9 +55,20 @@ export async function apiFetch(path, options = {}) {
             try {
               const currentToken = localStorage.getItem('ops_hub_token');
               if (token && currentToken === token) {
-                localStorage.removeItem('ops_hub_token');
-                localStorage.removeItem('ops_hub_user');
-                window.dispatchEvent(new CustomEvent('ops-hub-session-expired'));
+                // Grace period: don't nuke a session that was created very
+                // recently (< 30 s). This prevents a race where the Edge
+                // Runtime middleware rejects a freshly-issued token (e.g.
+                // due to key propagation delay or cold-start timing).
+                const tokenTs = Number(localStorage.getItem('ops_hub_token_ts') || 0);
+                const isRecentLogin = tokenTs && (Date.now() - tokenTs < 30000);
+                if (!isRecentLogin) {
+                  localStorage.removeItem('ops_hub_token');
+                  localStorage.removeItem('ops_hub_token_ts');
+                  localStorage.removeItem('ops_hub_user');
+                  window.dispatchEvent(new CustomEvent('ops-hub-session-expired'));
+                } else {
+                  console.warn('[apiFetch] 401 ignored — token was stored <30 s ago (grace period)');
+                }
               }
             } catch {}
           }

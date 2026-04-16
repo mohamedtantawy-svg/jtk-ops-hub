@@ -120,7 +120,35 @@ const App=()=>{
       setLoggedInEmail(null);
       return;
     }
-    // Validate session with backend
+
+    // Skip immediate revalidation for fresh logins — the token was JUST
+    // created by the auth callback, so there's no need to hit /me right
+    // away.  This avoids a race condition where the Edge middleware
+    // rejects the brand-new token (cold-start, key propagation, etc.)
+    // and nukes the session before the user even sees the dashboard.
+    const tokenTs = Number(localStorage.getItem('ops_hub_token_ts') || 0);
+    const isFreshLogin = tokenTs && (Date.now() - tokenTs < 30000);
+    let freshFlag = false;
+    try { freshFlag = !!sessionStorage.getItem('ops_hub_fresh_login'); } catch {}
+
+    if (isFreshLogin || freshFlag) {
+      // Clear the flag so the NEXT page load will revalidate normally
+      try { sessionStorage.removeItem('ops_hub_fresh_login'); } catch {}
+      // Optionally revalidate after a delay (gives middleware time to warm up)
+      const timer = setTimeout(() => {
+        apiFetchMe()
+          .then((serverUser) => {
+            if (serverUser?.email) {
+              const member = MEMBERS.find(m => m.email.toLowerCase() === serverUser.email.toLowerCase()) || serverUser;
+              setUser(member);
+            }
+          })
+          .catch(() => { /* fresh login — don't clear session on failure */ });
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+
+    // Validate session with backend (returning user with older token)
     apiFetchMe()
       .then((serverUser) => {
         if (serverUser?.email) {
@@ -133,7 +161,7 @@ const App=()=>{
           // Token expired or invalid — log out
           setUser(null);
           setLoggedInEmail(null);
-          try { localStorage.removeItem('ops_hub_logged_in_email'); localStorage.removeItem('ops_hub_token'); } catch(e) {}
+          try { localStorage.removeItem('ops_hub_logged_in_email'); localStorage.removeItem('ops_hub_token'); localStorage.removeItem('ops_hub_token_ts'); } catch(e) {}
         }
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -146,6 +174,7 @@ const App=()=>{
       throw new Error('Authentication failed');
     }
     localStorage.setItem('ops_hub_token', res.token);
+    localStorage.setItem('ops_hub_token_ts', String(Date.now()));
     const userEmail = res.user?.email || email;
     const member = MEMBERS.find(m => m.email.toLowerCase() === userEmail.toLowerCase()) || res.user;
     if (member) {
@@ -165,7 +194,7 @@ const App=()=>{
     setImpersonating(null);
     setUser(null);
     setLoggedInEmail(null);
-    try { localStorage.removeItem('ops_hub_logged_in_email'); localStorage.removeItem('ops_hub_token'); } catch(e) {}
+    try { localStorage.removeItem('ops_hub_logged_in_email'); localStorage.removeItem('ops_hub_token'); localStorage.removeItem('ops_hub_token_ts'); localStorage.removeItem('ops_hub_user'); } catch(e) {}
   }, []);
 
   // ── Impersonation handler ──────────────────────────────────────────────────
@@ -529,7 +558,7 @@ const App=()=>{
       setUser(null);
       setLoggedInEmail(null);
       setImpersonating(null);
-      try { localStorage.removeItem('ops_hub_logged_in_email'); } catch(e) {}
+      try { localStorage.removeItem('ops_hub_logged_in_email'); localStorage.removeItem('ops_hub_token_ts'); localStorage.removeItem('ops_hub_user'); } catch(e) {}
       addToast('error','Session Expired','Please log in again.');
     };
     window.addEventListener('ops-hub-session-expired',handler);
