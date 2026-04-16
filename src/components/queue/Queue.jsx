@@ -159,8 +159,8 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
         const sa=slaInfo(a),sb=slaInfo(b);
         if(sa?.breach&&!sb?.breach)return -1; if(!sa?.breach&&sb?.breach)return 1;
         if(sa&&!sb)return -1; if(!sa&&sb)return 1;
-        if(sa&&sb){ const limA=SLA_MINS[a.type]||1440, limB=SLA_MINS[b.type]||1440; return (limA-a.minutesAgo)-(limB-b.minutesAgo); }
-        return b.minutesAgo-a.minutesAgo;
+        if(sa&&sb){ const limA=SLA_MINS[a.type]||1440, limB=SLA_MINS[b.type]||1440; return (limA-(a.minutesSinceLastResponse??a.minutesAgo))-(limB-(b.minutesSinceLastResponse??b.minutesAgo)); }
+        return (b.minutesSinceLastResponse??b.minutesAgo)-(a.minutesSinceLastResponse??a.minutesAgo);
       });
       if(sort==='newest')return [...arr].sort((a,b)=>a.minutesAgo-b.minutesAgo);
       if(sort==='oldest')return [...arr].sort((a,b)=>b.minutesAgo-a.minutesAgo);
@@ -278,7 +278,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const slaAgeClass=(task)=>{
     if(task.status==='resolved'||task.status==='waiting')return'';
     const lim=SLA_MINS[task.type]||1440;
-    const rem=lim-task.minutesAgo;
+    const rem=lim-(task.minutesSinceLastResponse??task.minutesAgo);
     if(rem<=0)return'age-urgent';
     const pct=rem/lim;
     if(pct>0.5)return'';
@@ -842,7 +842,7 @@ const WorkModeOverlay=memo(({task,remaining,totalOpen,skipped,onResolve,onEscala
   const fn=FUNCTIONS[task.type];
   const tool=TOOLS[task.source];
   const slaLim=SLA_MINS[task.type]||1440;
-  const slaRem=slaLim-(task.minutesAgo??0);
+  const slaRem=slaLim-(task.minutesSinceLastResponse??task.minutesAgo??0);
   const slaPct=Math.max(0,Math.min(100,(slaRem/slaLim)*100));
   const slaBarColor=slaRem<=0?'#b91c1c':slaPct>50?'#15803d':slaPct>20?'#b45309':'#b91c1c';
   const processed=totalOpen-remaining;

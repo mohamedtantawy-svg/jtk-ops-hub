@@ -2,6 +2,7 @@ import { useState, useContext, useMemo, useRef, useEffect, useCallback } from 'r
 import { PermissionsContext, IntegrationsContext } from '../../App';
 import { TEAM_MEMBERS, MEMBERS_BY_EMAIL, getDirectReports, getAllReports } from '../../data/members';
 import { FLAGS, SLA_MINS } from '../../data/constants';
+import { slaInfo } from '../../utils/helpers';
 import Avatar from '../ui/Avatar';
 import PageHeader from '../ui/PageHeader';
 
@@ -173,20 +174,10 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
     const e = email.toLowerCase();
     const agentTasks = ns.filter(t => (t.assigneeEmail || '').toLowerCase() === e && t.status !== 'resolved');
     if (agentTasks.length === 0) return 'green';
-    const breached = agentTasks.filter(t => t.slaBreached || t.isAlert).length;
-    if (breached >= 1) return 'red';
-    const atHighRisk = agentTasks.some(t => {
-      const lim = (SLA_MINS && SLA_MINS[t.type]) || 1440;
-      const pct = (t.minutesAgo || 0) / lim;
-      return pct > 0.8;
-    });
-    if (atHighRisk) return 'red';
-    const atMedRisk = agentTasks.some(t => {
-      const lim = (SLA_MINS && SLA_MINS[t.type]) || 1440;
-      const pct = (t.minutesAgo || 0) / lim;
-      return pct >= 0.5;
-    });
-    if (atMedRisk || agentTasks.some(t => t.slaAtRisk)) return 'yellow';
+    const breached = agentTasks.some(t => { const s = slaInfo(t); return (s && s.breach) || t.isAlert; });
+    if (breached) return 'red';
+    const atRisk = agentTasks.some(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; });
+    if (atRisk) return 'yellow';
     return 'green';
   };
 
@@ -244,7 +235,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
   // EOD summary
   const resolvedToday = tasks.filter(t => t.status === 'resolved').length;
   const stillOpen = tasks.filter(t => t.status !== 'resolved').length;
-  const slaBreached = tasks.filter(t => t.slaBreached || t.isAlert).length;
+  const slaBreached = tasks.filter(t => { const s = slaInfo(t); return (s && s.breach) || t.isAlert; }).length;
   const dateStr = new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
 
   const copySummary = () => {

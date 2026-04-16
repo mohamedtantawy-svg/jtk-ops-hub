@@ -17,12 +17,12 @@ const ApproachingBreach = ({ tasks = [], slaInfo, onViewTask, limit = 5 }) => {
     return tasks
       .map(task => {
         const info = slaInfo(task);
-        if (!info || info.breached || info.remainingMins == null) return null;
-        if (info.remainingMins >= 120) return null;
+        if (!info || info.breach || info.remain == null) return null;
+        if (info.remain >= 120) return null;
         return { ...task, _sla: info };
       })
       .filter(Boolean)
-      .sort((a, b) => a._sla.remainingMins - b._sla.remainingMins)
+      .sort((a, b) => a._sla.remain - b._sla.remain)
       .slice(0, limit);
   }, [tasks, slaInfo, limit]);
 
@@ -70,7 +70,7 @@ const ApproachingBreach = ({ tasks = [], slaInfo, onViewTask, limit = 5 }) => {
           </div>
         ) : (
           approachingTasks.map((task, idx) => {
-            const urgencyColor = getUrgencyColor(task._sla.remainingMins);
+            const urgencyColor = getUrgencyColor(task._sla.remain);
             return (
               <div
                 key={task.id || task.ticketId || idx}
@@ -105,7 +105,7 @@ const ApproachingBreach = ({ tasks = [], slaInfo, onViewTask, limit = 5 }) => {
                   display: 'flex', alignItems: 'center', gap: 4
                 }}>
                   <i className="bi-clock" style={{ fontSize: 11 }}></i>
-                  {formatRemaining(task._sla.remainingMins)}
+                  {formatRemaining(task._sla.remain)}
                 </div>
               </div>
             );
