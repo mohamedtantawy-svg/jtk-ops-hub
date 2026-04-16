@@ -18,6 +18,7 @@ import { useChangeRequestData } from '../../hooks/useChangeRequestData';
 import { useWorkbenchData } from '../../hooks/useWorkbenchData';
 import SourceTable from './SourceTable';
 import ErrorBoundary from '../ui/ErrorBoundary';
+import { updateTaskStatus as apiUpdateStatus } from '../../services/tasksApi';
 import {
   normalizeOnboarding,
   normalizeOffboarding,
@@ -184,6 +185,10 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
         // Only move selection if user is still viewing this task
         setSelTask(prev=>prev?.id===taskId?null:prev);
         delete pendingCloseRefs.current[taskId];
+        // Persist to backend
+        apiUpdateStatus(task._beId||taskId,'resolved').catch(err=>{
+          console.warn('[Queue] Failed to sync close to backend:',err.message);
+        });
       },4000);
       pendingCloseRefs.current[taskId]=tid;
       addToast&&addToast('success',`Closed: ${taskId}`,task.subject.slice(0,46),()=>{
@@ -203,6 +208,10 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     setTasks(prev=>prev.map(t=>t.id===task.id?{...t,status:'resolved'}:t));
     setSelTask(prev=>prev?.id===task.id?null:prev);
     addToast&&addToast('success',`Resolved: ${task.id}`,task.subject.slice(0,46));
+    // Persist to backend — fire-and-forget (optimistic UI)
+    apiUpdateStatus(task._beId||task.id,'resolved').catch(err=>{
+      console.warn('[Queue] Failed to sync resolve to backend:',err.message);
+    });
   },[setTasks,setSelTask,addToast]);
 
   const toggleCheck=useCallback(id=>setCheckedIds(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;}),[]);
@@ -244,10 +253,10 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       const idx=all.findIndex(t=>t.id===selTask?.id);
       if(e.key==='j'){ const n=all[idx+1]||all[0]; if(n){setSelTask(n);setRecentIds(prev=>[n.id,...prev.filter(id=>id!==n.id)].slice(0,3));} }
       if(e.key==='k'){ const n=all[idx>0?idx-1:all.length-1]; if(n){setSelTask(n);setRecentIds(prev=>[n.id,...prev.filter(id=>id!==n.id)].slice(0,3));} }
-      if(e.key==='e'&&selTask) onEscalMgr&&onEscalMgr(selTask);
-      if(e.key==='s'&&selTask) onSnooze&&onSnooze(selTask);
-      if(e.key==='r'&&selTask) onReassign&&onReassign(selTask);
-      if(e.key==='x'&&selTask){ handleResolve(selTask); }
+      if(e.key==='e'&&selTask&&perms?.canDo('can_escalate')!==false) onEscalMgr&&onEscalMgr(selTask);
+      if(e.key==='s'&&selTask&&perms?.canDo('can_snooze')!==false) onSnooze&&onSnooze(selTask);
+      if(e.key==='r'&&selTask&&perms?.canDo('can_reassign')!==false) onReassign&&onReassign(selTask);
+      if(e.key==='x'&&selTask&&perms?.canDo('can_resolve_task')!==false){ handleResolve(selTask); }
       if(e.key==='Escape') setSelTask(null);
     };
     document.addEventListener('keydown',kd);

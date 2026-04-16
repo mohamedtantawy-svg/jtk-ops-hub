@@ -29,6 +29,15 @@ export async function PATCH(req, { params }) {
     const { id } = await params;
     const body = await req.json();
 
+    // Role changes require admin privileges — prevent privilege escalation
+    if (body.role && user.role !== 'admin') {
+      return NextResponse.json({ error: 'Only admins can change member roles' }, { status: 403 });
+    }
+    // Deactivation requires admin
+    if (body.isActive === false && user.role !== 'admin') {
+      return NextResponse.json({ error: 'Only admins can deactivate members' }, { status: 403 });
+    }
+
     // Enum validation for constrained fields
     const VALID_ROLES = ['admin', 'regional_manager', 'team_lead', 'agent'];
     if (body.role && !VALID_ROLES.includes(body.role)) {

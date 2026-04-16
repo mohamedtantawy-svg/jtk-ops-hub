@@ -117,17 +117,34 @@ function mergeSourceIntoTasks(currentTasks, syncedItems, source) {
       // Synced task exists — update external data, preserve local state
       const synced = syncMap.get(task.id);
       seen.add(task.id);
+
+      // Detect local assignee change (user reassigned since last sync)
+      const localReassigned = task.assigneeEmail && task.assigneeEmail !== synced.assigneeEmail;
+      // Detect local resolve (user resolved before source updated)
+      const localResolved = task.status === 'resolved' && synced.status !== 'resolved';
+
       result.push({
         ...synced,
-        // Preserve local mutations
+        // Preserve local mutations — snooze
         snoozedUntil: task.snoozedUntil,
         snoozeLabel: task.snoozeLabel,
         prevStatus: task.prevStatus,
-        status: task.snoozedUntil && task.status === 'waiting' ? 'waiting' : synced.status,
+        status: task.snoozedUntil && task.status === 'waiting' ? 'waiting'
+              : localResolved ? 'resolved'
+              : synced.status,
+        // Preserve local reassignment until source catches up
+        ...(localReassigned ? {
+          assigneeId: task.assigneeId,
+          assigneeEmail: task.assigneeEmail,
+          assigneeName: task.assigneeName,
+        } : {}),
       });
     } else if (task.source === source && !syncMap.has(task.id)) {
-      // Task disappeared from source — mark as resolved (unless manual)
-      if (task.status !== 'resolved' && task.source !== 'manual') {
+      // Task disappeared from source
+      // Keep locally-created tasks (no _externalId) — they won't exist in the source
+      if (task._locallyCreated) {
+        result.push(task);
+      } else if (task.status !== 'resolved') {
         result.push({ ...task, status: 'resolved' });
       }
       seen.add(task.id);

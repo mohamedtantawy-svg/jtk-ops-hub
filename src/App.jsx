@@ -353,7 +353,7 @@ const App=()=>{
     const iv=setInterval(()=>{
       setTasks(prev=>prev.map(t=>{
         if(t.status==='resolved'||t.status==='waiting')return t;
-        return {...t, minutesAgo:t.minutesAgo+1, updatedMinsAgo:t.updatedMinsAgo+1};
+        return {...t, minutesAgo:t.minutesAgo+1, updatedMinsAgo:t.updatedMinsAgo+1, minutesSinceLastResponse:(t.minutesSinceLastResponse||0)+1};
       }));
     },60000);
     return()=>clearInterval(iv);
@@ -443,7 +443,7 @@ const App=()=>{
     // Use base36 suffix for unique IDs
     const newId=`${pfx[form.source]||'MN'}-${(now.getTime()+Math.floor(Math.random()*999)).toString(36).slice(-4).toUpperCase()}`;
     const agentName=MEMBERS.find(m=>m.id===form.assigneeId)?.name;
-    setTasks(prev=>[{id:newId,source:form.source,subject:form.subject,body:form.body||'',assigneeId:form.assigneeId,country:form.country,receivedAt:t,minutesAgo:0,updatedMinsAgo:0,status:'new',type:form.type,isAlert:false,suggestedReply:''},...prev]);
+    setTasks(prev=>[{id:newId,source:form.source,subject:form.subject,body:form.body||'',assigneeId:form.assigneeId,country:form.country,receivedAt:t,minutesAgo:0,updatedMinsAgo:0,minutesSinceLastResponse:0,status:'new',type:form.type,isAlert:false,suggestedReply:'',_locallyCreated:true},...prev]);
     setActivity(prev=>({...prev,[newId]:[{type:'created',text:'Task created manually',user:user.name,time:t},{type:'assigned',text:`Assigned to ${agentName}`,user:user.name,time:t}]}));
     setCreateModal(false);
     addToast('success','Task Created',`${newId} → ${agentName?.split(' ')[0]}`);
@@ -630,7 +630,7 @@ const App=()=>{
           {view==='analytics'     &&perms?.canView('analytics')!==false    &&<div className="page-enter"><Analytics tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} currentUser={effectiveUser} subFilter={subFilter} escalations={escalations}/></div>}
           {view==='escalations'   &&perms?.canView('escalations')!==false  &&<div className="page-enter"><EscalationsView escalations={escalations} setEscalations={setEscalations} currentUser={effectiveUser} onNewEscalation={()=>setCreateEscalModal(true)}/></div>}
           {view==='announcements' &&perms?.canView('announcements')!==false&&<div className="page-enter"><AnnouncementsView user={effectiveUser} comms={comms} setComms={setComms} addToast={addToast} tasks={tasks} apiAcknowledge={apiAcknowledge} apiCreate={apiCreate} apiSend={apiSend} apiUpdate={apiUpdate} apiArchive={apiArchive} apiRemove={apiRemove} apiTogglePin={apiTogglePin} openCompose={announceCompose} onComposeOpened={()=>setAnnounceCompose(false)} apiUnarchive={apiUnarchive} apiComments={apiComments} apiSetComments={apiSetComments} apiLoadComments={apiLoadComments} apiAddComment={apiAddCommentFn} apiDeleteComment={apiDeleteCommentFn} apiLinks={apiLinks} apiLoadLinks={apiLoadLinks} apiLinkAnnouncement={apiLinkAnnouncementFn} apiUnlinkAnnouncement={apiUnlinkAnnouncementFn} apiReact={apiReactFn}/></div>}
-          {view==='calendar'      &&perms?.canView('calendar')!==false     &&<div className="page-enter"><CalendarView tasks={tasks}/></div>}
+          {view==='calendar'      &&perms?.canView('calendar')!==false     &&<div className="page-enter"><CalendarView tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks}/></div>}
           {view==='knowledge-hub' &&perms?.canView('knowledge-hub')!==false&&<div className="page-enter"><KnowledgeHub subFilter={subFilter} user={effectiveUser}/></div>}
           {view==='hr-reports'    &&perms?.canView('hr-reports')!==false   &&<div className="page-enter"><GMReportingView user={effectiveUser} addToast={addToast} createReportModal={createReportModal} setCreateReportModal={setCreateReportModal}/></div>}
           {view==='settings'      &&perms?.canView('settings')!==false     &&<div className="page-enter"><SettingsView settings={settings} setSettings={setSettings} user={user} addToast={addToast} tasks={tasks} setTasks={setTasks} subFilter={subFilter} accessTypes={accessTypes} setAccessTypes={setAccessTypes} userAccessMap={userAccessMap} setUserAccessMap={setUserAccessMap} perms={perms}/></div>}
