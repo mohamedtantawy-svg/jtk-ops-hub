@@ -27,7 +27,7 @@ export async function GET(req) {
     return NextResponse.json(issue);
   } catch (err) {
     console.error('[integrations/jira/issues GET]', err.message);
-    return NextResponse.json({ error: err.message }, { status: err.status || 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: err.status || 500 });
   }
 }
 
@@ -69,6 +69,6 @@ export async function POST(req) {
     return NextResponse.json(result, { status: 201 });
   } catch (err) {
     console.error('[integrations/jira/issues POST]', err.message);
-    return NextResponse.json({ error: err.message }, { status: err.status || 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: err.status || 500 });
   }
 }

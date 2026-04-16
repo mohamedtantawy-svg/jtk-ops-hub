@@ -17,8 +17,10 @@ export async function GET(req) {
     const { searchParams } = new URL(req.url);
     const email = searchParams.get('email');
     const search = searchParams.get('search');
-    const limit = searchParams.get('limit') || '50';
-    const offset = searchParams.get('offset') || '0';
+    const rawLimit = parseInt(searchParams.get('limit') || '50', 10);
+    const rawOffset = parseInt(searchParams.get('offset') || '0', 10);
+    const limit = String(Math.min(Math.max(1, isNaN(rawLimit) ? 50 : rawLimit), 200));
+    const offset = String(Math.max(0, isNaN(rawOffset) ? 0 : rawOffset));
 
     let result;
     if (email) {
@@ -30,6 +32,6 @@ export async function GET(req) {
     return NextResponse.json(result);
   } catch (err) {
     console.error('[integrations/deel/people]', err.message);
-    return NextResponse.json({ error: err.message }, { status: err.status || 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: err.status || 500 });
   }
 }

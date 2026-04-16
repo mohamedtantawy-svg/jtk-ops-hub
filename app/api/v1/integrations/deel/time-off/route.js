@@ -18,12 +18,12 @@ export async function GET(req) {
     const result = await listTimeOffRequests({
       contract_id: searchParams.get('contract_id'),
       status: searchParams.get('status'),
-      limit: searchParams.get('limit') || '50',
+      limit: String(Math.min(Math.max(1, parseInt(searchParams.get('limit') || '50', 10) || 50), 200)),
     });
 
     return NextResponse.json(result);
   } catch (err) {
     console.error('[integrations/deel/time-off]', err.message);
-    return NextResponse.json({ error: err.message }, { status: err.status || 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: err.status || 500 });
   }
 }

@@ -2,7 +2,7 @@
 // Unified table for all work sources (onboarding, offboarding, amendments,
 // redlines, workbench, and the combined "All" view).
 // Expects normalized rows with a common shape.
-import { useState, useMemo } from 'react';
+import { useState, useMemo, memo } from 'react';
 import { TOOLS, getFlag, getCountryName } from '../../data/constants';
 import Avatar from '../ui/Avatar';
 
@@ -240,7 +240,7 @@ export default function SourceTable({
 }
 
 // ── Row component ──
-function SourceRow({ row, showSource }) {
+const SourceRow = memo(function SourceRow({ row, showSource }) {
   const [hov, setHov] = useState(false);
   const sev = row.status?.severity || 'info';
   const isUrgent = sev === 'critical';
@@ -395,7 +395,8 @@ function SourceRow({ row, showSource }) {
       </td>
     </tr>
   );
-}
+});
+SourceRow.displayName='SourceRow';
 
 // ── Workbench SLA badge ──
 function WorkbenchSlaBadge({ slaRemaining, slaBreachStatus }) {

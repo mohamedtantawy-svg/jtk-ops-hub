@@ -26,6 +26,6 @@ export async function POST(req, { params }) {
     return NextResponse.json(result);
   } catch (err) {
     console.error('[integrations/slack/send]', err.message);
-    return NextResponse.json({ error: err.message }, { status: err.status || 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: err.status || 500 });
   }
 }

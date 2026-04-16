@@ -1,9 +1,14 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../src/lib/db';
-import { requireRole } from '../../../../src/lib/auth-helpers';
+import { getAuthUser, requireRole } from '../../../../src/lib/auth-helpers';
 
 export async function GET(req) {
   try {
+    const user = getAuthUser(req);
+    if (!user.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(req.url);
     const status = searchParams.get('status');
     const target = searchParams.get('target');

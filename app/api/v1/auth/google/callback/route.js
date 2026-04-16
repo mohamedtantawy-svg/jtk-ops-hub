@@ -157,10 +157,7 @@ export async function POST(req) {
 
     // ── If no strategy worked, return a helpful debug error ─────────────
     if (!email) {
-      console.error('[auth/google/callback] Could not extract email. Body keys:', Object.keys(body));
-      console.error('[auth/google/callback] Body values (first 100 chars each):',
-        Object.fromEntries(Object.entries(body).map(([k, v]) => [k, String(v).substring(0, 100)]))
-      );
+      console.error('[auth/google/callback] Could not extract email from request body');
       return NextResponse.json(
         {
           error: 'No valid authentication token received. Please sign in with Google.',

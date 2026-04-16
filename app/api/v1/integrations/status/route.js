@@ -1,13 +1,18 @@
 // ── GET /api/v1/integrations/status ───────────────────────────────────────────
 // Returns the configuration status of all external integrations.
-// Does NOT require auth — used by the frontend to show integration health.
 import { NextResponse } from 'next/server';
 import { isDeelConfigured } from '../../../../../src/lib/deel-api';
 import { isJiraConfigured } from '../../../../../src/lib/jira-api';
 import { isSlackConfigured } from '../../../../../src/lib/slack-api';
 import { isZendeskConfigured } from '../../../../../src/lib/zendesk-api';
+import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 
-export async function GET() {
+export async function GET(req) {
+  const user = getAuthUser(req);
+  if (!user.email) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   return NextResponse.json({
     integrations: {
       deel: {

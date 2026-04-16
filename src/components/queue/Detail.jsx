@@ -54,18 +54,20 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [replyPublic, setReplyPublic] = useState(true);
-  // Reset tab and reply when task changes
-  useEffect(()=>{ setTab('overview'); setReplyText(''); },[task.id]);
+  // Reset tab, reply, and public toggle when task changes
+  useEffect(()=>{ setTab('overview'); setReplyText(''); setReplyPublic(true); },[task.id]);
   // Sync linkedTickets when task changes
   useEffect(()=>{ setLinkedTickets(task.linkedTickets||[]); },[task.id]);
-  // Fetch Zendesk comments when Messages tab is opened
+  // Fetch comments when Messages tab is opened (supports Zendesk + Jira)
   useEffect(() => {
-    if (tab === 'messages' && task.source === 'zendesk' && task.id) {
+    if (tab === 'messages' && (task.source === 'zendesk' || task.source === 'jira') && task.id) {
+      let cancelled = false;
       setCommentsLoading(true);
       fetchTicketComments(task.id)
-        .then(data => setComments((data.comments || []).slice(0, 2)))
-        .catch(() => setComments([]))
-        .finally(() => setCommentsLoading(false));
+        .then(data => { if(!cancelled) setComments((data.comments || []).slice(0, 2)); })
+        .catch(() => { if(!cancelled) setComments([]); })
+        .finally(() => { if(!cancelled) setCommentsLoading(false); });
+      return () => { cancelled = true; };
     }
   }, [tab, task.id, task.source]);
 
@@ -501,9 +503,8 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
                     if(!replyText.trim())return;
                     setActionLoading(true);
                     try{
-                      if(task.source==='zendesk'){
-                        await postTicketAction(task.id,{action:'reply',message:replyText,public:replyPublic});
-                      }
+                      // Route reply to correct backend (Zendesk or Jira)
+                      await postTicketAction(task.id,{action:'reply',message:replyText,public:replyPublic});
                       addToast&&addToast('success','Reply sent','Your reply has been posted to the ticket.');
                       setReplyText('');
                       // Refresh comments

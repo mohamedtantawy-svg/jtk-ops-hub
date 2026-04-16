@@ -22,17 +22,23 @@ export async function GET(req) {
       return NextResponse.json(contract);
     }
 
+    // Clamp pagination to safe bounds
+    const rawLimit = parseInt(searchParams.get('limit') || '50', 10);
+    const rawOffset = parseInt(searchParams.get('offset') || '0', 10);
+    const limit = String(Math.min(Math.max(1, isNaN(rawLimit) ? 50 : rawLimit), 200));
+    const offset = String(Math.max(0, isNaN(rawOffset) ? 0 : rawOffset));
+
     const result = await listContracts({
       search: searchParams.get('search'),
       statuses: searchParams.get('statuses'),
       types: searchParams.get('types'),
-      limit: searchParams.get('limit') || '50',
-      offset: searchParams.get('offset') || '0',
+      limit,
+      offset,
     });
 
     return NextResponse.json(result);
   } catch (err) {
     console.error('[integrations/deel/contracts]', err.message);
-    return NextResponse.json({ error: err.message }, { status: err.status || 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: err.status || 500 });
   }
 }

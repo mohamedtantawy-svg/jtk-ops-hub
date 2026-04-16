@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../../src/lib/db';
+import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 
 export async function GET(req, { params }) {
+  const user = getAuthUser(req);
+  if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   try {
     const { id } = await params;
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
@@ -25,6 +28,10 @@ export async function GET(req, { params }) {
 }
 
 export async function DELETE(req, { params }) {
+  const delUser = getAuthUser(req);
+  if (!delUser.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  // Only admins can delete tasks
+  if (delUser.role !== 'admin') return NextResponse.json({ error: 'Forbidden: admin role required' }, { status: 403 });
   try {
     const { id } = await params;
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);

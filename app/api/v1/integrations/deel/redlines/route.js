@@ -26,7 +26,7 @@ export async function GET(req) {
     const status = searchParams.get('status') || 'preparingDocuments.legalReview';
     const bustCache = searchParams.get('bust') === '1';
 
-    const cacheKeyFull = `${CACHE_KEY}_${status}`;
+    const cacheKeyFull = `${CACHE_KEY}_${status.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
 
     if (!bustCache) {
       const fresh = cacheGet(cacheKeyFull, CACHE_TTL);
@@ -57,7 +57,7 @@ export async function GET(req) {
     return NextResponse.json(responseData);
   } catch (err) {
     console.error('[integrations/deel/redlines]', err.message);
-    return NextResponse.json({ error: err.message }, { status: err.status || 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: err.status || 500 });
   }
 }
 

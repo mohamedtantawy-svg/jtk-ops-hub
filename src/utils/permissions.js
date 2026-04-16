@@ -41,8 +41,10 @@ export const scopeTasks = (tasks, user, accessType, _allMembers) => {
       const member = TEAM_MEMBERS[t.assigneeId - 1];
       if (member && visibleEmails.has(member.email)) return true;
     }
-    // Unassigned tickets visible to everyone
-    if (!t.assigneeId && !t.assigneeEmail) return true;
+    // Unassigned tickets: only visible to leads/managers (not agents)
+    if (!t.assigneeId && !t.assigneeEmail) {
+      return scope === 'regional_tasks' || scope === 'team_tasks';
+    }
     return false;
   });
 };

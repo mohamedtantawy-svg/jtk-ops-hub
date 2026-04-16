@@ -1,8 +1,14 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../src/lib/db';
+import { getAuthUser } from '../../../../src/lib/auth-helpers';
 
 export async function GET(req) {
   try {
+    const user = getAuthUser(req);
+    if (!user.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(req.url);
     const toTeam = searchParams.get('toTeam');
     const status = searchParams.get('status');
@@ -48,6 +54,11 @@ export async function GET(req) {
 
 export async function POST(req) {
   try {
+    const user = getAuthUser(req);
+    if (!user.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await req.json();
     const { subject, description, toTeam, priority, fromMemberId, taskId, externalRef, dueDate } = body;
     if (!subject) return NextResponse.json({ error: 'Subject required' }, { status: 400 });

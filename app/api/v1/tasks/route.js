@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../src/lib/db';
+import { getAuthUser } from '../../../../src/lib/auth-helpers';
 
 export async function GET(req) {
+  const user = getAuthUser(req);
+  if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   try {
     const { searchParams } = new URL(req.url);
     const status = searchParams.get('status');
@@ -56,6 +59,8 @@ export async function GET(req) {
 }
 
 export async function POST(req) {
+  const postUser = getAuthUser(req);
+  if (!postUser.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   try {
     const body = await req.json();
     const { externalId, source, subject, description, priority, assigneeId, countryCode, tags, externalUrl } = body;

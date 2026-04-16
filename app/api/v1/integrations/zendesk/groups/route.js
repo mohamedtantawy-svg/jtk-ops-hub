@@ -18,6 +18,6 @@ export async function GET(req) {
     return NextResponse.json(result);
   } catch (err) {
     console.error('[integrations/zendesk/groups]', err.message);
-    return NextResponse.json({ error: err.message }, { status: err.status || 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: err.status || 500 });
   }
 }

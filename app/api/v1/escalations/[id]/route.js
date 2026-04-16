@@ -1,7 +1,12 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../../src/lib/db';
+import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 
 export async function GET(req, { params }) {
+  const user = getAuthUser(req);
+  if (!user.email) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
   try {
     const { id } = await params;
     const { rows } = await query('SELECT * FROM escalations WHERE id = $1', [id]);

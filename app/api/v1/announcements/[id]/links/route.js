@@ -1,8 +1,14 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../../../src/lib/db';
+import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 
 export async function GET(req, { params }) {
   try {
+    const user = getAuthUser(req);
+    if (!user.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { id } = await params;
     const { rows } = await query(
       `SELECT al.*, a.title, a.type FROM announcement_links al
@@ -22,6 +28,11 @@ export async function GET(req, { params }) {
 
 export async function POST(req, { params }) {
   try {
+    const user = getAuthUser(req);
+    if (!user.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { id } = await params;
     const { targetId } = await req.json();
     if (!targetId) return NextResponse.json({ error: 'targetId required' }, { status: 400 });
