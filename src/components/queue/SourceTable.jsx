@@ -253,14 +253,19 @@ const SourceRow = memo(function SourceRow({ row, showSource }) {
   const countryDisplay = getCountryName(row.country) || row.country || '';
   const tool = TOOLS[row.source];
 
-  // Status badge colors
+  // Status badge colors — use per-status color when available, fall back to severity
   const sevConfig = {
     critical: { bg: '#fef2f2', color: '#d42d35', border: '#fca5a5', icon: 'bi-exclamation-triangle-fill' },
     warning:  { bg: '#fef3c7', color: '#92400e', border: '#ffe27c', icon: 'bi-exclamation-circle-fill' },
     active:   { bg: '#eff6ff', color: '#1d4ed8', border: '#bddcf0', icon: 'bi-arrow-repeat' },
     info:     { bg: '#f7f5f2', color: '#616161', border: '#e8e8e8', icon: 'bi-clock' },
   };
-  const cfg = sevConfig[sev] || sevConfig.info;
+  const baseCfg = sevConfig[sev] || sevConfig.info;
+  // If the status has its own color, derive bg/border from it
+  const statusColor = row.status?.color;
+  const cfg = statusColor && statusColor !== baseCfg.color
+    ? { ...baseCfg, color: statusColor, bg: statusColor + '12', border: statusColor + '40' }
+    : baseCfg;
 
   return (
     <tr
