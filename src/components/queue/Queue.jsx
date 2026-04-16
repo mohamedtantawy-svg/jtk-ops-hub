@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useContext, memo } from 'react';
 import { STATUSES, TOOLS, FUNCTIONS, FLAGS, getFlag, getCountryName } from '../../data/constants';
-import { MEMBERS, MEMBERS_BY_EMAIL } from '../../data/members';
+import { MEMBERS, MEMBERS_BY_EMAIL, getDirectReports } from '../../data/members';
+import { OWNER_COUNTRIES } from '../../data/countryOwners';
 import { slaInfo, rel, getUrl, getVisibleEmails } from '../../utils/helpers';
 
 // ── O(1) member lookups (avoid MEMBERS.find in hot paths) ──
@@ -129,8 +130,31 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     });
   }, [isAdmin, visibleEmails]);
 
-  const onboardingRows = useMemo(() => filterSourceRows(onboardingRowsAll), [onboardingRowsAll, filterSourceRows]);
-  const pausedOnboardingRows = useMemo(() => filterSourceRows(pausedOnboardingRowsAll), [pausedOnboardingRowsAll, filterSourceRows]);
+  // ── Country-ownership filter for onboarding ──
+  // Admin/regional_manager → see all. Team lead → own countries + direct reports' countries. Agent → own countries only.
+  const filterOnboardingRows = useCallback((rows) => {
+    if (isAdmin) return rows;
+    const email = (user?.email || '').toLowerCase();
+    const member = MEMBERS_BY_EMAIL[email];
+    const access = member?.access || 'agent';
+    if (access === 'regional_manager') return rows;
+    // Collect owned country codes for this user (and direct reports for team leads)
+    const ownedCodes = new Set(OWNER_COUNTRIES.get(email) || []);
+    if (access === 'team_lead') {
+      for (const dr of getDirectReports(email)) {
+        const drCodes = OWNER_COUNTRIES.get(dr.email.toLowerCase());
+        if (drCodes) for (const c of drCodes) ownedCodes.add(c);
+      }
+    }
+    if (ownedCodes.size === 0) return rows; // no ownership data → show all (fallback)
+    return rows.filter(r => {
+      const cc = (r.country || '').toUpperCase();
+      return cc && ownedCodes.has(cc);
+    });
+  }, [isAdmin, user?.email]);
+
+  const onboardingRows = useMemo(() => filterOnboardingRows(onboardingRowsAll), [onboardingRowsAll, filterOnboardingRows]);
+  const pausedOnboardingRows = useMemo(() => filterOnboardingRows(pausedOnboardingRowsAll), [pausedOnboardingRowsAll, filterOnboardingRows]);
   const offboardingRows = useMemo(() => filterSourceRows(offboardingRowsAll), [offboardingRowsAll, filterSourceRows]);
   const amendmentRows = useMemo(() => filterSourceRows(amendmentRowsAll), [amendmentRowsAll, filterSourceRows]);
   const redlineRows = useMemo(() => filterSourceRows(redlineRowsAll), [redlineRowsAll, filterSourceRows]);
