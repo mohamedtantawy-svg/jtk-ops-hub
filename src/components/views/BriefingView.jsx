@@ -359,7 +359,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   <div style={{fontSize:7,color:'#9e9e9e',fontWeight:600,letterSpacing:'.04em',marginTop:1}}>HEALTH</div>
                 </div>
               </div>
-              {showHealthBreakdown&&<div style={{position:'absolute',top:'100%',right:0,marginTop:8,width:280,background:'#ffffff',borderRadius:16,border:'1px solid #e8e8e8',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'20px',zIndex:50,animation:'fadeSlide .2s ease'}}>
+              {showHealthBreakdown&&<div style={{position:'absolute',top:'100%',right:0,marginTop:8,width:280,background:'#ffffff',borderRadius:16,border:'1px solid #e8e8e8',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'20px',zIndex:999,animation:'fadeSlide .2s ease'}}>
                 <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:14}}>
                   <div style={{width:8,height:8,borderRadius:'50%',background:hColor}}></div>
                   <span style={{fontSize:14,fontWeight:700,color:'#1b1b1b'}}>Health Breakdown</span>

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useContext, memo } from 'react';
-import { STATUSES, TOOLS, FUNCTIONS, FLAGS, getFlag } from '../../data/constants';
+import { STATUSES, TOOLS, FUNCTIONS, FLAGS, getFlag, getCountryName } from '../../data/constants';
 import { MEMBERS, MEMBERS_BY_EMAIL } from '../../data/members';
 import { slaInfo, rel, getUrl, getVisibleEmails } from '../../utils/helpers';
 
@@ -64,7 +64,7 @@ const PRIORITY_DOT={critical:'#dc2626',high:'#d97706',medium:'#0369a1',low:'#9b9
 const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,setActivity,addToast,onEscalMgr,onReassign,onSnooze,onCreateTask,onBulkAction,subFilter,escalations,requests,setRequests,onNewRequest,queueMode,setQueueMode,fUnassigned,setFUnassigned})=>{
   const saved = useMemo(() => loadFilters(), []);
   const [fTool,setFTool]=useState(saved?.fTool||null);
-  const [fStatus,setFStatus]=useState(saved?.fStatus||null);
+  const [fStatus,setFStatus]=useState(()=>{const s=saved?.fStatus;if(Array.isArray(s))return s;if(s)return[s];return[];});
   const [fCtry,setFCtry]=useState(saved?.fCtry||[]);
   const [showMeetingInvites,setShowMeetingInvites]=useState(false);
   const [search,setSearch]=useState('');
@@ -87,7 +87,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     if (subFilter) {
       const statusMap = { 'Resolved': 'resolved', 'New': 'new', 'In Progress': 'in_progress', 'Waiting': 'waiting' };
       const mapped = statusMap[subFilter] || subFilter.toLowerCase();
-      setFStatus(mapped);
+      setFStatus([mapped]);
     }
   }, [subFilter]);
   const settings = useContext(SettingsContext);
@@ -144,7 +144,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     });
     const _baseVis=_vis.filter(t=>!t.isCalendarBooking);
     if(fTool)       _vis=_vis.filter(t=>t.source===fTool);
-    if(fStatus)     _vis=_vis.filter(t=>t.status===fStatus);
+    if(fStatus.length) _vis=_vis.filter(t=>fStatus.includes(t.status));
     if(fUnassigned) _vis=_vis.filter(t=>!t.assigneeId&&!t.assigneeEmail);
     if(fCtry.length) _vis=_vis.filter(t=>fCtry.includes(t.country));
     const _visPreSla=_vis.filter(t=>!t.isCalendarBooking);
@@ -179,7 +179,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     for(const r of allSourceRows) if(r.country) ctrySet.add(r.country);
     return [...ctrySet];
   },[baseVis,allSourceRows]);
-  const hasActiveFilters=useMemo(()=>!!(fTool||fStatus||fCtry.length>0||fSla||fUnassigned||search),[fTool,fStatus,fCtry,fSla,fUnassigned,search]);
+  const hasActiveFilters=useMemo(()=>!!(fTool||fStatus.length>0||fCtry.length>0||fSla||fUnassigned||search),[fTool,fStatus,fCtry,fSla,fUnassigned,search]);
 
   // Work mode queue — only active tasks (excludes snoozed/waiting)
   const workQueue = useMemo(()=> active.filter(t=>!workSkipped.has(t.id)),[active,workSkipped]);
@@ -265,7 +265,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       resolved: base.filter(t => t.status === 'resolved').length,
     };
   }, [workSource, fTool, baseVis, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, allSourceRows]);
-  const activeFilterCount=[fTool,fStatus,fCtry.length>0?true:null,fSla||null,fUnassigned||null].filter(Boolean).length;
+  const activeFilterCount=[fTool,fStatus.length>0?true:null,fCtry.length>0?true:null,fSla||null,fUnassigned||null].filter(Boolean).length;
 
   // Persist filters to localStorage
   useEffect(()=>{
@@ -534,32 +534,30 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           );
         })()}
 
-        {/* Line 3: Queue filters — only show when viewing the main queue (no work source panel) */}
-        {!workSource&&(
+        {/* Line 3: Filters — visible on ALL tabs (queue + work source panels) */}
         <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'nowrap'}}>
-          {/* Status dropdown */}
-          <FilterDropdown
+          {/* Status multi-select */}
+          <MultiFilterDropdown
             icon="bi-circle"
             label="Status"
-            value={fStatus}
+            selected={fStatus}
             options={[
-              {value:null,label:'All Status',icon:'bi-grid'},
-              {value:'new',label:'New',icon:'bi-circle-fill',dotColor:'#7c3aed'},
-              {value:'in_progress',label:'In Progress',icon:'bi-play-circle-fill',dotColor:'#1d4ed8'},
-              {value:'waiting',label:'Pause',icon:'bi-pause-circle-fill',dotColor:'#6b6560'},
-              {value:'escalated',label:'Escalated',icon:'bi-arrow-up-circle-fill',dotColor:'#d42d35'},
-              {value:'resolved',label:'Resolved',icon:'bi-check-circle-fill',dotColor:'#15803d'},
+              {value:'new',label:'New',dotColor:'#7c3aed'},
+              {value:'in_progress',label:'In Progress',dotColor:'#1d4ed8'},
+              {value:'waiting',label:'Pause',dotColor:'#6b6560'},
+              {value:'escalated',label:'Escalated',dotColor:'#d42d35'},
+              {value:'resolved',label:'Resolved',dotColor:'#15803d'},
             ]}
             onChange={setFStatus}
             activeColor="#7c3aed"
           />
-          {/* Country dropdown */}
-          <FilterDropdown
+          {/* Country multi-select */}
+          <MultiFilterDropdown
             icon="bi-geo-alt"
             label="Country"
-            value={fCtry[0]||null}
-            options={[{value:null,label:'All Countries',icon:'bi-globe'},...allCtry.sort().map(c=>({value:c,label:`${getFlag(c)} ${c}`}))]}
-            onChange={v=>setFCtry(v?[v]:[])}
+            selected={fCtry}
+            options={allCtry.sort().map(c=>({value:c,label:`${getFlag(c)} ${getCountryName(c) || c}`}))}
+            onChange={setFCtry}
             activeColor="#1f74b3"
           />
           {/* Sort dropdown */}
@@ -583,19 +581,19 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           </button>
           {/* Clear all */}
           {hasActiveFilters&&(
-            <button onClick={()=>{setFTool(null);setFStatus(null);setFCtry([]);setFSla(null);setFUnassigned(false);setSearch('');}} style={{height:32,display:'inline-flex',alignItems:'center',gap:4,padding:'0 10px',borderRadius:8,border:'none',background:'transparent',color:'#9e9e9e',fontSize:11,cursor:'pointer',whiteSpace:'nowrap',textDecoration:'underline'}}>
+            <button onClick={()=>{setFTool(null);setFStatus([]);setFCtry([]);setFSla(null);setFUnassigned(false);setSearch('');}} style={{height:32,display:'inline-flex',alignItems:'center',gap:4,padding:'0 10px',borderRadius:8,border:'none',background:'transparent',color:'#9e9e9e',fontSize:11,cursor:'pointer',whiteSpace:'nowrap',textDecoration:'underline'}}>
               Clear all
             </button>
           )}
         </div>
-        )}
       </div>
 
       {/* ── Work Source Panels — all use standardized SourceTable (Item #3) ── */}
+      {/* Apply queue-level country filter to source panels */}
       {workSource==='all_sources'&&(
         <ErrorBoundary>
         <SourceTable
-          rows={allSourceRows}
+          rows={fCtry.length?allSourceRows.filter(r=>fCtry.includes(r.country)):allSourceRows}
           loading={onboardingData.loading||offboardingData.loading||changeRequestData.loading||workbenchData.loading}
           error={null}
           onRefresh={()=>{onboardingData.refresh();offboardingData.refresh();changeRequestData.refresh();workbenchData.refresh();}}
@@ -609,7 +607,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       {workSource==='onboarding'&&(
         <ErrorBoundary>
         <SourceTable
-          rows={onboardingRows}
+          rows={fCtry.length?onboardingRows.filter(r=>fCtry.includes(r.country)):onboardingRows}
           loading={onboardingData.loading}
           error={onboardingData.error}
           onRefresh={onboardingData.refresh}
@@ -623,7 +621,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       {workSource==='offboarding'&&(
         <ErrorBoundary>
         <SourceTable
-          rows={offboardingRows}
+          rows={fCtry.length?offboardingRows.filter(r=>fCtry.includes(r.country)):offboardingRows}
           loading={offboardingData.loading}
           error={offboardingData.error}
           onRefresh={offboardingData.refresh}
@@ -637,7 +635,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       {workSource==='amendments'&&(
         <ErrorBoundary>
         <SourceTable
-          rows={amendmentRows}
+          rows={fCtry.length?amendmentRows.filter(r=>fCtry.includes(r.country)):amendmentRows}
           loading={changeRequestData.loading}
           error={changeRequestData.error}
           onRefresh={changeRequestData.refresh}
@@ -651,7 +649,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       {workSource==='redlines'&&(
         <ErrorBoundary>
         <SourceTable
-          rows={redlineRows}
+          rows={fCtry.length?redlineRows.filter(r=>fCtry.includes(r.country)):redlineRows}
           loading={changeRequestData.loading}
           error={changeRequestData.error}
           onRefresh={changeRequestData.refresh}
@@ -665,7 +663,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       {workSource==='workbench'&&(
         <ErrorBoundary>
         <SourceTable
-          rows={workbenchRows}
+          rows={fCtry.length?workbenchRows.filter(r=>fCtry.includes(r.country)):workbenchRows}
           loading={workbenchData.loading}
           error={workbenchData.error}
           onRefresh={workbenchData.refresh}
@@ -1045,6 +1043,75 @@ const FilterDropdown=memo(({icon,label,value,options,onChange,activeColor='#1f74
   );
 });
 FilterDropdown.displayName='FilterDropdown';
+
+// ── Multi-select filter dropdown (Status, Country) ──
+const MultiFilterDropdown=memo(({icon,label,selected=[],options,onChange,activeColor='#1f74b3'})=>{
+  const [open,setOpen]=useState(false);
+  const ref=useRef(null);
+  const isActive=selected.length>0;
+
+  useEffect(()=>{
+    if(!open)return;
+    const h=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false);};
+    document.addEventListener('mousedown',h);
+    return()=>document.removeEventListener('mousedown',h);
+  },[open]);
+
+  const toggle=(value)=>{
+    if(selected.includes(value)) onChange(selected.filter(v=>v!==value));
+    else onChange([...selected,value]);
+  };
+
+  const displayLabel=isActive
+    ? selected.length===1
+      ? (options.find(o=>o.value===selected[0])?.label||label)
+      : `${label} (${selected.length})`
+    : label;
+
+  return(
+    <div ref={ref} style={{position:'relative'}}>
+      <button onClick={()=>setOpen(o=>!o)} style={{
+        height:32,display:'inline-flex',alignItems:'center',gap:6,
+        padding:'0 12px',borderRadius:8,
+        border:isActive?`1px solid ${activeColor}`:'1px solid #e8e8e8',
+        background:isActive?`${activeColor}10`:'white',
+        color:isActive?activeColor:'#616161',
+        fontSize:12,fontWeight:isActive?600:500,cursor:'pointer',transition:'all .15s',whiteSpace:'nowrap',
+      }}>
+        <i className={icon} style={{fontSize:11}}></i>
+        {displayLabel}
+        <i className={open?'bi-chevron-up':'bi-chevron-down'} style={{fontSize:8,marginLeft:2,opacity:0.6}}></i>
+      </button>
+      {open&&(
+        <div style={{position:'absolute',top:'calc(100% + 4px)',left:0,background:'white',border:'1px solid #e8e8e8',borderRadius:12,boxShadow:'0 8px 24px rgba(0,0,0,.12)',zIndex:200,minWidth:200,maxHeight:320,overflowY:'auto',padding:'6px 0'}}>
+          {isActive&&(
+            <div onClick={()=>{onChange([]);setOpen(false);}}
+              style={{padding:'8px 14px',fontSize:12,color:'#9e9e9e',cursor:'pointer',borderBottom:'1px solid #f2f2f2',display:'flex',alignItems:'center',gap:6}}
+              onMouseEnter={e=>e.currentTarget.style.background='#f9f8f6'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+              <i className="bi-x-circle" style={{fontSize:11}}></i>Clear selection
+            </div>
+          )}
+          {options.map(opt=>{
+            const checked=selected.includes(opt.value);
+            return(
+              <div key={opt.value} onClick={()=>toggle(opt.value)}
+                onMouseEnter={e=>{if(!checked)e.currentTarget.style.background='#f9f8f6';}}
+                onMouseLeave={e=>{e.currentTarget.style.background=checked?`${activeColor}08`:'transparent';}}
+                style={{padding:'8px 14px',fontSize:13,color:checked?activeColor:'#1b1b1b',fontWeight:checked?600:400,cursor:'pointer',background:checked?`${activeColor}08`:'transparent',display:'flex',alignItems:'center',gap:8,transition:'background .1s'}}>
+                <span style={{width:16,height:16,borderRadius:4,border:checked?`2px solid ${activeColor}`:'2px solid #d5d5d5',background:checked?activeColor:'white',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .15s'}}>
+                  {checked&&<i className="bi-check2" style={{fontSize:10,color:'white'}}></i>}
+                </span>
+                {opt.dotColor&&<span style={{width:8,height:8,borderRadius:'50%',background:opt.dotColor,flexShrink:0}}></span>}
+                <span style={{flex:1}}>{opt.label}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+});
+MultiFilterDropdown.displayName='MultiFilterDropdown';
 
 // ── Styles ──
 const thStyle={padding:'10px 12px',fontSize:11,fontWeight:600,color:'#9e9e9e',textTransform:'uppercase',letterSpacing:'0.04em',textAlign:'center',whiteSpace:'nowrap',borderBottom:'1px solid #e8e8e8'};

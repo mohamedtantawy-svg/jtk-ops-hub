@@ -13,6 +13,7 @@ import { TEAM_MEMBERS } from '../data/members';
 
 const DEEL_CONTRACT_BASE = 'https://app.deel.com/contracts';
 const DEEL_ADMIN_BASE = 'https://admin.deel.network';
+const DEEL_WORKBENCH_BASE = 'https://app.deel.com/workbench/tasks';
 
 // ── Name → email lookup for sources that only provide assignee name ──
 // Normalize accents/diacritics for robust matching (André → andre)
@@ -151,9 +152,9 @@ export function normalizeWorkbench(items = []) {
     createdAt: t.createdAt || '',
     updatedAt: t.updatedAt || '',
     status: t.displayStatus || { label: t.status || 'Unknown', severity: 'info', color: '#616161' },
-    taskUrl: t.contractOid
-      ? `${DEEL_ADMIN_BASE}/contracts/${t.contractOid}/overview`
-      : '',
+    taskUrl: t.id
+      ? `${DEEL_WORKBENCH_BASE}/${t.id}`
+      : (t.contractOid ? `${DEEL_CONTRACT_BASE}/${t.contractOid}` : ''),
     slaRemaining: t.slaRemaining,
     slaBreachStatus: t.slaBreachStatus || '',
   }));
