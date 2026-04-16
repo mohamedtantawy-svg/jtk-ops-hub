@@ -43,7 +43,7 @@ export async function GET(req) {
 
     const countSql = 'SELECT COUNT(*) FROM announcements' + whereSql;
     const dataSql = `SELECT id, type, title, body, target, priority, is_popup, image_url, link,
-                            status, author_id, pinned, read_by, sound_key, sent_at,
+                            status, author_id, pinned, sound_key, sent_at,
                             created_at, updated_at
                        FROM announcements${whereSql}
                       ORDER BY pinned DESC, COALESCE(sent_at, created_at) DESC

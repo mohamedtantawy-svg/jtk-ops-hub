@@ -28,19 +28,8 @@ export async function POST(req, { params }) {
       [id, userId, user.email]
     );
 
-    // Back-compat: keep read_by JSONB in sync with acks so any legacy code path
-    // that still reads it sees the same data.
-    await query(
-      `UPDATE announcements
-          SET read_by = CASE
-            WHEN read_by IS NULL THEN jsonb_build_array(to_jsonb($2::int))
-            WHEN NOT read_by @> to_jsonb($2::int)::jsonb THEN read_by || to_jsonb($2::int)::jsonb
-            ELSE read_by
-          END,
-          updated_at = NOW()
-        WHERE id = $1`,
-      [id, userId]
-    );
+    // Update timestamp
+    await query('UPDATE announcements SET updated_at = NOW() WHERE id = $1', [id]);
 
     // Return canonical acks from announcement_acks table (source of truth)
     const acksResult = await query(
