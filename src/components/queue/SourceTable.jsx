@@ -224,7 +224,8 @@ export default function SourceTable({
                 <th style={{ ...thStyle, width: 70 }}>SLA</th>
                 <th style={{ ...thStyle, width: 80 }}>Updated</th>
                 <th style={{ ...thStyle, width: 100 }}>Status</th>
-                <th style={{ ...thStyle, width: 70 }}>Link</th>
+                <th style={{ ...thStyle, width: 70 }}>Task</th>
+                <th style={{ ...thStyle, width: 70 }}>Contract</th>
               </tr>
             </thead>
             <tbody>
@@ -375,10 +376,9 @@ const SourceRow = memo(function SourceRow({ row, showSource }) {
                 fontSize: 10, fontWeight: 600, textDecoration: 'none', transition: 'all .15s', whiteSpace: 'nowrap',
                 border: hov ? '1px solid #c8d9f0' : '1px solid transparent',
               }}>
-              <i className="bi-box-arrow-up-right" style={{ fontSize: 9 }} />Deel
+              <i className="bi-box-arrow-up-right" style={{ fontSize: 9 }} />Open
             </a>
           )}
-          {/* Item #10: Show Jira link for offboarding tasks */}
           {row.jiraUrl && (
             <a href={row.jiraUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
               style={{
@@ -392,6 +392,21 @@ const SourceRow = memo(function SourceRow({ row, showSource }) {
           )}
           {!row.taskUrl && !row.jiraUrl && <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>}
         </div>
+      </td>
+
+      {/* Contract Link */}
+      <td style={tdStyle}>
+        {row.contractUrl ? (
+          <a href={row.contractUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6,
+              background: hov ? '#f3eff8' : '#f5f4f2', color: hov ? '#6b3fa0' : '#9e9e9e',
+              fontSize: 10, fontWeight: 600, textDecoration: 'none', transition: 'all .15s', whiteSpace: 'nowrap',
+              border: hov ? '1px solid #d4c4f0' : '1px solid transparent',
+            }}>
+            <i className="bi-file-earmark-text" style={{ fontSize: 9 }} />View
+          </a>
+        ) : <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>}
       </td>
     </tr>
   );

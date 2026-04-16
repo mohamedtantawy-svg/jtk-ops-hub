@@ -11,8 +11,8 @@
 
 import { TEAM_MEMBERS } from '../data/members';
 
-const DEEL_CONTRACT_BASE = 'https://app.deel.com/contracts';
 const DEEL_ADMIN_BASE = 'https://admin.deel.network';
+const DEEL_CONTRACT_URL = (oid) => oid ? `${DEEL_ADMIN_BASE}/contracts/${oid}/details` : '';
 const DEEL_WORKBENCH_BASE = 'https://app.deel.com/workbench/tasks';
 
 // ── Name → email lookup for sources that only provide assignee name ──
@@ -49,6 +49,12 @@ export function normalizeOnboarding(items = []) {
     const flowDisplay = flowParts.map(part => part.replace(/([A-Z])/g, ' $1').trim()).join(' · ');
     const startStr = fmtShortDate(p.startDate);
 
+    // Task URL: admin dashboard with contract OID + flow step
+    // e.g. https://admin.deel.network/dashboards/employees/GLOBAL/status/Onboarding.ActionableQueue/contract/3kzqg4j/step/Onboarding.ComplianceDocs.AwaitingReview
+    const taskUrl = (p.oid && p.flowStep)
+      ? `${DEEL_ADMIN_BASE}/dashboards/employees/GLOBAL/status/Onboarding.ActionableQueue/contract/${p.oid}/step/${p.flowStep}`
+      : (p.oid ? `${DEEL_ADMIN_BASE}/dashboards/employees/GLOBAL/status/Onboarding.ActionableQueue/contract/${p.oid}` : '');
+
     return {
       id: p.id || p.oid || '',
       source: 'onboarding',
@@ -60,7 +66,8 @@ export function normalizeOnboarding(items = []) {
       createdAt: p.taskCreatedAt || p.createdAt || '',
       updatedAt: p.taskCreatedAt || '',
       status: p.action || { label: 'In Progress', severity: 'active', color: '#1d4ed8' },
-      taskUrl: p.oid ? `${DEEL_CONTRACT_BASE}/${p.oid}` : '',
+      taskUrl,
+      contractUrl: DEEL_CONTRACT_URL(p.oid),
       slaRemaining: null,
       slaBreachStatus: null,
     };
@@ -84,8 +91,9 @@ export function normalizeOffboarding(items = []) {
       createdAt: c.requestedDate || c.createdAt || '',
       updatedAt: c.updatedAt || '',
       status: c.status || { label: 'Awaiting Triage', severity: 'warning', color: '#ed8d00' },
-      taskUrl: c.contractUrl || (c.contractOid ? `${DEEL_CONTRACT_BASE}/${c.contractOid}` : ''),
-      jiraUrl: c.jiraUrl || '',   // Item #10: Preserve Jira link for offboarding tasks
+      taskUrl: c.contractUrl || DEEL_CONTRACT_URL(c.contractOid),
+      contractUrl: DEEL_CONTRACT_URL(c.contractOid),
+      jiraUrl: c.jiraUrl || '',
       slaRemaining: null,
       slaBreachStatus: null,
     };
@@ -110,7 +118,8 @@ export function normalizeAmendments(items = []) {
       createdAt: a.createdAt || '',
       updatedAt: a.updatedAt || '',
       status: a.displayStatus || { label: 'Amendment', severity: 'active', color: '#1d4ed8' },
-      taskUrl: a.contractOid ? `${DEEL_CONTRACT_BASE}/${a.contractOid}` : '',
+      taskUrl: DEEL_CONTRACT_URL(a.contractOid),
+      contractUrl: DEEL_CONTRACT_URL(a.contractOid),
       slaRemaining: null,
       slaBreachStatus: null,
     };
@@ -132,7 +141,8 @@ export function normalizeRedlines(items = []) {
       createdAt: r.createdAt || '',
       updatedAt: r.updatedAt || '',
       status: r.displayStatus || { label: 'Redline', severity: 'active', color: '#1d4ed8' },
-      taskUrl: '',  // Redlines don't have a direct external URL
+      taskUrl: '',
+      contractUrl: '',  // Redlines are org-level, no single contract
       slaRemaining: null,
       slaBreachStatus: null,
     };
@@ -154,7 +164,8 @@ export function normalizeWorkbench(items = []) {
     status: t.displayStatus || { label: t.status || 'Unknown', severity: 'info', color: '#616161' },
     taskUrl: t.id
       ? `${DEEL_WORKBENCH_BASE}/${t.id}`
-      : (t.contractOid ? `${DEEL_CONTRACT_BASE}/${t.contractOid}` : ''),
+      : DEEL_CONTRACT_URL(t.contractOid),
+    contractUrl: DEEL_CONTRACT_URL(t.contractOid),
     slaRemaining: t.slaRemaining,
     slaBreachStatus: t.slaBreachStatus || '',
   }));
