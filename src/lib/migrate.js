@@ -244,7 +244,8 @@ UPDATE escalations e
  WHERE e.escalated_by_email IS NULL
    AND e.escalated_by = m.name;
 
--- ── Announcements: per-announcement sound + sent timestamp (additive) ───────
+-- ── Announcements: additive columns for existing tables ─────────────────────
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS read_by   JSONB DEFAULT '[]'::jsonb;
 ALTER TABLE announcements ADD COLUMN IF NOT EXISTS sound_key VARCHAR(32) DEFAULT 'chime';
 ALTER TABLE announcements ADD COLUMN IF NOT EXISTS sent_at   TIMESTAMPTZ;
 
