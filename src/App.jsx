@@ -281,8 +281,13 @@ const App=()=>{
       setTasks(prev=>prev.map(t=>t.id===task.id?{...t,status:'in_progress'}:t));
       addToast('escalation','Escalated to Manager',`${mgr?.name||'Team Lead'} · ${task.id}`);
       // BE sync
-      apiCreateEscalation({taskId:task._beId||task.id,subject:task.subject,reason,managerId:mgrId?String(mgrId):undefined}).catch(()=>{});
-      apiUpdateStatus(task._beId||task.id,'escalated').catch(()=>{});
+      apiCreateEscalation({taskId:task._beId||task.id,subject:task.subject,reason,managerId:mgrId?String(mgrId):undefined}).catch(err=>{
+        console.warn('[escalation] BE sync failed:',err.message);
+        addToast('warning','Sync Warning','Escalation saved locally but backend sync failed');
+      });
+      apiUpdateStatus(task._beId||task.id,'escalated').catch(err=>{
+        console.warn('[escalation] Status sync failed:',err.message);
+      });
     }
     setEscalModal(null);
     setBulkIds(null);
@@ -316,7 +321,10 @@ const App=()=>{
     setCreateEscalModal(false);
     addToast('escalation','Escalation Created',form.subject.slice(0,50));
     // BE sync
-    apiCreateEscalation({taskId:form.taskId||undefined,subject:form.subject,reason:form.reason,managerId:form.managerId?String(form.managerId):undefined}).catch(()=>{});
+    apiCreateEscalation({taskId:form.taskId||undefined,subject:form.subject,reason:form.reason,managerId:form.managerId?String(form.managerId):undefined}).catch(err=>{
+      console.warn('[manualEscalation] BE sync failed:',err.message);
+      addToast('warning','Sync Warning','Escalation saved locally but backend sync failed');
+    });
   },[user,addToast,perms]);
 
   // ── Reassign handler (email-based — pushes to Zendesk/Jira) ────────────────
@@ -331,9 +339,10 @@ const App=()=>{
       setTasks(prev=>prev.map(t=>idSet.has(t.id)?{...t,assigneeId:newMemberId,assigneeEmail:newEmail,assigneeName:newName}:t));
       setActivity(prev=>{const next={...prev};bulkIds.forEach(id=>{next[id]=[...(next[id]||[]),{type:'assigned',text:`Bulk reassigned to ${newName}${note?` — ${note}`:''}`,user:user.name,time:now}];});return next;});
       addToast('success','Bulk Reassign',`${bulkIds.length} tasks → ${newName.split(' ')[0]}`);
-      // Push each ticket to Zendesk/Jira in background
-      bulkIds.forEach(id=>{
-        reassignQueueTicket(id,newEmail).catch(err=>console.warn(`[reassign] ${id} failed:`,err.message));
+      // Push each ticket to Zendesk/Jira in background — track failures
+      const failedIds=[];
+      Promise.allSettled(bulkIds.map(id=>reassignQueueTicket(id,newEmail).catch(err=>{failedIds.push(id);throw err;}))).then(()=>{
+        if(failedIds.length>0) addToast('warning','Partial Sync Failure',`${failedIds.length}/${bulkIds.length} tasks failed to sync to source system`);
       });
     } else {
       setTasks(prev=>prev.map(t=>t.id===task.id?{...t,assigneeId:newMemberId,assigneeEmail:newEmail,assigneeName:newName}:t));
@@ -345,7 +354,9 @@ const App=()=>{
         addToast('warning','Sync Warning',`Local reassign ok, but source system update failed for ${task.id}`);
       });
       // Legacy BE sync
-      apiAssignTask(task._beId||task.id,String(newMemberId||'')).catch(()=>{});
+      apiAssignTask(task._beId||task.id,String(newMemberId||'')).catch(err=>{
+        console.warn('[reassign] Legacy BE sync failed:',err.message);
+      });
     }
     setReassignModal(null);
     setBulkIds(null);
@@ -398,7 +409,10 @@ const App=()=>{
       setActivity(prev=>({...prev,[task.id]:[...(prev[task.id]||[]),{type:'status',text:`Snoozed until ${label}`,user:user.name,time:now}]}));
       addToast('info','Task Snoozed',`${task.id} · until ${label}`);
       // BE sync
-      apiSnoozeTask(task._beId||task.id,new Date(snoozedUntil).toISOString()).catch(()=>{});
+      apiSnoozeTask(task._beId||task.id,new Date(snoozedUntil).toISOString()).catch(err=>{
+        console.warn('[snooze] BE sync failed:',err.message);
+        addToast('warning','Sync Warning','Snooze saved locally but backend sync failed');
+      });
     }
     setSnoozeModal(null);
     setBulkIds(null);
@@ -451,7 +465,10 @@ const App=()=>{
     setCreateModal(false);
     addToast('success','Task Created',`${newId} → ${agentName?.split(' ')[0]}`);
     // BE sync
-    apiCreateTask(denormalizeTaskForCreate({...form,id:newId})).catch(()=>{});
+    apiCreateTask(denormalizeTaskForCreate({...form,id:newId})).catch(err=>{
+      console.warn('[createTask] BE sync failed:',err.message);
+      addToast('warning','Sync Warning','Task created locally but backend sync failed');
+    });
   },[addToast,user,perms]);
 
   // ── Project handlers (gated by can_create_project / can_edit_project) ──────
@@ -470,9 +487,15 @@ const App=()=>{
     addToast('success', projectModal && typeof projectModal==='object' ? 'Project Updated' : 'Project Created', form.name);
     // BE sync
     if(projectModal && typeof projectModal==='object'){
-      apiUpdateProject(projectModal.id,{title:form.name,priority:form.priority,description:form.description}).catch(()=>{});
+      apiUpdateProject(projectModal.id,{title:form.name,priority:form.priority,description:form.description}).catch(err=>{
+        console.warn('[project] Update sync failed:',err.message);
+        addToast('warning','Sync Warning','Project updated locally but backend sync failed');
+      });
     } else {
-      apiCreateProject({title:form.name,priority:form.priority||'medium',description:form.description}).catch(()=>{});
+      apiCreateProject({title:form.name,priority:form.priority||'medium',description:form.description}).catch(err=>{
+        console.warn('[project] Create sync failed:',err.message);
+        addToast('warning','Sync Warning','Project created locally but backend sync failed');
+      });
     }
   },[projectModal,projects.length,user,addToast,perms]);
 
@@ -484,7 +507,10 @@ const App=()=>{
     setRequestModal(false);
     addToast('success','Request Raised',form.subject.slice(0,50));
     // BE sync
-    apiCreateRequest({subject:form.subject,description:form.description,toTeam:form.toTeam,priority:form.priority,taskId:form.linkedTaskId||undefined}).catch(()=>{});
+    apiCreateRequest({subject:form.subject,description:form.description,toTeam:form.toTeam,priority:form.priority,taskId:form.linkedTaskId||undefined}).catch(err=>{
+      console.warn('[request] Create sync failed:',err.message);
+      addToast('warning','Sync Warning','Request created locally but backend sync failed');
+    });
   },[requests.length,addToast,perms]);
 
   // ── Global keyboard shortcuts (⌘K for search) ─────────────────────────────

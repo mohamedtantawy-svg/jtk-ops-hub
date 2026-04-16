@@ -254,6 +254,15 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
 
   // Tick timer removed — SLA ticking now managed in App.jsx
 
+  // Cleanup pending close timers on unmount (prevent stale state mutations)
+  useEffect(()=>{
+    const refs=pendingCloseRefs;
+    return()=>{
+      for(const tid of Object.values(refs.current)){clearTimeout(tid);}
+      refs.current={};
+    };
+  },[]);
+
   // Keyboard shortcuts
   useEffect(()=>{
     const kd=e=>{
