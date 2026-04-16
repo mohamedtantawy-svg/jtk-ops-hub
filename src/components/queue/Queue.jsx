@@ -235,11 +235,35 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const compact=!!selTask;
   const recentTasks=recentIds.map(id=>tasks.find(t=>t.id===id)).filter(Boolean);
   // SLA pills — always visible across all views (queue, source panels, etc.)
+  // For onboarding: age-based (createdAt) — <3d ok, 3-7d at risk, 7d+ breached
+  // For paused onboarding: 48h countdown from pausedAt
+  // For queue tasks (ZD/Jira): uses slaInfo() with type-specific thresholds
   const {atRiskCount,breachedCount,onTrackCount}=useMemo(()=>{
     // Determine the base set depending on active view
     let slaBase;
-    if (workSource === 'onboarding') slaBase = onboardingRows;
-    else if (workSource === 'offboarding') slaBase = offboardingRows;
+    if (workSource === 'onboarding') {
+      // Onboarding uses age-based SLA from createdAt
+      const rows = onboardingSubTab === 'paused' ? pausedOnboardingRows : onboardingRows;
+      const isPaused = onboardingSubTab === 'paused';
+      let atRisk = 0, breached = 0;
+      for (const r of rows) {
+        if (isPaused) {
+          // 48h countdown from pausedAt
+          const pausedMs = r.pausedAt ? Date.now() - new Date(r.pausedAt).getTime() : 0;
+          const remaining = 48 * 60 * 60 * 1000 - pausedMs;
+          if (remaining <= 0) breached++;
+          else if (remaining < 24 * 60 * 60 * 1000) atRisk++;
+        } else {
+          // Age-based: createdAt
+          const ageMs = r.createdAt ? Date.now() - new Date(r.createdAt).getTime() : 0;
+          const days = ageMs / (1000 * 60 * 60 * 24);
+          if (days >= 7) breached++;
+          else if (days >= 3) atRisk++;
+        }
+      }
+      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: rows.length - atRisk - breached };
+    }
+    if (workSource === 'offboarding') slaBase = offboardingRows;
     else if (workSource === 'amendments') slaBase = amendmentRows;
     else if (workSource === 'redlines') slaBase = redlineRows;
     else if (workSource === 'workbench') slaBase = workbenchRows;
@@ -252,11 +276,11 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     const atRisk=slaBase.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;}).length;
     const breached=slaBase.filter(t=>{const s=slaInfo(t);return s&&s.breach;}).length;
     return{atRiskCount:atRisk,breachedCount:breached,onTrackCount:slaBase.length-atRisk-breached};
-  },[workSource, visPreSla, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, allSourceRows]);
+  },[workSource, onboardingSubTab, visPreSla, onboardingRows, pausedOnboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, allSourceRows]);
 
   // ── View-aware header counts: reflect active tab (fTool / workSource) ──
   const headerCounts = useMemo(() => {
-    if (workSource === 'onboarding') return { open: onboardingRows.length, paused: 0, resolved: 0 };
+    if (workSource === 'onboarding') return { open: onboardingSubTab === 'paused' ? pausedOnboardingRows.length : onboardingRows.length, paused: 0, resolved: 0 };
     if (workSource === 'offboarding') return { open: offboardingRows.length, paused: 0, resolved: 0 };
     if (workSource === 'amendments') return { open: amendmentRows.length, paused: 0, resolved: 0 };
     if (workSource === 'redlines') return { open: redlineRows.length, paused: 0, resolved: 0 };
