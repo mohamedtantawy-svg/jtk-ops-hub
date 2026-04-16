@@ -30,7 +30,7 @@ export async function POST(req, { params }) {
 
     // Back-compat: keep read_by JSONB in sync with acks so any legacy code path
     // that still reads it sees the same data.
-    const { rows } = await query(
+    await query(
       `UPDATE announcements
           SET read_by = CASE
             WHEN read_by IS NULL THEN jsonb_build_array(to_jsonb($2::int))
@@ -38,16 +38,18 @@ export async function POST(req, { params }) {
             ELSE read_by
           END,
           updated_at = NOW()
-        WHERE id = $1
-        RETURNING id, read_by`,
+        WHERE id = $1`,
       [id, userId]
     );
 
-    if (rows.length === 0) {
-      return NextResponse.json({ error: 'Not found' }, { status: 404 });
-    }
+    // Return canonical acks from announcement_acks table (source of truth)
+    const acksResult = await query(
+      'SELECT ARRAY_AGG(user_id) AS user_ids FROM announcement_acks WHERE announcement_id = $1',
+      [id]
+    );
+    const acks = acksResult.rows[0]?.user_ids?.map(Number) || [];
 
-    return NextResponse.json({ ok: true, acks: rows[0].read_by || [] });
+    return NextResponse.json({ ok: true, acks });
   } catch (err) {
     console.error('[announcements/read]', err.message);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });

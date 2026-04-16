@@ -56,20 +56,29 @@ export function useAnnouncements() {
   const [isOnline, setIsOnline] = useState(false); // true when backend responds
   const loadedRef = useRef(false);
 
+  // Track the token so we re-fetch after logout → login cycles
+  const lastTokenRef = useRef(null);
+
   // ── Initial load — try API, fall back to static data ─────────────────────
   useEffect(() => {
-    if (loadedRef.current) return;
-    // Don't fire API calls before the user has logged in — there's no token
-    // yet, so the request would get a 401. The api.js 401 handler is now
-    // safe, but there's no point making a doomed request anyway.
     const hasToken = typeof window !== 'undefined' && !!localStorage.getItem('ops_hub_token');
-    if (!hasToken) return; // will try again on next re-render after login
+    if (!hasToken) {
+      // User logged out — reset so we re-fetch on next login
+      loadedRef.current = false;
+      lastTokenRef.current = null;
+      return;
+    }
+
+    const currentToken = localStorage.getItem('ops_hub_token');
+    // Re-fetch if we haven't loaded yet, or if the token changed (re-login)
+    if (loadedRef.current && lastTokenRef.current === currentToken) return;
     loadedRef.current = true;
+    lastTokenRef.current = currentToken;
 
     (async () => {
       try {
         const data = await fetchAnnouncements({ limit: 200 });
-        if (data?.items?.length) {
+        if (data?.items) {
           setComms(data.items.map(normalizeApiAnnouncement));
           setIsOnline(true);
         }
@@ -135,17 +144,35 @@ export function useAnnouncements() {
   // ── Send ─────────────────────────────────────────────────────────────────
   const send = useCallback(async (id) => {
     if (isOnline) {
-      try { await apiSend(id); } catch (e) { console.warn('[announcements] API error:', e.message); }
+      try {
+        await apiSend(id);
+        // Force a refresh so other sessions pick up the new announcement quickly
+        // and the sender sees canonical server state (acks, status, etc.)
+        setTimeout(() => refresh(), 500);
+      } catch (e) { console.warn('[announcements] API error:', e.message); }
     }
     setComms(prev => prev.map(c => c.id === id ? { ...c, status: 'sent', sentAt: new Date().toISOString() } : c));
-  }, [isOnline]);
+  }, [isOnline, refresh]);
 
   // ── Update ───────────────────────────────────────────────────────────────
   const update = useCallback(async (id, fields) => {
+    const prevSnapshot = {};
+    setComms(prev => prev.map(c => {
+      if (c.id === id) {
+        // Capture old values for revert
+        for (const k of Object.keys(fields)) prevSnapshot[k] = c[k];
+        return { ...c, ...fields };
+      }
+      return c;
+    }));
     if (isOnline) {
-      try { await apiUpdate(id, fields); } catch (e) { console.warn('[announcements] API error:', e.message); }
+      try {
+        await apiUpdate(id, fields);
+      } catch (e) {
+        console.warn('[announcements] update failed, reverting:', e.message);
+        setComms(prev => prev.map(c => c.id === id ? { ...c, ...prevSnapshot } : c));
+      }
     }
-    setComms(prev => prev.map(c => c.id === id ? { ...c, ...fields } : c));
   }, [isOnline]);
 
   // ── Acknowledge ──────────────────────────────────────────────────────────
@@ -172,10 +199,17 @@ export function useAnnouncements() {
 
   // ── Archive ──────────────────────────────────────────────────────────────
   const archive = useCallback(async (id) => {
-    if (isOnline) {
-      try { await apiUpdate(id, { status: 'archived' }); } catch (e) { console.warn('[announcements] API error:', e.message); }
-    }
+    // Optimistic update
     setComms(prev => prev.map(c => c.id === id ? { ...c, status: 'archived' } : c));
+    if (isOnline) {
+      try {
+        await apiUpdate(id, { status: 'archived' });
+      } catch (e) {
+        console.warn('[announcements] archive failed, reverting:', e.message);
+        // Revert on failure — server still has the old status
+        setComms(prev => prev.map(c => c.id === id && c.status === 'archived' ? { ...c, status: 'sent' } : c));
+      }
+    }
   }, [isOnline]);
 
   // ── Delete ───────────────────────────────────────────────────────────────
@@ -199,10 +233,15 @@ export function useAnnouncements() {
 
   // ── Unarchive ─────────────────────────────────────────────────────────
   const unarchive = useCallback(async (id) => {
-    if (isOnline) {
-      try { await apiUnarchive(id); } catch (e) { console.warn('[announcements] API error:', e.message); }
-    }
     setComms(prev => prev.map(c => c.id === id ? { ...c, status: 'sent' } : c));
+    if (isOnline) {
+      try {
+        await apiUnarchive(id);
+      } catch (e) {
+        console.warn('[announcements] unarchive failed, reverting:', e.message);
+        setComms(prev => prev.map(c => c.id === id && c.status === 'sent' ? { ...c, status: 'archived' } : c));
+      }
+    }
   }, [isOnline]);
 
   // ── Comments ──────────────────────────────────────────────────────────

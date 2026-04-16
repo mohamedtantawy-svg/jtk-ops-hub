@@ -13,12 +13,20 @@ export async function GET(req, { params }) {
     const { rows } = await query('SELECT * FROM announcements WHERE id = $1', [id]);
     if (rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     const r = rows[0];
+
+    // Read canonical acks from announcement_acks table (source of truth)
+    const acksResult = await query(
+      'SELECT ARRAY_AGG(user_id) AS user_ids FROM announcement_acks WHERE announcement_id = $1',
+      [id]
+    );
+    const acks = acksResult.rows[0]?.user_ids?.map(Number) || [];
+
     return NextResponse.json({
       id: r.id, type: r.type, title: r.title, body: r.body,
       target: r.target, priority: r.priority, isPopup: r.is_popup,
       imageUrl: r.image_url, link: r.link, status: r.status,
       authorId: r.author_id, pinned: r.pinned,
-      acks: Array.isArray(r.read_by) ? r.read_by : [],
+      acks,
       soundKey: r.sound_key || 'chime',
       sentAt: r.sent_at,
       createdAt: r.created_at, updatedAt: r.updated_at,

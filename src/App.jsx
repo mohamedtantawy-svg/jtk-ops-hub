@@ -700,17 +700,34 @@ const App=()=>{
     }).catch(err => console.warn('[managerOnCall] Failed to save:', err.message));
   }, []);
 
+  // ── Clean up dismissed popups on login ──────────────────────────────────
+  // Remove dismissed IDs for announcements the user has already acked or that
+  // no longer exist — prevents localStorage from growing unbounded.
+  useEffect(()=>{
+    if(!user||!comms.length)return;
+    const commsById=new Map(comms.map(c=>[c.id,c]));
+    setDismissedPopups(prev=>{
+      const cleaned=prev.filter(id=>{
+        const c=commsById.get(id);
+        // Keep if the announcement still exists, is still a popup, and user hasn't acked
+        return c&&c.isPopup&&c.status==='sent'&&!c.acks.includes(user.id);
+      });
+      return cleaned.length===prev.length?prev:cleaned;
+    });
+  },[user,comms]);
+
   // ── Popup queue — derived from comms, minus dismissed ones ──────────────
   // Uses the canonical audience matcher so NAM/LATAM/AMERICAS/global and
   // dual-region members resolve correctly.
   const popupQueue=React.useMemo(()=>{
     if(!user)return [];
+    const uid=Number(user.id);
     const targetMatch=(c)=>{
       if(Array.isArray(c.target)&&c.target.includes(user.id))return true;
       return matchesAudience(c.target, user.team);
     };
     return comms.filter(c=>
-      c.isPopup&&c.status==='sent'&&targetMatch(c)&&!c.acks.includes(user.id)&&!dismissedPopups.includes(c.id)&&!(c.author&&c.author.id===user.id)
+      c.isPopup&&c.status==='sent'&&targetMatch(c)&&!c.acks.includes(uid)&&!dismissedPopups.includes(c.id)&&!(c.author&&c.author.id===user.id)
     );
   },[comms,user,dismissedPopups]);
 
