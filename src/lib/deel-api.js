@@ -205,21 +205,44 @@ export async function listOnboardingPeople(params = {}) {
  * Same response shape as ActionableQueue but with pauseType, statusTag fields.
  */
 export async function listPausedOnboarding() {
-  const res = await deelFetch('/admin/eor/employee-manager/list/Onboarding.EA.EASigning.Paused');
+  // Fetch the country summary to get all countries with paused contracts
+  const countrySummary = await deelFetch('/admin/eor/employee-manager/countries/list/Onboarding.EA.EASigning.Paused');
+  const countries = (Array.isArray(countrySummary) ? countrySummary : [])
+    .filter(c => c.total > 0)
+    .map(c => c.country);
 
-  const rawItems = res?.result || [];
+  if (countries.length === 0) return { items: [], total: 0 };
 
-  // Paginate if needed
-  let allItems = [...rawItems];
-  let currentCursor = res?.cursor;
-  let iterations = 0;
-  while (currentCursor && iterations < 6 && allItems.length < 500) {
-    iterations++;
-    const nextRes = await deelFetch(`/admin/eor/employee-manager/list/Onboarding.EA.EASigning.Paused?actionableQueueFilters%5Boffset%5D=${allItems.length}`);
-    const nextItems = nextRes?.result || [];
-    if (nextItems.length === 0) break;
-    allItems.push(...nextItems);
-    currentCursor = nextRes?.cursor;
+  // Fetch per-country in parallel (the API scopes cursor per country,
+  // so a single call without country filter only returns ~50 items).
+  // Batch into groups of 5 to avoid hammering the API.
+  const seen = new Set();
+  const allItems = [];
+
+  const BATCH_SIZE = 5;
+  for (let i = 0; i < countries.length; i += BATCH_SIZE) {
+    const batch = countries.slice(i, i + BATCH_SIZE);
+    const results = await Promise.all(
+      batch.map(async (ctry) => {
+        try {
+          const res = await deelFetch(
+            `/admin/eor/employee-manager/list/Onboarding.EA.EASigning.Paused?countries%5B%5D=${ctry}`
+          );
+          return res?.result || [];
+        } catch (err) {
+          console.warn(`[pausedOnboarding] Failed for ${ctry}:`, err.message);
+          return [];
+        }
+      })
+    );
+    for (const items of results) {
+      for (const p of items) {
+        const key = p.oid || p.onboardingId || '';
+        if (key && seen.has(key)) continue;
+        seen.add(key);
+        allItems.push(p);
+      }
+    }
   }
 
   const items = allItems.map(p => ({
