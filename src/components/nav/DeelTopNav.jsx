@@ -7,6 +7,7 @@ import Avatar from '../ui/Avatar';
 const PRIMARY_TABS = [
   { id: 'briefing',      icon: 'bi-house',            label: 'Home' },
   { id: 'my-queue',      icon: 'bi-inbox',            label: 'Queue' },
+  { id: 'my-queue-v2',   icon: 'bi-inbox-fill',       label: 'Queue v2', restrictToEmail: 'mohamed.tantawy@deel.com' },
   { id: 'projects',      icon: 'bi-kanban',           label: 'Projects' },
   { id: 'escalations',   icon: 'bi-arrow-up-circle',  label: 'Escalations', badge: true },
   { id: 'hr-reports',    icon: 'bi-clipboard-data',   label: 'Reports' },
@@ -91,8 +92,13 @@ const DeelTopNav = ({
   const notifCount = unread;
 
   // Filter tabs by user permissions — hide views the user can't access
-  const visiblePrimary = PRIMARY_TABS.filter(t => !perms || perms.canView(t.id) !== false);
-  const visibleMore = MORE_TABS.filter(t => !perms || perms.canView(t.id) !== false);
+  const emailLc = (user?.email || '').toLowerCase();
+  const tabAllowed = (t) => {
+    if (t.restrictToEmail) return emailLc === t.restrictToEmail.toLowerCase();
+    return !perms || perms.canView(t.id) !== false;
+  };
+  const visiblePrimary = PRIMARY_TABS.filter(tabAllowed);
+  const visibleMore = MORE_TABS.filter(tabAllowed);
   const visibleCreate = CREATE_ACTIONS.filter(ca => {
     if (ca.perm && !perms?.canDo(ca.perm)) return false;
     if (ca.viewReq && !perms?.canView(ca.viewReq)) return false;
