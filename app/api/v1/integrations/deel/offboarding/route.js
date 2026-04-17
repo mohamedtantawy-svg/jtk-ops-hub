@@ -132,6 +132,13 @@ async function buildOffboardingResult() {
     .join(', ');
   console.log(`[offboarding] breakdown: total=${items.length} | by type: ${JSON.stringify(byType)} | by bucket: ${bucketSummary}`);
 
+  // If records are landing in Unknown, log one representative so we can see
+  // what flow-status / sign-off / admin-status combo we need to classify next.
+  const unknownSample = items.find(it => it.primaryBucket === 'Unknown');
+  if (unknownSample) {
+    console.log(`[offboarding] Unknown sample id=${unknownSample.id} adminStatus=${unknownSample.adminStatus} clientSO=${unknownSample.clientSignOffStatus} employeeSO=${unknownSample.employeeSignOffStatus} flows=${JSON.stringify(unknownSample.terminationFlowStatuses).slice(0, 400)}`);
+  }
+
   return { items, total: items.length, byBucket, byType };
 }
 
@@ -173,6 +180,14 @@ const BUCKET_PRIORITY = {
   'Awaiting Final Payroll Decision':         18,
   'Offboarding Payments':                    19,
   'Unenrollment':                            20,
+  'Awaiting Payment Method':                 21,
+  'Awaiting Pending Items Payment':          22,
+  'Off-Cycle Invoice':                       23,
+  'Fee and Adjustments':                     24,
+  'Awaiting Document Agreement':             25,
+  'End Details':                             26,
+  'Docs Shared':                             27,
+  'Awaiting Cron Execution':                 28,
   'Processing':                              98,
   'Unknown':                                 99,
 };
@@ -262,6 +277,34 @@ function derivePrimaryBucket(c) {
   }
   if (flow.has('Unenrollment')) {
     return { label: 'Unenrollment', severity: 'active', color: '#1d4ed8' };
+  }
+
+  // 21-26 — payment/invoice phases (admin UI bucket labels)
+  if (flow.has('AwaitingToAttachClientMethod')) {
+    return { label: 'Awaiting Payment Method', severity: 'active', color: '#1d4ed8' };
+  }
+  if (flow.has('AwaitingPendingItemsPayment')) {
+    return { label: 'Awaiting Pending Items Payment', severity: 'active', color: '#1d4ed8' };
+  }
+  if (flow.has('AwaitingCronJobExecution')) {
+    return { label: 'Awaiting Cron Execution', severity: 'info', color: '#616161' };
+  }
+  if (flow.has('OffcycleInvoice')) {
+    return { label: 'Off-Cycle Invoice', severity: 'active', color: '#1d4ed8' };
+  }
+  if (flow.has('FeeAndAdjustments')) {
+    return { label: 'Fee and Adjustments', severity: 'active', color: '#1d4ed8' };
+  }
+
+  // 27-30 — catch-alls derived from flow array values that aren't bucket names
+  if (flow.has('AwaitingDocumentAgreement')) {
+    return { label: 'Awaiting Document Agreement', severity: 'active', color: '#1d4ed8' };
+  }
+  if (flow.has('EndDetails')) {
+    return { label: 'End Details', severity: 'active', color: '#1d4ed8' };
+  }
+  if (flow.has('DocumentSharingCompleted')) {
+    return { label: 'Docs Shared', severity: 'info', color: '#616161' };
   }
 
   // Fallbacks

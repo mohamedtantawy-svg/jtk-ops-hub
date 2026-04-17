@@ -155,7 +155,42 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
 
   const onboardingRows = useMemo(() => filterOnboardingRows(onboardingRowsAll), [onboardingRowsAll, filterOnboardingRows]);
   const pausedOnboardingRows = useMemo(() => filterOnboardingRows(pausedOnboardingRowsAll), [pausedOnboardingRowsAll, filterOnboardingRows]);
-  const offboardingRows = useMemo(() => filterSourceRows(offboardingRowsAll), [offboardingRowsAll, filterSourceRows]);
+
+  // ── Offboarding filter: assignee-email scoping + country ownership for unassigned ──
+  // Assigned rows → same hierarchical assignee-email match as other sources.
+  // Unassigned rows → visible to admins, regional managers, and to agents/leads
+  // who own the row's country (or for team leads, whose direct reports own it).
+  const filterOffboardingRows = useCallback((rows) => {
+    if (isAdmin) return rows;
+    const email = (user?.email || '').toLowerCase();
+    const member = MEMBERS_BY_EMAIL[email];
+    const access = member?.access || 'agent';
+
+    // Build the set of country codes this user is responsible for
+    // (own countries + direct reports' countries if they're a lead).
+    const ownedCodes = new Set(OWNER_COUNTRIES.get(email) || []);
+    if (access === 'team_lead') {
+      for (const dr of getDirectReports(email)) {
+        const drCodes = OWNER_COUNTRIES.get(dr.email.toLowerCase());
+        if (drCodes) for (const c of drCodes) ownedCodes.add(c);
+      }
+    }
+
+    return rows.filter(r => {
+      const assignee = (r.assigneeEmail || '').toLowerCase();
+      if (assignee) {
+        // Assigned row — normal hierarchical visibility check.
+        return visibleEmails.has(assignee);
+      }
+      // Unassigned row — regional managers always see; agents/leads see if they
+      // own the row's country. Agents outside their countries don't see.
+      if (access === 'regional_manager') return true;
+      const cc = (r.country || '').toUpperCase();
+      return cc && ownedCodes.has(cc);
+    });
+  }, [isAdmin, user?.email, visibleEmails]);
+
+  const offboardingRows = useMemo(() => filterOffboardingRows(offboardingRowsAll), [offboardingRowsAll, filterOffboardingRows]);
   const amendmentRows = useMemo(() => filterSourceRows(amendmentRowsAll), [amendmentRowsAll, filterSourceRows]);
   const redlineRows = useMemo(() => filterSourceRows(redlineRowsAll), [redlineRowsAll, filterSourceRows]);
   const workbenchRows = useMemo(() => filterSourceRows(workbenchRowsAll), [workbenchRowsAll, filterSourceRows]);
