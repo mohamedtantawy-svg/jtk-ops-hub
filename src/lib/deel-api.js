@@ -291,22 +291,18 @@ export async function listPausedOnboarding() {
 // between the record-level `terminationFlowStatuses` array and the count
 // object's bucket labels.
 
-// Top-level statuses that mean the termination is closed — exclude.
+// Top-level statuses treated as closed / not actionable.
+// User directive: exclude COMPLETED, DONE, CANCELLED.
 const OFFBOARDING_CLOSED_STATUSES = new Set([
   'COMPLETED',
   'DONE',
   'CANCELLED',
   'CANCELED',
-  'AWAITING_REFUND',
 ]);
 
-// Active-step buckets that BI excludes (payment cleanup). Any record whose
-// terminationFlowStatuses array contains one of these is treated as "past
-// the actionable phase" and dropped.
+// Only Deposit refund step is excluded from the flow array.
 const OFFBOARDING_EXCLUDED_STEPS = new Set([
-  'FeeAndAdjustments',           // BI: "Fee and adjustments step"
-  'OffcycleInvoice',             // BI: "Off cycle step"
-  'AwaitingDepositConfirmation', // BI: "Deposit refund step"
+  'AwaitingDepositConfirmation', // BI label: "Deposit refund step"
 ]);
 
 // Scan cap — the admin endpoint returns 50/page sorted by endDate ASC (nulls
