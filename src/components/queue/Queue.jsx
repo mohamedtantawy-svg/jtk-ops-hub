@@ -767,6 +767,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           dateLabel="End Date"
           showClient
           showType
+          hideStatusPills
           currentUser={user}
         />
         </ErrorBoundary>
