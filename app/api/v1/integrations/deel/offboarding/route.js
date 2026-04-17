@@ -63,6 +63,12 @@ async function buildOffboardingResult() {
     }
   }
 
+  // Buckets hidden from the actionable queue — derived-label exclusions. Keep
+  // these in sync with the user's "not actionable from ops side" list.
+  const HIDDEN_BUCKETS = new Set([
+    'Client Sign-Off: Approved',     // client approved, now just waits on other steps
+  ]);
+
   const items = deduped.map(c => {
     // Priority: confirmed endDate → desired → original (from requestData) → earliest.
     // Empty string when nothing is set — UI renders "ASAP" in that case.
@@ -109,6 +115,17 @@ async function buildOffboardingResult() {
       contractUrl: c.contractOid ? `https://app.deel.com/contracts/${c.contractOid}` : '',
     };
   });
+
+  // Drop derived-label exclusions (e.g. Client Sign-Off: Approved) that
+  // aren't tied to a single flow-status value we can filter server-side.
+  const preHiddenCount = items.length;
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (HIDDEN_BUCKETS.has(items[i].primaryBucket)) items.splice(i, 1);
+  }
+  const hiddenDropped = preHiddenCount - items.length;
+  if (hiddenDropped > 0) {
+    console.log(`[offboarding] dropped ${hiddenDropped} records matching hidden bucket labels`);
+  }
 
   // Sort by priority (most actionable first), then end date ascending.
   items.sort((a, b) => {
@@ -161,8 +178,7 @@ function deriveTypeLabel(c) {
  */
 const BUCKET_PRIORITY = {
   'Awaiting Assignee':                        1,
-  'Awaiting Triage':                          2,
-  'Awaiting Client Review':                   3,
+  'Awaiting Client Review':                   2,
   'Client Sign-Off: Changes Requested':       4,
   'Employee Sign-Off: Changes Requested':     5,
   'Employee Sign-Off: Not Responded':         6,
@@ -188,6 +204,8 @@ const BUCKET_PRIORITY = {
   'End Details':                             26,
   'Docs Shared':                             27,
   'Awaiting Cron Execution':                 28,
+  // Top-level status fallbacks (ranked after all specific flow buckets)
+  'Awaiting Triage':                         90,
   'Processing':                              98,
   'Unknown':                                 99,
 };
@@ -208,10 +226,10 @@ function derivePrimaryBucket(c) {
     return { label: 'Awaiting Assignee', severity: 'critical', color: '#d42d35' };
   }
 
-  // 2 — top-level triage (not yet entered review)
-  if (status === 'AWAITING_TRIAGE') {
-    return { label: 'Awaiting Triage', severity: 'warning', color: '#ed8d00' };
-  }
+  // Flow-state and sign-off checks run BEFORE the top-level status fallback
+  // so an AWAITING_TRIAGE record with `AwaitingLegalReview` in its flow array
+  // surfaces as "Awaiting Legal Review" (the real blocker) rather than the
+  // generic "Awaiting Triage" label.
 
   // 3 — client is blocking us
   if (flow.has('AwaitingClientReview')) {
@@ -307,7 +325,10 @@ function derivePrimaryBucket(c) {
     return { label: 'Docs Shared', severity: 'info', color: '#616161' };
   }
 
-  // Fallbacks
+  // Fallbacks — top-level statuses when no specific flow state matched
+  if (status === 'AWAITING_TRIAGE') {
+    return { label: 'Awaiting Triage', severity: 'warning', color: '#ed8d00' };
+  }
   if (status === 'PROCESSING' || status === 'IN_PROGRESS') {
     return { label: 'Processing', severity: 'active', color: '#1d4ed8' };
   }
