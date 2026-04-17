@@ -70,12 +70,14 @@ function offboardingSlaThreshold(row) {
 }
 function offboardingUrgency(row) {
   const now = Date.now();
-  const ageDays = row.createdAt ? (now - new Date(row.createdAt).getTime()) / 86400000 : 0;
+  const createdMs = row.createdAt ? new Date(row.createdAt).getTime() : NaN;
+  const ageDays = Number.isFinite(createdMs) ? (now - createdMs) / 86400000 : 0;
   const threshold = offboardingSlaThreshold(row);
   const slaBreached = ageDays >= threshold;
   const slaAtRisk = ageDays >= threshold * 0.7;
 
-  const endMs = row.endDate ? new Date(row.endDate).getTime() : null;
+  const endMsRaw = row.endDate ? new Date(row.endDate).getTime() : NaN;
+  const endMs = Number.isFinite(endMsRaw) ? endMsRaw : null;
   const endDays = endMs != null ? (endMs - now) / 86400000 : null;
   const endPast = endDays != null && endDays <= 0;
   const endImminent = endDays != null && endDays > 0 && endDays <= 3;

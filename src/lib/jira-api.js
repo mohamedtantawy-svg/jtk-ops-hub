@@ -107,8 +107,14 @@ export async function getIssueDescriptionsByKeys(keys) {
   if (unique.length === 0) return out;
 
   const BATCH_SIZE = 100;
+  const chunks = [];
   for (let i = 0; i < unique.length; i += BATCH_SIZE) {
-    const chunk = unique.slice(i, i + BATCH_SIZE);
+    chunks.push(unique.slice(i, i + BATCH_SIZE));
+  }
+
+  // Batches are independent — fire them in parallel so a 12-batch job
+  // (≈1200 keys) finishes in one round-trip instead of twelve.
+  await Promise.all(chunks.map(async (chunk, idx) => {
     const jql = `issuekey in (${chunk.join(',')})`;
     try {
       const res = await searchIssues(jql, { fields: ['description'], maxResults: chunk.length });
@@ -116,9 +122,9 @@ export async function getIssueDescriptionsByKeys(keys) {
         out.set(issue.key, adfToPlainText(issue.fields?.description));
       }
     } catch (err) {
-      console.warn(`[jira] getIssueDescriptionsByKeys batch ${i / BATCH_SIZE} failed: ${err.message}`);
+      console.warn(`[jira] getIssueDescriptionsByKeys batch ${idx} failed: ${err.message}`);
     }
-  }
+  }));
   return out;
 }
 
