@@ -81,6 +81,7 @@ export default function SourceTable({
   dateLabel = 'Start Date',  // header label for the date column
   showClient = false,        // show "Organization" column (offboarding, etc.)
   showType = false,          // show "Type" column (Termination / Resignation — offboarding)
+  hideFilterBar = false,     // hide the whole filter bar (pills + search + refresh + count) when redundant
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   // Column-based sorting: col name + direction
@@ -164,6 +165,7 @@ export default function SourceTable({
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#fafaf9', overflow: 'hidden' }}>
       {/* ── Filter bar ── */}
+      {!hideFilterBar && (
       <div style={{ padding: '10px 24px', background: 'white', borderBottom: '1px solid #f0efed', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         {!hideStatusPills && <>
           <StatusPill label="All" count={counts.total} active={!statusFilter} onClick={() => setStatusFilter(null)} color="#1b1b1b" />
@@ -193,6 +195,7 @@ export default function SourceTable({
 
         <span style={{ fontSize: 11, color: '#9e9e9e' }}>{sorted.length} {sorted.length === 1 ? 'task' : 'tasks'}</span>
       </div>
+      )}
 
       {/* ── Loading ── */}
       {loading && rows.length === 0 && (
