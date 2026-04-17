@@ -16,21 +16,58 @@ const DEEL_CONTRACT_URL = (oid) => oid ? `${DEEL_ADMIN_BASE}/contracts/${oid}/de
 const DEEL_WORKBENCH_BASE = 'https://app.deel.com/workbench/tasks';
 
 // ── Name → email lookup for sources that only provide assignee name ──
-// Normalize accents/diacritics for robust matching (André → andre)
+// The Deel admin API returns only the display name for assignees. To scope
+// rows to the right agent/lead, we need to map that name back to their Deel
+// email. Handles accents, spacing differences ("De Luca" ↔ "Deluca"), and
+// extra middle names ("Jessica Czech" ↔ "Jessica Sabrina Czech").
 function stripAccents(s) {
   return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
-const _nameToEmail = new Map();
-const _nameToEmailNorm = new Map(); // accent-stripped fallback
-for (const m of TEAM_MEMBERS) {
-  _nameToEmail.set(m.name.toLowerCase(), m.email);
-  _nameToEmailNorm.set(stripAccents(m.name.toLowerCase()), m.email);
+function tokenize(name) {
+  return stripAccents((name || '').toLowerCase())
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
 }
+
+const _nameToEmail = new Map();         // lowercase name → email
+const _nameToEmailNorm = new Map();     // accent-stripped → email
+const _nameNoSpace = new Map();         // "federicadeluca" → email (collapses spacing)
+const _firstLastToEmail = new Map();    // "jessica|czech" → email (ignores middle names)
+
+for (const m of TEAM_MEMBERS) {
+  const lower = m.name.toLowerCase();
+  const stripped = stripAccents(lower);
+  _nameToEmail.set(lower, m.email);
+  _nameToEmailNorm.set(stripped, m.email);
+  _nameNoSpace.set(stripped.replace(/\s+/g, ''), m.email);
+  const tokens = tokenize(m.name);
+  if (tokens.length >= 2) {
+    _firstLastToEmail.set(`${tokens[0]}|${tokens[tokens.length - 1]}`, m.email);
+  }
+}
+
 function resolveEmailByName(name) {
   if (!name) return '';
   const lower = name.toLowerCase();
-  // Exact match first, then accent-stripped fallback
-  return _nameToEmail.get(lower) || _nameToEmailNorm.get(stripAccents(lower)) || '';
+  const stripped = stripAccents(lower);
+
+  // 1. Exact match
+  let hit = _nameToEmail.get(lower);
+  if (hit) return hit;
+  // 2. Accent-stripped
+  hit = _nameToEmailNorm.get(stripped);
+  if (hit) return hit;
+  // 3. Whitespace-collapsed ("Federica Deluca" ↔ "Federica De Luca")
+  hit = _nameNoSpace.get(stripped.replace(/\s+/g, ''));
+  if (hit) return hit;
+  // 4. First + last token only ("Jessica Czech" ↔ "Jessica Sabrina Czech")
+  const tokens = tokenize(name);
+  if (tokens.length >= 2) {
+    hit = _firstLastToEmail.get(`${tokens[0]}|${tokens[tokens.length - 1]}`);
+    if (hit) return hit;
+  }
+  return '';
 }
 
 // ── Date formatter for subject lines ──
