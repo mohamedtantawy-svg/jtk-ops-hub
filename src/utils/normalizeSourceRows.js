@@ -117,6 +117,8 @@ export function normalizeOffboarding(items = []) {
     subject: c.name || 'Unknown',
     clientName: c.organizationName || '',
     endDate: c.endDate || c.desiredEndDate || '',
+    endDateIsConfirmed: c.endDateIsConfirmed === true,   // false → render "ASAP" instead of date
+    isUrgentEndDate: c.isUrgentEndDate === true,
     typeLabel: c.typeLabel || 'Termination',
     function: c.reason
       ? (c.reason || '').replace(/_/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase()).toLowerCase().replace(/^\w/, ch => ch.toUpperCase())
@@ -127,7 +129,7 @@ export function normalizeOffboarding(items = []) {
     createdAt: c.requestedDate || c.createdAt || '',
     updatedAt: c.updatedAt || '',
     status: c.status || { label: 'Awaiting Triage', severity: 'warning', color: '#ed8d00' },
-    taskUrl: c.contractUrl || DEEL_CONTRACT_URL(c.contractOid),
+    taskUrl: c.id ? `${DEEL_ADMIN_BASE}/eor/termination_v3/${c.id}` : '',
     contractUrl: DEEL_CONTRACT_URL(c.contractOid),
     jiraUrl: c.jiraUrl || '',
     slaRemaining: null,
