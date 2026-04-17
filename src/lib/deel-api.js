@@ -291,12 +291,13 @@ export async function listPausedOnboarding() {
 // between the record-level `terminationFlowStatuses` array and the count
 // object's bucket labels.
 
-// Only explicitly terminal states are excluded — everything else is included.
-// User directive: "include everything except deposit refund and completed".
-// We'll tighten from the UI side if needed.
+// Top-level statuses treated as closed / not actionable.
+// User directive: exclude COMPLETED, DONE, CANCELLED.
 const OFFBOARDING_CLOSED_STATUSES = new Set([
   'COMPLETED',
   'DONE',
+  'CANCELLED',
+  'CANCELED',
 ]);
 
 // Only Deposit refund step is excluded from the flow array.

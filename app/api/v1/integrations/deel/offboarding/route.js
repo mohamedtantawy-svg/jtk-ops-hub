@@ -118,7 +118,21 @@ async function buildOffboardingResult() {
     return (a.daysUntilEnd ?? 9999) - (b.daysUntilEnd ?? 9999);
   });
 
-  return { items, total: items.length };
+  // Breakdown by primary status bucket — log + return so we can see the
+  // distribution without scraping the full item list.
+  const byBucket = {};
+  const byType = { Termination: 0, 'Resignation (Client)': 0, 'Resignation (Employee)': 0 };
+  for (const item of items) {
+    byBucket[item.primaryBucket] = (byBucket[item.primaryBucket] || 0) + 1;
+    if (byType[item.typeLabel] !== undefined) byType[item.typeLabel]++;
+  }
+  const bucketSummary = Object.entries(byBucket)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => `${k}=${v}`)
+    .join(', ');
+  console.log(`[offboarding] breakdown: total=${items.length} | by type: ${JSON.stringify(byType)} | by bucket: ${bucketSummary}`);
+
+  return { items, total: items.length, byBucket, byType };
 }
 
 /**
