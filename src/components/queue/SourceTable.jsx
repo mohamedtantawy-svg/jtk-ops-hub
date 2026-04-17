@@ -73,14 +73,18 @@ export default function SourceTable({
   emptySubLabel = 'All caught up',
   showSourceColumn = false,  // show Source column (for "All" view)
   searchable = true,
-  sortDefault = 'oldest',    // 'oldest' | 'newest' | 'sla' | 'startDate'
+  sortDefault = 'oldest',    // 'oldest' | 'newest' | 'sla' | 'startDate' | 'endDate'
   showPausedSla = false,     // use 48h countdown from pausedAt instead of age-based SLA
   hideStatusPills = false,   // hide the internal All/Action Needed/etc. pills
   currentUser = null,        // for "Assign me" button on unassigned rows
+  dateField = 'startDate',   // row field rendered in the date column
+  dateLabel = 'Start Date',  // header label for the date column
+  showClient = false,        // show "Organization" column (offboarding, etc.)
+  showType = false,          // show "Type" column (Termination / Resignation — offboarding)
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   // Column-based sorting: col name + direction
-  const defaultCol = sortDefault === 'startDate' ? 'startDate' : sortDefault === 'sla' ? 'sla' : 'createdAt';
+  const defaultCol = sortDefault === 'endDate' ? 'endDate' : sortDefault === 'startDate' ? 'startDate' : sortDefault === 'sla' ? 'sla' : 'createdAt';
   const defaultDir = sortDefault === 'newest' ? 'desc' : 'asc';
   const [sortCol, setSortCol] = useState(defaultCol);
   const [sortDir, setSortDir] = useState(defaultDir); // 'asc' | 'desc'
@@ -104,6 +108,8 @@ export default function SourceTable({
         (row.function || '').toLowerCase().includes(q) ||
         (row.country || '').toLowerCase().includes(q) ||
         (row.assignee || '').toLowerCase().includes(q) ||
+        (row.clientName || '').toLowerCase().includes(q) ||
+        (row.typeLabel || '').toLowerCase().includes(q) ||
         (row.id || '').toLowerCase().includes(q)
       );
     }
@@ -118,9 +124,12 @@ export default function SourceTable({
     const getVal = (row) => {
       switch (sortCol) {
         case 'subject':   return (row.subject || '').toLowerCase();
+        case 'clientName':return (row.clientName || '').toLowerCase();
+        case 'typeLabel': return (row.typeLabel || '').toLowerCase();
         case 'country':   return (row.country || '').toLowerCase();
         case 'assignee':  return (row.assignee || '').toLowerCase();
         case 'startDate': return row.startDate ? new Date(row.startDate).getTime() : Infinity;
+        case 'endDate':   return row.endDate ? new Date(row.endDate).getTime() : Infinity;
         case 'createdAt': return row.createdAt ? new Date(row.createdAt).getTime() : Infinity;
         case 'updatedAt': return row.updatedAt ? new Date(row.updatedAt).getTime() : 0;
         case 'status':    return (row.status?.label || '').toLowerCase();
@@ -228,9 +237,11 @@ export default function SourceTable({
               <tr style={{ background: '#f5f4f2', position: 'sticky', top: 0, zIndex: 2 }}>
                 {showSourceColumn && <th style={{ ...thStyle, width: 80 }}>Source</th>}
                 <SortTh col="subject"   label="Employee"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, textAlign: 'left', minWidth: 220 }} />
+                {showClient && <SortTh col="clientName" label="Organization" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, textAlign: 'left', minWidth: 160 }} />}
+                {showType && <SortTh col="typeLabel" label="Type" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 130 }} />}
                 <SortTh col="country"   label="Country"    sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 100 }} />
                 <SortTh col="assignee"  label="Assignee"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 110 }} />
-                <SortTh col="startDate" label="Start Date" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 90 }} />
+                <SortTh col={dateField} label={dateLabel} sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 90 }} />
                 <SortTh col="sla"       label="SLA"        sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 70 }} />
                 <SortTh col="updatedAt" label="Updated"    sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 90 }} />
                 <SortTh col="status"    label="Status"     sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 130 }} />
@@ -240,7 +251,7 @@ export default function SourceTable({
             </thead>
             <tbody>
               {sorted.map(row => (
-                <SourceRow key={`${row.source}-${row.id}`} row={row} showSource={showSourceColumn} showPausedSla={showPausedSla} currentUser={currentUser} />
+                <SourceRow key={`${row.source}-${row.id}`} row={row} showSource={showSourceColumn} showPausedSla={showPausedSla} currentUser={currentUser} dateField={dateField} showClient={showClient} showType={showType} />
               ))}
             </tbody>
           </table>
@@ -251,7 +262,7 @@ export default function SourceTable({
 }
 
 // ── Row component ──
-const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, currentUser = null }) {
+const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, currentUser = null, dateField = 'startDate', showClient = false, showType = false }) {
   const [hov, setHov] = useState(false);
   const [localAssignee, setLocalAssignee] = useState(null);
   const sev = row.status?.severity || 'info';
@@ -318,6 +329,32 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
         </div>
       </td>
 
+      {/* Client Name */}
+      {showClient && (
+        <td style={{ ...tdStyle, textAlign: 'left', fontSize: 12, color: '#1b1b1b', fontWeight: 500, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {row.clientName || '--'}
+        </td>
+      )}
+
+      {/* Type (Termination / Resignation) */}
+      {showType && (() => {
+        const t = row.typeLabel || '';
+        const isResignation = t.startsWith('Resignation');
+        const bg = isResignation ? '#eef2ff' : '#fef2f2';
+        const color = isResignation ? '#4338ca' : '#d42d35';
+        const border = isResignation ? '#c7d2fe' : '#fca5a5';
+        const short = t === 'Resignation (Employee)' ? 'Resign. (Emp)' : t === 'Resignation (Client)' ? 'Resign. (Client)' : t || '--';
+        return (
+          <td style={tdStyle}>
+            {t ? (
+              <span title={t} style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 128, background: bg, color, border: `1px solid ${border}`, fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                {short}
+              </span>
+            ) : <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>}
+          </td>
+        );
+      })()}
+
       {/* Country */}
       <td style={{ ...tdStyle, fontSize: 12, whiteSpace: 'nowrap' }}>
         {flag && <span style={{ marginRight: 3 }}>{flag}</span>}
@@ -341,9 +378,9 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
         ) : <span style={{ fontSize: 11, color: '#d42d35', fontWeight: 500 }}>Unassigned</span>}
       </td>
 
-      {/* Start Date */}
+      {/* Date column (Start Date for onboarding, End Date for offboarding, etc.) */}
       <td style={{ ...tdStyle, fontSize: 11, color: '#616161', whiteSpace: 'nowrap' }}>
-        {row.startDate ? fmtDate(row.startDate) : '--'}
+        {row[dateField] ? fmtDate(row[dateField]) : '--'}
       </td>
 
       {/* SLA */}

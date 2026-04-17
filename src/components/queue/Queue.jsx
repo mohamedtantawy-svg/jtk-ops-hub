@@ -727,7 +727,11 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           emptyIcon="bi-person-dash"
           emptyLabel="No active offboarding cases"
           emptySubLabel="All termination cases have been resolved"
-          sortDefault="oldest"
+          sortDefault="endDate"
+          dateField="endDate"
+          dateLabel="End Date"
+          showClient
+          showType
           currentUser={user}
         />
         </ErrorBoundary>

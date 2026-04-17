@@ -270,29 +270,82 @@ export async function listPausedOnboarding() {
 
 // ── Offboarding / Terminations (Admin API) ──────────────────────────────────
 
+// Actionable flow statuses (mirrors BI filter: exclude payment-cleanup steps).
+// Server-side filter via `terminationFlowStatuses[]=` — one per entry.
+const OFFBOARDING_ACTIONABLE_STATUSES = [
+  'AwaitingAssignee',
+  'AwaitingCSMReview',
+  'AwaitingLegalReview',
+  'AwaitingClientReview',
+  'AwaitingDocumentSharingForClientApproval',
+  'AwaitingDocumentSharingForEmployeeApproval',
+  'AwaitingFinalPayrollDecision',
+  'OffboardingPayments',
+  'Documents#EMPLOYEE_NOTIFICATION',
+  'Documents#DOCUMENTS_CONFIRMATION',
+  'Documents#EMPLOYEE_SIGNATURE',
+  'Unenrollment',
+];
+
+// Top-level statuses that mean the termination is closed — exclude these.
+const OFFBOARDING_CLOSED_STATUSES = new Set(['COMPLETED', 'DONE', 'CANCELLED', 'CANCELED', 'AWAITING_REFUND']);
+
+// Safety cap on pagination. At 50/page, 40 pages = 2,000 records —
+// well above the expected ~900 deduped records.
+const OFFBOARDING_MAX_PAGES = 40;
+
 /**
- * Fetches AWAITING_TRIAGE termination cases from the admin API.
- * Uses /admin/eor/terminations_v3 — the same endpoint as admin.deel.network.
- * Filters to status=AWAITING_TRIAGE only (actionable items).
+ * Fetches all actionable EOR termination cases from the admin API.
+ * Uses /admin/eor/terminations_v3 with server-side flow-status filter,
+ * paginates via `cursor` until exhausted, dedupes by id, and excludes
+ * closed / duplicate records.
  *
- * NOTE: The endpoint does NOT accept "limit" or "cursor" as query params
- * (returns 400). It may accept filters via POST body or specific param names.
- * For now we call it without params and filter client-side.
+ * Filter logic mirrors the internal BI dashboard:
+ *   status NOT IN (COMPLETED, AWAITING_REFUND, CANCELLED)
+ *   AND isDuplicate = false
+ *   AND active step is in OFFBOARDING_ACTIONABLE_STATUSES
+ *   (excluded: deposit refund, fee adjustments, off-cycle invoice, cancelled)
  */
 export async function listOffboardingCases() {
-  // Call without query params — the endpoint rejects limit/cursor
-  const res = await deelFetch('/admin/eor/terminations_v3');
+  const baseParams = new URLSearchParams();
+  baseParams.set('limit', '50');
+  for (const s of OFFBOARDING_ACTIONABLE_STATUSES) {
+    baseParams.append('terminationFlowStatuses[]', s);
+  }
 
-  // Admin API returns { cursor, terminations: [...], count: { total, ... } }
-  const dataArr = res?.terminations || [];
+  const all = [];
+  const seen = new Set();
+  let cursor = null;
+  let serverTotal = null;
 
-  // Filter to actionable items only: AWAITING_TRIAGE
-  const actionable = dataArr.filter(c => {
+  for (let page = 0; page < OFFBOARDING_MAX_PAGES; page++) {
+    const params = new URLSearchParams(baseParams);
+    if (cursor) params.set('cursor', cursor);
+
+    const res = await deelFetch(`/admin/eor/terminations_v3?${params.toString()}`);
+    if (serverTotal === null) serverTotal = res?.count?.total ?? null;
+
+    for (const t of res?.terminations || []) {
+      if (!seen.has(t.id)) {
+        seen.add(t.id);
+        all.push(t);
+      }
+    }
+
+    cursor = res?.cursor || null;
+    if (!cursor) break;
+  }
+
+  // Defensive client-side filter — the server filter handles most, but
+  // excluded-status + duplicate records still slip through occasionally.
+  const filtered = all.filter(c => {
     const status = (c.status || '').toUpperCase();
-    return status === 'AWAITING_TRIAGE';
+    if (OFFBOARDING_CLOSED_STATUSES.has(status)) return false;
+    if (c.isDuplicate === true) return false;
+    return true;
   });
 
-  return actionable.map(c => ({
+  return filtered.map(c => ({
     id: c.id,                                         // termination ID (e.g. 165810)
     contractId: c.eorContractId || c.contractOid || '',
     contractOid: c.contractOid || '',                 // short OID (e.g. "35jp4gq")
@@ -301,21 +354,28 @@ export async function listOffboardingCases() {
     country: c.employmentCountry || '',
     jobTitle: c.jobTitle || '',
     team: c.team || '',
-    hiringType: c.type || 'eor',                     // e.g. "TERMINATION"
+    hiringType: c.type || 'eor',                     // top-level type: TERMINATION | RESIGNATION | ...
     startDate: c.startDate || '',
     endDate: c.endDate || '',                         // last working day (may be null)
     desiredEndDate: c.desiredEndDate || '',
     createdAt: c.createdAt || '',
     updatedAt: c.updatedAt || '',
-    status: c.status || '',                           // e.g. "AWAITING_TRIAGE"
+    status: c.status || '',                           // top-level lifecycle status
     organizationName: c.organizationName || '',       // client company name
-    exAssignee: c.exAssignee || '',                   // assigned agent (name string)
-    exAssigneeEmail: c.exAssigneeEmail || '',  // assigned agent email (exAssignee is a name string, not an object)
+    exAssignee: c.exAssignee || '',                   // assigned agent (name)
+    exAssigneeId: c.exAssigneeId || null,
+    exAssigneeEmail: c.exAssigneeEmail || '',
+    clientSignOffStatus: c.clientSignOffStatus || '',
+    employeeSignOffStatus: c.employeeSignOffStatus || '',
+    terminationFlowStatuses: Array.isArray(c.terminationFlowStatuses) ? c.terminationFlowStatuses : [],
     reason: c.requestData?.reason || '',              // termination reason enum
     isResignation: c.requestData?.isEmployeeResignation || false,
+    isMassTermination: c.requestData?.isMassTermination || false,
     jiraUrl: c.requestData?.jiraTicket?.jiraWebURL || '',
     noticePeriod: c.noticePeriod || 0,
     isArchived: c.isArchived || false,
+    isDuplicate: c.isDuplicate === true,
+    _serverTotal: serverTotal, // for diagnostics
   }));
 }
 

@@ -111,28 +111,28 @@ export function normalizePausedOnboarding(items = []) {
 
 // ── Offboarding → normalized rows ──
 export function normalizeOffboarding(items = []) {
-  return items.map(c => {
-    const endStr = fmtShortDate(c.endDate || c.desiredEndDate);
-    return {
-      id: String(c.id || ''),
-      source: 'offboarding',
-      subject: endStr ? `${c.name || 'Unknown'} — ${endStr}` : (c.name || 'Unknown'),
-      function: c.reason
-        ? (c.reason || '').replace(/_/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase()).toLowerCase().replace(/^\w/, ch => ch.toUpperCase())
-        : 'Termination',
-      country: c.country || '',
-      assignee: c.exAssignee || '',
-      assigneeEmail: (c.exAssigneeEmail || resolveEmailByName(c.exAssignee) || '').toLowerCase(),
-      createdAt: c.requestedDate || c.createdAt || '',
-      updatedAt: c.updatedAt || '',
-      status: c.status || { label: 'Awaiting Triage', severity: 'warning', color: '#ed8d00' },
-      taskUrl: c.contractUrl || DEEL_CONTRACT_URL(c.contractOid),
-      contractUrl: DEEL_CONTRACT_URL(c.contractOid),
-      jiraUrl: c.jiraUrl || '',
-      slaRemaining: null,
-      slaBreachStatus: null,
-    };
-  });
+  return items.map(c => ({
+    id: String(c.id || ''),
+    source: 'offboarding',
+    subject: c.name || 'Unknown',
+    clientName: c.organizationName || '',
+    endDate: c.endDate || c.desiredEndDate || '',
+    typeLabel: c.typeLabel || 'Termination',
+    function: c.reason
+      ? (c.reason || '').replace(/_/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase()).toLowerCase().replace(/^\w/, ch => ch.toUpperCase())
+      : (c.typeLabel || 'Termination'),
+    country: c.country || '',
+    assignee: c.exAssignee || '',
+    assigneeEmail: (c.exAssigneeEmail || resolveEmailByName(c.exAssignee) || '').toLowerCase(),
+    createdAt: c.requestedDate || c.createdAt || '',
+    updatedAt: c.updatedAt || '',
+    status: c.status || { label: 'Awaiting Triage', severity: 'warning', color: '#ed8d00' },
+    taskUrl: c.contractUrl || DEEL_CONTRACT_URL(c.contractOid),
+    contractUrl: DEEL_CONTRACT_URL(c.contractOid),
+    jiraUrl: c.jiraUrl || '',
+    slaRemaining: null,
+    slaBreachStatus: null,
+  }));
 }
 
 // ── Amendments → normalized rows ──
