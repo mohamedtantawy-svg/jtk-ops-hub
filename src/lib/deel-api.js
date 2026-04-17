@@ -279,125 +279,127 @@ export async function listPausedOnboarding() {
 
 // ── Offboarding / Terminations (Admin API) ──────────────────────────────────
 
-// Actionable flow statuses (mirrors BI filter: exclude payment-cleanup steps).
-// Server-side filter via `terminationFlowStatuses[]=` — one per entry.
-// The API accepts all count-object bucket names as values here.
-const OFFBOARDING_ACTIONABLE_STATUSES = [
-  // Termination-path buckets
-  'AwaitingAssignee',
-  'AwaitingCSMReview',
-  'AwaitingLegalReview',
-  'AwaitingClientReview',
-  'AwaitingDocumentSharingForClientApproval',
-  'AwaitingDocumentSharingForEmployeeApproval',
-  'AwaitingFinalPayrollDecision',
-  'OffboardingPayments',
-  'Documents#EMPLOYEE_NOTIFICATION',
-  'Documents#DOCUMENTS_CONFIRMATION',
-  'Documents#EMPLOYEE_SIGNATURE',
-  'Unenrollment',
-  // Sign-off sub-buckets (apply to both termination + resignation paths)
-  'ClientSignOffAwaitingClientReview',
-  'ClientSignOffAwaitingClientFeedback',
-  'ClientSignOffClientFeedbackProvided',
-  'ClientSignOffRequestedChanges',
-  'ClientSignOffApproved',
-  'EmployeeSignOffAwaitingSignature',
-  'EmployeeSignOffSigned',
-  'EmployeeSignOffChangeRequested',
-  'EmployeeSignOffNotResponded',
-  // Resignation-specific sub-tasks
-  'ClientTasksResignationFromEmployeeNotReplied',
-  'ClientTasksResignationFromEmployeeAccepted',
-  'ClientTasksResignationFromEmployeeDeclined',
-];
+// Mirrors the internal BI filter EXACTLY:
+//   EOR Contracts Termination Status         IS NOT (COMPLETED, AWAITING_REFUND)
+//   EOR Contracts Is Duplicate               IS NO
+//   EOR Contracts Active Termination Step    IS NOT (Deposit refund step,
+//                                                    Fee and adjustments step,
+//                                                    Off cycle step,
+//                                                    Cancelled)
+// Plus top-level status not in (CANCELLED, DONE). Applied client-side so we
+// don't depend on the admin API's bucket-name vocabulary, which diverges
+// between the record-level `terminationFlowStatuses` array and the count
+// object's bucket labels.
 
-// Top-level statuses that mean the termination is closed — exclude these.
-const OFFBOARDING_CLOSED_STATUSES = new Set(['COMPLETED', 'DONE', 'CANCELLED', 'CANCELED', 'AWAITING_REFUND']);
+// Top-level statuses that mean the termination is closed — exclude.
+const OFFBOARDING_CLOSED_STATUSES = new Set([
+  'COMPLETED',
+  'DONE',
+  'CANCELLED',
+  'CANCELED',
+  'AWAITING_REFUND',
+]);
 
-// Safety cap on pagination. At 50/page, 40 pages = 2,000 records —
-// well above the expected ~900 deduped records.
-const OFFBOARDING_MAX_PAGES = 40;
+// Active-step buckets that BI excludes (payment cleanup). Any record whose
+// terminationFlowStatuses array contains one of these is treated as "past
+// the actionable phase" and dropped.
+const OFFBOARDING_EXCLUDED_STEPS = new Set([
+  'FeeAndAdjustments',           // BI: "Fee and adjustments step"
+  'OffcycleInvoice',             // BI: "Off cycle step"
+  'AwaitingDepositConfirmation', // BI: "Deposit refund step"
+]);
+
+// Scan cap — the admin endpoint returns 50/page sorted by endDate ASC (nulls
+// first), so ~200 pages covers every open record well past the ~900 expected.
+const OFFBOARDING_MAX_PAGES = 200;
+
+// Stop early once we've seen this many consecutive pages yielding 0 new
+// matches. The sort front-loads actionable records, so once the BI filter
+// stops producing keeps we've effectively exhausted the actionable set.
+const OFFBOARDING_EMPTY_PAGE_STOP = 5;
+
+function isOffboardingActionable(t) {
+  const status = (t?.status || '').toUpperCase();
+  if (OFFBOARDING_CLOSED_STATUSES.has(status)) return false;
+  if (t.isDuplicate === true) return false;
+
+  const flows = Array.isArray(t.terminationFlowStatuses) ? t.terminationFlowStatuses : [];
+  if (flows.some(f => OFFBOARDING_EXCLUDED_STEPS.has(f))) return false;
+
+  return true;
+}
 
 /**
  * Fetches all actionable EOR termination cases from the admin API.
- * Uses /admin/eor/terminations_v3 with server-side flow-status filter,
- * paginates via `cursor` until exhausted, dedupes by id, and excludes
- * closed / duplicate records.
  *
- * Filter logic mirrors the internal BI dashboard:
- *   status NOT IN (COMPLETED, AWAITING_REFUND, CANCELLED)
+ * Strategy: paginate /admin/eor/terminations_v3 unfiltered (cursor loop),
+ * apply the BI filter client-side for every record, dedupe by id.
+ * The admin default sort is endDate ASC (nulls first) which front-loads
+ * pre-finalized records; we early-stop after
+ * OFFBOARDING_EMPTY_PAGE_STOP consecutive pages with 0 new keeps.
+ *
+ * BI filter applied here (see isOffboardingActionable):
+ *   status NOT IN (COMPLETED, DONE, CANCELLED, AWAITING_REFUND)
  *   AND isDuplicate = false
- *   AND active step is in OFFBOARDING_ACTIONABLE_STATUSES
- *   (excluded: deposit refund, fee adjustments, off-cycle invoice, cancelled)
+ *   AND terminationFlowStatuses contains none of
+ *       (FeeAndAdjustments, OffcycleInvoice, AwaitingDepositConfirmation)
  */
 export async function listOffboardingCases() {
-  const all = [];
+  const kept = [];
   const seen = new Set();
   let serverTotal = null;
   let page = 0;
-  let mode = 'admin';
+  let scanned = 0;
+  let emptyRun = 0;
+  let mode = 'admin-scan';
 
-  if (DEEL_ADMIN_TOKEN) {
-    // Admin JWT present: full pagination + server-side flow-status filter.
-    // The admin API validates params via Joi alternatives:
-    //   first page:      `limit=50&terminationFlowStatuses[]=...`
-    //   subsequent page: `cursor=<opaque>` ONLY — the cursor already encodes
-    //                    limit + filters. Sending both together returns 400.
-    const firstPageParts = ['limit=50'];
-    for (const s of OFFBOARDING_ACTIONABLE_STATUSES) {
-      firstPageParts.push(`terminationFlowStatuses[]=${encodeURIComponent(s)}`);
-    }
-    const firstPageQuery = firstPageParts.join('&');
-
-    let cursor = null;
-    for (; page < OFFBOARDING_MAX_PAGES; page++) {
-      const qs = cursor ? `cursor=${encodeURIComponent(cursor)}` : firstPageQuery;
-      const res = await deelFetch(`/admin/eor/terminations_v3?${qs}`);
-      if (serverTotal === null) serverTotal = res?.count?.total ?? null;
-
-      for (const t of res?.terminations || []) {
-        if (!seen.has(t.id)) {
-          seen.add(t.id);
-          all.push(t);
-        }
-      }
-      cursor = res?.cursor || null;
-      if (!cursor) break;
-    }
-  } else {
-    // No admin JWT: the REST v2 token rejects `limit`/`cursor`/`terminationFlowStatuses[]`
-    // on /admin/eor/terminations_v3. Call with no params (returns first default page)
-    // and do the BI filter entirely client-side. Only yields ~50 records —
-    // to get the full ~900, set DEEL_ADMIN_TOKEN in the environment.
+  if (!DEEL_ADMIN_TOKEN) {
+    // No admin JWT: the REST v2 token can't paginate /admin/* endpoints.
+    // Fall back to single default page and apply the BI filter client-side.
     mode = 'rest-v2-fallback';
     const res = await deelFetch('/admin/eor/terminations_v3');
     serverTotal = res?.count?.total ?? null;
-
-    const allowedFlow = new Set(OFFBOARDING_ACTIONABLE_STATUSES);
     for (const t of res?.terminations || []) {
+      scanned++;
       if (seen.has(t.id)) continue;
-      // Client-side filter: at least one flow status must be in the allowed set.
-      const flows = Array.isArray(t.terminationFlowStatuses) ? t.terminationFlowStatuses : [];
-      if (flows.length && !flows.some(f => allowedFlow.has(f))) continue;
+      if (!isOffboardingActionable(t)) continue;
       seen.add(t.id);
-      all.push(t);
+      kept.push(t);
     }
-    page = 1;
+    console.log(`[offboarding] mode=${mode}, scanned ${scanned}, kept ${kept.length} (server reports ${serverTotal} total)`);
+  } else {
+    // Admin JWT present: scan pages unfiltered, applying BI filter client-side.
+    // The admin endpoint sorts by endDate ASC (nulls first), which front-loads
+    // pre-finalized records — exactly what we care about. Stop when we've
+    // seen OFFBOARDING_EMPTY_PAGE_STOP consecutive pages with zero new keeps.
+    let cursor = null;
+    for (; page < OFFBOARDING_MAX_PAGES; page++) {
+      const qs = cursor ? `cursor=${encodeURIComponent(cursor)}` : 'limit=50';
+      const res = await deelFetch(`/admin/eor/terminations_v3?${qs}`);
+      if (serverTotal === null) serverTotal = res?.count?.total ?? null;
+
+      let keptThisPage = 0;
+      for (const t of res?.terminations || []) {
+        scanned++;
+        if (seen.has(t.id)) continue;
+        if (!isOffboardingActionable(t)) continue;
+        seen.add(t.id);
+        kept.push(t);
+        keptThisPage++;
+      }
+
+      if (keptThisPage === 0) emptyRun++; else emptyRun = 0;
+      cursor = res?.cursor || null;
+      if (!cursor) break;
+      if (emptyRun >= OFFBOARDING_EMPTY_PAGE_STOP) {
+        console.log(`[offboarding] early-stop: ${OFFBOARDING_EMPTY_PAGE_STOP} empty pages in a row at page ${page + 1}`);
+        break;
+      }
+    }
+    console.log(`[offboarding] mode=${mode}, pages=${page + 1}, scanned=${scanned}, kept=${kept.length} (server reports ${serverTotal} total open)`);
   }
 
-  console.log(`[offboarding] mode=${mode}, fetched ${page} page(s), ${all.length} deduped records (server reports ${serverTotal} total)`);
-
-  // Defensive client-side filter — the server filter handles most, but
-  // excluded-status + duplicate records still slip through occasionally.
-  const filtered = all.filter(c => {
-    const status = (c.status || '').toUpperCase();
-    if (OFFBOARDING_CLOSED_STATUSES.has(status)) return false;
-    if (c.isDuplicate === true) return false;
-    return true;
-  });
-
-  return filtered.map(c => ({
+  return kept.map(c => ({
     id: c.id,                                         // termination ID (e.g. 165810)
     contractId: c.eorContractId || c.contractOid || '',
     contractOid: c.contractOid || '',                 // short OID (e.g. "35jp4gq")
