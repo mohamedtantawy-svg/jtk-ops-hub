@@ -366,7 +366,14 @@ function PersonRow({ person }) {
               <i className="bi-kanban" style={{ fontSize: 9 }} />Jira
             </a>
           )}
-          {!contractUrl && !person.jiraUrl && <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>}
+          {person.zendeskUrl && (
+            <a href={person.zendeskUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+              style={{ ...linkBtnStyle, background: hov ? '#e7f5ee' : '#f5f4f2', color: hov ? '#03363d' : '#9e9e9e', border: hov ? '1px solid #b8e0c8' : '1px solid transparent' }}
+              title="Open Zendesk ticket">
+              <i className="bi-headset" style={{ fontSize: 9 }} />Zendesk
+            </a>
+          )}
+          {!contractUrl && !person.jiraUrl && !person.zendeskUrl && <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>}
         </div>
       </td>
     </tr>

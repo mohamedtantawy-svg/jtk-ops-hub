@@ -33,15 +33,63 @@ function slaAge(dateStr) {
   return Math.floor((Date.now() - d.getTime()) / 60000); // minutes
 }
 
-function slaBadge(createdAt) {
+function slaBadge(createdAt, thresholdDays = null) {
   const mins = slaAge(createdAt);
   if (mins == null || mins < 0) return null; // guard against future dates
   const days = Math.floor(mins / 1440);
   const hrs = Math.floor((mins % 1440) / 60);
+
+  // Type-aware mode: caller passed an SLA threshold (offboarding: 14d terms, 5d resigs).
+  // Breach = age >= threshold. At-risk = age >= 70% of threshold.
+  if (thresholdDays != null && thresholdDays > 0) {
+    const overdue = days - thresholdDays;
+    if (overdue >= 0) {
+      const label = overdue > 0 ? `+${overdue}d over` : `${days}d`;
+      return { label, color: '#d42d35', bg: '#fef2f2', severity: 'breached' };
+    }
+    if (days >= Math.ceil(thresholdDays * 0.7)) {
+      return { label: `${days}d`, color: '#ed8d00', bg: '#fff8e6', severity: 'at_risk' };
+    }
+    return { label: `${days}d`, color: '#1d4ed8', bg: '#eff6ff', severity: 'ok' };
+  }
+
+  // Generic thresholds (non-offboarding).
   if (days >= 7) return { label: `${days}d`, color: '#d42d35', bg: '#fef2f2', severity: 'breached' };
   if (days >= 3) return { label: `${days}d ${hrs}h`, color: '#ed8d00', bg: '#fff8e6', severity: 'at_risk' };
   if (days >= 1) return { label: `${days}d ${hrs}h`, color: '#1d4ed8', bg: '#eff6ff', severity: 'ok' };
   return { label: hrs > 0 ? `${hrs}h` : `${mins}m`, color: '#15803d', bg: '#e8f5e9', severity: 'ok' };
+}
+
+// ── Offboarding SLA + end-date urgency ──────────────────────────────────────
+// Combines two urgency signals into a single tier + rank:
+//   • SLA age (14d for terminations, 5d for resignations)
+//   • End-date proximity (ASAP / past / within 3 days)
+// Lower tier = more urgent. Within a tier, higher rank = more urgent.
+function offboardingSlaThreshold(row) {
+  return (row.typeLabel || '').startsWith('Resignation') ? 5 : 14;
+}
+function offboardingUrgency(row) {
+  const now = Date.now();
+  const createdMs = row.createdAt ? new Date(row.createdAt).getTime() : NaN;
+  const ageDays = Number.isFinite(createdMs) ? (now - createdMs) / 86400000 : 0;
+  const threshold = offboardingSlaThreshold(row);
+  const slaBreached = ageDays >= threshold;
+  const slaAtRisk = ageDays >= threshold * 0.7;
+
+  const endMsRaw = row.endDate ? new Date(row.endDate).getTime() : NaN;
+  const endMs = Number.isFinite(endMsRaw) ? endMsRaw : null;
+  const endDays = endMs != null ? (endMs - now) / 86400000 : null;
+  const endPast = endDays != null && endDays <= 0;
+  const endImminent = endDays != null && endDays > 0 && endDays <= 3;
+  const asap = endMs == null || row.endDateIsConfirmed === false;
+
+  if (slaBreached && endPast)  return { tier: 0, rank: (ageDays - threshold) + Math.min(60, -endDays) };
+  if (slaBreached)             return { tier: 1, rank: ageDays - threshold };
+  if (endPast)                 return { tier: 2, rank: Math.min(60, -endDays) };
+  if (endImminent)             return { tier: 3, rank: 3 - endDays };
+  if (asap)                    return { tier: 4, rank: ageDays };
+  if (slaAtRisk)               return { tier: 5, rank: ageDays };
+  return                              { tier: 6, rank: -(endDays ?? 999) }; // normal: earliest end date first
 }
 
 /**
@@ -81,6 +129,7 @@ export default function SourceTable({
   dateLabel = 'Start Date',  // header label for the date column
   showClient = false,        // show "Organization" column (offboarding, etc.)
   showType = false,          // show "Type" column (Termination / Resignation — offboarding)
+  hideFilterBar = false,     // hide the whole filter bar (pills + search + refresh + count) when redundant
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   // Column-based sorting: col name + direction
@@ -120,6 +169,21 @@ export default function SourceTable({
   const sorted = useMemo(() => {
     const arr = [...filtered];
     const dir = sortDir === 'desc' ? -1 : 1;
+
+    // Smart offboarding SLA sort: combines SLA age (type-aware) + end-date
+    // proximity via tiered urgency. When the user clicks the SLA column on
+    // offboarding rows, we use this instead of simple age sorting.
+    const isOffboardingSla = sortCol === 'sla' && arr.some(r => r.source === 'offboarding');
+    if (isOffboardingSla) {
+      // Most urgent first by default (asc click → most urgent; desc → least).
+      const mult = dir;
+      return arr.sort((a, b) => {
+        const au = a.source === 'offboarding' ? offboardingUrgency(a) : { tier: 99, rank: 0 };
+        const bu = b.source === 'offboarding' ? offboardingUrgency(b) : { tier: 99, rank: 0 };
+        if (au.tier !== bu.tier) return (au.tier - bu.tier) * mult;
+        return (bu.rank - au.rank) * mult; // higher rank = more urgent
+      });
+    }
 
     const getVal = (row) => {
       switch (sortCol) {
@@ -164,6 +228,7 @@ export default function SourceTable({
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#fafaf9', overflow: 'hidden' }}>
       {/* ── Filter bar ── */}
+      {!hideFilterBar && (
       <div style={{ padding: '10px 24px', background: 'white', borderBottom: '1px solid #f0efed', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         {!hideStatusPills && <>
           <StatusPill label="All" count={counts.total} active={!statusFilter} onClick={() => setStatusFilter(null)} color="#1b1b1b" />
@@ -193,6 +258,7 @@ export default function SourceTable({
 
         <span style={{ fontSize: 11, color: '#9e9e9e' }}>{sorted.length} {sorted.length === 1 ? 'task' : 'tasks'}</span>
       </div>
+      )}
 
       {/* ── Loading ── */}
       {loading && rows.length === 0 && (
@@ -269,7 +335,9 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
   const isUrgent = sev === 'critical';
   const isWarning = sev === 'warning';
   const rowBg = isUrgent ? '#fffbfb' : isWarning ? '#fffdf5' : 'white';
-  const sla = slaBadge(row.createdAt);
+  // Offboarding gets type-aware SLA: Termination 14d, Resignation 5d.
+  const slaThresholdDays = row.source === 'offboarding' ? offboardingSlaThreshold(row) : null;
+  const sla = slaBadge(row.createdAt, slaThresholdDays);
   const flag = getFlag(row.country);
   const countryDisplay = getCountryName(row.country) || row.country || '';
   const tool = TOOLS[row.source];
@@ -449,7 +517,18 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
               <i className="bi-kanban" style={{ fontSize: 9 }} />Jira
             </a>
           )}
-          {!row.taskUrl && !row.jiraUrl && <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>}
+          {row.zendeskUrl && (
+            <a href={row.zendeskUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6,
+                background: hov ? '#e7f5ee' : '#f5f4f2', color: hov ? '#03363d' : '#9e9e9e',
+                fontSize: 10, fontWeight: 600, textDecoration: 'none', transition: 'all .15s', whiteSpace: 'nowrap',
+                border: hov ? '1px solid #b8e0c8' : '1px solid transparent',
+              }}>
+              <i className="bi-headset" style={{ fontSize: 9 }} />Zendesk
+            </a>
+          )}
+          {!row.taskUrl && !row.jiraUrl && !row.zendeskUrl && <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>}
         </div>
       </td>
 

@@ -91,6 +91,68 @@ export async function getIssue(issueKey) {
   return jiraFetch(`/issue/${issueKey}`);
 }
 
+// ── Bulk fetch descriptions for a list of issue keys ────────────────────────
+// Used to enrich non-Jira records (e.g. offboarding cases) with data that
+// lives inside the linked Jira ticket — currently the Zendesk URL.
+//
+// Batches keys into JQL `issuekey in (...)` queries (Jira's JQL `in` clause
+// handles ~100 keys comfortably). Returns a Map<issueKey, rawDescription>.
+// `rawDescription` is the serialized text of the ADF description so callers
+// can run simple regex matching without walking the tree.
+export async function getIssueDescriptionsByKeys(keys) {
+  const out = new Map();
+  if (!Array.isArray(keys) || keys.length === 0) return out;
+
+  const unique = Array.from(new Set(keys.filter(k => typeof k === 'string' && k.trim()))).map(k => k.trim());
+  if (unique.length === 0) return out;
+
+  const BATCH_SIZE = 100;
+  const chunks = [];
+  for (let i = 0; i < unique.length; i += BATCH_SIZE) {
+    chunks.push(unique.slice(i, i + BATCH_SIZE));
+  }
+
+  // Batches are independent — fire them in parallel so a 12-batch job
+  // (≈1200 keys) finishes in one round-trip instead of twelve.
+  await Promise.all(chunks.map(async (chunk, idx) => {
+    const jql = `issuekey in (${chunk.join(',')})`;
+    try {
+      const res = await searchIssues(jql, { fields: ['description'], maxResults: chunk.length });
+      for (const issue of res?.issues || []) {
+        out.set(issue.key, adfToPlainText(issue.fields?.description));
+      }
+    } catch (err) {
+      console.warn(`[jira] getIssueDescriptionsByKeys batch ${idx} failed: ${err.message}`);
+    }
+  }));
+  return out;
+}
+
+// ── ADF (Atlassian Document Format) → plain text ────────────────────────────
+// The description from /rest/api/3 is a doc tree. We don't care about
+// formatting — just need every text and link-href string so a regex can
+// pull out embedded URLs.
+function adfToPlainText(node) {
+  if (!node) return '';
+  if (typeof node === 'string') return node;
+  let out = '';
+  if (typeof node.text === 'string') out += ` ${node.text}`;
+  if (Array.isArray(node.marks)) {
+    for (const mark of node.marks) {
+      const href = mark?.attrs?.href;
+      if (href) out += ` ${href}`;
+    }
+  }
+  if (node.attrs) {
+    if (typeof node.attrs.url === 'string') out += ` ${node.attrs.url}`;
+    if (typeof node.attrs.href === 'string') out += ` ${node.attrs.href}`;
+  }
+  if (Array.isArray(node.content)) {
+    for (const child of node.content) out += ` ${adfToPlainText(child)}`;
+  }
+  return out;
+}
+
 // ── Create Issue ─────────────────────────────────────────────────────────────
 
 export async function createIssue(projectKey, summary, description, issueType = 'Task', extra = {}) {
