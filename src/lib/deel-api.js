@@ -307,25 +307,26 @@ const OFFBOARDING_MAX_PAGES = 40;
  *   (excluded: deposit refund, fee adjustments, off-cycle invoice, cancelled)
  */
 export async function listOffboardingCases() {
-  const baseParams = new URLSearchParams();
-  baseParams.set('limit', '50');
+  // Admin API expects literal `[]` in keys — URLSearchParams would encode them.
+  const staticParts = ['limit=50'];
   for (const s of OFFBOARDING_ACTIONABLE_STATUSES) {
-    baseParams.append('terminationFlowStatuses[]', s);
+    staticParts.push(`terminationFlowStatuses[]=${encodeURIComponent(s)}`);
   }
+  const staticQuery = staticParts.join('&');
 
   const all = [];
   const seen = new Set();
   let cursor = null;
   let serverTotal = null;
+  let page = 0;
 
-  for (let page = 0; page < OFFBOARDING_MAX_PAGES; page++) {
-    const params = new URLSearchParams(baseParams);
-    if (cursor) params.set('cursor', cursor);
-
-    const res = await deelFetch(`/admin/eor/terminations_v3?${params.toString()}`);
+  for (; page < OFFBOARDING_MAX_PAGES; page++) {
+    const qs = cursor ? `${staticQuery}&cursor=${encodeURIComponent(cursor)}` : staticQuery;
+    const res = await deelFetch(`/admin/eor/terminations_v3?${qs}`);
     if (serverTotal === null) serverTotal = res?.count?.total ?? null;
 
-    for (const t of res?.terminations || []) {
+    const items = res?.terminations || [];
+    for (const t of items) {
       if (!seen.has(t.id)) {
         seen.add(t.id);
         all.push(t);
@@ -335,6 +336,8 @@ export async function listOffboardingCases() {
     cursor = res?.cursor || null;
     if (!cursor) break;
   }
+
+  console.log(`[offboarding] fetched ${page + 1} page(s), ${all.length} deduped records (server reports ${serverTotal} matches)`);
 
   // Defensive client-side filter — the server filter handles most, but
   // excluded-status + duplicate records still slip through occasionally.
