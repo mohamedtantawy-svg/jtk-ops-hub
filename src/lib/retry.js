@@ -45,7 +45,9 @@ export async function withRetry(fn, opts = {}) {
       const delay = Math.min(baseDelay * Math.pow(2, attempt), maxDelay);
       const jitter = delay * (0.5 + Math.random() * 0.5); // 50-100% of delay
       const tag = label || 'retry';
-      console.warn(`[${tag}] Attempt ${attempt + 1}/${maxRetries + 1} failed (${err.status || err.code || 'network'}), retrying in ${Math.round(jitter)}ms...`);
+      const reason = err.status || err.code || 'network';
+      const snippet = (err.message || '').replace(/\s+/g, ' ').slice(0, 200);
+      console.warn(`[${tag}] Attempt ${attempt + 1}/${maxRetries + 1} failed (${reason}): ${snippet} — retrying in ${Math.round(jitter)}ms...`);
       await new Promise(r => setTimeout(r, jitter));
     }
   }
