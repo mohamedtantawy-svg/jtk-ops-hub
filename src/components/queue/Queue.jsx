@@ -762,7 +762,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           emptyIcon="bi-person-dash"
           emptyLabel="No active offboarding cases"
           emptySubLabel="All termination cases have been resolved"
-          sortDefault="endDate"
+          sortDefault="sla"
           dateField="endDate"
           dateLabel="End Date"
           showClient
