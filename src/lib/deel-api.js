@@ -281,7 +281,9 @@ export async function listPausedOnboarding() {
 
 // Actionable flow statuses (mirrors BI filter: exclude payment-cleanup steps).
 // Server-side filter via `terminationFlowStatuses[]=` — one per entry.
+// The API accepts all count-object bucket names as values here.
 const OFFBOARDING_ACTIONABLE_STATUSES = [
+  // Termination-path buckets
   'AwaitingAssignee',
   'AwaitingCSMReview',
   'AwaitingLegalReview',
@@ -294,6 +296,20 @@ const OFFBOARDING_ACTIONABLE_STATUSES = [
   'Documents#DOCUMENTS_CONFIRMATION',
   'Documents#EMPLOYEE_SIGNATURE',
   'Unenrollment',
+  // Sign-off sub-buckets (apply to both termination + resignation paths)
+  'ClientSignOffAwaitingClientReview',
+  'ClientSignOffAwaitingClientFeedback',
+  'ClientSignOffClientFeedbackProvided',
+  'ClientSignOffRequestedChanges',
+  'ClientSignOffApproved',
+  'EmployeeSignOffAwaitingSignature',
+  'EmployeeSignOffSigned',
+  'EmployeeSignOffChangeRequested',
+  'EmployeeSignOffNotResponded',
+  // Resignation-specific sub-tasks
+  'ClientTasksResignationFromEmployeeNotReplied',
+  'ClientTasksResignationFromEmployeeAccepted',
+  'ClientTasksResignationFromEmployeeDeclined',
 ];
 
 // Top-level statuses that mean the termination is closed — exclude these.
