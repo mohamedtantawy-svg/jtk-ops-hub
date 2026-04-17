@@ -1,6 +1,7 @@
 import { useState, useMemo, useContext } from 'react';
 import { GM_REPORTS } from '../../data/reports';
 import { PermissionsContext } from '../../App';
+import { MEMBERS_BY_EMAIL, getDirectReports, getAllReports } from '../../data/members';
 
 const DATE_RANGES = [
   { id:'7d',  label:'Last 7 Days',  days:7  },
@@ -24,6 +25,25 @@ const GMReportingView=({user,addToast,createReportModal,setCreateReportModal})=>
   const [newReportType,setNewReportType]=useState('hr_report');
   const [newReportSummary,setNewReportSummary]=useState('');
   const [newReportPriority,setNewReportPriority]=useState('normal');
+  const [filterMyTeam,setFilterMyTeam]=useState(false);
+
+  // Build "my team" name set for team leads / managers / RMs
+  const member = MEMBERS_BY_EMAIL[(user?.email||'').toLowerCase()];
+  const access = member?.access || 'agent';
+  const isLeadOrAbove = ['team_lead','regional_manager','admin'].includes(access);
+  const myTeamNames = useMemo(()=>{
+    if(!isLeadOrAbove||!user?.email) return new Set();
+    const reports = access==='regional_manager'||access==='admin'
+      ? getAllReports(user.email)
+      : getDirectReports(user.email).map(m=>m.email);
+    const names = new Set();
+    names.add((member?.name||'').toLowerCase());
+    for(const email of reports){
+      const m = MEMBERS_BY_EMAIL[email];
+      if(m) names.add(m.name.toLowerCase());
+    }
+    return names;
+  },[isLeadOrAbove, user?.email, access]);
 
   const selReport=GM_REPORTS.find(r=>r.id===selReportId)||null;
 
@@ -31,6 +51,12 @@ const GMReportingView=({user,addToast,createReportModal,setCreateReportModal})=>
     if(filterStatus!=='all'&&r.status!==filterStatus)return false;
     if(filterType!=='all'&&r.type!==filterType)return false;
     if(searchTerm&&!r.summary.toLowerCase().includes(searchTerm.toLowerCase())&&!r.id.toLowerCase().includes(searchTerm.toLowerCase()))return false;
+    // "My Team" filter — show only reports from/assigned to team members
+    if(filterMyTeam&&myTeamNames.size>0){
+      const reporterMatch=r.reporter&&myTeamNames.has(r.reporter.toLowerCase());
+      const assigneeMatch=r.assignedTo&&myTeamNames.has(r.assignedTo.toLowerCase());
+      if(!reporterMatch&&!assigneeMatch)return false;
+    }
     // Date range filter
     if(r.createdAt){
       const rangeObj=DATE_RANGES.find(d=>d.id===dateRange);
@@ -42,7 +68,7 @@ const GMReportingView=({user,addToast,createReportModal,setCreateReportModal})=>
       }
     }
     return true;
-  }),[filterStatus,filterType,searchTerm,dateRange]);
+  }),[filterStatus,filterType,searchTerm,dateRange,filterMyTeam,myTeamNames]);
 
   const reportCounts={
     hr_report:GM_REPORTS.filter(r=>r.type==='hr_report').length,
@@ -184,6 +210,14 @@ const GMReportingView=({user,addToast,createReportModal,setCreateReportModal})=>
               {chip.label}
             </button>
           ))}
+          {isLeadOrAbove&&(
+            <>
+              <div style={{width:1,height:20,background:'#e8e8e8',flexShrink:0,margin:'0 2px'}}/>
+              <button onClick={()=>setFilterMyTeam(p=>!p)} style={{padding:'5px 12px',borderRadius:128,border:`1px solid ${filterMyTeam?'#6b3fa0':'#e8e8e8'}`,background:filterMyTeam?'#f3eff8':'white',color:filterMyTeam?'#6b3fa0':'#616161',fontSize:11,cursor:'pointer',fontWeight:filterMyTeam?700:500,whiteSpace:'nowrap',flexShrink:0,display:'inline-flex',alignItems:'center',gap:4}}>
+                <i className="bi-people-fill" style={{fontSize:11}}/> My Team
+              </button>
+            </>
+          )}
           <input type="text" placeholder="Search reports..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} style={{marginLeft:'auto',border:'1px solid #e8e8e8',borderRadius:10,padding:'6px 12px',fontSize:12,color:'#1b1b1b',outline:'none',minWidth:160,flexShrink:0,transition:'border-color .15s,box-shadow .15s'}} onFocus={e=>{e.target.style.borderColor='#1f74b3';e.target.style.boxShadow='0 0 0 3px rgba(31,116,179,0.1)';}} onBlur={e=>{e.target.style.borderColor='#e8e8e8';e.target.style.boxShadow='none';}}/>
         </div>
       </div>
