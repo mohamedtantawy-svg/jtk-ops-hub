@@ -53,14 +53,26 @@ async function buildOffboardingResult() {
   const raw = await listOffboardingCases();
   const now = new Date();
 
-  const items = raw.map(c => {
-    // Use endDate (last working day) or desiredEndDate as fallback
+  // Dedupe defensively by id (listOffboardingCases already dedupes, but be safe)
+  const seen = new Set();
+  const deduped = [];
+  for (const c of raw) {
+    if (!seen.has(c.id)) {
+      seen.add(c.id);
+      deduped.push(c);
+    }
+  }
+
+  const items = deduped.map(c => {
     const endDateStr = c.endDate || c.desiredEndDate || '';
     const endDate = endDateStr ? new Date(endDateStr) : null;
     const daysUntilEnd = endDate ? Math.ceil((endDate - now) / (1000 * 60 * 60 * 24)) : null;
 
+    const { label: primaryBucket, severity, color } = derivePrimaryBucket(c);
+    const typeLabel = deriveTypeLabel(c);
+
     return {
-      id: c.id,                                           // termination ID
+      id: c.id,
       contractId: c.contractId,
       contractOid: c.contractOid || '',
       name: c.name || '',
@@ -78,23 +90,26 @@ async function buildOffboardingResult() {
       noticePeriod: c.noticePeriod || 0,
       organizationName: c.organizationName || '',
       exAssignee: c.exAssignee || '',
-      exAssigneeEmail: c.exAssigneeEmail || '',       // agent email (if API provides it)
+      exAssigneeEmail: c.exAssigneeEmail || '',
       reason: c.reason || '',
       isResignation: c.isResignation || false,
       jiraUrl: c.jiraUrl || '',
-      adminStatus: c.status || '',                        // raw admin status
-      status: deriveStatus(c.status, daysUntilEnd),
-      contractUrl: c.contractOid
-        ? `https://app.deel.com/contracts/${c.contractOid}`
-        : '',
+      adminStatus: c.status || '',
+      clientSignOffStatus: c.clientSignOffStatus || '',
+      employeeSignOffStatus: c.employeeSignOffStatus || '',
+      terminationFlowStatuses: c.terminationFlowStatuses || [],
+      typeLabel,                                          // "Termination" | "Resignation (Employee)" | "Resignation (Client)"
+      primaryBucket,                                      // most-actionable bucket label
+      status: { label: primaryBucket, severity, color },  // for UI status pill
+      contractUrl: c.contractOid ? `https://app.deel.com/contracts/${c.contractOid}` : '',
     };
   });
 
-  // Sort: AWAITING_TRIAGE first, then by days until end
+  // Sort by priority (most actionable first), then end date ascending.
   items.sort((a, b) => {
-    const aUrgent = a.adminStatus === 'AWAITING_TRIAGE' ? 0 : 1;
-    const bUrgent = b.adminStatus === 'AWAITING_TRIAGE' ? 0 : 1;
-    if (aUrgent !== bUrgent) return aUrgent - bUrgent;
+    const ap = BUCKET_PRIORITY[a.primaryBucket] ?? 999;
+    const bp = BUCKET_PRIORITY[b.primaryBucket] ?? 999;
+    if (ap !== bp) return ap - bp;
     return (a.daysUntilEnd ?? 9999) - (b.daysUntilEnd ?? 9999);
   });
 
@@ -102,34 +117,137 @@ async function buildOffboardingResult() {
 }
 
 /**
- * Derive display status from the admin API status string + days until end.
- * Admin statuses: AWAITING_TRIAGE, PROCESSING, COMPLETED, CANCELLED, etc.
+ * Derive the user-facing "Type" label from the admin record.
+ *   Termination: top-level type === TERMINATION
+ *   Resignation (Employee): isEmployeeResignation === true
+ *   Resignation (Client): top-level type is a resignation flavor and not employee-initiated
  */
-function deriveStatus(adminStatus, daysUntilEnd) {
-  const s = (adminStatus || '').toUpperCase();
+function deriveTypeLabel(c) {
+  const t = (c.hiringType || '').toUpperCase();
+  if (c.isResignation === true) return 'Resignation (Employee)';
+  if (t.includes('RESIGNATION')) return 'Resignation (Client)';
+  return 'Termination';
+}
 
-  if (s === 'COMPLETED' || s === 'DONE')
-    return { label: 'Completed', severity: 'info', color: '#616161' };
-  if (s === 'CANCELLED' || s === 'CANCELED')
-    return { label: 'Cancelled', severity: 'info', color: '#9e9e9e' };
-  if (s === 'AWAITING_TRIAGE')
+/**
+ * Priority order for the primary bucket shown to ops (most actionable → least).
+ * Lower number = more actionable.
+ */
+const BUCKET_PRIORITY = {
+  'Awaiting Assignee':                        1,
+  'Awaiting Triage':                          2,
+  'Awaiting Client Review':                   3,
+  'Client Sign-Off: Changes Requested':       4,
+  'Employee Sign-Off: Changes Requested':     5,
+  'Employee Sign-Off: Not Responded':         6,
+  'Awaiting Legal Review':                    7,
+  'Awaiting Docs → Client':                   8,
+  'Awaiting Docs → Employee':                 9,
+  'Docs: Employee Notification':             10,
+  'Docs: Documents Confirmation':            11,
+  'Docs: Employee Signature':                12,
+  'Client Sign-Off: Awaiting Client Review': 13,
+  'Client Sign-Off: Awaiting Feedback':      14,
+  'Client Sign-Off: Feedback Provided':      15,
+  'Client Sign-Off: Approved':               16,
+  'Employee Sign-Off: Signed':               17,
+  'Awaiting Final Payroll Decision':         18,
+  'Offboarding Payments':                    19,
+  'Unenrollment':                            20,
+  'Processing':                              98,
+  'Unknown':                                 99,
+};
+
+/**
+ * Pick the single most-actionable bucket label + severity + color for a record.
+ * Evaluates (in priority order): unassigned → top-level status → sign-off sub-states
+ * → flow-status array. First match wins.
+ */
+function derivePrimaryBucket(c) {
+  const flow = new Set(c.terminationFlowStatuses || []);
+  const status = (c.status || '').toUpperCase();
+  const clientSO = (c.clientSignOffStatus || '').toUpperCase();
+  const employeeSO = (c.employeeSignOffStatus || '').toUpperCase();
+
+  // 1 — unassigned
+  if (!c.exAssigneeId && !c.exAssignee) {
+    return { label: 'Awaiting Assignee', severity: 'critical', color: '#d42d35' };
+  }
+
+  // 2 — top-level triage (not yet entered review)
+  if (status === 'AWAITING_TRIAGE') {
     return { label: 'Awaiting Triage', severity: 'warning', color: '#ed8d00' };
+  }
 
-  // For active cases, also factor in timeline urgency
-  if (daysUntilEnd !== null && daysUntilEnd < 0)
-    return { label: 'Overdue', severity: 'critical', color: '#d42d35' };
-  if (daysUntilEnd !== null && daysUntilEnd <= 14)
-    return { label: 'Imminent', severity: 'critical', color: '#d42d35' };
+  // 3 — client is blocking us
+  if (flow.has('AwaitingClientReview')) {
+    return { label: 'Awaiting Client Review', severity: 'warning', color: '#ed8d00' };
+  }
 
-  if (s === 'PROCESSING' || s === 'IN_PROGRESS')
+  // 4/5 — changes-requested loops (high touch)
+  if (clientSO === 'CHANGES_REQUESTED_BY_EMPLOYEE' || clientSO === 'REQUESTED_CHANGES') {
+    return { label: 'Client Sign-Off: Changes Requested', severity: 'warning', color: '#ed8d00' };
+  }
+  if (employeeSO === 'CHANGES_REQUESTED_BY_EMPLOYEE' || employeeSO === 'CHANGE_REQUESTED') {
+    return { label: 'Employee Sign-Off: Changes Requested', severity: 'warning', color: '#ed8d00' };
+  }
+  if (employeeSO === 'NOT_RESPONDED') {
+    return { label: 'Employee Sign-Off: Not Responded', severity: 'warning', color: '#ed8d00' };
+  }
+
+  // 7–12 — flow-status buckets (actionable ops work)
+  if (flow.has('AwaitingLegalReview')) {
+    return { label: 'Awaiting Legal Review', severity: 'active', color: '#1d4ed8' };
+  }
+  if (flow.has('AwaitingDocumentSharingForClientApproval')) {
+    return { label: 'Awaiting Docs → Client', severity: 'active', color: '#1d4ed8' };
+  }
+  if (flow.has('AwaitingDocumentSharingForEmployeeApproval')) {
+    return { label: 'Awaiting Docs → Employee', severity: 'active', color: '#1d4ed8' };
+  }
+  if (flow.has('Documents#EMPLOYEE_NOTIFICATION')) {
+    return { label: 'Docs: Employee Notification', severity: 'active', color: '#1d4ed8' };
+  }
+  if (flow.has('Documents#DOCUMENTS_CONFIRMATION')) {
+    return { label: 'Docs: Documents Confirmation', severity: 'active', color: '#1d4ed8' };
+  }
+  if (flow.has('Documents#EMPLOYEE_SIGNATURE')) {
+    return { label: 'Docs: Employee Signature', severity: 'active', color: '#1d4ed8' };
+  }
+
+  // 13–16 — client sign-off positive path
+  if (clientSO === 'AWAITING_REVIEW') {
+    return { label: 'Client Sign-Off: Awaiting Client Review', severity: 'active', color: '#1d4ed8' };
+  }
+  if (clientSO === 'AWAITING_FEEDBACK') {
+    return { label: 'Client Sign-Off: Awaiting Feedback', severity: 'active', color: '#1d4ed8' };
+  }
+  if (clientSO === 'FEEDBACK_PROVIDED') {
+    return { label: 'Client Sign-Off: Feedback Provided', severity: 'active', color: '#1d4ed8' };
+  }
+  if (clientSO === 'APPROVED') {
+    return { label: 'Client Sign-Off: Approved', severity: 'info', color: '#616161' };
+  }
+
+  // 17 — employee sign-off positive path
+  if (employeeSO === 'APPROVED' || employeeSO === 'SIGNED') {
+    return { label: 'Employee Sign-Off: Signed', severity: 'info', color: '#616161' };
+  }
+
+  // 18–20 — late-stage flow buckets
+  if (flow.has('AwaitingFinalPayrollDecision')) {
+    return { label: 'Awaiting Final Payroll Decision', severity: 'active', color: '#1d4ed8' };
+  }
+  if (flow.has('OffboardingPayments')) {
+    return { label: 'Offboarding Payments', severity: 'active', color: '#1d4ed8' };
+  }
+  if (flow.has('Unenrollment')) {
+    return { label: 'Unenrollment', severity: 'active', color: '#1d4ed8' };
+  }
+
+  // Fallbacks
+  if (status === 'PROCESSING' || status === 'IN_PROGRESS') {
     return { label: 'Processing', severity: 'active', color: '#1d4ed8' };
-
-  // Fallback: use days-based logic
-  if (daysUntilEnd === null)
-    return { label: adminStatus || 'Unknown', severity: 'info', color: '#9e9e9e' };
-  if (daysUntilEnd <= 30)
-    return { label: 'Awaiting Action', severity: 'warning', color: '#ed8d00' };
-  if (daysUntilEnd <= 90)
-    return { label: 'In Progress', severity: 'active', color: '#1d4ed8' };
-  return { label: 'Scheduled', severity: 'info', color: '#616161' };
+  }
+  return { label: 'Unknown', severity: 'info', color: '#9e9e9e' };
 }
