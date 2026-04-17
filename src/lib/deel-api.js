@@ -408,10 +408,15 @@ export async function listOffboardingCases() {
     team: c.team || '',
     hiringType: c.type || 'eor',                     // top-level type: TERMINATION | RESIGNATION | ...
     startDate: c.startDate || '',
-    endDate: c.endDate || '',                         // last working day (may be null)
-    desiredEndDate: c.desiredEndDate || '',
+    endDate: c.endDate || '',                         // confirmed last working day (may be null)
+    desiredEndDate: c.desiredEndDate || c.requestData?.desiredEndDate || '',
+    originalEndDate: c.requestData?.originalEndDate || '',
+    earliestEndDate: c.requestData?.earliestEndDate || '',
+    isUrgentEndDate: c.requestData?.isUrgentEndDate === true,
     createdAt: c.createdAt || '',
-    updatedAt: c.updatedAt || '',
+    // Admin API doesn't return an `updatedAt` field on terminations; use the
+    // latest timestamp we can derive so the "Updated" column isn't empty.
+    updatedAt: c.updatedAt || c.requestData?.confirmedAt || c.requestData?.at || c.createdAt || '',
     status: c.status || '',                           // top-level lifecycle status
     organizationName: c.organizationName || '',       // client company name
     exAssignee: c.exAssignee || '',                   // assigned agent (name)

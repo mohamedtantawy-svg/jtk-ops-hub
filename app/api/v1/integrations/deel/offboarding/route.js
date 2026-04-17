@@ -64,9 +64,12 @@ async function buildOffboardingResult() {
   }
 
   const items = deduped.map(c => {
-    const endDateStr = c.endDate || c.desiredEndDate || '';
+    // Priority: confirmed endDate → desired → original (from requestData) → earliest.
+    // Empty string when nothing is set — UI renders "ASAP" in that case.
+    const endDateStr = c.endDate || c.desiredEndDate || c.originalEndDate || c.earliestEndDate || '';
     const endDate = endDateStr ? new Date(endDateStr) : null;
     const daysUntilEnd = endDate ? Math.ceil((endDate - now) / (1000 * 60 * 60 * 24)) : null;
+    const endDateIsConfirmed = !!c.endDate;
 
     const { label: primaryBucket, severity, color } = derivePrimaryBucket(c);
     const typeLabel = deriveTypeLabel(c);
@@ -82,10 +85,12 @@ async function buildOffboardingResult() {
       team: c.team || '',
       hiringType: c.hiringType || 'eor',
       endDate: endDateStr,
+      endDateIsConfirmed,                                 // false → UI shows "ASAP"-style label
+      isUrgentEndDate: c.isUrgentEndDate === true,
       desiredEndDate: c.desiredEndDate || '',
       startDate: c.startDate || '',
       requestedDate: c.createdAt || '',
-      updatedAt: c.updatedAt || '',
+      updatedAt: c.updatedAt || '',                       // already falls back in listOffboardingCases
       daysUntilEnd,
       noticePeriod: c.noticePeriod || 0,
       organizationName: c.organizationName || '',

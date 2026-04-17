@@ -117,6 +117,8 @@ export function normalizeOffboarding(items = []) {
     subject: c.name || 'Unknown',
     clientName: c.organizationName || '',
     endDate: c.endDate || c.desiredEndDate || '',
+    endDateIsConfirmed: c.endDateIsConfirmed === true,   // false → render "ASAP" instead of date
+    isUrgentEndDate: c.isUrgentEndDate === true,
     typeLabel: c.typeLabel || 'Termination',
     function: c.reason
       ? (c.reason || '').replace(/_/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase()).toLowerCase().replace(/^\w/, ch => ch.toUpperCase())

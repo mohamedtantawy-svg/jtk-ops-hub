@@ -380,7 +380,15 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
 
       {/* Date column (Start Date for onboarding, End Date for offboarding, etc.) */}
       <td style={{ ...tdStyle, fontSize: 11, color: '#616161', whiteSpace: 'nowrap' }}>
-        {row[dateField] ? fmtDate(row[dateField]) : '--'}
+        {(() => {
+          const val = row[dateField];
+          // Offboarding: when end date is not yet confirmed, mirror admin UI's "ASAP" label.
+          if (dateField === 'endDate' && !row.endDateIsConfirmed) {
+            if (val) return <span title={`Desired: ${fmtDate(val)}`} style={{ color: '#9e9e9e' }}>{fmtDate(val)}<span style={{ fontSize: 9, marginLeft: 4, color: '#b0b0b0' }}>(desired)</span></span>;
+            return <span style={{ color: '#9e9e9e', fontStyle: 'italic' }}>ASAP</span>;
+          }
+          return val ? fmtDate(val) : '--';
+        })()}
       </td>
 
       {/* SLA */}
