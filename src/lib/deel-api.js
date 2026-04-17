@@ -324,15 +324,19 @@ export async function listOffboardingCases() {
 
   if (DEEL_ADMIN_TOKEN) {
     // Admin JWT present: full pagination + server-side flow-status filter.
-    const staticParts = ['limit=50'];
+    // The admin API validates params via Joi alternatives:
+    //   first page:      `limit=50&terminationFlowStatuses[]=...`
+    //   subsequent page: `cursor=<opaque>` ONLY — the cursor already encodes
+    //                    limit + filters. Sending both together returns 400.
+    const firstPageParts = ['limit=50'];
     for (const s of OFFBOARDING_ACTIONABLE_STATUSES) {
-      staticParts.push(`terminationFlowStatuses[]=${encodeURIComponent(s)}`);
+      firstPageParts.push(`terminationFlowStatuses[]=${encodeURIComponent(s)}`);
     }
-    const staticQuery = staticParts.join('&');
+    const firstPageQuery = firstPageParts.join('&');
 
     let cursor = null;
     for (; page < OFFBOARDING_MAX_PAGES; page++) {
-      const qs = cursor ? `${staticQuery}&cursor=${encodeURIComponent(cursor)}` : staticQuery;
+      const qs = cursor ? `cursor=${encodeURIComponent(cursor)}` : firstPageQuery;
       const res = await deelFetch(`/admin/eor/terminations_v3?${qs}`);
       if (serverTotal === null) serverTotal = res?.count?.total ?? null;
 
