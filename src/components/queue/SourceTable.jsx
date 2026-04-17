@@ -235,18 +235,18 @@ export default function SourceTable({
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: '#f5f4f2', position: 'sticky', top: 0, zIndex: 2 }}>
-                {showSourceColumn && <th style={{ ...thStyle, width: 80 }}>Source</th>}
-                <SortTh col="subject"   label="Employee"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, textAlign: 'left', minWidth: 220 }} />
-                {showClient && <SortTh col="clientName" label="Organization" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, textAlign: 'left', minWidth: 160 }} />}
-                {showType && <SortTh col="typeLabel" label="Type" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 130 }} />}
-                <SortTh col="country"   label="Country"    sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 100 }} />
-                <SortTh col="assignee"  label="Assignee"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 110 }} />
-                <SortTh col={dateField} label={dateLabel} sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 90 }} />
-                <SortTh col="sla"       label="SLA"        sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 70 }} />
-                <SortTh col="updatedAt" label="Updated"    sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 90 }} />
-                <SortTh col="status"    label="Status"     sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 130 }} />
-                <th style={{ ...thStyle, width: 70 }}>Task</th>
-                <th style={{ ...thStyle, width: 70 }}>Contract</th>
+                {showSourceColumn && <th style={{ ...thStyle, width: 70 }}>Source</th>}
+                <SortTh col="subject"   label="Employee"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, textAlign: 'left', minWidth: 150, maxWidth: 180 }} />
+                {showClient && <SortTh col="clientName" label="Organization" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, textAlign: 'left', minWidth: 120, maxWidth: 150 }} />}
+                {showType && <SortTh col="typeLabel" label="Type" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 90 }} />}
+                <SortTh col="country"   label="Country"    sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 80 }} />
+                <SortTh col="assignee"  label="Assignee"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 90 }} />
+                <SortTh col={dateField} label={dateLabel} sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 80 }} />
+                <SortTh col="sla"       label="SLA"        sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 60 }} />
+                <SortTh col="updatedAt" label="Updated"    sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 70 }} />
+                <SortTh col="status"    label="Status"     sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 115 }} />
+                <th style={{ ...thStyle, width: 55 }}>Task</th>
+                <th style={{ ...thStyle, width: 55 }}>Contract</th>
               </tr>
             </thead>
             <tbody>
@@ -313,7 +313,7 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
       )}
 
       {/* Subject */}
-      <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: '#1b1b1b', maxWidth: 320 }}>
+      <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: '#1b1b1b', maxWidth: 180 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <div style={{
             width: 26, height: 26, borderRadius: '50%',
@@ -331,7 +331,8 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
 
       {/* Client Name */}
       {showClient && (
-        <td style={{ ...tdStyle, textAlign: 'left', fontSize: 12, color: '#1b1b1b', fontWeight: 500, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <td style={{ ...tdStyle, textAlign: 'left', fontSize: 12, color: '#1b1b1b', fontWeight: 500, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+          title={row.clientName || ''}>
           {row.clientName || '--'}
         </td>
       )}
