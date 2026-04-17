@@ -62,9 +62,15 @@ export function useChangeRequestData(enabled = true) {
       }
       lastFetch.current = Date.now();
 
+      // Same guard per source — don't let a transient empty response wipe
+      // the good cached snapshot used on the next page load.
       try {
-        localStorage.setItem(CACHE_KEY_AMENDMENTS, JSON.stringify({ items: fetchedAmendments, ts: Date.now() }));
-        localStorage.setItem(CACHE_KEY_REDLINES, JSON.stringify({ items: fetchedRedlines, ts: Date.now() }));
+        if (fetchedAmendments.length > 0 || amendments.length === 0) {
+          localStorage.setItem(CACHE_KEY_AMENDMENTS, JSON.stringify({ items: fetchedAmendments, ts: Date.now() }));
+        }
+        if (fetchedRedlines.length > 0 || redlines.length === 0) {
+          localStorage.setItem(CACHE_KEY_REDLINES, JSON.stringify({ items: fetchedRedlines, ts: Date.now() }));
+        }
       } catch (e) {}
     } catch (err) {
       console.warn('[useChangeRequestData] Failed:', err.message);

@@ -159,43 +159,65 @@ function deriveTypeLabel(c) {
  * Priority order for the primary bucket shown to ops (most actionable → least).
  * Lower number = more actionable.
  */
+// Priority follows the 9-step admin workflow: earlier steps = more actionable.
+// Within a step, warning sub-labels (changes requested / not responded) are
+// ranked higher than the neutral in-progress variant.
 const BUCKET_PRIORITY = {
-  'Awaiting Assignee':                        1,
-  'Awaiting Triage':                          2,
-  'Awaiting Client Review':                   3,
-  'Client Sign-Off: Changes Requested':       4,
-  'Employee Sign-Off: Changes Requested':     5,
-  'Employee Sign-Off: Not Responded':         6,
-  'Awaiting Legal Review':                    7,
-  'Awaiting Docs → Client':                   8,
-  'Awaiting Docs → Employee':                 9,
-  'Docs: Employee Notification':             10,
-  'Docs: Documents Confirmation':            11,
-  'Docs: Employee Signature':                12,
-  'Client Sign-Off: Awaiting Client Review': 13,
-  'Client Sign-Off: Awaiting Feedback':      14,
-  'Client Sign-Off: Feedback Provided':      15,
-  'Client Sign-Off: Approved':               16,
-  'Employee Sign-Off: Signed':               17,
-  'Awaiting Final Payroll Decision':         18,
-  'Offboarding Payments':                    19,
-  'Unenrollment':                            20,
-  'Awaiting Payment Method':                 21,
-  'Awaiting Pending Items Payment':          22,
-  'Off-Cycle Invoice':                       23,
-  'Fee and Adjustments':                     24,
-  'Awaiting Document Agreement':             25,
-  'End Details':                             26,
-  'Docs Shared':                             27,
-  'Awaiting Cron Execution':                 28,
-  'Processing':                              98,
-  'Unknown':                                 99,
+  // Cross-cutting
+  'Awaiting Assignee':                            1,
+  // Step 1 — HRX Review (AWAITING_TRIAGE)
+  'HRX Review — Awaiting Assignee':               2,
+  'HRX Review — Client Review (Resignation)':     3,
+  'HRX Review — Legal Input':                     4,
+  'HRX Review — CSM Input':                       5,
+  'HRX Review':                                   6,
+  // Step 2 — Client sign off
+  'Client Sign Off — Changes Requested':         10,
+  'Client Sign Off — Feedback Provided':         11,
+  'Client Sign Off':                              12,
+  // Step 3 — Employee sign off
+  'Employee Sign Off — Not Responded':           20,
+  'Employee Sign Off — Changes Requested':       21,
+  'Employee Sign Off':                            22,
+  // Step 4 — Legal input (post-triage)
+  'Legal Input':                                  30,
+  // Step 5 — End of contract details
+  'End of Contract Details':                      40,
+  // Step 6 — Offboarding payments
+  'Offboarding Payments':                         50,
+  // Step 7 — Unenrollment
+  'Unenrollment':                                 60,
+  // Fallbacks
+  'Processing':                                   98,
+  'Unknown':                                      99,
 };
 
 /**
- * Pick the single most-actionable bucket label + severity + color for a record.
- * Evaluates (in priority order): unassigned → top-level status → sign-off sub-states
- * → flow-status array. First match wins.
+ * Return true when the flow array shows that legal review has finished
+ * (either completed or skipped as "not needed"). The array is a union of
+ * all sub-states that have ever been active; completion markers persist.
+ */
+function isSubPhaseDone(flow, substring) {
+  for (const f of flow) if (f.includes(substring)) return true;
+  return false;
+}
+
+/**
+ * Derive the primary bucket label using the admin UI's 9-step sequential
+ * workflow as a mental model:
+ *   1. HRX review         (top-level status AWAITING_TRIAGE)
+ *   2. Client sign off    (clientSignOffStatus in progress)
+ *   3. Employee sign off  (employeeSignOffStatus in progress)
+ *   4. Legal input        (AwaitingLegalReview still open)
+ *   5. End of contract details    (AwaitingFinalPayrollDecision)
+ *   6. Offboarding payments       (OffboardingPayments)
+ *   7. Unenrollment               (Unenrollment)
+ *   8. Fees & Adjustments         (FeeAndAdjustments)        ← excluded upstream
+ *   9. Deposit refund             (AwaitingDepositConfirmation) ← excluded
+ *
+ * A record's *current* step is the first one that still shows "in progress".
+ * For AWAITING_TRIAGE records we sub-classify (Legal input / CSM input /
+ * Client review) so the status pill reflects the real blocker.
  */
 function derivePrimaryBucket(c) {
   const flow = new Set(c.terminationFlowStatuses || []);
@@ -203,111 +225,78 @@ function derivePrimaryBucket(c) {
   const clientSO = (c.clientSignOffStatus || '').toUpperCase();
   const employeeSO = (c.employeeSignOffStatus || '').toUpperCase();
 
-  // 1 — unassigned
+  // Unassigned is always the top priority — nobody is working this yet.
   if (!c.exAssigneeId && !c.exAssignee) {
     return { label: 'Awaiting Assignee', severity: 'critical', color: '#d42d35' };
   }
 
-  // 2 — top-level triage (not yet entered review)
+  // ── Step 1: HRX review (top-level status AWAITING_TRIAGE) ───────────────
+  // During triage, multiple sub-reviews (legal, CSM, client) run in parallel
+  // and ALL must finish before the record advances to PROCESSING. Pick the
+  // sub-filter that best describes the real blocker.
   if (status === 'AWAITING_TRIAGE') {
-    return { label: 'Awaiting Triage', severity: 'warning', color: '#ed8d00' };
+    if (flow.has('AwaitingAssignee')) {
+      return { label: 'HRX Review — Awaiting Assignee', severity: 'critical', color: '#d42d35' };
+    }
+    if (flow.has('AwaitingClientReview')) {
+      return { label: 'HRX Review — Client Review (Resignation)', severity: 'warning', color: '#ed8d00' };
+    }
+    if (flow.has('AwaitingLegalReview') && !isSubPhaseDone(flow, 'LegalReview.LegalReview')) {
+      return { label: 'HRX Review — Legal Input', severity: 'warning', color: '#ed8d00' };
+    }
+    if (flow.has('AwaitingCSMReview') && !isSubPhaseDone(flow, 'CSMReview.CSMReview')) {
+      return { label: 'HRX Review — CSM Input', severity: 'warning', color: '#ed8d00' };
+    }
+    return { label: 'HRX Review', severity: 'warning', color: '#ed8d00' };
   }
 
-  // 3 — client is blocking us
-  if (flow.has('AwaitingClientReview')) {
-    return { label: 'Awaiting Client Review', severity: 'warning', color: '#ed8d00' };
-  }
+  // From here down we're dealing with status === PROCESSING (or similar).
+  // Evaluate the 9-step sequence; the first "in progress" wins.
 
-  // 4/5 — changes-requested loops (high touch)
-  if (clientSO === 'CHANGES_REQUESTED_BY_EMPLOYEE' || clientSO === 'REQUESTED_CHANGES') {
-    return { label: 'Client Sign-Off: Changes Requested', severity: 'warning', color: '#ed8d00' };
-  }
-  if (employeeSO === 'CHANGES_REQUESTED_BY_EMPLOYEE' || employeeSO === 'CHANGE_REQUESTED') {
-    return { label: 'Employee Sign-Off: Changes Requested', severity: 'warning', color: '#ed8d00' };
-  }
-  if (employeeSO === 'NOT_RESPONDED') {
-    return { label: 'Employee Sign-Off: Not Responded', severity: 'warning', color: '#ed8d00' };
-  }
-
-  // 7–12 — flow-status buckets (actionable ops work)
-  if (flow.has('AwaitingLegalReview')) {
-    return { label: 'Awaiting Legal Review', severity: 'active', color: '#1d4ed8' };
-  }
-  if (flow.has('AwaitingDocumentSharingForClientApproval')) {
-    return { label: 'Awaiting Docs → Client', severity: 'active', color: '#1d4ed8' };
-  }
-  if (flow.has('AwaitingDocumentSharingForEmployeeApproval')) {
-    return { label: 'Awaiting Docs → Employee', severity: 'active', color: '#1d4ed8' };
-  }
-  if (flow.has('Documents#EMPLOYEE_NOTIFICATION')) {
-    return { label: 'Docs: Employee Notification', severity: 'active', color: '#1d4ed8' };
-  }
-  if (flow.has('Documents#DOCUMENTS_CONFIRMATION')) {
-    return { label: 'Docs: Documents Confirmation', severity: 'active', color: '#1d4ed8' };
-  }
-  if (flow.has('Documents#EMPLOYEE_SIGNATURE')) {
-    return { label: 'Docs: Employee Signature', severity: 'active', color: '#1d4ed8' };
-  }
-
-  // 13–16 — client sign-off positive path
-  if (clientSO === 'AWAITING_REVIEW') {
-    return { label: 'Client Sign-Off: Awaiting Client Review', severity: 'active', color: '#1d4ed8' };
-  }
-  if (clientSO === 'AWAITING_FEEDBACK') {
-    return { label: 'Client Sign-Off: Awaiting Feedback', severity: 'active', color: '#1d4ed8' };
+  // ── Step 2: Client sign off ─────────────────────────────────────────────
+  if (clientSO === 'REQUESTED_CHANGES' || clientSO === 'CHANGES_REQUESTED_BY_EMPLOYEE') {
+    return { label: 'Client Sign Off — Changes Requested', severity: 'warning', color: '#ed8d00' };
   }
   if (clientSO === 'FEEDBACK_PROVIDED') {
-    return { label: 'Client Sign-Off: Feedback Provided', severity: 'active', color: '#1d4ed8' };
+    return { label: 'Client Sign Off — Feedback Provided', severity: 'warning', color: '#ed8d00' };
   }
-  if (clientSO === 'APPROVED') {
-    return { label: 'Client Sign-Off: Approved', severity: 'info', color: '#616161' };
-  }
-
-  // 17 — employee sign-off positive path
-  if (employeeSO === 'APPROVED' || employeeSO === 'SIGNED') {
-    return { label: 'Employee Sign-Off: Signed', severity: 'info', color: '#616161' };
+  if (clientSO === 'AWAITING_REVIEW' || clientSO === 'AWAITING_FEEDBACK') {
+    return { label: 'Client Sign Off', severity: 'active', color: '#1d4ed8' };
   }
 
-  // 18–20 — late-stage flow buckets
-  if (flow.has('AwaitingFinalPayrollDecision')) {
-    return { label: 'Awaiting Final Payroll Decision', severity: 'active', color: '#1d4ed8' };
+  // ── Step 3: Employee sign off ───────────────────────────────────────────
+  if (employeeSO === 'NOT_RESPONDED') {
+    return { label: 'Employee Sign Off — Not Responded', severity: 'warning', color: '#ed8d00' };
   }
+  if (employeeSO === 'CHANGE_REQUESTED' || employeeSO === 'CHANGES_REQUESTED_BY_EMPLOYEE') {
+    return { label: 'Employee Sign Off — Changes Requested', severity: 'warning', color: '#ed8d00' };
+  }
+  if (employeeSO === 'AWAITING_REVIEW' || employeeSO === 'AWAITING_SIGNATURE') {
+    return { label: 'Employee Sign Off', severity: 'active', color: '#1d4ed8' };
+  }
+
+  // ── Step 4: Legal input ─────────────────────────────────────────────────
+  if (flow.has('AwaitingLegalReview') && !isSubPhaseDone(flow, 'LegalReview.LegalReview')) {
+    return { label: 'Legal Input', severity: 'active', color: '#1d4ed8' };
+  }
+
+  // ── Step 5: End of contract details ─────────────────────────────────────
+  if (flow.has('AwaitingFinalPayrollDecision') || flow.has('EndDetails')) {
+    return { label: 'End of Contract Details', severity: 'active', color: '#1d4ed8' };
+  }
+
+  // ── Step 6: Offboarding payments ────────────────────────────────────────
   if (flow.has('OffboardingPayments')) {
     return { label: 'Offboarding Payments', severity: 'active', color: '#1d4ed8' };
   }
+
+  // ── Step 7: Unenrollment ────────────────────────────────────────────────
   if (flow.has('Unenrollment')) {
     return { label: 'Unenrollment', severity: 'active', color: '#1d4ed8' };
   }
 
-  // 21-26 — payment/invoice phases (admin UI bucket labels)
-  if (flow.has('AwaitingToAttachClientMethod')) {
-    return { label: 'Awaiting Payment Method', severity: 'active', color: '#1d4ed8' };
-  }
-  if (flow.has('AwaitingPendingItemsPayment')) {
-    return { label: 'Awaiting Pending Items Payment', severity: 'active', color: '#1d4ed8' };
-  }
-  if (flow.has('AwaitingCronJobExecution')) {
-    return { label: 'Awaiting Cron Execution', severity: 'info', color: '#616161' };
-  }
-  if (flow.has('OffcycleInvoice')) {
-    return { label: 'Off-Cycle Invoice', severity: 'active', color: '#1d4ed8' };
-  }
-  if (flow.has('FeeAndAdjustments')) {
-    return { label: 'Fee and Adjustments', severity: 'active', color: '#1d4ed8' };
-  }
-
-  // 27-30 — catch-alls derived from flow array values that aren't bucket names
-  if (flow.has('AwaitingDocumentAgreement')) {
-    return { label: 'Awaiting Document Agreement', severity: 'active', color: '#1d4ed8' };
-  }
-  if (flow.has('EndDetails')) {
-    return { label: 'End Details', severity: 'active', color: '#1d4ed8' };
-  }
-  if (flow.has('DocumentSharingCompleted')) {
-    return { label: 'Docs Shared', severity: 'info', color: '#616161' };
-  }
-
-  // Fallbacks
+  // ── Steps 8/9: excluded upstream (should not reach here) ───────────────
+  // Fallbacks — top-level status when nothing specific matched
   if (status === 'PROCESSING' || status === 'IN_PROGRESS') {
     return { label: 'Processing', severity: 'active', color: '#1d4ed8' };
   }

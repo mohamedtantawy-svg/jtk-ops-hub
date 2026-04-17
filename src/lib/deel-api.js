@@ -300,9 +300,14 @@ const OFFBOARDING_CLOSED_STATUSES = new Set([
   'CANCELED',
 ]);
 
-// Only Deposit refund step is excluded from the flow array.
+// Flow states treated as "past the actionable phase" — records dropped
+// at ingestion so they don't land in the queue at all.
 const OFFBOARDING_EXCLUDED_STEPS = new Set([
-  'AwaitingDepositConfirmation', // BI label: "Deposit refund step"
+  'AwaitingDepositConfirmation',   // "Deposit refund step"
+  'AwaitingToAttachClientMethod',  // "Awaiting Payment Method"
+  'AwaitingPendingItemsPayment',   // "Awaiting Pending Items Payment"
+  'FeeAndAdjustments',             // "Fee and Adjustments"
+  'OffcycleInvoice',               // "Off-Cycle Invoice"
 ]);
 
 // Scan cap — the admin endpoint returns 50/page sorted by endDate ASC (nulls

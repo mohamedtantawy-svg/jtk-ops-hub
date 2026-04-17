@@ -35,16 +35,24 @@ export function useOffboardingData(enabled = true) {
     try {
       const res = await fetchDeelOffboarding({ bustCache: force });
       const fetched = res?.items || [];
+      // Only replace in-memory items if we got non-empty data (or we had nothing).
+      // Transient empty responses must never wipe good data from the UI.
       if (fetched.length > 0 || items.length === 0) {
         setItems(fetched);
       }
       lastFetch.current = Date.now();
-      try {
-        localStorage.setItem(CACHE_KEY, JSON.stringify({ items: fetched, ts: Date.now() }));
-      } catch (e) {}
+      // Same guard on localStorage — otherwise a one-off empty response would
+      // replace the good cached snapshot, and the next page load would start
+      // from zero until a new sync completes (which can take ~30s).
+      if (fetched.length > 0 || items.length === 0) {
+        try {
+          localStorage.setItem(CACHE_KEY, JSON.stringify({ items: fetched, ts: Date.now() }));
+        } catch (e) {}
+      }
     } catch (err) {
       console.warn('[useOffboardingData] Failed:', err.message);
       setError(err.message);
+      // Keep existing items AND existing localStorage — never show empty on error
     } finally {
       setLoading(false);
     }

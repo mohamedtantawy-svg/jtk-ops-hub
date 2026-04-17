@@ -38,9 +38,12 @@ export function usePausedOnboardingData(enabled = true) {
         setItems(fetched);
       }
       lastFetch.current = Date.now();
-      try {
-        localStorage.setItem(CACHE_KEY, JSON.stringify({ items: fetched, ts: Date.now() }));
-      } catch (e) {}
+      // Don't let a transient empty response wipe the good cached snapshot.
+      if (fetched.length > 0 || items.length === 0) {
+        try {
+          localStorage.setItem(CACHE_KEY, JSON.stringify({ items: fetched, ts: Date.now() }));
+        } catch (e) {}
+      }
     } catch (err) {
       console.warn('[usePausedOnboardingData] Failed:', err.message);
       setError(err.message);

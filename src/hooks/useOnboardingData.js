@@ -42,9 +42,13 @@ export function useOnboardingData(enabled = true) {
         setItems(fetched);
       }
       lastFetch.current = Date.now();
-      try {
-        localStorage.setItem(CACHE_KEY, JSON.stringify({ items: fetched, ts: Date.now() }));
-      } catch (e) {}
+      // Same guard on localStorage so a transient empty response doesn't wipe
+      // the good cached snapshot used on the next page load.
+      if (fetched.length > 0 || items.length === 0) {
+        try {
+          localStorage.setItem(CACHE_KEY, JSON.stringify({ items: fetched, ts: Date.now() }));
+        } catch (e) {}
+      }
     } catch (err) {
       console.warn('[useOnboardingData] Failed:', err.message);
       setError(err.message);
