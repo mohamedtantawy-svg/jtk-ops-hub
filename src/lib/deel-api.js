@@ -17,6 +17,10 @@ function sanitizeToken(raw) {
 }
 
 const DEEL_API_KEY = sanitizeToken(process.env.DEEL_API_KEY || '');
+// Optional: admin session JWT from admin.deel.network. Required for full
+// pagination/filtering on /admin/* endpoints — the REST v2 API key does not
+// accept params like `limit`, `cursor`, or `terminationFlowStatuses[]` there.
+const DEEL_ADMIN_TOKEN = sanitizeToken(process.env.DEEL_ADMIN_TOKEN || '');
 
 // ── Base URL ─────────────────────────────────────────────────────────────────
 // Admin API at api-prod-admin.letsdeel.com — no path prefix needed,
@@ -49,12 +53,17 @@ async function _deelFetch(path, options = {}) {
     throw new Error('DEEL_API_KEY is not configured');
   }
 
+  // For /admin/* paths, prefer DEEL_ADMIN_TOKEN (admin session JWT) if set —
+  // /rest/v2/* endpoints keep using DEEL_API_KEY.
+  const isAdminPath = path.startsWith('/admin/');
+  const token = isAdminPath && DEEL_ADMIN_TOKEN ? DEEL_ADMIN_TOKEN : DEEL_API_KEY;
+
   const url = `${DEEL_BASE}${path}`;
   const res = await fetch(url, {
     ...options,
     headers: {
-      'x-auth-token': DEEL_API_KEY,
-      Authorization: `Bearer ${DEEL_API_KEY}`,
+      'x-auth-token': token,
+      Authorization: `Bearer ${token}`,
       Accept: 'application/json, text/plain, */*',
       'Content-Type': 'application/json',
       Origin: 'https://admin.deel.network',
@@ -307,37 +316,57 @@ const OFFBOARDING_MAX_PAGES = 40;
  *   (excluded: deposit refund, fee adjustments, off-cycle invoice, cancelled)
  */
 export async function listOffboardingCases() {
-  // Admin API expects literal `[]` in keys — URLSearchParams would encode them.
-  const staticParts = ['limit=50'];
-  for (const s of OFFBOARDING_ACTIONABLE_STATUSES) {
-    staticParts.push(`terminationFlowStatuses[]=${encodeURIComponent(s)}`);
-  }
-  const staticQuery = staticParts.join('&');
-
   const all = [];
   const seen = new Set();
-  let cursor = null;
   let serverTotal = null;
   let page = 0;
+  let mode = 'admin';
 
-  for (; page < OFFBOARDING_MAX_PAGES; page++) {
-    const qs = cursor ? `${staticQuery}&cursor=${encodeURIComponent(cursor)}` : staticQuery;
-    const res = await deelFetch(`/admin/eor/terminations_v3?${qs}`);
-    if (serverTotal === null) serverTotal = res?.count?.total ?? null;
-
-    const items = res?.terminations || [];
-    for (const t of items) {
-      if (!seen.has(t.id)) {
-        seen.add(t.id);
-        all.push(t);
-      }
+  if (DEEL_ADMIN_TOKEN) {
+    // Admin JWT present: full pagination + server-side flow-status filter.
+    const staticParts = ['limit=50'];
+    for (const s of OFFBOARDING_ACTIONABLE_STATUSES) {
+      staticParts.push(`terminationFlowStatuses[]=${encodeURIComponent(s)}`);
     }
+    const staticQuery = staticParts.join('&');
 
-    cursor = res?.cursor || null;
-    if (!cursor) break;
+    let cursor = null;
+    for (; page < OFFBOARDING_MAX_PAGES; page++) {
+      const qs = cursor ? `${staticQuery}&cursor=${encodeURIComponent(cursor)}` : staticQuery;
+      const res = await deelFetch(`/admin/eor/terminations_v3?${qs}`);
+      if (serverTotal === null) serverTotal = res?.count?.total ?? null;
+
+      for (const t of res?.terminations || []) {
+        if (!seen.has(t.id)) {
+          seen.add(t.id);
+          all.push(t);
+        }
+      }
+      cursor = res?.cursor || null;
+      if (!cursor) break;
+    }
+  } else {
+    // No admin JWT: the REST v2 token rejects `limit`/`cursor`/`terminationFlowStatuses[]`
+    // on /admin/eor/terminations_v3. Call with no params (returns first default page)
+    // and do the BI filter entirely client-side. Only yields ~50 records —
+    // to get the full ~900, set DEEL_ADMIN_TOKEN in the environment.
+    mode = 'rest-v2-fallback';
+    const res = await deelFetch('/admin/eor/terminations_v3');
+    serverTotal = res?.count?.total ?? null;
+
+    const allowedFlow = new Set(OFFBOARDING_ACTIONABLE_STATUSES);
+    for (const t of res?.terminations || []) {
+      if (seen.has(t.id)) continue;
+      // Client-side filter: at least one flow status must be in the allowed set.
+      const flows = Array.isArray(t.terminationFlowStatuses) ? t.terminationFlowStatuses : [];
+      if (flows.length && !flows.some(f => allowedFlow.has(f))) continue;
+      seen.add(t.id);
+      all.push(t);
+    }
+    page = 1;
   }
 
-  console.log(`[offboarding] fetched ${page + 1} page(s), ${all.length} deduped records (server reports ${serverTotal} matches)`);
+  console.log(`[offboarding] mode=${mode}, fetched ${page} page(s), ${all.length} deduped records (server reports ${serverTotal} total)`);
 
   // Defensive client-side filter — the server filter handles most, but
   // excluded-status + duplicate records still slip through occasionally.
