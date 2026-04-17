@@ -72,7 +72,9 @@ async function _deelFetch(path, options = {}) {
       'x-proxy-to': 'payments',
       ...options.headers,
     },
-    signal: options.signal || AbortSignal.timeout(20000),
+    // Admin endpoints can take 10-20s per page under load. 20s was too tight
+    // and produced intermittent "code 23" timeout retries during the scan loop.
+    signal: options.signal || AbortSignal.timeout(40000),
     cache: 'no-store',
   });
 
