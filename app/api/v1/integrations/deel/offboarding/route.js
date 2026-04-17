@@ -5,6 +5,7 @@
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { listOffboardingCases, isDeelConfigured } from '../../../../../../src/lib/deel-api';
+import { getIssueDescriptionsByKeys, isJiraConfigured } from '../../../../../../src/lib/jira-api';
 import { cacheGet, cacheSet } from '../../../../../../src/lib/server-cache';
 
 const CACHE_KEY = 'deel_offboarding';
@@ -63,6 +64,11 @@ async function buildOffboardingResult() {
     }
   }
 
+  // Enrich every record with a Zendesk URL pulled from its linked Jira
+  // ticket's description (ops convention: every termination Jira ticket
+  // has a Zendesk link pasted into the description body).
+  const zendeskByTerminationId = await enrichZendeskUrls(deduped);
+
   const items = deduped.map(c => {
     // Priority: confirmed endDate → desired → original (from requestData) → earliest.
     // Empty string when nothing is set — UI renders "ASAP" in that case.
@@ -99,6 +105,7 @@ async function buildOffboardingResult() {
       reason: c.reason || '',
       isResignation: c.isResignation || false,
       jiraUrl: c.jiraUrl || '',
+      zendeskUrl: zendeskByTerminationId.get(c.id) || '',
       adminStatus: c.status || '',
       clientSignOffStatus: c.clientSignOffStatus || '',
       employeeSignOffStatus: c.employeeSignOffStatus || '',
@@ -140,6 +147,72 @@ async function buildOffboardingResult() {
   }
 
   return { items, total: items.length, byBucket, byType };
+}
+
+// ── Zendesk URL enrichment ──────────────────────────────────────────────────
+// Each termination record carries a jiraUrl like
+//   https://deel.atlassian.net/browse/DEELR-12345
+// Ops convention: the Jira ticket's description contains a Zendesk link
+// pointing at the underlying service-desk ticket. We batch-fetch Jira
+// descriptions in one query and regex-match the Zendesk URL out.
+
+const JIRA_KEY_FROM_URL = /\/browse\/([A-Z][A-Z0-9_]+-\d+)/i;
+// Fallback: any PROJECT-NUMBER style token anywhere in the string.
+const JIRA_KEY_ANYWHERE = /\b([A-Z][A-Z0-9_]+-\d+)\b/;
+// Match any *.zendesk.com URL (e.g. letsdeel.zendesk.com, deel.zendesk.com).
+// Stop at whitespace or any char that would clearly end a URL.
+const ZENDESK_URL_RE = /https?:\/\/[a-z0-9.-]+\.zendesk\.com\/[^\s"')<>]+/ig;
+
+function extractJiraKey(jiraUrl) {
+  if (!jiraUrl) return '';
+  // Prefer /browse/<KEY>; fall back to any KEY-123 substring so we still
+  // work if Deel ever returns a different URL form (API url, raw id, etc).
+  const m1 = jiraUrl.match(JIRA_KEY_FROM_URL);
+  if (m1) return m1[1].toUpperCase();
+  const m2 = jiraUrl.match(JIRA_KEY_ANYWHERE);
+  return m2 ? m2[1].toUpperCase() : '';
+}
+
+function extractZendeskUrl(description) {
+  if (!description) return '';
+  const matches = description.match(ZENDESK_URL_RE);
+  if (!matches || matches.length === 0) return '';
+  // Prefer a canonical agent ticket URL over any /hc/ help-center link.
+  const agentTicket = matches.find(u => /\/(agent\/tickets|tickets)\/\d+/i.test(u));
+  return (agentTicket || matches[0]).replace(/[),.;]+$/, '');
+}
+
+async function enrichZendeskUrls(records) {
+  const out = new Map();
+  if (!isJiraConfigured()) return out;
+
+  const keyToIds = new Map();
+  for (const c of records) {
+    const key = extractJiraKey(c.jiraUrl);
+    if (!key) continue;
+    const ids = keyToIds.get(key) || [];
+    ids.push(c.id);
+    keyToIds.set(key, ids);
+  }
+  if (keyToIds.size === 0) return out;
+
+  try {
+    const descriptions = await getIssueDescriptionsByKeys(Array.from(keyToIds.keys()));
+    let matched = 0;
+    let sampleKey = '';
+    let sampleZd = '';
+    for (const [key, ids] of keyToIds) {
+      const zd = extractZendeskUrl(descriptions.get(key));
+      if (!zd) continue;
+      if (!sampleKey) { sampleKey = key; sampleZd = zd; }
+      matched++;
+      for (const id of ids) out.set(id, zd);
+    }
+    console.log(`[offboarding] zendesk enrichment: ${matched}/${keyToIds.size} jira keys yielded a zendesk url${sampleKey ? ` | sample ${sampleKey} → ${sampleZd}` : ''}`);
+  } catch (err) {
+    console.warn('[offboarding] zendesk enrichment failed:', err.message);
+  }
+  return out;
 }
 
 /**

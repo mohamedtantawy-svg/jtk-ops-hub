@@ -452,7 +452,18 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
               <i className="bi-kanban" style={{ fontSize: 9 }} />Jira
             </a>
           )}
-          {!row.taskUrl && !row.jiraUrl && <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>}
+          {row.zendeskUrl && (
+            <a href={row.zendeskUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6,
+                background: hov ? '#e7f5ee' : '#f5f4f2', color: hov ? '#03363d' : '#9e9e9e',
+                fontSize: 10, fontWeight: 600, textDecoration: 'none', transition: 'all .15s', whiteSpace: 'nowrap',
+                border: hov ? '1px solid #b8e0c8' : '1px solid transparent',
+              }}>
+              <i className="bi-headset" style={{ fontSize: 9 }} />Zendesk
+            </a>
+          )}
+          {!row.taskUrl && !row.jiraUrl && !row.zendeskUrl && <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>}
         </div>
       </td>
 

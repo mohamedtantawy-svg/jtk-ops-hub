@@ -169,6 +169,7 @@ export function normalizeOffboarding(items = []) {
     taskUrl: c.id ? `${DEEL_ADMIN_BASE}/eor/termination_v3/${c.id}` : '',
     contractUrl: DEEL_CONTRACT_URL(c.contractOid),
     jiraUrl: c.jiraUrl || '',
+    zendeskUrl: c.zendeskUrl || '',
     slaRemaining: null,
     slaBreachStatus: null,
   }));
