@@ -154,6 +154,30 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     ...onboardingRows, ...offboardingRows, ...amendmentRows, ...redlineRows, ...workbenchRows,
   ], [onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows]);
 
+  // ── Shared scope for source panels ─────────────────────────────────────
+  // Applies the header-level Country + SLA filters to source rows so a user
+  // clicking Breached in the header narrows the source panel too (previously
+  // the click did nothing on source views).
+  //
+  //   SLA-pill ↔ source-row severity mapping:
+  //     breached → status.severity = 'critical'
+  //     at_risk  → status.severity = 'warning'
+  //     ok       → status.severity in ('active', 'info')
+  const scopeSourceRows = useCallback((rows) => {
+    let r = rows;
+    if (fCtry.length) r = r.filter(x => fCtry.includes(x.country));
+    if (fSla) {
+      r = r.filter(x => {
+        const sev = x.status?.severity;
+        if (fSla === 'breached') return sev === 'critical';
+        if (fSla === 'at_risk')  return sev === 'warning';
+        if (fSla === 'ok')       return sev === 'active' || sev === 'info';
+        return true;
+      });
+    }
+    return r;
+  }, [fCtry, fSla]);
+
   // ── Memoized filter chain — only recomputes when inputs change ──
   const { vis, baseVis, visPreSla, active, snoozed, open, done, all } = useMemo(() => {
     // Scope ZD / Jira tickets (the only sources in `ns`) through the shared
@@ -327,23 +351,29 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     return{atRiskCount:atRisk,breachedCount:breached,onTrackCount:slaBase.length-atRisk-breached};
   },[workSource, onboardingSubTab, visPreSla, onboardingRows, pausedOnboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, allSourceRows]);
 
-  // ── View-aware header counts: reflect active tab (fTool / workSource) ──
+  // ── View-aware header counts: reflect the ACTUAL visible set ──
+  // For queue view (ZD/JR), counts come from `vis` (the post-filter set the
+  // table also renders). For source panels, counts come from scopeSourceRows
+  // (fCtry + fSla applied) — the SourceTable applies its own internal search
+  // / status pills on top, so what the header says matches what's below.
   const headerCounts = useMemo(() => {
-    if (workSource === 'onboarding') return { open: onboardingSubTab === 'paused' ? pausedOnboardingRows.length : onboardingRows.length, paused: 0, resolved: 0 };
-    if (workSource === 'offboarding') return { open: offboardingRows.length, paused: 0, resolved: 0 };
-    if (workSource === 'amendments') return { open: amendmentRows.length, paused: 0, resolved: 0 };
-    if (workSource === 'redlines') return { open: redlineRows.length, paused: 0, resolved: 0 };
-    if (workSource === 'workbench') return { open: workbenchRows.length, paused: 0, resolved: 0 };
-    if (workSource === 'all_sources') return { open: allSourceRows.length, paused: 0, resolved: 0 };
-    // Queue view (ZD/JR) — use filtered baseVis when fTool is set
-    const base = fTool ? baseVis.filter(t => t.source === fTool) : baseVis;
-    const srcExtra = fTool ? 0 : allSourceRows.length;
+    if (workSource === 'onboarding') {
+      const rows = onboardingSubTab === 'paused' ? pausedOnboardingRows : onboardingRows;
+      return { open: scopeSourceRows(rows).length, paused: 0, resolved: 0 };
+    }
+    if (workSource === 'offboarding') return { open: scopeSourceRows(offboardingRows).length, paused: 0, resolved: 0 };
+    if (workSource === 'amendments')  return { open: scopeSourceRows(amendmentRows).length, paused: 0, resolved: 0 };
+    if (workSource === 'redlines')    return { open: scopeSourceRows(redlineRows).length, paused: 0, resolved: 0 };
+    if (workSource === 'workbench')   return { open: scopeSourceRows(workbenchRows).length, paused: 0, resolved: 0 };
+    if (workSource === 'all_sources') return { open: scopeSourceRows(allSourceRows).length, paused: 0, resolved: 0 };
+    // Queue view — use the filtered `vis` set (already reflects every header
+    // filter: fTool, fStatus, fCtry, fSla, fUnassigned, search).
     return {
-      open: base.filter(t => t.status !== 'resolved' && t.status !== 'waiting').length + srcExtra,
-      paused: base.filter(t => t.status === 'waiting').length,
-      resolved: base.filter(t => t.status === 'resolved').length,
+      open:     vis.filter(t => t.status !== 'resolved' && t.status !== 'waiting').length,
+      paused:   vis.filter(t => t.status === 'waiting').length,
+      resolved: vis.filter(t => t.status === 'resolved').length,
     };
-  }, [workSource, fTool, baseVis, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, allSourceRows]);
+  }, [workSource, onboardingSubTab, vis, scopeSourceRows, onboardingRows, pausedOnboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, allSourceRows]);
   const activeFilterCount=[fTool,fStatus.length>0?true:null,fCtry.length>0?true:null,fSla||null,fUnassigned||null].filter(Boolean).length;
 
   // Persist filters to localStorage
@@ -372,11 +402,17 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     };
   },[]);
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts.
+  // Escape is always allowed (even inside inputs/textareas) so users composing
+  // a reply can still close the detail modal with one keystroke. The letter
+  // shortcuts (j/k/e/s/r/x) are suppressed while typing so they don't hijack
+  // input characters.
   useEffect(()=>{
     const kd=e=>{
-      if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT'||e.target.isContentEditable)return;
       if(workMode)return; // Work mode has its own shortcuts
+      const typing = e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT'||e.target.isContentEditable;
+      if(e.key==='Escape'){ setSelTask(null); return; }
+      if(typing) return;
       const idx=all.findIndex(t=>t.id===selTask?.id);
       if(e.key==='j'){ const n=all[idx+1]||all[0]; if(n){setSelTask(n);setRecentIds(prev=>[n.id,...prev.filter(id=>id!==n.id)].slice(0,3));} }
       if(e.key==='k'){ const n=all[idx>0?idx-1:all.length-1]; if(n){setSelTask(n);setRecentIds(prev=>[n.id,...prev.filter(id=>id!==n.id)].slice(0,3));} }
@@ -384,7 +420,6 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       if(e.key==='s'&&selTask&&perms?.canDo('can_snooze')!==false) onSnooze&&onSnooze(selTask);
       if(e.key==='r'&&selTask&&perms?.canDo('can_reassign')!==false) onReassign&&onReassign(selTask);
       if(e.key==='x'&&selTask&&perms?.canDo('can_resolve_task')!==false){ handleResolve(selTask); }
-      if(e.key==='Escape') setSelTask(null);
     };
     document.addEventListener('keydown',kd);
     return()=>document.removeEventListener('keydown',kd);
@@ -504,7 +539,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           <span style={{fontSize:12,color:'#9e9e9e'}}>Requests raised to other teams</span>
         </div>
         )}
-        <OutboundQueue requests={requests} setRequests={setRequests} user={user} onNewRequest={onNewRequest} tasks={tasks}/>
+        <OutboundQueue requests={requests} setRequests={setRequests} user={user} onNewRequest={onNewRequest} tasks={tasks} addToast={addToast}/>
       </div>
     );
   }
@@ -615,24 +650,29 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           );
         })()}
 
-        {/* Line 3: Filters — visible on ALL tabs (queue + work source panels) */}
+        {/* Line 3: Filters — Status/Sort/Unassigned only apply to queue view
+            (ZD/JR tickets). For source panels they're hidden because the
+            concepts don't translate — use the SourceTable's built-in filter
+            bar (status pills + search) instead. Country + SLA pills work
+            across both views. */}
         <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'nowrap'}}>
-          {/* Status multi-select */}
-          <MultiFilterDropdown
-            icon="bi-circle"
-            label="Status"
-            selected={fStatus}
-            options={[
-              {value:'new',label:'New',dotColor:'#7c3aed'},
-              {value:'in_progress',label:'In Progress',dotColor:'#1d4ed8'},
-              {value:'waiting',label:'Pause',dotColor:'#6b6560'},
-              {value:'escalated',label:'Escalated',dotColor:'#d42d35'},
-              {value:'resolved',label:'Resolved',dotColor:'#15803d'},
-            ]}
-            onChange={setFStatus}
-            activeColor="#7c3aed"
-          />
-          {/* Country multi-select */}
+          {!workSource && (
+            <MultiFilterDropdown
+              icon="bi-circle"
+              label="Status"
+              selected={fStatus}
+              options={[
+                {value:'new',label:'New',dotColor:'#7c3aed'},
+                {value:'in_progress',label:'In Progress',dotColor:'#1d4ed8'},
+                {value:'waiting',label:'Pause',dotColor:'#6b6560'},
+                {value:'escalated',label:'Escalated',dotColor:'#d42d35'},
+                {value:'resolved',label:'Resolved',dotColor:'#15803d'},
+              ]}
+              onChange={setFStatus}
+              activeColor="#7c3aed"
+            />
+          )}
+          {/* Country multi-select — always visible, applies to every view */}
           <MultiFilterDropdown
             icon="bi-geo-alt"
             label="Country"
@@ -641,26 +681,29 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
             onChange={setFCtry}
             activeColor="#1f74b3"
           />
-          {/* Sort dropdown */}
-          <FilterDropdown
-            icon="bi-arrow-down-up"
-            label="Sort"
-            value={sort}
-            options={[
-              {value:'oldest',label:'Oldest first',icon:'bi-sort-down'},
-              {value:'newest',label:'Newest first',icon:'bi-sort-up'},
-              {value:'sla',label:'SLA urgency',icon:'bi-shield-exclamation'},
-              {value:'assignee',label:'By assignee',icon:'bi-person'},
-            ]}
-            onChange={setSort}
-            isSort
-          />
-          <div style={{width:1,height:20,background:'#e8e8e8',flexShrink:0,margin:'0 2px'}}></div>
-          {/* Unassigned toggle */}
-          <button onClick={()=>setFUnassigned(!fUnassigned)} style={{height:32,display:'inline-flex',alignItems:'center',gap:5,padding:'0 12px',borderRadius:8,border:fUnassigned?'1px solid #d42d35':'1px solid #e8e8e8',background:fUnassigned?'#fef2f2':'white',color:fUnassigned?'#d42d35':'#616161',fontSize:12,fontWeight:fUnassigned?600:500,cursor:'pointer',transition:'all .15s',whiteSpace:'nowrap'}}>
-            <i className="bi-person-dash" style={{fontSize:11}}></i>Unassigned
-          </button>
-          {/* Clear all */}
+          {!workSource && (
+            <FilterDropdown
+              icon="bi-arrow-down-up"
+              label="Sort"
+              value={sort}
+              options={[
+                {value:'oldest',label:'Oldest first',icon:'bi-sort-down'},
+                {value:'newest',label:'Newest first',icon:'bi-sort-up'},
+                {value:'sla',label:'SLA urgency',icon:'bi-shield-exclamation'},
+                {value:'assignee',label:'By assignee',icon:'bi-person'},
+              ]}
+              onChange={setSort}
+              isSort
+            />
+          )}
+          {!workSource && (
+            <>
+              <div style={{width:1,height:20,background:'#e8e8e8',flexShrink:0,margin:'0 2px'}}></div>
+              <button onClick={()=>setFUnassigned(!fUnassigned)} style={{height:32,display:'inline-flex',alignItems:'center',gap:5,padding:'0 12px',borderRadius:8,border:fUnassigned?'1px solid #d42d35':'1px solid #e8e8e8',background:fUnassigned?'#fef2f2':'white',color:fUnassigned?'#d42d35':'#616161',fontSize:12,fontWeight:fUnassigned?600:500,cursor:'pointer',transition:'all .15s',whiteSpace:'nowrap'}}>
+                <i className="bi-person-dash" style={{fontSize:11}}></i>Unassigned
+              </button>
+            </>
+          )}
           {hasActiveFilters&&(
             <button onClick={()=>{setFTool(null);setFStatus([]);setFCtry([]);setFSla(null);setFUnassigned(false);setSearch('');}} style={{height:32,display:'inline-flex',alignItems:'center',gap:4,padding:'0 10px',borderRadius:8,border:'none',background:'transparent',color:'#9e9e9e',fontSize:11,cursor:'pointer',whiteSpace:'nowrap',textDecoration:'underline'}}>
               Clear all
@@ -674,7 +717,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       {workSource==='all_sources'&&(
         <ErrorBoundary>
         <SourceTable
-          rows={fCtry.length?allSourceRows.filter(r=>fCtry.includes(r.country)):allSourceRows}
+          rows={scopeSourceRows(allSourceRows)}
           loading={onboardingData.loading||offboardingData.loading||changeRequestData.loading||workbenchData.loading}
           error={null}
           onRefresh={()=>{onboardingData.refresh();offboardingData.refresh();changeRequestData.refresh();workbenchData.refresh();}}
@@ -682,7 +725,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           emptyLabel="No tasks across any source"
           emptySubLabel="All queues are clear"
           sortDefault="oldest"
-          currentUser={user}
+
         />
         </ErrorBoundary>
       )}
@@ -712,7 +755,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           </div>
           {onboardingSubTab==='action'&&(
             <SourceTable
-              rows={fCtry.length?onboardingRows.filter(r=>fCtry.includes(r.country)):onboardingRows}
+              rows={scopeSourceRows(onboardingRows)}
               loading={onboardingData.loading}
               error={onboardingData.error}
               onRefresh={onboardingData.refresh}
@@ -721,12 +764,12 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
               emptySubLabel="All onboarding tasks are handled"
               sortDefault="startDate"
               hideStatusPills
-              currentUser={user}
+
             />
           )}
           {onboardingSubTab==='paused'&&(
             <SourceTable
-              rows={fCtry.length?pausedOnboardingRows.filter(r=>fCtry.includes(r.country)):pausedOnboardingRows}
+              rows={scopeSourceRows(pausedOnboardingRows)}
               loading={pausedOnboardingData.loading}
               error={pausedOnboardingData.error}
               onRefresh={pausedOnboardingData.refresh}
@@ -736,7 +779,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
               sortDefault="oldest"
               showPausedSla
               hideStatusPills
-              currentUser={user}
+
             />
           )}
         </div>
@@ -745,7 +788,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       {workSource==='offboarding'&&(
         <ErrorBoundary>
         <SourceTable
-          rows={fCtry.length?offboardingRows.filter(r=>fCtry.includes(r.country)):offboardingRows}
+          rows={scopeSourceRows(offboardingRows)}
           loading={offboardingData.loading}
           error={offboardingData.error}
           onRefresh={offboardingData.refresh}
@@ -758,14 +801,14 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           showClient
           showType
           hideFilterBar
-          currentUser={user}
+
         />
         </ErrorBoundary>
       )}
       {workSource==='amendments'&&(
         <ErrorBoundary>
         <SourceTable
-          rows={fCtry.length?amendmentRows.filter(r=>fCtry.includes(r.country)):amendmentRows}
+          rows={scopeSourceRows(amendmentRows)}
           loading={changeRequestData.loading}
           error={changeRequestData.error}
           onRefresh={changeRequestData.refresh}
@@ -773,14 +816,14 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           emptyLabel="No actionable amendments"
           emptySubLabel="All amendments are handled"
           sortDefault="oldest"
-          currentUser={user}
+
         />
         </ErrorBoundary>
       )}
       {workSource==='redlines'&&(
         <ErrorBoundary>
         <SourceTable
-          rows={fCtry.length?redlineRows.filter(r=>fCtry.includes(r.country)):redlineRows}
+          rows={scopeSourceRows(redlineRows)}
           loading={changeRequestData.loading}
           error={changeRequestData.error}
           onRefresh={changeRequestData.refresh}
@@ -788,14 +831,14 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           emptyLabel="No actionable redlines"
           emptySubLabel="All redlines are handled"
           sortDefault="oldest"
-          currentUser={user}
+
         />
         </ErrorBoundary>
       )}
       {workSource==='workbench'&&(
         <ErrorBoundary>
         <SourceTable
-          rows={fCtry.length?workbenchRows.filter(r=>fCtry.includes(r.country)):workbenchRows}
+          rows={scopeSourceRows(workbenchRows)}
           loading={workbenchData.loading}
           error={workbenchData.error}
           onRefresh={workbenchData.refresh}
@@ -803,7 +846,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           emptyLabel="No workbench tasks"
           emptySubLabel="All tasks are processed"
           sortDefault="oldest"
-          currentUser={user}
+
         />
         </ErrorBoundary>
       )}

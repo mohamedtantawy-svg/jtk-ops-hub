@@ -124,7 +124,6 @@ export default function SourceTable({
   sortDefault = 'oldest',    // 'oldest' | 'newest' | 'sla' | 'startDate' | 'endDate'
   showPausedSla = false,     // use 48h countdown from pausedAt instead of age-based SLA
   hideStatusPills = false,   // hide the internal All/Action Needed/etc. pills
-  currentUser = null,        // for "Assign me" button on unassigned rows
   dateField = 'startDate',   // row field rendered in the date column
   dateLabel = 'Start Date',  // header label for the date column
   showClient = false,        // show "Organization" column (offboarding, etc.)
@@ -185,6 +184,15 @@ export default function SourceTable({
       });
     }
 
+    // Safe date parser — returns the given fallback for missing or unparseable
+    // values so NaN never leaks into the comparator (Array.sort is only stable
+    // when the keys are well-ordered; NaN vs anything yields false on every
+    // comparison and produces non-deterministic ordering).
+    const dateMs = (value, fallback) => {
+      if (!value) return fallback;
+      const t = new Date(value).getTime();
+      return Number.isFinite(t) ? t : fallback;
+    };
     const getVal = (row) => {
       switch (sortCol) {
         case 'subject':   return (row.subject || '').toLowerCase();
@@ -192,15 +200,15 @@ export default function SourceTable({
         case 'typeLabel': return (row.typeLabel || '').toLowerCase();
         case 'country':   return (row.country || '').toLowerCase();
         case 'assignee':  return (row.assignee || '').toLowerCase();
-        case 'startDate': return row.startDate ? new Date(row.startDate).getTime() : Infinity;
-        case 'endDate':   return row.endDate ? new Date(row.endDate).getTime() : Infinity;
-        case 'createdAt': return row.createdAt ? new Date(row.createdAt).getTime() : Infinity;
-        case 'updatedAt': return row.updatedAt ? new Date(row.updatedAt).getTime() : 0;
+        case 'startDate': return dateMs(row.startDate, Infinity);
+        case 'endDate':   return dateMs(row.endDate, Infinity);
+        case 'createdAt': return dateMs(row.createdAt, Infinity);
+        case 'updatedAt': return dateMs(row.updatedAt, 0);
         case 'status':    return (row.status?.label || '').toLowerCase();
         case 'sla': {
-          if (row.slaRemaining != null) return row.slaRemaining;
-          if (row.createdAt) return -(Date.now() - new Date(row.createdAt).getTime());
-          return 0;
+          if (row.slaRemaining != null && Number.isFinite(row.slaRemaining)) return row.slaRemaining;
+          const created = dateMs(row.createdAt, null);
+          return created == null ? 0 : -(Date.now() - created);
         }
         default: return 0;
       }
@@ -317,7 +325,7 @@ export default function SourceTable({
             </thead>
             <tbody>
               {sorted.map(row => (
-                <SourceRow key={`${row.source}-${row.id}`} row={row} showSource={showSourceColumn} showPausedSla={showPausedSla} currentUser={currentUser} dateField={dateField} showClient={showClient} showType={showType} />
+                <SourceRow key={`${row.source}-${row.id}`} row={row} showSource={showSourceColumn} showPausedSla={showPausedSla} dateField={dateField} showClient={showClient} showType={showType} />
               ))}
             </tbody>
           </table>
@@ -328,9 +336,8 @@ export default function SourceTable({
 }
 
 // ── Row component ──
-const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, currentUser = null, dateField = 'startDate', showClient = false, showType = false }) {
+const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, dateField = 'startDate', showClient = false, showType = false }) {
   const [hov, setHov] = useState(false);
-  const [localAssignee, setLocalAssignee] = useState(null);
   const sev = row.status?.severity || 'info';
   const isUrgent = sev === 'critical';
   const isWarning = sev === 'warning';
@@ -432,19 +439,19 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
 
       {/* Assignee */}
       <td style={tdStyle}>
-        {(row.assignee || localAssignee) ? (
+        {row.assignee ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
-            <Avatar name={localAssignee || row.assignee} size="xs" />
+            <Avatar name={row.assignee} size="xs" />
             <span style={{ fontSize: 11, color: '#1b1b1b', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 80 }}>
-              {(localAssignee || row.assignee).split(' ')[0]}
+              {row.assignee.split(' ')[0]}
             </span>
           </div>
-        ) : currentUser?.name ? (
-          <button onClick={e => { e.stopPropagation(); setLocalAssignee(currentUser.name); }}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: 128, border: '1px solid #e8e8e8', background: hov ? '#f3eff8' : 'white', color: '#6b3fa0', fontSize: 10, fontWeight: 600, cursor: 'pointer', transition: 'all .15s', whiteSpace: 'nowrap' }}>
-            <i className="bi-person-plus" style={{ fontSize: 9 }} />Assign me
-          </button>
-        ) : <span style={{ fontSize: 11, color: '#d42d35', fontWeight: 500 }}>Unassigned</span>}
+        ) : (
+          // "Assign me" button removed — no Deel-side assign endpoint is wired
+          // from this app, so the button's optimistic UI was misleading users.
+          // Assignment still happens in the Deel admin UI; we surface the state.
+          <span style={{ fontSize: 11, color: '#d42d35', fontWeight: 500 }}>Unassigned</span>
+        )}
       </td>
 
       {/* Date column (Start Date for onboarding, End Date for offboarding, etc.) */}
