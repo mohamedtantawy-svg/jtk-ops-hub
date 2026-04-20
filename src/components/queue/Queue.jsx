@@ -60,7 +60,6 @@ const relTime=(m)=>{
 // ── Work Source Button config ──
 // Item #12: Split "Change Request" into "Amendments" and "Redlines"
 const WORK_SOURCES = [
-  { id: 'all_sources',     label: 'All',             icon: 'bi-grid',             color: '#1b1b1b', bg: '#f3f3f3' },
   { id: 'onboarding',      label: 'Onboarding',      icon: 'bi-person-plus-fill', color: '#7c3aed', bg: '#f3eff8' },
   { id: 'offboarding',     label: 'Offboarding',     icon: 'bi-person-dash-fill', color: '#d42d35', bg: '#fef2f2' },
   { id: 'amendments',      label: 'Amendments',      icon: 'bi-pencil-square',    color: '#ed8d00', bg: '#fff8e6' },
@@ -149,34 +148,12 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const amendmentRows        = useMemo(() => scopeAmendmentRequests(amendmentRowsAll, user),       [amendmentRowsAll, user]);
   const redlineRows          = useMemo(() => scopeRedlineRequests(redlineRowsAll, user),           [redlineRowsAll, user]);
   const workbenchRows        = useMemo(() => scopeWorkbenchTasks(workbenchRowsAll, user),          [workbenchRowsAll, user]);
-  // Item #4: "All" view — combine all agent-scoped sources into unified list
+  // Combined agent-scoped source rows — used for header "open" count and the
+  // country-filter dropdown aggregation. The dedicated "All" tab was removed
+  // per UX request; each source now has its own tab.
   const allSourceRows = useMemo(() => [
     ...onboardingRows, ...offboardingRows, ...amendmentRows, ...redlineRows, ...workbenchRows,
   ], [onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows]);
-
-  // ── Shared scope for source panels ─────────────────────────────────────
-  // Applies the header-level Country + SLA filters to source rows so a user
-  // clicking Breached in the header narrows the source panel too (previously
-  // the click did nothing on source views).
-  //
-  //   SLA-pill ↔ source-row severity mapping:
-  //     breached → status.severity = 'critical'
-  //     at_risk  → status.severity = 'warning'
-  //     ok       → status.severity in ('active', 'info')
-  const scopeSourceRows = useCallback((rows) => {
-    let r = rows;
-    if (fCtry.length) r = r.filter(x => fCtry.includes(x.country));
-    if (fSla) {
-      r = r.filter(x => {
-        const sev = x.status?.severity;
-        if (fSla === 'breached') return sev === 'critical';
-        if (fSla === 'at_risk')  return sev === 'warning';
-        if (fSla === 'ok')       return sev === 'active' || sev === 'info';
-        return true;
-      });
-    }
-    return r;
-  }, [fCtry, fSla]);
 
   // ── Memoized filter chain — only recomputes when inputs change ──
   const { vis, baseVis, visPreSla, active, snoozed, open, done, all } = useMemo(() => {
@@ -336,12 +313,54 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       }
       return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: rows.length - atRisk - breached };
     }
-    if (workSource === 'offboarding') slaBase = offboardingRows;
-    else if (workSource === 'amendments') slaBase = amendmentRows;
-    else if (workSource === 'redlines') slaBase = redlineRows;
-    else if (workSource === 'workbench') slaBase = workbenchRows;
-    else if (workSource === 'all_sources') slaBase = allSourceRows;
-    else if (workSource === 'jira') slaBase = visPreSla.filter(t => t.source === 'jira');
+    // ── Source-panel age-based SLA ──
+    // Mirrors SourceTable's slaBadge() + offboardingSlaThreshold() so the
+    // header counts agree with the per-row badges. slaInfo() only understands
+    // ZD/Jira ticket shape, so source panels need their own computation.
+    const countAgeSLA = (rows, thresholdFor) => {
+      let atRisk = 0, breached = 0;
+      for (const r of rows) {
+        const createdMs = r.createdAt ? new Date(r.createdAt).getTime() : NaN;
+        if (!Number.isFinite(createdMs)) continue;
+        const ageDays = (Date.now() - createdMs) / 86400000;
+        const threshold = thresholdFor(r);
+        if (ageDays >= threshold) breached++;
+        else if (ageDays >= threshold * 0.7) atRisk++;
+      }
+      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: rows.length - atRisk - breached };
+    };
+    if (workSource === 'offboarding') {
+      // Termination = 14d SLA, Resignation = 5d SLA (matches SourceTable.offboardingSlaThreshold)
+      return countAgeSLA(offboardingRows, r => (r.typeLabel || '').startsWith('Resignation') ? 5 : 14);
+    }
+    if (workSource === 'amendments' || workSource === 'redlines') {
+      // Generic age thresholds (matches SourceTable slaBadge fallback): 7d breach, 3d at-risk
+      const rows = workSource === 'amendments' ? amendmentRows : redlineRows;
+      return countAgeSLA(rows, () => 7); // breach at 7d; at_risk at 4.9d (70%)
+    }
+    if (workSource === 'workbench') {
+      // Workbench rows may carry slaRemaining (seconds) + slaBreachStatus from upstream.
+      // Fall back to age-based 7d if missing.
+      let atRisk = 0, breached = 0;
+      for (const r of workbenchRows) {
+        if (r.slaBreachStatus === 'breached') { breached++; continue; }
+        if (r.slaBreachStatus === 'at_risk') { atRisk++; continue; }
+        if (typeof r.slaRemaining === 'number') {
+          if (r.slaRemaining <= 0) breached++;
+          else if (r.slaRemaining < 86400) atRisk++; // < 24h remaining
+          continue;
+        }
+        const createdMs = r.createdAt ? new Date(r.createdAt).getTime() : NaN;
+        if (Number.isFinite(createdMs)) {
+          const days = (Date.now() - createdMs) / 86400000;
+          if (days >= 7) breached++;
+          else if (days >= 3) atRisk++;
+        }
+      }
+      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: workbenchRows.length - atRisk - breached };
+    }
+    // ── Queue-ticket SLA (ZD/Jira) — uses slaInfo() ──
+    if (workSource === 'jira') slaBase = visPreSla.filter(t => t.source === 'jira');
     else if (workSource === 'zendesk') slaBase = visPreSla.filter(t => t.source === 'zendesk');
     else slaBase = visPreSla;
     // Exclude resolved / waiting (snoozed)
@@ -349,31 +368,24 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     const atRisk=slaBase.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;}).length;
     const breached=slaBase.filter(t=>{const s=slaInfo(t);return s&&s.breach;}).length;
     return{atRiskCount:atRisk,breachedCount:breached,onTrackCount:slaBase.length-atRisk-breached};
-  },[workSource, onboardingSubTab, visPreSla, onboardingRows, pausedOnboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, allSourceRows]);
+  },[workSource, onboardingSubTab, visPreSla, onboardingRows, pausedOnboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows]);
 
-  // ── View-aware header counts: reflect the ACTUAL visible set ──
-  // For queue view (ZD/JR), counts come from `vis` (the post-filter set the
-  // table also renders). For source panels, counts come from scopeSourceRows
-  // (fCtry + fSla applied) — the SourceTable applies its own internal search
-  // / status pills on top, so what the header says matches what's below.
+  // ── View-aware header counts: reflect active tab (fTool / workSource) ──
   const headerCounts = useMemo(() => {
-    if (workSource === 'onboarding') {
-      const rows = onboardingSubTab === 'paused' ? pausedOnboardingRows : onboardingRows;
-      return { open: scopeSourceRows(rows).length, paused: 0, resolved: 0 };
-    }
-    if (workSource === 'offboarding') return { open: scopeSourceRows(offboardingRows).length, paused: 0, resolved: 0 };
-    if (workSource === 'amendments')  return { open: scopeSourceRows(amendmentRows).length, paused: 0, resolved: 0 };
-    if (workSource === 'redlines')    return { open: scopeSourceRows(redlineRows).length, paused: 0, resolved: 0 };
-    if (workSource === 'workbench')   return { open: scopeSourceRows(workbenchRows).length, paused: 0, resolved: 0 };
-    if (workSource === 'all_sources') return { open: scopeSourceRows(allSourceRows).length, paused: 0, resolved: 0 };
-    // Queue view — use the filtered `vis` set (already reflects every header
-    // filter: fTool, fStatus, fCtry, fSla, fUnassigned, search).
+    if (workSource === 'onboarding') return { open: onboardingSubTab === 'paused' ? pausedOnboardingRows.length : onboardingRows.length, paused: 0, resolved: 0 };
+    if (workSource === 'offboarding') return { open: offboardingRows.length, paused: 0, resolved: 0 };
+    if (workSource === 'amendments') return { open: amendmentRows.length, paused: 0, resolved: 0 };
+    if (workSource === 'redlines') return { open: redlineRows.length, paused: 0, resolved: 0 };
+    if (workSource === 'workbench') return { open: workbenchRows.length, paused: 0, resolved: 0 };
+    // Queue view (ZD/JR) — use filtered baseVis when fTool is set
+    const base = fTool ? baseVis.filter(t => t.source === fTool) : baseVis;
+    const srcExtra = fTool ? 0 : allSourceRows.length;
     return {
-      open:     vis.filter(t => t.status !== 'resolved' && t.status !== 'waiting').length,
-      paused:   vis.filter(t => t.status === 'waiting').length,
-      resolved: vis.filter(t => t.status === 'resolved').length,
+      open: base.filter(t => t.status !== 'resolved' && t.status !== 'waiting').length + srcExtra,
+      paused: base.filter(t => t.status === 'waiting').length,
+      resolved: base.filter(t => t.status === 'resolved').length,
     };
-  }, [workSource, onboardingSubTab, vis, scopeSourceRows, onboardingRows, pausedOnboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, allSourceRows]);
+  }, [workSource, fTool, baseVis, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, allSourceRows]);
   const activeFilterCount=[fTool,fStatus.length>0?true:null,fCtry.length>0?true:null,fSla||null,fUnassigned||null].filter(Boolean).length;
 
   // Persist filters to localStorage
@@ -402,17 +414,11 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     };
   },[]);
 
-  // Keyboard shortcuts.
-  // Escape is always allowed (even inside inputs/textareas) so users composing
-  // a reply can still close the detail modal with one keystroke. The letter
-  // shortcuts (j/k/e/s/r/x) are suppressed while typing so they don't hijack
-  // input characters.
+  // Keyboard shortcuts
   useEffect(()=>{
     const kd=e=>{
+      if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT'||e.target.isContentEditable)return;
       if(workMode)return; // Work mode has its own shortcuts
-      const typing = e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT'||e.target.isContentEditable;
-      if(e.key==='Escape'){ setSelTask(null); return; }
-      if(typing) return;
       const idx=all.findIndex(t=>t.id===selTask?.id);
       if(e.key==='j'){ const n=all[idx+1]||all[0]; if(n){setSelTask(n);setRecentIds(prev=>[n.id,...prev.filter(id=>id!==n.id)].slice(0,3));} }
       if(e.key==='k'){ const n=all[idx>0?idx-1:all.length-1]; if(n){setSelTask(n);setRecentIds(prev=>[n.id,...prev.filter(id=>id!==n.id)].slice(0,3));} }
@@ -420,6 +426,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       if(e.key==='s'&&selTask&&perms?.canDo('can_snooze')!==false) onSnooze&&onSnooze(selTask);
       if(e.key==='r'&&selTask&&perms?.canDo('can_reassign')!==false) onReassign&&onReassign(selTask);
       if(e.key==='x'&&selTask&&perms?.canDo('can_resolve_task')!==false){ handleResolve(selTask); }
+      if(e.key==='Escape') setSelTask(null);
     };
     document.addEventListener('keydown',kd);
     return()=>document.removeEventListener('keydown',kd);
@@ -539,7 +546,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           <span style={{fontSize:12,color:'#9e9e9e'}}>Requests raised to other teams</span>
         </div>
         )}
-        <OutboundQueue requests={requests} setRequests={setRequests} user={user} onNewRequest={onNewRequest} tasks={tasks} addToast={addToast}/>
+        <OutboundQueue requests={requests} setRequests={setRequests} user={user} onNewRequest={onNewRequest} tasks={tasks}/>
       </div>
     );
   }
@@ -551,7 +558,16 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       <div data-role="queue-header" style={{padding:'8px 32px 12px',background:'white',borderBottom:'1px solid #e8e8e8',flexShrink:0}}>
         {/* Line 1: Title + total counts across ALL queues (Item #7) + Start Working */}
         <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:10}}>
-          {(isAdmin||isLead)&&<span style={{fontSize:13,fontWeight:600,color:'#616161'}}>{isAdmin?'All Tasks':`${user.team}`}</span>}
+          {(isAdmin||isLead)&&(()=>{
+            // View-aware title: reflects the active source tab / filter
+            const sourceLabels = {
+              onboarding:'Onboarding', offboarding:'Offboarding', amendments:'Amendments',
+              redlines:'Redlines', workbench:'Workbench',
+            };
+            const toolLabels = { zendesk:'Zendesk', jira:'Jira' };
+            const viewLabel = sourceLabels[workSource] || toolLabels[fTool] || (isAdmin?'All Tasks':user.team);
+            return <span style={{fontSize:13,fontWeight:600,color:'#616161'}}>{viewLabel}</span>;
+          })()}
           {/* View-aware totals — change when switching between source tabs */}
           <span style={{fontSize:12,color:'#9e9e9e',display:'flex',alignItems:'center',gap:5}}>
             <i className="bi-layers" style={{fontSize:11}}></i>
@@ -603,9 +619,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           {WORK_SOURCES.map(ws=>{
             const isQueueFilter = ws.id === 'zendesk' || ws.id === 'jira';
             const isActive = isQueueFilter ? (fTool === ws.id && !workSource) : workSource === ws.id;
-            const count = ws.id === 'all_sources'
-              ? (onboardingRows.length + offboardingRows.length + amendmentRows.length + redlineRows.length + workbenchRows.length)
-              : ws.id === 'onboarding' ? onboardingRows.length
+            const count = ws.id === 'onboarding' ? onboardingRows.length
               : ws.id === 'offboarding' ? offboardingRows.length
               : ws.id === 'amendments' ? amendmentRows.length
               : ws.id === 'redlines' ? redlineRows.length
@@ -619,13 +633,19 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
                 setWorkSource(null);
                 setFTool(fTool === ws.id ? null : ws.id);
               } else {
-                // Show dedicated panel (onboarding, offboarding, workbench, amendments, redlines, all)
+                // Show dedicated panel (onboarding, offboarding, workbench, amendments, redlines)
                 setFTool(null);
                 setWorkSource(isActive ? null : ws.id);
               }
             };
+            // Source-specific sync failure indicator — surfaces stale/failing feed per tab
+            const sourceSync = syncSources?.[ws.id];
+            const sourceFailing = !!sourceSync?.error && !sourceSync?.isRefreshing;
+            const failingTitle = sourceFailing
+              ? `${ws.label} sync is currently failing — count may be stale`
+              : undefined;
             return(
-              <button key={ws.id} onClick={handleClick}
+              <button key={ws.id} onClick={handleClick} title={failingTitle}
                 style={{
                   height:34,display:'inline-flex',alignItems:'center',gap:6,
                   padding:'0 14px',borderRadius:10,
@@ -635,6 +655,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
                   fontSize:12,fontWeight:isActive?700:500,cursor:'pointer',
                   transition:'all .15s',whiteSpace:'nowrap',
                   boxShadow:isActive?`0 1px 4px ${ws.color}18`:'none',
+                  position:'relative',
                 }}>
                 <i className={ws.icon} style={{fontSize:12}}></i>
                 {ws.label}
@@ -643,6 +664,12 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
                   background:isActive?`${ws.color}20`:'#f2f2f2',
                   color:isActive?ws.color:'#9e9e9e',
                 }}>{count}</span>
+                {sourceFailing && (
+                  <span aria-label="Sync failing" style={{
+                    width:7,height:7,borderRadius:'50%',background:'#d42d35',
+                    boxShadow:'0 0 0 2px white',position:'absolute',top:4,right:4,
+                  }}/>
+                )}
               </button>
             );
           })}
@@ -650,60 +677,66 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           );
         })()}
 
-        {/* Line 3: Filters — Status/Sort/Unassigned only apply to queue view
-            (ZD/JR tickets). For source panels they're hidden because the
-            concepts don't translate — use the SourceTable's built-in filter
-            bar (status pills + search) instead. Country + SLA pills work
-            across both views. */}
+        {/* Line 3: Filters — visible on ALL tabs (queue + work source panels) */}
         <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'nowrap'}}>
-          {!workSource && (
-            <MultiFilterDropdown
-              icon="bi-circle"
-              label="Status"
-              selected={fStatus}
-              options={[
-                {value:'new',label:'New',dotColor:'#7c3aed'},
-                {value:'in_progress',label:'In Progress',dotColor:'#1d4ed8'},
-                {value:'waiting',label:'Pause',dotColor:'#6b6560'},
-                {value:'escalated',label:'Escalated',dotColor:'#d42d35'},
-                {value:'resolved',label:'Resolved',dotColor:'#15803d'},
-              ]}
-              onChange={setFStatus}
-              activeColor="#7c3aed"
-            />
-          )}
-          {/* Country multi-select — always visible, applies to every view */}
+          {/* Status multi-select */}
+          <MultiFilterDropdown
+            icon="bi-circle"
+            label="Status"
+            selected={fStatus}
+            options={[
+              {value:'new',label:'New',dotColor:'#7c3aed'},
+              {value:'in_progress',label:'In Progress',dotColor:'#1d4ed8'},
+              {value:'waiting',label:'Pause',dotColor:'#6b6560'},
+              {value:'escalated',label:'Escalated',dotColor:'#d42d35'},
+              {value:'resolved',label:'Resolved',dotColor:'#15803d'},
+            ]}
+            onChange={setFStatus}
+            activeColor="#7c3aed"
+          />
+          {/* Country multi-select — sorted alphabetically by label, with per-country counts */}
           <MultiFilterDropdown
             icon="bi-geo-alt"
             label="Country"
             selected={fCtry}
-            options={allCtry.sort().map(c=>({value:c,label:`${getFlag(c)} ${getCountryName(c) || c}`}))}
+            options={(() => {
+              // Count tickets per country in the currently-active view (source panel or queue)
+              const counts = new Map();
+              const bump = r => { if (r?.country) counts.set(r.country, (counts.get(r.country) || 0) + 1); };
+              if (workSource === 'onboarding') (onboardingSubTab === 'paused' ? pausedOnboardingRows : onboardingRows).forEach(bump);
+              else if (workSource === 'offboarding') offboardingRows.forEach(bump);
+              else if (workSource === 'amendments') amendmentRows.forEach(bump);
+              else if (workSource === 'redlines') redlineRows.forEach(bump);
+              else if (workSource === 'workbench') workbenchRows.forEach(bump);
+              else baseVis.forEach(bump);
+              return allCtry
+                .map(c => ({ value: c, name: getCountryName(c) || c, count: counts.get(c) || 0 }))
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map(o => ({ value: o.value, label: `${getFlag(o.value)} ${o.name}`, count: o.count }));
+            })()}
             onChange={setFCtry}
             activeColor="#1f74b3"
           />
-          {!workSource && (
-            <FilterDropdown
-              icon="bi-arrow-down-up"
-              label="Sort"
-              value={sort}
-              options={[
-                {value:'oldest',label:'Oldest first',icon:'bi-sort-down'},
-                {value:'newest',label:'Newest first',icon:'bi-sort-up'},
-                {value:'sla',label:'SLA urgency',icon:'bi-shield-exclamation'},
-                {value:'assignee',label:'By assignee',icon:'bi-person'},
-              ]}
-              onChange={setSort}
-              isSort
-            />
-          )}
-          {!workSource && (
-            <>
-              <div style={{width:1,height:20,background:'#e8e8e8',flexShrink:0,margin:'0 2px'}}></div>
-              <button onClick={()=>setFUnassigned(!fUnassigned)} style={{height:32,display:'inline-flex',alignItems:'center',gap:5,padding:'0 12px',borderRadius:8,border:fUnassigned?'1px solid #d42d35':'1px solid #e8e8e8',background:fUnassigned?'#fef2f2':'white',color:fUnassigned?'#d42d35':'#616161',fontSize:12,fontWeight:fUnassigned?600:500,cursor:'pointer',transition:'all .15s',whiteSpace:'nowrap'}}>
-                <i className="bi-person-dash" style={{fontSize:11}}></i>Unassigned
-              </button>
-            </>
-          )}
+          {/* Sort dropdown */}
+          <FilterDropdown
+            icon="bi-arrow-down-up"
+            label="Sort"
+            value={sort}
+            options={[
+              {value:'oldest',label:'Oldest first',icon:'bi-sort-down'},
+              {value:'newest',label:'Newest first',icon:'bi-sort-up'},
+              {value:'sla',label:'SLA urgency',icon:'bi-shield-exclamation'},
+              {value:'assignee',label:'By assignee',icon:'bi-person'},
+            ]}
+            onChange={setSort}
+            isSort
+          />
+          <div style={{width:1,height:20,background:'#e8e8e8',flexShrink:0,margin:'0 2px'}}></div>
+          {/* Unassigned toggle */}
+          <button onClick={()=>setFUnassigned(!fUnassigned)} style={{height:32,display:'inline-flex',alignItems:'center',gap:5,padding:'0 12px',borderRadius:8,border:fUnassigned?'1px solid #d42d35':'1px solid #e8e8e8',background:fUnassigned?'#fef2f2':'white',color:fUnassigned?'#d42d35':'#616161',fontSize:12,fontWeight:fUnassigned?600:500,cursor:'pointer',transition:'all .15s',whiteSpace:'nowrap'}}>
+            <i className="bi-person-dash" style={{fontSize:11}}></i>Unassigned
+          </button>
+          {/* Clear all */}
           {hasActiveFilters&&(
             <button onClick={()=>{setFTool(null);setFStatus([]);setFCtry([]);setFSla(null);setFUnassigned(false);setSearch('');}} style={{height:32,display:'inline-flex',alignItems:'center',gap:4,padding:'0 10px',borderRadius:8,border:'none',background:'transparent',color:'#9e9e9e',fontSize:11,cursor:'pointer',whiteSpace:'nowrap',textDecoration:'underline'}}>
               Clear all
@@ -714,21 +747,6 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
 
       {/* ── Work Source Panels — all use standardized SourceTable (Item #3) ── */}
       {/* Apply queue-level country filter to source panels */}
-      {workSource==='all_sources'&&(
-        <ErrorBoundary>
-        <SourceTable
-          rows={scopeSourceRows(allSourceRows)}
-          loading={onboardingData.loading||offboardingData.loading||changeRequestData.loading||workbenchData.loading}
-          error={null}
-          onRefresh={()=>{onboardingData.refresh();offboardingData.refresh();changeRequestData.refresh();workbenchData.refresh();}}
-          showSourceColumn={true}
-          emptyLabel="No tasks across any source"
-          emptySubLabel="All queues are clear"
-          sortDefault="oldest"
-
-        />
-        </ErrorBoundary>
-      )}
       {workSource==='onboarding'&&(
         <ErrorBoundary>
         <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
@@ -755,7 +773,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           </div>
           {onboardingSubTab==='action'&&(
             <SourceTable
-              rows={scopeSourceRows(onboardingRows)}
+              rows={fCtry.length?onboardingRows.filter(r=>fCtry.includes(r.country)):onboardingRows}
               loading={onboardingData.loading}
               error={onboardingData.error}
               onRefresh={onboardingData.refresh}
@@ -764,12 +782,12 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
               emptySubLabel="All onboarding tasks are handled"
               sortDefault="startDate"
               hideStatusPills
-
+              currentUser={user}
             />
           )}
           {onboardingSubTab==='paused'&&(
             <SourceTable
-              rows={scopeSourceRows(pausedOnboardingRows)}
+              rows={fCtry.length?pausedOnboardingRows.filter(r=>fCtry.includes(r.country)):pausedOnboardingRows}
               loading={pausedOnboardingData.loading}
               error={pausedOnboardingData.error}
               onRefresh={pausedOnboardingData.refresh}
@@ -779,7 +797,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
               sortDefault="oldest"
               showPausedSla
               hideStatusPills
-
+              currentUser={user}
             />
           )}
         </div>
@@ -788,7 +806,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       {workSource==='offboarding'&&(
         <ErrorBoundary>
         <SourceTable
-          rows={scopeSourceRows(offboardingRows)}
+          rows={fCtry.length?offboardingRows.filter(r=>fCtry.includes(r.country)):offboardingRows}
           loading={offboardingData.loading}
           error={offboardingData.error}
           onRefresh={offboardingData.refresh}
@@ -801,14 +819,14 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           showClient
           showType
           hideFilterBar
-
+          currentUser={user}
         />
         </ErrorBoundary>
       )}
       {workSource==='amendments'&&(
         <ErrorBoundary>
         <SourceTable
-          rows={scopeSourceRows(amendmentRows)}
+          rows={fCtry.length?amendmentRows.filter(r=>fCtry.includes(r.country)):amendmentRows}
           loading={changeRequestData.loading}
           error={changeRequestData.error}
           onRefresh={changeRequestData.refresh}
@@ -816,14 +834,14 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           emptyLabel="No actionable amendments"
           emptySubLabel="All amendments are handled"
           sortDefault="oldest"
-
+          currentUser={user}
         />
         </ErrorBoundary>
       )}
       {workSource==='redlines'&&(
         <ErrorBoundary>
         <SourceTable
-          rows={scopeSourceRows(redlineRows)}
+          rows={fCtry.length?redlineRows.filter(r=>fCtry.includes(r.country)):redlineRows}
           loading={changeRequestData.loading}
           error={changeRequestData.error}
           onRefresh={changeRequestData.refresh}
@@ -831,14 +849,14 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           emptyLabel="No actionable redlines"
           emptySubLabel="All redlines are handled"
           sortDefault="oldest"
-
+          currentUser={user}
         />
         </ErrorBoundary>
       )}
       {workSource==='workbench'&&(
         <ErrorBoundary>
         <SourceTable
-          rows={scopeSourceRows(workbenchRows)}
+          rows={fCtry.length?workbenchRows.filter(r=>fCtry.includes(r.country)):workbenchRows}
           loading={workbenchData.loading}
           error={workbenchData.error}
           onRefresh={workbenchData.refresh}
@@ -846,7 +864,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           emptyLabel="No workbench tasks"
           emptySubLabel="All tasks are processed"
           sortDefault="oldest"
-
+          currentUser={user}
         />
         </ErrorBoundary>
       )}
@@ -1221,22 +1239,39 @@ const FilterDropdown=memo(({icon,label,value,options,onChange,activeColor='#1f74
 FilterDropdown.displayName='FilterDropdown';
 
 // ── Multi-select filter dropdown (Status, Country) ──
-const MultiFilterDropdown=memo(({icon,label,selected=[],options,onChange,activeColor='#1f74b3'})=>{
+// Supports: per-option counts, auto-enabled search for long lists (>=8 options),
+// stable alphabetical sort by label, and a wider panel for long labels.
+const MultiFilterDropdown=memo(({icon,label,selected=[],options,onChange,activeColor='#1f74b3',searchable}) =>{
   const [open,setOpen]=useState(false);
+  const [query,setQuery]=useState('');
   const ref=useRef(null);
+  const inputRef=useRef(null);
   const isActive=selected.length>0;
+  // Auto-enable search when there are many options (unless explicitly disabled)
+  const showSearch = searchable ?? (options.length >= 8);
 
   useEffect(()=>{
     if(!open)return;
-    const h=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false);};
+    const h=e=>{if(ref.current&&!ref.current.contains(e.target)){setOpen(false);setQuery('');}};
     document.addEventListener('mousedown',h);
     return()=>document.removeEventListener('mousedown',h);
   },[open]);
+
+  // Focus search input when opening
+  useEffect(()=>{
+    if(open && showSearch && inputRef.current) inputRef.current.focus();
+  },[open,showSearch]);
 
   const toggle=(value)=>{
     if(selected.includes(value)) onChange(selected.filter(v=>v!==value));
     else onChange([...selected,value]);
   };
+
+  // Filter + keep options as provided; caller is responsible for sort order.
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? options.filter(o => (o.label || '').toLowerCase().includes(q) || String(o.value).toLowerCase().includes(q))
+    : options;
 
   const displayLabel=isActive
     ? selected.length===1
@@ -1259,29 +1294,56 @@ const MultiFilterDropdown=memo(({icon,label,selected=[],options,onChange,activeC
         <i className={open?'bi-chevron-up':'bi-chevron-down'} style={{fontSize:8,marginLeft:2,opacity:0.6}}></i>
       </button>
       {open&&(
-        <div style={{position:'absolute',top:'calc(100% + 4px)',left:0,background:'white',border:'1px solid #e8e8e8',borderRadius:12,boxShadow:'0 8px 24px rgba(0,0,0,.12)',zIndex:200,minWidth:200,maxHeight:320,overflowY:'auto',padding:'6px 0'}}>
-          {isActive&&(
-            <div onClick={()=>{onChange([]);setOpen(false);}}
-              style={{padding:'8px 14px',fontSize:12,color:'#9e9e9e',cursor:'pointer',borderBottom:'1px solid #f2f2f2',display:'flex',alignItems:'center',gap:6}}
-              onMouseEnter={e=>e.currentTarget.style.background='#f9f8f6'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-              <i className="bi-x-circle" style={{fontSize:11}}></i>Clear selection
+        <div style={{position:'absolute',top:'calc(100% + 4px)',left:0,background:'white',border:'1px solid #e8e8e8',borderRadius:12,boxShadow:'0 8px 24px rgba(0,0,0,.12)',zIndex:200,minWidth:260,maxHeight:360,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+          {showSearch && (
+            <div style={{padding:'8px 10px',borderBottom:'1px solid #f2f2f2',display:'flex',alignItems:'center',gap:6}}>
+              <i className="bi-search" style={{fontSize:11,color:'#9e9e9e'}}></i>
+              <input
+                ref={inputRef}
+                value={query}
+                onChange={e=>setQuery(e.target.value)}
+                onKeyDown={e=>{if(e.key==='Escape'){setQuery('');setOpen(false);}}}
+                placeholder={`Search ${label.toLowerCase()}…`}
+                style={{flex:1,border:'none',outline:'none',fontSize:12,color:'#1b1b1b',background:'transparent'}}
+              />
+              {query && (
+                <i className="bi-x-circle-fill" onClick={()=>setQuery('')}
+                  style={{fontSize:11,color:'#9e9e9e',cursor:'pointer'}}></i>
+              )}
             </div>
           )}
-          {options.map(opt=>{
-            const checked=selected.includes(opt.value);
-            return(
-              <div key={opt.value} onClick={()=>toggle(opt.value)}
-                onMouseEnter={e=>{if(!checked)e.currentTarget.style.background='#f9f8f6';}}
-                onMouseLeave={e=>{e.currentTarget.style.background=checked?`${activeColor}08`:'transparent';}}
-                style={{padding:'8px 14px',fontSize:13,color:checked?activeColor:'#1b1b1b',fontWeight:checked?600:400,cursor:'pointer',background:checked?`${activeColor}08`:'transparent',display:'flex',alignItems:'center',gap:8,transition:'background .1s'}}>
-                <span style={{width:16,height:16,borderRadius:4,border:checked?`2px solid ${activeColor}`:'2px solid #d5d5d5',background:checked?activeColor:'white',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .15s'}}>
-                  {checked&&<i className="bi-check2" style={{fontSize:10,color:'white'}}></i>}
-                </span>
-                {opt.dotColor&&<span style={{width:8,height:8,borderRadius:'50%',background:opt.dotColor,flexShrink:0}}></span>}
-                <span style={{flex:1}}>{opt.label}</span>
+          <div style={{flex:1,overflowY:'auto',padding:'6px 0'}}>
+            {isActive&&(
+              <div onClick={()=>{onChange([]);setOpen(false);setQuery('');}}
+                style={{padding:'8px 14px',fontSize:12,color:'#9e9e9e',cursor:'pointer',borderBottom:'1px solid #f2f2f2',display:'flex',alignItems:'center',gap:6}}
+                onMouseEnter={e=>e.currentTarget.style.background='#f9f8f6'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                <i className="bi-x-circle" style={{fontSize:11}}></i>Clear selection
               </div>
-            );
-          })}
+            )}
+            {filtered.length === 0 && (
+              <div style={{padding:'16px 14px',fontSize:12,color:'#9e9e9e',textAlign:'center'}}>
+                No matches for &ldquo;{query}&rdquo;
+              </div>
+            )}
+            {filtered.map(opt=>{
+              const checked=selected.includes(opt.value);
+              return(
+                <div key={opt.value} onClick={()=>toggle(opt.value)}
+                  onMouseEnter={e=>{if(!checked)e.currentTarget.style.background='#f9f8f6';}}
+                  onMouseLeave={e=>{e.currentTarget.style.background=checked?`${activeColor}08`:'transparent';}}
+                  style={{padding:'8px 14px',fontSize:13,color:checked?activeColor:'#1b1b1b',fontWeight:checked?600:400,cursor:'pointer',background:checked?`${activeColor}08`:'transparent',display:'flex',alignItems:'center',gap:8,transition:'background .1s'}}>
+                  <span style={{width:16,height:16,borderRadius:4,border:checked?`2px solid ${activeColor}`:'2px solid #d5d5d5',background:checked?activeColor:'white',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .15s'}}>
+                    {checked&&<i className="bi-check2" style={{fontSize:10,color:'white'}}></i>}
+                  </span>
+                  {opt.dotColor&&<span style={{width:8,height:8,borderRadius:'50%',background:opt.dotColor,flexShrink:0}}></span>}
+                  <span style={{flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{opt.label}</span>
+                  {typeof opt.count === 'number' && (
+                    <span style={{fontSize:11,color:checked?activeColor:'#9e9e9e',fontWeight:500,flexShrink:0,marginLeft:8}}>{opt.count}</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
