@@ -3,7 +3,7 @@ app:
   port: 3000
   image:
     repository: 211125331032.dkr.ecr.eu-west-1.amazonaws.com/jtk-ops-hub-v2
-    tag: latest
+    tag: 87b6d368e2ca3a6f90feaadc1d1e12c5f8596027
     pullPolicy: IfNotPresent
 
 service:
@@ -46,4 +46,7 @@ externalSecret:
   refreshInterval: 5m
 
 s3:
+  enabled: false
+
+publicIngress:
   enabled: false
