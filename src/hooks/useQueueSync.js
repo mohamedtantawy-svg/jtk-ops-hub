@@ -8,18 +8,30 @@
 // - Zendesk: every 2 minutes (tickets change frequently)
 // - Jira: every 3 minutes (issues change less often)
 // - localStorage caches per source for instant loads
+// - Concurrent refresh() calls are de-duped via an in-flight Promise ref
+// - Cross-tab adoption: when another tab syncs, we pick up the broadcast
+//   payload and skip our own network round-trip
 // - Single combined tasks state — App.jsx can mutate via setTasks
-// - Local mutations (snooze, reassign) preserved across syncs
+// - Local mutations (snooze, reassign, resolve, created) are loaded from the
+//   queueMutationStore so they survive page reload and are merged on top of
+//   every sync within a bounded time window (LOCAL_MUTATION_WINDOW_MS) before
+//   adopting the authoritative server value.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { fetchQueueBySource } from '../services/integrationsApi';
 import { MEMBERS } from '../data/members';
+import { getQueueChannel, broadcastSync } from './queueSyncChannel';
+import { loadMutations, applyMutationsToTasks, clearMutation, clearCreatedTask } from '../services/queueMutationStore';
+
+// How long a local mutation (reassign / resolve) wins over a diverging server
+// value. After this window, the server wins so external changes become visible.
+const LOCAL_MUTATION_WINDOW_MS = 5 * 60 * 1000;
 
 // ── Per-source sync config ──────────────────────────────────────────────────
 const SOURCE_CONFIG = {
-  zendesk: { interval: 2 * 60 * 1000, cacheKey: 'ops_hub_queue_zendesk', cacheTtl: 2 * 60 * 1000, delay: 100 },
-  jira:    { interval: 3 * 60 * 1000, cacheKey: 'ops_hub_queue_jira',    cacheTtl: 3 * 60 * 1000, delay: 800 },
+  zendesk: { interval: 2 * 60 * 1000, cacheKey: 'ops_hub_queue_zendesk', cacheTtl: 2 * 60 * 1000 },
+  jira:    { interval: 3 * 60 * 1000, cacheKey: 'ops_hub_queue_jira',    cacheTtl: 3 * 60 * 1000 },
 };
 
 // ── Normalize a queue item from the backend ─────────────────────────────────
@@ -89,7 +101,9 @@ function readSourceCache(source) {
     const raw = localStorage.getItem(cfg.cacheKey);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed.ts && Date.now() - parsed.ts < cfg.cacheTtl) return parsed;
+      // Always return the parsed payload — cache hydrates instantly on reload
+      // even when TTL has expired. The freshness check is done separately.
+      if (parsed.items) return parsed;
     }
   } catch {}
   return null;
@@ -104,24 +118,42 @@ function writeSourceCache(source, items, meta) {
 }
 
 // ── Merge source sync into combined tasks (preserves local mutations) ───────
-function mergeSourceIntoTasks(currentTasks, syncedItems, source) {
+// Local-reassign and local-resolve are preserved ONLY while within
+// LOCAL_MUTATION_WINDOW_MS of the recorded mutation timestamp. After that the
+// server value wins, so external (admin-side) changes eventually become visible
+// to everyone instead of being hidden forever.
+function mergeSourceIntoTasks(currentTasks, syncedItems, source, callbacks = {}) {
   const syncMap = new Map();
   for (const item of syncedItems) syncMap.set(item.id, item);
+  const now = Date.now();
 
   const result = [];
   const seen = new Set();
 
-  // Update existing tasks from this source
   for (const task of currentTasks) {
     if (task.source === source && syncMap.has(task.id)) {
-      // Synced task exists — update external data, preserve local state
       const synced = syncMap.get(task.id);
       seen.add(task.id);
 
-      // Detect local assignee change (user reassigned since last sync)
-      const localReassigned = task.assigneeEmail && task.assigneeEmail !== synced.assigneeEmail;
-      // Detect local resolve (user resolved before source updated)
-      const localResolved = task.status === 'resolved' && synced.status !== 'resolved';
+      const reassignAge = task._locallyReassignedAt ? now - task._locallyReassignedAt : Infinity;
+      const resolveAge  = task._locallyResolvedAt  ? now - task._locallyResolvedAt  : Infinity;
+
+      const localReassigned = reassignAge < LOCAL_MUTATION_WINDOW_MS
+        && task.assigneeEmail
+        && task.assigneeEmail !== synced.assigneeEmail;
+
+      const localResolved = resolveAge < LOCAL_MUTATION_WINDOW_MS
+        && task.status === 'resolved'
+        && synced.status !== 'resolved';
+
+      // If the server has caught up with our local mutation, drop the stored
+      // entry so stale timestamps don't linger in localStorage.
+      if (task._locallyReassignedAt && task.assigneeEmail === synced.assigneeEmail) {
+        callbacks.onReassignReconciled?.(task.id);
+      }
+      if (task._locallyResolvedAt && synced.status === 'resolved') {
+        callbacks.onResolveReconciled?.(task.id);
+      }
 
       result.push({
         ...synced,
@@ -129,10 +161,13 @@ function mergeSourceIntoTasks(currentTasks, syncedItems, source) {
         snoozedUntil: task.snoozedUntil,
         snoozeLabel: task.snoozeLabel,
         prevStatus: task.prevStatus,
+        _locallyReassignedAt: localReassigned ? task._locallyReassignedAt : null,
+        _locallyResolvedAt:   localResolved   ? task._locallyResolvedAt   : null,
+        _locallySnoozedAt:    task._locallySnoozedAt || null,
         status: task.snoozedUntil && task.status === 'waiting' ? 'waiting'
               : localResolved ? 'resolved'
               : synced.status,
-        // Preserve local reassignment until source catches up
+        // Preserve local reassignment until the window elapses
         ...(localReassigned ? {
           assigneeId: task.assigneeId,
           assigneeEmail: task.assigneeEmail,
@@ -162,13 +197,14 @@ function mergeSourceIntoTasks(currentTasks, syncedItems, source) {
   return result;
 }
 
-// ── Load initial tasks from all source caches ───────────────────────────────
-function loadInitialTasks() {
+// ── Load initial tasks: hydrate from cache + layer mutation store on top ─────
+function loadInitialTasks(userEmail) {
   const all = [];
   const seen = new Set();
+  const meta = {};
   for (const source of Object.keys(SOURCE_CONFIG)) {
     const cached = readSourceCache(source);
-    if (cached?.items) {
+    if (cached?.items?.length) {
       for (const item of cached.items) {
         const normalized = normalizeQueueItem(item);
         if (!seen.has(normalized.id)) {
@@ -177,73 +213,152 @@ function loadInitialTasks() {
         }
       }
     }
+    if (cached?.meta) meta[source] = cached.meta;
+    if (cached?.ts) meta[`${source}_ts`] = cached.ts;
   }
-  return all;
+  // Layer local mutations (snooze / local-resolve / local-reassign) and
+  // locally-created tasks on top so the user sees the state they left in.
+  const { mutations, created } = loadMutations(userEmail);
+  const withMutations = applyMutationsToTasks(all, mutations, created, {
+    localReassignWindowMs: LOCAL_MUTATION_WINDOW_MS,
+  });
+  return { tasks: withMutations, meta };
 }
 
 // ── Hook ────────────────────────────────────────────────────────────────────
-export function useQueueSync(enabled = true) {
-  const [tasks, setTasks] = useState(loadInitialTasks);
-  const [sourceMeta, setSourceMeta] = useState({});
+export function useQueueSync(arg = true) {
+  // Back-compat: previously called as useQueueSync(true). New call sites pass
+  // { enabled, userEmail } so the mutation store can namespace per user.
+  const { enabled, userEmail } = typeof arg === 'object' && arg !== null
+    ? { enabled: arg.enabled ?? true, userEmail: arg.userEmail || null }
+    : { enabled: !!arg, userEmail: null };
+
+  const initial = useMemo(() => loadInitialTasks(userEmail), [userEmail]);
+  const [tasks, setTasks] = useState(initial.tasks);
+  const [sourceMeta, setSourceMeta] = useState(() => {
+    const m = {};
+    if (initial.meta.zendesk) m.zendesk = initial.meta.zendesk;
+    if (initial.meta.jira) m.jira = initial.meta.jira;
+    return m;
+  });
   const [sourceErrors, setSourceErrors] = useState({});
-  const [sourceLastSync, setSourceLastSync] = useState({});
-  const [sourceLoading, setSourceLoading] = useState({ zendesk: true, jira: true });
+  const [sourceLastSync, setSourceLastSync] = useState(() => {
+    const s = {};
+    if (initial.meta.zendesk_ts) s.zendesk = new Date(initial.meta.zendesk_ts).toISOString();
+    if (initial.meta.jira_ts) s.jira = new Date(initial.meta.jira_ts).toISOString();
+    return s;
+  });
+  const [sourceLoading, setSourceLoading] = useState(() => {
+    const zdCount = initial.tasks.filter(t => t.source === 'zendesk').length;
+    const jrCount = initial.tasks.filter(t => t.source === 'jira').length;
+    return { zendesk: zdCount === 0, jira: jrCount === 0 };
+  });
+  const [sourceRefreshing, setSourceRefreshing] = useState({ zendesk: false, jira: false });
   const syncCounts = useRef({ zendesk: 0, jira: 0 });
   const intervalRefs = useRef({});
+  const inFlightRefs = useRef({ zendesk: null, jira: null });
+  const lastFetchTsRefs = useRef({
+    zendesk: initial.meta.zendesk_ts || 0,
+    jira: initial.meta.jira_ts || 0,
+  });
+  const userEmailRef = useRef(userEmail);
+  useEffect(() => { userEmailRef.current = userEmail; }, [userEmail]);
 
-  // Per-source sync function
+  // Shared callbacks so mergeSourceIntoTasks can signal back when the server
+  // caught up with a local mutation — we clear the stored entry so it doesn't
+  // linger and confuse future hydrations.
+  const mergeCallbacks = useMemo(() => ({
+    onReassignReconciled: (taskId) => clearMutation(userEmailRef.current, taskId),
+    onResolveReconciled:  (taskId) => clearMutation(userEmailRef.current, taskId),
+  }), []);
+
+  // Per-source sync function (with in-flight dedup)
   const syncSource = useCallback(async (source, opts = {}) => {
-    if (!enabled) return;
+    if (!enabled) return null;
+    if (inFlightRefs.current[source]) return inFlightRefs.current[source];
 
-    try {
-      const res = await fetchQueueBySource(source, opts);
-      const synced = (res?.items || []).map(normalizeQueueItem);
+    setSourceRefreshing(prev => ({ ...prev, [source]: true }));
 
-      setTasks(prev => {
-        if (syncCounts.current[source] === 0 && prev.filter(t => t.source === source).length === 0) {
-          // First sync for this source — just add the items
-          const otherTasks = prev.filter(t => t.source !== source);
-          return [...otherTasks, ...synced];
+    const run = (async () => {
+      try {
+        const res = await fetchQueueBySource(source, opts);
+        const rawItems = res?.items || [];
+        const synced = rawItems.map(normalizeQueueItem);
+        const now = Date.now();
+
+        setTasks(prev => {
+          // Guard: on a valid response that returns an empty list while we already
+          // had cached rows for this source, keep the existing rows instead of
+          // auto-resolving every task. Matches the Deel hooks' SWR contract.
+          if (synced.length === 0 && prev.some(t => t.source === source)) {
+            return prev;
+          }
+          if (syncCounts.current[source] === 0 && prev.filter(t => t.source === source).length === 0) {
+            // First sync for this source with no prior cache — seed with synced
+            // items then layer the mutation store on top so any stored snooze /
+            // local-reassign / locally-created entries appear immediately.
+            const otherTasks = prev.filter(t => t.source !== source);
+            const seeded = [...otherTasks, ...synced];
+            const { mutations, created } = loadMutations(userEmailRef.current);
+            return applyMutationsToTasks(seeded, mutations, created, {
+              localReassignWindowMs: LOCAL_MUTATION_WINDOW_MS,
+            });
+          }
+          return mergeSourceIntoTasks(prev, synced, source, mergeCallbacks);
+        });
+
+        const meta = res?.meta || null;
+        setSourceMeta(prev => ({ ...prev, [source]: meta }));
+        setSourceErrors(prev => ({ ...prev, [source]: null }));
+        setSourceLastSync(prev => ({ ...prev, [source]: new Date(now).toISOString() }));
+        syncCounts.current[source] = (syncCounts.current[source] || 0) + 1;
+        lastFetchTsRefs.current[source] = now;
+
+        // Only persist & broadcast non-empty responses so a transient empty
+        // payload never wipes the cache or other tabs.
+        if (rawItems.length > 0) {
+          writeSourceCache(source, rawItems, meta);
+          broadcastSync(source, rawItems, meta, userEmailRef.current);
+        } else {
+          // Still refresh the cache timestamp so TTL checks work.
+          writeSourceCache(source, rawItems, meta);
         }
-        return mergeSourceIntoTasks(prev, synced, source);
-      });
+        return synced;
+      } catch (err) {
+        console.warn(`[useQueueSync/${source}] Sync failed:`, err.message);
+        setSourceErrors(prev => ({ ...prev, [source]: err.message }));
+        return null;
+      } finally {
+        setSourceLoading(prev => ({ ...prev, [source]: false }));
+        setSourceRefreshing(prev => ({ ...prev, [source]: false }));
+        inFlightRefs.current[source] = null;
+      }
+    })();
 
-      setSourceMeta(prev => ({ ...prev, [source]: res?.meta || null }));
-      setSourceErrors(prev => ({ ...prev, [source]: null }));
-      setSourceLastSync(prev => ({ ...prev, [source]: new Date().toISOString() }));
-      syncCounts.current[source] = (syncCounts.current[source] || 0) + 1;
-      writeSourceCache(source, res?.items || [], res?.meta || null);
-    } catch (err) {
-      console.warn(`[useQueueSync/${source}] Sync failed:`, err.message);
-      setSourceErrors(prev => ({ ...prev, [source]: err.message }));
-    } finally {
-      setSourceLoading(prev => ({ ...prev, [source]: false }));
-    }
-  }, [enabled]);
+    inFlightRefs.current[source] = run;
+    return run;
+  }, [enabled, mergeCallbacks]);
 
-  // Initial fetch per source (staggered)
+  // Initial fetch — fire both sources in parallel immediately, no stagger.
+  // The server cache makes this cheap; the first paint is backed by the
+  // localStorage cache so the user sees data instantly anyway.
   useEffect(() => {
     if (!enabled) {
       setSourceLoading({ zendesk: false, jira: false });
       return;
     }
 
-    const timers = [];
-    for (const [source, cfg] of Object.entries(SOURCE_CONFIG)) {
-      const cached = readSourceCache(source);
-      // Skip if cache is still fresh
-      if (cached?.ts && Date.now() - cached.ts < cfg.cacheTtl) {
-        setSourceLoading(prev => ({ ...prev, [source]: false }));
-        // Schedule sync at cache expiry
-        const remaining = cfg.cacheTtl - (Date.now() - cached.ts);
-        timers.push(setTimeout(() => syncSource(source), remaining));
-      } else {
-        // Fetch with staggered delay
-        timers.push(setTimeout(() => syncSource(source), cfg.delay));
+    const kick = () => {
+      for (const [source, cfg] of Object.entries(SOURCE_CONFIG)) {
+        const ts = lastFetchTsRefs.current[source];
+        if (ts && Date.now() - ts < cfg.cacheTtl) {
+          setSourceLoading(prev => ({ ...prev, [source]: false }));
+        } else {
+          syncSource(source);
+        }
       }
-    }
-
-    return () => timers.forEach(t => clearTimeout(t));
+    };
+    kick();
   }, [syncSource, enabled]);
 
   // Per-source auto-sync intervals
@@ -251,7 +366,10 @@ export function useQueueSync(enabled = true) {
     if (!enabled) return;
 
     for (const [source, cfg] of Object.entries(SOURCE_CONFIG)) {
-      intervalRefs.current[source] = setInterval(() => syncSource(source), cfg.interval);
+      intervalRefs.current[source] = setInterval(() => {
+        if (typeof document !== 'undefined' && document.hidden) return;
+        syncSource(source);
+      }, cfg.interval);
     }
 
     return () => {
@@ -261,18 +379,91 @@ export function useQueueSync(enabled = true) {
     };
   }, [syncSource, enabled]);
 
-  // Manual refresh (all sources)
+  // When the tab regains focus, opportunistically refresh any stale source.
+  useEffect(() => {
+    if (!enabled || typeof document === 'undefined') return;
+    const handler = () => {
+      if (document.hidden) return;
+      for (const [source, cfg] of Object.entries(SOURCE_CONFIG)) {
+        const ts = lastFetchTsRefs.current[source];
+        if (!ts || Date.now() - ts >= cfg.cacheTtl) syncSource(source);
+      }
+    };
+    document.addEventListener('visibilitychange', handler);
+    window.addEventListener('focus', handler);
+    return () => {
+      document.removeEventListener('visibilitychange', handler);
+      window.removeEventListener('focus', handler);
+    };
+  }, [syncSource, enabled]);
+
+  // Cross-tab adoption — user-scoped so different users on the same machine
+  // never cross-pollinate each other's caches.
+  useEffect(() => {
+    const ch = getQueueChannel();
+    if (!ch) return;
+    const handler = (e) => {
+      const msg = e.data;
+      if (!msg || !msg.source) return;
+      if (msg.source !== 'zendesk' && msg.source !== 'jira') return;
+      // Reject broadcasts meant for a different signed-in user
+      const myEmail = (userEmailRef.current || '').toLowerCase();
+      const theirEmail = (msg.userKey || '').toLowerCase();
+      if (myEmail && theirEmail && myEmail !== theirEmail) return;
+      if (!msg.ts || msg.ts <= (lastFetchTsRefs.current[msg.source] || 0)) return;
+
+      const items = msg.items || [];
+      if (items.length === 0) return; // don't overwrite with empty
+
+      const synced = items.map(normalizeQueueItem);
+      setTasks(prev => {
+        if (syncCounts.current[msg.source] === 0 && prev.filter(t => t.source === msg.source).length === 0) {
+          const other = prev.filter(t => t.source !== msg.source);
+          const seeded = [...other, ...synced];
+          const { mutations, created } = loadMutations(userEmailRef.current);
+          return applyMutationsToTasks(seeded, mutations, created, {
+            localReassignWindowMs: LOCAL_MUTATION_WINDOW_MS,
+          });
+        }
+        return mergeSourceIntoTasks(prev, synced, msg.source, mergeCallbacks);
+      });
+      setSourceMeta(prev => ({ ...prev, [msg.source]: msg.meta || prev[msg.source] || null }));
+      setSourceErrors(prev => ({ ...prev, [msg.source]: null }));
+      setSourceLastSync(prev => ({ ...prev, [msg.source]: new Date(msg.ts).toISOString() }));
+      setSourceLoading(prev => ({ ...prev, [msg.source]: false }));
+      lastFetchTsRefs.current[msg.source] = msg.ts;
+      syncCounts.current[msg.source] = (syncCounts.current[msg.source] || 0) + 1;
+      writeSourceCache(msg.source, items, msg.meta || null);
+    };
+    ch.addEventListener('message', handler);
+    return () => ch.removeEventListener('message', handler);
+  }, [mergeCallbacks]);
+
+  // Manual refresh (all sources) — dedups internally so rapid clicks are safe
   const refresh = useCallback(() => {
-    setSourceLoading({ zendesk: true, jira: true });
     for (const source of Object.keys(SOURCE_CONFIG)) {
       syncSource(source, { bustCache: true });
     }
   }, [syncSource]);
 
+  // Expose a helper so locally-created task clean-up can be triggered from
+  // callers (e.g., when they delete or resolve a manual task).
+  const forgetLocalCreated = useCallback((taskId) => {
+    clearCreatedTask(userEmailRef.current, taskId);
+  }, []);
+
   // Combined meta
   const meta = useMemo(() => ({
-    zendesk: { count: sourceMeta.zendesk?.count || 0, status: sourceMeta.zendesk?.status || 'unknown', error: sourceErrors.zendesk },
-    jira:    { count: sourceMeta.jira?.count || 0,    status: sourceMeta.jira?.status || 'unknown',    error: sourceErrors.jira },
+    zendesk: {
+      count: sourceMeta.zendesk?.count || 0,
+      status: sourceMeta.zendesk?.status || 'unknown',
+      error: sourceErrors.zendesk,
+    },
+    jira: {
+      count: sourceMeta.jira?.count || 0,
+      status: sourceMeta.jira?.status || 'unknown',
+      error: sourceErrors.jira,
+    },
     syncedAt: sourceLastSync.zendesk && sourceLastSync.jira
       ? (sourceLastSync.zendesk > sourceLastSync.jira ? sourceLastSync.zendesk : sourceLastSync.jira)
       : (sourceLastSync.zendesk || sourceLastSync.jira),
@@ -280,29 +471,46 @@ export function useQueueSync(enabled = true) {
     totalResolved: tasks.filter(i => i.status === 'resolved').length,
   }), [sourceMeta, sourceErrors, sourceLastSync, tasks]);
 
-  // Loading = any source loading on first load with no cached data
   const loading = (sourceLoading.zendesk && tasks.filter(t => t.source === 'zendesk').length === 0) ||
                   (sourceLoading.jira && tasks.filter(t => t.source === 'jira').length === 0);
 
-  // Error = only if BOTH sources fail
   const error = sourceErrors.zendesk && sourceErrors.jira
     ? `Zendesk: ${sourceErrors.zendesk}; Jira: ${sourceErrors.jira}`
     : null;
 
+  const isRefreshing = sourceRefreshing.zendesk || sourceRefreshing.jira;
   const lastSync = meta.syncedAt;
 
   return {
     tasks,
-    setTasks,  // Direct state setter — App.jsx can mutate freely
+    setTasks,
     meta,
     loading,
+    isRefreshing,
     error,
     lastSync,
     refresh,
+    forgetLocalCreated,
     isLive: !!(sourceLastSync.zendesk || sourceLastSync.jira) && !error,
     sources: {
-      zendesk: { loading: sourceLoading.zendesk, error: sourceErrors.zendesk, lastSync: sourceLastSync.zendesk, count: tasks.filter(t => t.source === 'zendesk').length },
-      jira:    { loading: sourceLoading.jira,    error: sourceErrors.jira,    lastSync: sourceLastSync.jira,    count: tasks.filter(t => t.source === 'jira').length },
+      zendesk: {
+        loading: sourceLoading.zendesk,
+        isRefreshing: sourceRefreshing.zendesk,
+        error: sourceErrors.zendesk,
+        lastSync: sourceLastSync.zendesk,
+        lastSyncAt: lastFetchTsRefs.current.zendesk || null,
+        count: tasks.filter(t => t.source === 'zendesk').length,
+        retry: () => syncSource('zendesk', { bustCache: true }),
+      },
+      jira: {
+        loading: sourceLoading.jira,
+        isRefreshing: sourceRefreshing.jira,
+        error: sourceErrors.jira,
+        lastSync: sourceLastSync.jira,
+        lastSyncAt: lastFetchTsRefs.current.jira || null,
+        count: tasks.filter(t => t.source === 'jira').length,
+        retry: () => syncSource('jira', { bustCache: true }),
+      },
     },
   };
 }

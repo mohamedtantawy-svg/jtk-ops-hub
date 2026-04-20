@@ -1,8 +1,18 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useContext, memo } from 'react';
 import { STATUSES, TOOLS, FUNCTIONS, FLAGS, getFlag, getCountryName } from '../../data/constants';
-import { MEMBERS, MEMBERS_BY_EMAIL, getDirectReports } from '../../data/members';
-import { OWNER_COUNTRIES } from '../../data/countryOwners';
-import { slaInfo, rel, getUrl, getVisibleEmails } from '../../utils/helpers';
+import { MEMBERS } from '../../data/members';
+import { slaInfo, rel, getUrl } from '../../utils/helpers';
+import {
+  scopeZendeskTickets,
+  scopeOffboardingCases,
+  scopeWorkbenchTasks,
+  scopeOnboardingPeople,
+  scopePausedOnboarding,
+  scopeAmendmentRequests,
+  scopeRedlineRequests,
+  filterByAssignee as scopeTicketsByAssignee,
+  isAdminUser,
+} from '../../lib/queue-scoping';
 
 // ── O(1) member lookups (avoid MEMBERS.find in hot paths) ──
 const MEMBERS_BY_ID = new Map(MEMBERS.map(m => [m.id, m]));
@@ -13,14 +23,13 @@ import { ToolBadge, StatusBadge, SlaBadge } from '../ui/Badges';
 import OutboundQueue from './OutboundQueue';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import Avatar from '../ui/Avatar';
-import { useOnboardingData } from '../../hooks/useOnboardingData';
-import { useOffboardingData } from '../../hooks/useOffboardingData';
-import { useChangeRequestData } from '../../hooks/useChangeRequestData';
-import { useWorkbenchData } from '../../hooks/useWorkbenchData';
-import { usePausedOnboardingData } from '../../hooks/usePausedOnboardingData';
+import { useQueueUnifiedSync } from '../../hooks/useQueueUnifiedSync';
+import UnifiedSyncButton from './UnifiedSyncButton';
 import SourceTable from './SourceTable';
 import ErrorBoundary from '../ui/ErrorBoundary';
 import { updateTaskStatus as apiUpdateStatus } from '../../services/tasksApi';
+import { postTicketAction } from '../../services/integrationsApi';
+import { recordMutation, clearCreatedTask } from '../../services/queueMutationStore';
 import {
   normalizeOnboarding,
   normalizeOffboarding,
@@ -29,6 +38,16 @@ import {
   normalizeWorkbench,
   normalizePausedOnboarding,
 } from '../../utils/normalizeSourceRows';
+
+// Push a status change to the source system for live (ZD/Jira) tickets.
+// Manual / locally-created tasks short-circuit to no-op.
+function pushResolveIfLive(task) {
+  if (!task) return Promise.resolve();
+  if (task.source !== 'zendesk' && task.source !== 'jira') return Promise.resolve();
+  return postTicketAction(task.id, { action: 'status', status: 'resolved' }).catch(err => {
+    console.warn('[Queue] push resolve to source failed:', err.message);
+  });
+}
 
 // ── Shared relTime utility (used by QueueRow + WorkModeOverlay) ──
 const relTime=(m)=>{
@@ -95,13 +114,15 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     }
   }, [subFilter]);
   const settings = useContext(SettingsContext);
-  const { deelData, jiraData, queueSync } = useContext(IntegrationsContext);
-  // Onboarding data from Deel API
-  const onboardingData = useOnboardingData(true);
-  const offboardingData = useOffboardingData(true);
-  const changeRequestData = useChangeRequestData(true);
-  const workbenchData = useWorkbenchData(true);
-  const pausedOnboardingData = usePausedOnboardingData(true);
+  const { queueSync } = useContext(IntegrationsContext);
+  // Unified sync aggregator — one source of truth for all Deel feeds + tickets.
+  // Exposes per-source refresh() (for row-level retries) alongside refreshAll().
+  const unified = useQueueUnifiedSync({ queueSync, enabled: !!user });
+  const {
+    onboardingData, pausedOnboardingData, offboardingData,
+    changeRequestData, workbenchData,
+    meta: syncMeta, sources: syncSources, refreshAll: syncRefreshAll, nowTick: syncNowTick,
+  } = unified;
 
   // ── Normalized rows for SourceTable (Item #3) ──
   const onboardingRowsAll = useMemo(() => normalizeOnboarding(onboardingData.items), [onboardingData.items]);
@@ -111,89 +132,23 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const redlineRowsAll = useMemo(() => normalizeRedlines(changeRequestData.redlines), [changeRequestData.redlines]);
   const workbenchRowsAll = useMemo(() => normalizeWorkbench(workbenchData.tasks), [workbenchData.tasks]);
 
-  const isAdmin=perms?.dataScope==='all_tasks'; const isLead=perms?.dataScope==='team_tasks';
-  const ns=(tasks||[]).filter(t=>t.source!=='slack'&&t.source!=='calendar');
-  // Hierarchical visibility: viewer sees own tickets + all direct/indirect reports
-  const visibleEmails = useMemo(
-    () => getVisibleEmails(user?.email),
-    [user?.email]
-  );
+  const isAdmin = isAdminUser(user);
+  const isLead = perms?.dataScope === 'team_tasks';
+  const ns = (tasks || []).filter(t => t.source !== 'slack' && t.source !== 'calendar');
 
-  // ── Agent-scoped source rows: filter Deel API rows by assigneeEmail ──
-  // Admins see all. Leads/agents see only rows assigned to their visible emails.
-  // Rows with no assigneeEmail (amendments, redlines) are hidden from agents.
-  const filterSourceRows = useCallback((rows) => {
-    if (isAdmin) return rows;
-    return rows.filter(r => {
-      const email = (r.assigneeEmail || '').toLowerCase();
-      return email && visibleEmails.has(email);
-    });
-  }, [isAdmin, visibleEmails]);
-
-  // ── Country-ownership filter for onboarding ──
-  // Admin/regional_manager → see all. Team lead → own countries + direct reports' countries. Agent → own countries only.
-  const filterOnboardingRows = useCallback((rows) => {
-    if (isAdmin) return rows;
-    const email = (user?.email || '').toLowerCase();
-    const member = MEMBERS_BY_EMAIL[email];
-    const access = member?.access || 'agent';
-    if (access === 'regional_manager') return rows;
-    // Collect owned country codes for this user (and direct reports for team leads)
-    const ownedCodes = new Set(OWNER_COUNTRIES.get(email) || []);
-    if (access === 'team_lead') {
-      for (const dr of getDirectReports(email)) {
-        const drCodes = OWNER_COUNTRIES.get(dr.email.toLowerCase());
-        if (drCodes) for (const c of drCodes) ownedCodes.add(c);
-      }
-    }
-    if (ownedCodes.size === 0) return []; // no ownership data → safe default (admins/RMs bypass above)
-    return rows.filter(r => {
-      const cc = (r.country || '').toUpperCase();
-      return cc && ownedCodes.has(cc);
-    });
-  }, [isAdmin, user?.email]);
-
-  const onboardingRows = useMemo(() => filterOnboardingRows(onboardingRowsAll), [onboardingRowsAll, filterOnboardingRows]);
-  const pausedOnboardingRows = useMemo(() => filterOnboardingRows(pausedOnboardingRowsAll), [pausedOnboardingRowsAll, filterOnboardingRows]);
-
-  // ── Offboarding filter: assignee-email scoping + country ownership for unassigned ──
-  // Assigned rows → same hierarchical assignee-email match as other sources.
-  // Unassigned rows → visible to admins, regional managers, and to agents/leads
-  // who own the row's country (or for team leads, whose direct reports own it).
-  const filterOffboardingRows = useCallback((rows) => {
-    if (isAdmin) return rows;
-    const email = (user?.email || '').toLowerCase();
-    const member = MEMBERS_BY_EMAIL[email];
-    const access = member?.access || 'agent';
-
-    // Build the set of country codes this user is responsible for
-    // (own countries + direct reports' countries if they're a lead).
-    const ownedCodes = new Set(OWNER_COUNTRIES.get(email) || []);
-    if (access === 'team_lead') {
-      for (const dr of getDirectReports(email)) {
-        const drCodes = OWNER_COUNTRIES.get(dr.email.toLowerCase());
-        if (drCodes) for (const c of drCodes) ownedCodes.add(c);
-      }
-    }
-
-    return rows.filter(r => {
-      const assignee = (r.assigneeEmail || '').toLowerCase();
-      if (assignee) {
-        // Assigned row — normal hierarchical visibility check.
-        return visibleEmails.has(assignee);
-      }
-      // Unassigned row — regional managers always see; agents/leads see if they
-      // own the row's country. Agents outside their countries don't see.
-      if (access === 'regional_manager') return true;
-      const cc = (r.country || '').toUpperCase();
-      return cc && ownedCodes.has(cc);
-    });
-  }, [isAdmin, user?.email, visibleEmails]);
-
-  const offboardingRows = useMemo(() => filterOffboardingRows(offboardingRowsAll), [offboardingRowsAll, filterOffboardingRows]);
-  const amendmentRows = useMemo(() => filterSourceRows(amendmentRowsAll), [amendmentRowsAll, filterSourceRows]);
-  const redlineRows = useMemo(() => filterSourceRows(redlineRowsAll), [redlineRowsAll, filterSourceRows]);
-  const workbenchRows = useMemo(() => filterSourceRows(workbenchRowsAll), [workbenchRowsAll, filterSourceRows]);
+  // ── Per-source scoping (see src/lib/queue-scoping.js for the full matrix) ──
+  // Assignee-based: Zendesk / Jira / Offboarding / Workbench
+  // Country-based:  Onboarding / Paused Onboarding / Amendments / Redlines
+  // The helpers derive visibility from the user's role (admin / RM / TL /
+  // agent) and the hierarchy in src/data/members.js + ownership map in
+  // src/data/countryOwners.js — the BE uses the exact same functions so FE
+  // and BE stay byte-identical.
+  const onboardingRows       = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user),       [onboardingRowsAll, user]);
+  const pausedOnboardingRows = useMemo(() => scopePausedOnboarding(pausedOnboardingRowsAll, user), [pausedOnboardingRowsAll, user]);
+  const offboardingRows      = useMemo(() => scopeOffboardingCases(offboardingRowsAll, user),      [offboardingRowsAll, user]);
+  const amendmentRows        = useMemo(() => scopeAmendmentRequests(amendmentRowsAll, user),       [amendmentRowsAll, user]);
+  const redlineRows          = useMemo(() => scopeRedlineRequests(redlineRowsAll, user),           [redlineRowsAll, user]);
+  const workbenchRows        = useMemo(() => scopeWorkbenchTasks(workbenchRowsAll, user),          [workbenchRowsAll, user]);
   // Item #4: "All" view — combine all agent-scoped sources into unified list
   const allSourceRows = useMemo(() => [
     ...onboardingRows, ...offboardingRows, ...amendmentRows, ...redlineRows, ...workbenchRows,
@@ -201,12 +156,9 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
 
   // ── Memoized filter chain — only recomputes when inputs change ──
   const { vis, baseVis, visPreSla, active, snoozed, open, done, all } = useMemo(() => {
-    let _vis=ns;
-    if(!isAdmin) _vis=ns.filter(t=>{
-      if(t.assigneeId===user.id) return true;
-      if(t.assigneeEmail && visibleEmails.has(t.assigneeEmail.toLowerCase())) return true;
-      return false;
-    });
+    // Scope ZD / Jira tickets (the only sources in `ns`) through the shared
+    // assignee-based helper — exact same rules the /queue backend applies.
+    let _vis = scopeTicketsByAssignee(ns, user);
     const _baseVis=_vis.filter(t=>!t.isCalendarBooking);
     if(fTool)       _vis=_vis.filter(t=>t.source===fTool);
     if(fStatus.length) _vis=_vis.filter(t=>fStatus.includes(t.status));
@@ -237,7 +189,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     const _done=_vis.filter(t=>t.status==='resolved');
     const _all=[..._sorted,..._snoozed,..._done];
     return { vis:_vis, baseVis:_baseVis, visPreSla:_visPreSla, active:_sorted, snoozed:_snoozed, open:_sorted, done:_done, all:_all };
-  }, [ns, isAdmin, user.id, visibleEmails, fTool, fStatus, fUnassigned, fCtry, fSla, showMeetingInvites, search, sort, settings.sla_enabled]);
+  }, [ns, user, fTool, fStatus, fUnassigned, fCtry, fSla, showMeetingInvites, search, sort, settings.sla_enabled]);
   // Item #9: Country filter — stable list from baseVis (unaffected by fTool/fStatus)
   const allCtry=useMemo(()=>{
     const ctrySet = new Set(baseVis.map(t=>t.country).filter(Boolean));
@@ -255,14 +207,21 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       if(task.status==='resolved'||pendingCloseRefs.current[task.id])return;
       const taskId=task.id;
       const tid=setTimeout(()=>{
-        setTasks(prev=>prev.map(t=>t.id===taskId?{...t,status:'resolved'}:t));
-        // Only move selection if user is still viewing this task
+        const resolvedAt=Date.now();
+        setTasks(prev=>prev.map(t=>t.id===taskId?{...t,status:'resolved',_locallyResolvedAt:resolvedAt}:t));
         setSelTask(prev=>prev?.id===taskId?null:prev);
         delete pendingCloseRefs.current[taskId];
-        // Persist to backend
-        apiUpdateStatus(task._beId||taskId,'resolved').catch(err=>{
-          console.warn('[Queue] Failed to sync close to backend:',err.message);
-        });
+        // Record mutation so reload preserves the resolved state within the window
+        recordMutation(user?.email,taskId,{status:'resolved',_locallyResolvedAt:resolvedAt});
+        if(task._locallyCreated) clearCreatedTask(user?.email,taskId);
+        // Push resolve to source system (ZD/Jira). For manual tasks we hit the
+        // legacy Postgres endpoint instead.
+        pushResolveIfLive(task);
+        if(task.source!=='zendesk'&&task.source!=='jira'){
+          apiUpdateStatus(task._beId||taskId,'resolved').catch(err=>{
+            console.warn('[Queue] Failed to sync close to backend:',err.message);
+          });
+        }
       },4000);
       pendingCloseRefs.current[taskId]=tid;
       addToast&&addToast('success',`Closed: ${taskId}`,task.subject.slice(0,46),()=>{
@@ -275,21 +234,50 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     if(action==='reply'){setSelTask(task);setRecentIds(prev=>[task.id,...prev.filter(id=>id!==task.id)].slice(0,3));}
     if(action==='reassign') onReassign&&onReassign(task);
     if(action==='snooze') onSnooze&&onSnooze(task);
-  },[setTasks,setSelTask,setRecentIds,addToast,onReassign,onSnooze]);
+  },[setTasks,setSelTask,setRecentIds,addToast,onReassign,onSnooze,user]);
 
   const handleResolve=useCallback((task)=>{
     if(task.status==='resolved')return;
-    setTasks(prev=>prev.map(t=>t.id===task.id?{...t,status:'resolved'}:t));
+    const resolvedAt=Date.now();
+    setTasks(prev=>prev.map(t=>t.id===task.id?{...t,status:'resolved',_locallyResolvedAt:resolvedAt}:t));
     setSelTask(prev=>prev?.id===task.id?null:prev);
+    recordMutation(user?.email,task.id,{status:'resolved',_locallyResolvedAt:resolvedAt});
+    if(task._locallyCreated) clearCreatedTask(user?.email,task.id);
     addToast&&addToast('success',`Resolved: ${task.id}`,task.subject.slice(0,46));
-    // Persist to backend — fire-and-forget (optimistic UI)
-    apiUpdateStatus(task._beId||task.id,'resolved').catch(err=>{
-      console.warn('[Queue] Failed to sync resolve to backend:',err.message);
-    });
-  },[setTasks,setSelTask,addToast]);
+    // Push resolve to source system; manual tasks use the legacy Postgres path.
+    pushResolveIfLive(task);
+    if(task.source!=='zendesk'&&task.source!=='jira'){
+      apiUpdateStatus(task._beId||task.id,'resolved').catch(err=>{
+        console.warn('[Queue] Failed to sync resolve to backend:',err.message);
+      });
+    }
+  },[setTasks,setSelTask,addToast,user]);
 
   const toggleCheck=useCallback(id=>setCheckedIds(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;}),[]);
-  const doBulk=(action)=>{ const ids=[...checkedIds]; if(action==='resolve'){ setTasks(prev=>prev.map(t=>checkedIds.has(t.id)?{...t,status:'resolved'}:t)); addToast&&addToast('success',`${ids.length} tasks resolved`,''); setCheckedIds(new Set()); setSelTask(null); return; } if(onBulkAction){ onBulkAction(ids,action); setCheckedIds(new Set()); } };
+  const doBulk=(action)=>{
+    const ids=[...checkedIds];
+    if(action==='resolve'){
+      const resolvedAt=Date.now();
+      const targets=ids.map(id=>tasks.find(t=>t.id===id)).filter(Boolean);
+      setTasks(prev=>prev.map(t=>checkedIds.has(t.id)?{...t,status:'resolved',_locallyResolvedAt:resolvedAt}:t));
+      ids.forEach(id=>recordMutation(user?.email,id,{status:'resolved',_locallyResolvedAt:resolvedAt}));
+      // Push to source + cleanup locally-created flags
+      targets.forEach(t=>{
+        if(t._locallyCreated) clearCreatedTask(user?.email,t.id);
+        pushResolveIfLive(t);
+        if(t.source!=='zendesk'&&t.source!=='jira'){
+          apiUpdateStatus(t._beId||t.id,'resolved').catch(err=>{
+            console.warn('[Queue] Bulk resolve sync failed:',err.message);
+          });
+        }
+      });
+      addToast&&addToast('success',`${ids.length} tasks resolved`,'');
+      setCheckedIds(new Set());
+      setSelTask(null);
+      return;
+    }
+    if(onBulkAction){ onBulkAction(ids,action); setCheckedIds(new Set()); }
+  };
   const visibleIds=new Set(vis.map(t=>t.id));
   const compact=!!selTask;
   const recentTasks=recentIds.map(id=>tasks.find(t=>t.id===id)).filter(Boolean);
@@ -427,9 +415,18 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
 
   const workResolve=useCallback(()=>{
     if(!workTask)return;
-    setTasks(prev=>prev.map(t=>t.id===workTask.id?{...t,status:'resolved'}:t));
+    const resolvedAt=Date.now();
+    setTasks(prev=>prev.map(t=>t.id===workTask.id?{...t,status:'resolved',_locallyResolvedAt:resolvedAt}:t));
+    recordMutation(user?.email,workTask.id,{status:'resolved',_locallyResolvedAt:resolvedAt});
+    if(workTask._locallyCreated) clearCreatedTask(user?.email,workTask.id);
+    pushResolveIfLive(workTask);
+    if(workTask.source!=='zendesk'&&workTask.source!=='jira'){
+      apiUpdateStatus(workTask._beId||workTask.id,'resolved').catch(err=>{
+        console.warn('[Queue] Work mode resolve sync failed:',err.message);
+      });
+    }
     addToast&&addToast('success',`Resolved: ${workTask.id}`,workTask.subject.slice(0,46));
-  },[workTask,setTasks,addToast]);
+  },[workTask,setTasks,addToast,user]);
 
   const workEscalate=useCallback(()=>{
     if(!workTask)return;
@@ -528,20 +525,13 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
             {headerCounts.resolved>0&&<span> &middot; <span style={{fontWeight:600,color:'#29811e'}}>{headerCounts.resolved}</span> resolved</span>}
           </span>
           <div style={{marginLeft:'auto',display:'flex',gap:8,alignItems:'center'}}>
-            {/* Live sync indicator */}
-            {queueSync&&(()=>{
-              const hasCachedData = ns.length > 0;
-              const syncColor = queueSync.loading ? '#ed8d00' : queueSync.isLive ? '#29811e' : hasCachedData ? '#0369a1' : '#d42d35';
-              const syncLabel = queueSync.loading ? 'Syncing...' : queueSync.isLive ? 'Live' : hasCachedData ? 'Cached' : 'Offline';
-              return(
-              <div style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:syncColor}}>
-                <span style={{width:6,height:6,borderRadius:'50%',background:syncColor,animation:queueSync.loading?'pulse 1s infinite':'none'}}/>
-                <span>{syncLabel}</span>
-                {queueSync.meta&&<span style={{color:'#bbb'}}>ZD:{queueSync.meta.zendesk?.count||0} JR:{queueSync.meta.jira?.count||0}</span>}
-                <button onClick={()=>queueSync.refresh()} title="Force refresh" style={{border:'none',background:'transparent',cursor:'pointer',padding:2,color:'#9e9e9e',fontSize:12,display:'flex'}}><i className="bi-arrow-clockwise"/></button>
-              </div>
-              );
-            })()}
+            {/* Unified sync status — single button across all feeds */}
+            <UnifiedSyncButton
+              meta={syncMeta}
+              sources={syncSources}
+              onRefresh={syncRefreshAll}
+              nowTick={syncNowTick}
+            />
             {/* SLA filter pills — always visible across all views */}
             <div onClick={()=>setFSla(fSla==='ok'?null:'ok')} style={{display:'flex',alignItems:'center',gap:5,background:fSla==='ok'?'#dcfce7':'#f0fdf4',border:`${fSla==='ok'?'2':'1'}px solid ${fSla==='ok'?'#15803d':'#bbf7d0'}`,borderRadius:128,padding:'5px 14px',cursor:'pointer',transition:'all .15s',flexShrink:0,boxShadow:fSla==='ok'?'0 0 0 2px #15803d30':'none'}}>
                 <i className="bi-check-circle-fill" style={{color:'#15803d',fontSize:13}}></i>

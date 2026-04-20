@@ -134,6 +134,31 @@ export function cacheHas(key, ttl) {
 }
 
 /**
+ * Delete a cache entry (memory + filesystem).
+ * Used after writes to invalidate stale cache before the next read.
+ * @param {string} key — cache key
+ */
+export function cacheDel(key) {
+  memoryFallback.delete(key);
+  const idx = accessOrder.indexOf(key);
+  if (idx !== -1) accessOrder.splice(idx, 1);
+  try {
+    const filePath = join(CACHE_DIR, `${key}.json`);
+    if (existsSync(filePath)) unlinkSync(filePath);
+  } catch {
+    // FS read-only or permission error — memory delete still succeeded
+  }
+}
+
+/**
+ * Delete multiple cache entries at once. Convenient for invalidating all
+ * related caches (e.g., ['queue', 'queue_zendesk', 'queue_jira']) after a write.
+ */
+export function cacheDelMany(keys) {
+  for (const k of keys) cacheDel(k);
+}
+
+/**
  * Stale-while-revalidate pattern:
  * Returns cached data immediately (even if stale), then calls revalidate().
  * If no cache at all, awaits revalidate() and caches the result.

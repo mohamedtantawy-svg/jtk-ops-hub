@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
+import { getVisibleMemberEmails, isAdmin } from '../../../../../../src/lib/scope-helpers';
+import { cacheGet } from '../../../../../../src/lib/server-cache';
 
 const ZD_SUBDOMAIN = process.env.ZENDESK_SUBDOMAIN || '';
 const ZD_TOKEN = process.env.ZENDESK_API_TOKEN || '';
@@ -9,8 +11,43 @@ const JIRA_BASE = process.env.JIRA_BASE_URL || '';
 const JIRA_EMAIL = process.env.JIRA_EMAIL || '';
 const JIRA_TOKEN = process.env.JIRA_API_TOKEN || '';
 
+const STALE_TTL = 30 * 60_000;
+
 function isZendeskTicket(ticketId) {
   return ticketId.startsWith('ZD-');
+}
+
+// ── Defence-in-depth: a ticket's comments should only be readable by users
+// who would already see that ticket in their scoped /queue view.
+// - admin / regional_manager: always allowed
+// - team_lead: allowed if the ticket is unassigned OR assigned within hierarchy
+// - agent: allowed only if the ticket is assigned to them
+// - cold cache (ticket not in any cached payload): default to allow, because
+//   the only alternative is an extra Zendesk/Jira round-trip on every call.
+function ticketInUserScope(ticketId, user) {
+  if (!user) return false;
+  if (isAdmin(user) || user.role === 'regional_manager') return true;
+
+  // Look the ticket up in the most recent cached /queue payload.
+  const sourceKey = isZendeskTicket(ticketId) ? 'queue_zendesk' : 'queue_jira';
+  const combined = cacheGet('queue', STALE_TTL);
+  const perSource = cacheGet(sourceKey, STALE_TTL);
+  const pools = [];
+  if (combined?.items) pools.push(combined.items);
+  if (perSource?.items) pools.push(perSource.items);
+
+  let match = null;
+  for (const pool of pools) {
+    match = pool.find(t => t.id === ticketId);
+    if (match) break;
+  }
+  if (!match) return true; // Cache cold — don't block on permission misses
+
+  const visible = getVisibleMemberEmails(user);
+  const email = (match.assigneeEmail || '').toLowerCase();
+  if (email && visible.has(email)) return true;
+  if (!email && user.role === 'team_lead') return true;
+  return false;
 }
 
 async function fetchZendeskComments(ticketId) {
@@ -56,6 +93,10 @@ export async function GET(req, { params }) {
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { ticketId } = await params;
+
+  if (!ticketInUserScope(ticketId, user)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
 
   let comments;
   if (isZendeskTicket(ticketId)) {

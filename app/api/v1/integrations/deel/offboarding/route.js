@@ -7,10 +7,20 @@ import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { listOffboardingCases, isDeelConfigured } from '../../../../../../src/lib/deel-api';
 import { getIssueDescriptionsByKeys, isJiraConfigured } from '../../../../../../src/lib/jira-api';
 import { cacheGet, cacheSet } from '../../../../../../src/lib/server-cache';
+import { scopeOffboardingCases } from '../../../../../../src/lib/queue-scoping';
 
 const CACHE_KEY = 'deel_offboarding';
 const CACHE_TTL = 5 * 60 * 1000;    // fresh for 5 minutes
 const STALE_TTL = 60 * 60 * 1000;   // serve stale up to 60 minutes
+
+// Assignee-based scoping per the user-spec: agents see terminations assigned
+// to them; TL / RM see their subtree (and country-matched unassigned cases);
+// admins see everything.
+function scoped(data, user) {
+  if (!data?.items) return data;
+  const items = scopeOffboardingCases(data.items, user);
+  return { ...data, items, total: items.length };
+}
 
 export async function GET(req) {
   const user = getAuthUser(req);
@@ -27,7 +37,7 @@ export async function GET(req) {
 
     if (!bustCache) {
       const fresh = cacheGet(CACHE_KEY, CACHE_TTL);
-      if (fresh) return NextResponse.json(fresh);
+      if (fresh) return NextResponse.json(scoped(fresh, user));
     }
 
     let result;
@@ -38,12 +48,12 @@ export async function GET(req) {
       const stale = cacheGet(CACHE_KEY, STALE_TTL);
       if (stale) {
         console.warn('[offboarding] Fetch failed, returning stale cache:', fetchErr.message);
-        return NextResponse.json({ ...stale, _stale: true });
+        return NextResponse.json({ ...scoped(stale, user), _stale: true });
       }
       throw fetchErr;
     }
 
-    return NextResponse.json(result);
+    return NextResponse.json(scoped(result, user));
   } catch (err) {
     console.error('[integrations/deel/offboarding]', err.message);
     return NextResponse.json({ error: 'Internal server error' }, { status: err.status || 500 });

@@ -3,7 +3,9 @@
 // Same pattern as useOnboardingData but for Onboarding.EA.EASigning.Paused.
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { fetchDeelOnboardingPaused } from '../services/integrationsApi';
+import { getQueueChannel, broadcastSync } from './queueSyncChannel';
 
+const SOURCE_ID = 'pausedOnboarding';
 const CACHE_TTL = 5 * 60 * 1000;
 const CACHE_KEY = 'ops_hub_onboarding_paused_cache';
 
@@ -22,42 +24,74 @@ export function usePausedOnboardingData(enabled = true) {
   const cached = useMemo(() => loadCache(), []);
   const [items, setItems] = useState(cached.items);
   const [loading, setLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState(null);
-  const lastFetch = useRef(cached.ts > 0 && Date.now() - cached.ts < CACHE_TTL ? cached.ts : 0);
+  const [lastSyncAt, setLastSyncAt] = useState(cached.ts || null);
+  const lastFetchRef = useRef(cached.ts > 0 && Date.now() - cached.ts < CACHE_TTL ? cached.ts : 0);
+  const inFlightRef = useRef(null);
 
   const refresh = useCallback(async (force = false) => {
-    if (!enabled) return;
-    if (!force && Date.now() - lastFetch.current < CACHE_TTL) return;
+    if (!enabled) return null;
+    if (!force && Date.now() - lastFetchRef.current < CACHE_TTL) return null;
+    if (inFlightRef.current) return inFlightRef.current;
 
+    setIsRefreshing(true);
     setLoading(prev => items.length === 0 ? true : prev);
     setError(null);
-    try {
-      const res = await fetchDeelOnboardingPaused();
-      const fetched = res?.items || [];
-      if (fetched.length > 0 || items.length === 0) {
-        setItems(fetched);
+
+    const run = (async () => {
+      try {
+        const res = await fetchDeelOnboardingPaused();
+        const fetched = res?.items || [];
+        const now = Date.now();
+        if (fetched.length > 0 || items.length === 0) {
+          setItems(fetched);
+          try {
+            localStorage.setItem(CACHE_KEY, JSON.stringify({ items: fetched, ts: now }));
+          } catch (e) {}
+          broadcastSync(SOURCE_ID, fetched);
+        }
+        lastFetchRef.current = now;
+        setLastSyncAt(now);
+        return fetched;
+      } catch (err) {
+        console.warn('[usePausedOnboardingData] Failed:', err.message);
+        setError(err.message);
+        return null;
+      } finally {
+        setLoading(false);
+        setIsRefreshing(false);
+        inFlightRef.current = null;
       }
-      lastFetch.current = Date.now();
-      // Don't let a transient empty response wipe the good cached snapshot.
-      if (fetched.length > 0 || items.length === 0) {
-        try {
-          localStorage.setItem(CACHE_KEY, JSON.stringify({ items: fetched, ts: Date.now() }));
-        } catch (e) {}
-      }
-    } catch (err) {
-      console.warn('[usePausedOnboardingData] Failed:', err.message);
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+    })();
+    inFlightRef.current = run;
+    return run;
   }, [enabled, items.length]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  useEffect(() => {
+    const ch = getQueueChannel();
+    if (!ch) return;
+    const handler = (e) => {
+      const msg = e.data;
+      if (!msg || msg.source !== SOURCE_ID) return;
+      if (msg.ts && msg.ts > lastFetchRef.current) {
+        setItems(msg.items || []);
+        lastFetchRef.current = msg.ts;
+        setLastSyncAt(msg.ts);
+      }
+    };
+    ch.addEventListener('message', handler);
+    return () => ch.removeEventListener('message', handler);
+  }, []);
+
   return {
     items,
     loading,
+    isRefreshing,
     error,
+    lastSyncAt,
     refresh: () => refresh(true),
     isAvailable: items.length > 0 || !error,
   };
