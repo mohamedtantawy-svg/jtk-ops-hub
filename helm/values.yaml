@@ -41,6 +41,9 @@ ingress:
   annotations: {}
   tls: []
 
+publicIngress:
+  enabled: false
+
 argocd:
   enabled: false
   namespace: "argocd"
