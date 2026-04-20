@@ -9,10 +9,10 @@ app:
   port: 3000
   resources:
     requests:
-      memory: "1Gi"
-      cpu: "500m"
+      memory: "128Mi"
+      cpu: "300m"
     limits:
-      memory: "4Gi"
+      memory: "1024Mi"
   env: []
 podAnnotations: {}
 database:
@@ -43,22 +43,7 @@ ingress:
 
 publicIngress:
   enabled: false
-
-argocd:
-  enabled: false
-  namespace: "argocd"
-  project: "default"
-  repoURL: ""
-  targetRevision: "main"
-  path: "."
-  helm:
-    valueFiles: []
-    values: ""
-  autoSync:
-    enabled: true
-    prune: true
-    selfHeal: true
-    allowEmpty: false
+  host: ""
 
 service:
   port: 80
