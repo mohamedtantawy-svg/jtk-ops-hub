@@ -47,3 +47,6 @@ externalSecret:
 
 s3:
   enabled: false
+
+publicIngress:
+  enabled: false
