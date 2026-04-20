@@ -3,7 +3,6 @@ import { FLAGS } from '../../data/constants';
 const DeelSubNav=({view,subFilter,setSubFilter,tasks,user})=>{
   const subNavItems = {
     'my-queue': [], // Queue has its own integrated header
-    'my-queue-v2': [], // Queue v2 has its own integrated header
     'briefing': [],
     'projects': [],
     'calendar': [],

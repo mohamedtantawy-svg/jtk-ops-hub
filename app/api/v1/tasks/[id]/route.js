@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
+import { getVisibleMemberEmails, isAdmin } from '../../../../../src/lib/scope-helpers';
 
 export async function GET(req, { params }) {
   const user = getAuthUser(req);
@@ -9,12 +10,26 @@ export async function GET(req, { params }) {
     const { id } = await params;
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 
-    // Role-based scoping: non-admin/non-RM users can only access tasks assigned to them or unassigned
+    // Role-based scoping — same hierarchy as /tasks GET: admin/RM see all;
+    // team_lead sees self + direct reports + unassigned; agent sees self only.
     let whereClause = isUUID ? 'WHERE t.id = $1' : 'WHERE t.external_id = $1';
     const params_arr = [id];
-    if (user.role !== 'admin' && user.role !== 'regional_manager') {
-      whereClause += ` AND (t.assignee_id IN (SELECT id FROM members WHERE email = $2) OR t.assignee_id IS NULL)`;
-      params_arr.push(user.email);
+    if (!isAdmin(user) && user.role !== 'regional_manager') {
+      const visible = [...getVisibleMemberEmails(user)];
+      const allowUnassigned = user.role === 'team_lead';
+      let ph = 2;
+      if (visible.length === 0) {
+        whereClause += ` AND t.assignee_id IN (SELECT id FROM members WHERE LOWER(email) = LOWER($${ph}))`;
+        params_arr.push(user.email);
+      } else {
+        const placeholders = visible.map(() => { const p = `$${ph}`; ph++; return p; }).join(',');
+        if (allowUnassigned) {
+          whereClause += ` AND (t.assignee_id IN (SELECT id FROM members WHERE LOWER(email) IN (${placeholders})) OR t.assignee_id IS NULL)`;
+        } else {
+          whereClause += ` AND t.assignee_id IN (SELECT id FROM members WHERE LOWER(email) IN (${placeholders}))`;
+        }
+        for (const e of visible) params_arr.push(e.toLowerCase());
+      }
     }
     const { rows } = await query(`SELECT * FROM tasks t ${whereClause}`, params_arr);
     if (rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });

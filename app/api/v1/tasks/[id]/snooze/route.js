@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server';
 import { query } from '../../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 
+// PATCH /api/v1/tasks/[id]/snooze
+// `id` is either a UUID (internal tasks.id) or an external_id like "ZD-123".
+// For external_ids referring to live Zendesk/Jira tickets (which may not yet
+// have a row), we upsert a shadow row so snooze state survives page reload.
 export async function PATCH(req, { params }) {
   try {
     const user = getAuthUser(req);
@@ -23,15 +27,43 @@ export async function PATCH(req, { params }) {
     }
 
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-    const whereClause = isUUID ? 'WHERE id = $2' : 'WHERE external_id = $2';
 
-    const { rows } = await query(
-      `UPDATE tasks SET snoozed_until = $1, status = 'snoozed', updated_at = NOW() ${whereClause} RETURNING *`,
-      [until || null, id]
-    );
-    if (rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    let updatedRow = null;
 
-    return NextResponse.json({ ok: true, snoozedUntil: rows[0].snoozed_until });
+    if (isUUID) {
+      const { rows } = await query(
+        `UPDATE tasks SET snoozed_until = $1, status = 'snoozed', updated_at = NOW() WHERE id = $2 RETURNING *`,
+        [until || null, id],
+      );
+      updatedRow = rows[0] || null;
+      if (!updatedRow) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    } else {
+      // external_id path: upsert so live tickets get a persistent row
+      const source = id.startsWith('ZD-') ? 'zendesk' : id.startsWith('PROJ-') || /^[A-Z]+-\d+$/.test(id) ? 'jira' : 'manual';
+      const { rows } = await query(
+        `INSERT INTO tasks (external_id, source, subject, status, snoozed_until)
+         VALUES ($1, $2, $1, 'snoozed', $3)
+         ON CONFLICT (external_id) DO UPDATE
+           SET snoozed_until = EXCLUDED.snoozed_until,
+               status = 'snoozed',
+               updated_at = NOW()
+         RETURNING *`,
+        [id, source, until || null],
+      );
+      updatedRow = rows[0] || null;
+    }
+
+    if (!updatedRow) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
+    // Log activity (best-effort)
+    try {
+      await query(
+        'INSERT INTO task_activity (task_id, event_type, event_text, actor_name) VALUES ($1, $2, $3, $4)',
+        [updatedRow.id, 'snooze', until ? `Snoozed until ${until}` : 'Unsnoozed', user.name || 'System'],
+      );
+    } catch {}
+
+    return NextResponse.json({ ok: true, snoozedUntil: updatedRow.snoozed_until });
   } catch (err) {
     console.error('[tasks/snooze]', err.message);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });

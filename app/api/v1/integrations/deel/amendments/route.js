@@ -7,10 +7,17 @@ import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { listAmendmentRequests, isDeelConfigured } from '../../../../../../src/lib/deel-api';
 import { cacheGet, cacheSet } from '../../../../../../src/lib/server-cache';
+import { scopeAmendmentRequests } from '../../../../../../src/lib/queue-scoping';
 
 const CACHE_KEY = 'deel_amendments';
 const CACHE_TTL = 5 * 60 * 1000;    // fresh for 5 minutes
 const STALE_TTL = 30 * 60 * 1000;   // serve stale up to 30 minutes
+
+function scoped(data, user) {
+  if (!data?.items) return data;
+  const items = scopeAmendmentRequests(data.items, user);
+  return { ...data, items, total: items.length };
+}
 
 export async function GET(req) {
   const user = getAuthUser(req);
@@ -30,7 +37,7 @@ export async function GET(req) {
 
     if (!bustCache) {
       const fresh = cacheGet(cacheKeyFull, CACHE_TTL);
-      if (fresh) return NextResponse.json(fresh);
+      if (fresh) return NextResponse.json(scoped(fresh, user));
     }
 
     let responseData;
@@ -49,12 +56,12 @@ export async function GET(req) {
       const stale = cacheGet(cacheKeyFull, STALE_TTL);
       if (stale) {
         console.warn('[amendments] Fetch failed, returning stale cache:', fetchErr.message);
-        return NextResponse.json({ ...stale, _stale: true });
+        return NextResponse.json({ ...scoped(stale, user), _stale: true });
       }
       throw fetchErr;
     }
 
-    return NextResponse.json(responseData);
+    return NextResponse.json(scoped(responseData, user));
   } catch (err) {
     console.error('[integrations/deel/amendments]', err.message);
     return NextResponse.json({ error: 'Internal server error' }, { status: err.status || 500 });

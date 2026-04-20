@@ -7,10 +7,19 @@ import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { listOnboardingPeople, isDeelConfigured } from '../../../../../../src/lib/deel-api';
 import { cacheGet, cacheSet } from '../../../../../../src/lib/server-cache';
+import { scopeOnboardingPeople } from '../../../../../../src/lib/queue-scoping';
 
 const CACHE_KEY = 'deel_onboarding';
 const CACHE_TTL = 5 * 60 * 1000;    // fresh for 5 minutes
 const STALE_TTL = 30 * 60 * 1000;   // serve stale up to 30 minutes
+
+// Scope the cached payload for this user (country-based for onboarding).
+// Cache stores the full payload; each request filters on the way out.
+function scoped(data, user) {
+  if (!data?.items) return data;
+  const items = scopeOnboardingPeople(data.items, user);
+  return { ...data, items, total: items.length };
+}
 
 export async function GET(req) {
   const user = getAuthUser(req);
@@ -27,7 +36,7 @@ export async function GET(req) {
 
     const cacheKeyFull = `${CACHE_KEY}_${String(offset).replace(/[^a-zA-Z0-9._-]/g, '_')}`;
     const fresh = cacheGet(cacheKeyFull, CACHE_TTL);
-    if (fresh) return NextResponse.json(fresh);
+    if (fresh) return NextResponse.json(scoped(fresh, user));
 
     let responseData;
     try {
@@ -45,12 +54,12 @@ export async function GET(req) {
       const stale = cacheGet(cacheKeyFull, STALE_TTL);
       if (stale) {
         console.warn('[onboarding] Fetch failed, returning stale cache:', fetchErr.message);
-        return NextResponse.json({ ...stale, _stale: true });
+        return NextResponse.json({ ...scoped(stale, user), _stale: true });
       }
       throw fetchErr;
     }
 
-    return NextResponse.json(responseData);
+    return NextResponse.json(scoped(responseData, user));
   } catch (err) {
     console.error('[integrations/deel/onboarding]', err.message);
     return NextResponse.json({ error: 'Internal server error' }, { status: err.status || 500 });

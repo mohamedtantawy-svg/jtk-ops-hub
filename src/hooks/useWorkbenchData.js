@@ -2,9 +2,12 @@
 // Fetches OpsWorkbench tasks from the Deel Admin API.
 // Groups by task type, then by country. Caches in localStorage.
 // Stale-while-revalidate: always shows previous data until fresh data arrives.
+// De-dupes concurrent refresh() calls and adopts cross-tab broadcasts.
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { fetchDeelWorkbench } from '../services/integrationsApi';
+import { getQueueChannel, broadcastSync } from './queueSyncChannel';
 
+const SOURCE_ID = 'workbench';
 const CACHE_TTL = 3 * 60 * 1000;
 const CACHE_KEY = 'ops_hub_workbench_cache';
 
@@ -23,39 +26,67 @@ export function useWorkbenchData(enabled = true) {
   const cached = useMemo(() => loadCache(), []);
   const [tasks, setTasks] = useState(cached.items);
   const [loading, setLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState(null);
-  const lastFetch = useRef(cached.ts > 0 && Date.now() - cached.ts < CACHE_TTL ? cached.ts : 0);
+  const [lastSyncAt, setLastSyncAt] = useState(cached.ts || null);
+  const lastFetchRef = useRef(cached.ts > 0 && Date.now() - cached.ts < CACHE_TTL ? cached.ts : 0);
+  const inFlightRef = useRef(null);
 
   const refresh = useCallback(async (force = false) => {
-    if (!enabled) return;
-    if (!force && Date.now() - lastFetch.current < CACHE_TTL) return;
+    if (!enabled) return null;
+    if (!force && Date.now() - lastFetchRef.current < CACHE_TTL) return null;
+    if (inFlightRef.current) return inFlightRef.current;
 
+    setIsRefreshing(true);
     setLoading(prev => tasks.length === 0 ? true : prev);
     setError(null);
-    try {
-      const res = await fetchDeelWorkbench({ limit: 50, bustCache: force });
-      const fetched = res?.items || [];
 
-      if (fetched.length > 0 || tasks.length === 0) {
-        setTasks(fetched);
+    const run = (async () => {
+      try {
+        const res = await fetchDeelWorkbench({ limit: 50, bustCache: force });
+        const fetched = res?.items || [];
+        const now = Date.now();
+        if (fetched.length > 0 || tasks.length === 0) {
+          setTasks(fetched);
+          try {
+            localStorage.setItem(CACHE_KEY, JSON.stringify({ items: fetched, ts: now }));
+          } catch (e) {}
+          broadcastSync(SOURCE_ID, fetched);
+        }
+        lastFetchRef.current = now;
+        setLastSyncAt(now);
+        return fetched;
+      } catch (err) {
+        console.warn('[useWorkbenchData] Failed:', err.message);
+        setError(err.message);
+        return null;
+      } finally {
+        setLoading(false);
+        setIsRefreshing(false);
+        inFlightRef.current = null;
       }
-      lastFetch.current = Date.now();
-
-      // Don't let a transient empty response wipe the good cached snapshot.
-      if (fetched.length > 0 || tasks.length === 0) {
-        try {
-          localStorage.setItem(CACHE_KEY, JSON.stringify({ items: fetched, ts: Date.now() }));
-        } catch (e) {}
-      }
-    } catch (err) {
-      console.warn('[useWorkbenchData] Failed:', err.message);
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+    })();
+    inFlightRef.current = run;
+    return run;
   }, [enabled, tasks.length]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  useEffect(() => {
+    const ch = getQueueChannel();
+    if (!ch) return;
+    const handler = (e) => {
+      const msg = e.data;
+      if (!msg || msg.source !== SOURCE_ID) return;
+      if (msg.ts && msg.ts > lastFetchRef.current) {
+        setTasks(msg.items || []);
+        lastFetchRef.current = msg.ts;
+        setLastSyncAt(msg.ts);
+      }
+    };
+    ch.addEventListener('message', handler);
+    return () => ch.removeEventListener('message', handler);
+  }, []);
 
   // ── Status counts ──
   const counts = useMemo(() => {
@@ -115,7 +146,9 @@ export function useWorkbenchData(enabled = true) {
     byTaskType,
     byCountry,
     loading,
+    isRefreshing,
     error,
+    lastSyncAt,
     refresh: () => refresh(true),
     isAvailable: (tasks.length > 0) || !error,
   };

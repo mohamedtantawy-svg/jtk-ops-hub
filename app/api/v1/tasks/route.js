@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../src/lib/db';
 import { getAuthUser } from '../../../../src/lib/auth-helpers';
+import { getVisibleMemberEmails, isAdmin } from '../../../../src/lib/scope-helpers';
 
 export async function GET(req) {
   const user = getAuthUser(req);
@@ -19,15 +20,28 @@ export async function GET(req) {
     const params = [];
     let idx = 1;
 
-    // Role-based scoping: non-admin users only see tasks assigned to
-    // themselves or their direct/transitive reports.
-    if (user.role !== 'admin' && user.role !== 'regional_manager') {
-      // For team leads and agents, scope to tasks assigned to them
-      // (Server-side hierarchy resolution would require a DB query for the
-      //  manager chain. For now, scope by the requesting user's own email.)
-      whereSql += ` AND (t.assignee_id IN (SELECT id FROM members WHERE email = $${idx}) OR t.assignee_id IS NULL)`;
-      params.push(user.email);
-      idx++;
+    // Role-based scoping — mirrors src/utils/permissions.js#scopeTasks so the
+    // FE and BE agree on what each role can see:
+    //   admin / regional_manager → everything (no filter)
+    //   team_lead                → own + direct reports' tasks + unassigned
+    //   agent                    → own tasks only
+    if (!isAdmin(user) && user.role !== 'regional_manager') {
+      const visible = [...getVisibleMemberEmails(user)];
+      const allowUnassigned = user.role === 'team_lead';
+      if (visible.length === 0) {
+        // No hierarchy resolved — fall back to self-only to be safe.
+        whereSql += ` AND t.assignee_id IN (SELECT id FROM members WHERE LOWER(email) = LOWER($${idx}))`;
+        params.push(user.email);
+        idx++;
+      } else {
+        const placeholders = visible.map(() => { const p = `$${idx}`; idx++; return p; }).join(',');
+        if (allowUnassigned) {
+          whereSql += ` AND (t.assignee_id IN (SELECT id FROM members WHERE LOWER(email) IN (${placeholders})) OR t.assignee_id IS NULL)`;
+        } else {
+          whereSql += ` AND t.assignee_id IN (SELECT id FROM members WHERE LOWER(email) IN (${placeholders}))`;
+        }
+        for (const e of visible) params.push(e.toLowerCase());
+      }
     }
 
     if (status) { whereSql += ` AND status = $${idx++}`; params.push(status); }

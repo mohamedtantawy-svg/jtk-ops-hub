@@ -12,6 +12,19 @@ import { searchTickets, showManyUsers, isZendeskConfigured } from '../../../../s
 import { searchIssues, isJiraConfigured } from '../../../../src/lib/jira-api';
 import { ADMIN_EMAILS_LIST } from '../../../../src/data/adminEmails';
 import { cacheGet, cacheSet } from '../../../../src/lib/server-cache';
+import { filterByAssignee } from '../../../../src/lib/queue-scoping';
+
+// ── Server-side scope filter ─────────────────────────────────────────────────
+// Zendesk and Jira are assignee-based queues — delegates to the shared scoping
+// helper (src/lib/queue-scoping.js) so FE + BE apply byte-identical rules.
+//
+//   admin            → all
+//   regional_manager → own + full subtree's assignees + unassigned in subtree countries
+//   team_lead        → own + direct reports' assignees + unassigned in team countries
+//   agent            → only items assigned to self
+function scopeQueueItems(items, user) {
+  return filterByAssignee(items || [], user);
+}
 
 // ── Config (overridable via env vars) ────────────────────────────────────────
 const ZD_GROUP_NAME = process.env.ZENDESK_HR_GROUP || 'HR Experience';
@@ -449,7 +462,12 @@ export async function GET(req) {
 
     if (!bustCache) {
       const fresh = cacheGet(cacheKey, ttl);
-      if (fresh) return NextResponse.json(fresh);
+      if (fresh) {
+        return NextResponse.json({
+          ...fresh,
+          items: scopeQueueItems(fresh.items || [], user),
+        });
+      }
     }
 
     let result;
@@ -466,18 +484,30 @@ export async function GET(req) {
       const stale = cacheGet(cacheKey, STALE_TTL);
       if (stale) {
         console.warn(`[queue/${source}] Fetch failed, returning stale:`, fetchErr.message);
-        return NextResponse.json({ ...stale, _stale: true });
+        return NextResponse.json({
+          ...stale,
+          items: scopeQueueItems(stale.items || [], user),
+          _stale: true,
+        });
       }
       return NextResponse.json({ error: fetchErr.message }, { status: 500 });
     }
 
-    return NextResponse.json(result);
+    return NextResponse.json({
+      ...result,
+      items: scopeQueueItems(result.items, user),
+    });
   }
 
   // ── Combined fetch (legacy: both sources in one call) ─────────────────────
   if (!bustCache) {
     const fresh = cacheGet(CACHE_KEY, CACHE_TTL);
-    if (fresh) return NextResponse.json(fresh);
+    if (fresh) {
+      return NextResponse.json({
+        ...fresh,
+        items: scopeQueueItems(fresh.items || [], user),
+      });
+    }
   }
 
   const stale = !bustCache ? cacheGet(CACHE_KEY, STALE_TTL) : null;
@@ -515,10 +545,17 @@ export async function GET(req) {
   } catch (fetchErr) {
     if (stale) {
       console.warn('[queue] Fetch failed, returning stale cache:', fetchErr.message);
-      return NextResponse.json({ ...stale, _stale: true });
+      return NextResponse.json({
+        ...stale,
+        items: scopeQueueItems(stale.items || [], user),
+        _stale: true,
+      });
     }
     return NextResponse.json({ error: fetchErr.message }, { status: 500 });
   }
 
-  return NextResponse.json(response);
+  return NextResponse.json({
+    ...response,
+    items: scopeQueueItems(response.items, user),
+  });
 }
