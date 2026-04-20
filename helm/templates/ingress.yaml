@@ -10,7 +10,7 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: 10m
 spec:
-  ingressClassName: internal-nginx
+  ingressClassName: {{ .Values.ingress.ingressClassName | default "internal-nginx" }}
   rules:
     - host: {{ .Values.ingress.host }}
       http:
