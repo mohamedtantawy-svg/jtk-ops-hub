@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useContext } from 'react';
+import { useState, useEffect, useRef, useContext, useCallback } from 'react';
 import { PermissionsContext, SettingsContext } from '../../App';
 import { MEMBERS } from '../../data/members';
 import { TOOLS, STATUSES, FLAGS, SLA_MINS, getFlag } from '../../data/constants';
@@ -52,33 +52,52 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
   const [showSideConvTooltip,setShowSideConvTooltip]=useState(false);
   const [comments, setComments] = useState([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentsError, setCommentsError] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [replyPublic, setReplyPublic] = useState(true);
-  // Reset tab, reply, and public toggle when task changes
-  useEffect(()=>{ setTab('overview'); setReplyText(''); setReplyPublic(true); },[task.id]);
+
+  // Track mount state so async handlers (reply send, comment refresh) don't
+  // setState on an unmounted component if the user closes the modal mid-flight.
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+
+  // Reset tab, reply, public toggle, and error state when task changes
+  useEffect(()=>{
+    setTab('overview'); setReplyText(''); setReplyPublic(true);
+    setCommentsError(null); setComments([]);
+  },[task.id]);
   // Sync linkedTickets when task changes
   useEffect(()=>{ setLinkedTickets(task.linkedTickets||[]); },[task.id]);
   // Fetch comments when Messages tab is opened (supports Zendesk + Jira).
   // Dedup via inflightRef so rapid tab-toggles don't fire parallel fetches.
+  // Surfaces a distinct error state so users can tell 403/500 from empty.
   const commentsFetchRef = useRef(null);
-  useEffect(() => {
-    if (tab !== 'messages') return;
-    if (task.source !== 'zendesk' && task.source !== 'jira') return;
+  const loadComments = useCallback(() => {
     if (!task.id) return;
-    // Dedup: if a fetch for this task is already in flight, skip
+    if (task.source !== 'zendesk' && task.source !== 'jira') return;
     if (commentsFetchRef.current === task.id) return;
     commentsFetchRef.current = task.id;
     let cancelled = false;
     setCommentsLoading(true);
+    setCommentsError(null);
     fetchTicketComments(task.id)
-      .then(data => { if (!cancelled) setComments((data.comments || []).slice(0, 2)); })
-      .catch(() => { if (!cancelled) setComments([]); })
+      .then(data => { if (!cancelled && mountedRef.current) {
+        setComments((data.comments || []).slice(0, 2));
+      }})
+      .catch(err => { if (!cancelled && mountedRef.current) {
+        setCommentsError(err?.message || 'Failed to load messages');
+      }})
       .finally(() => {
-        if (!cancelled) setCommentsLoading(false);
+        if (!cancelled && mountedRef.current) setCommentsLoading(false);
         if (commentsFetchRef.current === task.id) commentsFetchRef.current = null;
       });
     return () => { cancelled = true; };
-  }, [tab, task.id, task.source]);
+  }, [task.id, task.source]);
+  useEffect(() => {
+    if (tab !== 'messages') return;
+    const cleanup = loadComments();
+    return cleanup;
+  }, [tab, loadComments]);
 
   // Translate dropdown close on outside click
   const translateRef = useRef(null);
@@ -88,6 +107,50 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, [showTranslateDD]);
+
+  // Side-conversations tooltip also closes on outside click so the pop-up
+  // doesn't linger when the user clicks elsewhere in the modal.
+  const sideConvRef = useRef(null);
+  useEffect(() => {
+    if (!showSideConvTooltip) return;
+    const h = (e) => { if (sideConvRef.current && !sideConvRef.current.contains(e.target)) setShowSideConvTooltip(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [showSideConvTooltip]);
+
+  // ── Focus trap ─────────────────────────────────────────────────────────
+  // Keeps keyboard focus inside the modal while it's open so screen-reader
+  // and keyboard-only users can't accidentally tab out to background content.
+  // Sets initial focus to the first interactive element. Tab cycles forward
+  // from last → first; Shift+Tab cycles backward from first → last.
+  const modalRef = useRef(null);
+  useEffect(() => {
+    const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    // Focus the first focusable after paint so it respects the rendered DOM
+    const t = setTimeout(() => {
+      const first = modalRef.current?.querySelector(FOCUSABLE);
+      if (first && !modalRef.current.contains(document.activeElement)) first.focus();
+    }, 0);
+    const handleTab = (e) => {
+      if (e.key !== 'Tab' || !modalRef.current) return;
+      const nodes = modalRef.current.querySelectorAll(FOCUSABLE);
+      if (nodes.length === 0) return;
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleTab);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener('keydown', handleTab);
+    };
+  }, []);
 
   const assignee=MEMBERS.find(m=>m.id===task.assigneeId)||(task.assigneeEmail?MEMBERS.find(m=>m.email.toLowerCase()===task.assigneeEmail.toLowerCase()):null)||{id:null,name:task.assigneeName||'Unassigned',initials:(task.assigneeName||'U').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(),email:task.assigneeEmail};
   const taskEscalation=escalations.find(e=>e.taskId===task.id);
@@ -140,7 +203,7 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
 
   return(
     <div style={overlayStyle} onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
-      <div className="detail-modal" style={modalStyle}>
+      <div ref={modalRef} className="detail-modal" style={modalStyle} role="dialog" aria-modal="true" aria-label={`Task details: ${task.subject}`}>
       <style>{`
         @keyframes fadeInOverlay { from { opacity:0; } to { opacity:1; } }
         @keyframes scaleInModal { from { opacity:0; transform:scale(0.97) translateY(10px); } to { opacity:1; transform:scale(1) translateY(0); } }
@@ -161,7 +224,7 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
               </div>
               {task.isAlert&&<span style={{background:'#fff8e6',color:'#ed8d00',borderRadius:128,padding:'2px 10px',fontSize:11,fontWeight:600}}>Alert</span>}
             </div>
-            <div style={{color:'#1b1b1b',fontWeight:700,fontSize:16,lineHeight:1.35}}>{task.subject}</div>
+            <div title={task.subject} style={{color:'#1b1b1b',fontWeight:700,fontSize:16,lineHeight:1.35,display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden',wordBreak:'break-word'}}>{task.subject}</div>
             <div style={{display:'flex',alignItems:'center',gap:8,marginTop:4}}>
               <span style={{color:'#9e9e9e',fontSize:12}}>{task.id}</span>
               {/* E: Open in Source button — guarded */}
@@ -271,18 +334,20 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
                 <div style={{fontSize:12,color:'#616161'}}><span style={{fontWeight:600}}>Reason:</span> {taskEscalation.reason}</div>
               </div>
             )}
-            {/* B: Linked Tickets — from task.linkedTickets field */}
-            {task.linkedTickets&&task.linkedTickets.length>0&&(
+            {/* B: Linked Tickets — driven by local state so additions from
+                the Linked Systems editor below appear here immediately
+                instead of waiting for the parent to re-push the task prop. */}
+            {linkedTickets&&linkedTickets.length>0&&(
               <div>
                 <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6}}>Linked Tickets</div>
                 <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
-                  {task.linkedTickets.map((lt,i)=>{
+                  {linkedTickets.map((lt,i)=>{
                     const url=lt.type==='jira'?`https://deel.atlassian.net/browse/${lt.id}`:lt.type==='zendesk'?`https://deel.zendesk.com/agent/tickets/${lt.id.replace(/\D/g,'')}`:task.externalUrl||'#';
                     return(
                       <a key={i} href={url} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 10px',borderRadius:128,background:'var(--border,#e8e4df)',color:'#1b1b1b',border:'1px solid #d6d0ca',fontSize:12,fontWeight:500,textDecoration:'none',transition:'all .12s'}}
                         onMouseEnter={e=>{e.currentTarget.style.background='#ddd8d2';}} onMouseLeave={e=>{e.currentTarget.style.background='var(--border,#e8e4df)';}}>
                         <i className="bi-link-45deg" style={{fontSize:11,color:'#616161'}}></i>
-                        <span style={{fontSize:10,color:'#616161',textTransform:'uppercase',fontWeight:700}}>{lt.type.slice(0,2).toUpperCase()}</span>
+                        <span style={{fontSize:10,color:'#616161',textTransform:'uppercase',fontWeight:700}}>{lt.type?.slice(0,2).toUpperCase()||'LN'}</span>
                         {lt.id}
                       </a>
                     );
@@ -295,7 +360,7 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
               <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
                 <span>Linked Systems</span>
                 {task.source==='zendesk'&&(
-                  <div style={{position:'relative',display:'inline-block'}}>
+                  <div ref={sideConvRef} style={{position:'relative',display:'inline-block'}}>
                     <button onClick={()=>setShowSideConvTooltip(v=>!v)}
                       style={{display:'inline-flex',alignItems:'center',gap:4,height:22,padding:'0 8px',borderRadius:6,border:'1px solid #e8e8e8',background:'white',color:'#9e9e9e',fontSize:10,fontWeight:500,cursor:'pointer',transition:'all .12s'}}
                       onMouseEnter={e=>{e.currentTarget.style.borderColor='#1f74b3';e.currentTarget.style.color='#1f74b3';}} onMouseLeave={e=>{e.currentTarget.style.borderColor='#e8e8e8';e.currentTarget.style.color='#9e9e9e';}}>
@@ -397,16 +462,30 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
                 )}
               </div>
             )}
-            {/* Recent Zendesk Messages */}
-            {task.source === 'zendesk' && (
+            {/* Recent Messages — supports Zendesk + Jira */}
+            {(task.source === 'zendesk' || task.source === 'jira') && (
               <div>
-                <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:8}}>Recent Messages</div>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+                  <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Recent Messages</div>
+                  {commentsError && !commentsLoading && (
+                    <button onClick={loadComments} title="Retry loading messages" style={{padding:'2px 10px',borderRadius:128,border:'1px solid #fca5a5',background:'white',color:'#991b1b',fontSize:11,fontWeight:600,cursor:'pointer'}}>
+                      <i className="bi-arrow-clockwise" style={{fontSize:10,marginRight:4}}/>Retry
+                    </button>
+                  )}
+                </div>
                 {commentsLoading ? (
                   <div style={{display:'flex',flexDirection:'column',gap:8}}>
                     {[1,2].map(i=><div key={i} className="skeleton" style={{height:60,borderRadius:8}}/>)}
                   </div>
+                ) : commentsError ? (
+                  <div style={{padding:'12px 14px',background:'#fef2f2',borderRadius:10,border:'1px solid #fca5a5',color:'#991b1b',fontSize:12}}>
+                    <i className="bi-exclamation-triangle-fill" style={{fontSize:11,marginRight:6}}/>
+                    Couldn't load messages: {commentsError}
+                  </div>
                 ) : comments.length === 0 ? (
-                  <div style={{padding:'12px 14px',background:'#fafaf9',borderRadius:10,border:'1px solid #f2f2f2',color:'#9e9e9e',fontSize:12,textAlign:'center'}}>No recent messages from Zendesk</div>
+                  <div style={{padding:'12px 14px',background:'#fafaf9',borderRadius:10,border:'1px solid #f2f2f2',color:'#9e9e9e',fontSize:12,textAlign:'center'}}>
+                    No recent messages from {task.source === 'zendesk' ? 'Zendesk' : 'Jira'}
+                  </div>
                 ) : (
                   <div style={{display:'flex',flexDirection:'column',gap:8}}>
                     {comments.map(c => (
@@ -423,6 +502,12 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
                     ))}
                   </div>
                 )}
+              </div>
+            )}
+            {task.source !== 'zendesk' && task.source !== 'jira' && (
+              <div style={{padding:'12px 14px',background:'#f7f5f2',borderRadius:10,border:'1px solid #e8e8e8',color:'#616161',fontSize:12,display:'flex',alignItems:'center',gap:8}}>
+                <i className="bi-info-circle" style={{fontSize:13}}/>
+                Messages are only available for Zendesk and Jira tickets.
               </div>
             )}
             {/* Message Body — expanded */}
@@ -514,14 +599,16 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
                     try{
                       // Route reply to correct backend (Zendesk or Jira)
                       await postTicketAction(task.id,{action:'reply',message:replyText,public:replyPublic});
+                      if (!mountedRef.current) return;
                       addToast&&addToast('success','Reply sent','Your reply has been posted to the ticket.');
                       setReplyText('');
-                      // Refresh comments
-                      fetchTicketComments(task.id).then(data=>setComments((data.comments||[]).slice(0,2))).catch(()=>{});
+                      // Refresh comments — guard against unmount + re-dedup via ref
+                      commentsFetchRef.current = null;
+                      loadComments();
                     }catch(err){
-                      addToast&&addToast('error','Reply failed',err.message||'Could not send reply.');
+                      if (mountedRef.current) addToast&&addToast('error','Reply failed',err.message||'Could not send reply.');
                     }finally{
-                      setActionLoading(false);
+                      if (mountedRef.current) setActionLoading(false);
                     }
                   }}
                   style={{display:'inline-flex',alignItems:'center',gap:5,height:34,padding:'0 20px',borderRadius:128,border:'none',background:replyText.trim()&&!actionLoading?'#1b1b1b':'#e0e0e0',color:replyText.trim()&&!actionLoading?'white':'#9e9e9e',fontSize:12,fontWeight:700,cursor:replyText.trim()&&!actionLoading?'pointer':'not-allowed',transition:'all .15s'}}

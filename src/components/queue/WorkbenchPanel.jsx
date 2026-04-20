@@ -271,7 +271,7 @@ function TaskCard({ task }) {
           background:st.bg,color:st.color,fontSize:10,fontWeight:600,flexShrink:0,whiteSpace:'nowrap'}}>
           <i className={st.icon} style={{fontSize:8}}/> {st.label}
         </span>
-        <span style={{flex:1,fontSize:12.5,fontWeight:500,color:'#1b1b1b',lineHeight:1.4,minWidth:0,
+        <span title={task.name||''} style={{flex:1,fontSize:12.5,fontWeight:500,color:'#1b1b1b',lineHeight:1.4,minWidth:0,
           overflow:'hidden',display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical'}}>
           {task.name}
         </span>

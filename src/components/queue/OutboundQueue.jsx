@@ -2,6 +2,7 @@ import { useState, useMemo, useContext } from 'react';
 import { PermissionsContext } from '../../App';
 import { MEMBERS } from '../../data/members';
 import { OUTBOUND_TEAMS, REQUEST_STATUSES } from '../../data/requests';
+import { updateRequest as apiUpdateRequest } from '../../services/requestsApi';
 
 const priorityColors = { low:'#29811e', medium:'#1f74b3', high:'#ed5e2a', critical:'#d42d35' };
 const priorityBg    = { low:'#e6f4e5', medium:'#e8f0fe', high:'#fef3ee', critical:'#fce9ea' };
@@ -190,7 +191,7 @@ function RequestDetail({ req, onClose, onUpdateStatus, onUpdateRef, currentUser 
 }
 
 // ── Main Outbound Queue ───────────────────────────────────────────────────────
-export default function OutboundQueue({ requests, setRequests, user, onNewRequest, tasks }) {
+export default function OutboundQueue({ requests, setRequests, user, onNewRequest, tasks, addToast }) {
   const [selReq, setSelReq]         = useState(null);
   const [teamFilter, setTeamFilter] = useState(null);
   const [statusFilter, setStatus]   = useState(null);
@@ -231,20 +232,37 @@ export default function OutboundQueue({ requests, setRequests, user, onNewReques
   const open   = visible.filter(r => r.status !== 'resolved' && r.status !== 'rejected').length;
   const total  = visible.length;
 
+  // Shared helper — optimistic update + backend sync with automatic rollback
+  // on failure. Keeps the UI responsive while preventing "ghost saves" when
+  // the server rejects the write.
+  const persistRequestUpdate = (id, patch) => {
+    const prev = requests.find(r => r.id === id);
+    if (!prev) return;
+    const now = new Date().toISOString();
+    // Optimistic
+    setRequests(list => list.map(r => r.id === id ? { ...r, ...patch, updatedAt: now } : r));
+    if (selReq?.id === id) setSelReq(cur => cur ? { ...cur, ...patch } : cur);
+    // Persist
+    apiUpdateRequest(id, patch).catch(err => {
+      // Rollback
+      setRequests(list => list.map(r => r.id === id ? prev : r));
+      if (selReq?.id === id) setSelReq(prev);
+      addToast?.('error', 'Save failed', err.message || 'Could not save change — reverted.');
+    });
+  };
+
   const handleUpdateStatus = (id, status) => {
-    setRequests(prev => prev.map(r => r.id === id
-      ? { ...r, status, resolvedAt: status === 'resolved' ? new Date().toISOString() : r.resolvedAt, updatedAt: new Date().toISOString() }
-      : r
-    ));
-    if (selReq?.id === id) setSelReq(prev => ({ ...prev, status }));
+    const patch = { status };
+    if (status === 'resolved') patch.resolvedAt = new Date().toISOString();
+    persistRequestUpdate(id, patch);
   };
 
   const handleUpdateRef = (id, externalRef, notes) => {
-    setRequests(prev => prev.map(r => r.id === id
-      ? { ...r, ...(externalRef !== undefined ? { externalRef } : {}), ...(notes !== undefined ? { notes } : {}), updatedAt: new Date().toISOString() }
-      : r
-    ));
-    if (selReq?.id === id) setSelReq(prev => ({ ...prev, ...(externalRef !== undefined ? { externalRef } : {}), ...(notes !== undefined ? { notes } : {}) }));
+    const patch = {};
+    if (externalRef !== undefined) patch.externalRef = externalRef;
+    if (notes !== undefined) patch.notes = notes;
+    if (Object.keys(patch).length === 0) return;
+    persistRequestUpdate(id, patch);
   };
 
   const thStyle = {
