@@ -7,7 +7,6 @@ import Avatar from '../ui/Avatar';
 const PRIMARY_TABS = [
   { id: 'briefing',      icon: 'bi-house',            label: 'Home' },
   { id: 'my-queue',      icon: 'bi-inbox',            label: 'Queue' },
-  { id: 'my-queue-v2',   icon: 'bi-inbox-fill',       label: 'Queue v2', restrictToEmail: 'mohamed.tantawy@deel.com' },
   { id: 'projects',      icon: 'bi-kanban',           label: 'Projects' },
   { id: 'escalations',   icon: 'bi-arrow-up-circle',  label: 'Escalations', badge: true },
   { id: 'hr-reports',    icon: 'bi-clipboard-data',   label: 'Reports' },

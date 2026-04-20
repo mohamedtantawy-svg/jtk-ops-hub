@@ -58,17 +58,26 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
   useEffect(()=>{ setTab('overview'); setReplyText(''); setReplyPublic(true); },[task.id]);
   // Sync linkedTickets when task changes
   useEffect(()=>{ setLinkedTickets(task.linkedTickets||[]); },[task.id]);
-  // Fetch comments when Messages tab is opened (supports Zendesk + Jira)
+  // Fetch comments when Messages tab is opened (supports Zendesk + Jira).
+  // Dedup via inflightRef so rapid tab-toggles don't fire parallel fetches.
+  const commentsFetchRef = useRef(null);
   useEffect(() => {
-    if (tab === 'messages' && (task.source === 'zendesk' || task.source === 'jira') && task.id) {
-      let cancelled = false;
-      setCommentsLoading(true);
-      fetchTicketComments(task.id)
-        .then(data => { if(!cancelled) setComments((data.comments || []).slice(0, 2)); })
-        .catch(() => { if(!cancelled) setComments([]); })
-        .finally(() => { if(!cancelled) setCommentsLoading(false); });
-      return () => { cancelled = true; };
-    }
+    if (tab !== 'messages') return;
+    if (task.source !== 'zendesk' && task.source !== 'jira') return;
+    if (!task.id) return;
+    // Dedup: if a fetch for this task is already in flight, skip
+    if (commentsFetchRef.current === task.id) return;
+    commentsFetchRef.current = task.id;
+    let cancelled = false;
+    setCommentsLoading(true);
+    fetchTicketComments(task.id)
+      .then(data => { if (!cancelled) setComments((data.comments || []).slice(0, 2)); })
+      .catch(() => { if (!cancelled) setComments([]); })
+      .finally(() => {
+        if (!cancelled) setCommentsLoading(false);
+        if (commentsFetchRef.current === task.id) commentsFetchRef.current = null;
+      });
+    return () => { cancelled = true; };
   }, [tab, task.id, task.source]);
 
   // Translate dropdown close on outside click

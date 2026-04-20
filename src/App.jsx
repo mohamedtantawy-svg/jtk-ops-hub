@@ -30,13 +30,49 @@ import { fetchRequests as apiFetchRequests, createRequest as apiCreateRequest, u
 import { createNote as apiCreateNote } from './services/notesApi';
 import { apiFetch } from './services/api';
 import { reassignQueueTicket } from './services/integrationsApi';
+import { recordMutation, recordCreatedTask, clearMutation, clearAllMutationsEverywhere } from './services/queueMutationStore';
 import { normalizeTask, normalizeEscalation, normalizeProject, normalizeRequest, normalizeMember, denormalizeTaskForCreate, feStatusToBe } from './services/normalize';
+
+// ── Keys we clear on logout so the next user on this browser starts fresh ──
+// Auth tokens are handled alongside; this list is everything queue-related.
+const QUEUE_STORAGE_KEYS = [
+  'ops_hub_queue_zendesk',
+  'ops_hub_queue_jira',
+  'ops_hub_onboarding_cache',
+  'ops_hub_onboarding_paused_cache',
+  'ops_hub_offboarding_cache',
+  'ops_hub_amendments_cache',
+  'ops_hub_redlines_cache',
+  'ops_hub_workbench_cache',
+  'ops_hub_queue_filters',
+  // Legacy v2 leftovers — harmless once v2 is gone, but no reason to keep them.
+  'ops_hub_queuev2_filters',
+  'ops_hub_queuev2_views',
+  'ops_hub_queuev2_rules',
+  'ops_hub_queuev2_templates',
+];
+
+function clearQueueCaches() {
+  try {
+    for (const k of QUEUE_STORAGE_KEYS) localStorage.removeItem(k);
+    // Remove any leftover per-user OOO / mutation keys for ANY user since
+    // logout doesn't always know who we were signed in as.
+    const toRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && (k.startsWith('ops_hub_queuev2_ooo_') || k.startsWith('ops_hub_queue_mutations:'))) {
+        toRemove.push(k);
+      }
+    }
+    for (const k of toRemove) localStorage.removeItem(k);
+  } catch {}
+  clearAllMutationsEverywhere();
+}
 
 import DeelTopNav from './components/nav/DeelTopNav';
 import DeelSubNav from './components/nav/DeelSubNav';
 import BriefingView from './components/views/BriefingView';
 import Queue from './components/queue/Queue';
-import QueueV2 from './components/queue/QueueV2';
 import Team from './components/views/Team';
 import Analytics from './components/views/Analytics';
 import EscalationsView from './components/views/EscalationsView';
@@ -97,7 +133,7 @@ const App=()=>{
   const [view,setView]=useState('briefing');
   const [selTask,setSelTask]=useState(null);
   // ── Live queue sync (Zendesk + Jira) ─────────────────────────────────────
-  const queueSync = useQueueSync(!!user);
+  const queueSync = useQueueSync({ enabled: !!user, userEmail: user?.email || null });
   const tasks = queueSync.tasks;
   const setTasks = queueSync.setTasks;
   const [feed,setFeed]=useState(FEED_EVENTS);
@@ -222,6 +258,9 @@ const App=()=>{
     setUser(null);
     setLoggedInEmail(null);
     try { localStorage.removeItem('ops_hub_logged_in_email'); localStorage.removeItem('ops_hub_token'); localStorage.removeItem('ops_hub_token_ts'); localStorage.removeItem('ops_hub_user'); } catch(e) {}
+    // Clear every queue-related cache so the next user doesn't inherit prior
+    // session data on the same browser.
+    clearQueueCaches();
   }, []);
 
   // ── Impersonation handler ──────────────────────────────────────────────────
@@ -471,49 +510,85 @@ const App=()=>{
   },[user,addToast,perms]);
 
   // ── Reassign handler (email-based — pushes to Zendesk/Jira) ────────────────
+  // For live tickets (zendesk/jira) the push goes through /queue/reassign
+  // which also busts the server cache and logs activity. For manual tasks we
+  // fall back to the legacy /tasks/[id]/assign path. Local mutations are
+  // recorded in the mutation store so they survive a page reload (within the
+  // 5-minute window — after that the server value wins).
   const confirmReassign=useCallback((task,newEmail,note)=>{
     if(!perms?.canDo('can_reassign'))return;
     const member=MEMBERS_BY_EMAIL[newEmail];
     const newName=member?.name||newEmail;
     const newMemberId=member?MEMBERS.findIndex(m=>m.email.toLowerCase()===newEmail.toLowerCase())+1:null;
-    const now=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+    const nowLabel=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+    const nowMs=Date.now();
+
+    const applyOne=(t)=>({...t,assigneeId:newMemberId,assigneeEmail:newEmail,assigneeName:newName,_locallyReassignedAt:nowMs});
+    const recordOne=(taskId)=>recordMutation(user?.email,taskId,{
+      assigneeEmail:newEmail,assigneeId:newMemberId,assigneeName:newName,_locallyReassignedAt:nowMs,
+    });
+    const pushOne=(t)=>{
+      const source=t?.source;
+      if(source==='zendesk'||source==='jira'){
+        return reassignQueueTicket(t.id,newEmail);
+      }
+      // Manual / locally-created task — only the legacy Postgres endpoint makes sense.
+      return apiAssignTask(t._beId||t.id,String(newMemberId||''));
+    };
+
     if(bulkIds&&bulkIds.length>0){
       const idSet=new Set(bulkIds);
-      setTasks(prev=>prev.map(t=>idSet.has(t.id)?{...t,assigneeId:newMemberId,assigneeEmail:newEmail,assigneeName:newName}:t));
-      setActivity(prev=>{const next={...prev};bulkIds.forEach(id=>{next[id]=[...(next[id]||[]),{type:'assigned',text:`Bulk reassigned to ${newName}${note?` — ${note}`:''}`,user:user.name,time:now}];});return next;});
+      setTasks(prev=>prev.map(t=>idSet.has(t.id)?applyOne(t):t));
+      setActivity(prev=>{const next={...prev};bulkIds.forEach(id=>{next[id]=[...(next[id]||[]),{type:'assigned',text:`Bulk reassigned to ${newName}${note?` — ${note}`:''}`,user:user.name,time:nowLabel}];});return next;});
+      bulkIds.forEach(recordOne);
       addToast('success','Bulk Reassign',`${bulkIds.length} tasks → ${newName.split(' ')[0]}`);
-      // Push each ticket to Zendesk/Jira in background — track failures
+      // Push each ticket to its source in the background, track failures
       const failedIds=[];
-      Promise.allSettled(bulkIds.map(id=>reassignQueueTicket(id,newEmail).catch(err=>{failedIds.push(id);throw err;}))).then(()=>{
+      const targets=bulkIds.map(id=>tasks.find(t=>t.id===id)).filter(Boolean);
+      Promise.allSettled(targets.map(t=>pushOne(t).catch(err=>{failedIds.push(t.id);throw err;}))).then(()=>{
         if(failedIds.length>0) addToast('warning','Partial Sync Failure',`${failedIds.length}/${bulkIds.length} tasks failed to sync to source system`);
       });
     } else {
-      setTasks(prev=>prev.map(t=>t.id===task.id?{...t,assigneeId:newMemberId,assigneeEmail:newEmail,assigneeName:newName}:t));
-      setActivity(prev=>({...prev,[task.id]:[...(prev[task.id]||[]),{type:'assigned',text:`Reassigned to ${newName}${note?` — ${note}`:''}`,user:user.name,time:now}]}));
+      setTasks(prev=>prev.map(t=>t.id===task.id?applyOne(t):t));
+      setActivity(prev=>({...prev,[task.id]:[...(prev[task.id]||[]),{type:'assigned',text:`Reassigned to ${newName}${note?` — ${note}`:''}`,user:user.name,time:nowLabel}]}));
+      recordOne(task.id);
       addToast('success','Task Reassigned',`→ ${newName.split(' ')[0]} · ${task.id}`);
-      // Push to Zendesk/Jira (real reassignment)
-      reassignQueueTicket(task.id,newEmail).catch(err=>{
+      pushOne(task).catch(err=>{
         console.warn('[reassign] Push to source failed:',err.message);
         addToast('warning','Sync Warning',`Local reassign ok, but source system update failed for ${task.id}`);
-      });
-      // Legacy BE sync
-      apiAssignTask(task._beId||task.id,String(newMemberId||'')).catch(err=>{
-        console.warn('[reassign] Legacy BE sync failed:',err.message);
       });
     }
     setReassignModal(null);
     setBulkIds(null);
-  },[addToast,user,perms,bulkIds]);
+  },[addToast,user,perms,bulkIds,tasks]);
 
   // ── SLA real-time ticking — increment minutesAgo every 60s ────────────────
+  // Skipped while the tab is hidden (no one's looking — don't re-render every
+  // task). When the tab becomes visible again, we bump once to catch up, then
+  // the interval resumes its 60s cadence.
   useEffect(()=>{
-    const iv=setInterval(()=>{
+    const bump=(mins)=>{
       setTasks(prev=>prev.map(t=>{
         if(t.status==='resolved'||t.status==='waiting')return t;
-        return {...t, minutesAgo:t.minutesAgo+1, updatedMinsAgo:t.updatedMinsAgo+1, minutesSinceLastResponse:(t.minutesSinceLastResponse||0)+1};
+        return {...t, minutesAgo:(t.minutesAgo||0)+mins, updatedMinsAgo:(t.updatedMinsAgo||0)+mins, minutesSinceLastResponse:(t.minutesSinceLastResponse||0)+mins};
       }));
+    };
+    let lastTick=Date.now();
+    const iv=setInterval(()=>{
+      if(typeof document!=='undefined'&&document.hidden)return;
+      lastTick=Date.now();
+      bump(1);
     },60000);
-    return()=>clearInterval(iv);
+    const onVis=()=>{
+      if(typeof document==='undefined'||document.hidden)return;
+      const elapsedMins=Math.floor((Date.now()-lastTick)/60000);
+      if(elapsedMins>0){lastTick=Date.now();bump(elapsedMins);}
+    };
+    if(typeof document!=='undefined')document.addEventListener('visibilitychange',onVis);
+    return()=>{
+      clearInterval(iv);
+      if(typeof document!=='undefined')document.removeEventListener('visibilitychange',onVis);
+    };
   },[]);
 
   // ── Snooze handler (gated by can_snooze_task) ─────────────────────────────
@@ -537,21 +612,32 @@ const App=()=>{
       snoozedUntil=Date.now()+60*60000;
     }
     const now=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+    const nowMs=Date.now();
     if(bulkIds&&bulkIds.length>0){
       const idSet=new Set(bulkIds);
       setTasks(prev=>prev.map(t=>{
         if(!idSet.has(t.id))return t;
         const prevStatus=t.status==='waiting'?t.prevStatus||'new':t.status;
-        return {...t,status:'waiting',snoozeLabel:label,snoozedUntil,prevStatus};
+        return {...t,status:'waiting',snoozeLabel:label,snoozedUntil,prevStatus,_locallySnoozedAt:nowMs};
       }));
       setActivity(prev=>{const next={...prev};bulkIds.forEach(id=>{next[id]=[...(next[id]||[]),{type:'status',text:`Bulk snoozed until ${label}`,user:user.name,time:now}];});return next;});
+      // Persist each snooze + push to backend
+      bulkIds.forEach(id=>{
+        const t=tasks.find(tt=>tt.id===id);
+        const prevStatus=t?.status==='waiting'?t.prevStatus||'new':t?.status||'new';
+        recordMutation(user?.email,id,{snoozedUntil,snoozeLabel:label,prevStatus,_locallySnoozedAt:nowMs});
+        apiSnoozeTask(t?._beId||id,new Date(snoozedUntil).toISOString()).catch(err=>{
+          console.warn('[snooze] BE sync failed for',id,err.message);
+        });
+      });
       addToast('info','Bulk Snooze',`${bulkIds.length} tasks · until ${label}`);
     } else {
       const prevStatus=task.status==='waiting'?task.prevStatus||'new':task.status;
-      setTasks(prev=>prev.map(t=>t.id===task.id?{...t,status:'waiting',snoozeLabel:label,snoozedUntil,prevStatus}:t));
+      setTasks(prev=>prev.map(t=>t.id===task.id?{...t,status:'waiting',snoozeLabel:label,snoozedUntil,prevStatus,_locallySnoozedAt:nowMs}:t));
       setActivity(prev=>({...prev,[task.id]:[...(prev[task.id]||[]),{type:'status',text:`Snoozed until ${label}`,user:user.name,time:now}]}));
+      recordMutation(user?.email,task.id,{snoozedUntil,snoozeLabel:label,prevStatus,_locallySnoozedAt:nowMs});
       addToast('info','Task Snoozed',`${task.id} · until ${label}`);
-      // BE sync
+      // BE sync — upserts a shadow row keyed by external_id so live tickets persist
       apiSnoozeTask(task._beId||task.id,new Date(snoozedUntil).toISOString()).catch(err=>{
         console.warn('[snooze] BE sync failed:',err.message);
         addToast('warning','Sync Warning','Snooze saved locally but backend sync failed');
@@ -559,7 +645,7 @@ const App=()=>{
     }
     setSnoozeModal(null);
     setBulkIds(null);
-  },[addToast,user,perms,bulkIds]);
+  },[addToast,user,perms,bulkIds,tasks]);
 
   // ── Auto-unsnooze — check every 30s for expired snoozes ─────────────────
   useEffect(()=>{
@@ -570,7 +656,9 @@ const App=()=>{
         const next=prev.map(t=>{
           if(t.status==='waiting'&&t.snoozedUntil&&t.snoozedUntil<=now){
             changed=true;
-            return {...t, status:t.prevStatus||'new', snoozeLabel:null, snoozedUntil:null, prevStatus:null};
+            // Drop the persisted mutation too so reload doesn't re-snooze
+            try { clearMutation(user?.email,t.id); } catch {}
+            return {...t, status:t.prevStatus||'new', snoozeLabel:null, snoozedUntil:null, prevStatus:null, _locallySnoozedAt:null};
           }
           return t;
         });
@@ -578,7 +666,7 @@ const App=()=>{
       });
     },30000);
     return()=>clearInterval(iv);
-  },[]);
+  },[user?.email]);
 
   // ── Bulk escalate handler (gated by can_bulk_action) ──────────────────────
   const bulkEscalateHandler=useCallback((ids)=>{
@@ -603,8 +691,11 @@ const App=()=>{
     // Use base36 suffix for unique IDs
     const newId=`${pfx[form.source]||'MN'}-${(now.getTime()+Math.floor(Math.random()*999)).toString(36).slice(-4).toUpperCase()}`;
     const agentName=MEMBERS.find(m=>m.id===form.assigneeId)?.name;
-    setTasks(prev=>[{id:newId,source:form.source,subject:form.subject,body:form.body||'',assigneeId:form.assigneeId,country:form.country,receivedAt:t,minutesAgo:0,updatedMinsAgo:0,minutesSinceLastResponse:0,status:'new',type:form.type,isAlert:false,suggestedReply:'',_locallyCreated:true},...prev]);
+    const newTask={id:newId,source:form.source,subject:form.subject,body:form.body||'',assigneeId:form.assigneeId,country:form.country,receivedAt:t,minutesAgo:0,updatedMinsAgo:0,minutesSinceLastResponse:0,status:'new',type:form.type,isAlert:false,suggestedReply:'',_locallyCreated:true,_createdAt:now.toISOString()};
+    setTasks(prev=>[newTask,...prev]);
     setActivity(prev=>({...prev,[newId]:[{type:'created',text:'Task created manually',user:user.name,time:t},{type:'assigned',text:`Assigned to ${agentName}`,user:user.name,time:t}]}));
+    // Persist so reload keeps the task visible
+    recordCreatedTask(user?.email, newTask);
     setCreateModal(false);
     addToast('success','Task Created',`${newId} → ${agentName?.split(' ')[0]}`);
     // BE sync
@@ -673,6 +764,7 @@ const App=()=>{
       setLoggedInEmail(null);
       setImpersonating(null);
       try { localStorage.removeItem('ops_hub_logged_in_email'); localStorage.removeItem('ops_hub_token_ts'); localStorage.removeItem('ops_hub_user'); } catch(e) {}
+      clearQueueCaches();
       addToast('error','Session Expired','Please log in again.');
     };
     window.addEventListener('ops-hub-session-expired',handler);
@@ -767,14 +859,12 @@ const App=()=>{
   // ── View permission guard — redirect to first allowed view ──────────────
   useEffect(()=>{
     if(!perms)return;
-    // Email-gated views bypass perms.canView
-    const isEmailGated = view==='my-queue-v2' && (user?.email||'').toLowerCase()==='mohamed.tantawy@deel.com';
-    if(view&&!perms.canView(view)&&!isEmailGated){
+    if(view&&!perms.canView(view)){
       // Find first allowed view
       const fallback=['briefing','my-queue','calendar','projects','escalations','hr-reports','knowledge-hub','analytics','announcements','slack','team','settings'].find(v=>perms.canView(v));
       setView(fallback||'briefing');
     }
-  },[view,perms,user?.email]);
+  },[view,perms]);
 
   // ── Live feed + occasional toast ──────────────────────────────────────────
   useEffect(()=>{
@@ -864,7 +954,6 @@ const App=()=>{
       <div className="deel-content" data-region="main-content" aria-label="Main content" style={{display:'flex',overflowX:'hidden',overflowY:'auto',position:'relative',flex:1}}>
           {view==='briefing'      &&perms?.canView('briefing')!==false     &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={setSelTask} comms={comms} escalations={scopedEscalations} setSubFilter={setSubFilter} requests={requests}/></div>}
           {view==='my-queue'      &&perms?.canView('my-queue')!==false     &&<div className="page-enter"><Queue user={effectiveUser} tasks={tasks} setTasks={setTasks} selTask={liveSelTask} setSelTask={setSelTask} notes={notes} setNotes={setNotes} activity={activity} setActivity={setActivity} addToast={addToast} onEscalMgr={openEscalModal} onReassign={(t)=>{closeActionModals();setReassignModal(t);}} onSnooze={(t)=>{closeActionModals();setSnoozeModal(t);}} onCreateTask={()=>{closeActionModals();setCreateModal(true);}} onBulkAction={(ids,action)=>{closeActionModals();setBulkIds(ids);if(action==='reassign'){setReassignModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}else if(action==='snooze'){setSnoozeModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}else if(action==='escalate'){setEscalModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}}} subFilter={subFilter} escalations={scopedEscalations} requests={requests} setRequests={setRequests} onNewRequest={()=>setRequestModal(true)} queueMode={queueMode} setQueueMode={setQueueMode} fUnassigned={fUnassigned} setFUnassigned={setFUnassigned}/></div>}
-          {view==='my-queue-v2'   &&(user?.email||'').toLowerCase()==='mohamed.tantawy@deel.com'&&<div className="page-enter"><QueueV2 user={effectiveUser} tasks={tasks} setTasks={setTasks} selTask={liveSelTask} setSelTask={setSelTask} notes={notes} setNotes={setNotes} activity={activity} setActivity={setActivity} addToast={addToast} onEscalMgr={openEscalModal} onReassign={(t)=>{closeActionModals();setReassignModal(t);}} onSnooze={(t)=>{closeActionModals();setSnoozeModal(t);}} onCreateTask={()=>{closeActionModals();setCreateModal(true);}} onBulkAction={(ids,action)=>{closeActionModals();setBulkIds(ids);if(action==='reassign'){setReassignModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}else if(action==='snooze'){setSnoozeModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}else if(action==='escalate'){setEscalModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}}} subFilter={subFilter} escalations={scopedEscalations} requests={requests} setRequests={setRequests} onNewRequest={()=>setRequestModal(true)} queueMode={queueMode} setQueueMode={setQueueMode} fUnassigned={fUnassigned} setFUnassigned={setFUnassigned}/></div>}
           {view==='team'          &&perms?.canView('team')!==false         &&<div className="page-enter"><Team user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setTask={setSelTask} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
           {view==='analytics'     &&perms?.canView('analytics')!==false    &&<div className="page-enter"><Analytics tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} currentUser={effectiveUser} subFilter={subFilter} escalations={scopedEscalations}/></div>}
           {view==='escalations'   &&perms?.canView('escalations')!==false  &&<div className="page-enter"><EscalationsView escalations={scopedEscalations} setEscalations={setEscalations} currentUser={effectiveUser} onNewEscalation={()=>setCreateEscalModal(true)}/></div>}

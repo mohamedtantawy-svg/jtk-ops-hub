@@ -2,9 +2,15 @@
 // Fetches amendments + redlines from the Deel Admin API.
 // Groups by country. Caches in localStorage.
 // Stale-while-revalidate: always shows previous data until fresh data arrives.
+// De-dupes concurrent refresh() calls and adopts cross-tab broadcasts.
+// Amendments and redlines track their own lastFetchRef so an out-of-order
+// broadcast for one doesn't block the other from updating.
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { fetchDeelAmendments, fetchDeelRedlines } from '../services/integrationsApi';
+import { getQueueChannel, broadcastSync } from './queueSyncChannel';
 
+const SOURCE_AMENDMENTS = 'amendments';
+const SOURCE_REDLINES = 'redlines';
 const CACHE_TTL = 5 * 60 * 1000;
 const CACHE_KEY_AMENDMENTS = 'ops_hub_amendments_cache';
 const CACHE_KEY_REDLINES = 'ops_hub_redlines_cache';
@@ -26,62 +32,102 @@ export function useChangeRequestData(enabled = true) {
   const [amendments, setAmendments] = useState(cachedA.items);
   const [redlines, setRedlines] = useState(cachedR.items);
   const [loading, setLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState(null);
-  const lastFetch = useRef(
-    cachedA.ts > 0 && cachedR.ts > 0 && Date.now() - Math.min(cachedA.ts, cachedR.ts) < CACHE_TTL
-      ? Math.min(cachedA.ts, cachedR.ts) : 0
+  const [lastSyncAt, setLastSyncAt] = useState(() => {
+    if (cachedA.ts && cachedR.ts) return Math.max(cachedA.ts, cachedR.ts);
+    return cachedA.ts || cachedR.ts || null;
+  });
+  const lastFetchAmendmentsRef = useRef(
+    cachedA.ts > 0 && Date.now() - cachedA.ts < CACHE_TTL ? cachedA.ts : 0
   );
+  const lastFetchRedlinesRef = useRef(
+    cachedR.ts > 0 && Date.now() - cachedR.ts < CACHE_TTL ? cachedR.ts : 0
+  );
+  const inFlightRef = useRef(null);
 
   const refresh = useCallback(async (force = false) => {
-    if (!enabled) return;
-    if (!force && Date.now() - lastFetch.current < CACHE_TTL) return;
+    if (!enabled) return null;
+    const bothFresh = !force
+      && Date.now() - lastFetchAmendmentsRef.current < CACHE_TTL
+      && Date.now() - lastFetchRedlinesRef.current < CACHE_TTL;
+    if (bothFresh) return null;
+    if (inFlightRef.current) return inFlightRef.current;
 
-    // Only show loading if both are empty (first load ever)
+    setIsRefreshing(true);
     setLoading(prev => (amendments.length === 0 && redlines.length === 0) ? true : prev);
     setError(null);
-    try {
-      // Fetch both in parallel — use allSettled so one failure doesn't kill both
-      const [amendResult, redlineResult] = await Promise.allSettled([
-        fetchDeelAmendments({ bustCache: force }),
-        fetchDeelRedlines({ bustCache: force }),
-      ]);
 
-      const fetchedAmendments = amendResult.status === 'fulfilled' ? (amendResult.value?.items || []) : [];
-      const fetchedRedlines = redlineResult.status === 'fulfilled' ? (redlineResult.value?.items || []) : [];
-
-      // Log individual failures without blocking the other source
-      if (amendResult.status === 'rejected') console.warn('[useChangeRequestData] Amendments fetch failed:', amendResult.reason?.message);
-      if (redlineResult.status === 'rejected') console.warn('[useChangeRequestData] Redlines fetch failed:', redlineResult.reason?.message);
-
-      // Only replace if we got data or current is empty
-      if (fetchedAmendments.length > 0 || amendments.length === 0) {
-        setAmendments(fetchedAmendments);
-      }
-      if (fetchedRedlines.length > 0 || redlines.length === 0) {
-        setRedlines(fetchedRedlines);
-      }
-      lastFetch.current = Date.now();
-
-      // Same guard per source — don't let a transient empty response wipe
-      // the good cached snapshot used on the next page load.
+    const run = (async () => {
       try {
-        if (fetchedAmendments.length > 0 || amendments.length === 0) {
-          localStorage.setItem(CACHE_KEY_AMENDMENTS, JSON.stringify({ items: fetchedAmendments, ts: Date.now() }));
+        const [amendResult, redlineResult] = await Promise.allSettled([
+          fetchDeelAmendments({ bustCache: force }),
+          fetchDeelRedlines({ bustCache: force }),
+        ]);
+
+        const fetchedAmendments = amendResult.status === 'fulfilled' ? (amendResult.value?.items || []) : [];
+        const fetchedRedlines = redlineResult.status === 'fulfilled' ? (redlineResult.value?.items || []) : [];
+
+        if (amendResult.status === 'rejected') console.warn('[useChangeRequestData] Amendments fetch failed:', amendResult.reason?.message);
+        if (redlineResult.status === 'rejected') console.warn('[useChangeRequestData] Redlines fetch failed:', redlineResult.reason?.message);
+
+        const now = Date.now();
+        if (amendResult.status === 'fulfilled' && (fetchedAmendments.length > 0 || amendments.length === 0)) {
+          setAmendments(fetchedAmendments);
+          try { localStorage.setItem(CACHE_KEY_AMENDMENTS, JSON.stringify({ items: fetchedAmendments, ts: now })); } catch (e) {}
+          broadcastSync(SOURCE_AMENDMENTS, fetchedAmendments);
+          lastFetchAmendmentsRef.current = now;
         }
-        if (fetchedRedlines.length > 0 || redlines.length === 0) {
-          localStorage.setItem(CACHE_KEY_REDLINES, JSON.stringify({ items: fetchedRedlines, ts: Date.now() }));
+        if (redlineResult.status === 'fulfilled' && (fetchedRedlines.length > 0 || redlines.length === 0)) {
+          setRedlines(fetchedRedlines);
+          try { localStorage.setItem(CACHE_KEY_REDLINES, JSON.stringify({ items: fetchedRedlines, ts: now })); } catch (e) {}
+          broadcastSync(SOURCE_REDLINES, fetchedRedlines);
+          lastFetchRedlinesRef.current = now;
         }
-      } catch (e) {}
-    } catch (err) {
-      console.warn('[useChangeRequestData] Failed:', err.message);
-      setError(err.message);
-      // Keep existing data on error
-    } finally {
-      setLoading(false);
-    }
+        setLastSyncAt(Math.max(lastFetchAmendmentsRef.current, lastFetchRedlinesRef.current) || null);
+
+        // Surface an error only when BOTH legs fall over — one succeeding keeps the card informative.
+        if (amendResult.status === 'rejected' && redlineResult.status === 'rejected') {
+          setError(amendResult.reason?.message || 'Change requests fetch failed');
+        }
+        return { amendments: fetchedAmendments, redlines: fetchedRedlines };
+      } catch (err) {
+        console.warn('[useChangeRequestData] Failed:', err.message);
+        setError(err.message);
+        return null;
+      } finally {
+        setLoading(false);
+        setIsRefreshing(false);
+        inFlightRef.current = null;
+      }
+    })();
+    inFlightRef.current = run;
+    return run;
   }, [enabled, amendments.length, redlines.length]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // Cross-tab adoption — amendments and redlines are tracked by independent
+  // refs so an out-of-order broadcast for one never blocks the other.
+  useEffect(() => {
+    const ch = getQueueChannel();
+    if (!ch) return;
+    const handler = (e) => {
+      const msg = e.data;
+      if (!msg) return;
+      if (msg.source === SOURCE_AMENDMENTS && msg.ts && msg.ts > lastFetchAmendmentsRef.current) {
+        setAmendments(msg.items || []);
+        lastFetchAmendmentsRef.current = msg.ts;
+        setLastSyncAt(Math.max(lastFetchAmendmentsRef.current, lastFetchRedlinesRef.current) || null);
+      } else if (msg.source === SOURCE_REDLINES && msg.ts && msg.ts > lastFetchRedlinesRef.current) {
+        setRedlines(msg.items || []);
+        lastFetchRedlinesRef.current = msg.ts;
+        setLastSyncAt(Math.max(lastFetchAmendmentsRef.current, lastFetchRedlinesRef.current) || null);
+      }
+    };
+    ch.addEventListener('message', handler);
+    return () => ch.removeEventListener('message', handler);
+  }, []);
 
   // ── Amendments grouped by country ──
   const amendmentsByCountry = useMemo(() => {
@@ -128,7 +174,9 @@ export function useChangeRequestData(enabled = true) {
     amendmentCounts,
     redlineCounts,
     loading,
+    isRefreshing,
     error,
+    lastSyncAt,
     refresh: () => refresh(true),
     isAvailable: (amendments.length > 0 || redlines.length > 0) || !error,
   };

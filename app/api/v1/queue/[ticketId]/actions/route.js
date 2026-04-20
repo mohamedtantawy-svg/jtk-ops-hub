@@ -1,5 +1,46 @@
+// ── POST /api/v1/queue/[ticketId]/actions ────────────────────────────────
+// Pushes a replay, status change, or assignee change to the original
+// ticketing system (Zendesk or Jira). Body actions: 'reply' | 'status' | 'assignee'.
+//
+// - Auth: every authenticated user can reply + change status on their own work.
+//   Assignee changes require admin | regional_manager | team_lead.
+// - Busts the persistent `/queue` cache so the next poll reflects the write
+//   instead of serving stale data.
+// - Upserts a shadow `tasks` row keyed by external_id and logs activity.
+// ─────────────────────────────────────────────────────────────────────────
+
 import { NextResponse } from 'next/server';
-import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
+import { getAuthUser, requireRole } from '../../../../../../src/lib/auth-helpers';
+import { query } from '../../../../../../src/lib/db';
+import { cacheDelMany, cacheGet } from '../../../../../../src/lib/server-cache';
+import { getVisibleMemberEmails, isAdmin } from '../../../../../../src/lib/scope-helpers';
+
+const STALE_TTL_MS = 30 * 60_000;
+
+// Reject writes on tickets the user wouldn't see in their own /queue view.
+// Mirrors ticketInUserScope from /queue/[id]/comments — keeps the behaviour
+// consistent between read + write surfaces.
+function ticketInUserScope(ticketId, user) {
+  if (!user) return false;
+  if (isAdmin(user) || user.role === 'regional_manager') return true;
+  const sourceKey = ticketId.startsWith('ZD-') ? 'queue_zendesk' : 'queue_jira';
+  const combined = cacheGet('queue', STALE_TTL_MS);
+  const perSource = cacheGet(sourceKey, STALE_TTL_MS);
+  const pools = [];
+  if (combined?.items) pools.push(combined.items);
+  if (perSource?.items) pools.push(perSource.items);
+  let match = null;
+  for (const pool of pools) {
+    match = pool.find(t => t.id === ticketId);
+    if (match) break;
+  }
+  if (!match) return true; // cold cache — degrade to allow
+  const visible = getVisibleMemberEmails(user);
+  const email = (match.assigneeEmail || '').toLowerCase();
+  if (email && visible.has(email)) return true;
+  if (!email && user.role === 'team_lead') return true;
+  return false;
+}
 
 const ZD_SUBDOMAIN = process.env.ZENDESK_SUBDOMAIN || '';
 const ZD_TOKEN = process.env.ZENDESK_API_TOKEN || '';
@@ -92,6 +133,50 @@ async function assignJiraIssue(issueKey, email) {
   return { ok: true };
 }
 
+// ── Shadow task upsert + activity log ────────────────────────────────────────
+// Keeps a persistent row keyed by the external id so we can record history for
+// tickets that otherwise live only in Zendesk/Jira.
+async function upsertShadowAndLog({ ticketId, source, eventType, eventText, actorName, patch = {} }) {
+  try {
+    const cols = ['external_id', 'source', 'subject'];
+    const vals = [ticketId, source, ticketId];
+    let ph = 3;
+    const updates = ['updated_at = NOW()'];
+
+    // Optional columns we may patch (status, snoozed_until, assignee_id)
+    if (patch.status) {
+      cols.push('status'); vals.push(patch.status); ph++;
+      updates.push(`status = EXCLUDED.status`);
+    }
+    if (patch.snoozedUntil !== undefined) {
+      cols.push('snoozed_until'); vals.push(patch.snoozedUntil); ph++;
+      updates.push(`snoozed_until = EXCLUDED.snoozed_until`);
+    }
+    if (patch.assigneeId !== undefined) {
+      cols.push('assignee_id'); vals.push(patch.assigneeId); ph++;
+      updates.push(`assignee_id = EXCLUDED.assignee_id`);
+    }
+
+    const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
+    const sql = `
+      INSERT INTO tasks (${cols.join(', ')})
+      VALUES (${placeholders})
+      ON CONFLICT (external_id) DO UPDATE
+        SET ${updates.join(', ')}
+      RETURNING id
+    `;
+    const upsert = await query(sql, vals);
+    const taskUuid = upsert.rows[0]?.id;
+    if (!taskUuid) return;
+    await query(
+      'INSERT INTO task_activity (task_id, event_type, event_text, actor_name) VALUES ($1, $2, $3, $4)',
+      [taskUuid, eventType, eventText, actorName || 'System'],
+    );
+  } catch (err) {
+    console.warn('[queue/actions] Shadow task / activity log failed:', err.message);
+  }
+}
+
 export async function POST(req, { params }) {
   const user = getAuthUser(req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -100,9 +185,22 @@ export async function POST(req, { params }) {
   const body = await req.json();
   const { action } = body;
   const isZD = isZendeskTicket(ticketId);
+  const source = isZD ? 'zendesk' : 'jira';
+
+  // Assignee changes require the same role gate as /queue/reassign and
+  // /tasks/[id]/assign. Reply + status changes only require the user to be
+  // able to SEE the ticket (scoped view).
+  if (action === 'assignee') {
+    const { authorized, status, error } = requireRole(req, 'admin', 'regional_manager', 'team_lead');
+    if (!authorized) return NextResponse.json({ error }, { status });
+  }
+  if (!ticketInUserScope(ticketId, user)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
 
   try {
     if (action === 'reply') {
+      if (!body.message) return NextResponse.json({ error: 'message required for reply action' }, { status: 400 });
       if (isZD) {
         const zdId = ticketId.replace('ZD-', '');
         await updateZendeskTicket(zdId, {
@@ -111,10 +209,17 @@ export async function POST(req, { params }) {
       } else {
         await addJiraComment(ticketId, body.message);
       }
+      await upsertShadowAndLog({
+        ticketId, source, eventType: 'reply',
+        eventText: `Replied (${body.public !== false ? 'public' : 'internal'})`,
+        actorName: user.name,
+      });
+      cacheDelMany(['queue', `queue_${source}`]);
       return NextResponse.json({ ok: true, action: 'reply' });
     }
 
     if (action === 'status') {
+      if (!body.status) return NextResponse.json({ error: 'status required for status action' }, { status: 400 });
       if (isZD) {
         const zdId = ticketId.replace('ZD-', '');
         const statusMap = { new: 'new', in_progress: 'open', waiting: 'pending', resolved: 'solved' };
@@ -123,16 +228,35 @@ export async function POST(req, { params }) {
       } else {
         await transitionJiraIssue(ticketId, body.status);
       }
+      await upsertShadowAndLog({
+        ticketId, source, eventType: 'status',
+        eventText: `Status changed to ${body.status}`,
+        actorName: user.name,
+        patch: { status: body.status },
+      });
+      cacheDelMany(['queue', `queue_${source}`]);
       return NextResponse.json({ ok: true, action: 'status', status: body.status });
     }
 
     if (action === 'assignee') {
+      if (!body.assigneeEmail) return NextResponse.json({ error: 'assigneeEmail required for assignee action' }, { status: 400 });
       if (isZD) {
         const zdId = ticketId.replace('ZD-', '');
         await updateZendeskTicket(zdId, { assignee_email: body.assigneeEmail });
       } else {
         await assignJiraIssue(ticketId, body.assigneeEmail);
       }
+      const asgn = await query(
+        'SELECT id FROM members WHERE LOWER(email) = LOWER($1) LIMIT 1',
+        [body.assigneeEmail],
+      );
+      await upsertShadowAndLog({
+        ticketId, source, eventType: 'assign',
+        eventText: `Reassigned to ${body.assigneeEmail}`,
+        actorName: user.name,
+        patch: { assigneeId: asgn.rows[0]?.id || null },
+      });
+      cacheDelMany(['queue', `queue_${source}`]);
       return NextResponse.json({ ok: true, action: 'assignee' });
     }
 
