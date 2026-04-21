@@ -821,49 +821,65 @@ export async function listAmendmentRequests(params = {}) {
 
 // ── OpsWorkbench Tasks (Admin API) ─────────────────────────────────────────
 
+// HRX Operations team — the only team the Workbench Q surfaces. HRX
+// Termination tasks live under a different team ID and are surfaced in the
+// Offboarding panel instead.
+export const HRX_OPERATIONS_TEAM_ID = 'f235fd21-c5a0-4804-badf-2cc3dc76191e';
+
+const WORKBENCH_PAGE_SIZE = 200;
+const WORKBENCH_MAX_PAGES = 25; // 25 * 200 = 5000 item ceiling (well above current volume)
+
+// Country is frequently null on the task itself but carried in a custom
+// field keyed by reference "COUNTRY..." as either a dropdown string or a
+// multi-select array (e.g. ["Turkey"]). Return the first populated one —
+// FE helpers (getFlag / getCountryName) accept both ISO2 and full names.
+function extractCountryFromCustomFields(customFields) {
+  if (!Array.isArray(customFields) || customFields.length === 0) return '';
+  for (const f of customFields) {
+    const ref = (f?.reference || '').toUpperCase();
+    if (!ref.includes('COUNTR')) continue;
+    const multi = f.dropdownMultiSelectValue;
+    if (Array.isArray(multi) && multi.length > 0 && multi[0]) return String(multi[0]);
+    if (Array.isArray(f.value) && f.value.length > 0 && f.value[0]) return String(f.value[0]);
+    if (typeof f.value === 'string' && f.value) return f.value;
+  }
+  return '';
+}
+
 /**
  * Fetches OpsWorkbench tasks from the admin API.
  * Uses /admin/ops_workbench/tasks — same endpoint as admin.deel.network.
  *
- * Query params:
- *   status[] — array of statuses: TO_DO, IN_PROGRESS, ON_HOLD, ESCALATED
- *   teamIds[] — array of team UUIDs (HRX Operations, HRX Termination)
- *   limit — max results per page (default 30)
- *
- * Response shape: { count: number, result: [...tasks...], cursor: string }
- * Each task has: id, name, description, status, country, assignee, creator,
- * createdAt, updatedAt, dueAt, slaTime, slaRemaining, slaBreachStatus,
- * taskConfiguration (name, sourceType, team), highPriority, contractOid, etc.
+ * Defaults:
+ *   - teamIds: HRX Operations only
+ *   - statuses: all four actionable buckets (TO_DO, IN_PROGRESS, ON_HOLD, ESCALATED)
+ *   - follows `cursor` across pages up to 5000 items
  */
 export async function listWorkbenchTasks(params = {}) {
-  const qs = new URLSearchParams();
-
-  // Statuses to fetch (default: all actionable)
   const statuses = params.statuses || ['TO_DO', 'IN_PROGRESS', 'ON_HOLD', 'ESCALATED'];
-  for (const s of statuses) qs.append('status[]', s);
+  const teamIds = params.teamIds || [HRX_OPERATIONS_TEAM_ID];
 
-  // HRX team IDs
-  const teamIds = params.teamIds || [
-    'f06e236b-85a2-4380-979f-f36acec498b4', // HRX Termination
-    'f235fd21-c5a0-4804-badf-2cc3dc76191e', // HRX Operations
-  ];
-  for (const id of teamIds) qs.append('teamIds[]', id);
+  const buildQs = (cursor) => {
+    const qs = new URLSearchParams();
+    for (const s of statuses) qs.append('status[]', s);
+    for (const id of teamIds) qs.append('teamIds[]', id);
+    qs.set('limit', String(params.limit || WORKBENCH_PAGE_SIZE));
+    if (cursor) qs.set('cursor', cursor);
+    return qs;
+  };
 
-  qs.set('limit', String(params.limit || 200));
-
-  const res = await deelFetch(`/admin/ops_workbench/tasks?${qs.toString()}`);
-  const rawItems = res?.result || [];
-
-  // Paginate: keep fetching until no cursor or safety cap of 300 items
-  let allItems = [...rawItems];
-  let cursor = res?.cursor;
-  while (cursor && allItems.length < 300) {
-    qs.set('cursor', cursor);
-    const nextRes = await deelFetch(`/admin/ops_workbench/tasks?${qs.toString()}`);
-    const nextItems = nextRes?.result || [];
-    if (nextItems.length === 0) break;
-    allItems.push(...nextItems);
-    cursor = nextRes?.cursor;
+  const allItems = [];
+  let cursor = null;
+  let serverCount = 0;
+  for (let page = 0; page < WORKBENCH_MAX_PAGES; page++) {
+    const qs = buildQs(cursor);
+    const res = await deelFetch(`/admin/ops_workbench/tasks?${qs.toString()}`);
+    const pageItems = res?.result || [];
+    serverCount = res?.count || serverCount;
+    if (pageItems.length === 0) break;
+    allItems.push(...pageItems);
+    cursor = res?.cursor || null;
+    if (!cursor) break;
   }
 
   const items = allItems.map(t => ({
@@ -872,7 +888,10 @@ export async function listWorkbenchTasks(params = {}) {
     description:      t.description || '',
     status:           t.status || '',                              // TO_DO, IN_PROGRESS, etc.
     statusCategory:   t.customStatus?.statusCategory || t.status,
-    country:          t.country || '',                             // 2-letter code
+    // Country: prefer top-level; fall back to the custom-field scan.
+    country:          t.country
+                   || extractCountryFromCustomFields(t.taskConfiguration?.customFieldConfigurations)
+                   || '',
     assignee:         t.assignee ? { id: t.assignee.id, email: t.assignee.email, name: t.assignee.name } : null,
     creator:          t.creator ? { id: t.creator.id, email: t.creator.email, name: t.creator.name } : null,
     createdAt:        t.createdAt || '',
@@ -881,18 +900,19 @@ export async function listWorkbenchTasks(params = {}) {
     completedAt:      t.completedAt || null,
     // SLA
     slaTime:          t.slaTime || null,                           // SLA window in seconds
-    slaRemaining:     t.slaRemaining ?? null,                      // seconds remaining (use ?? to preserve 0)
+    slaRemaining:     t.slaRemaining ?? null,                      // seconds remaining (?? preserves 0)
     slaBreachStatus:  t.slaBreachStatus || '',                     // SLA_NOT_STARTED, SLA_NOT_BREACHED, SLA_PAUSED
     slaState:         t.slaState || '',                            // NOT_STARTED, RUNNING, PAUSED
     // Task type
-    taskType:         t.taskConfiguration?.name || '',             // e.g. "HRX Escalation"
-    sourceType:       t.taskConfiguration?.sourceType || '',       // e.g. "HRX_ESCALATION"
+    taskType:         t.taskConfiguration?.name || '',             // e.g. "Expedite EOR Onboarding"
+    sourceType:       t.taskConfiguration?.sourceType || '',
     teamName:         t.taskConfiguration?.team?.name || '',       // e.g. "HRX Operations"
+    teamId:           t.taskConfiguration?.team?.id || '',
     // Priority & refs
     highPriority:     t.highPriority || 0,
     contractOid:      t.contractOid || '',
     organizationId:   t.organizationId || null,
-    origin:           t.origin || '',                              // NATS, PUBLIC_REQUEST, etc.
+    origin:           t.origin || '',
     // Escalation
     reasonForEscalation: t.reasonForEscalation || '',
     // Linked items
@@ -901,7 +921,7 @@ export async function listWorkbenchTasks(params = {}) {
     escalations:      t.escalations || [],
   }));
 
-  return { items, total: res?.count || items.length, cursor: cursor || null };
+  return { items, total: serverCount || items.length, cursor: null };
 }
 
 // ── Payslips (REST v2 API) ──────────────────────────────────────────────────
