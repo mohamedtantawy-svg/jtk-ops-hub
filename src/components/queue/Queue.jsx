@@ -811,6 +811,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
               emptySubLabel="All onboarding tasks are handled"
               sortDefault="startDate"
               hideStatusPills
+              showClient
               currentUser={user}
             />
           )}
@@ -826,6 +827,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
               sortDefault="oldest"
               showPausedSla
               hideStatusPills
+              showClient
               currentUser={user}
             />
           )}
