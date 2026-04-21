@@ -979,6 +979,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
               showClient
               hideStatusPills
               hideUpdated
+              hideContract
               dateField="createdAt"
               dateLabel="Requested Date"
               currentUser={user}
@@ -997,6 +998,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
               showClient
               hideStatusPills
               hideUpdated
+              hideContract
               dateField="createdAt"
               dateLabel="Requested Date"
               currentUser={user}
