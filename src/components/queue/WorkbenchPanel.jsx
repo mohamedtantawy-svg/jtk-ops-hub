@@ -150,24 +150,29 @@ export default function WorkbenchPanel({
         {/* Search + tabs */}
         <div style={{display:'flex',gap:8,alignItems:'center'}}>
           <div style={{flex:1,position:'relative'}}>
-            <i className="bi-search" style={{position:'absolute',left:8,top:'50%',transform:'translateY(-50%)',fontSize:11,color:'#9e9e9e',pointerEvents:'none'}}/>
+            <i className="bi-search" aria-hidden="true" style={{position:'absolute',left:8,top:'50%',transform:'translateY(-50%)',fontSize:11,color:'#9e9e9e',pointerEvents:'none'}}/>
             <input value={searchTerm} onChange={e=>setSearchTerm(e.target.value)}
               placeholder="Search tasks, assignees, contracts..."
+              role="searchbox"
+              aria-label="Search workbench tasks"
               style={{width:'100%',padding:'6px 10px 6px 26px',border:'1px solid #e8e8e8',borderRadius:8,fontSize:12,outline:'none',boxSizing:'border-box',fontFamily:'inherit',color:'#1b1b1b'}}/>
           </div>
-          <div style={{display:'flex',gap:2,background:'#f3f3f3',borderRadius:8,padding:2}}>
+          <div role="tablist" aria-label="Workbench grouping" style={{display:'flex',gap:2,background:'#f3f3f3',borderRadius:8,padding:2}}>
             {[
               { id:'byType',    label:'By Type',    icon:'bi-collection' },
               { id:'byCountry', label:'By Country', icon:'bi-globe2' },
               { id:'all',       label:'All',        icon:'bi-list-ul' },
             ].map(tab=>(
               <button key={tab.id} onClick={()=>{setActiveTab(tab.id);setExpandedGroups(new Set(['_all']));}}
+                role="tab"
+                aria-selected={activeTab===tab.id}
+                aria-label={`Group ${tab.label}`}
                 style={{display:'flex',alignItems:'center',gap:3,padding:'4px 10px',borderRadius:6,border:'none',
                   background:activeTab===tab.id?'white':'transparent',
                   color:activeTab===tab.id?'#1b1b1b':'#9e9e9e',
                   fontSize:11,fontWeight:activeTab===tab.id?600:400,cursor:'pointer',
                   boxShadow:activeTab===tab.id?'0 1px 3px rgba(0,0,0,0.08)':'none'}}>
-                <i className={tab.icon} style={{fontSize:10}}/> {tab.label}
+                <i className={tab.icon} aria-hidden="true" style={{fontSize:10}}/> {tab.label}
               </button>
             ))}
           </div>
@@ -233,18 +238,22 @@ export default function WorkbenchPanel({
 
 // ── Group Section ──
 function GroupSection({ label, count, badge, badgeColor, badgeBg, expanded, onToggle, items }) {
+  const regionId = `workbench-group-${String(label).replace(/\s+/g,'-').toLowerCase()}`;
   return (
     <div style={{marginBottom:8}}>
       <button onClick={onToggle}
+        aria-expanded={expanded}
+        aria-controls={regionId}
+        aria-label={`${label} — ${count} ${count === 1 ? 'item' : 'items'}${badge ? `, ${badge}` : ''}`}
         style={{display:'flex',alignItems:'center',gap:6,width:'100%',padding:'8px 10px',borderRadius:8,
           border:'1px solid #e8e8e8',background:'white',cursor:'pointer',textAlign:'left',transition:'all .12s'}}>
-        <i className={expanded?'bi-chevron-down':'bi-chevron-right'} style={{fontSize:10,color:'#9e9e9e',flexShrink:0}}/>
+        <i className={expanded?'bi-chevron-down':'bi-chevron-right'} aria-hidden="true" style={{fontSize:10,color:'#9e9e9e',flexShrink:0}}/>
         <span style={{fontSize:13,fontWeight:600,color:'#1b1b1b',flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{label}</span>
         {badge && <span style={{fontSize:10,fontWeight:600,color:badgeColor,background:badgeBg,padding:'1px 8px',borderRadius:128}}>{badge}</span>}
         <span style={{fontSize:11,color:'#9e9e9e',fontWeight:500,flexShrink:0}}>{count}</span>
       </button>
       {expanded && (
-        <div style={{display:'flex',flexDirection:'column',gap:4,marginTop:4,paddingLeft:4}}>
+        <div id={regionId} role="region" aria-label={`${label} tasks`} style={{display:'flex',flexDirection:'column',gap:4,marginTop:4,paddingLeft:4}}>
           {items.map(t => <TaskCard key={t.id} task={t}/>)}
         </div>
       )}

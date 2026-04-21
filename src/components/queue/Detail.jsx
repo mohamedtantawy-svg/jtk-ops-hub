@@ -244,15 +244,23 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
           </div>
         </div>
         {/* Tabs — Title Case labels */}
-        <div role="tablist" style={{display:'flex',marginTop:14,gap:0,borderBottom:'1px solid #e8e8e8',marginLeft:-20,marginRight:-20,paddingLeft:20,paddingRight:20}}>
+        <div role="tablist" aria-label="Task detail sections" style={{display:'flex',marginTop:14,gap:0,borderBottom:'1px solid #e8e8e8',marginLeft:-20,marginRight:-20,paddingLeft:20,paddingRight:20}}>
           {tabItems.map(t=>{
             const active=tab===t;
             const label={overview:'Overview',messages:'Messages',notes:'Notes',timeline:'Timeline',attachments:'Attachments',related:'Related'}[t]||t;
             const noteCount=t==='notes'?(notes[task.id]||[]).length:0;
             return(
-              <div key={t} role="tab" aria-selected={active} onClick={()=>setTab(t)} style={{padding:'10px 8px',marginRight:16,fontSize:14,fontWeight:active?700:400,color:active?'#1b1b1b':'#9e9e9e',borderBottom:active?'2px solid #1b1b1b':'2px solid transparent',cursor:'pointer',transition:'all .15s',display:'flex',alignItems:'center',gap:4,marginBottom:-1}}>
+              <div
+                key={t}
+                role="tab"
+                tabIndex={active?0:-1}
+                aria-selected={active}
+                aria-label={`${label} tab${noteCount>0?` (${noteCount} notes)`:''}`}
+                onClick={()=>setTab(t)}
+                onKeyDown={(e)=>{ if (e.key==='Enter'||e.key===' '){ e.preventDefault(); setTab(t); } }}
+                style={{padding:'10px 8px',marginRight:16,fontSize:14,fontWeight:active?700:400,color:active?'#1b1b1b':'#9e9e9e',borderBottom:active?'2px solid #1b1b1b':'2px solid transparent',cursor:'pointer',transition:'all .15s',display:'flex',alignItems:'center',gap:4,marginBottom:-1}}>
                 {label}
-                {noteCount>0&&<span style={{background:active?'#1b1b1b':'#f2f2f2',color:active?'white':'#616161',borderRadius:10,padding:'0 6px',fontSize:10,fontWeight:700,lineHeight:'18px'}}>{noteCount}</span>}
+                {noteCount>0&&<span aria-hidden="true" style={{background:active?'#1b1b1b':'#f2f2f2',color:active?'white':'#616161',borderRadius:10,padding:'0 6px',fontSize:10,fontWeight:700,lineHeight:'18px'}}>{noteCount}</span>}
               </div>
             );
           })}
@@ -281,10 +289,18 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
             </div>
             {/* SLA Remaining bar */}
             {settings.sla_enabled!==false&&task.status!=='resolved'&&task.status!=='waiting'&&(
-              <div>
+              <div aria-live="polite" aria-atomic="true">
                 <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
                   <span style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>SLA</span>
-                  <div style={{flex:1,background:'#f2f2f2',borderRadius:4,height:5,overflow:'hidden'}}>
+                  <div
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={Math.round(slaPct)}
+                    aria-valuetext={`${Math.round(slaPct)}% SLA remaining — ${slaBarText}`}
+                    aria-label="SLA remaining"
+                    style={{flex:1,background:'#f2f2f2',borderRadius:4,height:5,overflow:'hidden'}}
+                  >
                     <div style={{height:'100%',width:`${slaPct}%`,background:slaBarColor,borderRadius:4,transition:'width .3s'}}></div>
                   </div>
                   <span style={{fontSize:11,color:'var(--text-muted)',whiteSpace:'nowrap'}}>{slaBarText}</span>
@@ -532,13 +548,13 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
                 <div style={{display:'flex',gap:6,alignItems:'center'}}>
                   {/* H: Translate button */}
                   <div ref={translateRef} style={{position:'relative'}}>
-                    <button onClick={()=>setShowTranslateDD(v=>!v)} style={{display:'inline-flex',alignItems:'center',gap:4,height:26,padding:'0 10px',borderRadius:6,border:'1px solid #e8e8e8',background:showTranslateDD?'#e8f0fe':'white',color:showTranslateDD?'#1f74b3':'#616161',fontSize:11,fontWeight:500,cursor:'pointer',transition:'all .12s'}}>
+                    <button onClick={()=>setShowTranslateDD(v=>!v)} aria-haspopup="menu" aria-expanded={showTranslateDD} aria-label={activeLang?`Translate reply (currently ${activeLang})`:'Translate reply'} style={{display:'inline-flex',alignItems:'center',gap:4,height:26,padding:'0 10px',borderRadius:6,border:'1px solid #e8e8e8',background:showTranslateDD?'#e8f0fe':'white',color:showTranslateDD?'#1f74b3':'#616161',fontSize:11,fontWeight:500,cursor:'pointer',transition:'all .12s'}}>
                       Translate
                     </button>
                     {showTranslateDD&&(
-                      <div style={{position:'absolute',right:0,top:30,width:160,background:'white',border:'1px solid #e8e8e8',borderRadius:10,boxShadow:'0 4px 16px rgba(0,0,0,0.1)',zIndex:110,overflow:'hidden'}}>
+                      <div role="menu" aria-label="Translate to language" style={{position:'absolute',right:0,top:30,width:160,background:'white',border:'1px solid #e8e8e8',borderRadius:10,boxShadow:'0 4px 16px rgba(0,0,0,0.1)',zIndex:110,overflow:'hidden'}}>
                         {TRANSLATE_LANGS.map(lang=>(
-                          <button key={lang} onClick={()=>{
+                          <button key={lang} role="menuitem" onClick={()=>{
                             const orig=activeLang?originalReplyText:replyText;
                             setOriginalReplyText(orig);
                             setReplyText(mockTranslate(orig,lang));
@@ -553,8 +569,8 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
                     )}
                   </div>
                   <div style={{position:'relative'}}>
-                    <button onClick={()=>setShowTemplates(t=>!t)} style={{display:'inline-flex',alignItems:'center',gap:4,height:26,padding:'0 10px',borderRadius:6,border:'1px solid #e8e8e8',background:showTemplates?'#e8f0fe':'white',color:showTemplates?'#1f74b3':'#616161',fontSize:11,fontWeight:500,cursor:'pointer',transition:'all .12s'}}>
-                      <i className="bi-file-text" style={{fontSize:10}}></i>Templates
+                    <button onClick={()=>setShowTemplates(t=>!t)} aria-haspopup="menu" aria-expanded={showTemplates} aria-label="Choose reply template" style={{display:'inline-flex',alignItems:'center',gap:4,height:26,padding:'0 10px',borderRadius:6,border:'1px solid #e8e8e8',background:showTemplates?'#e8f0fe':'white',color:showTemplates?'#1f74b3':'#616161',fontSize:11,fontWeight:500,cursor:'pointer',transition:'all .12s'}}>
+                      <i className="bi-file-text" aria-hidden="true" style={{fontSize:10}}></i>Templates
                     </button>
                     {showTemplates&&(
                       <div style={{position:'absolute',right:0,top:30,width:280,background:'white',border:'1px solid #e8e8e8',borderRadius:10,boxShadow:'0 4px 16px rgba(0,0,0,0.1)',zIndex:100,overflow:'hidden'}}>
@@ -574,7 +590,7 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
                   </div>
                 </div>
               </div>
-              <textarea value={replyText} onChange={e=>setReplyText(e.target.value)} className="note-input" rows={6} placeholder="Type a reply or select a template above..." style={{width:'100%',boxSizing:'border-box',minHeight:120,fontSize:13,lineHeight:1.6}}/>
+              <textarea value={replyText} onChange={e=>setReplyText(e.target.value)} aria-label="Quick reply message" className="note-input" rows={6} placeholder="Type a reply or select a template above..." style={{width:'100%',boxSizing:'border-box',minHeight:120,fontSize:13,lineHeight:1.6}}/>
               {/* H: Active translation badge */}
               {activeLang&&(
                 <div style={{display:'inline-flex',alignItems:'center',gap:6,marginTop:6,padding:'4px 12px',borderRadius:128,background:'#e8f0fe',border:'1px solid #93c5fd',fontSize:11,color:'#1f74b3',fontWeight:500}}>

@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { getVisibleMemberEmails, isAdmin } from '../../../../../../src/lib/scope-helpers';
+import { getVisibleCountries } from '../../../../../../src/lib/queue-scoping';
 import { cacheGet } from '../../../../../../src/lib/server-cache';
+import { query } from '../../../../../../src/lib/db';
 
 const ZD_SUBDOMAIN = process.env.ZENDESK_SUBDOMAIN || '';
 const ZD_TOKEN = process.env.ZENDESK_API_TOKEN || '';
@@ -20,11 +22,12 @@ function isZendeskTicket(ticketId) {
 // ── Defence-in-depth: a ticket's comments should only be readable by users
 // who would already see that ticket in their scoped /queue view.
 // - admin / regional_manager: always allowed
-// - team_lead: allowed if the ticket is unassigned OR assigned within hierarchy
+// - team_lead: allowed if the ticket is unassigned in their countries OR
+//   assigned within hierarchy
 // - agent: allowed only if the ticket is assigned to them
-// - cold cache (ticket not in any cached payload): default to allow, because
-//   the only alternative is an extra Zendesk/Jira round-trip on every call.
-function ticketInUserScope(ticketId, user) {
+// - cold cache: fall back to the persistent `tasks` table; fail CLOSED if
+//   even that has no record (previously defaulted to allow, which was a hole)
+async function ticketInUserScope(ticketId, user) {
   if (!user) return false;
   if (isAdmin(user) || user.role === 'regional_manager') return true;
 
@@ -41,12 +44,38 @@ function ticketInUserScope(ticketId, user) {
     match = pool.find(t => t.id === ticketId);
     if (match) break;
   }
-  if (!match) return true; // Cache cold — don't block on permission misses
 
-  const visible = getVisibleMemberEmails(user);
-  const email = (match.assigneeEmail || '').toLowerCase();
-  if (email && visible.has(email)) return true;
-  if (!email && user.role === 'team_lead') return true;
+  if (match) {
+    const visible = getVisibleMemberEmails(user);
+    const email = (match.assigneeEmail || '').toLowerCase();
+    if (email && visible.has(email)) return true;
+    if (!email && user.role === 'team_lead') {
+      const cc = (match.country || match.countryCode || '').toUpperCase();
+      if (cc && getVisibleCountries(user).has(cc)) return true;
+    }
+    return false;
+  }
+
+  // Cold-cache fallback: use the persistent shadow row.
+  try {
+    const { rows } = await query(
+      `SELECT m.email AS assignee_email, t.country_code
+         FROM tasks t
+         LEFT JOIN members m ON m.id = t.assignee_id
+        WHERE t.external_id = $1
+        LIMIT 1`,
+      [ticketId],
+    );
+    if (rows.length) {
+      const email = (rows[0].assignee_email || '').toLowerCase();
+      const cc = (rows[0].country_code || '').toUpperCase();
+      const visible = getVisibleMemberEmails(user);
+      if (email && visible.has(email)) return true;
+      if (!email && user.role === 'team_lead' && cc && getVisibleCountries(user).has(cc)) return true;
+    }
+  } catch (err) {
+    console.warn('[queue/comments] cold-cache fallback lookup failed:', err.message);
+  }
   return false;
 }
 
@@ -94,7 +123,7 @@ export async function GET(req, { params }) {
 
   const { ticketId } = await params;
 
-  if (!ticketInUserScope(ticketId, user)) {
+  if (!(await ticketInUserScope(ticketId, user))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 

@@ -15,6 +15,7 @@ import { reassignTicket } from '../../../../../src/lib/zendesk-api';
 import { reassignIssue } from '../../../../../src/lib/jira-api';
 import { query } from '../../../../../src/lib/db';
 import { cacheDelMany } from '../../../../../src/lib/server-cache';
+import { canAssignTo } from '../../../../../src/lib/task-scope-guard';
 
 async function upsertShadowAndLog({ ticketId, source, assigneeEmail, actorName }) {
   try {
@@ -73,6 +74,16 @@ export async function POST(req) {
     return NextResponse.json(
       { error: 'Invalid email format for assigneeEmail' },
       { status: 400 },
+    );
+  }
+
+  // Target assignee must be an active, known member within the caller's
+  // hierarchy. Prevents a TL parking a ticket on someone in another region
+  // and blocks assignment to a deactivated / unknown email.
+  if (!canAssignTo(user, assigneeEmail)) {
+    return NextResponse.json(
+      { error: 'Assignee is outside your scope or not a valid member', reason: 'assignee_scope' },
+      { status: 403 },
     );
   }
 

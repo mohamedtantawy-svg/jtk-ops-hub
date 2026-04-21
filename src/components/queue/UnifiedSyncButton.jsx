@@ -9,7 +9,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-const STALE_AFTER_MS = 10 * 60 * 1000; // 10 min: surface an amber subtitle
+// Two-tier freshness so a long-running tab signals drift *before* users act on
+// stale data: warn at 5 min (yellow), escalate at 10 min (red). Matches the
+// resilience audit's recommended thresholds.
+const WARN_AFTER_MS  = 5  * 60 * 1000;
+const STALE_AFTER_MS = 10 * 60 * 1000;
 
 function formatAgo(ts, now) {
   if (!ts) return 'never';
@@ -41,6 +45,7 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
   const now = nowTick || Date.now();
   const ageMs = oldestSyncAt ? now - oldestSyncAt : null;
   const isStale = ageMs != null && ageMs > STALE_AFTER_MS;
+  const isWarn  = ageMs != null && ageMs > WARN_AFTER_MS && !isStale;
 
   let state = 'live';
   let label = 'Synced';
@@ -86,6 +91,14 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
     state = 'stale';
     label = `Synced ${formatAgo(oldestSyncAt, now)}`;
     sublabel = 'stale — click to refresh';
+    dotColor = '#d42d35';
+    bg = '#fef2f2';
+    border = '#fca5a5';
+    textColor = '#991b1b';
+  } else if (isWarn) {
+    state = 'aging';
+    label = `Synced ${formatAgo(oldestSyncAt, now)}`;
+    sublabel = 'aging — consider refresh';
     dotColor = '#ed8d00';
     bg = '#fff8e6';
     border = '#ffe27c';

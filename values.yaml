@@ -50,4 +50,3 @@ s3:
 
 publicIngress:
   enabled: false
-  enabled: false
