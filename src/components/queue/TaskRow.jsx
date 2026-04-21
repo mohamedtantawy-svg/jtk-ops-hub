@@ -58,12 +58,12 @@ const TaskRow=({task,index,selected,onClick,onAction,onEscalMgr,compact,checked,
       {/* 3. Subject — main content */}
       <div style={{minWidth:0,display:'flex',flexDirection:'column',justifyContent:'center',gap:2}}>
         <div style={{display:'flex',alignItems:'center',gap:5}}>
-          {task.isAlert&&<span className="pulse" style={{width:6,height:6,borderRadius:'50%',background:'#ed8d00',flexShrink:0}}></span>}
+          {task.isAlert&&<span className="pulse" role="img" aria-label="Critical alert" style={{width:6,height:6,borderRadius:'50%',background:'#ed8d00',flexShrink:0}}></span>}
           <span title={task.subject} style={{color:'#1b1b1b',fontSize:14,lineHeight:'var(--lh-snug, 1.375)',fontWeight:500,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',flex:1,minWidth:60}}>{task.subject}</span>
-          {isActive&&task.minutesAgo>=120&&<span className="urgency-pill" style={{background:'#ffe2de',color:'#d42d35',flexShrink:0}}><i className="bi-exclamation-circle" style={{fontSize:8}}></i></span>}
-          {isActive&&task.minutesAgo>=60&&task.minutesAgo<120&&<span className="urgency-pill" style={{background:'#fff3ee',color:'#ed5e2a',flexShrink:0}}><i className="bi-fire" style={{fontSize:8}}></i></span>}
-          {isActive&&task.minutesAgo>=30&&task.minutesAgo<60&&<span className="urgency-pill" style={{background:'#fff8e6',color:'#ed8d00',flexShrink:0}}><i className="bi-clock" style={{fontSize:8}}></i></span>}
-          {task.snoozeLabel&&<span className="snooze-pill" style={{flexShrink:0}}><i className="bi-alarm" style={{fontSize:8}}></i></span>}
+          {isActive&&task.minutesAgo>=120&&<span className="urgency-pill" role="img" aria-label={`Urgent — open ${Math.floor(task.minutesAgo/60)}h`} title={`Urgent — open ${Math.floor(task.minutesAgo/60)}h`} style={{background:'#ffe2de',color:'#d42d35',flexShrink:0}}><i className="bi-exclamation-circle" aria-hidden="true" style={{fontSize:8}}></i></span>}
+          {isActive&&task.minutesAgo>=60&&task.minutesAgo<120&&<span className="urgency-pill" role="img" aria-label="High urgency — over 1 hour old" title="High urgency — over 1 hour old" style={{background:'#fff3ee',color:'#ed5e2a',flexShrink:0}}><i className="bi-fire" aria-hidden="true" style={{fontSize:8}}></i></span>}
+          {isActive&&task.minutesAgo>=30&&task.minutesAgo<60&&<span className="urgency-pill" role="img" aria-label="Medium urgency — over 30 minutes old" title="Medium urgency — over 30 minutes old" style={{background:'#fff8e6',color:'#ed8d00',flexShrink:0}}><i className="bi-clock" aria-hidden="true" style={{fontSize:8}}></i></span>}
+          {task.snoozeLabel&&<span className="snooze-pill" role="img" aria-label={`Snoozed: ${task.snoozeLabel}`} title={`Snoozed: ${task.snoozeLabel}`} style={{flexShrink:0}}><i className="bi-alarm" aria-hidden="true" style={{fontSize:8}}></i></span>}
         </div>
         {/* Linked ticket badges */}
         {task.linkedTickets&&task.linkedTickets.length>0&&(

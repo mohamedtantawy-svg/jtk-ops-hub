@@ -168,12 +168,15 @@ export async function fetchQueue({ bustCache } = {}) {
   return apiFetch(`/queue${qs}`);
 }
 
-// Per-source queue fetch (independent sync per source)
-export async function fetchQueueBySource(source, { bustCache } = {}) {
+// Per-source queue fetch (independent sync per source).
+// Accepts an AbortSignal so callers (useQueueSync) can cancel a pending fetch
+// when the user switches view mid-flight, preventing stale responses from
+// overwriting newer state.
+export async function fetchQueueBySource(source, { bustCache, signal } = {}) {
   const params = new URLSearchParams();
   params.set('source', source);
   if (bustCache) params.set('_t', String(Date.now()));
-  return apiFetch(`/queue?${params.toString()}`);
+  return apiFetch(`/queue?${params.toString()}`, { signal });
 }
 
 // Reassign a ticket in Zendesk/Jira via our backend

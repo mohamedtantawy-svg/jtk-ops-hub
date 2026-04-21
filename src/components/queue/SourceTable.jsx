@@ -242,21 +242,23 @@ export default function SourceTable({
 
         {searchable && (
           <div style={{ position: 'relative' }}>
-            <i className="bi-search" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: '#9e9e9e' }} />
+            <i className="bi-search" aria-hidden="true" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: '#9e9e9e' }} />
             <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
               placeholder="Search..."
+              role="searchbox"
+              aria-label="Search tasks"
               style={{ width: 200, height: 32, paddingLeft: 30, paddingRight: 10, borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 12, outline: 'none' }} />
           </div>
         )}
 
 
         {onRefresh && (
-          <button onClick={onRefresh} title="Refresh" style={{ ...iconBtnStyle, color: loading ? '#ed8d00' : '#9e9e9e' }}>
-            <i className={loading ? 'bi-arrow-clockwise spin' : 'bi-arrow-clockwise'} style={{ fontSize: 12 }} />
+          <button onClick={onRefresh} title="Refresh" aria-label={loading ? 'Refreshing tasks' : 'Refresh tasks'} style={{ ...iconBtnStyle, color: loading ? '#ed8d00' : '#9e9e9e' }}>
+            <i className={loading ? 'bi-arrow-clockwise spin' : 'bi-arrow-clockwise'} aria-hidden="true" style={{ fontSize: 12 }} />
           </button>
         )}
 
-        <span style={{ fontSize: 11, color: '#9e9e9e' }}>{sorted.length} {sorted.length === 1 ? 'task' : 'tasks'}</span>
+        <span aria-live="polite" aria-atomic="true" style={{ fontSize: 11, color: '#9e9e9e' }}>{sorted.length} {sorted.length === 1 ? 'task' : 'tasks'}</span>
       </div>
       )}
 
@@ -629,7 +631,10 @@ function PausedSlaBadge({ pausedAt }) {
 // ── StatusPill ──
 function StatusPill({ label, count, active, onClick, color }) {
   return (
-    <button onClick={onClick}
+    <button
+      onClick={onClick}
+      aria-pressed={!!active}
+      aria-label={`Filter: ${label}${count > 0 ? ` (${count})` : ''}`}
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 5,
         padding: '5px 12px', borderRadius: 128,
@@ -652,11 +657,29 @@ function StatusPill({ label, count, active, onClick, color }) {
 // ── Sortable table header ──
 function SortTh({ col, label, sortCol, sortDir, onSort, style }) {
   const active = sortCol === col;
+  const sortState = active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
+  const onKey = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      onSort(col);
+    }
+  };
   return (
-    <th style={{ ...style, cursor: 'pointer', userSelect: 'none' }} onClick={() => onSort(col)}>
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+    <th
+      role="columnheader"
+      aria-sort={sortState}
+      style={{ ...style, cursor: 'pointer', userSelect: 'none' }}
+      onClick={() => onSort(col)}
+    >
+      <span
+        role="button"
+        tabIndex={0}
+        onKeyDown={onKey}
+        aria-label={`Sort by ${label}${active ? `, currently ${sortState}` : ''}`}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+      >
         {label}
-        <span style={{ display: 'inline-flex', flexDirection: 'column', lineHeight: 1, gap: 0, fontSize: 7, marginTop: -1 }}>
+        <span aria-hidden="true" style={{ display: 'inline-flex', flexDirection: 'column', lineHeight: 1, gap: 0, fontSize: 7, marginTop: -1 }}>
           <i className="bi-caret-up-fill" style={{ color: active && sortDir === 'asc' ? '#1b1b1b' : '#ccc' }} />
           <i className="bi-caret-down-fill" style={{ color: active && sortDir === 'desc' ? '#1b1b1b' : '#ccc', marginTop: -3 }} />
         </span>

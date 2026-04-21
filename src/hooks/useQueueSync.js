@@ -109,12 +109,36 @@ function readSourceCache(source) {
   return null;
 }
 
+// Cross-module signal so a Queue banner can render when the cache silently
+// failed to persist (private-browsing, quota exceeded, disabled storage).
+// Consumed by Queue.jsx — listens via `window.addEventListener('ops-hub-cache-quota')`.
+function emitQuotaFailed(source, err) {
+  try {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('ops-hub-cache-quota', {
+      detail: { source, message: err?.message || 'Cache write failed' },
+    }));
+  } catch {}
+}
+
 function writeSourceCache(source, items, meta) {
   const cfg = SOURCE_CONFIG[source];
   if (!cfg) return;
   try {
     localStorage.setItem(cfg.cacheKey, JSON.stringify({ items, meta, ts: Date.now() }));
-  } catch {}
+  } catch (err) {
+    // QuotaExceededError — most common cause is another app filling localStorage.
+    // Try evicting the *other* source's cache as a last-ditch attempt before
+    // giving up + notifying the UI. No silent drops.
+    try {
+      for (const other of Object.keys(SOURCE_CONFIG)) {
+        if (other !== source) localStorage.removeItem(SOURCE_CONFIG[other].cacheKey);
+      }
+      localStorage.setItem(cfg.cacheKey, JSON.stringify({ items, meta, ts: Date.now() }));
+    } catch (retryErr) {
+      emitQuotaFailed(source, retryErr);
+    }
+  }
 }
 
 // ── Merge source sync into combined tasks (preserves local mutations) ───────
@@ -257,6 +281,11 @@ export function useQueueSync(arg = true) {
   const syncCounts = useRef({ zendesk: 0, jira: 0 });
   const intervalRefs = useRef({});
   const inFlightRefs = useRef({ zendesk: null, jira: null });
+  // Per-source AbortController so we can cancel an in-flight fetch on unmount
+  // or when the consumer forces a retry. Without this, a slow response can
+  // resolve after the component is gone and still mutate (stale) state.
+  const abortControllersRef = useRef({ zendesk: null, jira: null });
+  const mountedRef = useRef(true);
   const lastFetchTsRefs = useRef({
     zendesk: initial.meta.zendesk_ts || 0,
     jira: initial.meta.jira_ts || 0,
@@ -277,14 +306,29 @@ export function useQueueSync(arg = true) {
     if (!enabled) return null;
     if (inFlightRefs.current[source]) return inFlightRefs.current[source];
 
+    // Abort any lingering controller for this source before starting a new
+    // fetch — usually a no-op because of the in-flight dedup above, but if a
+    // caller somehow slipped past (e.g., force-refresh during teardown) we
+    // don't want two live controllers racing.
+    if (abortControllersRef.current[source]) {
+      try { abortControllersRef.current[source].abort(); } catch {}
+    }
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    abortControllersRef.current[source] = controller;
+
     setSourceRefreshing(prev => ({ ...prev, [source]: true }));
 
     const run = (async () => {
       try {
-        const res = await fetchQueueBySource(source, opts);
+        const res = await fetchQueueBySource(source, {
+          ...opts,
+          signal: controller?.signal,
+        });
         const rawItems = res?.items || [];
         const synced = rawItems.map(normalizeQueueItem);
         const now = Date.now();
+
+        if (!mountedRef.current) return null;
 
         setTasks(prev => {
           // Guard: on a valid response that returns an empty list while we already
@@ -325,13 +369,22 @@ export function useQueueSync(arg = true) {
         }
         return synced;
       } catch (err) {
+        // Deliberate cancellation — caller moved on; don't surface it as an
+        // error, don't clobber existing state, don't bump the error ticker.
+        if (err?.name === 'AbortError') return null;
+        if (!mountedRef.current) return null;
         console.warn(`[useQueueSync/${source}] Sync failed:`, err.message);
         setSourceErrors(prev => ({ ...prev, [source]: err.message }));
         return null;
       } finally {
-        setSourceLoading(prev => ({ ...prev, [source]: false }));
-        setSourceRefreshing(prev => ({ ...prev, [source]: false }));
+        if (mountedRef.current) {
+          setSourceLoading(prev => ({ ...prev, [source]: false }));
+          setSourceRefreshing(prev => ({ ...prev, [source]: false }));
+        }
         inFlightRefs.current[source] = null;
+        if (abortControllersRef.current[source] === controller) {
+          abortControllersRef.current[source] = null;
+        }
       }
     })();
 
@@ -378,6 +431,20 @@ export function useQueueSync(arg = true) {
       }
     };
   }, [syncSource, enabled]);
+
+  // Unmount cleanup — mark as unmounted and abort any live fetches so the
+  // response doesn't land on a dead component.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      for (const key of Object.keys(abortControllersRef.current)) {
+        const ctrl = abortControllersRef.current[key];
+        if (ctrl) { try { ctrl.abort(); } catch {} }
+        abortControllersRef.current[key] = null;
+      }
+    };
+  }, []);
 
   // When the tab regains focus, opportunistically refresh any stale source.
   useEffect(() => {
