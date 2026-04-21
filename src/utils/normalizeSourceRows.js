@@ -23,10 +23,13 @@ const DEEL_AMENDMENT_URL = (id, currentStatus) => {
 };
 
 // Admin redline page. Deep-links into the side-pane for a specific redline.
-const DEEL_REDLINE_URL = (id, isExecution) => {
+// Requires both `redlineType` (templateRedline | contractRedline) and
+// `requestId` — omitting redlineType opens an empty side-pane.
+const DEEL_REDLINE_URL = (id, isExecution, redlineType) => {
   if (!id) return '';
   const sub = isExecution ? 'preparingDocuments.HRXToExecute' : 'preparingDocuments.legalReview';
-  return `${DEEL_ADMIN_BASE}/eor/change-requests?requestId=${encodeURIComponent(id)}&requestType=redlines&sortBy=createdAt&sortOrder=desc&status=preparingDocuments&subStatus=${encodeURIComponent(sub)}`;
+  const rt = redlineType ? `&redlineType=${encodeURIComponent(redlineType)}` : '';
+  return `${DEEL_ADMIN_BASE}/eor/change-requests?requestType=redlines${rt}&requestId=${encodeURIComponent(id)}&sortBy=createdAt&sortOrder=desc&status=preparingDocuments&subStatus=${encodeURIComponent(sub)}`;
 };
 
 // SLA windows (per Ops policy):
@@ -273,6 +276,15 @@ export function normalizeRedlines(items = []) {
   return items.map(r => {
     const typeLabel = r.type === 'templateRedline' ? 'Template' : r.type === 'contractRedline' ? 'Contract' : r.type || '';
 
+    // Subject fallback chain — template redlines carry creatorOrganization,
+    // contract redlines carry an employee name via `contract`. When neither
+    // is present, show the template name or a short request ID suffix so the
+    // row is never an anonymous "Unknown".
+    const subject = r.employeeName
+                 || r.orgName
+                 || r.templateName
+                 || (r.id ? `${typeLabel || 'Redline'} ${String(r.id).slice(0, 8)}` : 'Redline');
+
     // 24h SLA countdown from createdAt (both review and execution are
     // action-needed surfaces — no paused state).
     let slaRemaining = null;
@@ -286,17 +298,21 @@ export function normalizeRedlines(items = []) {
     return {
       id: String(r.id || ''),
       source: 'redlines',
-      subject: r.orgName || 'Unknown Org',
+      subject,
       function: `${typeLabel} Redline${r.countries?.length ? ' · ' + r.countries.join(', ') : ''}`,
       country: r.countryCode || (r.countries?.[0] || ''),
+      // Client Name column: always the creating org (template redlines) or
+      // the employee's employer org if available.
       clientName: r.orgName || '',
       assignee: '',  // no server-side assignee — SourceTable renders "Assign me"
       assigneeEmail: '',
       createdAt: r.createdAt || '',
       updatedAt: r.updatedAt || r.createdAt || '',
       status: r.displayStatus || { label: 'Redline Review', severity: 'warning', color: '#ed8d00' },
-      taskUrl: DEEL_REDLINE_URL(r.id, r.isExecution),
-      contractUrl: '',  // Redlines are org-/template-level, no single contract
+      taskUrl: DEEL_REDLINE_URL(r.id, r.isExecution, r.type),
+      // Contract redlines tie back to an employee contract; template redlines
+      // don't have a single contract (applies to all employees in that template).
+      contractUrl: r.contractOid ? DEEL_CONTRACT_URL(r.contractOid) : '',
       isExecution: !!r.isExecution,
       slaRemaining,
       slaBreachStatus,
