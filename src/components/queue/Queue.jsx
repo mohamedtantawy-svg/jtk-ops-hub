@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useContext, memo } from 'react';
-import { STATUSES, TOOLS, FUNCTIONS, FLAGS, getFlag, getCountryName } from '../../data/constants';
+import { TOOLS, FUNCTIONS, getFlag } from '../../data/constants';
 import { MEMBERS } from '../../data/members';
 import { slaInfo, rel, getUrl } from '../../utils/helpers';
 import {
@@ -86,7 +86,10 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const saved = useMemo(() => loadFilters(), []);
   const [fTool,setFTool]=useState(saved?.fTool||null);
   const [fStatus,setFStatus]=useState(()=>{const s=saved?.fStatus;if(Array.isArray(s))return s;if(s)return[s];return[];});
-  const [fCtry,setFCtry]=useState(saved?.fCtry||[]);
+  // Country + Sort filters removed 2026-04-21 — Country scoping is enforced
+  // by queue-scoping.js (getVisibleCountries) so the UI dropdown was
+  // redundant, and ops requested a cleaner header. Sort is now fixed to
+  // SLA-urgency (most urgent first), the only useful default for a work queue.
   const [showMeetingInvites,setShowMeetingInvites]=useState(false);
   const [search,setSearch]=useState('');
   const [fSla,setFSla]=useState(saved?.fSla||null); // null | 'ok' | 'at_risk' | 'breached'
@@ -94,7 +97,6 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   // into a single list per source. SourceTable renders the paused-SLA badge
   // per row when `row.pausedAt` is set (and `showPausedSla` is passed), so
   // the visual distinction is preserved without a filter step.
-  const [sort,setSort]=useState(saved?.sort||'sla'); // Item #5: Default SLA sort oldest→newest
   const [checkedIds,setCheckedIds]=useState(new Set());
   const [recentIds,setRecentIds]=useState([]);
   // Work mode state
@@ -201,40 +203,52 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     if(fTool)       _vis=_vis.filter(t=>t.source===fTool);
     if(fStatus.length) _vis=_vis.filter(t=>fStatus.includes(t.status));
     if(fUnassigned) _vis=_vis.filter(t=>!t.assigneeId&&!t.assigneeEmail);
-    if(fCtry.length) _vis=_vis.filter(t=>fCtry.includes(t.country));
     const _visPreSla=_vis.filter(t=>!t.isCalendarBooking);
     if(fSla==='ok')       _vis=_vis.filter(t=>{const s=slaInfo(t);return s&&s.ok;});
     if(fSla==='at_risk')  _vis=_vis.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;});
     if(fSla==='breached') _vis=_vis.filter(t=>{const s=slaInfo(t);return s&&s.breach;});
     if(!showMeetingInvites) _vis=_vis.filter(t=>!t.isCalendarBooking);
     if(search) { const sl=search.toLowerCase(); _vis=_vis.filter(t=>t.subject.toLowerCase().includes(sl)||t.id.toLowerCase().includes(sl)||t.type.toLowerCase().includes(sl)); }
-    // Sort
+    // Fixed sort: SLA-urgency-first (most urgent at top, breached before at-risk
+    // before ok), newest-first as tiebreaker. Sort dropdown was removed
+    // 2026-04-21 — this is the only sensible default for a work queue.
     const sortArr=(arr)=>{
-      if(sort==='sla'&&settings.sla_enabled!==false)return [...arr].sort((a,b)=>{
+      if(settings.sla_enabled===false) return [...arr].sort((a,b)=>a.minutesAgo-b.minutesAgo);
+      return [...arr].sort((a,b)=>{
         const sa=slaInfo(a),sb=slaInfo(b);
         if(sa?.breach&&!sb?.breach)return -1; if(!sa?.breach&&sb?.breach)return 1;
         if(sa&&!sb)return -1; if(!sa&&sb)return 1;
         if(sa&&sb){ const limA=SLA_MINS[a.type]||1440, limB=SLA_MINS[b.type]||1440; return (limA-(a.minutesSinceLastResponse??a.minutesAgo))-(limB-(b.minutesSinceLastResponse??b.minutesAgo)); }
         return (b.minutesSinceLastResponse??b.minutesAgo)-(a.minutesSinceLastResponse??a.minutesAgo);
       });
-      if(sort==='newest')return [...arr].sort((a,b)=>a.minutesAgo-b.minutesAgo);
-      if(sort==='oldest')return [...arr].sort((a,b)=>b.minutesAgo-a.minutesAgo);
-      if(sort==='assignee')return [...arr].sort((a,b)=>(MEMBERS_BY_ID.get(a.assigneeId)?.name||a.assigneeName||'').localeCompare(MEMBERS_BY_ID.get(b.assigneeId)?.name||b.assigneeName||''));
-      return arr;
     };
     const _sorted=sortArr(_vis.filter(t=>t.status!=='resolved'&&t.status!=='waiting'));
     const _snoozed=_vis.filter(t=>t.status==='waiting');
     const _done=_vis.filter(t=>t.status==='resolved');
     const _all=[..._sorted,..._snoozed,..._done];
     return { vis:_vis, baseVis:_baseVis, visPreSla:_visPreSla, active:_sorted, snoozed:_snoozed, open:_sorted, done:_done, all:_all };
-  }, [ns, user, fTool, fStatus, fUnassigned, fCtry, fSla, showMeetingInvites, search, sort, settings.sla_enabled]);
-  // Item #9: Country filter — stable list from baseVis (unaffected by fTool/fStatus)
-  const allCtry=useMemo(()=>{
-    const ctrySet = new Set(baseVis.map(t=>t.country).filter(Boolean));
-    for(const r of allSourceRows) if(r.country) ctrySet.add(r.country);
-    return [...ctrySet];
-  },[baseVis,allSourceRows]);
-  const hasActiveFilters=useMemo(()=>!!(fTool||fStatus.length>0||fCtry.length>0||fSla||fUnassigned||search),[fTool,fStatus,fCtry,fSla,fUnassigned,search]);
+  }, [ns, user, fTool, fStatus, fUnassigned, fSla, showMeetingInvites, search, settings.sla_enabled]);
+  const hasActiveFilters=useMemo(()=>!!(fTool||fStatus.length>0||fSla||fUnassigned||search),[fTool,fStatus,fSla,fUnassigned,search]);
+
+  // ── Source-panel filter (status severity + unassigned) ────────────────
+  // Applied to all 5 source panels (onboarding / offboarding / amendments /
+  // redlines / workbench). Status dropdown values map to row.status.severity
+  // (critical | warning | active | info) on these panels. The same function
+  // feeds both the SourceTable rows AND the SLA pill counts so the counts
+  // always reflect what the user sees in the table.
+  const applyPanelFilter = useCallback((rows) => {
+    let r = Array.isArray(rows) ? rows : [];
+    if (fStatus.length) r = r.filter(row => fStatus.includes(row?.status?.severity));
+    if (fUnassigned)    r = r.filter(row => !row?.assigneeEmail);
+    return r;
+  }, [fStatus, fUnassigned]);
+
+  // Pre-computed post-filter row sets — used by both SLA counts and tables
+  const visOnboardingRows = useMemo(()=>applyPanelFilter(onboardingRows), [onboardingRows, applyPanelFilter]);
+  const visOffboardingRows = useMemo(()=>applyPanelFilter(offboardingRows), [offboardingRows, applyPanelFilter]);
+  const visAmendmentRows   = useMemo(()=>applyPanelFilter(amendmentRows),   [amendmentRows, applyPanelFilter]);
+  const visRedlineRows     = useMemo(()=>applyPanelFilter(redlineRows),     [redlineRows, applyPanelFilter]);
+  const visWorkbenchRows   = useMemo(()=>applyPanelFilter(workbenchRows),   [workbenchRows, applyPanelFilter]);
 
   // Work mode queue — only active tasks (excludes snoozed/waiting)
   const workQueue = useMemo(()=> active.filter(t=>!workSkipped.has(t.id)),[active,workSkipped]);
@@ -324,7 +338,9 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   // For paused onboarding: 48h countdown from pausedAt
   // For queue tasks (ZD/Jira): uses slaInfo() with type-specific thresholds
   const {atRiskCount,breachedCount,onTrackCount}=useMemo(()=>{
-    // Determine the base set depending on active view
+    // Determine the base set depending on active view. SLA counts always
+    // reflect the POST-FILTER row set (visOnboardingRows, etc.) so toggling
+    // Status or Unassigned updates the pills in lockstep with the table.
     let slaBase;
     if (workSource === 'onboarding') {
       // Merged view (2026-04-21): Action Needed uses age-based SLA from
@@ -332,7 +348,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       // per-row by presence of pausedAt so the header counts match what the
       // SourceTable renders in each row's SLA cell.
       let atRisk = 0, breached = 0;
-      for (const r of onboardingRows) {
+      for (const r of visOnboardingRows) {
         if (r.pausedAt) {
           let pausedMs = Date.now() - new Date(r.pausedAt).getTime();
           if (isNaN(pausedMs)) pausedMs = 0;
@@ -347,7 +363,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           else if (days >= 3) atRisk++;
         }
       }
-      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: onboardingRows.length - atRisk - breached };
+      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: visOnboardingRows.length - atRisk - breached };
     }
     // ── Source-panel age-based SLA ──
     // Mirrors SourceTable's slaBadge() + offboardingSlaThreshold() so the
@@ -367,36 +383,33 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     };
     if (workSource === 'offboarding') {
       // Termination = 14d SLA, Resignation = 5d SLA (matches SourceTable.offboardingSlaThreshold)
-      return countAgeSLA(offboardingRows, r => (r.typeLabel || '').startsWith('Resignation') ? 5 : 14);
+      return countAgeSLA(visOffboardingRows, r => (r.typeLabel || '').startsWith('Resignation') ? 5 : 14);
     }
     if (workSource === 'amendments') {
       // Amendments use slaRemaining (seconds): breach at <=0, at-risk at <6h.
-      // Merged view (2026-04-21): sub-tabs removed, one list covers both
-      // action and paused rows. SLA formula is identical regardless of the
-      // isPaused flag.
       let atRisk = 0, breached = 0;
-      for (const r of amendmentRows) {
+      for (const r of visAmendmentRows) {
         if (typeof r.slaRemaining !== 'number') continue;
         if (r.slaRemaining <= 0) breached++;
         else if (r.slaRemaining < 21600) atRisk++; // < 6h remaining
       }
-      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: amendmentRows.length - atRisk - breached };
+      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: visAmendmentRows.length - atRisk - breached };
     }
     if (workSource === 'redlines') {
       // Redlines use slaRemaining (seconds): breach at <=0, at-risk at <6h.
       let atRisk = 0, breached = 0;
-      for (const r of redlineRows) {
+      for (const r of visRedlineRows) {
         if (typeof r.slaRemaining !== 'number') continue;
         if (r.slaRemaining <= 0) breached++;
         else if (r.slaRemaining < 21600) atRisk++; // < 6h remaining
       }
-      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: redlineRows.length - atRisk - breached };
+      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: visRedlineRows.length - atRisk - breached };
     }
     if (workSource === 'workbench') {
       // Workbench rows may carry slaRemaining (seconds) + slaBreachStatus from upstream.
       // Fall back to age-based 7d if missing.
       let atRisk = 0, breached = 0;
-      for (const r of workbenchRows) {
+      for (const r of visWorkbenchRows) {
         if (r.slaBreachStatus === 'breached') { breached++; continue; }
         if (r.slaBreachStatus === 'at_risk') { atRisk++; continue; }
         if (typeof r.slaRemaining === 'number') {
@@ -411,9 +424,12 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           else if (days >= 3) atRisk++;
         }
       }
-      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: workbenchRows.length - atRisk - breached };
+      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: visWorkbenchRows.length - atRisk - breached };
     }
-    // ── Queue-ticket SLA (ZD/Jira) — uses slaInfo() ──
+    // ── Queue-ticket SLA (ZD/Jira) — uses slaInfo() on already-filtered _visPreSla ──
+    // _visPreSla already has fTool/fStatus/fUnassigned applied (see main vis
+    // useMemo), so SLA counts here naturally reflect the Status + Unassigned
+    // dropdowns the same way the source panels do.
     if (workSource === 'jira') slaBase = visPreSla.filter(t => t.source === 'jira');
     else if (workSource === 'zendesk') slaBase = visPreSla.filter(t => t.source === 'zendesk');
     else slaBase = visPreSla;
@@ -422,15 +438,17 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     const atRisk=slaBase.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;}).length;
     const breached=slaBase.filter(t=>{const s=slaInfo(t);return s&&s.breach;}).length;
     return{atRiskCount:atRisk,breachedCount:breached,onTrackCount:slaBase.length-atRisk-breached};
-  },[workSource, visPreSla, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows]);
+  },[workSource, visPreSla, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows]);
 
-  // ── View-aware header counts: reflect active tab (fTool / workSource) ──
+  // ── View-aware header counts: reflect active tab + filters ──
+  // Uses the POST-FILTER row sets so Status / Unassigned toggles reshape
+  // the "open" count the same way they reshape the table.
   const headerCounts = useMemo(() => {
-    if (workSource === 'onboarding') return { open: onboardingRows.length, paused: 0, resolved: 0 };
-    if (workSource === 'offboarding') return { open: offboardingRows.length, paused: 0, resolved: 0 };
-    if (workSource === 'amendments') return { open: amendmentRows.length, paused: 0, resolved: 0 };
-    if (workSource === 'redlines') return { open: redlineRows.length, paused: 0, resolved: 0 };
-    if (workSource === 'workbench') return { open: workbenchRows.length, paused: 0, resolved: 0 };
+    if (workSource === 'onboarding') return { open: visOnboardingRows.length, paused: 0, resolved: 0 };
+    if (workSource === 'offboarding') return { open: visOffboardingRows.length, paused: 0, resolved: 0 };
+    if (workSource === 'amendments') return { open: visAmendmentRows.length, paused: 0, resolved: 0 };
+    if (workSource === 'redlines') return { open: visRedlineRows.length, paused: 0, resolved: 0 };
+    if (workSource === 'workbench') return { open: visWorkbenchRows.length, paused: 0, resolved: 0 };
     // Queue view (ZD/JR) — use filtered baseVis when fTool is set
     const base = fTool ? baseVis.filter(t => t.source === fTool) : baseVis;
     const srcExtra = fTool ? 0 : allSourceRows.length;
@@ -439,15 +457,14 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       paused: base.filter(t => t.status === 'waiting').length,
       resolved: base.filter(t => t.status === 'resolved').length,
     };
-  }, [workSource, fTool, baseVis, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, allSourceRows]);
-  const activeFilterCount=[fTool,fStatus.length>0?true:null,fCtry.length>0?true:null,fSla||null,fUnassigned||null].filter(Boolean).length;
+  }, [workSource, fTool, baseVis, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows, allSourceRows]);
 
-  // Persist filters to localStorage
+  // Persist filters to localStorage (fCtry + sort removed 2026-04-21)
   useEffect(()=>{
     try {
-      localStorage.setItem('ops_hub_queue_filters',JSON.stringify({fTool,fStatus,fCtry,fSla,fUnassigned,sort}));
+      localStorage.setItem('ops_hub_queue_filters',JSON.stringify({fTool,fStatus,fSla,fUnassigned}));
     } catch {}
-  },[fTool,fStatus,fCtry,fSla,fUnassigned,sort]);
+  },[fTool,fStatus,fSla,fUnassigned]);
 
   const visIds=useMemo(()=>new Set(vis.map(t=>t.id)),[vis]);
   useEffect(()=>{
@@ -619,51 +636,60 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
         </div>
       )}
 
-      {/* ── Single Header — matches Announcements ── */}
+      {/* ── Single Header — matches Announcements ──
+          Reworked 2026-04-21:
+            • SLA pills moved to the LEFT of Line 1 (was right-aligned).
+            • Line 2 now carries ALL Qs (work-source buttons) + remaining
+              filters (Status, Unassigned, Clear) on a single row.
+            • Country + Sort dropdowns removed (country scoping already
+              enforced by queue-scoping.js; sort is fixed to SLA-urgency).
+            • SLA pill counts AND every Q-button count respect the active
+              Status / Unassigned filters via the visXxxRows post-filter sets.
+      */}
       <div data-role="queue-header" style={{padding:'8px 32px 12px',background:'white',borderBottom:'1px solid #e8e8e8',flexShrink:0}}>
-        {/* Line 1: Title + total counts across ALL queues (Item #7) + Start Working */}
+        {/* Line 1: SLA pills (left) · Title/totals · Start Working (right) */}
         <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:10}}>
+          {/* SLA filter pills — LEFT-aligned (moved 2026-04-21) */}
+          <div onClick={()=>setFSla(fSla==='ok'?null:'ok')} title="Filter by SLA: On Track" role="button" tabIndex={0} style={{display:'flex',alignItems:'center',gap:5,background:fSla==='ok'?'#dcfce7':'#f0fdf4',border:`${fSla==='ok'?'2':'1'}px solid ${fSla==='ok'?'#15803d':'#bbf7d0'}`,borderRadius:128,padding:'5px 14px',cursor:'pointer',transition:'all .15s',flexShrink:0,boxShadow:fSla==='ok'?'0 0 0 2px #15803d30':'none'}}>
+            <i className="bi-check-circle-fill" style={{color:'#15803d',fontSize:13}}></i>
+            <span style={{fontSize:13,fontWeight:700,color:'#166534'}}>{onTrackCount}</span>
+            <span style={{fontSize:11,fontWeight:500,color:'#166534'}}>On Track</span>
+          </div>
+          <div onClick={()=>setFSla(fSla==='at_risk'?null:'at_risk')} title="Filter by SLA: At Risk" role="button" tabIndex={0} style={{display:'flex',alignItems:'center',gap:5,background:fSla==='at_risk'?'#fef3c7':'#fff8e6',border:`${fSla==='at_risk'?'2':'1'}px solid ${fSla==='at_risk'?'#ed8d00':'#ffe27c'}`,borderRadius:128,padding:'5px 14px',cursor:'pointer',transition:'all .15s',flexShrink:0,boxShadow:fSla==='at_risk'?'0 0 0 2px #ed8d0030':'none'}}>
+            <i className="bi-exclamation-circle-fill" style={{color:'#ed8d00',fontSize:13}}></i>
+            <span style={{fontSize:13,fontWeight:700,color:'#92400E'}}>{atRiskCount}</span>
+            <span style={{fontSize:11,fontWeight:500,color:'#92400E'}}>At Risk</span>
+          </div>
+          <div onClick={()=>setFSla(fSla==='breached'?null:'breached')} title="Filter by SLA: Breached" role="button" tabIndex={0} style={{display:'flex',alignItems:'center',gap:5,background:fSla==='breached'?'#fecaca':'#ffe2de',border:`${fSla==='breached'?'2':'1'}px solid ${fSla==='breached'?'#d42d35':'#fca5a5'}`,borderRadius:128,padding:'5px 14px',cursor:'pointer',transition:'all .15s',flexShrink:0,boxShadow:fSla==='breached'?'0 0 0 2px #d42d3530':'none'}}>
+            <i className="bi-x-circle-fill" style={{color:'#d42d35',fontSize:13}}></i>
+            <span style={{fontSize:13,fontWeight:700,color:'#991b1b'}}>{breachedCount}</span>
+            <span style={{fontSize:11,fontWeight:500,color:'#991b1b'}}>Breached</span>
+          </div>
+
+          {/* View-aware title + totals */}
           {(isAdmin||isLead)&&(()=>{
-            // View-aware title: reflects the active source tab / filter
             const sourceLabels = {
               onboarding:'Onboarding', offboarding:'Offboarding', amendments:'Amendments',
               redlines:'Redlines', workbench:'Workbench',
             };
             const toolLabels = { zendesk:'Zendesk', jira:'Jira' };
             const viewLabel = sourceLabels[workSource] || toolLabels[fTool] || (isAdmin?'All Tasks':user.team);
-            return <span style={{fontSize:13,fontWeight:600,color:'#616161'}}>{viewLabel}</span>;
+            return <span style={{fontSize:13,fontWeight:600,color:'#616161',marginLeft:6}}>{viewLabel}</span>;
           })()}
-          {/* View-aware totals — change when switching between source tabs */}
           <span style={{fontSize:12,color:'#9e9e9e',display:'flex',alignItems:'center',gap:5}}>
             <i className="bi-layers" style={{fontSize:11}}></i>
             <span style={{fontWeight:600,color:'#1b1b1b'}}>{headerCounts.open}</span> open
             {headerCounts.paused>0&&<span> &middot; <span style={{fontWeight:600,color:'#616161'}}>{headerCounts.paused}</span> paused</span>}
             {headerCounts.resolved>0&&<span> &middot; <span style={{fontWeight:600,color:'#29811e'}}>{headerCounts.resolved}</span> resolved</span>}
           </span>
+
           <div style={{marginLeft:'auto',display:'flex',gap:8,alignItems:'center'}}>
-            {/* Unified sync status — single button across all feeds */}
             <UnifiedSyncButton
               meta={syncMeta}
               sources={syncSources}
               onRefresh={syncRefreshAll}
               nowTick={syncNowTick}
             />
-            {/* SLA filter pills — always visible across all views */}
-            <div onClick={()=>setFSla(fSla==='ok'?null:'ok')} style={{display:'flex',alignItems:'center',gap:5,background:fSla==='ok'?'#dcfce7':'#f0fdf4',border:`${fSla==='ok'?'2':'1'}px solid ${fSla==='ok'?'#15803d':'#bbf7d0'}`,borderRadius:128,padding:'5px 14px',cursor:'pointer',transition:'all .15s',flexShrink:0,boxShadow:fSla==='ok'?'0 0 0 2px #15803d30':'none'}}>
-                <i className="bi-check-circle-fill" style={{color:'#15803d',fontSize:13}}></i>
-                <span style={{fontSize:13,fontWeight:700,color:'#166534'}}>{onTrackCount}</span>
-                <span style={{fontSize:11,fontWeight:500,color:'#166534'}}>On Track</span>
-              </div>
-            <div onClick={()=>setFSla(fSla==='at_risk'?null:'at_risk')} style={{display:'flex',alignItems:'center',gap:5,background:fSla==='at_risk'?'#fef3c7':'#fff8e6',border:`${fSla==='at_risk'?'2':'1'}px solid ${fSla==='at_risk'?'#ed8d00':'#ffe27c'}`,borderRadius:128,padding:'5px 14px',cursor:'pointer',transition:'all .15s',flexShrink:0,boxShadow:fSla==='at_risk'?'0 0 0 2px #ed8d0030':'none'}}>
-                <i className="bi-exclamation-circle-fill" style={{color:'#ed8d00',fontSize:13}}></i>
-                <span style={{fontSize:13,fontWeight:700,color:'#92400E'}}>{atRiskCount}</span>
-                <span style={{fontSize:11,fontWeight:500,color:'#92400E'}}>At Risk</span>
-              </div>
-            <div onClick={()=>setFSla(fSla==='breached'?null:'breached')} style={{display:'flex',alignItems:'center',gap:5,background:fSla==='breached'?'#fecaca':'#ffe2de',border:`${fSla==='breached'?'2':'1'}px solid ${fSla==='breached'?'#d42d35':'#fca5a5'}`,borderRadius:128,padding:'5px 14px',cursor:'pointer',transition:'all .15s',flexShrink:0,boxShadow:fSla==='breached'?'0 0 0 2px #d42d3530':'none'}}>
-                <i className="bi-x-circle-fill" style={{color:'#d42d35',fontSize:13}}></i>
-                <span style={{fontSize:13,fontWeight:700,color:'#991b1b'}}>{breachedCount}</span>
-                <span style={{fontSize:11,fontWeight:500,color:'#991b1b'}}>Breached</span>
-              </div>
             {open.length>0&&(
               <button onClick={startWorkMode}
                 style={{height:36,padding:'0 18px',borderRadius:128,border:'none',background:'#1f74b3',color:'white',fontSize:13,fontWeight:700,cursor:'pointer',display:'flex',alignItems:'center',gap:7,transition:'all .15s'}}>
@@ -674,36 +700,76 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           </div>
         </div>
 
-        {/* Line 2: Work Source buttons */}
+        {/* Line 2: Qs (work-source buttons) + Status filter + Unassigned + Clear — all same line */}
         {(()=>{
           // Hoist Jira/Zendesk counts outside .map() — computed from baseVis (stable)
-          const jiraCount = baseVis.filter(t=>t.source==='jira'&&t.status!=='resolved').length;
-          const zdCount = baseVis.filter(t=>t.source==='zendesk'&&t.status!=='resolved').length;
+          // For Jira/Zendesk, honour fStatus + fUnassigned so the Q counts
+          // move in lockstep with the Status/Unassigned dropdowns.
+          const applyQueueFilter = (t) => {
+            if (t.status === 'resolved') return false;
+            if (fStatus.length && !fStatus.includes(t.status)) return false;
+            if (fUnassigned && (t.assigneeId || t.assigneeEmail)) return false;
+            return true;
+          };
+          const jiraCount = baseVis.filter(t=>t.source==='jira' && applyQueueFilter(t)).length;
+          const zdCount = baseVis.filter(t=>t.source==='zendesk' && applyQueueFilter(t)).length;
+          // Status dropdown options depend on the active tab:
+          //   • ZD/Jira/default → ticket statuses (new/in_progress/waiting/escalated/resolved)
+          //   • source panels   → severity (critical/warning/active/info) pulled from row.status.severity
+          const isSourcePanel = !!workSource && workSource!=='jira' && workSource!=='zendesk';
+          const severityMeta = {
+            critical:{label:'Critical',dotColor:'#d42d35'},
+            warning: {label:'Action Needed',dotColor:'#ed8d00'},
+            active:  {label:'In Progress',dotColor:'#1d4ed8'},
+            info:    {label:'Other',dotColor:'#616161'},
+          };
+          let statusOptions;
+          if (isSourcePanel) {
+            const rowsForPanel =
+              workSource==='onboarding' ? onboardingRows
+              : workSource==='offboarding' ? offboardingRows
+              : workSource==='amendments' ? amendmentRows
+              : workSource==='redlines' ? redlineRows
+              : workSource==='workbench' ? workbenchRows
+              : [];
+            const present = new Set(rowsForPanel.map(r=>r?.status?.severity).filter(Boolean));
+            statusOptions = ['critical','warning','active','info']
+              .filter(k => present.has(k))
+              .map(k => ({ value:k, ...severityMeta[k] }));
+          } else {
+            statusOptions = [
+              {value:'new',label:'New',dotColor:'#7c3aed'},
+              {value:'in_progress',label:'In Progress',dotColor:'#1d4ed8'},
+              {value:'waiting',label:'Pause',dotColor:'#6b6560'},
+              {value:'escalated',label:'Escalated',dotColor:'#d42d35'},
+              {value:'resolved',label:'Resolved',dotColor:'#15803d'},
+            ];
+          }
           return(
-        <div style={{display:'flex',gap:6,alignItems:'center',marginBottom:workSource&&workSource!=='zendesk'&&workSource!=='jira'?0:10,flexWrap:'nowrap',overflowX:'auto',paddingBottom:2}}>
+        <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'nowrap',overflowX:'auto',paddingBottom:2}}>
           {WORK_SOURCES.map(ws=>{
             const isQueueFilter = ws.id === 'zendesk' || ws.id === 'jira';
             const isActive = isQueueFilter ? (fTool === ws.id && !workSource) : workSource === ws.id;
-            const count = ws.id === 'onboarding' ? onboardingRows.length
-              : ws.id === 'offboarding' ? offboardingRows.length
-              : ws.id === 'amendments' ? amendmentRows.length
-              : ws.id === 'redlines' ? redlineRows.length
-              : ws.id === 'workbench' ? workbenchRows.length
+            // Q counts respect active Status + Unassigned filters so
+            // clicking the filter immediately shows how many rows survive
+            // per source — matches the SLA pills behaviour.
+            const count = ws.id === 'onboarding' ? visOnboardingRows.length
+              : ws.id === 'offboarding' ? visOffboardingRows.length
+              : ws.id === 'amendments' ? visAmendmentRows.length
+              : ws.id === 'redlines' ? visRedlineRows.length
+              : ws.id === 'workbench' ? visWorkbenchRows.length
               : ws.id === 'jira' ? jiraCount
               : ws.id === 'zendesk' ? zdCount
               : 0;
             const handleClick = () => {
               if (isQueueFilter) {
-                // Toggle source filter on the queue — clear any active panel
                 setWorkSource(null);
                 setFTool(fTool === ws.id ? null : ws.id);
               } else {
-                // Show dedicated panel (onboarding, offboarding, workbench, amendments, redlines)
                 setFTool(null);
                 setWorkSource(isActive ? null : ws.id);
               }
             };
-            // Source-specific sync failure indicator — surfaces stale/failing feed per tab
             const sourceSync = syncSources?.[ws.id];
             const sourceFailing = !!sourceSync?.error && !sourceSync?.isRefreshing;
             const failingTitle = sourceFailing
@@ -738,80 +804,41 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
               </button>
             );
           })}
-        </div>
-          );
-        })()}
 
-        {/* Line 3: Filters — visible on ALL tabs (queue + work source panels) */}
-        <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'nowrap'}}>
-          {/* Status multi-select */}
+          {/* Divider between Qs and remaining filters */}
+          <div style={{width:1,height:20,background:'#e8e8e8',flexShrink:0,margin:'0 4px'}}></div>
+
+          {/* Status multi-select — tab-aware options (severity on source panels, ticket statuses on ZD/Jira) */}
           <MultiFilterDropdown
             icon="bi-circle"
             label="Status"
             selected={fStatus}
-            options={[
-              {value:'new',label:'New',dotColor:'#7c3aed'},
-              {value:'in_progress',label:'In Progress',dotColor:'#1d4ed8'},
-              {value:'waiting',label:'Pause',dotColor:'#6b6560'},
-              {value:'escalated',label:'Escalated',dotColor:'#d42d35'},
-              {value:'resolved',label:'Resolved',dotColor:'#15803d'},
-            ]}
+            options={statusOptions}
             onChange={setFStatus}
             activeColor="#7c3aed"
           />
-          {/* Country multi-select — sorted alphabetically by label, with per-country counts */}
-          <MultiFilterDropdown
-            icon="bi-geo-alt"
-            label="Country"
-            selected={fCtry}
-            options={(() => {
-              // Count tickets per country in the currently-active view (source panel or queue)
-              const counts = new Map();
-              const bump = r => { if (r?.country) counts.set(r.country, (counts.get(r.country) || 0) + 1); };
-              if (workSource === 'onboarding') onboardingRows.forEach(bump);
-              else if (workSource === 'offboarding') offboardingRows.forEach(bump);
-              else if (workSource === 'amendments') amendmentRows.forEach(bump);
-              else if (workSource === 'redlines') redlineRows.forEach(bump);
-              else if (workSource === 'workbench') workbenchRows.forEach(bump);
-              else baseVis.forEach(bump);
-              return allCtry
-                .map(c => ({ value: c, name: getCountryName(c) || c, count: counts.get(c) || 0 }))
-                .sort((a, b) => a.name.localeCompare(b.name))
-                .map(o => ({ value: o.value, label: `${getFlag(o.value)} ${o.name}`, count: o.count }));
-            })()}
-            onChange={setFCtry}
-            activeColor="#1f74b3"
-          />
-          {/* Sort dropdown */}
-          <FilterDropdown
-            icon="bi-arrow-down-up"
-            label="Sort"
-            value={sort}
-            options={[
-              {value:'oldest',label:'Oldest first',icon:'bi-sort-down'},
-              {value:'newest',label:'Newest first',icon:'bi-sort-up'},
-              {value:'sla',label:'SLA urgency',icon:'bi-shield-exclamation'},
-              {value:'assignee',label:'By assignee',icon:'bi-person'},
-            ]}
-            onChange={setSort}
-            isSort
-          />
-          <div style={{width:1,height:20,background:'#e8e8e8',flexShrink:0,margin:'0 2px'}}></div>
+
           {/* Unassigned toggle */}
           <button onClick={()=>setFUnassigned(!fUnassigned)} style={{height:32,display:'inline-flex',alignItems:'center',gap:5,padding:'0 12px',borderRadius:8,border:fUnassigned?'1px solid #d42d35':'1px solid #e8e8e8',background:fUnassigned?'#fef2f2':'white',color:fUnassigned?'#d42d35':'#616161',fontSize:12,fontWeight:fUnassigned?600:500,cursor:'pointer',transition:'all .15s',whiteSpace:'nowrap'}}>
             <i className="bi-person-dash" style={{fontSize:11}}></i>Unassigned
           </button>
+
           {/* Clear all */}
           {hasActiveFilters&&(
-            <button onClick={()=>{setFTool(null);setFStatus([]);setFCtry([]);setFSla(null);setFUnassigned(false);setSearch('');}} style={{height:32,display:'inline-flex',alignItems:'center',gap:4,padding:'0 10px',borderRadius:8,border:'none',background:'transparent',color:'#9e9e9e',fontSize:11,cursor:'pointer',whiteSpace:'nowrap',textDecoration:'underline'}}>
+            <button onClick={()=>{setFTool(null);setFStatus([]);setFSla(null);setFUnassigned(false);setSearch('');}} style={{height:32,display:'inline-flex',alignItems:'center',gap:4,padding:'0 10px',borderRadius:8,border:'none',background:'transparent',color:'#9e9e9e',fontSize:11,cursor:'pointer',whiteSpace:'nowrap',textDecoration:'underline'}}>
               Clear all
             </button>
           )}
         </div>
+          );
+        })()}
       </div>
 
       {/* ── Work Source Panels — all use standardized SourceTable (Item #3) ── */}
-      {/* Apply queue-level country filter to source panels */}
+      {/* Source panels receive the POST-FILTER row sets (visXxxRows) so
+          Status + Unassigned dropdowns reshape the table identically across
+          all panels. Country dropdown removed 2026-04-21 — scoping is
+          enforced inside queue-scoping.js (getVisibleCountries). */}
       {workSource==='onboarding'&&(
         <ErrorBoundary>
         {/* Merged view (2026-04-21) — Action Needed + Paused shown in a
@@ -819,7 +846,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
             via showPausedSla+row.pausedAt; action rows fall through to the
             age-based SLA badge. */}
         <SourceTable
-          rows={fCtry.length?onboardingRows.filter(r=>fCtry.includes(r.country)):onboardingRows}
+          rows={visOnboardingRows}
           loading={onboardingData.loading || pausedOnboardingData.loading}
           error={onboardingData.error || pausedOnboardingData.error}
           onRefresh={()=>{ onboardingData.refresh&&onboardingData.refresh(); pausedOnboardingData.refresh&&pausedOnboardingData.refresh(); }}
@@ -837,7 +864,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       {workSource==='offboarding'&&(
         <ErrorBoundary>
         <SourceTable
-          rows={fCtry.length?offboardingRows.filter(r=>fCtry.includes(r.country)):offboardingRows}
+          rows={visOffboardingRows}
           loading={offboardingData.loading}
           error={offboardingData.error}
           onRefresh={offboardingData.refresh}
@@ -861,7 +888,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
             countdown badge; action rows fall through to the slaRemaining
             badge. No row is filtered out. */}
         <SourceTable
-          rows={fCtry.length?amendmentRows.filter(r=>fCtry.includes(r.country)):amendmentRows}
+          rows={visAmendmentRows}
           loading={changeRequestData.loading}
           error={changeRequestData.error}
           onRefresh={changeRequestData.refresh}
@@ -882,7 +909,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       {workSource==='redlines'&&(
         <ErrorBoundary>
         <SourceTable
-          rows={fCtry.length?redlineRows.filter(r=>fCtry.includes(r.country)):redlineRows}
+          rows={visRedlineRows}
           loading={changeRequestData.loading}
           error={changeRequestData.error}
           onRefresh={changeRequestData.refresh}
@@ -903,7 +930,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       {workSource==='workbench'&&(
         <ErrorBoundary>
         <SourceTable
-          rows={fCtry.length?workbenchRows.filter(r=>fCtry.includes(r.country)):workbenchRows}
+          rows={visWorkbenchRows}
           loading={workbenchData.loading}
           error={workbenchData.error}
           onRefresh={workbenchData.refresh}
