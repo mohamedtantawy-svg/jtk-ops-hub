@@ -115,9 +115,15 @@ export function getVisibleCountries(user) {
  *
  *   • Assigned items: visible when `assigneeEmail` is in the user's
  *     visible-email set.
- *   • Unassigned items: invisible to agents. TL / RM see them only when
- *     their `country` (uppercase ISO-ish code) is in the user's
- *     visible-country set. Admins see everything.
+ *   • Secondary assignees (Jira only): items also carry
+ *     `secondaryAssigneeEmails` — emails pulled from custom fields like
+ *     Country Owner / Task Owner / Process Owner / Team Responsible. An item
+ *     is visible if ANY of those matches the user's visible-email set, so a
+ *     Country Owner can see their region's tickets without being the Jira
+ *     assignee.
+ *   • Unassigned items (no primary AND no secondary): invisible to agents.
+ *     TL / RM see them only when their `country` (uppercase ISO-ish code) is
+ *     in the user's visible-country set. Admins see everything.
  *
  * @param {Array}  items
  * @param {Object} user  — must have `email`; may have `role` set by JWT
@@ -135,12 +141,24 @@ export function filterByAssignee(items, user, opts = {}) {
   const visibleCountries = allowUnassigned ? getVisibleCountries(user) : null;
 
   return items.filter(item => {
-    const email = (item.assigneeEmail || '').toLowerCase();
-    if (email) return visibleEmails.has(email);
-    // Unassigned
-    if (!allowUnassigned) return false;
-    const cc = (item.country || item.countryCode || '').toUpperCase();
-    return !!cc && visibleCountries.has(cc);
+    const primary = (item.assigneeEmail || '').toLowerCase();
+    const secondary = Array.isArray(item.secondaryAssigneeEmails)
+      ? item.secondaryAssigneeEmails.map(e => (e || '').toLowerCase()).filter(Boolean)
+      : [];
+
+    // Match on primary assignee OR any secondary-owner role.
+    if (primary && visibleEmails.has(primary)) return true;
+    for (const s of secondary) {
+      if (visibleEmails.has(s)) return true;
+    }
+
+    // No primary and no secondary → treat as unassigned.
+    if (!primary && secondary.length === 0) {
+      if (!allowUnassigned) return false;
+      const cc = (item.country || item.countryCode || '').toUpperCase();
+      return !!cc && visibleCountries.has(cc);
+    }
+    return false;
   });
 }
 

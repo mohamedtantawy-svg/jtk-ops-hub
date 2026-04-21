@@ -9,7 +9,17 @@
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../src/lib/auth-helpers';
 import { searchTickets, showManyUsers, isZendeskConfigured } from '../../../../src/lib/zendesk-api';
-import { searchIssues, isJiraConfigured } from '../../../../src/lib/jira-api';
+import { searchIssues, isJiraConfigured, resolveHrxOwnerFields, emailsFromJiraFieldValue } from '../../../../src/lib/jira-api';
+
+// Jira custom fields (by display-name substring) that can assign an HRX
+// manager to a ticket in addition to the built-in `assignee`. We also surface
+// tickets where any of these fields is one of our registered emails.
+const HRX_OWNER_FIELD_NAMES = [
+  'country owner',
+  'task owner',
+  'process owner',
+  'team responsible',
+];
 import { ADMIN_EMAILS_LIST } from '../../../../src/data/adminEmails';
 import { cacheGet, cacheSet } from '../../../../src/lib/server-cache';
 import { filterByAssignee } from '../../../../src/lib/queue-scoping';
@@ -360,15 +370,25 @@ async function fetchZendeskQueue() {
 }
 
 // ── Build JQL for registered emails ──────────────────────────────────────────
-function buildJiraJql() {
-  // Build assignee IN clause from registered admin emails
-  const emailsList = ADMIN_EMAILS_LIST
-    .map(e => `"${e}"`)
-    .join(', ');
+// Includes both built-in `assignee` and the HRX-owner custom fields
+// (Country Owner / Task Owner / Process Owner / Team Responsible). Each field
+// is OR'd in so a ticket surfaces whenever ANY role is one of our team.
+// `ownerFieldIds` is { 'country owner': 'customfield_12345', ... } — empty
+// entries are skipped (field doesn't exist on this Jira instance).
+function buildJiraJql(ownerFieldIds = {}) {
+  const emailsList = ADMIN_EMAILS_LIST.map(e => `"${e}"`).join(', ');
 
-  // Jira: issues assigned to any registered email, not completed
-  // Also include recently done (last 4h) for transition detection
-  return `assignee IN (${emailsList}) AND (status NOT IN (Done, Closed, Resolved, Solved, Cancelled, Rejected, Completed) OR (status IN (Done, Closed, Resolved, Solved, Completed) AND updated >= -4h)) ORDER BY updated DESC`;
+  const orClauses = [`assignee IN (${emailsList})`];
+  for (const cfId of Object.values(ownerFieldIds)) {
+    if (!cfId) continue;
+    const num = String(cfId).replace(/^customfield_/, '');
+    // cf[12345] IN (...) works for both single and multi-user picker fields.
+    orClauses.push(`cf[${num}] IN (${emailsList})`);
+  }
+  const whoClause = orClauses.length === 1 ? orClauses[0] : `(${orClauses.join(' OR ')})`;
+
+  // Not completed — with a 4h done-grace window for transition detection.
+  return `${whoClause} AND (status NOT IN (Done, Closed, Resolved, Solved, Cancelled, Rejected, Completed) OR (status IN (Done, Closed, Resolved, Solved, Completed) AND updated >= -4h)) ORDER BY updated DESC`;
 }
 
 // ── Fetch Jira issues (paginated, by registered emails) ─────────────────────
@@ -376,7 +396,13 @@ async function fetchJiraQueue() {
   if (!isJiraConfigured()) return { items: [], status: 'skipped', error: null };
 
   try {
-    const jql = buildJiraJql();
+    // Discover the HRX-owner custom field IDs once per hour (cached in
+    // jira-api). If discovery fails the map is empty and we fall back to
+    // assignee-only search — never breaks the queue.
+    const ownerFieldIds = await resolveHrxOwnerFields(HRX_OWNER_FIELD_NAMES);
+    const ownerFieldList = Object.values(ownerFieldIds);
+
+    const jql = buildJiraJql(ownerFieldIds);
     const allIssues = [];
     let startAt = 0;
     const pageSize = 100;
@@ -390,6 +416,7 @@ async function fetchJiraQueue() {
           'summary', 'status', 'assignee', 'reporter', 'priority',
           'created', 'updated', 'issuetype', 'project', 'labels',
           'description',
+          ...ownerFieldList,
         ],
       });
 
@@ -411,6 +438,15 @@ async function fetchJiraQueue() {
       const assignee = f.assignee || {};
       const reporter = f.reporter || {};
 
+      // Collect every email associated with this ticket via any of the HRX
+      // owner custom fields — used by the scoping layer so the ticket is
+      // visible to (e.g.) the Country Owner even if they're not the assignee.
+      const ownerEmails = new Set();
+      for (const [name, cfId] of Object.entries(ownerFieldIds)) {
+        const emails = emailsFromJiraFieldValue(f[cfId]);
+        for (const e of emails) ownerEmails.add(e);
+      }
+
       return {
         id: issue.key,
         source: 'jira',
@@ -423,6 +459,9 @@ async function fetchJiraQueue() {
         country: detectCountry(f.summary, f.labels || []),
         assigneeEmail: assignee.emailAddress || null,
         assigneeName: assignee.displayName || null,
+        // Secondary visibility: any HRX manager set as country/task/process
+        // owner or team responsible. Scoping checks both.
+        secondaryAssigneeEmails: [...ownerEmails],
         requesterName: reporter.displayName || 'System',
         requesterEmail: reporter.emailAddress || null,
         lastCustomerResponseAt: f.updated, // Jira updated tracks last activity
