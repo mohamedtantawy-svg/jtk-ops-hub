@@ -496,26 +496,35 @@ async function fetchAllRedlinesForStatus(status) {
   return all;
 }
 
-// Fill in employee / org / country fields for redlines whose payload is thin
-// (common for contract redlines that reference a contract by OID only).
-// Hits /rest/v2/contracts/{id}, caches for an hour, capped concurrency.
+// Fill in org name (and country/employee when missing) for contract redlines.
+// Template redlines get everything from the redline payload; contract redlines
+// put contractOid/contractName/employmentCountry at the ROOT but lack the org
+// — we pull it from /admin/api/contract/{oid} → Team.Organization.name.
 const REDLINE_CONTRACT_CACHE = new Map();
 const REDLINE_CONTRACT_TTL_MS = 60 * 60 * 1000;
 const REDLINE_CONTRACT_CONCURRENCY = 5;
 
-async function fetchContractDetailForRedline(contractId) {
-  if (!contractId) return null;
-  const key = String(contractId);
+// Contract name format from Deel: "<Employee Legal Name> - <Job Title>".
+// Split on the first " - " — job titles may themselves contain " - "
+// (e.g. "Manager - EMEA"), but the employee name side doesn't.
+function parseContractName(name) {
+  if (!name) return '';
+  const idx = name.indexOf(' - ');
+  return idx > 0 ? name.slice(0, idx).trim() : name.trim();
+}
+
+async function fetchContractDetailForRedline(contractOid) {
+  if (!contractOid) return null;
+  const key = String(contractOid);
   const hit = REDLINE_CONTRACT_CACHE.get(key);
   if (hit && Date.now() - hit.ts < REDLINE_CONTRACT_TTL_MS) return hit.detail;
   try {
-    const res = await deelFetch(`/rest/v2/contracts/${encodeURIComponent(key)}`);
-    const c = res?.data || res || {};
+    const c = await deelFetch(`/admin/api/contract/${encodeURIComponent(key)}`);
     const detail = {
-      employeeName: c.worker?.full_name || c.worker?.name || c.employee?.name || c.employeeLegalName || '',
-      country:      c.country || c.employment?.country || c.employmentCountry || '',
-      orgName:      c.client?.legal_name || c.client?.name || c.organization?.name || c.client_legal_entity?.name || '',
-      contractOid:  c.id || c.oid || key,
+      employeeName: parseContractName(c?.name),
+      country:      c?.country || '',
+      orgName:      c?.Team?.Organization?.name || '',
+      contractOid:  c?.oid || c?.id || key,
     };
     REDLINE_CONTRACT_CACHE.set(key, { detail, ts: Date.now() });
     return detail;
@@ -584,53 +593,48 @@ export async function listRedlineRequests(params = {}) {
     // like `workbenchProcess.redlineExecutionTask` are unreliable because
     // review-bucket redlines pre-create an execution task in a pending state.
     const isExecution = /HRXToExecute/i.test(r.__status || '');
-    // Derive redline type when the raw field isn't populated: presence of
-    // templateToRefineId / template means it's a template redline; otherwise
-    // it targets a specific contract.
+    // Derive redline type from the shape of the payload:
+    //   - template redlines carry `templateToRefineId` / `template` + `creatorOrganization`
+    //   - contract redlines carry `contractOid` / `contractName` / `employmentCountry`
+    //     directly on the root object.
     const derivedType = r.type
-                     || (r.templateToRefineId || r.template ? 'templateRedline' : 'contractRedline');
-    // Contract redlines carry a contract sub-object with the employee's name,
-    // country, and OID; template redlines don't — we fall back to the
-    // creating org's name + template country.
-    const contract = r.contract || r.targetContract || r.relatedContract || {};
+                     || (r.templateToRefineId || r.template ? 'templateRedline'
+                     :  r.contractOid ? 'contractRedline' : 'contractRedline');
     const wbReview = r.workbenchProcess?.redlineLegalReviewTask?.opsWorkbenchTask;
     const wbExec   = r.workbenchProcess?.redlineExecutionTask?.opsWorkbenchTask;
     const wbTask   = wbReview || wbExec || {};
     return {
       id:                r.id || '',
       type:              derivedType,
-      status:            r.status || '',                                // IN_REVIEW etc.
+      status:            r.status || '',                                // IN_REVIEW / HRX_TO_EXECUTE
       createdAt:         r.createdAt || '',
       updatedAt:         r.updatedAt || '',
-      // Organization — creatorOrganization is set for template redlines;
-      // contract redlines expose it via the contract or workbench task.
+      // Organization — template redlines carry it on `creatorOrganization`;
+      // contract redlines don't expose it on the redline payload, so we fall
+      // back to the workbench task (rarely populated) and finally to the
+      // /admin/api/contract/{oid} enrichment below.
       orgName:           r.creatorOrganization?.name
-                      || contract.clientLegalEntityName
-                      || contract.organizationName
-                      || contract.client?.name
                       || wbTask.organization?.name
                       || wbTask.organizationName
                       || '',
       orgId:             r.creatorOrganization?.id
-                      || contract.organizationId
                       || wbTask.organizationId
                       || null,
-      // Country — check every sensible path before giving up.
+      // Country — template redlines expose `template.countryCode`;
+      // contract redlines expose `employmentCountry` at the root.
       countryCode:       r.template?.countryCode
-                      || contract.employmentCountry
-                      || contract.country
+                      || r.employmentCountry
                       || wbTask.country
                       || (r.template?.countries?.[0])
                       || '',
       countries:         r.template?.countries || [],
       templateName:      r.template?.name || '',
-      // Employee — only contract redlines have one.
-      employeeName:      contract.employeeLegalName
-                      || contract.employee?.name
+      // Employee — only contract redlines have one. The raw payload stores it
+      // as `contractName` in "<Employee Name> - <Job Title>" format.
+      employeeName:      parseContractName(r.contractName)
                       || (derivedType === 'contractRedline' ? wbTask.name : '')
                       || '',
-      contractOid:       contract.contractOid
-                      || contract.oid
+      contractOid:       r.contractOid
                       || wbTask.contractOid
                       || '',
       isExecution,
@@ -641,7 +645,9 @@ export async function listRedlineRequests(params = {}) {
         status:          item.status || '',
       })),
       changesCount:      (r.items || []).length,
-      // Workbench task info — whichever sub-task is populated
+      // Workbench process/task info — the admin UI deep-links by PROCESS id
+      // (/ops-workbench-processes/{processId}), not the opsWorkbenchTask id.
+      workbenchProcessId: r.workbenchProcessId || r.workbenchProcess?.id || '',
       workbenchTaskId:   wbTask.id || '',
       workbenchStatus:   wbTask.status || '',
       customStatusName:  wbTask.customStatusName || '',
