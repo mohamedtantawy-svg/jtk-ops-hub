@@ -32,6 +32,17 @@ database:
       operator: Equal
       value: "true"
       effect: NoSchedule
+redis:
+  enabled: false
+  version: "7.4-alpine"
+  resources:
+    requests:
+      memory: "64Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+  nodeSelector:
+    karpenter.sh/nodepool: playgrounds-v1
 ingress:
   enabled: true
   ingressClassName: internal-nginx
