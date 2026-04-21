@@ -58,12 +58,12 @@ const TaskRow=({task,index,selected,onClick,onAction,onEscalMgr,compact,checked,
       {/* 3. Subject — main content */}
       <div style={{minWidth:0,display:'flex',flexDirection:'column',justifyContent:'center',gap:2}}>
         <div style={{display:'flex',alignItems:'center',gap:5}}>
-          {task.isAlert&&<span className="pulse" style={{width:6,height:6,borderRadius:'50%',background:'#ed8d00',flexShrink:0}}></span>}
+          {task.isAlert&&<span className="pulse" role="img" aria-label="Critical alert" style={{width:6,height:6,borderRadius:'50%',background:'#ed8d00',flexShrink:0}}></span>}
           <span title={task.subject} style={{color:'#1b1b1b',fontSize:14,lineHeight:'var(--lh-snug, 1.375)',fontWeight:500,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',flex:1,minWidth:60}}>{task.subject}</span>
-          {isActive&&task.minutesAgo>=120&&<span className="urgency-pill" style={{background:'#ffe2de',color:'#d42d35',flexShrink:0}}><i className="bi-exclamation-circle" style={{fontSize:8}}></i></span>}
-          {isActive&&task.minutesAgo>=60&&task.minutesAgo<120&&<span className="urgency-pill" style={{background:'#fff3ee',color:'#ed5e2a',flexShrink:0}}><i className="bi-fire" style={{fontSize:8}}></i></span>}
-          {isActive&&task.minutesAgo>=30&&task.minutesAgo<60&&<span className="urgency-pill" style={{background:'#fff8e6',color:'#ed8d00',flexShrink:0}}><i className="bi-clock" style={{fontSize:8}}></i></span>}
-          {task.snoozeLabel&&<span className="snooze-pill" style={{flexShrink:0}}><i className="bi-alarm" style={{fontSize:8}}></i></span>}
+          {isActive&&task.minutesAgo>=120&&<span className="urgency-pill" role="img" aria-label={`Urgent — open ${Math.floor(task.minutesAgo/60)}h`} title={`Urgent — open ${Math.floor(task.minutesAgo/60)}h`} style={{background:'#ffe2de',color:'#d42d35',flexShrink:0}}><i className="bi-exclamation-circle" aria-hidden="true" style={{fontSize:8}}></i></span>}
+          {isActive&&task.minutesAgo>=60&&task.minutesAgo<120&&<span className="urgency-pill" role="img" aria-label="High urgency — over 1 hour old" title="High urgency — over 1 hour old" style={{background:'#fff3ee',color:'#ed5e2a',flexShrink:0}}><i className="bi-fire" aria-hidden="true" style={{fontSize:8}}></i></span>}
+          {isActive&&task.minutesAgo>=30&&task.minutesAgo<60&&<span className="urgency-pill" role="img" aria-label="Medium urgency — over 30 minutes old" title="Medium urgency — over 30 minutes old" style={{background:'#fff8e6',color:'#ed8d00',flexShrink:0}}><i className="bi-clock" aria-hidden="true" style={{fontSize:8}}></i></span>}
+          {task.snoozeLabel&&<span className="snooze-pill" role="img" aria-label={`Snoozed: ${task.snoozeLabel}`} title={`Snoozed: ${task.snoozeLabel}`} style={{flexShrink:0}}><i className="bi-alarm" aria-hidden="true" style={{fontSize:8}}></i></span>}
         </div>
         {/* Linked ticket badges */}
         {task.linkedTickets&&task.linkedTickets.length>0&&(
@@ -104,14 +104,39 @@ const TaskRow=({task,index,selected,onClick,onAction,onEscalMgr,compact,checked,
       <div style={{display:'flex',justifyContent:'flex-end',alignItems:'center',gap:2}}>
         {hov&&task.status!=='resolved'?(
           <div style={{display:'flex',gap:2}} onClick={e=>e.stopPropagation()}>
-            {perms?.canDo('can_reassign')!==false&&<button title="Reassign" onClick={()=>onAction(task,'reassign')} style={{width:24,height:24,borderRadius:6,border:'none',background:'#e8f0fe',color:'#1f74b3',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,transition:'all .12s'}}
-              onMouseEnter={e=>{e.currentTarget.style.background='#1f74b3';e.currentTarget.style.color='white';}} onMouseLeave={e=>{e.currentTarget.style.background='#e8f0fe';e.currentTarget.style.color='#1f74b3';}}><i className="bi-person-up"></i></button>}
-            {perms?.canDo('can_escalate')!==false&&<button title="Escalate" onClick={()=>onEscalMgr&&onEscalMgr(task)} style={{width:24,height:24,borderRadius:6,border:'none',background:'#fff8e6',color:'#ed8d00',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,transition:'all .12s'}}
-              onMouseEnter={e=>{e.currentTarget.style.background='#ed8d00';e.currentTarget.style.color='white';}} onMouseLeave={e=>{e.currentTarget.style.background='#fff8e6';e.currentTarget.style.color='#ed8d00';}}><i className="bi-arrow-up-circle"></i></button>}
-            {perms?.canDo('can_snooze_task')!==false&&<button title="Pause" onClick={()=>onAction(task,'snooze')} style={{width:24,height:24,borderRadius:6,border:'none',background:'#f3f3f3',color:'#616161',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,transition:'all .12s'}}
-              onMouseEnter={e=>{e.currentTarget.style.background='#616161';e.currentTarget.style.color='white';}} onMouseLeave={e=>{e.currentTarget.style.background='#f3f3f3';e.currentTarget.style.color='#616161';}}><i className="bi-pause-circle"></i></button>}
-            {perms?.canDo('can_resolve_task')!==false&&<button title="Resolve" onClick={()=>onAction(task,'close')} style={{width:24,height:24,borderRadius:6,border:'none',background:'#e8f5e9',color:'#29811e',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,transition:'all .12s'}}
-              onMouseEnter={e=>{e.currentTarget.style.background='#29811e';e.currentTarget.style.color='white';}} onMouseLeave={e=>{e.currentTarget.style.background='#e8f5e9';e.currentTarget.style.color='#29811e';}}><i className="bi-check-circle"></i></button>}
+            {/* Actions render as disabled pills with a tooltip when the role lacks
+                the capability, instead of disappearing silently. This keeps the
+                layout stable and makes the reason discoverable on hover. */}
+            {(() => {
+              const btns = [
+                { cap:'can_reassign',     title:'Reassign', icon:'bi-person-up',       bg:'#e8f0fe', fg:'#1f74b3', on:()=>onAction(task,'reassign') },
+                { cap:'can_escalate',     title:'Escalate', icon:'bi-arrow-up-circle', bg:'#fff8e6', fg:'#ed8d00', on:()=>onEscalMgr&&onEscalMgr(task) },
+                { cap:'can_snooze_task',  title:'Pause',    icon:'bi-pause-circle',    bg:'#f3f3f3', fg:'#616161', on:()=>onAction(task,'snooze') },
+                { cap:'can_resolve_task', title:'Resolve',  icon:'bi-check-circle',    bg:'#e8f5e9', fg:'#29811e', on:()=>onAction(task,'close') },
+              ];
+              return btns.map(b => {
+                const allowed = perms?.canDo(b.cap) !== false;
+                return (
+                  <button key={b.cap}
+                    title={allowed ? b.title : `${b.title} \u2014 you don\u2019t have permission`}
+                    aria-disabled={!allowed}
+                    onClick={allowed ? b.on : undefined}
+                    style={{
+                      width:24,height:24,borderRadius:6,border:'none',
+                      background:b.bg,color:b.fg,
+                      cursor:allowed?'pointer':'not-allowed',
+                      opacity:allowed?1:0.35,
+                      display:'flex',alignItems:'center',justifyContent:'center',
+                      fontSize:10,transition:'all .12s',
+                    }}
+                    onMouseEnter={allowed ? e=>{e.currentTarget.style.background=b.fg;e.currentTarget.style.color='white';} : undefined}
+                    onMouseLeave={allowed ? e=>{e.currentTarget.style.background=b.bg;e.currentTarget.style.color=b.fg;} : undefined}
+                  >
+                    <i className={b.icon}></i>
+                  </button>
+                );
+              });
+            })()}
           </div>
         ):(
           <StatusBadge status={task.status}/>

@@ -304,22 +304,24 @@ export default function OutboundQueue({ requests, setRequests, user, onNewReques
           <div style={{ display:'flex', gap:8, paddingBottom:16, flexWrap:'wrap', alignItems:'center' }}>
             {/* Search */}
             <div style={{ position:'relative' }}>
-              <i className="bi-search" style={{ position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', color:'#9e9e9e', fontSize:13, pointerEvents:'none' }}/>
+              <i className="bi-search" aria-hidden="true" style={{ position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', color:'#9e9e9e', fontSize:13, pointerEvents:'none' }}/>
               <input
                 value={search} onChange={e => setSearch(e.target.value)}
                 placeholder="Search requests…"
+                role="searchbox"
+                aria-label="Search outbound requests"
                 style={{ padding:'7px 10px 7px 30px', border:'1px solid #e8e8e8', borderRadius:128, fontSize:13, outline:'none', width:200 }}
               />
             </div>
 
             {/* Team chips */}
-            <button onClick={() => setTeamFilter(null)} style={{
+            <button onClick={() => setTeamFilter(null)} aria-pressed={!teamFilter} aria-label="Filter by team: all teams" style={{
               padding:'5px 14px', borderRadius:128, fontSize:12, fontWeight:500, cursor:'pointer',
               border:'1px solid', borderColor:!teamFilter?'#1b1b1b':'#e8e8e8',
               background:!teamFilter?'#1b1b1b':'white', color:!teamFilter?'white':'#616161',
             }}>All Teams</button>
             {OUTBOUND_TEAMS.filter(t => usedTeams.includes(t.id) || !usedTeams.length).map(t => (
-              <button key={t.id} onClick={() => setTeamFilter(teamFilter===t.id?null:t.id)} style={{
+              <button key={t.id} onClick={() => setTeamFilter(teamFilter===t.id?null:t.id)} aria-pressed={teamFilter===t.id} aria-label={`Filter by team: ${t.label}`} style={{
                 display:'flex', alignItems:'center', gap:5,
                 padding:'5px 14px', borderRadius:128, fontSize:12, fontWeight:500, cursor:'pointer',
                 border:'1px solid', transition:'all .15s',
@@ -327,16 +329,16 @@ export default function OutboundQueue({ requests, setRequests, user, onNewReques
                 background: teamFilter===t.id?'#e8f0fe':'white',
                 color: teamFilter===t.id?'#1f74b3':'#616161',
               }}>
-                <i className={t.icon} style={{ fontSize:11 }}/>{t.label}
+                <i className={t.icon} aria-hidden="true" style={{ fontSize:11 }}/>{t.label}
               </button>
             ))}
 
             {/* Divider */}
-            <div style={{ width:1, height:20, background:'#e8e8e8' }}/>
+            <div aria-hidden="true" style={{ width:1, height:20, background:'#e8e8e8' }}/>
 
             {/* Status chips */}
             {REQUEST_STATUSES.map(s => (
-              <button key={s.id} onClick={() => setStatus(statusFilter===s.id?null:s.id)} style={{
+              <button key={s.id} onClick={() => setStatus(statusFilter===s.id?null:s.id)} aria-pressed={statusFilter===s.id} aria-label={`Filter by status: ${s.label}`} style={{
                 padding:'5px 14px', borderRadius:128, fontSize:12, fontWeight:500, cursor:'pointer',
                 border:'1px solid', transition:'all .15s',
                 borderColor: statusFilter===s.id?s.color:'#e8e8e8',
@@ -380,6 +382,16 @@ export default function OutboundQueue({ requests, setRequests, user, onNewReques
                     <tr
                       key={req.id}
                       onClick={() => setSelReq(isSelected ? null : req)}
+                      role="button"
+                      tabIndex={0}
+                      aria-pressed={isSelected}
+                      aria-label={`${req.subject} — ${statusInfo?.label || req.status}`}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setSelReq(isSelected ? null : req);
+                        }
+                      }}
                       style={{
                         borderBottom:'1px solid #f2f2f2', cursor:'pointer', transition:'background .1s',
                         background: isSelected ? '#f3eff8' : 'white',

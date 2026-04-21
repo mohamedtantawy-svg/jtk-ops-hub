@@ -29,9 +29,14 @@ export async function apiFetch(path, options = {}) {
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
+      // Early-out if an upstream abort fired before we even tried.
+      if (options.signal?.aborted) {
+        const e = new Error('Aborted'); e.name = 'AbortError'; throw e;
+      }
       const res = await fetch(`${API_BASE}${path}`, {
         ...options,
         headers,
+        signal: options.signal,
       });
 
       // 204 No Content
@@ -93,6 +98,9 @@ export async function apiFetch(path, options = {}) {
       return body;
     } catch (err) {
       lastError = err;
+
+      // Never retry deliberate aborts — caller wants to bail.
+      if (err.name === 'AbortError') throw err;
 
       // Don't retry 4xx
       if (err.status && err.status >= 400 && err.status < 500) throw err;
