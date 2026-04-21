@@ -22,11 +22,14 @@ const STALE_TTL_MS = 30 * 60_000;
 // Reject writes on tickets the user wouldn't see in their own /queue view.
 // Fails CLOSED on cold cache — prior behaviour defaulted to allow, which
 // meant any authenticated agent could mutate any ticket ID if the server
-// happened to have an empty /queue cache. Now: if we can't verify scope,
-// we reject and let the client refresh.
-async function ticketInUserScope(ticketId, user) {
-  if (!user) return false;
-  if (isAdmin(user) || user.role === 'regional_manager') return true;
+// happened to have an empty /queue cache.
+//
+// Returns { allowed, reason } so callers can distinguish "this ticket is not
+// visible to you" (genuine scope denial) from "we've never seen this ticket"
+// (cold cache — client should refresh and retry).
+async function checkTicketScope(ticketId, user) {
+  if (!user) return { allowed: false, reason: 'unauthenticated' };
+  if (isAdmin(user) || user.role === 'regional_manager') return { allowed: true };
   const sourceKey = ticketId.startsWith('ZD-') ? 'queue_zendesk' : 'queue_jira';
   const combined = cacheGet('queue', STALE_TTL_MS);
   const perSource = cacheGet(sourceKey, STALE_TTL_MS);
@@ -41,20 +44,21 @@ async function ticketInUserScope(ticketId, user) {
   if (match) {
     const visible = getVisibleMemberEmails(user);
     const email = (match.assigneeEmail || '').toLowerCase();
-    if (email && visible.has(email)) return true;
+    if (email && visible.has(email)) return { allowed: true };
     if (!email && user.role === 'team_lead') {
       // Unassigned: only allowed when the ticket's country is in the TL's scope.
       const cc = (match.country || match.countryCode || '').toUpperCase();
-      if (cc && getVisibleCountries(user).has(cc)) return true;
+      if (cc && getVisibleCountries(user).has(cc)) return { allowed: true };
     }
-    return false;
+    return { allowed: false, reason: 'out_of_scope' };
   }
 
   // ── Cold-cache fallback ──
   // Previously we defaulted to allow. Now we look the ticket up in the
   // persistent `tasks` table (our shadow of the source system) and apply the
   // same rule. If that also comes back empty — e.g. a fresh ticket we've
-  // never synced — we fail closed.
+  // never synced — we fail closed with `unknown_ticket` so the client can
+  // refresh its cache and retry once.
   try {
     const { rows } = await query(
       `SELECT m.email AS assignee_email, t.country_code
@@ -68,13 +72,14 @@ async function ticketInUserScope(ticketId, user) {
       const email = (rows[0].assignee_email || '').toLowerCase();
       const cc = (rows[0].country_code || '').toUpperCase();
       const visible = getVisibleMemberEmails(user);
-      if (email && visible.has(email)) return true;
-      if (!email && user.role === 'team_lead' && cc && getVisibleCountries(user).has(cc)) return true;
+      if (email && visible.has(email)) return { allowed: true };
+      if (!email && user.role === 'team_lead' && cc && getVisibleCountries(user).has(cc)) return { allowed: true };
+      return { allowed: false, reason: 'out_of_scope' };
     }
   } catch (err) {
     console.warn('[queue/actions] cold-cache fallback lookup failed:', err.message);
   }
-  return false;
+  return { allowed: false, reason: 'unknown_ticket' };
 }
 
 const ZD_SUBDOMAIN = process.env.ZENDESK_SUBDOMAIN || '';
@@ -145,10 +150,16 @@ async function transitionJiraIssue(issueKey, status) {
   return { ok: true };
 }
 
-async function assignJiraIssue(issueKey, email) {
-  if (!JIRA_BASE || !JIRA_TOKEN) throw new Error('Jira API not configured');
-  const auth = Buffer.from(`${JIRA_EMAIL}:${JIRA_TOKEN}`).toString('base64');
-  // Look up Jira account ID by email
+// Cache email → Jira accountId so we don't pay a user-search round-trip on
+// every single reassignment. Jira accounts almost never change and the lookup
+// added ~300-500ms of latency to each assign click.
+const JIRA_ACCOUNT_ID_TTL_MS = 60 * 60 * 1000;
+const jiraAccountIdCache = new Map();
+
+async function resolveJiraAccountId(email, auth) {
+  const key = email.toLowerCase();
+  const hit = jiraAccountIdCache.get(key);
+  if (hit && Date.now() - hit.ts < JIRA_ACCOUNT_ID_TTL_MS) return hit.accountId;
   const searchRes = await fetch(`${JIRA_BASE}/rest/api/3/user/search?query=${encodeURIComponent(email)}`, {
     headers: { 'Authorization': `Basic ${auth}`, 'Accept': 'application/json' },
   });
@@ -156,13 +167,24 @@ async function assignJiraIssue(issueKey, email) {
   const users = await searchRes.json();
   const jiraUser = users[0];
   if (!jiraUser) throw new Error(`No Jira user found for ${email}`);
+  jiraAccountIdCache.set(key, { accountId: jiraUser.accountId, ts: Date.now() });
+  return jiraUser.accountId;
+}
+
+async function assignJiraIssue(issueKey, email) {
+  if (!JIRA_BASE || !JIRA_TOKEN) throw new Error('Jira API not configured');
+  const auth = Buffer.from(`${JIRA_EMAIL}:${JIRA_TOKEN}`).toString('base64');
+  const accountId = await resolveJiraAccountId(email, auth);
   const res = await fetch(`${JIRA_BASE}/rest/api/3/issue/${issueKey}/assignee`, {
     method: 'PUT',
     headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ accountId: jiraUser.accountId }),
+    body: JSON.stringify({ accountId }),
   });
   if (!res.ok) {
     const body = await res.text();
+    // If the accountId we had cached has since been deactivated/removed, drop
+    // it so the next attempt forces a fresh lookup.
+    if (res.status === 400 || res.status === 404) jiraAccountIdCache.delete(email.toLowerCase());
     throw new Error(`Jira assign failed ${res.status}: ${body.substring(0, 200)}`);
   }
   return { ok: true };
@@ -237,8 +259,9 @@ export async function POST(req, { params }) {
       );
     }
   }
-  if (!(await ticketInUserScope(ticketId, user))) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  const scope = await checkTicketScope(ticketId, user);
+  if (!scope.allowed) {
+    return NextResponse.json({ error: 'Forbidden', reason: scope.reason }, { status: 403 });
   }
 
   try {

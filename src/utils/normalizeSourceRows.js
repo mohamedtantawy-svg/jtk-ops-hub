@@ -35,15 +35,40 @@ const _nameToEmailNorm = new Map();     // accent-stripped → email
 const _nameNoSpace = new Map();         // "federicadeluca" → email (collapses spacing)
 const _firstLastToEmail = new Map();    // "jessica|czech" → email (ignores middle names)
 
+// Track collisions during map build so two members who would both resolve to
+// the same fuzzy key don't silently clobber each other — the existing code
+// was last-wins, which could route a ticket for "Jane Smith (EMEA)" to
+// "Jane Smith (LATAM)" if a duplicate existed. We WARN instead of hard-fail so
+// a transient data-quality issue doesn't break onboarding rendering.
+function _noteCollision(mapName, key, existingEmail, incomingEmail) {
+  if (existingEmail && existingEmail !== incomingEmail) {
+    console.warn(
+      `[normalizeSourceRows] name→email collision in ${mapName}: key="${key}" already mapped to ${existingEmail}, not overriding with ${incomingEmail}`,
+    );
+    return true;
+  }
+  return false;
+}
+
 for (const m of TEAM_MEMBERS) {
   const lower = m.name.toLowerCase();
   const stripped = stripAccents(lower);
-  _nameToEmail.set(lower, m.email);
-  _nameToEmailNorm.set(stripped, m.email);
-  _nameNoSpace.set(stripped.replace(/\s+/g, ''), m.email);
+  const collapsed = stripped.replace(/\s+/g, '');
+  if (!_noteCollision('exact', lower, _nameToEmail.get(lower), m.email)) {
+    _nameToEmail.set(lower, m.email);
+  }
+  if (!_noteCollision('stripped', stripped, _nameToEmailNorm.get(stripped), m.email)) {
+    _nameToEmailNorm.set(stripped, m.email);
+  }
+  if (!_noteCollision('collapsed', collapsed, _nameNoSpace.get(collapsed), m.email)) {
+    _nameNoSpace.set(collapsed, m.email);
+  }
   const tokens = tokenize(m.name);
   if (tokens.length >= 2) {
-    _firstLastToEmail.set(`${tokens[0]}|${tokens[tokens.length - 1]}`, m.email);
+    const flKey = `${tokens[0]}|${tokens[tokens.length - 1]}`;
+    if (!_noteCollision('first|last', flKey, _firstLastToEmail.get(flKey), m.email)) {
+      _firstLastToEmail.set(flKey, m.email);
+    }
   }
 }
 
