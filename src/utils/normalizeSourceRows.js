@@ -310,6 +310,9 @@ export function normalizeRedlines(items = []) {
       updatedAt: r.updatedAt || r.createdAt || '',
       status: r.displayStatus || { label: 'Redline Review', severity: 'warning', color: '#ed8d00' },
       taskUrl: DEEL_REDLINE_URL(r.id, r.isExecution, r.type),
+      // Workbench task associated with this redline — opens in the ops
+      // workbench UI alongside the admin side-pane.
+      workbenchUrl: r.workbenchTaskId ? `${DEEL_WORKBENCH_BASE}/${r.workbenchTaskId}` : '',
       // Contract redlines tie back to an employee contract; template redlines
       // don't have a single contract (applies to all employees in that template).
       contractUrl: r.contractOid ? DEEL_CONTRACT_URL(r.contractOid) : '',

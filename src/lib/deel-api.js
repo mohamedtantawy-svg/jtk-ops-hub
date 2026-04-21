@@ -555,6 +555,9 @@ export async function listRedlineRequests(params = {}) {
       })),
       changesCount:      (r.items || []).length,
       // Workbench task info — whichever sub-task is populated
+      workbenchTaskId:   r.workbenchProcess?.redlineLegalReviewTask?.opsWorkbenchTask?.id
+                      || r.workbenchProcess?.redlineExecutionTask?.opsWorkbenchTask?.id
+                      || '',
       workbenchStatus:   r.workbenchProcess?.redlineLegalReviewTask?.opsWorkbenchTask?.status
                       || r.workbenchProcess?.redlineExecutionTask?.opsWorkbenchTask?.status
                       || '',
