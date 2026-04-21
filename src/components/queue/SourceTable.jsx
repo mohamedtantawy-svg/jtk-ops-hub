@@ -130,6 +130,7 @@ export default function SourceTable({
   showClient = false,        // show "Organization" column (offboarding, etc.)
   showType = false,          // show "Type" column (Termination / Resignation — offboarding)
   hideFilterBar = false,     // hide the whole filter bar (pills + search + refresh + count) when redundant
+  hideUpdated = false,       // hide the "Updated" column
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   // Column-based sorting: col name + direction
@@ -311,7 +312,7 @@ export default function SourceTable({
                 <SortTh col="assignee"  label="Assignee"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 90 }} />
                 <SortTh col={dateField} label={dateLabel} sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 80 }} />
                 <SortTh col="sla"       label="SLA"        sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 60 }} />
-                <SortTh col="updatedAt" label="Updated"    sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 70 }} />
+                {!hideUpdated && <SortTh col="updatedAt" label="Updated"    sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 70 }} />}
                 <SortTh col="status"    label="Status"     sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 115 }} />
                 <th style={{ ...thStyle, width: 55 }}>Task</th>
                 <th style={{ ...thStyle, width: 55 }}>Contract</th>
@@ -319,7 +320,7 @@ export default function SourceTable({
             </thead>
             <tbody>
               {sorted.map(row => (
-                <SourceRow key={`${row.source}-${row.id}`} row={row} showSource={showSourceColumn} showPausedSla={showPausedSla} currentUser={currentUser} dateField={dateField} showClient={showClient} showType={showType} />
+                <SourceRow key={`${row.source}-${row.id}`} row={row} showSource={showSourceColumn} showPausedSla={showPausedSla} currentUser={currentUser} dateField={dateField} showClient={showClient} showType={showType} hideUpdated={hideUpdated} />
               ))}
             </tbody>
           </table>
@@ -330,7 +331,7 @@ export default function SourceTable({
 }
 
 // ── Row component ──
-const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, currentUser = null, dateField = 'startDate', showClient = false, showType = false }) {
+const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, currentUser = null, dateField = 'startDate', showClient = false, showType = false, hideUpdated = false }) {
   const [hov, setHov] = useState(false);
   const [localAssignee, setLocalAssignee] = useState(null);
   const sev = row.status?.severity || 'info';
@@ -487,9 +488,11 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
       </td>
 
       {/* Updated */}
-      <td style={{ ...tdStyle, fontSize: 11, color: '#9e9e9e', whiteSpace: 'nowrap' }}>
-        {row.updatedAt ? timeAgo(row.updatedAt) : '--'}
-      </td>
+      {!hideUpdated && (
+        <td style={{ ...tdStyle, fontSize: 11, color: '#9e9e9e', whiteSpace: 'nowrap' }}>
+          {row.updatedAt ? timeAgo(row.updatedAt) : '--'}
+        </td>
+      )}
 
       {/* Status */}
       <td style={tdStyle}>

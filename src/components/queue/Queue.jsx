@@ -903,6 +903,10 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
               emptySubLabel="All amendments are handled"
               sortDefault="oldest"
               showClient
+              hideStatusPills
+              hideUpdated
+              dateField="createdAt"
+              dateLabel="Requested Date"
               currentUser={user}
             />
           )}
@@ -918,6 +922,10 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
               sortDefault="oldest"
               showPausedSla
               showClient
+              hideStatusPills
+              hideUpdated
+              dateField="createdAt"
+              dateLabel="Requested Date"
               currentUser={user}
             />
           )}
