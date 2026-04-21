@@ -150,10 +150,16 @@ async function transitionJiraIssue(issueKey, status) {
   return { ok: true };
 }
 
-async function assignJiraIssue(issueKey, email) {
-  if (!JIRA_BASE || !JIRA_TOKEN) throw new Error('Jira API not configured');
-  const auth = Buffer.from(`${JIRA_EMAIL}:${JIRA_TOKEN}`).toString('base64');
-  // Look up Jira account ID by email
+// Cache email → Jira accountId so we don't pay a user-search round-trip on
+// every single reassignment. Jira accounts almost never change and the lookup
+// added ~300-500ms of latency to each assign click.
+const JIRA_ACCOUNT_ID_TTL_MS = 60 * 60 * 1000;
+const jiraAccountIdCache = new Map();
+
+async function resolveJiraAccountId(email, auth) {
+  const key = email.toLowerCase();
+  const hit = jiraAccountIdCache.get(key);
+  if (hit && Date.now() - hit.ts < JIRA_ACCOUNT_ID_TTL_MS) return hit.accountId;
   const searchRes = await fetch(`${JIRA_BASE}/rest/api/3/user/search?query=${encodeURIComponent(email)}`, {
     headers: { 'Authorization': `Basic ${auth}`, 'Accept': 'application/json' },
   });
@@ -161,13 +167,24 @@ async function assignJiraIssue(issueKey, email) {
   const users = await searchRes.json();
   const jiraUser = users[0];
   if (!jiraUser) throw new Error(`No Jira user found for ${email}`);
+  jiraAccountIdCache.set(key, { accountId: jiraUser.accountId, ts: Date.now() });
+  return jiraUser.accountId;
+}
+
+async function assignJiraIssue(issueKey, email) {
+  if (!JIRA_BASE || !JIRA_TOKEN) throw new Error('Jira API not configured');
+  const auth = Buffer.from(`${JIRA_EMAIL}:${JIRA_TOKEN}`).toString('base64');
+  const accountId = await resolveJiraAccountId(email, auth);
   const res = await fetch(`${JIRA_BASE}/rest/api/3/issue/${issueKey}/assignee`, {
     method: 'PUT',
     headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ accountId: jiraUser.accountId }),
+    body: JSON.stringify({ accountId }),
   });
   if (!res.ok) {
     const body = await res.text();
+    // If the accountId we had cached has since been deactivated/removed, drop
+    // it so the next attempt forces a fresh lookup.
+    if (res.status === 400 || res.status === 404) jiraAccountIdCache.delete(email.toLowerCase());
     throw new Error(`Jira assign failed ${res.status}: ${body.substring(0, 200)}`);
   }
   return { ok: true };
