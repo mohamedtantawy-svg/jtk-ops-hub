@@ -218,7 +218,6 @@ export function normalizeOffboarding(items = []) {
 // ── Amendments → normalized rows ──
 export function normalizeAmendments(items = []) {
   return items.map(a => {
-    const effectiveStr = fmtShortDate(a.effectiveDate);
     const changesSummary = a.changes?.length > 0
       ? a.changes.map(c => c.label || c.dataPoint).filter(Boolean).join(', ')
       : '';
@@ -242,7 +241,7 @@ export function normalizeAmendments(items = []) {
     return {
       id: String(a.id || ''),
       source: 'amendments',
-      subject: effectiveStr ? `${a.employeeName || 'Unknown'} — ${effectiveStr}` : (a.employeeName || 'Unknown'),
+      subject: a.employeeName || 'Unknown',
       function: changesSummary || `${a.type || 'Amendment'} Amendment`,
       country: a.country || '',
       clientName: a.clientName || '',
