@@ -203,6 +203,7 @@ export async function listOnboardingPeople(params = {}) {
     assigneeEmail:     p.assignee?.email || '',
     assigneeId:        p.assigneeId || null,
     isHourly:          p.timeTracking?.isHourly || false,
+    clientName:        p.organizationName || p.clientLegalEntityName || p.clientName || p.client?.name || '',
   }));
 
   return { items, total: actionableTotal, cursor: currentCursor || null };
@@ -274,6 +275,7 @@ export async function listPausedOnboarding() {
     assignee:          p.assignee?.name || '',
     assigneeEmail:     p.assignee?.email || '',
     assigneeId:        p.assigneeId || null,
+    clientName:        p.organizationName || p.clientLegalEntityName || p.clientName || p.client?.name || '',
   }));
 
   return { items, total: items.length };
