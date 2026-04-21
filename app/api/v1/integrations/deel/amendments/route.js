@@ -1,7 +1,7 @@
 // ── GET /api/v1/integrations/deel/amendments ──────────────────────────────────
-// Proxies to Deel Admin API: amendment requests (HRX actionable).
+// Proxies to Deel Admin API: amendment requests (HRX actionable + paused).
 // Uses /admin/eor-experience/amendments-requests
-// Response: { filter, cursor, data: [...] }
+// Fetches all 5 status buckets concurrently and merges — FE splits by isPaused.
 // Uses persistent cache + stale-while-revalidate.
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
@@ -9,7 +9,17 @@ import { listAmendmentRequests, isDeelConfigured } from '../../../../../../src/l
 import { cacheGet, cacheSet } from '../../../../../../src/lib/server-cache';
 import { scopeAmendmentRequests } from '../../../../../../src/lib/queue-scoping';
 
-const CACHE_KEY = 'deel_amendments';
+// Default status set: Action Needed (AmendmentRequested + WaitingHrxAction)
+// + all three Paused reasons (LegalReview, PausedByHRX, MobilityInput).
+const DEFAULT_STATUSES = [
+  'PreparingDocuments.AmendmentRequested',
+  'PreparingDocuments.WaitingHrxAction',
+  'PreparingDocuments.Paused.LegalReview',
+  'PreparingDocuments.Paused.PausedByHRX',
+  'PreparingDocuments.Paused.MobilityInput',
+];
+
+const CACHE_KEY = 'deel_amendments_v2';
 const CACHE_TTL = 5 * 60 * 1000;    // fresh for 5 minutes
 const STALE_TTL = 30 * 60 * 1000;   // serve stale up to 30 minutes
 
@@ -30,10 +40,14 @@ export async function GET(req) {
 
   try {
     const { searchParams } = new URL(req.url);
-    const statuses = searchParams.get('statuses') || 'PreparingDocuments.AmendmentRequested';
+    // Accept either comma-joined statuses string (legacy) or fall back to default.
+    const statusesParam = searchParams.get('statuses');
+    const statuses = statusesParam
+      ? statusesParam.split(',').map(s => s.trim()).filter(Boolean)
+      : DEFAULT_STATUSES;
     const bustCache = searchParams.get('bust') === '1';
 
-    const cacheKeyFull = `${CACHE_KEY}_${statuses.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+    const cacheKeyFull = `${CACHE_KEY}_${statuses.join('|').replace(/[^a-zA-Z0-9._-]/g, '_')}`;
 
     if (!bustCache) {
       const fresh = cacheGet(cacheKeyFull, CACHE_TTL);
@@ -46,7 +60,7 @@ export async function GET(req) {
 
       const items = result.items.map(a => ({
         ...a,
-        // Derive a display status from the amendment type + statuses
+        // Derive a display label from the resolved currentStatus.
         displayStatus: deriveAmendmentStatus(a),
       }));
 
@@ -69,32 +83,34 @@ export async function GET(req) {
 }
 
 /**
- * Derive display label + severity from amendment data.
- * Key statuses: AmendmentRequested, WaitingHRXAction, PendingSOWCountersign,
- * PendingEACountersign, Paused
+ * Derive display label + severity from amendment currentStatus.
+ * Action-needed statuses get "warning" severity (drive SLA breach).
+ * Paused sub-statuses get a distinct label each, info severity.
  */
 function deriveAmendmentStatus(amendment) {
-  const currentStatus = (amendment.currentStatus || '').toLowerCase();
+  const s = amendment.currentStatus || '';
   const type = (amendment.type || '').toUpperCase();
 
-  if (currentStatus.includes('amendmentrequested') || currentStatus.includes('amendment_requested'))
-    return { label: 'Amendment Requested', severity: 'warning', color: '#ed8d00' };
-  if (currentStatus.includes('waitinghrx') || currentStatus.includes('waiting_hrx'))
-    return { label: 'Waiting HRX Action', severity: 'warning', color: '#ed8d00' };
-  if (currentStatus.includes('pendingsowcountersign') || currentStatus.includes('pending_sow'))
-    return { label: 'Pending SOW Countersign', severity: 'active', color: '#1d4ed8' };
-  if (currentStatus.includes('pendingeacountersign') || currentStatus.includes('pending_ea'))
-    return { label: 'Pending EA Countersign', severity: 'active', color: '#1d4ed8' };
-  if (currentStatus.includes('paused'))
+  // Paused sub-statuses — one label per reason.
+  if (s === 'PreparingDocuments.Paused.LegalReview')
+    return { label: 'Awaiting Legal Input', severity: 'info', color: '#6b3fa0' };
+  if (s === 'PreparingDocuments.Paused.PausedByHRX')
+    return { label: 'Paused by HRX', severity: 'info', color: '#616161' };
+  if (s === 'PreparingDocuments.Paused.MobilityInput')
+    return { label: 'Awaiting Mobility Input', severity: 'info', color: '#1d4ed8' };
+  if (/^PreparingDocuments\.Paused/.test(s))
     return { label: 'Paused', severity: 'info', color: '#616161' };
 
-  // Type-based fallback
-  if (type === 'OPS')
-    return { label: 'Ops Amendment', severity: 'active', color: '#1d4ed8' };
-  if (type === 'CUSTOM')
-    return { label: 'Custom Amendment', severity: 'active', color: '#7c3aed' };
-  if (type === 'LEGAL')
-    return { label: 'Legal Amendment', severity: 'warning', color: '#ed8d00' };
+  // Action-needed statuses.
+  if (s === 'PreparingDocuments.AmendmentRequested' || /amendmentrequested$/i.test(s))
+    return { label: 'Amendment Requested', severity: 'warning', color: '#ed8d00' };
+  if (s === 'PreparingDocuments.WaitingHrxAction' || /waitinghrx/i.test(s))
+    return { label: 'Waiting HRX Action', severity: 'warning', color: '#ed8d00' };
+
+  // Type-based fallback (keeps existing behaviour for non-standard flows).
+  if (type === 'OPS')    return { label: 'Ops Amendment',    severity: 'active',  color: '#1d4ed8' };
+  if (type === 'CUSTOM') return { label: 'Custom Amendment', severity: 'active',  color: '#7c3aed' };
+  if (type === 'LEGAL')  return { label: 'Legal Amendment',  severity: 'warning', color: '#ed8d00' };
 
   return { label: 'Amendment', severity: 'active', color: '#1d4ed8' };
 }

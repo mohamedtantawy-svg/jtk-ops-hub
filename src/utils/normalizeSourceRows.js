@@ -14,6 +14,19 @@ import { TEAM_MEMBERS } from '../data/members';
 const DEEL_ADMIN_BASE = 'https://admin.deel.network';
 const DEEL_CONTRACT_URL = (oid) => oid ? `${DEEL_ADMIN_BASE}/contracts/${oid}/details` : '';
 const DEEL_WORKBENCH_BASE = 'https://app.deel.com/workbench/tasks';
+// Admin amendment page. Deep-links to the side-pane for a specific amendment.
+// Example: https://admin.deel.network/eor/change-requests?requestId=...&requestType=amendments&status=PreparingDocuments&subStatus=PreparingDocuments.WaitingHrxAction
+const DEEL_AMENDMENT_URL = (id, currentStatus) => {
+  if (!id) return '';
+  const sub = currentStatus ? `&subStatus=${encodeURIComponent(currentStatus)}` : '';
+  return `${DEEL_ADMIN_BASE}/eor/change-requests?requestId=${encodeURIComponent(id)}&requestType=amendments&sortBy=createdAt&sortOrder=desc&status=PreparingDocuments${sub}`;
+};
+
+// SLA windows for amendments (per Ops policy):
+//   - Action Needed: 24h from createdAt
+//   - Paused:        48h from when it entered a Paused.* state
+const AMENDMENT_SLA_ACTIVE_MS = 24 * 60 * 60 * 1000;
+const AMENDMENT_SLA_PAUSED_MS = 48 * 60 * 60 * 1000;
 
 // ── Name → email lookup for sources that only provide assignee name ──
 // The Deel admin API returns only the display name for assignees. To scope
@@ -209,21 +222,41 @@ export function normalizeAmendments(items = []) {
     const changesSummary = a.changes?.length > 0
       ? a.changes.map(c => c.label || c.dataPoint).filter(Boolean).join(', ')
       : '';
+
+    // SLA is derived: 24h from createdAt when active, 48h from pausedAt when paused.
+    // slaRemaining is seconds (matches the workbench convention) so the shared
+    // SourceTable badge renders without special-casing.
+    let slaRemaining = null;
+    let slaBreachStatus = null;
+    const now = Date.now();
+    if (a.isPaused && a.pausedAt) {
+      const deadline = new Date(a.pausedAt).getTime() + AMENDMENT_SLA_PAUSED_MS;
+      slaRemaining = Math.round((deadline - now) / 1000);
+      slaBreachStatus = slaRemaining < 0 ? 'SLA_BREACHED' : 'SLA_NOT_BREACHED';
+    } else if (a.createdAt) {
+      const deadline = new Date(a.createdAt).getTime() + AMENDMENT_SLA_ACTIVE_MS;
+      slaRemaining = Math.round((deadline - now) / 1000);
+      slaBreachStatus = slaRemaining < 0 ? 'SLA_BREACHED' : 'SLA_NOT_BREACHED';
+    }
+
     return {
       id: String(a.id || ''),
       source: 'amendments',
       subject: effectiveStr ? `${a.employeeName || 'Unknown'} — ${effectiveStr}` : (a.employeeName || 'Unknown'),
       function: changesSummary || `${a.type || 'Amendment'} Amendment`,
       country: a.country || '',
-      assignee: '',  // Amendments don't have assignee in current data
+      clientName: a.clientName || '',
+      assignee: '',  // no server-side assignee — SourceTable renders "Assign me"
       assigneeEmail: '',
       createdAt: a.createdAt || '',
-      updatedAt: a.updatedAt || '',
+      updatedAt: a.updatedAt || a.createdAt || '',
       status: a.displayStatus || { label: 'Amendment', severity: 'active', color: '#1d4ed8' },
-      taskUrl: DEEL_CONTRACT_URL(a.contractOid),
+      taskUrl: DEEL_AMENDMENT_URL(a.id, a.currentStatus),
       contractUrl: DEEL_CONTRACT_URL(a.contractOid),
-      slaRemaining: null,
-      slaBreachStatus: null,
+      pausedAt: a.pausedAt || null,
+      isPaused: !!a.isPaused,
+      slaRemaining,
+      slaBreachStatus,
     };
   });
 }

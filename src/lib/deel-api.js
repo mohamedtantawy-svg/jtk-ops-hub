@@ -522,55 +522,156 @@ export async function listRedlineRequests(params = {}) {
 
 // ── Amendment Requests (Admin API) ──────────────────────────────────────────
 
+// In-memory cache: eorContractId → { clientName, ts }. Client name rarely
+// changes, so we cache for an hour and refresh opportunistically.
+const AMEND_CLIENT_CACHE = new Map();
+const AMEND_CLIENT_TTL_MS = 60 * 60 * 1000;
+const AMEND_CLIENT_CONCURRENCY = 5;
+
+async function fetchClientNameForContract(contractId) {
+  if (!contractId) return '';
+  const key = String(contractId);
+  const hit = AMEND_CLIENT_CACHE.get(key);
+  if (hit && Date.now() - hit.ts < AMEND_CLIENT_TTL_MS) return hit.clientName;
+  try {
+    const res = await deelFetch(`/rest/v2/contracts/${encodeURIComponent(key)}`);
+    const c = res?.data || res || {};
+    const clientName = c.client?.legal_name || c.client?.name || c.organization?.name
+                    || c.client_legal_entity?.name || c.team?.name || '';
+    AMEND_CLIENT_CACHE.set(key, { clientName, ts: Date.now() });
+    return clientName;
+  } catch (e) {
+    return hit?.clientName || '';
+  }
+}
+
+async function enrichClientNames(items) {
+  const unique = [...new Set(items.map(i => i.eorContractId).filter(Boolean))];
+  const resolved = new Map();
+  for (let i = 0; i < unique.length; i += AMEND_CLIENT_CONCURRENCY) {
+    const batch = unique.slice(i, i + AMEND_CLIENT_CONCURRENCY);
+    const results = await Promise.all(batch.map(id => fetchClientNameForContract(id)));
+    batch.forEach((id, idx) => resolved.set(String(id), results[idx] || ''));
+  }
+  return items.map(item => ({
+    ...item,
+    clientName: item.clientName || resolved.get(String(item.eorContractId)) || '',
+  }));
+}
+
+/**
+ * Resolve the most-specific meaningful status name for an amendment.
+ * Rules:
+ *   1. Prefer Paused.* sub-statuses (LegalReview, PausedByHRX, MobilityInput).
+ *   2. Otherwise prefer the deepest admin-filter path (e.g. AmendmentRequested,
+ *      WaitingHrxAction) over the parent "PreparingDocuments".
+ */
+function resolveCurrentStatus(amendmentStatuses = []) {
+  const entries = amendmentStatuses.map(s => ({
+    name: s.name || s.status || '',
+    createdAt: s.AmendmentFlowStatus?.createdAt || s.updatedAt || '',
+    showAdminFilter: s.showAdminFilter === true,
+  }));
+  const paused = entries.find(e => /^PreparingDocuments\.Paused\./.test(e.name));
+  if (paused) return paused.name;
+  const specific = entries
+    .filter(e => e.showAdminFilter && e.name !== 'PreparingDocuments')
+    .sort((a, b) => b.name.split('.').length - a.name.split('.').length)[0];
+  if (specific) return specific.name;
+  const anyAdmin = entries.find(e => e.showAdminFilter);
+  return anyAdmin?.name || entries[0]?.name || '';
+}
+
+/**
+ * Extract the timestamp when the amendment entered a Paused.* state, if any.
+ */
+function resolvePausedAt(amendmentStatuses = []) {
+  const pausedEntries = amendmentStatuses
+    .filter(s => /^PreparingDocuments\.Paused(\.|$)/.test(s.name || ''))
+    .map(s => s.AmendmentFlowStatus?.createdAt || s.updatedAt || '')
+    .filter(Boolean);
+  if (pausedEntries.length === 0) return '';
+  return pausedEntries.sort().pop();
+}
+
 /**
  * Fetches amendment requests from the admin API.
  * Uses /admin/eor-experience/amendments-requests — same as admin.deel.network.
- * Filters to "Preparing Documents → Amendment Requested" and related statuses.
  *
- * Response shape: { filter: {...}, cursor, data: [...] }
- * Each amendment has: id, eorContractId, type (OPS/CUSTOM/LEGAL),
- * contract (with contractOid, employeeLegalName, employmentCountry),
- * items[] (dataPoint, previousValue, newValue), effectiveDate, amendmentStatuses[].
+ * `statuses` may be a single string or an array. Each status is fetched in a
+ * separate request (the upstream API doesn't accept multi-select); results are
+ * merged and deduped by amendment id.
+ *
+ * Each amendment is enriched with clientName by looking up the contract detail
+ * (cached in-memory for an hour).
  */
 export async function listAmendmentRequests(params = {}) {
-  const qs = new URLSearchParams();
-  qs.set('sortBy', 'createdAt');
-  qs.set('sortOrder', 'desc');
-  qs.set('statuses', params.statuses || 'PreparingDocuments.AmendmentRequested');
-  qs.set('limit', String(params.limit || 200));
-  const res = await deelFetch(`/admin/eor-experience/amendments-requests?${qs.toString()}`);
+  const statuses = Array.isArray(params.statuses)
+    ? params.statuses
+    : [params.statuses || 'PreparingDocuments.AmendmentRequested'];
 
-  const rawItems = res?.data || [];
+  async function fetchStatus(status) {
+    const qs = new URLSearchParams();
+    qs.set('sortBy', 'createdAt');
+    qs.set('sortOrder', 'desc');
+    qs.set('statuses', status);
+    qs.set('limit', String(params.limit || 200));
+    const res = await deelFetch(`/admin/eor-experience/amendments-requests?${qs.toString()}`);
+    return res?.data || [];
+  }
 
-  const items = rawItems.map(a => ({
-    id:                a.id || '',
-    eorContractId:     a.eorContractId || '',
-    type:              a.type || '',                                  // OPS, CUSTOM, LEGAL
-    contractOid:       a.contract?.contractOid || '',
-    employeeName:      a.contract?.employeeLegalName || '',
-    country:           a.contract?.employmentCountry || '',
-    clientName:        a.contract?.clientLegalEntityName || a.contract?.organizationName || '',
-    effectiveDate:     a.effectiveDate || '',
-    createdAt:         a.createdAt || '',
-    updatedAt:         a.updatedAt || '',
-    // Amendment items — what's being changed
-    changes:           (a.items || []).map(item => ({
-      dataPoint:       item.dataPoint || '',
-      label:           item.item || '',
-      previousValue:   item.previousValue || '',
-      newValue:        item.newValue || '',
-    })),
-    changesCount:      (a.items || []).length,
-    // Statuses
-    statuses:          (a.amendmentStatuses || []).map(s => ({
-      status:          s.status || '',
-      label:           s.label || '',
-      updatedAt:       s.updatedAt || '',
-    })),
-    currentStatus:     (a.amendmentStatuses || []).find(s => s.status)?.status || '',
-  }));
+  const batches = await Promise.all(statuses.map(fetchStatus));
 
-  return { items, total: items.length, cursor: res?.cursor || null };
+  // Merge + dedupe by amendment id (same amendment never appears twice in one
+  // bucket, but a retry could in theory return overlap).
+  const seen = new Set();
+  const rawItems = [];
+  for (const batch of batches) {
+    for (const a of batch) {
+      if (!a?.id || seen.has(a.id)) continue;
+      seen.add(a.id);
+      rawItems.push(a);
+    }
+  }
+
+  const items = rawItems.map(a => {
+    const currentStatus = resolveCurrentStatus(a.amendmentStatuses);
+    const pausedAt = resolvePausedAt(a.amendmentStatuses);
+    return {
+      id:                a.id || '',
+      eorContractId:     a.eorContractId || '',
+      type:              a.type || '',                                  // OPS, CUSTOM, LEGAL
+      contractOid:       a.contract?.contractOid || '',
+      employeeName:      a.contract?.employeeLegalName || '',
+      country:           a.contract?.employmentCountry || '',
+      clientName:        a.contract?.clientLegalEntityName || a.contract?.organizationName || '',
+      effectiveDate:     a.effectiveDate || '',
+      createdAt:         a.createdAt || '',
+      updatedAt:         a.updatedAt || '',
+      clientConfirmedAt: a.changeRequest?.clientConfirmedAt || '',
+      pausedAt,
+      isPaused:          /^PreparingDocuments\.Paused(\.|$)/.test(currentStatus),
+      // Amendment items — what's being changed
+      changes:           (a.items || []).map(item => ({
+        dataPoint:       item.dataPoint || '',
+        label:           item.item || '',
+        previousValue:   item.previousValue || '',
+        newValue:        item.newValue || '',
+      })),
+      changesCount:      (a.items || []).length,
+      // Raw statuses (kept for diagnostics)
+      statuses:          (a.amendmentStatuses || []).map(s => ({
+        name:            s.name || '',
+        friendlyName:    s.friendlyName || '',
+        showAdminFilter: s.showAdminFilter === true,
+        updatedAt:       s.AmendmentFlowStatus?.createdAt || s.updatedAt || '',
+      })),
+      currentStatus,
+    };
+  });
+
+  const enriched = await enrichClientNames(items);
+  return { items: enriched, total: enriched.length, cursor: null };
 }
 
 // ── OpsWorkbench Tasks (Admin API) ─────────────────────────────────────────
