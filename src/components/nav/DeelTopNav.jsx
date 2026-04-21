@@ -3,21 +3,26 @@ import { PermissionsContext } from '../../App';
 import { TEAM_MEMBERS } from '../../data/members';
 import Avatar from '../ui/Avatar';
 
+// Temporary gate: these surfaces are hidden from everyone except the owner
+// until the underlying features are production-ready. Remove the
+// `restrictToEmail` props below once the app is ready to ship broadly.
+const OWNER_EMAIL = 'mohamed.tantawy@deel.com';
+
 /* Primary tabs always visible in the nav bar */
 const PRIMARY_TABS = [
   { id: 'briefing',      icon: 'bi-house',            label: 'Home' },
   { id: 'my-queue',      icon: 'bi-inbox',            label: 'Queue' },
-  { id: 'projects',      icon: 'bi-kanban',           label: 'Projects' },
+  { id: 'projects',      icon: 'bi-kanban',           label: 'Projects',      restrictToEmail: OWNER_EMAIL },
   { id: 'escalations',   icon: 'bi-arrow-up-circle',  label: 'Escalations', badge: true },
-  { id: 'hr-reports',    icon: 'bi-clipboard-data',   label: 'Reports' },
-  { id: 'announcements', icon: 'bi-megaphone',        label: 'Announcements' },
+  { id: 'hr-reports',    icon: 'bi-clipboard-data',   label: 'Reports',       restrictToEmail: OWNER_EMAIL },
+  { id: 'announcements', icon: 'bi-megaphone',        label: 'Announcements', restrictToEmail: OWNER_EMAIL },
 ];
 
 /* Secondary tabs under More */
 const MORE_TABS = [
-  { id: 'calendar',      icon: 'bi-calendar3',        label: 'Calendar' },
-  { id: 'knowledge-hub', icon: 'bi-book',             label: 'Knowledge Hub' },
-  { id: 'analytics',     icon: 'bi-bar-chart-line',   label: 'Analytics' },
+  { id: 'calendar',      icon: 'bi-calendar3',        label: 'Calendar',       restrictToEmail: OWNER_EMAIL },
+  { id: 'knowledge-hub', icon: 'bi-book',             label: 'Knowledge Hub',  restrictToEmail: OWNER_EMAIL },
+  { id: 'analytics',     icon: 'bi-bar-chart-line',   label: 'Analytics',      restrictToEmail: OWNER_EMAIL },
   { id: 'team',          icon: 'bi-people',           label: 'Team' },
 ];
 
@@ -25,9 +30,9 @@ const MORE_TABS = [
 const CREATE_ACTIONS = [
   { icon: 'bi-plus-square',       label: 'New Task',         action: 'task',         desc: 'Create a queue task',         perm: 'can_create_task' },
   { icon: 'bi-arrow-up-circle',   label: 'New Escalation',   action: 'escalation',   desc: 'Raise an escalation',         perm: 'can_create_escalation' },
-  { icon: 'bi-kanban',            label: 'New Project',      action: 'project',       desc: 'Start a project',             perm: 'can_create_project' },
-  { icon: 'bi-megaphone',         label: 'New Announcement', action: 'announcement',  desc: 'Post to the team',            perm: 'can_compose_announcements' },
-  { icon: 'bi-clipboard-data',    label: 'New Report',       action: 'report',        desc: 'Submit an HR report',         viewReq: 'hr-reports' },
+  { icon: 'bi-kanban',            label: 'New Project',      action: 'project',       desc: 'Start a project',             perm: 'can_create_project',          restrictToEmail: OWNER_EMAIL },
+  { icon: 'bi-megaphone',         label: 'New Announcement', action: 'announcement',  desc: 'Post to the team',            perm: 'can_compose_announcements',   restrictToEmail: OWNER_EMAIL },
+  { icon: 'bi-clipboard-data',    label: 'New Report',       action: 'report',        desc: 'Submit an HR report',         viewReq: 'hr-reports',               restrictToEmail: OWNER_EMAIL },
 ];
 
 const DeelTopNav = ({
@@ -99,6 +104,7 @@ const DeelTopNav = ({
   const visiblePrimary = PRIMARY_TABS.filter(tabAllowed);
   const visibleMore = MORE_TABS.filter(tabAllowed);
   const visibleCreate = CREATE_ACTIONS.filter(ca => {
+    if (ca.restrictToEmail && emailLc !== ca.restrictToEmail.toLowerCase()) return false;
     if (ca.perm && !perms?.canDo(ca.perm)) return false;
     if (ca.viewReq && !perms?.canView(ca.viewReq)) return false;
     return true;
