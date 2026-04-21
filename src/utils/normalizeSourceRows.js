@@ -315,9 +315,12 @@ export function normalizeRedlines(items = []) {
       updatedAt: r.updatedAt || r.createdAt || '',
       status: r.displayStatus || { label: 'Redline Review', severity: 'warning', color: '#ed8d00' },
       taskUrl: DEEL_REDLINE_URL(r.id, r.isExecution, r.type),
-      // Workbench task associated with this redline — opens in the ops
-      // workbench UI alongside the admin side-pane.
-      workbenchUrl: r.workbenchTaskId ? `${DEEL_WORKBENCH_BASE}/${r.workbenchTaskId}` : '',
+      // Workbench process associated with this redline — deep-links into the
+      // admin workbench process page (NOT app.deel.com/workbench/tasks, which
+      // is a different UI). Uses the workbench PROCESS id, not the task id.
+      workbenchUrl: r.workbenchProcessId
+        ? `${DEEL_ADMIN_BASE}/ops-workbench-processes/${r.workbenchProcessId}`
+        : '',
       // Contract redlines tie back to an employee contract; template redlines
       // don't have a single contract (applies to all employees in that template).
       contractUrl: r.contractOid ? DEEL_CONTRACT_URL(r.contractOid) : '',
