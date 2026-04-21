@@ -131,6 +131,7 @@ export default function SourceTable({
   showType = false,          // show "Type" column (Termination / Resignation — offboarding)
   hideFilterBar = false,     // hide the whole filter bar (pills + search + refresh + count) when redundant
   hideUpdated = false,       // hide the "Updated" column
+  hideContract = false,      // hide the "Contract" column (redlines don't always have one)
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   // Column-based sorting: col name + direction
@@ -315,12 +316,12 @@ export default function SourceTable({
                 {!hideUpdated && <SortTh col="updatedAt" label="Updated"    sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 70 }} />}
                 <SortTh col="status"    label="Status"     sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 115 }} />
                 <th style={{ ...thStyle, width: 55 }}>Task</th>
-                <th style={{ ...thStyle, width: 55 }}>Contract</th>
+                {!hideContract && <th style={{ ...thStyle, width: 55 }}>Contract</th>}
               </tr>
             </thead>
             <tbody>
               {sorted.map(row => (
-                <SourceRow key={`${row.source}-${row.id}`} row={row} showSource={showSourceColumn} showPausedSla={showPausedSla} currentUser={currentUser} dateField={dateField} showClient={showClient} showType={showType} hideUpdated={hideUpdated} />
+                <SourceRow key={`${row.source}-${row.id}`} row={row} showSource={showSourceColumn} showPausedSla={showPausedSla} currentUser={currentUser} dateField={dateField} showClient={showClient} showType={showType} hideUpdated={hideUpdated} hideContract={hideContract} />
               ))}
             </tbody>
           </table>
@@ -331,7 +332,7 @@ export default function SourceTable({
 }
 
 // ── Row component ──
-const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, currentUser = null, dateField = 'startDate', showClient = false, showType = false, hideUpdated = false }) {
+const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, currentUser = null, dateField = 'startDate', showClient = false, showType = false, hideUpdated = false, hideContract = false }) {
   const [hov, setHov] = useState(false);
   const [localAssignee, setLocalAssignee] = useState(null);
   const sev = row.status?.severity || 'info';
@@ -544,24 +545,37 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
               <i className="bi-headset" style={{ fontSize: 9 }} />Zendesk
             </a>
           )}
-          {!row.taskUrl && !row.jiraUrl && !row.zendeskUrl && <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>}
+          {row.workbenchUrl && (
+            <a href={row.workbenchUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6,
+                background: hov ? '#f3eff8' : '#f5f4f2', color: hov ? '#6b3fa0' : '#9e9e9e',
+                fontSize: 10, fontWeight: 600, textDecoration: 'none', transition: 'all .15s', whiteSpace: 'nowrap',
+                border: hov ? '1px solid #d4c4f0' : '1px solid transparent',
+              }}>
+              <i className="bi-grid-3x3-gap" style={{ fontSize: 9 }} />Workbench
+            </a>
+          )}
+          {!row.taskUrl && !row.jiraUrl && !row.zendeskUrl && !row.workbenchUrl && <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>}
         </div>
       </td>
 
       {/* Contract Link */}
-      <td style={tdStyle}>
-        {row.contractUrl ? (
-          <a href={row.contractUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6,
-              background: hov ? '#f3eff8' : '#f5f4f2', color: hov ? '#6b3fa0' : '#9e9e9e',
-              fontSize: 10, fontWeight: 600, textDecoration: 'none', transition: 'all .15s', whiteSpace: 'nowrap',
-              border: hov ? '1px solid #d4c4f0' : '1px solid transparent',
-            }}>
-            <i className="bi-file-earmark-text" style={{ fontSize: 9 }} />View
-          </a>
-        ) : <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>}
-      </td>
+      {!hideContract && (
+        <td style={tdStyle}>
+          {row.contractUrl ? (
+            <a href={row.contractUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6,
+                background: hov ? '#f3eff8' : '#f5f4f2', color: hov ? '#6b3fa0' : '#9e9e9e',
+                fontSize: 10, fontWeight: 600, textDecoration: 'none', transition: 'all .15s', whiteSpace: 'nowrap',
+                border: hov ? '1px solid #d4c4f0' : '1px solid transparent',
+              }}>
+              <i className="bi-file-earmark-text" style={{ fontSize: 9 }} />View
+            </a>
+          ) : <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>}
+        </td>
+      )}
     </tr>
   );
 });
