@@ -525,8 +525,14 @@ export async function listRedlineRequests(params = {}) {
   }
 
   const items = rawItems.map(r => {
-    const isExecution = /hrxtoexecute|execute|execution/i.test(r.__status || '')
-                     || !!r.workbenchProcess?.redlineExecutionTask;
+    // Trust the upstream status bucket we fetched with — secondary signals
+    // like `workbenchProcess.redlineExecutionTask` are unreliable because
+    // review-bucket redlines pre-create an execution task in a pending state.
+    const isExecution = /HRXToExecute/i.test(r.__status || '');
+    // Contract redlines (type=contractRedline) carry a contract sub-object
+    // with the employee's name + oid; template redlines (type=templateRedline)
+    // don't — we fall back to the creating org's name.
+    const contract = r.contract || r.relatedContract || null;
     return {
       id:                r.id || '',
       type:              r.type || '',                                  // templateRedline | contractRedline
@@ -535,9 +541,11 @@ export async function listRedlineRequests(params = {}) {
       updatedAt:         r.updatedAt || '',
       orgName:           r.creatorOrganization?.name || '',
       orgId:             r.creatorOrganization?.id || '',
-      countryCode:       r.template?.countryCode || '',
+      countryCode:       r.template?.countryCode || contract?.employmentCountry || '',
       countries:         r.template?.countries || [],                   // array of country names
       templateName:      r.template?.name || '',
+      employeeName:      contract?.employeeLegalName || '',
+      contractOid:       contract?.contractOid || '',
       isExecution,
       // Items — the actual redline changes requested
       changes:           (r.items || []).map(item => ({
