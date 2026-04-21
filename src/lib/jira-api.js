@@ -53,6 +53,83 @@ export async function jiraFetch(endpoint, options = {}) {
   return withRetry(() => _jiraFetch(endpoint, options), { label: 'Jira', maxRetries: 2 });
 }
 
+// ── Custom field discovery ──────────────────────────────────────────────────
+// HRX managers can be set on an issue via several user-valued custom fields
+// (Country Owner, Task Owner, Process Owner, Team Responsible, etc) in
+// addition to the built-in `assignee`. Those fields have instance-specific
+// IDs like `customfield_12345`. We discover them by display name once per
+// hour and cache the mapping so the queue route doesn't re-fetch on every
+// request.
+
+const FIELD_CACHE_TTL_MS = 60 * 60 * 1000;
+let _fieldCache = null;
+let _fieldCacheTs = 0;
+
+export async function listJiraFields() {
+  const now = Date.now();
+  if (_fieldCache && now - _fieldCacheTs < FIELD_CACHE_TTL_MS) return _fieldCache;
+  try {
+    const fields = await jiraFetch('/field');
+    _fieldCache = Array.isArray(fields) ? fields : [];
+    _fieldCacheTs = now;
+  } catch (e) {
+    console.warn('[jira] listJiraFields failed:', e.message);
+    if (!_fieldCache) _fieldCache = [];
+  }
+  return _fieldCache;
+}
+
+/**
+ * Given a list of display-name substrings (case-insensitive), return a map
+ * from the substring → customfield_id for the first field whose name matches.
+ * Unmatched substrings are omitted.
+ *
+ * Example: resolveHrxOwnerFields(['country owner', 'task owner'])
+ *   → { 'country owner': 'customfield_10234', 'task owner': 'customfield_10567' }
+ */
+export async function resolveHrxOwnerFields(substrings) {
+  const fields = await listJiraFields();
+  const out = {};
+  const remaining = new Set(substrings.map(s => s.toLowerCase()));
+  for (const f of fields) {
+    if (remaining.size === 0) break;
+    const name = (f?.name || '').toLowerCase();
+    for (const needle of remaining) {
+      if (name.includes(needle)) {
+        out[needle] = f.id;
+        remaining.delete(needle);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Pulls every user-like email out of a raw Jira custom-field value.
+ * Handles:
+ *   - single user object { emailAddress, accountId, ... }
+ *   - array of user objects
+ *   - raw email strings (text fields)
+ *   - array of strings
+ * Returns a lower-cased email array (deduped).
+ */
+export function emailsFromJiraFieldValue(value) {
+  if (!value) return [];
+  const out = new Set();
+  const push = (v) => {
+    if (!v) return;
+    if (typeof v === 'string') {
+      const match = v.match(/[\w.+-]+@[\w-]+\.[\w.-]+/g);
+      if (match) for (const m of match) out.add(m.toLowerCase());
+    } else if (typeof v === 'object') {
+      if (typeof v.emailAddress === 'string') out.add(v.emailAddress.toLowerCase());
+    }
+  };
+  if (Array.isArray(value)) for (const v of value) push(v); else push(value);
+  return [...out];
+}
+
 // ── Search (JQL) ─────────────────────────────────────────────────────────────
 
 export async function searchIssues(jql, params = {}) {
