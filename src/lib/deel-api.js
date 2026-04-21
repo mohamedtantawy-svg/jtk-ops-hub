@@ -496,6 +496,61 @@ async function fetchAllRedlinesForStatus(status) {
   return all;
 }
 
+// Fill in employee / org / country fields for redlines whose payload is thin
+// (common for contract redlines that reference a contract by OID only).
+// Hits /rest/v2/contracts/{id}, caches for an hour, capped concurrency.
+const REDLINE_CONTRACT_CACHE = new Map();
+const REDLINE_CONTRACT_TTL_MS = 60 * 60 * 1000;
+const REDLINE_CONTRACT_CONCURRENCY = 5;
+
+async function fetchContractDetailForRedline(contractId) {
+  if (!contractId) return null;
+  const key = String(contractId);
+  const hit = REDLINE_CONTRACT_CACHE.get(key);
+  if (hit && Date.now() - hit.ts < REDLINE_CONTRACT_TTL_MS) return hit.detail;
+  try {
+    const res = await deelFetch(`/rest/v2/contracts/${encodeURIComponent(key)}`);
+    const c = res?.data || res || {};
+    const detail = {
+      employeeName: c.worker?.full_name || c.worker?.name || c.employee?.name || c.employeeLegalName || '',
+      country:      c.country || c.employment?.country || c.employmentCountry || '',
+      orgName:      c.client?.legal_name || c.client?.name || c.organization?.name || c.client_legal_entity?.name || '',
+      contractOid:  c.id || c.oid || key,
+    };
+    REDLINE_CONTRACT_CACHE.set(key, { detail, ts: Date.now() });
+    return detail;
+  } catch (e) {
+    return hit?.detail || null;
+  }
+}
+
+async function enrichRedlines(items) {
+  const needEnrich = items.filter(i =>
+    i.contractOid && (!i.employeeName || !i.countryCode || !i.orgName)
+  );
+  if (needEnrich.length === 0) return items;
+
+  const resolved = new Map();
+  const ids = [...new Set(needEnrich.map(i => i.contractOid))];
+  for (let i = 0; i < ids.length; i += REDLINE_CONTRACT_CONCURRENCY) {
+    const batch = ids.slice(i, i + REDLINE_CONTRACT_CONCURRENCY);
+    const results = await Promise.all(batch.map(fetchContractDetailForRedline));
+    batch.forEach((id, idx) => { if (results[idx]) resolved.set(id, results[idx]); });
+  }
+
+  return items.map(item => {
+    if (!item.contractOid) return item;
+    const detail = resolved.get(item.contractOid);
+    if (!detail) return item;
+    return {
+      ...item,
+      employeeName: item.employeeName || detail.employeeName || '',
+      countryCode:  item.countryCode  || detail.country      || '',
+      orgName:      item.orgName      || detail.orgName      || '',
+    };
+  });
+}
+
 /**
  * Fetches redline requests from the admin API.
  * Uses /admin/eor-experience/redline-requests — same as admin.deel.network.
@@ -529,23 +584,55 @@ export async function listRedlineRequests(params = {}) {
     // like `workbenchProcess.redlineExecutionTask` are unreliable because
     // review-bucket redlines pre-create an execution task in a pending state.
     const isExecution = /HRXToExecute/i.test(r.__status || '');
-    // Contract redlines (type=contractRedline) carry a contract sub-object
-    // with the employee's name + oid; template redlines (type=templateRedline)
-    // don't — we fall back to the creating org's name.
-    const contract = r.contract || r.relatedContract || null;
+    // Derive redline type when the raw field isn't populated: presence of
+    // templateToRefineId / template means it's a template redline; otherwise
+    // it targets a specific contract.
+    const derivedType = r.type
+                     || (r.templateToRefineId || r.template ? 'templateRedline' : 'contractRedline');
+    // Contract redlines carry a contract sub-object with the employee's name,
+    // country, and OID; template redlines don't — we fall back to the
+    // creating org's name + template country.
+    const contract = r.contract || r.targetContract || r.relatedContract || {};
+    const wbReview = r.workbenchProcess?.redlineLegalReviewTask?.opsWorkbenchTask;
+    const wbExec   = r.workbenchProcess?.redlineExecutionTask?.opsWorkbenchTask;
+    const wbTask   = wbReview || wbExec || {};
     return {
       id:                r.id || '',
-      type:              r.type || '',                                  // templateRedline | contractRedline
+      type:              derivedType,
       status:            r.status || '',                                // IN_REVIEW etc.
       createdAt:         r.createdAt || '',
       updatedAt:         r.updatedAt || '',
-      orgName:           r.creatorOrganization?.name || '',
-      orgId:             r.creatorOrganization?.id || '',
-      countryCode:       r.template?.countryCode || contract?.employmentCountry || '',
-      countries:         r.template?.countries || [],                   // array of country names
+      // Organization — creatorOrganization is set for template redlines;
+      // contract redlines expose it via the contract or workbench task.
+      orgName:           r.creatorOrganization?.name
+                      || contract.clientLegalEntityName
+                      || contract.organizationName
+                      || contract.client?.name
+                      || wbTask.organization?.name
+                      || wbTask.organizationName
+                      || '',
+      orgId:             r.creatorOrganization?.id
+                      || contract.organizationId
+                      || wbTask.organizationId
+                      || null,
+      // Country — check every sensible path before giving up.
+      countryCode:       r.template?.countryCode
+                      || contract.employmentCountry
+                      || contract.country
+                      || wbTask.country
+                      || (r.template?.countries?.[0])
+                      || '',
+      countries:         r.template?.countries || [],
       templateName:      r.template?.name || '',
-      employeeName:      contract?.employeeLegalName || '',
-      contractOid:       contract?.contractOid || '',
+      // Employee — only contract redlines have one.
+      employeeName:      contract.employeeLegalName
+                      || contract.employee?.name
+                      || (derivedType === 'contractRedline' ? wbTask.name : '')
+                      || '',
+      contractOid:       contract.contractOid
+                      || contract.oid
+                      || wbTask.contractOid
+                      || '',
       isExecution,
       // Items — the actual redline changes requested
       changes:           (r.items || []).map(item => ({
@@ -555,18 +642,10 @@ export async function listRedlineRequests(params = {}) {
       })),
       changesCount:      (r.items || []).length,
       // Workbench task info — whichever sub-task is populated
-      workbenchTaskId:   r.workbenchProcess?.redlineLegalReviewTask?.opsWorkbenchTask?.id
-                      || r.workbenchProcess?.redlineExecutionTask?.opsWorkbenchTask?.id
-                      || '',
-      workbenchStatus:   r.workbenchProcess?.redlineLegalReviewTask?.opsWorkbenchTask?.status
-                      || r.workbenchProcess?.redlineExecutionTask?.opsWorkbenchTask?.status
-                      || '',
-      customStatusName:  r.workbenchProcess?.redlineLegalReviewTask?.opsWorkbenchTask?.customStatusName
-                      || r.workbenchProcess?.redlineExecutionTask?.opsWorkbenchTask?.customStatusName
-                      || '',
-      assigneeId:        r.workbenchProcess?.redlineLegalReviewTask?.opsWorkbenchTask?.assigneeId
-                      || r.workbenchProcess?.redlineExecutionTask?.opsWorkbenchTask?.assigneeId
-                      || null,
+      workbenchTaskId:   wbTask.id || '',
+      workbenchStatus:   wbTask.status || '',
+      customStatusName:  wbTask.customStatusName || '',
+      assigneeId:        wbTask.assigneeId || null,
       // Participants
       participants:      (r.participants || []).map(p => ({
         name:            p.name || '',
@@ -576,7 +655,8 @@ export async function listRedlineRequests(params = {}) {
     };
   });
 
-  return { items, total: items.length, cursor: null };
+  const enriched = await enrichRedlines(items);
+  return { items: enriched, total: enriched.length, cursor: null };
 }
 
 // ── Amendment Requests (Admin API) ──────────────────────────────────────────
