@@ -23,13 +23,16 @@ const DEEL_AMENDMENT_URL = (id, currentStatus) => {
 };
 
 // Admin redline page. Deep-links into the side-pane for a specific redline.
-// Requires both `redlineType` (templateRedline | contractRedline) and
-// `requestId` — omitting redlineType opens an empty side-pane.
+// The admin UI REQUIRES both `redlineType` (templateRedline | contractRedline)
+// and `requestId` — omitting either opens an empty side-pane.
+// Param order mirrors the admin UI's own share URL (redlineType first).
 const DEEL_REDLINE_URL = (id, isExecution, redlineType) => {
   if (!id) return '';
   const sub = isExecution ? 'preparingDocuments.HRXToExecute' : 'preparingDocuments.legalReview';
-  const rt = redlineType ? `&redlineType=${encodeURIComponent(redlineType)}` : '';
-  return `${DEEL_ADMIN_BASE}/eor/change-requests?requestType=redlines${rt}&requestId=${encodeURIComponent(id)}&sortBy=createdAt&sortOrder=desc&status=preparingDocuments&subStatus=${encodeURIComponent(sub)}`;
+  // Default to templateRedline when we couldn't infer the type — better to
+  // open the wrong template than a blank page.
+  const rt = redlineType || 'templateRedline';
+  return `${DEEL_ADMIN_BASE}/eor/change-requests?redlineType=${encodeURIComponent(rt)}&requestId=${encodeURIComponent(id)}&requestType=redlines&sortBy=createdAt&sortOrder=desc&status=preparingDocuments&subStatus=${encodeURIComponent(sub)}`;
 };
 
 // SLA windows (per Ops policy):
@@ -276,10 +279,12 @@ export function normalizeRedlines(items = []) {
   return items.map(r => {
     const typeLabel = r.type === 'templateRedline' ? 'Template' : r.type === 'contractRedline' ? 'Contract' : r.type || '';
 
-    // Subject fallback chain — template redlines carry creatorOrganization,
-    // contract redlines carry an employee name via `contract`. When neither
-    // is present, show the template name or a short request ID suffix so the
-    // row is never an anonymous "Unknown".
+    // Subject — the row's lead identifier, shown in the Employee column.
+    //   - Contract redlines: the employee's legal name (enriched from
+    //     /rest/v2/contracts in the BE if missing from the raw payload).
+    //   - Template redlines: the creating organization's name.
+    //   - Else: fall back to template name, then a truncated redline ID so
+    //     the row is never anonymous.
     const subject = r.employeeName
                  || r.orgName
                  || r.templateName
