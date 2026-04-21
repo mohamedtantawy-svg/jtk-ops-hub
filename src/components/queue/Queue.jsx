@@ -91,6 +91,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const [search,setSearch]=useState('');
   const [fSla,setFSla]=useState(saved?.fSla||null); // null | 'ok' | 'at_risk' | 'breached'
   const [onboardingSubTab,setOnboardingSubTab]=useState('action'); // 'action' | 'paused'
+  const [amendmentSubTab,setAmendmentSubTab]=useState('action'); // 'action' | 'paused'
   const [sort,setSort]=useState(saved?.sort||'sla'); // Item #5: Default SLA sort oldest→newest
   const [checkedIds,setCheckedIds]=useState(new Set());
   const [recentIds,setRecentIds]=useState([]);
@@ -164,6 +165,8 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const pausedOnboardingRows = useMemo(() => scopePausedOnboarding(pausedOnboardingRowsAll, user), [pausedOnboardingRowsAll, user]);
   const offboardingRows      = useMemo(() => scopeOffboardingCases(offboardingRowsAll, user),      [offboardingRowsAll, user]);
   const amendmentRows        = useMemo(() => scopeAmendmentRequests(amendmentRowsAll, user),       [amendmentRowsAll, user]);
+  const amendmentActionRows  = useMemo(() => amendmentRows.filter(r => !r.isPaused),               [amendmentRows]);
+  const amendmentPausedRows  = useMemo(() => amendmentRows.filter(r =>  r.isPaused),               [amendmentRows]);
   const redlineRows          = useMemo(() => scopeRedlineRequests(redlineRowsAll, user),           [redlineRowsAll, user]);
   const workbenchRows        = useMemo(() => scopeWorkbenchTasks(workbenchRowsAll, user),          [workbenchRowsAll, user]);
   // Combined agent-scoped source rows — used for header "open" count and the
@@ -351,10 +354,21 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       // Termination = 14d SLA, Resignation = 5d SLA (matches SourceTable.offboardingSlaThreshold)
       return countAgeSLA(offboardingRows, r => (r.typeLabel || '').startsWith('Resignation') ? 5 : 14);
     }
-    if (workSource === 'amendments' || workSource === 'redlines') {
+    if (workSource === 'amendments') {
+      // Amendments use slaRemaining (seconds): breach at <=0, at-risk at <6h.
+      // Rows are pre-split by isPaused via the sub-tab.
+      const rows = amendmentSubTab === 'paused' ? amendmentPausedRows : amendmentActionRows;
+      let atRisk = 0, breached = 0;
+      for (const r of rows) {
+        if (typeof r.slaRemaining !== 'number') continue;
+        if (r.slaRemaining <= 0) breached++;
+        else if (r.slaRemaining < 21600) atRisk++; // < 6h remaining
+      }
+      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: rows.length - atRisk - breached };
+    }
+    if (workSource === 'redlines') {
       // Generic age thresholds (matches SourceTable slaBadge fallback): 7d breach, 3d at-risk
-      const rows = workSource === 'amendments' ? amendmentRows : redlineRows;
-      return countAgeSLA(rows, () => 7); // breach at 7d; at_risk at 4.9d (70%)
+      return countAgeSLA(redlineRows, () => 7); // breach at 7d; at_risk at 4.9d (70%)
     }
     if (workSource === 'workbench') {
       // Workbench rows may carry slaRemaining (seconds) + slaBreachStatus from upstream.
@@ -386,13 +400,13 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     const atRisk=slaBase.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;}).length;
     const breached=slaBase.filter(t=>{const s=slaInfo(t);return s&&s.breach;}).length;
     return{atRiskCount:atRisk,breachedCount:breached,onTrackCount:slaBase.length-atRisk-breached};
-  },[workSource, onboardingSubTab, visPreSla, onboardingRows, pausedOnboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows]);
+  },[workSource, onboardingSubTab, amendmentSubTab, visPreSla, onboardingRows, pausedOnboardingRows, offboardingRows, amendmentRows, amendmentActionRows, amendmentPausedRows, redlineRows, workbenchRows]);
 
   // ── View-aware header counts: reflect active tab (fTool / workSource) ──
   const headerCounts = useMemo(() => {
     if (workSource === 'onboarding') return { open: onboardingSubTab === 'paused' ? pausedOnboardingRows.length : onboardingRows.length, paused: 0, resolved: 0 };
     if (workSource === 'offboarding') return { open: offboardingRows.length, paused: 0, resolved: 0 };
-    if (workSource === 'amendments') return { open: amendmentRows.length, paused: 0, resolved: 0 };
+    if (workSource === 'amendments') return { open: amendmentSubTab === 'paused' ? amendmentPausedRows.length : amendmentActionRows.length, paused: 0, resolved: 0 };
     if (workSource === 'redlines') return { open: redlineRows.length, paused: 0, resolved: 0 };
     if (workSource === 'workbench') return { open: workbenchRows.length, paused: 0, resolved: 0 };
     // Queue view (ZD/JR) — use filtered baseVis when fTool is set
@@ -403,7 +417,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       paused: base.filter(t => t.status === 'waiting').length,
       resolved: base.filter(t => t.status === 'resolved').length,
     };
-  }, [workSource, fTool, baseVis, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, allSourceRows]);
+  }, [workSource, fTool, baseVis, onboardingRows, offboardingRows, amendmentRows, amendmentActionRows, amendmentPausedRows, amendmentSubTab, redlineRows, workbenchRows, allSourceRows]);
   const activeFilterCount=[fTool,fStatus.length>0?true:null,fCtry.length>0?true:null,fSla||null,fUnassigned||null].filter(Boolean).length;
 
   // Persist filters to localStorage
@@ -734,7 +748,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
               const bump = r => { if (r?.country) counts.set(r.country, (counts.get(r.country) || 0) + 1); };
               if (workSource === 'onboarding') (onboardingSubTab === 'paused' ? pausedOnboardingRows : onboardingRows).forEach(bump);
               else if (workSource === 'offboarding') offboardingRows.forEach(bump);
-              else if (workSource === 'amendments') amendmentRows.forEach(bump);
+              else if (workSource === 'amendments') (amendmentSubTab === 'paused' ? amendmentPausedRows : amendmentActionRows).forEach(bump);
               else if (workSource === 'redlines') redlineRows.forEach(bump);
               else if (workSource === 'workbench') workbenchRows.forEach(bump);
               else baseVis.forEach(bump);
@@ -856,17 +870,58 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       )}
       {workSource==='amendments'&&(
         <ErrorBoundary>
-        <SourceTable
-          rows={fCtry.length?amendmentRows.filter(r=>fCtry.includes(r.country)):amendmentRows}
-          loading={changeRequestData.loading}
-          error={changeRequestData.error}
-          onRefresh={changeRequestData.refresh}
-          emptyIcon="bi-pencil-square"
-          emptyLabel="No actionable amendments"
-          emptySubLabel="All amendments are handled"
-          sortDefault="oldest"
-          currentUser={user}
-        />
+        <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
+          {/* Sub-tabs: Action Needed / Paused */}
+          <div style={{display:'flex',gap:6,padding:'10px 24px 0',background:'white'}}>
+            {[
+              {id:'action',label:'Action Needed',count:amendmentActionRows.length,color:'#ed8d00'},
+              {id:'paused',label:'Paused',count:amendmentPausedRows.length,color:'#6b6560'},
+            ].map(t=>(
+              <button key={t.id} onClick={()=>setAmendmentSubTab(t.id)} style={{
+                display:'inline-flex',alignItems:'center',gap:6,padding:'7px 16px',borderRadius:128,
+                border:amendmentSubTab===t.id?`1.5px solid ${t.color}`:'1px solid #e8e8e8',
+                background:amendmentSubTab===t.id?`${t.color}10`:'white',
+                color:amendmentSubTab===t.id?t.color:'#616161',
+                fontSize:12,fontWeight:amendmentSubTab===t.id?700:500,cursor:'pointer',transition:'all .15s',
+              }}>
+                {t.label}
+                <span style={{padding:'1px 7px',borderRadius:128,fontSize:10,fontWeight:700,
+                  background:amendmentSubTab===t.id?`${t.color}20`:'#f2f2f2',
+                  color:amendmentSubTab===t.id?t.color:'#9e9e9e',
+                }}>{t.count}</span>
+              </button>
+            ))}
+          </div>
+          {amendmentSubTab==='action'&&(
+            <SourceTable
+              rows={fCtry.length?amendmentActionRows.filter(r=>fCtry.includes(r.country)):amendmentActionRows}
+              loading={changeRequestData.loading}
+              error={changeRequestData.error}
+              onRefresh={changeRequestData.refresh}
+              emptyIcon="bi-pencil-square"
+              emptyLabel="No action-needed amendments"
+              emptySubLabel="All amendments are handled"
+              sortDefault="oldest"
+              showClient
+              currentUser={user}
+            />
+          )}
+          {amendmentSubTab==='paused'&&(
+            <SourceTable
+              rows={fCtry.length?amendmentPausedRows.filter(r=>fCtry.includes(r.country)):amendmentPausedRows}
+              loading={changeRequestData.loading}
+              error={changeRequestData.error}
+              onRefresh={changeRequestData.refresh}
+              emptyIcon="bi-pause-circle"
+              emptyLabel="No paused amendments"
+              emptySubLabel="Nothing awaiting Legal / Mobility / HRX hold"
+              sortDefault="oldest"
+              showPausedSla
+              showClient
+              currentUser={user}
+            />
+          )}
+        </div>
         </ErrorBoundary>
       )}
       {workSource==='redlines'&&(
