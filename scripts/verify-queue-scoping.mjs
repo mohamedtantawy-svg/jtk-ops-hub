@@ -8,6 +8,7 @@
 import {
   filterByAssignee,
   filterByCountry,
+  filterByCountryOrAssignee,
   getVisibleEmails,
   getVisibleCountries,
   scopeZendeskTickets,
@@ -170,24 +171,79 @@ assert('TL Jose country filter matches his country set', tlCountryIds, countryMa
 assert('Agent Alexandra country filter matches her country set', agentCountryIds, countryMatchFor(agentCountries));
 
 // ── 5. Named wrappers all work ─────────────────────────────────────────────
+// After the 2026-04-21 rewrite: Onboarding / Paused Onboarding / Offboarding /
+// Amendments / Redlines all route through filterByCountryOrAssignee (country
+// owner chain OR assignee chain). ZD / Jira / Workbench stay assignee-only.
 console.log('\n── Named wrapper consistency ──');
-assert('scopeZendeskTickets delegates to filterByAssignee',       scopeZendeskTickets(sampleItems, tlJose).length, filterByAssignee(sampleItems, tlJose).length);
-assert('scopeOffboardingCases delegates to filterByAssignee',     scopeOffboardingCases(sampleItems, tlJose).length, filterByAssignee(sampleItems, tlJose).length);
-assert('scopeWorkbenchTasks delegates to filterByAssignee',       scopeWorkbenchTasks(sampleItems, tlJose).length, filterByAssignee(sampleItems, tlJose).length);
-assert('scopeOnboardingPeople delegates to filterByCountry',      scopeOnboardingPeople(countryItems, tlJose).length, filterByCountry(countryItems, tlJose).length);
-assert('scopeAmendmentRequests delegates to filterByCountry',     scopeAmendmentRequests(countryItems, tlJose).length, filterByCountry(countryItems, tlJose).length);
-assert('scopeRedlineRequests delegates to filterByCountry',       scopeRedlineRequests(countryItems, tlJose).length, filterByCountry(countryItems, tlJose).length);
+assert('scopeZendeskTickets delegates to filterByAssignee',           scopeZendeskTickets(sampleItems, tlJose).length,    filterByAssignee(sampleItems, tlJose).length);
+assert('scopeWorkbenchTasks delegates to filterByAssignee',           scopeWorkbenchTasks(sampleItems, tlJose).length,    filterByAssignee(sampleItems, tlJose).length);
+assert('scopeOffboardingCases delegates to filterByCountryOrAssignee', scopeOffboardingCases(sampleItems, tlJose).length, filterByCountryOrAssignee(sampleItems, tlJose).length);
+assert('scopeOnboardingPeople delegates to filterByCountryOrAssignee', scopeOnboardingPeople(countryItems, tlJose).length, filterByCountryOrAssignee(countryItems, tlJose).length);
+assert('scopeAmendmentRequests delegates to filterByCountryOrAssignee', scopeAmendmentRequests(countryItems, tlJose).length, filterByCountryOrAssignee(countryItems, tlJose).length);
+assert('scopeRedlineRequests delegates to filterByCountryOrAssignee',  scopeRedlineRequests(countryItems, tlJose).length, filterByCountryOrAssignee(countryItems, tlJose).length);
 
-// ── 6. Critical spec: agents see their tasks only on ZD/JR/Terminations ────
-console.log('\n── Agent spec — strict assignee-only for ZD/JR/Terminations ──');
-// Agent's assignee-scoped queues never include unassigned rows, even when
-// country matches. This was a pre-existing bug in Offboarding.
-const agentOffb = scopeOffboardingCases([
-  { id: '1', assigneeEmail: 'alexandra.apsychou@deel.com', country: 'ES' },
-  { id: '2', assigneeEmail: null, country: 'ES' }, // unassigned in own country — must NOT be visible
-  { id: '3', assigneeEmail: 'someone.else@deel.com', country: 'ES' },
+// ── 6. Country-OR-assignee union semantics ─────────────────────────────────
+// Core spec: a row is visible if EITHER path matches, and the union is
+// strictly additive (no row visible under a single-mode filter disappears
+// when we switch to combined).
+console.log('\n── filterByCountryOrAssignee union semantics ──');
+
+// 6a. Union ≥ country-only and ≥ assignee-only, for every role.
+for (const [label, user] of [
+  ['admin', admin], ['RM Kristina', rmKristina], ['TL Jose', tlJose], ['agent Alexandra', agentAlex],
+]) {
+  const items = [
+    { id: 'c1', assigneeEmail: 'someone@deel.com', country: 'ES' },
+    { id: 'c2', assigneeEmail: 'alexandra.apsychou@deel.com', country: 'NO_SUCH_COUNTRY' }, // assignee path only
+    { id: 'c3', assigneeEmail: null, country: 'ES' },                                        // country path only
+    { id: 'c4', assigneeEmail: 'alexandra.apsychou@deel.com', country: 'ES' },               // both paths
+    { id: 'c5', assigneeEmail: 'unrelated@deel.com', country: 'NO_SUCH_COUNTRY' },           // neither
+  ];
+  const countryOnly  = filterByCountry(items, user).length;
+  const assigneeOnly = filterByAssignee(items, user).length;
+  const combined     = filterByCountryOrAssignee(items, user).length;
+  assert(`${label}: combined ≥ country-only`,  combined >= countryOnly,  true);
+  assert(`${label}: combined ≥ assignee-only`, combined >= assigneeOnly, true);
+}
+
+// 6b. Agent sees self-assigned items AND items in countries they own — the
+//     previous strict "no country fallback" behavior is gone by design.
+const agentCombined = scopeOffboardingCases([
+  { id: '1', assigneeEmail: 'alexandra.apsychou@deel.com', country: 'ES' },   // assigned to her
+  { id: '2', assigneeEmail: null, country: 'ES' },                            // unassigned in ES
+  { id: '3', assigneeEmail: 'someone.else@deel.com', country: 'ES' },         // assigned to someone else, in ES
+  { id: '4', assigneeEmail: null, country: 'NO_SUCH_COUNTRY' },               // nothing matches
+  { id: '5', assigneeEmail: 'alexandra.apsychou@deel.com', country: null },   // assigned to her, no country
 ], agentAlex).map(i => i.id).sort();
-assert('Agent sees only items assigned to them on Offboarding (no country fallback)', agentOffb, ['1']);
+const agentOwnsES = agentCountries.has('ES');
+const expectedAgentCombined = agentOwnsES
+  ? ['1', '2', '3', '5'].sort() // assignee + country(ES) paths both surface
+  : ['1', '5'].sort();           // only assignee path
+assert(`Agent on country-OR-assignee: ${agentOwnsES ? 'owns ES → sees ES + assigned' : 'not ES owner → assigned only'}`, agentCombined, expectedAgentCombined);
+
+// 6c. Dedup: an item that matches BOTH paths is returned once.
+const dedupeItems = [
+  { id: 'dup', assigneeEmail: tlJose.email, country: [...tlCountries][0] || 'ES' },
+];
+assert('combined filter dedupes items matching both paths', filterByCountryOrAssignee(dedupeItems, tlJose).length, 1);
+
+// 6d. Items with neither country nor assignee match → invisible (except admin).
+const noMatchItems = [{ id: 'x', assigneeEmail: 'unrelated@deel.com', country: 'NO_SUCH_COUNTRY' }];
+assert('TL sees no items that match neither path',      filterByCountryOrAssignee(noMatchItems, tlJose).length, 0);
+assert('RM sees no items that match neither path',      filterByCountryOrAssignee(noMatchItems, rmKristina).length, 0);
+assert('agent sees no items that match neither path',   filterByCountryOrAssignee(noMatchItems, agentAlex).length, 0);
+assert('admin sees ALL items via combined (early exit)', filterByCountryOrAssignee(noMatchItems, admin).length, 1);
+
+// ── 7. Assignee-only queues (ZD/Jira/Workbench) — unchanged spec ───────────
+console.log('\n── Assignee-only queues keep strict assignee spec ──');
+// Agent still sees only self-assigned items on ZD/Jira/Workbench — no country
+// fallback for these queues per spec ("visibility based on assignee").
+const agentWorkbench = scopeWorkbenchTasks([
+  { id: 'w1', assigneeEmail: 'alexandra.apsychou@deel.com', country: 'ES' },
+  { id: 'w2', assigneeEmail: null, country: 'ES' }, // unassigned in own country — agents DON'T see
+  { id: 'w3', assigneeEmail: 'someone.else@deel.com', country: 'ES' },
+], agentAlex).map(i => i.id).sort();
+assert('Agent sees only own items on Workbench (no country fallback)', agentWorkbench, ['w1']);
 
 // ── Summary ────────────────────────────────────────────────────────────────
 console.log(`\n──────────────────────────────`);

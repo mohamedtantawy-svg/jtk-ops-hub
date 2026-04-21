@@ -90,8 +90,10 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const [showMeetingInvites,setShowMeetingInvites]=useState(false);
   const [search,setSearch]=useState('');
   const [fSla,setFSla]=useState(saved?.fSla||null); // null | 'ok' | 'at_risk' | 'breached'
-  const [onboardingSubTab,setOnboardingSubTab]=useState('action'); // 'action' | 'paused'
-  const [amendmentSubTab,setAmendmentSubTab]=useState('action'); // 'action' | 'paused'
+  // Sub-tab state removed 2026-04-21 — Action Needed / Paused are now merged
+  // into a single list per source. SourceTable renders the paused-SLA badge
+  // per row when `row.pausedAt` is set (and `showPausedSla` is passed), so
+  // the visual distinction is preserved without a filter step.
   const [sort,setSort]=useState(saved?.sort||'sla'); // Item #5: Default SLA sort oldest→newest
   const [checkedIds,setCheckedIds]=useState(new Set());
   const [recentIds,setRecentIds]=useState([]);
@@ -161,12 +163,26 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   // agent) and the hierarchy in src/data/members.js + ownership map in
   // src/data/countryOwners.js — the BE uses the exact same functions so FE
   // and BE stay byte-identical.
-  const onboardingRows       = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user),       [onboardingRowsAll, user]);
+  const onboardingActionRows = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user),       [onboardingRowsAll, user]);
   const pausedOnboardingRows = useMemo(() => scopePausedOnboarding(pausedOnboardingRowsAll, user), [pausedOnboardingRowsAll, user]);
+  // Merged Onboarding set — Action Needed + Paused shown in a single list
+  // (sub-tabs removed 2026-04-21). The two upstream feeds are distinct so
+  // dedupe by id just in case a row ever appears in both (shouldn't happen —
+  // they're sourced from different Deel endpoints).
+  const onboardingRows = useMemo(() => {
+    const seen = new Set();
+    const merged = [];
+    for (const r of [...onboardingActionRows, ...pausedOnboardingRows]) {
+      const k = r?.id != null ? String(r.id) : r;
+      if (seen.has(k)) continue;
+      seen.add(k); merged.push(r);
+    }
+    return merged;
+  }, [onboardingActionRows, pausedOnboardingRows]);
   const offboardingRows      = useMemo(() => scopeOffboardingCases(offboardingRowsAll, user),      [offboardingRowsAll, user]);
+  // Amendments no longer split by isPaused — merged into a single list. The
+  // per-row PausedSlaBadge (SourceTable) still shows when r.pausedAt is set.
   const amendmentRows        = useMemo(() => scopeAmendmentRequests(amendmentRowsAll, user),       [amendmentRowsAll, user]);
-  const amendmentActionRows  = useMemo(() => amendmentRows.filter(r => !r.isPaused),               [amendmentRows]);
-  const amendmentPausedRows  = useMemo(() => amendmentRows.filter(r =>  r.isPaused),               [amendmentRows]);
   const redlineRows          = useMemo(() => scopeRedlineRequests(redlineRowsAll, user),           [redlineRowsAll, user]);
   const workbenchRows        = useMemo(() => scopeWorkbenchTasks(workbenchRowsAll, user),          [workbenchRowsAll, user]);
   // Combined agent-scoped source rows — used for header "open" count and the
@@ -311,20 +327,19 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     // Determine the base set depending on active view
     let slaBase;
     if (workSource === 'onboarding') {
-      // Onboarding uses age-based SLA from createdAt
-      const rows = onboardingSubTab === 'paused' ? pausedOnboardingRows : onboardingRows;
-      const isPaused = onboardingSubTab === 'paused';
+      // Merged view (2026-04-21): Action Needed uses age-based SLA from
+      // createdAt; Paused rows use a 48h countdown from pausedAt. Classify
+      // per-row by presence of pausedAt so the header counts match what the
+      // SourceTable renders in each row's SLA cell.
       let atRisk = 0, breached = 0;
-      for (const r of rows) {
-        if (isPaused) {
-          // 48h countdown from pausedAt
-          let pausedMs = r.pausedAt ? Date.now() - new Date(r.pausedAt).getTime() : 0;
+      for (const r of onboardingRows) {
+        if (r.pausedAt) {
+          let pausedMs = Date.now() - new Date(r.pausedAt).getTime();
           if (isNaN(pausedMs)) pausedMs = 0;
           const remaining = 48 * 60 * 60 * 1000 - pausedMs;
           if (remaining <= 0) breached++;
           else if (remaining < 24 * 60 * 60 * 1000) atRisk++;
         } else {
-          // Age-based: createdAt
           let ageMs = r.createdAt ? Date.now() - new Date(r.createdAt).getTime() : 0;
           if (isNaN(ageMs)) ageMs = 0;
           const days = ageMs / (1000 * 60 * 60 * 24);
@@ -332,7 +347,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           else if (days >= 3) atRisk++;
         }
       }
-      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: rows.length - atRisk - breached };
+      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: onboardingRows.length - atRisk - breached };
     }
     // ── Source-panel age-based SLA ──
     // Mirrors SourceTable's slaBadge() + offboardingSlaThreshold() so the
@@ -356,15 +371,16 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     }
     if (workSource === 'amendments') {
       // Amendments use slaRemaining (seconds): breach at <=0, at-risk at <6h.
-      // Rows are pre-split by isPaused via the sub-tab.
-      const rows = amendmentSubTab === 'paused' ? amendmentPausedRows : amendmentActionRows;
+      // Merged view (2026-04-21): sub-tabs removed, one list covers both
+      // action and paused rows. SLA formula is identical regardless of the
+      // isPaused flag.
       let atRisk = 0, breached = 0;
-      for (const r of rows) {
+      for (const r of amendmentRows) {
         if (typeof r.slaRemaining !== 'number') continue;
         if (r.slaRemaining <= 0) breached++;
         else if (r.slaRemaining < 21600) atRisk++; // < 6h remaining
       }
-      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: rows.length - atRisk - breached };
+      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: amendmentRows.length - atRisk - breached };
     }
     if (workSource === 'redlines') {
       // Redlines use slaRemaining (seconds): breach at <=0, at-risk at <6h.
@@ -406,13 +422,13 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     const atRisk=slaBase.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;}).length;
     const breached=slaBase.filter(t=>{const s=slaInfo(t);return s&&s.breach;}).length;
     return{atRiskCount:atRisk,breachedCount:breached,onTrackCount:slaBase.length-atRisk-breached};
-  },[workSource, onboardingSubTab, amendmentSubTab, visPreSla, onboardingRows, pausedOnboardingRows, offboardingRows, amendmentRows, amendmentActionRows, amendmentPausedRows, redlineRows, workbenchRows]);
+  },[workSource, visPreSla, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows]);
 
   // ── View-aware header counts: reflect active tab (fTool / workSource) ──
   const headerCounts = useMemo(() => {
-    if (workSource === 'onboarding') return { open: onboardingSubTab === 'paused' ? pausedOnboardingRows.length : onboardingRows.length, paused: 0, resolved: 0 };
+    if (workSource === 'onboarding') return { open: onboardingRows.length, paused: 0, resolved: 0 };
     if (workSource === 'offboarding') return { open: offboardingRows.length, paused: 0, resolved: 0 };
-    if (workSource === 'amendments') return { open: amendmentSubTab === 'paused' ? amendmentPausedRows.length : amendmentActionRows.length, paused: 0, resolved: 0 };
+    if (workSource === 'amendments') return { open: amendmentRows.length, paused: 0, resolved: 0 };
     if (workSource === 'redlines') return { open: redlineRows.length, paused: 0, resolved: 0 };
     if (workSource === 'workbench') return { open: workbenchRows.length, paused: 0, resolved: 0 };
     // Queue view (ZD/JR) — use filtered baseVis when fTool is set
@@ -423,7 +439,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       paused: base.filter(t => t.status === 'waiting').length,
       resolved: base.filter(t => t.status === 'resolved').length,
     };
-  }, [workSource, fTool, baseVis, onboardingRows, offboardingRows, amendmentRows, amendmentActionRows, amendmentPausedRows, amendmentSubTab, redlineRows, workbenchRows, allSourceRows]);
+  }, [workSource, fTool, baseVis, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, allSourceRows]);
   const activeFilterCount=[fTool,fStatus.length>0?true:null,fCtry.length>0?true:null,fSla||null,fUnassigned||null].filter(Boolean).length;
 
   // Persist filters to localStorage
@@ -752,9 +768,9 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
               // Count tickets per country in the currently-active view (source panel or queue)
               const counts = new Map();
               const bump = r => { if (r?.country) counts.set(r.country, (counts.get(r.country) || 0) + 1); };
-              if (workSource === 'onboarding') (onboardingSubTab === 'paused' ? pausedOnboardingRows : onboardingRows).forEach(bump);
+              if (workSource === 'onboarding') onboardingRows.forEach(bump);
               else if (workSource === 'offboarding') offboardingRows.forEach(bump);
-              else if (workSource === 'amendments') (amendmentSubTab === 'paused' ? amendmentPausedRows : amendmentActionRows).forEach(bump);
+              else if (workSource === 'amendments') amendmentRows.forEach(bump);
               else if (workSource === 'redlines') redlineRows.forEach(bump);
               else if (workSource === 'workbench') workbenchRows.forEach(bump);
               else baseVis.forEach(bump);
@@ -798,60 +814,24 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       {/* Apply queue-level country filter to source panels */}
       {workSource==='onboarding'&&(
         <ErrorBoundary>
-        <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
-          {/* Sub-tabs: Action Needed / Paused */}
-          <div style={{display:'flex',gap:6,padding:'10px 24px 0',background:'white'}}>
-            {[
-              {id:'action',label:'Action Needed',count:onboardingRows.length,color:'#ed8d00'},
-              {id:'paused',label:'Paused',count:pausedOnboardingRows.length,color:'#6b6560'},
-            ].map(t=>(
-              <button key={t.id} onClick={()=>setOnboardingSubTab(t.id)} style={{
-                display:'inline-flex',alignItems:'center',gap:6,padding:'7px 16px',borderRadius:128,
-                border:onboardingSubTab===t.id?`1.5px solid ${t.color}`:'1px solid #e8e8e8',
-                background:onboardingSubTab===t.id?`${t.color}10`:'white',
-                color:onboardingSubTab===t.id?t.color:'#616161',
-                fontSize:12,fontWeight:onboardingSubTab===t.id?700:500,cursor:'pointer',transition:'all .15s',
-              }}>
-                {t.label}
-                <span style={{padding:'1px 7px',borderRadius:128,fontSize:10,fontWeight:700,
-                  background:onboardingSubTab===t.id?`${t.color}20`:'#f2f2f2',
-                  color:onboardingSubTab===t.id?t.color:'#9e9e9e',
-                }}>{t.count}</span>
-              </button>
-            ))}
-          </div>
-          {onboardingSubTab==='action'&&(
-            <SourceTable
-              rows={fCtry.length?onboardingRows.filter(r=>fCtry.includes(r.country)):onboardingRows}
-              loading={onboardingData.loading}
-              error={onboardingData.error}
-              onRefresh={onboardingData.refresh}
-              emptyIcon="bi-person-plus"
-              emptyLabel="No actionable onboarding tasks"
-              emptySubLabel="All onboarding tasks are handled"
-              sortDefault="startDate"
-              hideStatusPills
-              showClient
-              currentUser={user}
-            />
-          )}
-          {onboardingSubTab==='paused'&&(
-            <SourceTable
-              rows={fCtry.length?pausedOnboardingRows.filter(r=>fCtry.includes(r.country)):pausedOnboardingRows}
-              loading={pausedOnboardingData.loading}
-              error={pausedOnboardingData.error}
-              onRefresh={pausedOnboardingData.refresh}
-              emptyIcon="bi-pause-circle"
-              emptyLabel="No paused onboarding contracts"
-              emptySubLabel="All contracts are progressing"
-              sortDefault="oldest"
-              showPausedSla
-              hideStatusPills
-              showClient
-              currentUser={user}
-            />
-          )}
-        </div>
+        {/* Merged view (2026-04-21) — Action Needed + Paused shown in a
+            single table. Paused rows render the 48h countdown badge per-row
+            via showPausedSla+row.pausedAt; action rows fall through to the
+            age-based SLA badge. */}
+        <SourceTable
+          rows={fCtry.length?onboardingRows.filter(r=>fCtry.includes(r.country)):onboardingRows}
+          loading={onboardingData.loading || pausedOnboardingData.loading}
+          error={onboardingData.error || pausedOnboardingData.error}
+          onRefresh={()=>{ onboardingData.refresh&&onboardingData.refresh(); pausedOnboardingData.refresh&&pausedOnboardingData.refresh(); }}
+          emptyIcon="bi-person-plus"
+          emptyLabel="No onboarding tasks"
+          emptySubLabel="Nothing action-needed or paused"
+          sortDefault="oldest"
+          showPausedSla
+          hideStatusPills
+          showClient
+          currentUser={user}
+        />
         </ErrorBoundary>
       )}
       {workSource==='offboarding'&&(
@@ -876,66 +856,27 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       )}
       {workSource==='amendments'&&(
         <ErrorBoundary>
-        <div style={{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
-          {/* Sub-tabs: Action Needed / Paused */}
-          <div style={{display:'flex',gap:6,padding:'10px 24px 0',background:'white'}}>
-            {[
-              {id:'action',label:'Action Needed',count:amendmentActionRows.length,color:'#ed8d00'},
-              {id:'paused',label:'Paused',count:amendmentPausedRows.length,color:'#6b6560'},
-            ].map(t=>(
-              <button key={t.id} onClick={()=>setAmendmentSubTab(t.id)} style={{
-                display:'inline-flex',alignItems:'center',gap:6,padding:'7px 16px',borderRadius:128,
-                border:amendmentSubTab===t.id?`1.5px solid ${t.color}`:'1px solid #e8e8e8',
-                background:amendmentSubTab===t.id?`${t.color}10`:'white',
-                color:amendmentSubTab===t.id?t.color:'#616161',
-                fontSize:12,fontWeight:amendmentSubTab===t.id?700:500,cursor:'pointer',transition:'all .15s',
-              }}>
-                {t.label}
-                <span style={{padding:'1px 7px',borderRadius:128,fontSize:10,fontWeight:700,
-                  background:amendmentSubTab===t.id?`${t.color}20`:'#f2f2f2',
-                  color:amendmentSubTab===t.id?t.color:'#9e9e9e',
-                }}>{t.count}</span>
-              </button>
-            ))}
-          </div>
-          {amendmentSubTab==='action'&&(
-            <SourceTable
-              rows={fCtry.length?amendmentActionRows.filter(r=>fCtry.includes(r.country)):amendmentActionRows}
-              loading={changeRequestData.loading}
-              error={changeRequestData.error}
-              onRefresh={changeRequestData.refresh}
-              emptyIcon="bi-pencil-square"
-              emptyLabel="No action-needed amendments"
-              emptySubLabel="All amendments are handled"
-              sortDefault="oldest"
-              showClient
-              hideStatusPills
-              hideUpdated
-              dateField="createdAt"
-              dateLabel="Requested Date"
-              currentUser={user}
-            />
-          )}
-          {amendmentSubTab==='paused'&&(
-            <SourceTable
-              rows={fCtry.length?amendmentPausedRows.filter(r=>fCtry.includes(r.country)):amendmentPausedRows}
-              loading={changeRequestData.loading}
-              error={changeRequestData.error}
-              onRefresh={changeRequestData.refresh}
-              emptyIcon="bi-pause-circle"
-              emptyLabel="No paused amendments"
-              emptySubLabel="Nothing awaiting Legal / Mobility / HRX hold"
-              sortDefault="oldest"
-              showPausedSla
-              showClient
-              hideStatusPills
-              hideUpdated
-              dateField="createdAt"
-              dateLabel="Requested Date"
-              currentUser={user}
-            />
-          )}
-        </div>
+        {/* Merged view (2026-04-21) — Action Needed + Paused shown in a
+            single table. Paused rows (row.pausedAt set) render the 48h
+            countdown badge; action rows fall through to the slaRemaining
+            badge. No row is filtered out. */}
+        <SourceTable
+          rows={fCtry.length?amendmentRows.filter(r=>fCtry.includes(r.country)):amendmentRows}
+          loading={changeRequestData.loading}
+          error={changeRequestData.error}
+          onRefresh={changeRequestData.refresh}
+          emptyIcon="bi-pencil-square"
+          emptyLabel="No amendments"
+          emptySubLabel="Nothing action-needed or paused"
+          sortDefault="oldest"
+          showPausedSla
+          showClient
+          hideStatusPills
+          hideUpdated
+          dateField="createdAt"
+          dateLabel="Requested Date"
+          currentUser={user}
+        />
         </ErrorBoundary>
       )}
       {workSource==='redlines'&&(

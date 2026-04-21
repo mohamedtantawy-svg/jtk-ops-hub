@@ -6,26 +6,36 @@
 //
 // Visibility matrix
 // ──────────────────────────────────────────────────────────────────────────
-//                         Assignee-based         Country-based
-//                         (ZD, Jira,             (Onboarding,
-//                          Offboarding,           Paused Onboarding,
-//                          Workbench)             Amendments, Redlines)
+//                         Assignee-only          Country OR Assignee
+//                         (ZD, Jira,             (Onboarding, Paused
+//                          Workbench)             Onboarding, Offboarding,
+//                                                 Amendments, Redlines)
 // ──────────────────────────────────────────────────────────────────────────
 // admin                   all                    all
-// regional_manager        self + full subtree    union of owned countries
-//                         assignees + unassigned across self + full subtree
-//                         in subtree countries
-// team_lead               self + direct-report   union of owned countries
-//                         assignees + unassigned across self + direct reports
-//                         in team countries
-// agent                   assigned to self       own owned countries only
-//                         (no unassigned)
+// regional_manager        self + full subtree    UNION of assignee match
+//                         assignees + unassigned   (self + full subtree)
+//                         in subtree countries     AND country match (countries
+//                                                  owned by self + full subtree)
+// team_lead               self + direct-report   UNION of assignee match
+//                         assignees + unassigned   (self + direct reports)
+//                         in team countries        AND country match (countries
+//                                                  owned by self + direct reports)
+// agent                   assigned to self       self-assigned OR self-owned
+//                         (no unassigned)          country
 // ──────────────────────────────────────────────────────────────────────────
 //
 // Notes
-//   • "Unassigned" rows are visible to team_lead/regional_manager only when
-//     their country is in the user's country set. Agents never see
-//     unassigned rows — an unassigned termination doesn't belong to them.
+//   • Country-OR-assignee queues (Onboarding / Paused Onb / Offboarding /
+//     Amendments / Redlines) return the UNION of the two filters — a row is
+//     visible if EITHER the country path OR the assignee path matches. This
+//     is strictly additive vs. each individual filter so no row ever loses
+//     visibility relative to the legacy single-mode scoping.
+//   • "Unassigned" rows on assignee-only queues (ZD/Jira/Workbench) are
+//     visible to team_lead/regional_manager only when their country is in
+//     the user's country set. Agents never see unassigned rows on those
+//     queues. On country-OR-assignee queues the country path handles
+//     unassigned rows automatically (no primary assignee → visible iff
+//     country matches the user's country set).
 //   • getVisibleCountries derives from the ownership map (OWNER_COUNTRIES)
 //     and walks exactly the same hierarchy the assignee filter uses, so the
 //     two modes stay consistent: a TL "sees" the same set of people for both.
@@ -163,7 +173,7 @@ export function filterByAssignee(items, user, opts = {}) {
 }
 
 /**
- * Country-mode filter — Onboarding, Paused Onboarding, Amendments, Redlines.
+ * Country-mode filter — used internally by filterByCountryOrAssignee.
  *
  *   • An item is visible when its `country` is in the user's visible-country
  *     set. Admin sees everything.
@@ -186,16 +196,69 @@ export function filterByCountry(items, user) {
   });
 }
 
+/**
+ * Combined filter — Onboarding, Paused Onboarding, Offboarding, Amendments,
+ * Redlines.
+ *
+ * Union of filterByCountry AND filterByAssignee. A row is visible when EITHER
+ * path matches:
+ *
+ *   • Country path — item.country is in the user's visible-country set (self
+ *     + subtree for TL/RM). This is how country owners see their region's
+ *     work even when they are not the Jira/Deel assignee.
+ *   • Assignee path — item.assigneeEmail (or any secondaryAssigneeEmails) is
+ *     in the user's visible-email set. This is how an assignee's chain
+ *     (the assignee, their TL, their RM) sees the row, even when the row's
+ *     country is not one they own.
+ *
+ * The union is strictly additive vs. either filter individually — no row is
+ * hidden here that either filter would have surfaced on its own. Admins see
+ * everything (early return in each filter).
+ *
+ * @param {Array}  items
+ * @param {Object} user
+ */
+export function filterByCountryOrAssignee(items, user) {
+  if (!Array.isArray(items)) return [];
+  if (!user) return [];
+  if (isAdminUser(user)) return items;
+
+  // Dedupe by identity — an item matched by both paths must appear once.
+  // Prefer a stable id key; fall back to the object reference (Set membership
+  // by reference is fine here because filter() returns original refs).
+  const seen = new Set();
+  const visible = [];
+  for (const bucket of [filterByCountry(items, user), filterByAssignee(items, user)]) {
+    for (const item of bucket) {
+      const key = item && item.id != null ? `id:${item.id}` : item;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      visible.push(item);
+    }
+  }
+  return visible;
+}
+
 // ── Named wrappers so call sites read like the spec ────────────────────────
 // These are the only functions call sites should use. Swapping the rule for
 // a single queue later then means editing exactly one line here.
-
+//
+// Assignee-only (spec: "visibility based on assignee to the assignee, their
+// team leads and their regional managers"). Jira retains secondary-assignee
+// surfacing (Country Owner / Task Owner / Process Owner / Team Responsible
+// custom fields) so HRX managers continue to see tickets tagged to them via
+// any of those fields — removing that would strip visibility from country
+// owners currently relying on it.
 export const scopeZendeskTickets   = (items, user) => filterByAssignee(items, user);
 export const scopeJiraIssues       = (items, user) => filterByAssignee(items, user);
-export const scopeOffboardingCases = (items, user) => filterByAssignee(items, user);
 export const scopeWorkbenchTasks   = (items, user) => filterByAssignee(items, user);
 
-export const scopeOnboardingPeople      = (items, user) => filterByCountry(items, user);
-export const scopePausedOnboarding      = (items, user) => filterByCountry(items, user);
-export const scopeAmendmentRequests     = (items, user) => filterByCountry(items, user);
-export const scopeRedlineRequests       = (items, user) => filterByCountry(items, user);
+// Country-OR-assignee (spec: "visible to country owners, their team leads
+// and their regional manager OR if the task is assigned to them"). The
+// union guarantees strictly additive visibility — nobody who saw a row
+// under the previous single-mode scoping loses access.
+export const scopeOnboardingPeople      = (items, user) => filterByCountryOrAssignee(items, user);
+export const scopePausedOnboarding      = (items, user) => filterByCountryOrAssignee(items, user);
+export const scopeOffboardingCases      = (items, user) => filterByCountryOrAssignee(items, user);
+export const scopeAmendmentRequests     = (items, user) => filterByCountryOrAssignee(items, user);
+export const scopeRedlineRequests       = (items, user) => filterByCountryOrAssignee(items, user);
