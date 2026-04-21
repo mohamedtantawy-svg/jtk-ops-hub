@@ -8,22 +8,26 @@ import Avatar from '../ui/Avatar';
 // `restrictToEmail` props below once the app is ready to ship broadly.
 const OWNER_EMAIL = 'mohamed.tantawy@deel.com';
 
-/* Primary tabs always visible in the nav bar */
+/* Primary tabs always visible in the nav bar.
+ * Team sits at the end: for non-owners it's the only secondary surface left
+ * (everything else is owner-gated), so promoting it to the primary bar means
+ * we can drop the More dropdown entirely for them. */
 const PRIMARY_TABS = [
   { id: 'briefing',      icon: 'bi-house',            label: 'Home' },
   { id: 'my-queue',      icon: 'bi-inbox',            label: 'Queue' },
   { id: 'projects',      icon: 'bi-kanban',           label: 'Projects',      restrictToEmail: OWNER_EMAIL },
-  { id: 'escalations',   icon: 'bi-arrow-up-circle',  label: 'Escalations', badge: true },
+  { id: 'escalations',   icon: 'bi-arrow-up-circle',  label: 'Escalations',   badge: true,                       restrictToEmail: OWNER_EMAIL },
   { id: 'hr-reports',    icon: 'bi-clipboard-data',   label: 'Reports',       restrictToEmail: OWNER_EMAIL },
   { id: 'announcements', icon: 'bi-megaphone',        label: 'Announcements', restrictToEmail: OWNER_EMAIL },
+  { id: 'team',          icon: 'bi-people',           label: 'Team' },
 ];
 
-/* Secondary tabs under More */
+/* Secondary tabs under More — all owner-only for now, so for non-owners
+ * visibleMore is empty and the More button is suppressed entirely. */
 const MORE_TABS = [
   { id: 'calendar',      icon: 'bi-calendar3',        label: 'Calendar',       restrictToEmail: OWNER_EMAIL },
   { id: 'knowledge-hub', icon: 'bi-book',             label: 'Knowledge Hub',  restrictToEmail: OWNER_EMAIL },
   { id: 'analytics',     icon: 'bi-bar-chart-line',   label: 'Analytics',      restrictToEmail: OWNER_EMAIL },
-  { id: 'team',          icon: 'bi-people',           label: 'Team' },
 ];
 
 /* Quick-create actions in the + menu — each mapped to a required permission */
@@ -150,7 +154,10 @@ const DeelTopNav = ({
           );
         })}
 
-        {/* More dropdown */}
+        {/* More dropdown — only rendered when there's something to put in it.
+             For non-owners all MORE_TABS entries are owner-gated, so this is
+             suppressed entirely and they just see the primary bar. */}
+        {visibleMore.length > 0 && (
         <div ref={moreRef} style={{ position: 'relative' }}>
           <div className={`deel-nav-item${isMoreActive ? ' active' : ''}`}
             role="button"
@@ -185,6 +192,7 @@ const DeelTopNav = ({
             </div>
           )}
         </div>
+        )}
       </div>
 
       {/* ── Right: Figma icon bar ───────────────────────── */}
