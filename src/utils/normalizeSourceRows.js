@@ -22,11 +22,19 @@ const DEEL_AMENDMENT_URL = (id, currentStatus) => {
   return `${DEEL_ADMIN_BASE}/eor/change-requests?requestId=${encodeURIComponent(id)}&requestType=amendments&sortBy=createdAt&sortOrder=desc&status=PreparingDocuments${sub}`;
 };
 
-// SLA windows for amendments (per Ops policy):
-//   - Action Needed: 24h from createdAt
-//   - Paused:        48h from when it entered a Paused.* state
+// Admin redline page. Deep-links into the side-pane for a specific redline.
+const DEEL_REDLINE_URL = (id, isExecution) => {
+  if (!id) return '';
+  const sub = isExecution ? 'preparingDocuments.HRXToExecute' : 'preparingDocuments.legalReview';
+  return `${DEEL_ADMIN_BASE}/eor/change-requests?requestId=${encodeURIComponent(id)}&requestType=redlines&sortBy=createdAt&sortOrder=desc&status=preparingDocuments&subStatus=${encodeURIComponent(sub)}`;
+};
+
+// SLA windows (per Ops policy):
+//   - Amendments Action Needed / Redlines: 24h from createdAt
+//   - Amendments Paused:                    48h from when it entered Paused.*
 const AMENDMENT_SLA_ACTIVE_MS = 24 * 60 * 60 * 1000;
 const AMENDMENT_SLA_PAUSED_MS = 48 * 60 * 60 * 1000;
+const REDLINE_SLA_ACTIVE_MS   = 24 * 60 * 60 * 1000;
 
 // ── Name → email lookup for sources that only provide assignee name ──
 // The Deel admin API returns only the display name for assignees. To scope
@@ -264,21 +272,34 @@ export function normalizeAmendments(items = []) {
 export function normalizeRedlines(items = []) {
   return items.map(r => {
     const typeLabel = r.type === 'templateRedline' ? 'Template' : r.type === 'contractRedline' ? 'Contract' : r.type || '';
+
+    // 24h SLA countdown from createdAt (both review and execution are
+    // action-needed surfaces — no paused state).
+    let slaRemaining = null;
+    let slaBreachStatus = null;
+    if (r.createdAt) {
+      const deadline = new Date(r.createdAt).getTime() + REDLINE_SLA_ACTIVE_MS;
+      slaRemaining = Math.round((deadline - Date.now()) / 1000);
+      slaBreachStatus = slaRemaining < 0 ? 'SLA_BREACHED' : 'SLA_NOT_BREACHED';
+    }
+
     return {
       id: String(r.id || ''),
       source: 'redlines',
       subject: r.orgName || 'Unknown Org',
       function: `${typeLabel} Redline${r.countries?.length ? ' · ' + r.countries.join(', ') : ''}`,
       country: r.countryCode || (r.countries?.[0] || ''),
-      assignee: '',  // Redlines don't have assignee in current data
+      clientName: r.orgName || '',
+      assignee: '',  // no server-side assignee — SourceTable renders "Assign me"
       assigneeEmail: '',
       createdAt: r.createdAt || '',
-      updatedAt: r.updatedAt || '',
-      status: r.displayStatus || { label: 'Redline', severity: 'active', color: '#1d4ed8' },
-      taskUrl: '',
-      contractUrl: '',  // Redlines are org-level, no single contract
-      slaRemaining: null,
-      slaBreachStatus: null,
+      updatedAt: r.updatedAt || r.createdAt || '',
+      status: r.displayStatus || { label: 'Redline Review', severity: 'warning', color: '#ed8d00' },
+      taskUrl: DEEL_REDLINE_URL(r.id, r.isExecution),
+      contractUrl: '',  // Redlines are org-/template-level, no single contract
+      isExecution: !!r.isExecution,
+      slaRemaining,
+      slaBreachStatus,
     };
   });
 }
