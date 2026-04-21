@@ -46,12 +46,28 @@ const ALL_COUNTRIES = new Set(Object.keys(COUNTRY_OWNERS));
 // ── Role resolution ─────────────────────────────────────────────────────────
 // On the backend, JWT payload gives us `user.role`. On the frontend the same
 // shape comes from App.jsx's `user`. Fall back to MEMBERS_BY_EMAIL so missing
-// roles still map correctly.
+// roles still map correctly. Case-normalize both the lookup key and the
+// resolved role so "Admin" / "AGENT" / "Team_Lead" all behave the same.
+//
+// When we hit the fallback (no explicit role + no directory match) we emit a
+// single dev-mode warning so orphaned users surface in logs instead of being
+// silently demoted to 'agent'.
+const _warnedFallback = typeof globalThis !== 'undefined' ? (globalThis.__queueScopeWarned ||= new Set()) : new Set();
 function normalizeRole(user) {
   if (!user) return null;
-  if (user.role) return user.role;
-  const m = MEMBERS_BY_EMAIL[(user.email || '').toLowerCase()];
-  return m?.access || 'agent';
+  if (user.role) return String(user.role).toLowerCase();
+  const email = (user.email || '').toLowerCase();
+  const m = MEMBERS_BY_EMAIL[email];
+  if (m?.access) return String(m.access).toLowerCase();
+  if (email && !_warnedFallback.has(email)) {
+    _warnedFallback.add(email);
+    // Don't log noise in production for legit agents; only warn when both the
+    // JWT role AND the directory lookup miss.
+    if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
+      console.warn(`[queue-scoping] No role for ${email}; defaulting to 'agent'. Add to MEMBERS or set role in JWT.`);
+    }
+  }
+  return 'agent';
 }
 
 export function isAdminUser(user) {

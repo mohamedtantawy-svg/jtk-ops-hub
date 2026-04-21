@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { withTransaction } from '../../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
+import { canOperateOnTask, loadTaskForGuard, FORBIDDEN } from '../../../../../../src/lib/task-scope-guard';
 
 // Authorization note: All authenticated users can escalate tasks. Agents
 // escalate to their managers — this is the expected workflow. The auth check
@@ -19,11 +20,16 @@ export async function PATCH(req, { params }) {
     const whereClause = isUUID ? 'WHERE id = $1' : 'WHERE external_id = $1';
 
     const result = await withTransaction(async (client) => {
+      // Scope check before mutating — matches status/assign routes.
+      const task = await loadTaskForGuard(client, id);
+      if (!task) return { notFound: true };
+      if (!canOperateOnTask(authUser, task)) return { forbidden: true };
+
       const { rows } = await client.query(
         `UPDATE tasks SET status = 'escalated', updated_at = NOW() ${whereClause} RETURNING *`,
         [id]
       );
-      if (rows.length === 0) return null;
+      if (rows.length === 0) return { notFound: true };
 
       // Create escalation record — also persist the caller's identity so the
       // scoping filter on GET /escalations can match the raiser.
@@ -53,7 +59,8 @@ export async function PATCH(req, { params }) {
       return { task: rows[0], escalation };
     });
 
-    if (!result) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    if (result?.forbidden) return NextResponse.json(FORBIDDEN, { status: 403 });
+    if (result?.notFound || !result?.task) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
     return NextResponse.json({ ok: true });
   } catch (err) {

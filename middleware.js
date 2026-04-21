@@ -80,10 +80,51 @@ async function verifyToken(token) {
   }
 }
 
+// ── Origin guard for state-changing requests ─────────────────────────────────
+// Defense-in-depth against CSRF: a stolen JWT on a user's machine cannot be
+// weaponised from a third-party site because cross-origin POST/PUT/PATCH/DELETE
+// requests are rejected before the token is even verified.
+const STATE_CHANGING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+function isOriginAllowed(request) {
+  if (!STATE_CHANGING.has(request.method)) return true;
+
+  const origin = request.headers.get('origin');
+  const referer = request.headers.get('referer');
+  let candidate = origin;
+  if (!candidate && referer) {
+    try { candidate = new URL(referer).origin; } catch { /* ignore */ }
+  }
+
+  if (!candidate) {
+    // Allow only via explicit opt-in (server-to-server cron, etc.).
+    return process.env.ORIGIN_CHECK_ALLOW_MISSING === '1';
+  }
+
+  const allowed = new Set();
+  if (process.env.ALLOWED_ORIGINS) {
+    for (const raw of process.env.ALLOWED_ORIGINS.split(',')) {
+      try { allowed.add(new URL(raw.trim()).origin); } catch {}
+    }
+  }
+  if (process.env.NEXT_PUBLIC_APP_URL) {
+    try { allowed.add(new URL(process.env.NEXT_PUBLIC_APP_URL).origin); } catch {}
+  }
+  try { allowed.add(new URL(request.url).origin); } catch {}
+
+  return allowed.has(candidate);
+}
+
 // ── Middleware function ───────────────────────────────────────────────────────
 
 export async function middleware(request) {
   const { pathname } = request.nextUrl;
+
+  // CSRF / origin guard — applied to every /api/v1/* mutation before we even
+  // look at auth. Read-only GET/HEAD/OPTIONS are unaffected.
+  if (!isOriginAllowed(request)) {
+    return NextResponse.json({ error: 'Forbidden', reason: 'origin' }, { status: 403 });
+  }
 
   // Skip auth for auth routes, config, and integration status endpoint
   if (pathname.startsWith('/api/v1/auth') || pathname === '/api/v1/config' || pathname === '/api/v1/integrations/status') {

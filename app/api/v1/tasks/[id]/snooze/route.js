@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { query } from '../../../../../../src/lib/db';
+import { query, withTransaction } from '../../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
+import { canOperateOnTask, loadTaskForGuard, FORBIDDEN } from '../../../../../../src/lib/task-scope-guard';
 
 // PATCH /api/v1/tasks/[id]/snooze
 // `id` is either a UUID (internal tasks.id) or an external_id like "ZD-123".
@@ -27,6 +28,19 @@ export async function PATCH(req, { params }) {
     }
 
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+    // ── Scope check ──
+    // For existing tasks we load the row and verify the caller can see it.
+    // For fresh external_ids (cache-only tickets the DB hasn't seen yet) the
+    // only trust anchor is the caller's ability to fetch /queue for them —
+    // which is already scoped server-side, so an agent can't even learn an
+    // out-of-scope id. Snooze is per-user-state so this is acceptable.
+    const guardResult = await withTransaction(async (client) => {
+      const task = await loadTaskForGuard(client, id);
+      if (task && !canOperateOnTask(user, task)) return { forbidden: true };
+      return { ok: true, task };
+    });
+    if (guardResult.forbidden) return NextResponse.json(FORBIDDEN, { status: 403 });
 
     let updatedRow = null;
 

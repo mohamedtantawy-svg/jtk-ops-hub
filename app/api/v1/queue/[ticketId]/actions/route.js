@@ -14,13 +14,17 @@ import { getAuthUser, requireRole } from '../../../../../../src/lib/auth-helpers
 import { query } from '../../../../../../src/lib/db';
 import { cacheDelMany, cacheGet } from '../../../../../../src/lib/server-cache';
 import { getVisibleMemberEmails, isAdmin } from '../../../../../../src/lib/scope-helpers';
+import { getVisibleCountries } from '../../../../../../src/lib/queue-scoping';
+import { canAssignTo } from '../../../../../../src/lib/task-scope-guard';
 
 const STALE_TTL_MS = 30 * 60_000;
 
 // Reject writes on tickets the user wouldn't see in their own /queue view.
-// Mirrors ticketInUserScope from /queue/[id]/comments — keeps the behaviour
-// consistent between read + write surfaces.
-function ticketInUserScope(ticketId, user) {
+// Fails CLOSED on cold cache — prior behaviour defaulted to allow, which
+// meant any authenticated agent could mutate any ticket ID if the server
+// happened to have an empty /queue cache. Now: if we can't verify scope,
+// we reject and let the client refresh.
+async function ticketInUserScope(ticketId, user) {
   if (!user) return false;
   if (isAdmin(user) || user.role === 'regional_manager') return true;
   const sourceKey = ticketId.startsWith('ZD-') ? 'queue_zendesk' : 'queue_jira';
@@ -34,11 +38,42 @@ function ticketInUserScope(ticketId, user) {
     match = pool.find(t => t.id === ticketId);
     if (match) break;
   }
-  if (!match) return true; // cold cache — degrade to allow
-  const visible = getVisibleMemberEmails(user);
-  const email = (match.assigneeEmail || '').toLowerCase();
-  if (email && visible.has(email)) return true;
-  if (!email && user.role === 'team_lead') return true;
+  if (match) {
+    const visible = getVisibleMemberEmails(user);
+    const email = (match.assigneeEmail || '').toLowerCase();
+    if (email && visible.has(email)) return true;
+    if (!email && user.role === 'team_lead') {
+      // Unassigned: only allowed when the ticket's country is in the TL's scope.
+      const cc = (match.country || match.countryCode || '').toUpperCase();
+      if (cc && getVisibleCountries(user).has(cc)) return true;
+    }
+    return false;
+  }
+
+  // ── Cold-cache fallback ──
+  // Previously we defaulted to allow. Now we look the ticket up in the
+  // persistent `tasks` table (our shadow of the source system) and apply the
+  // same rule. If that also comes back empty — e.g. a fresh ticket we've
+  // never synced — we fail closed.
+  try {
+    const { rows } = await query(
+      `SELECT m.email AS assignee_email, t.country_code
+         FROM tasks t
+         LEFT JOIN members m ON m.id = t.assignee_id
+        WHERE t.external_id = $1
+        LIMIT 1`,
+      [ticketId],
+    );
+    if (rows.length) {
+      const email = (rows[0].assignee_email || '').toLowerCase();
+      const cc = (rows[0].country_code || '').toUpperCase();
+      const visible = getVisibleMemberEmails(user);
+      if (email && visible.has(email)) return true;
+      if (!email && user.role === 'team_lead' && cc && getVisibleCountries(user).has(cc)) return true;
+    }
+  } catch (err) {
+    console.warn('[queue/actions] cold-cache fallback lookup failed:', err.message);
+  }
   return false;
 }
 
@@ -193,8 +228,16 @@ export async function POST(req, { params }) {
   if (action === 'assignee') {
     const { authorized, status, error } = requireRole(req, 'admin', 'regional_manager', 'team_lead');
     if (!authorized) return NextResponse.json({ error }, { status });
+    // Also validate the target assignee is within scope — prevents parking
+    // tickets on someone in another region.
+    if (body.assigneeEmail && !canAssignTo(user, body.assigneeEmail)) {
+      return NextResponse.json(
+        { error: 'Assignee is outside your scope or not a valid member', reason: 'assignee_scope' },
+        { status: 403 },
+      );
+    }
   }
-  if (!ticketInUserScope(ticketId, user)) {
+  if (!(await ticketInUserScope(ticketId, user))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
