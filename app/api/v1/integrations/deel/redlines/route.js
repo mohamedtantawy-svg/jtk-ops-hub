@@ -1,7 +1,9 @@
 // ── GET /api/v1/integrations/deel/redlines ─────────────────────────────────────
-// Proxies to Deel Admin API: redline requests (Preparing Document).
+// Proxies to Deel Admin API: redline requests.
 // Uses /admin/eor-experience/redline-requests
-// Response: { redlines: [...], cursor, totalCount }
+// Default: fetches both Legal Review + HRX Execution buckets concurrently
+// (paginated via cursor) and merges — FE splits by isExecution.
+// Response: { items: [...], total }
 // Uses persistent cache + stale-while-revalidate.
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
@@ -9,7 +11,14 @@ import { listRedlineRequests, isDeelConfigured } from '../../../../../../src/lib
 import { cacheGet, cacheSet } from '../../../../../../src/lib/server-cache';
 import { scopeRedlineRequests } from '../../../../../../src/lib/queue-scoping';
 
-const CACHE_KEY = 'deel_redlines';
+// Default: both Review (legalReview) and Execution (HRXToExecute) buckets —
+// the two "Action Needed" surfaces on admin.deel.network.
+const DEFAULT_STATUSES = [
+  'preparingDocuments.legalReview',
+  'preparingDocuments.HRXToExecute',
+];
+
+const CACHE_KEY = 'deel_redlines_v2';
 const CACHE_TTL = 5 * 60 * 1000;    // fresh for 5 minutes
 const STALE_TTL = 30 * 60 * 1000;   // serve stale up to 30 minutes
 
@@ -30,10 +39,14 @@ export async function GET(req) {
 
   try {
     const { searchParams } = new URL(req.url);
-    const status = searchParams.get('status') || 'preparingDocuments.legalReview';
+    // Accept comma-joined status string (legacy) or fall back to default set.
+    const statusParam = searchParams.get('status');
+    const statuses = statusParam
+      ? statusParam.split(',').map(s => s.trim()).filter(Boolean)
+      : DEFAULT_STATUSES;
     const bustCache = searchParams.get('bust') === '1';
 
-    const cacheKeyFull = `${CACHE_KEY}_${status.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+    const cacheKeyFull = `${CACHE_KEY}_${statuses.join('|').replace(/[^a-zA-Z0-9._-]/g, '_')}`;
 
     if (!bustCache) {
       const fresh = cacheGet(cacheKeyFull, CACHE_TTL);
@@ -42,11 +55,10 @@ export async function GET(req) {
 
     let responseData;
     try {
-      const result = await listRedlineRequests({ status });
+      const result = await listRedlineRequests({ status: statuses });
 
       const items = result.items.map(r => ({
         ...r,
-        // Derive a display status from the redline's workbench task
         displayStatus: deriveRedlineStatus(r),
       }));
 
@@ -70,30 +82,24 @@ export async function GET(req) {
 
 /**
  * Derive display label + severity from redline data.
- * customStatusName values: "Redline Review", "Redline Execution", etc.
- * workbenchStatus: "IN_PROGRESS", "PENDING", etc.
+ * Splits on isExecution (upstream status bucket) first, falls back to the
+ * customStatusName from the workbench task, then to generic type labels.
  */
 function deriveRedlineStatus(redline) {
-  const custom = (redline.customStatusName || '').toLowerCase();
-  const wbStatus = (redline.workbenchStatus || '').toUpperCase();
-  const type = redline.type || '';
-
-  if (custom.includes('redline review'))
-    return { label: 'Redline Review', severity: 'warning', color: '#ed8d00' };
-  if (custom.includes('redline execution'))
+  if (redline.isExecution)
     return { label: 'Redline Execution', severity: 'active', color: '#1d4ed8' };
 
-  // Fallback to workbench status
-  if (wbStatus === 'IN_PROGRESS')
-    return { label: 'In Progress', severity: 'active', color: '#1d4ed8' };
-  if (wbStatus === 'PENDING')
-    return { label: 'Pending', severity: 'warning', color: '#ed8d00' };
+  const custom = (redline.customStatusName || '').toLowerCase();
+  if (custom.includes('redline review') || custom.includes('legal review'))
+    return { label: 'Redline Review', severity: 'warning', color: '#ed8d00' };
+  if (custom.includes('redline execution') || custom.includes('execute'))
+    return { label: 'Redline Execution', severity: 'active', color: '#1d4ed8' };
 
-  // Type-based fallback
-  if (type === 'templateRedline')
-    return { label: 'Template Redline', severity: 'active', color: '#7c3aed' };
-  if (type === 'contractRedline')
-    return { label: 'Contract Redline', severity: 'active', color: '#1d4ed8' };
+  // Default for the legalReview bucket (covers the vast majority of items).
+  if (redline.type === 'templateRedline')
+    return { label: 'Template Redline', severity: 'warning', color: '#ed8d00' };
+  if (redline.type === 'contractRedline')
+    return { label: 'Contract Redline', severity: 'warning', color: '#ed8d00' };
 
-  return { label: 'Redline', severity: 'active', color: '#1d4ed8' };
+  return { label: 'Redline Review', severity: 'warning', color: '#ed8d00' };
 }

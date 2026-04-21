@@ -467,57 +467,105 @@ export async function listInvoices(params = {}) {
 
 // ── Redline Requests (Admin API) ────────────────────────────────────────────
 
-/**
- * Fetches redline requests from the admin API.
- * Uses /admin/eor-experience/redline-requests — same as admin.deel.network.
- * Filters to "Preparing Documents → Legal Review" status.
- *
- * Response shape: { redlines: [...], cursor, totalCount }
- * Each redline has: id, status (IN_REVIEW), type (templateRedline/contractRedline),
- * creatorOrganization, template (with countryCode/countries), items[], participants[],
- * workbenchProcess with redlineLegalReviewTask details.
- */
-export async function listRedlineRequests(params = {}) {
+// Pagination config: REDLINE_PAGE_SIZE items per call, follow cursor up to
+// REDLINE_MAX_PAGES before bailing. 20 * 200 = 4000 item ceiling, well beyond
+// current volume (~170 open at time of writing).
+const REDLINE_MAX_PAGES = 20;
+const REDLINE_PAGE_SIZE = 200;
+
+async function fetchRedlinePage(status, cursor) {
   const qs = new URLSearchParams();
   qs.set('sortBy', 'createdAt');
   qs.set('sortOrder', 'desc');
-  qs.set('status', params.status || 'preparingDocuments.legalReview');
-  qs.set('limit', String(params.limit || 200));
+  qs.set('status', status);
+  qs.set('limit', String(REDLINE_PAGE_SIZE));
+  if (cursor) qs.set('cursor', cursor);
   const res = await deelFetch(`/admin/eor-experience/redline-requests?${qs.toString()}`);
+  return { items: res?.redlines || [], cursor: res?.cursor || null };
+}
 
-  const rawItems = res?.redlines || [];
+async function fetchAllRedlinesForStatus(status) {
+  const all = [];
+  let cursor = null;
+  for (let page = 0; page < REDLINE_MAX_PAGES; page++) {
+    const res = await fetchRedlinePage(status, cursor);
+    all.push(...res.items);
+    cursor = res.cursor;
+    if (!cursor || res.items.length === 0) break;
+  }
+  return all;
+}
 
-  const items = rawItems.map(r => ({
-    id:                r.id || '',
-    type:              r.type || '',                                  // templateRedline | contractRedline
-    status:            r.status || '',                                // IN_REVIEW etc.
-    createdAt:         r.createdAt || '',
-    updatedAt:         r.updatedAt || '',
-    orgName:           r.creatorOrganization?.name || '',
-    orgId:             r.creatorOrganization?.id || '',
-    countryCode:       r.template?.countryCode || '',
-    countries:         r.template?.countries || [],                   // array of country names
-    templateName:      r.template?.name || '',
-    // Items — the actual redline changes requested
-    changes:           (r.items || []).map(item => ({
-      id:              item.id || '',
-      requestedChange: item.itemSettings?.requestedChange || '',
-      status:          item.status || '',
-    })),
-    changesCount:      (r.items || []).length,
-    // Workbench task info
-    workbenchStatus:   r.workbenchProcess?.redlineLegalReviewTask?.opsWorkbenchTask?.status || '',
-    customStatusName:  r.workbenchProcess?.redlineLegalReviewTask?.opsWorkbenchTask?.customStatusName || '',
-    assigneeId:        r.workbenchProcess?.redlineLegalReviewTask?.opsWorkbenchTask?.assigneeId || null,
-    // Participants
-    participants:      (r.participants || []).map(p => ({
-      name:            p.name || '',
-      role:            p.role || '',
-      email:           p.email || '',
-    })),
-  }));
+/**
+ * Fetches redline requests from the admin API.
+ * Uses /admin/eor-experience/redline-requests — same as admin.deel.network.
+ *
+ * `status` may be a single string or an array — each value is fetched
+ * independently (upstream API rejects comma/pipe-joined values) and merged.
+ * Follows the `cursor` token to pull the full set (not just the first page).
+ */
+export async function listRedlineRequests(params = {}) {
+  const statusList = Array.isArray(params.status)
+    ? params.status
+    : [params.status || 'preparingDocuments.legalReview'];
 
-  return { items, total: res?.totalCount || items.length, cursor: res?.cursor || null };
+  const batches = await Promise.all(statusList.map(fetchAllRedlinesForStatus));
+
+  // Dedupe by redline id (retry overlap guard).
+  const seen = new Set();
+  const rawItems = [];
+  for (let i = 0; i < batches.length; i++) {
+    for (const r of batches[i]) {
+      if (!r?.id || seen.has(r.id)) continue;
+      seen.add(r.id);
+      // Tag with the upstream status so the FE can split into sub-tabs even
+      // when the payload itself doesn't carry a flow status.
+      rawItems.push({ __status: statusList[i], ...r });
+    }
+  }
+
+  const items = rawItems.map(r => {
+    const isExecution = /hrxtoexecute|execute|execution/i.test(r.__status || '')
+                     || !!r.workbenchProcess?.redlineExecutionTask;
+    return {
+      id:                r.id || '',
+      type:              r.type || '',                                  // templateRedline | contractRedline
+      status:            r.status || '',                                // IN_REVIEW etc.
+      createdAt:         r.createdAt || '',
+      updatedAt:         r.updatedAt || '',
+      orgName:           r.creatorOrganization?.name || '',
+      orgId:             r.creatorOrganization?.id || '',
+      countryCode:       r.template?.countryCode || '',
+      countries:         r.template?.countries || [],                   // array of country names
+      templateName:      r.template?.name || '',
+      isExecution,
+      // Items — the actual redline changes requested
+      changes:           (r.items || []).map(item => ({
+        id:              item.id || '',
+        requestedChange: item.itemSettings?.requestedChange || '',
+        status:          item.status || '',
+      })),
+      changesCount:      (r.items || []).length,
+      // Workbench task info — whichever sub-task is populated
+      workbenchStatus:   r.workbenchProcess?.redlineLegalReviewTask?.opsWorkbenchTask?.status
+                      || r.workbenchProcess?.redlineExecutionTask?.opsWorkbenchTask?.status
+                      || '',
+      customStatusName:  r.workbenchProcess?.redlineLegalReviewTask?.opsWorkbenchTask?.customStatusName
+                      || r.workbenchProcess?.redlineExecutionTask?.opsWorkbenchTask?.customStatusName
+                      || '',
+      assigneeId:        r.workbenchProcess?.redlineLegalReviewTask?.opsWorkbenchTask?.assigneeId
+                      || r.workbenchProcess?.redlineExecutionTask?.opsWorkbenchTask?.assigneeId
+                      || null,
+      // Participants
+      participants:      (r.participants || []).map(p => ({
+        name:            p.name || '',
+        role:            p.role || '',
+        email:           p.email || '',
+      })),
+    };
+  });
+
+  return { items, total: items.length, cursor: null };
 }
 
 // ── Amendment Requests (Admin API) ──────────────────────────────────────────
