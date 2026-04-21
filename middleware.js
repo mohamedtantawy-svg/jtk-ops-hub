@@ -122,8 +122,17 @@ export async function middleware(request) {
 
   // CSRF / origin guard — applied to every /api/v1/* mutation before we even
   // look at auth. Read-only GET/HEAD/OPTIONS are unaffected.
+  //
+  // Rollout safety: defaults to OBSERVE mode — we log would-be rejections so
+  // ops can confirm ALLOWED_ORIGINS / NEXT_PUBLIC_APP_URL are configured
+  // correctly before flipping to enforce. Set ORIGIN_CHECK_ENFORCE=1 once
+  // logs are clean. This avoids a "the whole app is 403 the moment the pod
+  // starts" failure mode if env is misconfigured.
   if (!isOriginAllowed(request)) {
-    return NextResponse.json({ error: 'Forbidden', reason: 'origin' }, { status: 403 });
+    if (process.env.ORIGIN_CHECK_ENFORCE === '1') {
+      return NextResponse.json({ error: 'Forbidden', reason: 'origin' }, { status: 403 });
+    }
+    console.warn(`[middleware] origin-check would reject: method=${request.method} path=${pathname} origin=${request.headers.get('origin') || 'none'} referer=${request.headers.get('referer') || 'none'}`);
   }
 
   // Skip auth for auth routes, config, and integration status endpoint
