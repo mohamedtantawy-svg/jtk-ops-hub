@@ -14,6 +14,10 @@ import { TEAM_MEMBERS } from '../data/members';
 const DEEL_ADMIN_BASE = 'https://admin.deel.network';
 const DEEL_CONTRACT_URL = (oid) => oid ? `${DEEL_ADMIN_BASE}/contracts/${oid}/details` : '';
 const DEEL_WORKBENCH_BASE = 'https://app.deel.com/workbench/tasks';
+// HRX Operations team ID — used for the admin ops-workbench deep-link.
+const HRX_OPERATIONS_TEAM_ID = 'f235fd21-c5a0-4804-badf-2cc3dc76191e';
+const DEEL_OPS_WORKBENCH_URL = (taskId) =>
+  taskId ? `${DEEL_ADMIN_BASE}/ops-workbench/${encodeURIComponent(taskId)}?teamIds%5B%5D=${HRX_OPERATIONS_TEAM_ID}` : '';
 // Admin amendment page. Deep-links to the side-pane for a specific amendment.
 // Example: https://admin.deel.network/eor/change-requests?requestId=...&requestType=amendments&status=PreparingDocuments&subStatus=PreparingDocuments.WaitingHrxAction
 const DEEL_AMENDMENT_URL = (id, currentStatus) => {
@@ -337,16 +341,19 @@ export function normalizeWorkbench(items = []) {
     id: String(t.id || ''),
     source: 'workbench',
     subject: t.name || 'Untitled Task',
+    // typeLabel drives the "Type" column when SourceTable is rendered with
+    // showType=true — e.g. "Expedite EOR Onboarding", "HRX Escalation".
+    typeLabel: t.taskType || t.sourceType || 'Workbench',
     function: t.taskType || t.sourceType || 'Workbench',
     country: t.country || '',
     assignee: t.assignee?.name || '',
     assigneeEmail: (t.assignee?.email || '').toLowerCase(),
     createdAt: t.createdAt || '',
-    updatedAt: t.updatedAt || '',
+    updatedAt: t.updatedAt || t.createdAt || '',
     status: t.displayStatus || { label: t.status || 'Unknown', severity: 'info', color: '#616161' },
-    taskUrl: t.id
-      ? `${DEEL_WORKBENCH_BASE}/${t.id}`
-      : DEEL_CONTRACT_URL(t.contractOid),
+    // Deep-link to the admin workbench task page (NOT app.deel.com — that's
+    // a different UI that doesn't recognise these IDs).
+    taskUrl: DEEL_OPS_WORKBENCH_URL(t.id),
     contractUrl: DEEL_CONTRACT_URL(t.contractOid),
     slaRemaining: t.slaRemaining,
     slaBreachStatus: t.slaBreachStatus || '',

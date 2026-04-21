@@ -968,8 +968,14 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           onRefresh={workbenchData.refresh}
           emptyIcon="bi-grid-3x3-gap"
           emptyLabel="No workbench tasks"
-          emptySubLabel="All tasks are processed"
+          emptySubLabel="All HRX Operations tasks are processed"
           sortDefault="oldest"
+          showType
+          hideUpdated
+          hideContract
+          hideStatusPills
+          dateField="createdAt"
+          dateLabel="Created"
           currentUser={user}
         />
         </ErrorBoundary>
