@@ -7,11 +7,13 @@ import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../
 import { CALENDAR_EVENTS } from '../../data/calendar';
 import { slaInfo, rel, getVisibleEmails } from '../../utils/helpers';
 import { useOnboardingData } from '../../hooks/useOnboardingData';
+import { usePausedOnboardingData } from '../../hooks/usePausedOnboardingData';
 import { useOffboardingData } from '../../hooks/useOffboardingData';
 import { useChangeRequestData } from '../../hooks/useChangeRequestData';
 import { useWorkbenchData } from '../../hooks/useWorkbenchData';
 import {
   normalizeOnboarding,
+  normalizePausedOnboarding,
   normalizeOffboarding,
   normalizeAmendments,
   normalizeRedlines,
@@ -94,6 +96,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
 
   // ── Deel API hooks (onboarding, offboarding, amendments/redlines, workbench) ──
   const onboardingData = useOnboardingData(true);
+  const pausedOnboardingData = usePausedOnboardingData(true);
   const offboardingData = useOffboardingData(true);
   const changeRequestData = useChangeRequestData(true);
   const workbenchData = useWorkbenchData(true);
@@ -119,6 +122,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
 
   // ── Deel API normalized rows (same pattern as Queue.jsx) ─────────────
   const onboardingRowsAll = useMemo(() => normalizeOnboarding(onboardingData.items), [onboardingData.items]);
+  const pausedOnboardingRowsAll = useMemo(() => normalizePausedOnboarding(pausedOnboardingData.items), [pausedOnboardingData.items]);
   const offboardingRowsAll = useMemo(() => normalizeOffboarding(offboardingData.items), [offboardingData.items]);
   const amendmentRowsAll = useMemo(() => normalizeAmendments(changeRequestData.amendments), [changeRequestData.amendments]);
   const redlineRowsAll = useMemo(() => normalizeRedlines(changeRequestData.redlines), [changeRequestData.redlines]);
@@ -273,35 +277,108 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     };
   }, [user.email]);
 
-  // ── DYNAMIC CAPACITY — scoped to permission level ──────────────────
-  const allAgents=MEMBERS.filter(m=>m.role==='agent'&&scopeIds.includes(m.id)).map(m=>{
-    const mTasks=tasks.filter(t=>t.assigneeId===m.id&&t.status!=='resolved');
-    const mt=mTasks.length;
-    const br=mTasks.filter(t=>{const s=slaInfo(t);return s&&s.breach;}).length;
-    const open=mTasks.filter(t=>t.status==='new'||t.status==='in_progress').length;
-    const paused=mTasks.filter(t=>t.status==='waiting').length;
-    const escalated=mTasks.filter(t=>t.status==='escalated').length;
-    return {...m,tc:mt,br,open,paused,escalated};
-  }).sort((a,b)=>b.tc-a.tc);
+  // ── DYNAMIC CAPACITY — per-agent multi-source aggregation ──────────
+  // Per Pilar's team-summary spec (2026-04-22):
+  //   • Total   = Open + Paused  (strict invariant)
+  //   • Open    = actionable rows across Zendesk, Jira, Workbench,
+  //               Onboarding, Offboarding, Amendments, Redlines
+  //   • Paused  = paused rows across the same 7 sources
+  //   • Breaches = SLA-breached rows across the same 7 sources
+  //   • Capacity = absolute, baseline 30 tasks (good workload).
+  //       < 20 → Low | 20-50 → Medium | > 50 → High
+  //       capPct = tc / 30 * 100, capped at 200.
+  //
+  // Source-by-source attribution:
+  //   • Zendesk/Jira (tickets):   t.assigneeId OR t.assigneeEmail
+  //   • Onboarding / Paused Onb:  r.assigneeEmail (BE provides it)
+  //   • Offboarding:              r.assigneeEmail (exAssigneeEmail)
+  //   • Workbench:                r.assigneeEmail
+  //   • Amendments / Redlines:    NO server-side assignee field. Rows live
+  //                               in a shared pool ("Assign me" in the UI).
+  //                               Attributed to the viewer's own scope via
+  //                               scoping (country-based) at the team roll-up
+  //                               level — see poolAmendmentsForTeam below.
+  //                               Per-agent attribution is impossible, so
+  //                               per-agent counts omit these sources and a
+  //                               footer note explains the gap.
+  //
+  // Breach rules (match Queue.jsx):
+  //   • Tickets:       slaInfo(t).breach (null for waiting/resolved)
+  //   • Onboarding:    age ≥ 7 days (createdAt → now)
+  //   • Paused Onb:    age ≥ 7 days (pausedAt/updatedAt → now)
+  //   • Offboarding:   no per-row SLA field from admin → excluded
+  //   • Workbench / Amendments / Redlines:  slaBreachStatus === 'SLA_BREACHED'
+  const BASELINE_CAPACITY = 30;
+  const ONB_BREACH_MS = 7 * 24 * 60 * 60 * 1000;
 
-  // Team avg = avg tickets across all agents in the relevant scope
-  const scopeAgents=isOwnScope?allAgents.filter(a=>a.team===user.team):isTeamScope?allAgents.filter(a=>a.team===user.team):allAgents;
-  const teamAvg=scopeAgents.length>0?scopeAgents.reduce((s,a)=>s+a.tc,0)/scopeAgents.length:0;
+  const allAgents = MEMBERS.filter(m => m.role === 'agent' && scopeIds.includes(m.id)).map(m => {
+    const memEmail = (m.email || '').toLowerCase();
 
-  // Dynamic workload: agent compares personal count vs team avg
-  const myCount=isOwnScope?personal.length:total;
-  const dynRatio=teamAvg>0?myCount/teamAvg:0;
-  const wl=dynRatio>=1.4?'High':dynRatio>=0.7?'Medium':'Low';
-  const wc=wl==='High'?'#d42d35':wl==='Medium'?'#ed8d00':'#29811e';
-  const capPct=teamAvg>0?Math.min(100,Math.round((myCount/teamAvg)*100)):0;
+    // — Tickets (Zendesk + Jira merged in `tasks`) —
+    const mTickets = tasks.filter(t => {
+      if (t.status === 'resolved') return false;
+      if (t.assigneeId === m.id) return true;
+      if (t.assigneeEmail && t.assigneeEmail.toLowerCase() === memEmail) return true;
+      return false;
+    });
+    const tOpen    = mTickets.filter(t => t.status === 'new' || t.status === 'in_progress' || t.status === 'escalated').length;
+    const tPaused  = mTickets.filter(t => t.status === 'waiting').length;
+    const tEsc     = mTickets.filter(t => t.status === 'escalated').length;
+    const tBreach  = mTickets.filter(t => { const s = slaInfo(t); return s && s.breach; }).length;
 
-  // Assign dynamic wl to allAgents too
-  const allAgentsWL=allAgents.map(m=>{
-    const r=teamAvg>0?m.tc/teamAvg:0;
-    const awl=r>=1.4?'High':r>=0.7?'Medium':'Low';
-    const awc=awl==='High'?'#d42d35':awl==='Medium'?'#ed8d00':'#29811e';
-    const mCapPct=teamAvg>0?Math.min(200,Math.round((m.tc/teamAvg)*100)):0;
-    return {...m,wl:awl,wc:awc,capPct:mCapPct};
+    // — Onboarding (actionable queue rows are inherently "open") —
+    const mOnb = onboardingRowsAll.filter(r => r.assigneeEmail && r.assigneeEmail === memEmail);
+    const onbOpen   = mOnb.length;
+    const onbBreach = mOnb.filter(r => {
+      if (!r.createdAt) return false;
+      return (Date.now() - new Date(r.createdAt).getTime()) >= ONB_BREACH_MS;
+    }).length;
+
+    // — Paused Onboarding (always paused by definition) —
+    const mPausedOnb = pausedOnboardingRowsAll.filter(r => r.assigneeEmail && r.assigneeEmail === memEmail);
+    const pausedOnbCount  = mPausedOnb.length;
+    const pausedOnbBreach = mPausedOnb.filter(r => {
+      const ts = r.pausedAt || r.updatedAt || r.createdAt;
+      if (!ts) return false;
+      return (Date.now() - new Date(ts).getTime()) >= ONB_BREACH_MS;
+    }).length;
+
+    // — Offboarding (open by definition; no per-row breach field) —
+    const mOff = offboardingRowsAll.filter(r => r.assigneeEmail && r.assigneeEmail === memEmail);
+    const offOpen = mOff.length;
+
+    // — Workbench (open by definition; BE-provided SLA flag) —
+    const mWb = workbenchRowsAll.filter(r => r.assigneeEmail && r.assigneeEmail === memEmail);
+    const wbOpen   = mWb.length;
+    const wbBreach = mWb.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length;
+
+    const open    = tOpen + onbOpen + offOpen + wbOpen;
+    const paused  = tPaused + pausedOnbCount;
+    const br      = tBreach + onbBreach + pausedOnbBreach + wbBreach;
+    const tc      = open + paused;   // strict invariant: Total = Open + Paused
+
+    return { ...m, tc, br, open, paused, escalated: tEsc };
+  }).sort((a, b) => b.tc - a.tc);
+
+  // Team avg — informational only (used by some legacy cards, kept for now).
+  const scopeAgents = isOwnScope ? allAgents.filter(a => a.team === user.team)
+                    : isTeamScope ? allAgents.filter(a => a.team === user.team)
+                    : allAgents;
+  const teamAvg = scopeAgents.length > 0 ? scopeAgents.reduce((s, a) => s + a.tc, 0) / scopeAgents.length : 0;
+
+  // Viewer's own workload — now anchored on the same absolute baseline so
+  // the "My Workload" tile and the Team Summary row agree by construction.
+  const myCount = isOwnScope ? personal.length : total;
+  const wl = myCount > 50 ? 'High' : myCount < 20 ? 'Low' : 'Medium';
+  const wc = wl === 'High' ? '#d42d35' : wl === 'Medium' ? '#ed8d00' : '#29811e';
+  const capPct = Math.min(100, Math.round((myCount / BASELINE_CAPACITY) * 100));
+
+  // Team-summary workload + capacity % (absolute baseline).
+  const allAgentsWL = allAgents.map(m => {
+    const awl = m.tc > 50 ? 'High' : m.tc < 20 ? 'Low' : 'Medium';
+    const awc = awl === 'High' ? '#d42d35' : awl === 'Medium' ? '#ed8d00' : '#29811e';
+    const mCapPct = Math.min(200, Math.round((m.tc / BASELINE_CAPACITY) * 100));
+    return { ...m, wl: awl, wc: awc, capPct: mCapPct };
   });
 
   // ── Health Score (composite 0-100) — uses the 4 weights configured in Settings ─────────────────
@@ -1121,13 +1198,14 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 <thead>
                   <tr style={{background:'#fafaf9',borderBottom:'1px solid #e8e8e8'}}>
                     <th style={{padding:'12px 24px',textAlign:'left',fontWeight:600,color:'#9e9e9e',fontSize:12}}>Full Name</th>
-                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}}>Total</th>
-                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}}>Open</th>
-                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}}>Paused</th>
-                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}}>Escalated</th>
-                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}}>Breaches</th>
-                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}}>Capacity %</th>
-                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}}>Workload</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="Total = Open + Paused across Zendesk, Jira, Workbench, Onboarding, Offboarding, Amendments, Redlines">Total</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="Actionable rows across all 7 sources">Open</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="Paused / waiting rows across all 7 sources">Paused</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="Escalated tickets (subset of Open — informational)">Escalated</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="SLA-breached rows across all 7 sources">Breaches</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="Baseline 30 tasks = healthy workload. capacity% = total / 30.">Capacity %</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="<20 Low · 20-50 Medium · >50 High">Workload</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="Meetings scheduled for today (will populate once per-user calendar sync is live)">Meetings</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1156,7 +1234,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                       <td style={{padding:'14px 16px',textAlign:'center'}}>
                         <div style={{display:'flex',alignItems:'center',gap:6,justifyContent:'center'}}>
                           <div style={{width:40,height:5,borderRadius:3,background:'#f0f0f0'}}>
-                            <div style={{width:`${Math.min(m.capPct,100)}%`,height:5,borderRadius:3,background:m.capPct>120?'#d42d35':m.capPct>80?'#ed8d00':'#29811e'}}></div>
+                            <div style={{width:`${Math.min(m.capPct,100)}%`,height:5,borderRadius:3,background:m.wc}}></div>
                           </div>
                           <span style={{fontSize:11,fontWeight:600,color:'#616161'}}>{m.capPct}%</span>
                         </div>
@@ -1164,10 +1242,17 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                       <td style={{padding:'14px 16px',textAlign:'center'}}>
                         <span style={{fontSize:11,fontWeight:700,color:m.wc,padding:'3px 12px',borderRadius:128,background:m.wc+'15'}}>{m.wl}</span>
                       </td>
+                      <td style={{padding:'14px 16px',textAlign:'center'}} title="Will populate once per-user calendar sync is live">
+                        <span style={{fontSize:13,fontWeight:600,color:'#c9c9c7'}}>—</span>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+            <div style={{padding:'10px 24px 14px',fontSize:11,color:'#9e9e9e',borderTop:'1px solid #f0f0f0',background:'#fafaf9'}}>
+              <i className="bi-info-circle" style={{marginRight:6}}></i>
+              Totals aggregate Zendesk, Jira, Workbench, Onboarding, Offboarding. Amendments &amp; Redlines live in a shared pool (no server-side assignee) so they roll into team capacity but not per-agent counts. Baseline 30 tasks &#8209; &lt;20 Low &middot; 20&#8209;50 Medium &middot; &gt;50 High.
             </div>
           </DeelCard>}
 
