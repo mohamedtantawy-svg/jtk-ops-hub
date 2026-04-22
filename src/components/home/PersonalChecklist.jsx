@@ -1,5 +1,6 @@
 // ── PersonalChecklist ─────────────────────────────────────────────────────────
-// Per-user checklist of lightweight tasks with title, description, and due date.
+// Per-user checklist of lightweight tasks with title, description, due date,
+// and priority.
 //
 // Durability contract (data MUST NOT be lost across refreshes / deploys / tab
 // churn / partial backend failures):
@@ -12,7 +13,8 @@
 //   4. A BroadcastChannel syncs mutations across tabs in real time; a
 //      `storage` event listener catches other tabs as a belt-and-braces backup.
 //   5. Items migrated from the legacy {id,text,done} shape once on first read
-//      and preserved forever — no data is ever dropped.
+//      and preserved forever — no data is ever dropped. Missing `priority`
+//      on existing items defaults to `normal`.
 //   6. All writes are best-effort — any thrown error is caught and the app
 //      keeps running; the user never sees their input vanish.
 //
@@ -26,6 +28,18 @@ const IDB_NAME = 'ops_hub_checklist';
 const IDB_STORE = 'items';
 const SCHEMA_VERSION = 2;
 
+// ── Priority taxonomy ───────────────────────────────────────────────────────
+// Four levels with color coding. `rank` drives sort order (lower number =
+// more urgent). Legacy items without priority migrate to `normal`.
+const PRIORITY_META = {
+  urgent: { label: 'Urgent', color: '#d42d35', bg: '#FEE2E2', rank: 0 },
+  high:   { label: 'High',   color: '#ed8d00', bg: '#FEF3C7', rank: 1 },
+  normal: { label: 'Normal', color: '#9e9e9e', bg: '#f5f5f5', rank: 2 },
+  low:    { label: 'Low',    color: '#1f74b3', bg: '#DBEAFE', rank: 3 },
+};
+const PRIORITY_ORDER = ['urgent', 'high', 'normal', 'low'];
+const VALID_PRIORITIES = new Set(PRIORITY_ORDER);
+
 // Per-user storage key — protects checklists on shared machines
 function storageKey(userEmail) {
   const e = (userEmail || '').toLowerCase().trim();
@@ -36,12 +50,16 @@ function storageKey(userEmail) {
 function migrateItem(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const now = Date.now();
+  const priority = typeof raw.priority === 'string' && VALID_PRIORITIES.has(raw.priority)
+    ? raw.priority
+    : 'normal';
   if (typeof raw.title === 'string') {
     return {
       id: raw.id || now + Math.random(),
       title: raw.title,
       description: typeof raw.description === 'string' ? raw.description : '',
       dueDate: typeof raw.dueDate === 'string' ? raw.dueDate : null,
+      priority,
       done: !!raw.done,
       createdAt: Number.isFinite(raw.createdAt) ? raw.createdAt : now,
       updatedAt: Number.isFinite(raw.updatedAt) ? raw.updatedAt : now,
@@ -53,6 +71,7 @@ function migrateItem(raw) {
       title: raw.text,
       description: '',
       dueDate: null,
+      priority,
       done: !!raw.done,
       createdAt: now,
       updatedAt: now,
@@ -176,6 +195,94 @@ function formatDue(iso) {
   if (diff <= 7) return { label: `${diff}d`, color: '#1f74b3', bg: '#DBEAFE', icon: 'bi-calendar' };
   return { label: d.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' }), color: '#616161', bg: '#f7f5f2', icon: 'bi-calendar' };
 }
+// Due-date urgency bucket used for sorting (lower = more urgent). Items without
+// a due date fall below anything dated so the top of the list is always
+// "something with a deadline". Within a bucket we further sort by priority.
+function dueBucket(iso) {
+  if (!iso) return 5;
+  const d = new Date(iso + 'T00:00:00');
+  if (isNaN(d)) return 5;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diff = Math.round((d - today) / 86400000);
+  if (diff < 0) return 0;   // overdue
+  if (diff === 0) return 1; // today
+  if (diff === 1) return 2; // tomorrow
+  if (diff <= 7) return 3;  // this week
+  return 4;                 // later
+}
+
+// ── PriorityPicker ──────────────────────────────────────────────────────────
+// Controlled. Two render modes:
+//   • "compact" → four small flag-icon buttons. Used in the quick-add row and
+//     anywhere space is tight.
+//   • "full"    → four labeled pills with color dots. Used in expanded add/
+//     edit forms where there's room for labels.
+const PriorityPicker = ({ value, onChange, mode = 'compact' }) => {
+  return (
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: mode === 'full' ? 6 : 4, flexWrap: 'wrap' }}>
+      {PRIORITY_ORDER.map(p => {
+        const meta = PRIORITY_META[p];
+        const selected = value === p;
+        if (mode === 'full') {
+          return (
+            <button
+              key={p}
+              type="button"
+              onClick={() => onChange(p)}
+              aria-pressed={selected}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '5px 11px',
+                borderRadius: 99,
+                border: selected ? `1.5px solid ${meta.color}` : '1px solid #e8e8e8',
+                background: selected ? meta.bg : 'white',
+                color: selected ? meta.color : '#616161',
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: 'pointer',
+                transition: 'all .15s',
+                fontFamily: 'inherit',
+              }}
+            >
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: meta.color, display: 'inline-block' }} />
+              {meta.label}
+            </button>
+          );
+        }
+        return (
+          <button
+            key={p}
+            type="button"
+            title={`Priority: ${meta.label}`}
+            aria-label={`Set priority to ${meta.label}`}
+            aria-pressed={selected}
+            onClick={() => onChange(p)}
+            style={{
+              width: 22,
+              height: 22,
+              borderRadius: 6,
+              border: selected ? `1.5px solid ${meta.color}` : '1px solid #e8e8e8',
+              background: selected ? meta.bg : 'white',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 0,
+              transition: 'all .15s',
+            }}
+            onMouseEnter={e => { if (!selected) e.currentTarget.style.borderColor = meta.color; }}
+            onMouseLeave={e => { if (!selected) e.currentTarget.style.borderColor = '#e8e8e8'; }}
+          >
+            <i className="bi-flag-fill" style={{ fontSize: 10, color: meta.color }} />
+          </button>
+        );
+      })}
+    </div>
+  );
+};
 
 // ── Component ───────────────────────────────────────────────────────────────
 // `variant` — "compact" (default) renders the small right-column card; "primary"
@@ -198,7 +305,7 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
   });
   const [lastWriteTs, setLastWriteTs] = useState(0);
   const [expandedId, setExpandedId] = useState(null);
-  const [draft, setDraft] = useState({ title: '', description: '', dueDate: '' });
+  const [draft, setDraft] = useState({ title: '', description: '', dueDate: '', priority: 'normal' });
   const [showAddForm, setShowAddForm] = useState(false);
   const titleInputRef = useRef(null);
   const skipNextWriteRef = useRef(false); // set when we adopt a broadcast so we don't echo
@@ -272,17 +379,19 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
     const title = (titleOverride ?? draft.title).trim();
     if (!title) return;
     const now = Date.now();
+    const priority = VALID_PRIORITIES.has(draft.priority) ? draft.priority : 'normal';
     const item = {
       id: now + Math.random(),
       title,
       description: (draft.description || '').trim(),
       dueDate: draft.dueDate || null,
+      priority,
       done: false,
       createdAt: now,
       updatedAt: now,
     };
     setItems(prev => [...prev, item]);
-    setDraft({ title: '', description: '', dueDate: '' });
+    setDraft({ title: '', description: '', dueDate: '', priority: 'normal' });
     setShowAddForm(false);
   }, [draft]);
 
@@ -307,15 +416,26 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
   }, []);
 
   // ── Derived ──────────────────────────────────────────────────────────────
+  // Sort order (most actionable first):
+  //   1. Done items sink to the bottom.
+  //   2. Incomplete items sort by due-date bucket (overdue → today → tomorrow
+  //      → this week → later → undated).
+  //   3. Within a bucket, priority breaks the tie (urgent → high → normal →
+  //      low) — so an "urgent + due today" always beats "normal + due today".
+  //   4. Within a bucket+priority, the earlier literal due date wins.
+  //   5. Finally, creation order keeps identical items stable.
   const sorted = [...items].sort((a, b) => {
-    // Incomplete first; within incomplete: overdue → today → dated → undated
     if (a.done !== b.done) return a.done ? 1 : -1;
+    const ab = dueBucket(a.dueDate);
+    const bb = dueBucket(b.dueDate);
+    if (ab !== bb) return ab - bb;
+    const ap = (PRIORITY_META[a.priority] || PRIORITY_META.normal).rank;
+    const bp = (PRIORITY_META[b.priority] || PRIORITY_META.normal).rank;
+    if (ap !== bp) return ap - bp;
     const ad = a.dueDate || '';
     const bd = b.dueDate || '';
-    if (ad && !bd) return -1;
-    if (!ad && bd) return 1;
-    if (ad && bd) return ad.localeCompare(bd);
-    return a.createdAt - b.createdAt;
+    if (ad && bd && ad !== bd) return ad.localeCompare(bd);
+    return (a.createdAt || 0) - (b.createdAt || 0);
   });
   const doneCount = items.filter(i => i.done).length;
   const openCount = items.length - doneCount;
@@ -325,7 +445,8 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
 
   // ── UI ───────────────────────────────────────────────────────────────────
   // Primary variant fills a tall left-column slot: bigger header, gradient
-  // ribbon, progress bar, larger item rows, and a permanently-visible add bar.
+  // ribbon, progress bar, a top-pinned add area (so capturing a task never
+  // requires scrolling past a long list), and larger item rows.
   // Compact variant keeps the existing small-card look for right-column use.
   return (
     <div style={{
@@ -413,6 +534,143 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
         </div>
       )}
 
+      {/* Add area — pinned at the top so a long list never hides it */}
+      <div style={{
+        padding: primary ? '12px 18px 14px' : '10px 16px 10px',
+        borderBottom: '1px solid #f0eeec',
+        flexShrink: 0,
+        background: primary ? '#fbfafc' : '#fdfcfb',
+      }}>
+        {!showAddForm ? (
+          <>
+            <div style={{ display: 'flex', gap: primary ? 8 : 6 }}>
+              <input
+                ref={titleInputRef}
+                value={draft.title}
+                onChange={e => setDraft(d => ({ ...d, title: e.target.value }))}
+                onKeyDown={quickAdd}
+                placeholder={primary ? 'Add a task… press Enter to save' : 'Add a task... (Enter to save)'}
+                style={{
+                  flex: 1,
+                  height: primary ? 38 : 32,
+                  padding: primary ? '0 14px' : '0 10px',
+                  borderRadius: primary ? 10 : 8,
+                  border: '1px solid #e8e8e8',
+                  fontSize: primary ? 13 : 12,
+                  outline: 'none',
+                  fontFamily: 'inherit',
+                  color: '#1b1b1b',
+                  background: 'white',
+                }}
+                onFocus={e => e.target.style.borderColor = '#7c3aed'}
+                onBlur={e => e.target.style.borderColor = '#e8e8e8'}
+              />
+              <button
+                onClick={() => { if (draft.title.trim()) setShowAddForm(true); else titleInputRef.current?.focus(); }}
+                title="Add details (description, due date, priority)"
+                style={{
+                  height: primary ? 38 : 32,
+                  padding: primary ? '0 12px' : '0 10px',
+                  borderRadius: primary ? 10 : 8,
+                  border: '1px solid #e8e8e8',
+                  background: 'white',
+                  color: '#616161',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all .15s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = '#7c3aed'; e.currentTarget.style.color = '#7c3aed'; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = '#e8e8e8'; e.currentTarget.style.color = '#616161'; }}
+              >
+                <i className="bi-sliders" style={{ fontSize: primary ? 13 : 12 }}></i>
+              </button>
+              <button
+                onClick={() => add()}
+                disabled={!draft.title.trim()}
+                style={{
+                  height: primary ? 38 : 32,
+                  padding: primary ? '0 18px' : '0 14px',
+                  borderRadius: primary ? 10 : 8,
+                  border: 'none',
+                  background: draft.title.trim() ? '#7c3aed' : '#e8e8e8',
+                  color: draft.title.trim() ? 'white' : '#9e9e9e',
+                  fontSize: primary ? 13 : 12,
+                  fontWeight: 700,
+                  cursor: draft.title.trim() ? 'pointer' : 'default',
+                  transition: 'all .15s',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+              >
+                <i className="bi-plus" style={{ fontSize: primary ? 16 : 14 }}></i>
+                {primary && <span>Add</span>}
+              </button>
+            </div>
+            {/* Inline compact priority picker — discoverable without opening
+                the full form, and the selected priority is carried into the
+                next task. Users can still override via the details form. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: primary ? 8 : 6 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: '#9e9e9e', letterSpacing: 0.4, textTransform: 'uppercase' }}>Priority</span>
+              <PriorityPicker value={draft.priority} onChange={p => setDraft(d => ({ ...d, priority: p }))} mode="compact" />
+            </div>
+          </>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: 'white', padding: 10, borderRadius: 10, border: '1px solid #e8e8e8' }}>
+            <input
+              autoFocus
+              value={draft.title}
+              onChange={e => setDraft(d => ({ ...d, title: e.target.value }))}
+              placeholder="Title"
+              style={{ width: '100%', padding: '6px 10px', borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 12, outline: 'none', fontFamily: 'inherit', color: '#1b1b1b', boxSizing: 'border-box' }}
+              onFocus={e => e.target.style.borderColor = '#7c3aed'}
+              onBlur={e => e.target.style.borderColor = '#e8e8e8'}
+            />
+            <textarea
+              value={draft.description}
+              onChange={e => setDraft(d => ({ ...d, description: e.target.value }))}
+              placeholder="Description (optional)"
+              rows={2}
+              style={{ width: '100%', padding: '6px 10px', borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 12, outline: 'none', fontFamily: 'inherit', color: '#1b1b1b', resize: 'vertical', boxSizing: 'border-box', lineHeight: 1.4 }}
+              onFocus={e => e.target.style.borderColor = '#7c3aed'}
+              onBlur={e => e.target.style.borderColor = '#e8e8e8'}
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <label style={{ fontSize: 11, color: '#9e9e9e', fontWeight: 600 }}>Due</label>
+              <input
+                type="date"
+                value={draft.dueDate}
+                onChange={e => setDraft(d => ({ ...d, dueDate: e.target.value }))}
+                style={{ padding: '4px 8px', borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 12, outline: 'none', fontFamily: 'inherit', color: '#1b1b1b' }}
+                onFocus={e => e.target.style.borderColor = '#7c3aed'}
+                onBlur={e => e.target.style.borderColor = '#e8e8e8'}
+              />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <label style={{ fontSize: 11, color: '#9e9e9e', fontWeight: 600 }}>Priority</label>
+              <PriorityPicker value={draft.priority} onChange={p => setDraft(d => ({ ...d, priority: p }))} mode="full" />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+              <div style={{ flex: 1 }}></div>
+              <button
+                onClick={() => { setShowAddForm(false); setDraft({ title: '', description: '', dueDate: '', priority: 'normal' }); }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9e9e9e', fontSize: 11, padding: '4px 8px', borderRadius: 6, fontWeight: 600 }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => add()}
+                disabled={!draft.title.trim()}
+                style={{ background: draft.title.trim() ? '#7c3aed' : '#e8e8e8', border: 'none', cursor: draft.title.trim() ? 'pointer' : 'default', color: draft.title.trim() ? 'white' : '#9e9e9e', fontSize: 11, padding: '5px 12px', borderRadius: 6, fontWeight: 700 }}
+              >
+                Add task
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Items list */}
       <div style={{
         padding: primary ? '8px 14px' : '6px 12px',
@@ -438,7 +696,7 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
             {primary ? (
               <>
                 <div style={{ fontWeight: 700, fontSize: 14, color: '#616161', marginBottom: 4 }}>Nothing on your plate yet</div>
-                <div style={{ fontSize: 12 }}>Capture a task below — it stays with you across tabs and sessions.</div>
+                <div style={{ fontSize: 12 }}>Capture a task above — it stays with you across tabs and sessions.</div>
               </>
             ) : (
               'Track your daily tasks here'
@@ -448,8 +706,17 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
         {sorted.map(item => {
           const due = formatDue(item.dueDate);
           const isExpanded = expandedId === item.id;
+          const priMeta = PRIORITY_META[item.priority] || PRIORITY_META.normal;
+          const showPriPill = item.priority && item.priority !== 'normal';
           return (
-            <div key={item.id} style={{ borderBottom: '1px solid #f5f5f5', transition: 'background .15s', borderRadius: primary ? 8 : 0 }}>
+            <div key={item.id} style={{
+              borderBottom: '1px solid #f5f5f5',
+              transition: 'background .15s',
+              borderRadius: primary ? 8 : 0,
+              // Always render a 3px stripe so content alignment stays stable
+              // as priority changes; transparent for `normal`.
+              borderLeft: `3px solid ${showPriPill ? priMeta.color : 'transparent'}`,
+            }}>
               {/* Row */}
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: primary ? 10 : 8, padding: primary ? '10px 8px' : '8px 4px' }}>
                 <button
@@ -466,8 +733,13 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
                   <div style={{ fontSize: primary ? 13.5 : 13, color: item.done ? '#9e9e9e' : '#1b1b1b', textDecoration: item.done ? 'line-through' : 'none', fontWeight: 500, lineHeight: 1.35, wordBreak: 'break-word' }}>
                     {item.title}
                   </div>
-                  {(item.description || due) && !isExpanded && (
+                  {(item.description || due || showPriPill) && !isExpanded && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
+                      {showPriPill && (
+                        <span title={`Priority: ${priMeta.label}`} style={{ fontSize: 10, fontWeight: 700, color: priMeta.color, background: priMeta.bg, padding: '1px 7px', borderRadius: 99, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                          <i className="bi-flag-fill" style={{ fontSize: 9 }}></i>{priMeta.label}
+                        </span>
+                      )}
                       {item.description && (
                         <span style={{ fontSize: 11, color: '#9e9e9e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180, display: 'inline-block' }} title={item.description}>
                           {item.description}
@@ -491,7 +763,7 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
                   <i className="bi-x" style={{ fontSize: 14 }}></i>
                 </button>
               </div>
-              {/* Inline edit — title / description / due date */}
+              {/* Inline edit — title / description / due date / priority */}
               {isExpanded && (
                 <div style={{ padding: '4px 4px 12px 32px', display: 'flex', flexDirection: 'column', gap: 8 }}>
                   <input
@@ -511,7 +783,7 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
                     onFocus={e => e.target.style.borderColor = '#7c3aed'}
                     onBlur={e => e.target.style.borderColor = '#e8e8e8'}
                   />
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <label style={{ fontSize: 11, color: '#9e9e9e', fontWeight: 600 }}>Due</label>
                     <input
                       type="date"
@@ -531,6 +803,12 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
                         Clear
                       </button>
                     )}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <label style={{ fontSize: 11, color: '#9e9e9e', fontWeight: 600 }}>Priority</label>
+                    <PriorityPicker value={item.priority || 'normal'} onChange={p => updateField(item.id, 'priority', p)} mode="full" />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <div style={{ flex: 1 }}></div>
                     <button
                       onClick={() => setExpandedId(null)}
@@ -544,128 +822,6 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
             </div>
           );
         })}
-      </div>
-
-      {/* Add area */}
-      <div style={{
-        padding: primary ? '12px 18px 16px' : '10px 16px 12px',
-        borderTop: '1px solid #f5f5f5',
-        flexShrink: 0,
-        background: primary ? '#fbfafc' : 'white',
-      }}>
-        {!showAddForm ? (
-          <div style={{ display: 'flex', gap: primary ? 8 : 6 }}>
-            <input
-              ref={titleInputRef}
-              value={draft.title}
-              onChange={e => setDraft(d => ({ ...d, title: e.target.value }))}
-              onKeyDown={quickAdd}
-              placeholder={primary ? 'Add a task… press Enter to save' : 'Add a task... (Enter to save)'}
-              style={{
-                flex: 1,
-                height: primary ? 38 : 32,
-                padding: primary ? '0 14px' : '0 10px',
-                borderRadius: primary ? 10 : 8,
-                border: '1px solid #e8e8e8',
-                fontSize: primary ? 13 : 12,
-                outline: 'none',
-                fontFamily: 'inherit',
-                color: '#1b1b1b',
-                background: 'white',
-              }}
-              onFocus={e => e.target.style.borderColor = '#7c3aed'}
-              onBlur={e => e.target.style.borderColor = '#e8e8e8'}
-            />
-            <button
-              onClick={() => { if (draft.title.trim()) setShowAddForm(true); else titleInputRef.current?.focus(); }}
-              title="Add details (description, due date)"
-              style={{
-                height: primary ? 38 : 32,
-                padding: primary ? '0 12px' : '0 10px',
-                borderRadius: primary ? 10 : 8,
-                border: '1px solid #e8e8e8',
-                background: 'white',
-                color: '#616161',
-                fontSize: 11,
-                fontWeight: 600,
-                cursor: 'pointer',
-                transition: 'all .15s',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = '#7c3aed'; e.currentTarget.style.color = '#7c3aed'; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = '#e8e8e8'; e.currentTarget.style.color = '#616161'; }}
-            >
-              <i className="bi-sliders" style={{ fontSize: primary ? 13 : 12 }}></i>
-            </button>
-            <button
-              onClick={() => add()}
-              disabled={!draft.title.trim()}
-              style={{
-                height: primary ? 38 : 32,
-                padding: primary ? '0 18px' : '0 14px',
-                borderRadius: primary ? 10 : 8,
-                border: 'none',
-                background: draft.title.trim() ? '#7c3aed' : '#e8e8e8',
-                color: draft.title.trim() ? 'white' : '#9e9e9e',
-                fontSize: primary ? 13 : 12,
-                fontWeight: 700,
-                cursor: draft.title.trim() ? 'pointer' : 'default',
-                transition: 'all .15s',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-              }}
-            >
-              <i className="bi-plus" style={{ fontSize: primary ? 16 : 14 }}></i>
-              {primary && <span>Add</span>}
-            </button>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, background: '#fafaf9', padding: 10, borderRadius: 10, border: '1px solid #e8e8e8' }}>
-            <input
-              autoFocus
-              value={draft.title}
-              onChange={e => setDraft(d => ({ ...d, title: e.target.value }))}
-              placeholder="Title"
-              style={{ width: '100%', padding: '6px 10px', borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 12, outline: 'none', fontFamily: 'inherit', color: '#1b1b1b', boxSizing: 'border-box' }}
-              onFocus={e => e.target.style.borderColor = '#7c3aed'}
-              onBlur={e => e.target.style.borderColor = '#e8e8e8'}
-            />
-            <textarea
-              value={draft.description}
-              onChange={e => setDraft(d => ({ ...d, description: e.target.value }))}
-              placeholder="Description (optional)"
-              rows={2}
-              style={{ width: '100%', padding: '6px 10px', borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 12, outline: 'none', fontFamily: 'inherit', color: '#1b1b1b', resize: 'vertical', boxSizing: 'border-box', lineHeight: 1.4 }}
-              onFocus={e => e.target.style.borderColor = '#7c3aed'}
-              onBlur={e => e.target.style.borderColor = '#e8e8e8'}
-            />
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <label style={{ fontSize: 11, color: '#9e9e9e', fontWeight: 600 }}>Due</label>
-              <input
-                type="date"
-                value={draft.dueDate}
-                onChange={e => setDraft(d => ({ ...d, dueDate: e.target.value }))}
-                style={{ padding: '4px 8px', borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 12, outline: 'none', fontFamily: 'inherit', color: '#1b1b1b' }}
-                onFocus={e => e.target.style.borderColor = '#7c3aed'}
-                onBlur={e => e.target.style.borderColor = '#e8e8e8'}
-              />
-              <div style={{ flex: 1 }}></div>
-              <button
-                onClick={() => { setShowAddForm(false); setDraft({ title: '', description: '', dueDate: '' }); }}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9e9e9e', fontSize: 11, padding: '4px 8px', borderRadius: 6, fontWeight: 600 }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => add()}
-                disabled={!draft.title.trim()}
-                style={{ background: draft.title.trim() ? '#7c3aed' : '#e8e8e8', border: 'none', cursor: draft.title.trim() ? 'pointer' : 'default', color: draft.title.trim() ? 'white' : '#9e9e9e', fontSize: 11, padding: '5px 12px', borderRadius: 6, fontWeight: 700 }}
-              >
-                Add task
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
