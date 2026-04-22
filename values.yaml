@@ -3,7 +3,7 @@ app:
   port: 3000
   image:
     repository: 211125331032.dkr.ecr.eu-west-1.amazonaws.com/jtk-ops-hub-v2
-    tag: 52c5252c32f27f523151d441cccb2c5ee6f83b99
+    tag: 4390c41b0871a7693bd8e89e104c1031f84fbfc5
     pullPolicy: IfNotPresent
 
 service:
@@ -13,6 +13,7 @@ service:
 
 ingress:
   host: jtk-ops-hub-v2.dp.com
+  aliasHost: jtk.dp.com
 
 sandboxName: jtk-ops-hub-v2
 
