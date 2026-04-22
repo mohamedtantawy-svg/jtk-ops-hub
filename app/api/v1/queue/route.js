@@ -14,11 +14,15 @@ import { searchIssues, isJiraConfigured, resolveHrxOwnerFields, emailsFromJiraFi
 // Jira custom fields (by display-name substring) that can assign an HRX
 // manager to a ticket in addition to the built-in `assignee`. We also surface
 // tickets where any of these fields is one of our registered emails.
+// Note: 'responsible' is intentionally a substring match so both "HRX
+// Responsible" and "Team Responsible" (and any future *Responsible field)
+// resolve through the same discovery path.
 const HRX_OWNER_FIELD_NAMES = [
   'country owner',
   'task owner',
   'process owner',
   'team responsible',
+  'hrx responsible',
 ];
 import { ADMIN_EMAILS_LIST } from '../../../../src/data/adminEmails';
 import { cacheGet, cacheSet } from '../../../../src/lib/server-cache';
@@ -370,22 +374,32 @@ async function fetchZendeskQueue() {
 }
 
 // ── Build JQL for registered emails ──────────────────────────────────────────
-// Includes both built-in `assignee` and the HRX-owner custom fields
-// (Country Owner / Task Owner / Process Owner / Team Responsible). Each field
-// is OR'd in so a ticket surfaces whenever ANY role is one of our team.
+// A ticket surfaces in our queue whenever ANY of the following roles is one of
+// our registered team emails:
+//   • built-in `assignee`
+//   • built-in `reporter`
+//   • HRX-owner custom fields (Country Owner / Task Owner / Process Owner /
+//     Team Responsible / HRX Responsible)
+//
 // `ownerFieldIds` is { 'country owner': 'customfield_12345', ... } — empty
-// entries are skipped (field doesn't exist on this Jira instance).
+// entries are skipped (field doesn't exist on this Jira instance). All
+// clauses OR together so the union is a single query, and Jira returns each
+// issue only once even when it matches multiple clauses (no duplicates from
+// the API — we also belt-and-brace with a Set-based dedup below).
 function buildJiraJql(ownerFieldIds = {}) {
   const emailsList = ADMIN_EMAILS_LIST.map(e => `"${e}"`).join(', ');
 
-  const orClauses = [`assignee IN (${emailsList})`];
+  const orClauses = [
+    `assignee IN (${emailsList})`,
+    `reporter IN (${emailsList})`,
+  ];
   for (const cfId of Object.values(ownerFieldIds)) {
     if (!cfId) continue;
     const num = String(cfId).replace(/^customfield_/, '');
     // cf[12345] IN (...) works for both single and multi-user picker fields.
     orClauses.push(`cf[${num}] IN (${emailsList})`);
   }
-  const whoClause = orClauses.length === 1 ? orClauses[0] : `(${orClauses.join(' OR ')})`;
+  const whoClause = `(${orClauses.join(' OR ')})`;
 
   // Not completed — with a 4h done-grace window for transition detection.
   return `${whoClause} AND (status NOT IN (Done, Closed, Resolved, Solved, Cancelled, Rejected, Completed) OR (status IN (Done, Closed, Resolved, Solved, Completed) AND updated >= -4h)) ORDER BY updated DESC`;
@@ -404,6 +418,7 @@ async function fetchJiraQueue() {
 
     const jql = buildJiraJql(ownerFieldIds);
     const allIssues = [];
+    const seenKeys = new Set();       // dedup guard — same key never lands twice
     let startAt = 0;
     const pageSize = 100;
 
@@ -421,7 +436,12 @@ async function fetchJiraQueue() {
       });
 
       const issues = result?.issues || [];
-      allIssues.push(...issues);
+      for (const issue of issues) {
+        if (issue?.key && !seenKeys.has(issue.key)) {
+          seenKeys.add(issue.key);
+          allIssues.push(issue);
+        }
+      }
 
       // Stop if we got fewer than pageSize or total reached
       const total = result?.total || 0;
@@ -438,13 +458,21 @@ async function fetchJiraQueue() {
       const assignee = f.assignee || {};
       const reporter = f.reporter || {};
 
-      // Collect every email associated with this ticket via any of the HRX
-      // owner custom fields — used by the scoping layer so the ticket is
-      // visible to (e.g.) the Country Owner even if they're not the assignee.
+      // Collect every email associated with this ticket via roles OTHER than
+      // the primary assignee — used by the scoping layer so the ticket is
+      // visible to e.g. the Country Owner, HRX Responsible, or Reporter even
+      // when they aren't the assignee. Deduped via Set.
       const ownerEmails = new Set();
-      for (const [name, cfId] of Object.entries(ownerFieldIds)) {
+      for (const cfId of Object.values(ownerFieldIds)) {
+        if (!cfId) continue;
         const emails = emailsFromJiraFieldValue(f[cfId]);
         for (const e of emails) ownerEmails.add(e);
+      }
+      // Reporter also contributes to visibility — per Pilar's 2026-04-22 rule
+      // ("pull any ticket if any of our users is the HRX Responsible or
+      // Reporter"). Lowercased to match scoping's comparison convention.
+      if (reporter.emailAddress) {
+        ownerEmails.add(reporter.emailAddress.toLowerCase());
       }
 
       return {
@@ -459,14 +487,20 @@ async function fetchJiraQueue() {
         country: detectCountry(f.summary, f.labels || []),
         assigneeEmail: assignee.emailAddress || null,
         assigneeName: assignee.displayName || null,
-        // Secondary visibility: any HRX manager set as country/task/process
-        // owner or team responsible. Scoping checks both.
+        // Secondary visibility: HRX-owner custom fields + Reporter. Scoping
+        // matches on primary assignee OR any secondary — see
+        // src/lib/queue-scoping.js::filterByAssignee.
         secondaryAssigneeEmails: [...ownerEmails],
         requesterName: reporter.displayName || 'System',
         requesterEmail: reporter.emailAddress || null,
         lastCustomerResponseAt: f.updated, // Jira updated tracks last activity
         createdAt: f.created,
         updatedAt: f.updated,
+        // Jira SLA is fixed at 24h from the latest update regardless of the
+        // inferred task type (Pilar's 2026-04-22 rule). slaInfo() in
+        // src/utils/helpers.js reads this override before falling back to
+        // SLA_MINS[type].
+        slaMinsOverride: 1440,
         externalUrl: JIRA_BASE ? `${JIRA_BASE}/browse/${issue.key}` : '',
         tags: f.labels || [],
         jiraStatus: statusName,
