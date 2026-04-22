@@ -449,15 +449,23 @@ async function fetchJiraQueue() {
     // Paginate each clause independently; union the results. Running them
     // sequentially (instead of Promise.all) keeps Jira rate-limit headroom
     // and avoids any single request's backoff stalling the others.
+    //
+    // Pagination note: Jira Cloud's /search/jql endpoint uses token-based
+    // cursor pagination via `nextPageToken` (not offset `startAt`). The
+    // response tells us we're done via `isLast === true` or a missing
+    // `nextPageToken`. See src/lib/jira-api.js for the full rationale.
     for (const jql of jqlQueries) {
-      let startAt = 0;
+      let nextPageToken; // undefined → first page
       let fetched = 0;
+      let safetyPages = 0;
+      const MAX_PAGES = Math.ceil(MAX_ISSUES_PER_CLAUSE / pageSize) + 1;
+
       while (true) {
         let result;
         try {
           result = await searchIssues(jql, {
             maxResults: pageSize,
-            startAt,
+            nextPageToken,
             fields: fieldsToFetch,
           });
         } catch (clauseErr) {
@@ -475,17 +483,20 @@ async function fetchJiraQueue() {
             allIssues.push(issue);
           }
         }
-
         fetched += issues.length;
-        const total = result?.total;
-        // Stop conditions:
-        //  - page was smaller than pageSize (no more results)
-        //  - we've fetched every issue for this clause
-        //  - we've hit the safety cap
-        if (issues.length < pageSize) break;
-        if (Number.isFinite(total) && fetched >= total) break;
-        startAt += pageSize;
-        if (startAt >= MAX_ISSUES_PER_CLAUSE) break;
+
+        // Stop conditions for the new /search/jql endpoint:
+        //   - server says we've hit the last page (isLast)
+        //   - no token to get the next page
+        //   - we've hit the per-clause safety cap
+        //   - page request count safety cap (defensive; protects against a
+        //     server that never stops returning `nextPageToken`)
+        if (result?.isLast) break;
+        if (!result?.nextPageToken) break;
+        if (fetched >= MAX_ISSUES_PER_CLAUSE) break;
+        if (++safetyPages >= MAX_PAGES) break;
+
+        nextPageToken = result.nextPageToken;
       }
     }
 
