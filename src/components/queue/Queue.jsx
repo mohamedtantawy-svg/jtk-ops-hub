@@ -442,22 +442,48 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
 
   // ── View-aware header counts: reflect active tab + filters ──
   // Uses the POST-FILTER row sets so Status / Unassigned toggles reshape
-  // the "open" count the same way they reshape the table.
+  // the "open" count the same way they reshape the chips and the table.
+  //
+  // Historical bug (fixed 2026-04-22): the default Queue (ZD/JR) branch
+  // used unfiltered `baseVis` + `allSourceRows.length`, so when a stale
+  // persisted filter was active the header could read "275 open" while
+  // every chip read 0. Summary now always agrees with chips; `rawCounts`
+  // captures the unfiltered totals so we can show a "N hidden" hint.
   const headerCounts = useMemo(() => {
     if (workSource === 'onboarding') return { open: visOnboardingRows.length, paused: 0, resolved: 0 };
     if (workSource === 'offboarding') return { open: visOffboardingRows.length, paused: 0, resolved: 0 };
     if (workSource === 'amendments') return { open: visAmendmentRows.length, paused: 0, resolved: 0 };
     if (workSource === 'redlines') return { open: visRedlineRows.length, paused: 0, resolved: 0 };
     if (workSource === 'workbench') return { open: visWorkbenchRows.length, paused: 0, resolved: 0 };
-    // Queue view (ZD/JR) — use filtered baseVis when fTool is set
+    // Default Queue (ZD/JR) — filtered ZD/JR counts + filtered source-panel counts.
+    // When fTool is set we're narrowing to one ticket source, so source panels drop out.
+    const sourceOpen = fTool ? 0 : (
+      visOnboardingRows.length + visOffboardingRows.length + visAmendmentRows.length
+      + visRedlineRows.length + visWorkbenchRows.length
+    );
+    return {
+      open: active.length + sourceOpen,
+      paused: snoozed.length,
+      resolved: done.length,
+    };
+  }, [workSource, fTool, active, snoozed, done, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows]);
+
+  // Unfiltered baseline — drives the "N hidden by filters" nudge. We only
+  // surface it when filters are active AND the gap is positive, which means
+  // the user has truly hidden work behind a stale/accidental filter.
+  const rawCounts = useMemo(() => {
+    if (workSource === 'onboarding') return { open: onboardingRows.length };
+    if (workSource === 'offboarding') return { open: offboardingRows.length };
+    if (workSource === 'amendments') return { open: amendmentRows.length };
+    if (workSource === 'redlines') return { open: redlineRows.length };
+    if (workSource === 'workbench') return { open: workbenchRows.length };
     const base = fTool ? baseVis.filter(t => t.source === fTool) : baseVis;
     const srcExtra = fTool ? 0 : allSourceRows.length;
     return {
       open: base.filter(t => t.status !== 'resolved' && t.status !== 'waiting').length + srcExtra,
-      paused: base.filter(t => t.status === 'waiting').length,
-      resolved: base.filter(t => t.status === 'resolved').length,
     };
-  }, [workSource, fTool, baseVis, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows, allSourceRows]);
+  }, [workSource, fTool, baseVis, allSourceRows, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows]);
+  const hiddenByFilters = Math.max(0, rawCounts.open - headerCounts.open);
 
   // Persist filters to localStorage (fCtry + sort removed 2026-04-21)
   useEffect(()=>{
@@ -822,6 +848,18 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           <button onClick={()=>setFUnassigned(!fUnassigned)} style={{height:32,display:'inline-flex',alignItems:'center',gap:5,padding:'0 12px',borderRadius:8,border:fUnassigned?'1px solid #d42d35':'1px solid #e8e8e8',background:fUnassigned?'#fef2f2':'white',color:fUnassigned?'#d42d35':'#616161',fontSize:12,fontWeight:fUnassigned?600:500,cursor:'pointer',transition:'all .15s',whiteSpace:'nowrap'}}>
             <i className="bi-person-dash" style={{fontSize:11}}></i>Unassigned
           </button>
+
+          {/* "N hidden by filters" nudge — only when filters are genuinely
+              masking work. Catches the "all chips show 0 but I know there
+              are tasks" state that used to bite Team Leads with stale
+              localStorage filters. */}
+          {hasActiveFilters && hiddenByFilters > 0 && (
+            <span title={`Your active filters are hiding ${hiddenByFilters} ${hiddenByFilters === 1 ? 'task' : 'tasks'}. Click Clear all to see everything.`}
+              style={{height:32,display:'inline-flex',alignItems:'center',gap:5,padding:'0 10px',borderRadius:8,background:'#fff7ed',border:'1px solid #fed7aa',color:'#b45309',fontSize:11,fontWeight:600,whiteSpace:'nowrap'}}>
+              <i className="bi-funnel-fill" style={{fontSize:10}}></i>
+              {hiddenByFilters} hidden
+            </span>
+          )}
 
           {/* Clear all */}
           {hasActiveFilters&&(
