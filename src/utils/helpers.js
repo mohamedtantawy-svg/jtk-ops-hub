@@ -9,10 +9,15 @@ export const ageClass=(m,s)=>{ if(s==='resolved'||s==='waiting')return''; if(m>=
 export const ageDot=(m,s)=>{ if(s==='resolved'||s==='waiting'||m<30)return null; if(m>=120)return'#d42d35'; if(m>=60)return'#ed5e2a'; return'#ed8d00'; };
 export const slaInfo=(task,customThresholds)=>{
   if(task.status==='resolved'||task.status==='waiting')return null;
-  // SLA uses task-type-specific thresholds from SLA_MINS (or custom overrides)
+  // SLA uses task-type-specific thresholds from SLA_MINS (or custom overrides).
+  // Per-task `slaMinsOverride` wins over everything — e.g. Jira tickets are
+  // pinned at 24h from the latest update (Pilar's 2026-04-22 rule) regardless
+  // of the type detected from the summary.
   const elapsed = task.minutesSinceLastResponse != null ? task.minutesSinceLastResponse : task.minutesAgo;
   const thresholds = customThresholds || SLA_MINS;
-  const lim = thresholds[task.type] || SLA_MINS[task.type] || 1440;
+  const lim = Number.isFinite(task.slaMinsOverride) && task.slaMinsOverride > 0
+    ? task.slaMinsOverride
+    : (thresholds[task.type] || SLA_MINS[task.type] || 1440);
   const rem = lim - elapsed;
   if(rem<=0)return{label:'SLA Breached',short:'BREACHED',color:'#d42d35',bg:'#ffe2de',breach:true,remain:rem};
   const pct = elapsed / lim;

@@ -75,6 +75,15 @@ function normalizeQueueItem(item) {
     updatedMinsAgo,
     minutesSinceLastResponse,
     lastCustomerResponseAt: item.lastCustomerResponseAt || null,
+    // Per-task SLA override (minutes). Set by the backend on Jira items so
+    // slaInfo() pins the threshold at 24h regardless of detected type.
+    slaMinsOverride: Number.isFinite(item.slaMinsOverride) ? item.slaMinsOverride : null,
+    // Secondary-visibility emails — HRX-owner custom fields + Reporter for
+    // Jira. filterByAssignee() in src/lib/queue-scoping.js checks both the
+    // primary assignee and this list.
+    secondaryAssigneeEmails: Array.isArray(item.secondaryAssigneeEmails)
+      ? item.secondaryAssigneeEmails.map(e => (e || '').toLowerCase()).filter(Boolean)
+      : [],
     receivedAt,
     status: item.status || 'new',
     type: item.type || 'Policy Query',
