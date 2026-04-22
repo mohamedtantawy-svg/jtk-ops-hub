@@ -278,6 +278,63 @@ CREATE INDEX IF NOT EXISTS idx_requests_to_team ON requests(to_team);
 CREATE INDEX IF NOT EXISTS idx_requests_from_member ON requests(from_member_id);
 CREATE INDEX IF NOT EXISTS idx_requests_created ON requests(created_at DESC);
 
+-- ── Google Calendar integration ─────────────────────────────────────────────
+-- One row per user that has connected a Google Calendar. The refresh_token is
+-- encrypted at rest with AES-256-GCM (key: CALENDAR_TOKEN_ENCRYPTION_KEY env
+-- var; see src/lib/token-crypto.js). The cleartext access_token is stored as
+-- an optimization — it's already short-lived (1h) and Google treats it as a
+-- bearer credential we have to send over the wire every request anyway, so
+-- encrypting it in the DB adds no real protection. The refresh_token, by
+-- contrast, is long-lived (until user revokes) and MUST be encrypted.
+--
+-- Connection lifecycle:
+--   1. User clicks "Connect Google Calendar" → OAuth start route generates a
+--      signed state JWT (5min TTL) containing their email, returns Google
+--      auth URL.
+--   2. User consents → Google redirects to /api/v1/calendar/oauth/callback
+--      with code + state. Callback verifies state JWT, exchanges code for
+--      refresh_token + access_token, upserts this row.
+--   3. Subsequent API calls (listEvents etc.) pull the row, refresh the
+--      access_token if expired, update expires_at.
+--   4. Disconnect → DELETE /api/v1/calendar/connection drops the row.
+--
+-- If the user later revokes access at myaccount.google.com, the next refresh
+-- attempt returns invalid_grant and we mark last_error so the UI can prompt
+-- the user to reconnect.
+CREATE TABLE IF NOT EXISTS calendar_tokens (
+  user_email              VARCHAR(255) PRIMARY KEY,
+  refresh_token_encrypted BYTEA        NOT NULL,
+  refresh_token_iv        BYTEA        NOT NULL,
+  access_token            TEXT,
+  access_token_expires_at TIMESTAMPTZ,
+  scopes                  TEXT         NOT NULL,
+  calendar_id             TEXT         DEFAULT 'primary',
+  google_email            VARCHAR(255),
+  connected_at            TIMESTAMPTZ  DEFAULT NOW(),
+  updated_at              TIMESTAMPTZ  DEFAULT NOW(),
+  last_error              TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_calendar_tokens_google_email ON calendar_tokens(google_email);
+
+-- Local-only calendar events — user-created "quick reminders" that don't sync
+-- back to Google. Keyed by (user_email, id) so every user owns their own set
+-- and cross-device persistence comes for free (vs storing in localStorage).
+-- start_at / end_at are UTC timestamps; the client renders in the user's
+-- local timezone.
+CREATE TABLE IF NOT EXISTS calendar_local_events (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_email  VARCHAR(255) NOT NULL,
+  title       TEXT         NOT NULL,
+  description TEXT,
+  start_at    TIMESTAMPTZ  NOT NULL,
+  end_at      TIMESTAMPTZ  NOT NULL,
+  color       VARCHAR(16)  DEFAULT 'blue',
+  created_at  TIMESTAMPTZ  DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ  DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_calendar_local_events_user_start
+  ON calendar_local_events(user_email, start_at);
+
 CREATE INDEX IF NOT EXISTS idx_announcements_status ON announcements(status);
 CREATE INDEX IF NOT EXISTS idx_announcements_pinned_created ON announcements(pinned DESC, created_at DESC);
 

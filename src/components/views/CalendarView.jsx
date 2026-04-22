@@ -1,526 +1,278 @@
-import { useState, useMemo } from 'react';
-import { CALENDAR_EVENTS } from '../../data/calendar';
+// ── CalendarView — Google Calendar integration UI ──────────────────────────
+// This screen was previously a static demo that rendered CALENDAR_EVENTS
+// from a mock JSON file. It is now the live Calendar tab, backed by:
+//   • Google Calendar API (read-only) via /api/v1/calendar/events
+//   • Local-only "add event" items via /api/v1/calendar/local-events
+//   • useCalendarConnection — connect/disconnect + status
+//   • useCalendarEvents — merged events with 2-min auto-refresh
+//
+// Layout (per user's spec):
+//   1. Daily events strip on top (horizontal scrolling meeting cards).
+//   2. Month/Week toggle + navigation in the middle.
+//   3. EventDetail modal when user clicks any card / pill.
+//   4. AddEventModal for quick local items.
+//
+// Soft launch gate: the Calendar tab is already restricted to OWNER_EMAIL
+// in DeelTopNav (restrictToEmail) and again in App.jsx (RESTRICTED_VIEWS),
+// and the server routes enforce the same gate at the API. This component
+// assumes it's only rendered for eligible users — there's no third layer.
+//
+// Props (from App.jsx):
+//   user        — current user ({ email, name, ... })
+//   addToast    — (type, title, body, onUndo?) => void
+//   setView     — view setter (used by alert toasts to focus the Calendar tab)
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import PageHeader from '../ui/PageHeader';
+import { useCalendarConnection } from '../../hooks/useCalendarConnection';
+import { useCalendarEvents } from '../../hooks/useCalendarEvents';
+import { createLocalEvent, deleteLocalEvent } from '../../services/calendarApi';
 
-// ─── Event type colour tokens ──────────────────────────────────────────────────
-const EVENT_COLOURS = {
-  deadline: { bg: 'var(--red-light)',    text: 'var(--red)',    border: 'var(--red-mid)' },
-  meeting:  { bg: 'var(--blue-light)',   text: 'var(--blue)',   border: 'var(--blue-mid)' },
-  review:   { bg: 'var(--orange-light)', text: 'var(--orange)', border: 'var(--orange-mid)' },
-  leave:    { bg: 'var(--green-light)',  text: 'var(--green)',  border: 'var(--green-mid)' },
-  default:  { bg: 'var(--purple-light)', text: 'var(--purple)', border: 'var(--purple-mid)' },
-};
+import ConnectPrompt from '../calendar/ConnectPrompt';
+import DailyEvents from '../calendar/DailyEvents';
+import MonthView from '../calendar/MonthView';
+import WeekView from '../calendar/WeekView';
+import EventDetail from '../calendar/EventDetail';
+import AddEventModal from '../calendar/AddEventModal';
 
-// Legacy config kept for icon/label lookup (colours replaced by EVENT_COLOURS)
-const TYPE_CONFIG = {
-  deadline: { label: 'Deadline',  icon: 'bi-clock-history'    },
-  meeting:  { label: 'Meeting',   icon: 'bi-camera-video'      },
-  review:   { label: 'Review',    icon: 'bi-clipboard2-check'  },
-  leave:    { label: 'Leave',     icon: 'bi-person-heart'      },
-};
+// ─────────────────────────────────────────────────────────────────────────────
+// Time helpers
+// ─────────────────────────────────────────────────────────────────────────────
 
-// Resolve colours for an event type
-function getEventColour(type) {
-  return EVENT_COLOURS[type] || EVENT_COLOURS.default;
+function startOfDay(d) {
+  const copy = new Date(d);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+}
+function endOfDay(d) {
+  const copy = new Date(d);
+  copy.setHours(23, 59, 59, 999);
+  return copy;
 }
 
-const MONTHS = [
-  'January','February','March','April','May','June',
-  'July','August','September','October','November','December',
-];
-const DAY_LABELS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-function toDateStr(year, month, day) {
-  return `${year}-${String(month + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+// Monday of the week containing `d`.
+function startOfWeek(d) {
+  const copy = startOfDay(d);
+  // JS getDay: Sun=0, Mon=1, ... Sat=6. We want Monday-start, so:
+  //   Sun → back 6 days, Mon → 0, Tue → 1, ... Sat → 5.
+  const offset = (copy.getDay() + 6) % 7;
+  copy.setDate(copy.getDate() - offset);
+  return copy;
+}
+function endOfWeek(d) {
+  const start = startOfWeek(d);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 7);
+  end.setMilliseconds(-1);
+  return end;
 }
 
-function formatDetailHeader(dateStr) {
-  return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {
-    weekday: 'long', month: 'long', day: 'numeric',
+function startOfMonthGrid(year, month) {
+  // Include the preceding days shown in the grid so event queries cover
+  // the entire visible cell range. Monday-start grid → up to 6 days padding.
+  const first = new Date(year, month, 1);
+  const offset = (first.getDay() + 6) % 7;
+  const result = new Date(first);
+  result.setDate(first.getDate() - offset);
+  result.setHours(0, 0, 0, 0);
+  return result;
+}
+function endOfMonthGrid(year, month) {
+  // 6 weeks × 7 days max — covers every possible grid layout.
+  const start = startOfMonthGrid(year, month);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 42);
+  end.setMilliseconds(-1);
+  return end;
+}
+
+function sameDay(a, b) {
+  return a.getFullYear() === b.getFullYear()
+    && a.getMonth() === b.getMonth()
+    && a.getDate() === b.getDate();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main view
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CalendarView = ({ user, addToast }) => {
+  const enabled = !!user?.email;
+
+  // ── Connection state ─────────────────────────────────────────────────────
+  const {
+    connected,
+    googleEmail,
+    lastError,
+    loading: connectionLoading,
+    connectError,
+    connect,
+    disconnect,
+    refresh: refreshConnection,
+  } = useCalendarConnection({ enabled, addToast });
+
+  const [connecting, setConnecting] = useState(false);
+
+  // ── UI state ─────────────────────────────────────────────────────────────
+  const [mode, setMode] = useState('month'); // 'week' | 'month'
+  const [cursor, setCursor] = useState(() => new Date()); // current focus date
+  const [selectedDay, setSelectedDay] = useState(null); // 'YYYY-MM-DD'
+  const [detail, setDetail] = useState(null); // event to show in modal
+  const [addOpen, setAddOpen] = useState(false);
+  const [now, setNow] = useState(() => new Date());
+
+  // Tick `now` every 30 s so the "Live" / "in X min" badges on DailyEvents
+  // stay accurate without re-fetching events.
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30 * 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Query window — wide enough to cover the current view.
+  // • Month mode:  the 6-row grid range so we can fill every visible cell.
+  // • Week mode:   the current week.
+  // Kept as a memo so the fetch hook sees stable identity between renders.
+  const { timeMin, timeMax } = useMemo(() => {
+    if (mode === 'week') {
+      return { timeMin: startOfWeek(cursor), timeMax: endOfWeek(cursor) };
+    }
+    return {
+      timeMin: startOfMonthGrid(cursor.getFullYear(), cursor.getMonth()),
+      timeMax: endOfMonthGrid(cursor.getFullYear(), cursor.getMonth()),
+    };
+  }, [cursor, mode]);
+
+  const {
+    events,
+    loading: eventsLoading,
+    googleError,
+    localError,
+    needsReconnect,
+    refresh: refreshEvents,
+    addLocalEventOptimistic,
+    removeLocalEventOptimistic,
+  } = useCalendarEvents({
+    enabled: enabled && connected,
+    timeMin,
+    timeMax,
   });
-}
 
-function formatTime(time) {
-  if (!time) return null;
-  const [h, m] = time.split(':').map(Number);
-  const ampm = h >= 12 ? 'PM' : 'AM';
-  const hour = h % 12 || 12;
-  return `${hour}:${String(m).padStart(2,'0')} ${ampm}`;
-}
-
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
-function EventPill({ event }) {
-  const c = getEventColour(event.type);
-  return (
-    <div
-      title={event.title}
-      style={{
-        fontSize: 11,
-        fontWeight: 600,
-        color: c.text,
-        background: c.bg,
-        borderRadius: 4,
-        padding: '2px 6px',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
-        lineHeight: '16px',
-        maxWidth: '100%',
-      }}
-    >
-      {event.title}
-    </div>
-  );
-}
-
-function DayCell({ cell, isToday, isSelected, isWeekend, onClick }) {
-  const [hovered, setHovered] = useState(false);
-
-  const bgColor = isSelected
-    ? 'var(--bg)'
-    : hovered && cell.inMonth
-    ? 'var(--bg)'
-    : isWeekend
-    ? '#fafafa'
-    : 'var(--surface)';
-
-  const borderLeft = isSelected ? '3px solid var(--purple)' : '1px solid var(--border)';
-
-  const visibleEvents = cell.events ? cell.events.slice(0, 2) : [];
-  const overflowCount = cell.events ? cell.events.length - 2 : 0;
-
-  return (
-    <div
-      onClick={() => cell.inMonth && onClick(cell.date)}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        background: bgColor,
-        borderLeft,
-        borderRight: '1px solid var(--border)',
-        borderBottom: '1px solid var(--border)',
-        borderTop: 'none',
-        minHeight: 90,
-        padding: '6px 7px',
-        cursor: cell.inMonth ? 'pointer' : 'default',
-        transition: 'background 0.12s',
-        boxSizing: 'border-box',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 3,
-      }}
-    >
-      {/* Date number */}
-      <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: 2 }}>
-        {isToday ? (
-          <span style={{
-            width: 26,
-            height: 26,
-            borderRadius: 'var(--radius-pill)',
-            background: 'var(--purple)',
-            color: '#fff',
-            fontSize: 'var(--font-md, 14px)',
-            fontWeight: 500,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0,
-          }}>
-            {cell.day}
-          </span>
-        ) : (
-          <span style={{
-            fontSize: 'var(--font-md, 14px)',
-            fontWeight: cell.inMonth ? 500 : 400,
-            color: cell.inMonth
-              ? (isSelected ? 'var(--purple)' : 'var(--text)')
-              : 'var(--text-3)',
-            lineHeight: '24px',
-            paddingLeft: 3,
-          }}>
-            {cell.day}
-          </span>
-        )}
-      </div>
-
-      {/* Event pills */}
-      {visibleEvents.map((evt, j) => (
-        <EventPill key={j} event={evt} />
-      ))}
-      {overflowCount > 0 && (
-        <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 500, paddingLeft: 3 }}>
-          +{overflowCount} more
-        </div>
-      )}
-    </div>
-  );
-}
-
-function TodayStrip({ todayStr, todayEvents }) {
-  return (
-    <div style={{
-      background: 'var(--surface)',
-      border: '1px solid var(--border)',
-      borderRadius: 'var(--radius-md)',
-      boxShadow: 'var(--shadow-sm)',
-      padding: '12px 20px',
-      maxHeight: 120,
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 8,
-    }}>
-      {/* Strip header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-        <div style={{
-          width: 28,
-          height: 28,
-          borderRadius: 'var(--radius-pill)',
-          background: 'var(--purple)',
-          color: '#fff',
-          fontSize: 12,
-          fontWeight: 700,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-        }}>
-          {new Date(todayStr + 'T00:00:00').getDate()}
-        </div>
-        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)' }}>
-          Today
-        </span>
-        <span style={{ fontSize: 12, color: 'var(--text-3)', fontWeight: 500 }}>
-          {formatDetailHeader(todayStr)}
-        </span>
-        <span style={{
-          fontSize: 11,
-          fontWeight: 600,
-          color: 'var(--purple)',
-          background: '#ede9fe',
-          borderRadius: 'var(--radius-pill)',
-          padding: '2px 10px',
-          marginLeft: 4,
-        }}>
-          {todayEvents.length} event{todayEvents.length !== 1 ? 's' : ''}
-        </span>
-      </div>
-
-      {/* Horizontal scrollable event pills */}
-      <div style={{
-        display: 'flex',
-        gap: 8,
-        overflowX: 'auto',
-        flex: 1,
-        minHeight: 0,
-        paddingBottom: 2,
-      }}>
-        {todayEvents.length === 0 ? (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            color: 'var(--text-3)',
-            fontSize: 12,
-            fontWeight: 500,
-            padding: '4px 0',
-          }}>
-            <i className="bi-calendar2-check" style={{ fontSize: 14 }} />
-            No events scheduled for today
-          </div>
-        ) : (
-          todayEvents.map((evt) => {
-            const c = getEventColour(evt.type);
-            const meta = TYPE_CONFIG[evt.type] || { label: evt.type, icon: 'bi-calendar2' };
-            return (
-              <div
-                key={evt.id}
-                style={{
-                  background: c.bg,
-                  border: `1px solid ${c.border}`,
-                  borderRadius: 8,
-                  padding: '6px 12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  flexShrink: 0,
-                  minWidth: 160,
-                  maxWidth: 280,
-                }}
-              >
-                <i className={meta.icon} style={{ color: c.text, fontSize: 13, flexShrink: 0 }} />
-                <div style={{ minWidth: 0 }}>
-                  <div style={{
-                    fontSize: 12,
-                    fontWeight: 600,
-                    color: c.text,
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}>
-                    {evt.title}
-                  </div>
-                  {evt.time && (
-                    <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-2)', marginTop: 1 }}>
-                      {formatTime(evt.time)}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ExpandedDayEvents({ selectedDay, events, onClose }) {
-  if (!selectedDay) return null;
-
-  return (
-    <div style={{
-      background: 'var(--surface)',
-      border: '1px solid var(--border)',
-      borderRadius: 'var(--radius-md)',
-      boxShadow: 'var(--shadow-sm)',
-      overflow: 'hidden',
-    }}>
-      {/* Section header */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '12px 20px',
-        borderBottom: '1px solid var(--border)',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <i className="bi-calendar2-event" style={{ fontSize: 14, color: 'var(--purple)' }} />
-          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)' }}>
-            {formatDetailHeader(selectedDay)}
-          </span>
-          <span style={{
-            fontSize: 11,
-            fontWeight: 600,
-            color: 'var(--text-3)',
-            background: 'var(--bg)',
-            borderRadius: 'var(--radius-pill)',
-            padding: '2px 10px',
-          }}>
-            {events.length === 0 ? 'No events' : `${events.length} event${events.length !== 1 ? 's' : ''}`}
-          </span>
-        </div>
-        <button
-          onClick={onClose}
-          style={{
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            color: 'var(--text-3)',
-            fontSize: 16,
-            padding: '2px 6px',
-            borderRadius: 'var(--radius-sm, 4px)',
-            display: 'flex',
-            alignItems: 'center',
-          }}
-          onMouseEnter={e => e.currentTarget.style.background = 'var(--bg)'}
-          onMouseLeave={e => e.currentTarget.style.background = 'none'}
-        >
-          <i className="bi-x-lg" />
-        </button>
-      </div>
-
-      {/* Events body */}
-      <div style={{ padding: '12px 20px' }}>
-        {events.length === 0 ? (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-            padding: '16px 0',
-            color: 'var(--text-3)',
-            fontSize: 12,
-            fontWeight: 500,
-          }}>
-            <i className="bi-calendar2" style={{ fontSize: 18, color: 'var(--border)' }} />
-            No events scheduled for this day
-          </div>
-        ) : (
-          <div style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 10,
-          }}>
-            {events.map((evt) => {
-              const c = getEventColour(evt.type);
-              const meta = TYPE_CONFIG[evt.type] || { label: evt.type, icon: 'bi-calendar2' };
-              return (
-                <div
-                  key={evt.id}
-                  style={{
-                    background: 'var(--surface)',
-                    border: '1px solid var(--border)',
-                    borderLeft: `4px solid ${c.text}`,
-                    borderRadius: 10,
-                    padding: '10px 14px',
-                    boxShadow: 'var(--shadow-sm)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    flex: '1 1 280px',
-                    maxWidth: 420,
-                    transition: 'box-shadow 0.15s',
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.boxShadow = 'var(--shadow-md)'}
-                  onMouseLeave={e => e.currentTarget.style.boxShadow = 'var(--shadow-sm)'}
-                >
-                  {/* Icon badge */}
-                  <div style={{
-                    width: 32,
-                    height: 32,
-                    background: c.bg,
-                    borderRadius: 8,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                  }}>
-                    <i className={meta.icon} style={{ color: c.text, fontSize: 14 }} />
-                  </div>
-
-                  {/* Content */}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                      <span style={{
-                        fontSize: 10,
-                        fontWeight: 700,
-                        color: c.text,
-                        background: c.bg,
-                        borderRadius: 'var(--radius-pill)',
-                        padding: '1px 7px',
-                      }}>
-                        {meta.label}
-                      </span>
-                      {evt.time && (
-                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-2)' }}>
-                          {formatTime(evt.time)}
-                        </span>
-                      )}
-                    </div>
-                    <div style={{
-                      fontSize: 13,
-                      fontWeight: 600,
-                      color: 'var(--text-1)',
-                      lineHeight: 1.35,
-                      marginBottom: evt.description ? 3 : 0,
-                    }}>
-                      {evt.title}
-                    </div>
-                    {evt.description && (
-                      <div style={{
-                        fontSize: 11,
-                        color: 'var(--text-3)',
-                        lineHeight: 1.4,
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}>
-                        {evt.description}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── Main component ────────────────────────────────────────────────────────────
-// eslint-disable-next-line no-unused-vars
-const CalendarView = ({ tasks }) => {
-  // Use real today's date
-  const realToday = new Date();
-  const todayStr = toDateStr(realToday.getFullYear(), realToday.getMonth(), realToday.getDate());
-
-  const [currentMonth, setCurrentMonth] = useState(realToday.getMonth());
-  const [currentYear, setCurrentYear]   = useState(realToday.getFullYear());
-  const [selectedDay, setSelectedDay]   = useState(todayStr);
-
-  // Build the grid cells for the displayed month (Mon-start grid)
-  const calendarDays = useMemo(() => {
-    const firstDay = new Date(currentYear, currentMonth, 1);
-    const lastDay  = new Date(currentYear, currentMonth + 1, 0);
-    const totalDays = lastDay.getDate();
-
-    // Mon=0 … Sun=6 offset
-    let startOffset = firstDay.getDay() - 1;
-    if (startOffset < 0) startOffset = 6;
-
-    const days = [];
-
-    // Trailing days of previous month
-    const prevLastDay = new Date(currentYear, currentMonth, 0).getDate();
-    for (let i = startOffset - 1; i >= 0; i--) {
-      days.push({ day: prevLastDay - i, inMonth: false, date: null, events: [] });
+  // If the events endpoint reports needsReconnect, flip the connection
+  // status back to "not connected" so ConnectPrompt re-appears.
+  useEffect(() => {
+    if (needsReconnect) {
+      refreshConnection();
     }
+  }, [needsReconnect, refreshConnection]);
 
-    // Days of current month
-    for (let d = 1; d <= totalDays; d++) {
-      const dateStr = toDateStr(currentYear, currentMonth, d);
-      const evts = CALENDAR_EVENTS.filter(e => e.date === dateStr);
-      days.push({ day: d, inMonth: true, date: dateStr, events: evts });
+  // Today's events always come from a separate, tight time window
+  // (start..end of today) — keeps the "Today strip" accurate even when
+  // the user has navigated to a different month in the grid below.
+  const { todayEvents, todaysRange } = useMemo(() => {
+    const t0 = startOfDay(now);
+    const t1 = endOfDay(now);
+    return {
+      todaysRange: { t0, t1 },
+      todayEvents: events.filter((ev) => {
+        if (!ev.startAt) return false;
+        const s = new Date(ev.startAt);
+        return s >= t0 && s <= t1;
+      }),
+    };
+  }, [events, now]);
+
+  // If the current view window doesn't include today (user is looking at
+  // last month), we need a second fetch for today specifically. For now
+  // the simplest correct approach is: when user navigates away from the
+  // month containing today, todayEvents just shows [] — they can tap
+  // "Today" to return. If we want a persistent today strip, we'd add a
+  // second events hook here. Leaving as a simple behaviour v1.
+
+  // ── Connect / disconnect handlers ────────────────────────────────────────
+  const handleConnect = useCallback(async () => {
+    setConnecting(true);
+    try {
+      await connect();
+      // `connect` navigates away on success; if we're still here, something
+      // went wrong and connectError will render via ConnectPrompt.
+    } finally {
+      // No-op: if navigation succeeds, we unmount before this runs.
+      setConnecting(false);
     }
+  }, [connect]);
 
-    // Leading days of next month
-    const remaining = days.length % 7;
-    if (remaining !== 0) {
-      for (let i = 1; i <= 7 - remaining; i++) {
-        days.push({ day: i, inMonth: false, date: null, events: [] });
-      }
+  const handleDisconnect = useCallback(async () => {
+    if (typeof window !== 'undefined'
+      && !window.confirm('Disconnect your Google Calendar from Ops Hub?')) return;
+    await disconnect();
+  }, [disconnect]);
+
+  // ── Local-event create / delete ──────────────────────────────────────────
+  const handleAdd = useCallback(async ({ title, description, startAt, endAt, color }) => {
+    const res = await createLocalEvent({ title, description, startAt, endAt, color });
+    if (res?.event) {
+      addLocalEventOptimistic(res.event);
+      addToast?.('success', 'Event added', title);
     }
+    // Force a refetch so the cache line matching the current window gets
+    // re-populated from server state (captures any server-side rounding).
+    refreshEvents();
+    return res?.event;
+  }, [addLocalEventOptimistic, addToast, refreshEvents]);
 
-    return days;
-  }, [currentMonth, currentYear]);
+  const handleDeleteLocal = useCallback(async (event) => {
+    if (event.source !== 'local') return;
+    if (typeof window !== 'undefined'
+      && !window.confirm('Delete this event?')) return;
+    try {
+      await deleteLocalEvent(event.id);
+      removeLocalEventOptimistic(event.id);
+      addToast?.('success', 'Event deleted', event.title);
+      setDetail(null);
+    } catch (err) {
+      addToast?.('alert', 'Failed to delete', err.message);
+    }
+  }, [addToast, removeLocalEventOptimistic]);
 
-  const goMonth = (dir) => {
-    let m = currentMonth + dir;
-    let y = currentYear;
-    if (m < 0)  { m = 11; y--; }
-    if (m > 11) { m = 0;  y++; }
-    setCurrentMonth(m);
-    setCurrentYear(y);
+  // ── Navigation helpers ───────────────────────────────────────────────────
+  const navigateMonth = useCallback((dir) => {
+    setCursor((prev) => {
+      const next = new Date(prev);
+      next.setMonth(prev.getMonth() + dir);
+      return next;
+    });
     setSelectedDay(null);
-  };
+  }, []);
+  const navigateWeek = useCallback((dir) => {
+    setCursor((prev) => {
+      const next = new Date(prev);
+      next.setDate(prev.getDate() + 7 * dir);
+      return next;
+    });
+  }, []);
+  const goToday = useCallback(() => {
+    setCursor(new Date());
+    const today = new Date();
+    setSelectedDay(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`);
+  }, []);
 
-  const goToday = () => {
-    setCurrentMonth(realToday.getMonth());
-    setCurrentYear(realToday.getFullYear());
-    setSelectedDay(todayStr);
-  };
+  // ── Selected day events (when a day in the month grid is clicked) ────────
+  const selectedDayEvents = useMemo(() => {
+    if (!selectedDay) return [];
+    const d = new Date(`${selectedDay}T00:00:00`);
+    if (Number.isNaN(d.getTime())) return [];
+    return events.filter((ev) => {
+      if (!ev.startAt) return false;
+      return sameDay(new Date(ev.startAt), d);
+    });
+  }, [selectedDay, events]);
 
-  const handleDayClick = (dateStr) => {
-    setSelectedDay(prev => prev === dateStr ? null : dateStr);
-  };
+  // ── Render ───────────────────────────────────────────────────────────────
 
-  const todayEvents = CALENDAR_EVENTS.filter(e => e.date === todayStr);
-
-  const selectedEvents = selectedDay
-    ? CALENDAR_EVENTS.filter(e => e.date === selectedDay)
-    : [];
-
-  // Legend entries using EVENT_COLOURS
-  const legendEntries = [
-    { key: 'deadline', label: 'Deadline' },
-    { key: 'meeting',  label: 'Meeting'  },
-    { key: 'review',   label: 'Review'   },
-    { key: 'leave',    label: 'Leave'    },
-  ];
+  if (!enabled) {
+    // Defensive fallback — should never hit because App.jsx gates render.
+    return null;
+  }
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -528,200 +280,265 @@ const CalendarView = ({ tasks }) => {
         icon="bi-calendar3"
         iconBg="#ede9fe"
         iconColor="#7c3aed"
-        title="Deadlines & Reviews"
-        subtitle="Monthly calendar view with upcoming deadlines, reviews & meetings"
-      />
-
-      {/* Stacked layout: Today strip → Calendar grid → Expanded day events */}
-      <div style={{
-        flex: 1,
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'auto',
-        padding: '20px 24px',
-        gap: 16,
-      }}>
-
-        {/* ── TOP: Today's events strip (full width, compact) ── */}
-        <TodayStrip todayStr={todayStr} todayEvents={todayEvents} />
-
-        {/* ── MIDDLE: Calendar grid (full width) ─────────────── */}
-        <div style={{
-          background: 'var(--surface)',
-          borderRadius: 'var(--radius-md)',
-          boxShadow: 'var(--shadow-sm)',
-          border: '1px solid var(--border)',
-          overflow: 'hidden',
-          display: 'flex',
-          flexDirection: 'column',
-        }}>
-
-          {/* Month navigation header */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '16px 20px 12px',
-            borderBottom: '1px solid var(--border)',
-          }}>
-            <button
-              onClick={() => goMonth(-1)}
-              style={{
-                background: 'var(--surface)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-pill)',
-                padding: '6px 12px',
-                cursor: 'pointer',
-                color: 'var(--text-2)',
-                fontSize: 13,
-                display: 'flex',
-                alignItems: 'center',
-                boxShadow: 'var(--shadow-sm)',
-              }}
-              onMouseEnter={e => e.currentTarget.style.background = 'var(--bg)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
-            >
-              <i className="bi-chevron-left" />
-            </button>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-1)' }}>
-                {MONTHS[currentMonth]} {currentYear}
-              </span>
-              <button
-                onClick={goToday}
-                style={{
-                  background: 'var(--surface)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-pill)',
-                  padding: '4px 13px',
-                  cursor: 'pointer',
-                  color: 'var(--purple)',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  boxShadow: 'var(--shadow-sm)',
-                }}
-                onMouseEnter={e => e.currentTarget.style.background = 'var(--bg)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
-              >
-                Today
-              </button>
-            </div>
-
-            <button
-              onClick={() => goMonth(1)}
-              style={{
-                background: 'var(--surface)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-pill)',
-                padding: '6px 12px',
-                cursor: 'pointer',
-                color: 'var(--text-2)',
-                fontSize: 13,
-                display: 'flex',
-                alignItems: 'center',
-                boxShadow: 'var(--shadow-sm)',
-              }}
-              onMouseEnter={e => e.currentTarget.style.background = 'var(--bg)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'var(--surface)'}
-            >
-              <i className="bi-chevron-right" />
-            </button>
-          </div>
-
-          {/* Day-of-week headers: Mon -> Sun */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(7, 1fr)',
-            borderBottom: '1px solid var(--border)',
-          }}>
-            {DAY_LABELS.map((d, i) => (
-              <div
-                key={d}
-                style={{
-                  textAlign: 'center',
-                  fontSize: 'var(--font-xs, 11px)',
-                  fontWeight: 600,
-                  color: 'var(--text-muted)',
-                  letterSpacing: 'normal',
-                  textTransform: 'none',
-                  padding: '10px 0',
-                  background: (i === 5 || i === 6) ? '#fafafa' : 'var(--surface)',
-                  borderRight: i < 6 ? '1px solid var(--border)' : 'none',
-                }}
-              >
-                {d}
-              </div>
-            ))}
-          </div>
-
-          {/* Grid rows */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(7, 1fr)',
-          }}>
-            {calendarDays.map((cell, i) => {
-              const isToday    = cell.date === todayStr;
-              const isSelected = cell.date === selectedDay;
-              const colIndex   = i % 7;
-              const isWeekend  = colIndex === 5 || colIndex === 6;
-
-              return (
-                <DayCell
-                  key={i}
-                  cell={cell}
-                  isToday={isToday}
-                  isSelected={isSelected}
-                  isWeekend={isWeekend}
-                  onClick={handleDayClick}
-                />
-              );
-            })}
-          </div>
-
-          {/* Legend */}
-          <div style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 'var(--space-4)',
-            padding: '12px 20px',
-            borderTop: '1px solid var(--border)',
-          }}>
-            {legendEntries.map(({ key, label }) => {
-              const c = EVENT_COLOURS[key];
-              return (
-                <span
-                  key={key}
+        title="Calendar"
+        subtitle={
+          connected
+            ? `Connected to ${googleEmail || 'Google Calendar'}`
+            : 'Connect your Google Calendar to see today\u2019s meetings & upcoming events'
+        }
+        right={connected && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{
+              display: 'inline-flex',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-pill)',
+              overflow: 'hidden',
+              background: 'var(--surface)',
+            }}>
+              {['week', 'month'].map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setMode(m)}
                   style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    fontSize: 11,
+                    padding: '6px 14px',
+                    fontSize: 12,
                     fontWeight: 600,
-                    color: 'var(--text-3)',
+                    background: mode === m ? '#7c3aed' : 'transparent',
+                    color: mode === m ? '#fff' : 'var(--text-1)',
+                    border: 'none',
+                    cursor: 'pointer',
+                    textTransform: 'capitalize',
                   }}
                 >
-                  <span style={{
-                    width: 10,
-                    height: 10,
-                    borderRadius: 3,
-                    background: c.text,
-                    display: 'inline-block',
-                  }} />
-                  {label}
-                </span>
-              );
-            })}
+                  {m}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={refreshEvents}
+              title="Refresh"
+              style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-pill)',
+                padding: '6px 12px',
+                cursor: 'pointer',
+                color: 'var(--text-2)',
+                fontSize: 13,
+              }}
+            >
+              <i className={`bi-arrow-clockwise${eventsLoading ? ' spin' : ''}`} />
+            </button>
+            <button
+              type="button"
+              onClick={handleDisconnect}
+              title="Disconnect"
+              style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-pill)',
+                padding: '6px 14px',
+                cursor: 'pointer',
+                color: 'var(--text-2)',
+                fontSize: 12,
+                fontWeight: 600,
+              }}
+            >
+              <i className="bi-plug" style={{ marginRight: 6 }} />
+              Disconnect
+            </button>
           </div>
-        </div>
+        )}
+      />
 
-        {/* ── BOTTOM: Expanded day events (when a day is clicked) */}
-        <ExpandedDayEvents
-          selectedDay={selectedDay}
-          events={selectedEvents}
-          onClose={() => setSelectedDay(null)}
+      <style>{`.spin { animation: spin 0.9s linear infinite; } @keyframes spin { to { transform: rotate(360deg); } }`}</style>
+
+      {/* ── Not connected → prompt ──────────────────────────────────────── */}
+      {!connected && !connectionLoading && (
+        <ConnectPrompt
+          onConnect={handleConnect}
+          connecting={connecting}
+          error={connectError}
         />
-      </div>
+      )}
+
+      {/* ── Loading initial status ──────────────────────────────────────── */}
+      {!connected && connectionLoading && (
+        <div style={{
+          flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: 'var(--text-3)', fontSize: 13,
+        }}>
+          <i className="bi-arrow-clockwise spin" style={{ marginRight: 8 }} />
+          Loading calendar status…
+        </div>
+      )}
+
+      {/* ── Connected → main view ────────────────────────────────────────── */}
+      {connected && (
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'auto',
+          padding: '20px 24px',
+          gap: 16,
+        }}>
+          {lastError && (
+            <div style={{
+              background: 'var(--red-light, #fef2f2)',
+              border: '1px solid var(--red-mid, #fecaca)',
+              borderRadius: 8,
+              padding: '10px 14px',
+              fontSize: 12,
+              color: 'var(--red)',
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <i className="bi-exclamation-triangle" />
+              Last refresh failed: {lastError}
+            </div>
+          )}
+          {googleError && (
+            <div style={{
+              background: '#fef3c7',
+              border: '1px solid #fcd34d',
+              borderRadius: 8,
+              padding: '10px 14px',
+              fontSize: 12,
+              color: '#92400e',
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <i className="bi-exclamation-triangle" />
+              Couldn&rsquo;t load Google events: {googleError}
+            </div>
+          )}
+          {localError && (
+            <div style={{
+              background: '#f3f4f6',
+              border: '1px solid #d1d5db',
+              borderRadius: 8,
+              padding: '10px 14px',
+              fontSize: 12,
+              color: '#4b5563',
+            }}>
+              Couldn&rsquo;t load local events: {localError}
+            </div>
+          )}
+
+          <DailyEvents
+            events={todayEvents}
+            now={now}
+            loading={eventsLoading && todayEvents.length === 0}
+            onOpen={setDetail}
+            onAdd={() => setAddOpen(true)}
+          />
+
+          {mode === 'month' ? (
+            <MonthView
+              year={cursor.getFullYear()}
+              month={cursor.getMonth()}
+              events={events}
+              selectedDay={selectedDay}
+              onSelectDay={(d) => setSelectedDay((prev) => (prev === d ? null : d))}
+              onOpenEvent={setDetail}
+              onNavigate={navigateMonth}
+              onGoToday={goToday}
+            />
+          ) : (
+            <WeekView
+              weekStart={startOfWeek(cursor)}
+              events={events}
+              onOpenEvent={setDetail}
+              onNavigate={navigateWeek}
+              onGoToday={goToday}
+            />
+          )}
+
+          {/* Selected day events (month mode only — week already shows them) */}
+          {mode === 'month' && selectedDay && (
+            <div style={{
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-md)',
+              boxShadow: 'var(--shadow-sm)',
+              padding: '14px 20px',
+              display: 'flex', flexDirection: 'column', gap: 8,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <i className="bi-calendar2-event" style={{ fontSize: 14, color: '#7c3aed' }} />
+                <span style={{ fontSize: 13, fontWeight: 700 }}>
+                  {new Date(`${selectedDay}T00:00:00`).toLocaleDateString(undefined, {
+                    weekday: 'long', month: 'long', day: 'numeric',
+                  })}
+                </span>
+                <span style={{
+                  fontSize: 11, fontWeight: 600,
+                  color: 'var(--text-3)', background: 'var(--bg)',
+                  borderRadius: 'var(--radius-pill)', padding: '2px 10px',
+                }}>
+                  {selectedDayEvents.length} {selectedDayEvents.length === 1 ? 'event' : 'events'}
+                </span>
+                <div style={{ flex: 1 }} />
+                <button
+                  type="button"
+                  onClick={() => setSelectedDay(null)}
+                  style={{
+                    background: 'none', border: 'none',
+                    cursor: 'pointer', color: 'var(--text-3)', fontSize: 14,
+                  }}
+                >
+                  <i className="bi-x-lg" />
+                </button>
+              </div>
+              {selectedDayEvents.length === 0 ? (
+                <div style={{ fontSize: 12, color: 'var(--text-3)' }}>No events on this day.</div>
+              ) : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {selectedDayEvents.map((ev) => (
+                    <button
+                      key={ev.id}
+                      type="button"
+                      onClick={() => setDetail(ev)}
+                      style={{
+                        all: 'unset',
+                        cursor: 'pointer',
+                        background: 'var(--bg)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 8,
+                        padding: '8px 12px',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: 'var(--text-1)',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 8,
+                      }}
+                    >
+                      <span>{new Date(ev.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      <span style={{ color: 'var(--text-3)' }}>·</span>
+                      <span>{ev.title}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      <EventDetail
+        event={detail}
+        onClose={() => setDetail(null)}
+        onDelete={handleDeleteLocal}
+      />
+
+      <AddEventModal
+        open={addOpen}
+        defaultDate={selectedDay ? new Date(`${selectedDay}T00:00:00`) : new Date()}
+        onClose={() => setAddOpen(false)}
+        onSubmit={handleAdd}
+      />
     </div>
   );
 };
