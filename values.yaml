@@ -13,7 +13,7 @@ service:
 
 ingress:
   host: jtk-ops-hub-v2.dp.com
-  aliasHost: jtk.dp.com
+  aliasHost: ""
 
 sandboxName: jtk-ops-hub-v2
 
