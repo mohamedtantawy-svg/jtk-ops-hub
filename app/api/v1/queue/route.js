@@ -11,17 +11,14 @@ import { getAuthUser } from '../../../../src/lib/auth-helpers';
 import { searchTickets, showManyUsers, isZendeskConfigured } from '../../../../src/lib/zendesk-api';
 import { searchIssues, isJiraConfigured, resolveHrxOwnerFields, emailsFromJiraFieldValue } from '../../../../src/lib/jira-api';
 
-// Jira custom fields (by display-name substring) that can assign an HRX
-// manager to a ticket in addition to the built-in `assignee`. We also surface
-// tickets where any of these fields is one of our registered emails.
-// Note: 'responsible' is intentionally a substring match so both "HRX
-// Responsible" and "Team Responsible" (and any future *Responsible field)
-// resolve through the same discovery path.
+// Jira custom fields (by display-name substring) that, together with the
+// built-in `assignee` and `reporter`, govern whether a ticket belongs to our
+// queue. Per Pilar's 2026-04-22 clarification: the scope is ASSIGNEE +
+// REPORTER + HRX RESPONSIBLE only — the previous broader list (Country
+// Owner / Task Owner / Process Owner / Team Responsible) is explicitly
+// out of scope. Keeping a single entry also prevents the JQL from growing
+// past the URL length that caused 414 errors on the Jira API.
 const HRX_OWNER_FIELD_NAMES = [
-  'country owner',
-  'task owner',
-  'process owner',
-  'team responsible',
   'hrx responsible',
 ];
 import { ADMIN_EMAILS_LIST } from '../../../../src/data/adminEmails';
@@ -375,17 +372,28 @@ async function fetchZendeskQueue() {
 
 // ── Build JQL for registered emails ──────────────────────────────────────────
 // A ticket surfaces in our queue whenever ANY of the following roles is one of
-// our registered team emails:
+// our registered team emails (Pilar's 2026-04-22 rule):
 //   • built-in `assignee`
 //   • built-in `reporter`
-//   • HRX-owner custom fields (Country Owner / Task Owner / Process Owner /
-//     Team Responsible / HRX Responsible)
+//   • "HRX Responsible" user-picker custom field
 //
-// `ownerFieldIds` is { 'country owner': 'customfield_12345', ... } — empty
-// entries are skipped (field doesn't exist on this Jira instance). All
-// clauses OR together so the union is a single query, and Jira returns each
-// issue only once even when it matches multiple clauses (no duplicates from
-// the API — we also belt-and-brace with a Set-based dedup below).
+// The ticket must ALSO be in an actionable state — any status that means
+// "done" (closed, resolved, cancelled, rejected, denied, withdrawn, etc.)
+// is excluded. No done-grace window — if a ticket transitioned to a closed
+// state, it's out of our queue immediately.
+//
+// `ownerFieldIds` is { 'hrx responsible': 'customfield_12345' } — if the
+// field doesn't exist on this Jira instance the entry is omitted and we
+// fall back to assignee + reporter only.
+//
+// Duplicates: Jira returns each issue once even when matched via multiple
+// OR clauses; the pagination loop adds a Set-based belt-and-braces guard.
+const JIRA_DONE_STATUSES = [
+  'Done', 'Closed', 'Resolved', 'Solved', 'Completed',
+  'Cancelled', 'Canceled', 'Rejected', 'Denied', 'Withdrawn', 'Declined',
+  'Won\'t Do', 'Wont Do', 'Duplicate', 'Abandoned',
+];
+
 function buildJiraJql(ownerFieldIds = {}) {
   const emailsList = ADMIN_EMAILS_LIST.map(e => `"${e}"`).join(', ');
 
@@ -401,8 +409,14 @@ function buildJiraJql(ownerFieldIds = {}) {
   }
   const whoClause = `(${orClauses.join(' OR ')})`;
 
-  // Not completed — with a 4h done-grace window for transition detection.
-  return `${whoClause} AND (status NOT IN (Done, Closed, Resolved, Solved, Cancelled, Rejected, Completed) OR (status IN (Done, Closed, Resolved, Solved, Completed) AND updated >= -4h)) ORDER BY updated DESC`;
+  const doneList = JIRA_DONE_STATUSES.map(s => `"${s}"`).join(', ');
+  // Also filter via resolution — many workflows mark a ticket resolved
+  // without moving to a "Done" status name. `resolution IS NOT EMPTY` alone
+  // would exclude those reliably, but some workflows don't set resolution,
+  // so we keep both filters ORed-with-AND for belt-and-braces accuracy.
+  const statusFilter = `(status NOT IN (${doneList}) AND (resolution IS EMPTY OR resolution = Unresolved))`;
+
+  return `${whoClause} AND ${statusFilter} ORDER BY updated DESC`;
 }
 
 // ── Fetch Jira issues (paginated, by registered emails) ─────────────────────
