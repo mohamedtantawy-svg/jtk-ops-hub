@@ -38,6 +38,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const [expandedSla,setExpandedSla]=useState(null);
   const [ackBannerIdx,setAckBannerIdx]=useState(0);
   const [showHealthBreakdown,setShowHealthBreakdown]=useState(false);
+  const [healthPopoverPos,setHealthPopoverPos]=useState(null);
   const [startDatesExpanded,setStartDatesExpanded]=useState(true);
   const [onLeaveEmails] = useState(() => {
     try {
@@ -60,6 +61,19 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     const h=e=>{if(healthBreakdownRef.current&&!healthBreakdownRef.current.contains(e.target)){setShowHealthBreakdown(false);}};
     document.addEventListener('mousedown',h);
     return()=>document.removeEventListener('mousedown',h);
+  },[showHealthBreakdown]);
+
+  // ── Keep health popover anchored during scroll / resize ──────────────
+  useEffect(()=>{
+    if(!showHealthBreakdown)return;
+    const recompute=()=>{
+      const r=healthBreakdownRef.current?.getBoundingClientRect();
+      if(r)setHealthPopoverPos({top:Math.round(r.bottom+8),right:Math.max(8,Math.round(window.innerWidth-r.right))});
+    };
+    recompute();
+    window.addEventListener('resize',recompute);
+    window.addEventListener('scroll',recompute,true);
+    return()=>{window.removeEventListener('resize',recompute);window.removeEventListener('scroll',recompute,true);};
   },[showHealthBreakdown]);
 
   // ── PERMISSIONS-BASED SCOPE ──────────────────────────────────────────
@@ -169,12 +183,25 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     return {...m,wl:awl,wc:awc,capPct:mCapPct};
   });
 
-  // ── Health Score (composite 0-100) — slaCompRate*0.5 + resRate*0.3 + wlScore*0.2 ────────────────────────────────────
+  // ── Health Score (composite 0-100) — uses the 4 weights configured in Settings ─────────────────
+  // Each factor is scored 0-100, then combined using weights that together sum to 100:
+  //   • SLA Compliance ─ % of in-scope tasks that are NOT breached (higher is better)
+  //   • Resolution Rate ─ resolved / (resolved + open)
+  //   • Response Time ─ derived from avg ticket age (≤30m→100, ≤60m→80, ≤120m→60, ≤240m→40, else 20)
+  //   • Team Capacity ─ Low workload→100, Medium→60, High→25
+  // Defaults (SLA 40 · Res 30 · Resp 20 · Cap 10) are defined in data/settings.js and user-configurable.
   const slaTotal=slaScope.length+onboardingRows.length;
   const slaCompRate=slaTotal>0?Math.round(((slaTotal-breached.length)/slaTotal)*100):100;
   const resRate=resolved+total>0?Math.round((resolved/(resolved+total))*100):0;
+  const avgResponseTime=scope.length>0?Math.round(scope.reduce((s,t)=>s+t.minutesAgo,0)/scope.length):0;
+  const respScore=avgResponseTime<=30?100:avgResponseTime<=60?80:avgResponseTime<=120?60:avgResponseTime<=240?40:20;
   const wlScore=wl==='Low'?100:wl==='Medium'?60:25;
-  const healthScore=Math.round(slaCompRate*0.5+resRate*0.3+wlScore*0.2)||0;
+  const wSLA=Number.isFinite(settings.briefing_health_sla_weight)?settings.briefing_health_sla_weight:40;
+  const wRes=Number.isFinite(settings.briefing_health_resolution_weight)?settings.briefing_health_resolution_weight:30;
+  const wResp=Number.isFinite(settings.briefing_health_response_weight)?settings.briefing_health_response_weight:20;
+  const wCap=Number.isFinite(settings.briefing_health_capacity_weight)?settings.briefing_health_capacity_weight:10;
+  const wSum=(wSLA+wRes+wResp+wCap)||100;
+  const healthScore=Math.round((slaCompRate*wSLA+resRate*wRes+respScore*wResp+wlScore*wCap)/wSum)||0;
   const hColor=healthScore>=80?'#29811e':healthScore>=60?'#ed8d00':'#d42d35';
   const hLabel=healthScore>=80?'Healthy':healthScore>=60?'Attention':'Critical';
 
@@ -288,9 +315,6 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const orgAtRiskTasks=[...orgSlaPool.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;}),...onbAtRisk];
   const orgWithinSlaTasks=orgSlaPool.filter(t=>{const s=slaInfo(t);return !s||(s&&s.ok);});
 
-  // ── Average response time (simulated from task age) ─────────────────
-  const avgResponseTime=scope.length>0?Math.round(scope.reduce((s,t)=>s+t.minutesAgo,0)/scope.length):0;
-
   // ── Deel-style card wrapper ──────────────────────────────────────────
   const DeelCard=({children,style,...props})=>(
     <div style={{background:'white',border:'1px solid #e8e8e8',borderRadius:16,padding:24,transition:'box-shadow .2s',...style}}
@@ -358,8 +382,14 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             </div>
 
             {/* Health Score Ring */}
-            {settings.briefing_show_health_score!==false&&<div ref={healthBreakdownRef} title="Score out of 100 based on SLA compliance, task resolution rate, and team capacity" style={{position:'relative',flexShrink:0}}>
-              <div onClick={()=>setShowHealthBreakdown(!showHealthBreakdown)}
+            {settings.briefing_show_health_score!==false&&<div ref={healthBreakdownRef} title="Composite score 0-100. Click for breakdown." style={{position:'relative',flexShrink:0}}>
+              <div onClick={()=>{
+                if(!showHealthBreakdown){
+                  const r=healthBreakdownRef.current?.getBoundingClientRect();
+                  if(r)setHealthPopoverPos({top:Math.round(r.bottom+8),right:Math.max(8,Math.round(window.innerWidth-r.right))});
+                }
+                setShowHealthBreakdown(!showHealthBreakdown);
+              }}
                 style={{position:'relative',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',transition:'transform .15s'}}
                 onMouseEnter={e=>e.currentTarget.style.transform='scale(1.06)'} onMouseLeave={e=>e.currentTarget.style.transform='scale(1)'}>
                 <Ring pct={healthScore} color={hColor} size={64} stroke={5}/>
@@ -368,29 +398,47 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   <div style={{fontSize:7,color:'#9e9e9e',fontWeight:600,letterSpacing:'.04em',marginTop:1}}>HEALTH</div>
                 </div>
               </div>
-              {showHealthBreakdown&&<div style={{position:'absolute',top:'100%',right:0,marginTop:8,width:280,background:'#ffffff',borderRadius:16,border:'1px solid #e8e8e8',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'20px',zIndex:999,animation:'fadeSlide .2s ease'}}>
-                <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:14}}>
+              {showHealthBreakdown&&healthPopoverPos&&<div style={{position:'fixed',top:healthPopoverPos.top,right:healthPopoverPos.right,width:300,background:'#ffffff',borderRadius:16,border:'1px solid #e8e8e8',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'18px 18px 14px',zIndex:9999,animation:'fadeSlide .2s ease'}}>
+                <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
                   <div style={{width:8,height:8,borderRadius:'50%',background:hColor}}></div>
                   <span style={{fontSize:14,fontWeight:700,color:'#1b1b1b'}}>Health Breakdown</span>
                   <span style={{fontSize:11,fontWeight:700,color:hColor,marginLeft:'auto',padding:'2px 10px',borderRadius:128,background:hColor+'12'}}>{hLabel}</span>
                   <button onClick={e=>{e.stopPropagation();setShowHealthBreakdown(false);}} style={{background:'none',border:'none',cursor:'pointer',padding:'2px 4px',fontSize:12,color:'#9e9e9e',lineHeight:1,marginLeft:4,borderRadius:4}} title="Close">✕</button>
                 </div>
+                <div style={{fontSize:11,color:'#9e9e9e',marginBottom:10,lineHeight:1.4}}>
+                  How your {scopeLabel.toLowerCase()} is performing right now. Each factor is scored 0-100 and weighted below.
+                </div>
                 {[
-                  {label:'SLA Compliance',value:`${slaCompRate}%`,color:slaCompRate>=80?'#29811e':slaCompRate>=60?'#ed8d00':'#d42d35',icon:'bi-shield-check'},
-                  {label:'Resolution Rate',value:`${resRate}%`,color:resRate>=50?'#29811e':resRate>=30?'#ed8d00':'#d42d35',icon:'bi-check2-all'},
-                  {label:'Avg Response Time',value:`${avgResponseTime}m`,color:avgResponseTime<=60?'#29811e':avgResponseTime<=120?'#ed8d00':'#d42d35',icon:'bi-clock-history'},
-                  {label:'Open Tasks',value:`${total}`,color:'#1b1b1b',icon:'bi-inbox'},
-                  {label:'Breached Tasks',value:`${breached.length}`,color:breached.length>0?'#d42d35':'#29811e',icon:'bi-exclamation-triangle'},
-                  {label:'Team Capacity',value:wl,color:wc,icon:'bi-speedometer2'},
-                ].map(row=>(
-                  <div key={row.label} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:'1px solid #f5f5f5'}}>
-                    <i className={row.icon} style={{fontSize:12,color:row.color,width:18,textAlign:'center'}}></i>
-                    <span style={{fontSize:12,color:'#616161',flex:1}}>{row.label}</span>
-                    <span style={{fontSize:14,fontWeight:700,color:row.color,fontVariantNumeric:'tabular-nums'}}>{row.value}</span>
+                  {label:'SLA Compliance',weight:wSLA,value:`${slaCompRate}%`,score:slaCompRate,sub:`${slaTotal-breached.length}/${slaTotal} on-time`,icon:'bi-shield-check'},
+                  {label:'Resolution Rate',weight:wRes,value:`${resRate}%`,score:resRate,sub:`${resolved} resolved · ${total} open`,icon:'bi-check2-all'},
+                  {label:'Avg Response Time',weight:wResp,value:avgResponseTime>=60?`${Math.round(avgResponseTime/60)}h ${avgResponseTime%60}m`:`${avgResponseTime}m`,score:respScore,sub:respScore>=80?'Fast':respScore>=60?'Normal':respScore>=40?'Slow':'Very slow',icon:'bi-clock-history'},
+                  {label:'Team Capacity',weight:wCap,value:wl,score:wlScore,sub:`${Math.round(capPct)}% of team avg`,icon:'bi-speedometer2'},
+                ].map(row=>{
+                  const rc=row.score>=80?'#29811e':row.score>=60?'#ed8d00':'#d42d35';
+                  return(
+                    <div key={row.label} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 0',borderBottom:'1px solid #f5f5f5'}}>
+                      <i className={row.icon} style={{fontSize:13,color:rc,width:18,textAlign:'center'}}></i>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{display:'flex',alignItems:'baseline',gap:6}}>
+                          <span style={{fontSize:12,color:'#1b1b1b',fontWeight:600}}>{row.label}</span>
+                          <span style={{fontSize:9,color:'#9e9e9e',fontWeight:600,background:'#f7f5f2',padding:'1px 6px',borderRadius:99}}>{row.weight}%</span>
+                        </div>
+                        <div style={{fontSize:10,color:'#9e9e9e',marginTop:1}}>{row.sub}</div>
+                      </div>
+                      <div style={{textAlign:'right'}}>
+                        <div style={{fontSize:14,fontWeight:700,color:rc,fontVariantNumeric:'tabular-nums',lineHeight:1}}>{row.value}</div>
+                        <div style={{fontSize:9,color:'#9e9e9e',marginTop:2,fontVariantNumeric:'tabular-nums'}}>score {row.score}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div style={{marginTop:10,padding:'8px 10px',borderRadius:10,background:hColor+'08',border:`1px solid ${hColor}15`,textAlign:'center',lineHeight:1.4}}>
+                  <div style={{fontSize:10,color:hColor,fontWeight:700,letterSpacing:'.02em'}}>
+                    Score = (SLA×{wSLA} + Res×{wRes} + Resp×{wResp} + Cap×{wCap}) ÷ {wSum}
                   </div>
-                ))}
-                <div style={{marginTop:10,padding:'8px 10px',borderRadius:10,background:hColor+'08',border:`1px solid ${hColor}15`,textAlign:'center'}}>
-                  <span style={{fontSize:10,color:hColor,fontWeight:600}}>Score = SLA(50%) + Resolution(30%) + Capacity(20%)</span>
+                  <div style={{fontSize:9,color:'#9e9e9e',marginTop:3}}>
+                    Weights are configurable in Settings → Briefing
+                  </div>
                 </div>
               </div>}
             </div>}
