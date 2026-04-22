@@ -59,12 +59,17 @@ export function useQueueUnifiedSync({ queueSync, enabled = true } = {}) {
   }, []);
 
   // ── Offline detection ────────────────────────────────────────────────────
-  const [isOffline, setIsOffline] = useState(() =>
+  // We DO NOT trust navigator.onLine on its own — it flips to false on VPN
+  // reconnects, WiFi hops, OS network-stack glitches, and some corporate
+  // proxies, while HTTP requests continue to work. Treat it as a hint only.
+  // Ground truth comes from whether any source has actually synced recently
+  // (see `meta` below).
+  const [navReportsOffline, setNavReportsOffline] = useState(() =>
     typeof navigator !== 'undefined' && typeof navigator.onLine === 'boolean' ? !navigator.onLine : false);
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const on = () => setIsOffline(false);
-    const off = () => setIsOffline(true);
+    const on = () => setNavReportsOffline(false);
+    const off = () => setNavReportsOffline(true);
     window.addEventListener('online', on);
     window.addEventListener('offline', off);
     return () => {
@@ -175,6 +180,10 @@ export function useQueueUnifiedSync({ queueSync, enabled = true } = {}) {
   ]);
 
   // ── Aggregated meta for the UnifiedSyncButton ────────────────────────────
+  // A successful sync within RECENT_SYNC_MS proves HTTP works and overrides
+  // any `navigator.onLine = false` false-positive. Same for an in-flight
+  // refresh — if a request is currently on the wire, we're clearly online.
+  const RECENT_SYNC_MS = 2 * 60 * 1000; // 2 minutes
   const meta = useMemo(() => {
     const list = Object.values(sources);
     const timestamps = list.map(s => s.lastSyncAt).filter(t => typeof t === 'number' && t > 0);
@@ -184,6 +193,12 @@ export function useQueueUnifiedSync({ queueSync, enabled = true } = {}) {
     const isAnyLoading = list.some(s => s.loading);
     const sourceErrors = list.filter(s => s.error);
     const hasEverSynced = !!lastSyncAt;
+
+    // Corroborated offline: navigator hint must agree with actual evidence.
+    const now = nowTick;
+    const recentlySynced = !!(lastSyncAt && (now - lastSyncAt) < RECENT_SYNC_MS);
+    const isOffline = navReportsOffline && !recentlySynced && !isAnyRefreshing;
+
     return {
       lastSyncAt,
       oldestSyncAt,
@@ -194,7 +209,17 @@ export function useQueueUnifiedSync({ queueSync, enabled = true } = {}) {
       hasEverSynced,
       isOffline,
     };
-  }, [sources, isOffline]);
+  }, [sources, navReportsOffline, nowTick]);
+
+  // ── Self-correct the navigator hint when we have proof of connectivity ──
+  // If any source just completed a sync successfully, the browser's opinion
+  // that we're offline is objectively wrong. Reset navReportsOffline so we
+  // don't flip back to "Offline" as soon as the 2-minute window lapses.
+  useEffect(() => {
+    if (navReportsOffline && meta.lastSyncAt && (Date.now() - meta.lastSyncAt) < 10_000) {
+      setNavReportsOffline(false);
+    }
+  }, [meta.lastSyncAt, navReportsOffline]);
 
   // ── Refresh all sources ──────────────────────────────────────────────────
   // Each underlying hook de-dupes concurrent refresh() calls via an in-flight
