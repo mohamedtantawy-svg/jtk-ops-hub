@@ -374,14 +374,6 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     return {r,n:ra.length,tt,tb,avg,wl:ratio>=1.4?'High':ratio>=0.7?'Medium':'Low',wc:ratio>=1.4?'#d42d35':ratio>=0.7?'#ed8d00':'#29811e',ld:leads.find(l=>l.team===r)};
   });
 
-  // ── Priority tasks ────────────────────────────────────────────────────
-  const topP=[...scope].sort((a,b)=>{
-    const as=slaInfo(a),bs=slaInfo(b);
-    if(as?.breach&&!bs?.breach)return-1;if(!as?.breach&&bs?.breach)return 1;
-    if(as&&!as.breach&&!bs)return-1;if(!as&&bs&&!bs.breach)return 1;
-    return b.minutesAgo-a.minutesAgo;
-  }).slice(0,isOwnScope?8:15);
-
   // ── Recent activity ───────────────────────────────────────────────────
   const recentAct=[...scope].filter(t=>t.updatedMinsAgo!==undefined&&t.updatedMinsAgo<t.minutesAgo).sort((a,b)=>a.updatedMinsAgo-b.updatedMinsAgo).slice(0,4).map(t=>{
     const who=MEMBERS.find(m=>m.id===t.assigneeId)||(t.assigneeEmail?MEMBERS.find(m=>m.email.toLowerCase()===t.assigneeEmail.toLowerCase()):null);
@@ -1181,87 +1173,18 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
 
           <div style={{display:'grid',gridTemplateColumns:isManager?'1.2fr 1fr':'1.2fr 1fr',gap:20,alignItems:'start'}}>
 
-            {/* ── COL 1: Priority Tasks ───────────────────────────────────────
-                Whole header row is clickable — Pilar reported that clicking
-                "Priority Tasks" did nothing because the click target was just
-                the tiny "View all →" button. Now any click on the header (icon,
-                title, count, button) navigates to the queue. Individual task
-                rows below remain independently clickable and stopPropagation
-                isn't needed because row clicks supersede the header (they
-                handle their own onClick). */}
-            <DeelCard style={{padding:0,overflow:'hidden',display:'flex',flexDirection:'column'}}>
-              <div onClick={()=>setView('my-queue')}
-                role="button" tabIndex={0}
-                onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();setView('my-queue');}}}
-                style={{padding:'18px 22px 14px',borderBottom:'1px solid #e8e8e8',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0,cursor:'pointer',transition:'background .15s'}}
-                onMouseEnter={e=>e.currentTarget.style.background='#fafaf9'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                <div style={{display:'flex',alignItems:'center',gap:10}}>
-                  <div style={{width:32,height:32,borderRadius:10,background:'linear-gradient(135deg,#FEF3C7,#fff8e6)',display:'flex',alignItems:'center',justifyContent:'center'}}>
-                    <i className="bi-lightning-charge-fill" style={{fontSize:14,color:'#ed8d00'}}></i>
-                  </div>
-                  <span style={{fontSize:16,fontWeight:700,color:'#1b1b1b'}}>Priority Tasks</span>
-                  <span style={{background:'#f3eff8',borderRadius:128,padding:'3px 10px',fontSize:11,fontWeight:700,color:'#8b6dca'}}>{topP.length}</span>
-                </div>
-                <span style={{fontSize:12,color:'#1f74b3',fontWeight:600,padding:'6px 12px',borderRadius:128,background:'#f3eff8',display:'inline-flex',alignItems:'center',gap:4}}>
-                  View all <i className="bi-arrow-right" style={{fontSize:11}}></i>
-                </span>
-              </div>
-              <div style={{flex:1,overflowY:'auto'}}>
-                {topP.length===0?(
-                  <div style={{padding:'48px 16px',textAlign:'center'}}>
-                    <div style={{fontSize:32,color:'#9e9e9e',marginBottom:8}}>All caught up!</div>
-                    <div style={{fontSize:13,color:'#9e9e9e'}}>No urgent tasks right now</div>
-                  </div>
-                ):(topP.map((t,i)=>{
-                  const sla=slaInfo(t);const tool=TOOLS[t.source];
-                  const asgn=isManager?MEMBERS.find(m=>m.id===t.assigneeId):null;
-                  const urgency=sla?.breach?'breach':sla?'atrisk':'ok';
-                  return(
-                    <div key={t.id} onClick={()=>{setSelTask(t);setView('my-queue');}}
-                      style={{padding:'12px 22px',display:'flex',alignItems:'center',gap:12,cursor:'pointer',
-                        borderBottom:i<topP.length-1?'1px solid #f5f5f5':'none',
-                        borderLeft:`3px solid ${urgency==='breach'?'#d42d35':urgency==='atrisk'?'#ed5e2a':'transparent'}`,
-                        transition:'background .15s'}}
-                      onMouseEnter={e=>e.currentTarget.style.background='#fafaf9'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                      <div style={{width:32,height:32,borderRadius:10,background:tool?.bg||'#f7f5f2',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                        <i className={tool?.icon||'bi-circle'} style={{fontSize:13,color:tool?.color||'#bebebe'}}></i>
-                      </div>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:13,fontWeight:600,color:'#1b1b1b',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{t.subject}</div>
-                        <div style={{display:'flex',alignItems:'center',gap:6,marginTop:3}}>
-                          <span style={{fontSize:11,color:'#9e9e9e',fontFamily:'monospace'}}>{t.id}</span>
-                          {asgn&&<><span style={{width:3,height:3,borderRadius:'50%',background:'#dedede'}}></span>
-                          <span style={{display:'inline-flex',alignItems:'center',gap:3,fontSize:11,color:'#616161',fontWeight:500}}>
-                            <Avatar name={asgn.name} size={16}/>{asgn.name.split(' ')[0]}
-                          </span></>}
-                          <span style={{width:3,height:3,borderRadius:'50%',background:'#dedede'}}></span>
-                          <span style={{fontSize:11,color:'#9e9e9e'}}>{rel(t.minutesAgo)}</span>
-                        </div>
-                      </div>
-                      {sla?<span style={{padding:'4px 12px',borderRadius:128,fontSize:11,fontWeight:700,background:sla.bg,color:sla.color,whiteSpace:'nowrap',flexShrink:0,display:'flex',alignItems:'center',gap:3}}>
-                        <i className={sla.breach?'bi-exclamation-triangle-fill':'bi-clock'} style={{fontSize:9}}></i>{sla.short}
-                      </span>:<span style={{padding:'4px 12px',borderRadius:128,fontSize:11,fontWeight:600,background:'#e8f5e3',color:'#29811e'}}>On Track</span>}
-                    </div>
-                  );
-                }))}
-              </div>
-              {total>0&&<div style={{padding:'12px 22px',borderTop:'1px solid #f5f5f5'}}>
-                <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-                  <span style={{fontSize:13,fontWeight:600,color:'#9e9e9e',textTransform:'none',letterSpacing:'normal'}}>Sources</span>
-                  {srcEntries.map(([src,cnt])=>{
-                    const tl=TOOLS[src];const isExp=expandedSource===src;
-                    return <div key={src} onClick={()=>setExpandedSource(isExp?null:src)}
-                      style={{display:'flex',alignItems:'center',gap:4,padding:'3px 10px',borderRadius:128,background:isExp?(tl?.color||'#616161')+'15':tl?.bg||'#f7f5f2',
-                        cursor:'pointer',transition:'all .15s',border:isExp?`1px solid ${tl?.color||'#616161'}30`:'1px solid transparent'}}
-                      onMouseEnter={e=>{if(!isExp)e.currentTarget.style.transform='scale(1.05)';}} onMouseLeave={e=>e.currentTarget.style.transform='scale(1)'}>
-                      <i className={tl?.icon||'bi-circle'} style={{fontSize:9,color:tl?.color||'#bebebe'}}></i>
-                      <span style={{fontSize:10,fontWeight:700,color:tl?.color||'#616161',fontVariantNumeric:'tabular-nums'}}>{cnt}</span>
-                    </div>;
-                  })}
-                </div>
-                {expandedSource&&<MiniTicketList items={[...srcPool.filter(t=>t.source===expandedSource),...({onboarding:onboardingRows,offboarding:offboardingRows,amendments:amendmentRows,redlines:redlineRows,workbench:workbenchRows}[expandedSource]||[])]} emptyMsg="No tickets from this source"/>}
-              </div>}
-            </DeelCard>
+            {/* ── COL 1: My To-Do (Personal Checklist, primary variant) ──────
+                Pilar reported that the old "Priority Tasks" column was visually
+                dominant but clicking it did nothing useful — the only live
+                action was to jump to /my-queue. We've promoted the Personal
+                Checklist to take its slot: a real, actionable workspace that
+                users can interact with directly. Works identically for every
+                role (Agent / Team Lead / Regional Manager / Admin/Director)
+                since it's user-scoped storage, not tied to any role query.
+                Live ticket priorities remain surfaced via the KPI tile row
+                above (Active Requests → click through to Queue) and via the
+                Sources breakdown in the KPI tiles' expanded state. */}
+            <PersonalChecklist user={user} variant="primary" />
 
             {/* ── COL 2: Context Panel ──────────────────────────────────────── */}
             <div style={{display:'flex',flexDirection:'column',gap:16}}>
@@ -1270,9 +1193,6 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               {isOwnScope && <DailySummary tasks={personal} escalations={escalations} scope="personal" />}
               {isTeamScope && <DailySummary tasks={scope} escalations={escalations} scope="team" />}
               {isExec && <DailySummary tasks={allOrgTasks} escalations={escalations} scope="org" />}
-
-              {/* ── PersonalChecklist — all roles, sits right under Morning Briefing ── */}
-              <PersonalChecklist user={user} />
 
               {/* ── ApproachingBreach — all roles ────────────────────────────── */}
               {isOwnScope && <ApproachingBreach tasks={personal} slaInfo={slaInfo} onViewTask={task => { setSelTask(task); setView('my-queue'); }} />}

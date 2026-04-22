@@ -178,7 +178,12 @@ function formatDue(iso) {
 }
 
 // ── Component ───────────────────────────────────────────────────────────────
-const PersonalChecklist = ({ user }) => {
+// `variant` — "compact" (default) renders the small right-column card; "primary"
+// renders a taller, richer card designed to occupy a prominent left-column slot
+// (it replaces the old Priority Tasks card on BriefingView). All behavior,
+// storage, and cross-tab sync is identical between variants.
+const PersonalChecklist = ({ user, variant = 'compact' }) => {
+  const primary = variant === 'primary';
   const userEmail = user?.email || null;
   const key = storageKey(userEmail);
   const userKey = (userEmail || '').toLowerCase().trim() || 'anon';
@@ -313,55 +318,152 @@ const PersonalChecklist = ({ user }) => {
     return a.createdAt - b.createdAt;
   });
   const doneCount = items.filter(i => i.done).length;
+  const openCount = items.length - doneCount;
   const overdueCount = items.filter(i => !i.done && i.dueDate && new Date(i.dueDate + 'T00:00:00') < new Date(todayISO() + 'T00:00:00')).length;
+  const todayCount = items.filter(i => !i.done && i.dueDate === todayISO()).length;
+  const progressPct = items.length > 0 ? Math.round((doneCount / items.length) * 100) : 0;
 
   // ── UI ───────────────────────────────────────────────────────────────────
+  // Primary variant fills a tall left-column slot: bigger header, gradient
+  // ribbon, progress bar, larger item rows, and a permanently-visible add bar.
+  // Compact variant keeps the existing small-card look for right-column use.
   return (
-    <div style={{ background: 'white', border: '1px solid #e8e8e8', borderRadius: 16, overflow: 'hidden' }}>
+    <div style={{
+      background: 'white',
+      border: '1px solid #e8e8e8',
+      borderRadius: 16,
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column',
+      height: primary ? '100%' : 'auto',
+      minHeight: primary ? 520 : 'auto',
+    }}>
       {/* Header */}
-      <div style={{ padding: '14px 20px 12px', borderBottom: '1px solid #e8e8e8', display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{ width: 32, height: 32, borderRadius: 10, background: 'linear-gradient(135deg, #f3eff8, #EDE9FE)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <i className="bi-check2-square" style={{ fontSize: 14, color: '#7c3aed' }}></i>
+      <div style={{
+        padding: primary ? '18px 22px 14px' : '14px 20px 12px',
+        borderBottom: '1px solid #e8e8e8',
+        display: 'flex',
+        alignItems: 'center',
+        gap: primary ? 12 : 10,
+        flexShrink: 0,
+        background: primary ? 'linear-gradient(180deg,#fbfaff 0%,#ffffff 100%)' : 'white',
+      }}>
+        <div style={{
+          width: primary ? 40 : 32,
+          height: primary ? 40 : 32,
+          borderRadius: primary ? 12 : 10,
+          background: 'linear-gradient(135deg, #f3eff8, #EDE9FE)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+          boxShadow: primary ? '0 2px 6px rgba(124,58,237,0.12)' : 'none',
+        }}>
+          <i className="bi-check2-square" style={{ fontSize: primary ? 18 : 14, color: '#7c3aed' }}></i>
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: '#1b1b1b' }}>My Checklist</div>
-          <div style={{ fontSize: 10, color: '#9e9e9e', marginTop: 1 }}>Your personal to-do list — saved locally and across tabs</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ fontSize: primary ? 16 : 15, fontWeight: 700, color: '#1b1b1b' }}>My To-Do</div>
+            {primary && items.length > 0 && (
+              <span style={{ background: '#f3eff8', borderRadius: 128, padding: '3px 10px', fontSize: 11, fontWeight: 700, color: '#8b6dca' }}>{openCount} open</span>
+            )}
+          </div>
+          <div style={{ fontSize: primary ? 11 : 10, color: '#9e9e9e', marginTop: 1 }}>
+            {primary ? 'Your personal to-do list — saved on this device and synced across tabs' : 'Your personal to-do list — saved locally and across tabs'}
+          </div>
         </div>
         {items.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            {overdueCount > 0 && <span title={`${overdueCount} overdue`} style={{ fontSize: 10, fontWeight: 700, color: '#d42d35', background: '#FEE2E2', padding: '2px 8px', borderRadius: 99 }}><i className="bi-exclamation-circle-fill" style={{ fontSize: 9, marginRight: 3 }}></i>{overdueCount}</span>}
-            <span style={{ fontSize: 11, color: '#9e9e9e', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{doneCount}/{items.length}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: primary ? 8 : 6, flexShrink: 0 }}>
+            {todayCount > 0 && primary && (
+              <span title={`${todayCount} due today`} style={{ fontSize: 10, fontWeight: 700, color: '#ed8d00', background: '#FEF3C7', padding: '3px 9px', borderRadius: 99, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                <i className="bi-calendar-event" style={{ fontSize: 9 }}></i>{todayCount} today
+              </span>
+            )}
+            {overdueCount > 0 && (
+              <span title={`${overdueCount} overdue`} style={{ fontSize: 10, fontWeight: 700, color: '#d42d35', background: '#FEE2E2', padding: primary ? '3px 9px' : '2px 8px', borderRadius: 99 }}>
+                <i className="bi-exclamation-circle-fill" style={{ fontSize: 9, marginRight: 3 }}></i>{overdueCount}
+              </span>
+            )}
+            <span style={{ fontSize: primary ? 12 : 11, color: '#9e9e9e', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{doneCount}/{items.length}</span>
           </div>
         )}
       </div>
 
+      {/* Progress bar (primary only, only if there are items) */}
+      {primary && items.length > 0 && (
+        <div style={{ padding: '10px 22px 0', flexShrink: 0 }}>
+          <div style={{ height: 6, borderRadius: 999, background: '#f3f0f8', overflow: 'hidden' }}>
+            <div style={{
+              width: `${progressPct}%`,
+              height: '100%',
+              background: progressPct === 100
+                ? 'linear-gradient(90deg,#29811e,#4dbf3f)'
+                : 'linear-gradient(90deg,#7c3aed,#a78bfa)',
+              borderRadius: 999,
+              transition: 'width .3s ease',
+            }}></div>
+          </div>
+          <div style={{ fontSize: 10, color: '#9e9e9e', marginTop: 5, fontWeight: 600, letterSpacing: 0.3 }}>
+            {progressPct === 100
+              ? 'All caught up — nice work!'
+              : progressPct === 0
+                ? `${openCount} task${openCount === 1 ? '' : 's'} to get through`
+                : `${progressPct}% complete`}
+          </div>
+        </div>
+      )}
+
       {/* Items list */}
-      <div style={{ padding: '6px 12px', maxHeight: 320, overflowY: 'auto' }}>
+      <div style={{
+        padding: primary ? '8px 14px' : '6px 12px',
+        maxHeight: primary ? 'none' : 320,
+        flex: primary ? 1 : '0 0 auto',
+        overflowY: 'auto',
+        minHeight: primary ? 180 : 'auto',
+      }}>
         {items.length === 0 && !showAddForm && (
-          <div style={{ padding: '20px 0', textAlign: 'center', fontSize: 12, color: '#9e9e9e' }}>
-            <i className="bi-list-check" style={{ fontSize: 22, display: 'block', marginBottom: 6, opacity: 0.4 }}></i>
-            Track your daily tasks here
+          <div style={{
+            padding: primary ? '48px 24px 40px' : '20px 0',
+            textAlign: 'center',
+            fontSize: primary ? 13 : 12,
+            color: '#9e9e9e',
+          }}>
+            <i className="bi-list-check" style={{
+              fontSize: primary ? 44 : 22,
+              display: 'block',
+              marginBottom: primary ? 12 : 6,
+              opacity: 0.35,
+              color: '#7c3aed',
+            }}></i>
+            {primary ? (
+              <>
+                <div style={{ fontWeight: 700, fontSize: 14, color: '#616161', marginBottom: 4 }}>Nothing on your plate yet</div>
+                <div style={{ fontSize: 12 }}>Capture a task below — it stays with you across tabs and sessions.</div>
+              </>
+            ) : (
+              'Track your daily tasks here'
+            )}
           </div>
         )}
         {sorted.map(item => {
           const due = formatDue(item.dueDate);
           const isExpanded = expandedId === item.id;
           return (
-            <div key={item.id} style={{ borderBottom: '1px solid #f5f5f5', transition: 'background .15s' }}>
+            <div key={item.id} style={{ borderBottom: '1px solid #f5f5f5', transition: 'background .15s', borderRadius: primary ? 8 : 0 }}>
               {/* Row */}
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 4px' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: primary ? 10 : 8, padding: primary ? '10px 8px' : '8px 4px' }}>
                 <button
                   onClick={() => toggle(item.id)}
                   aria-label={item.done ? 'Mark as not done' : 'Mark as done'}
-                  style={{ width: 20, height: 20, borderRadius: 6, border: `1.5px solid ${item.done ? '#7c3aed' : '#d0d0d0'}`, background: item.done ? '#7c3aed' : 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1, padding: 0, transition: 'all .15s' }}
+                  style={{ width: primary ? 22 : 20, height: primary ? 22 : 20, borderRadius: primary ? 7 : 6, border: `1.5px solid ${item.done ? '#7c3aed' : '#d0d0d0'}`, background: item.done ? '#7c3aed' : 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1, padding: 0, transition: 'all .15s' }}
                 >
-                  {item.done && <i className="bi-check" style={{ fontSize: 12, color: 'white' }}></i>}
+                  {item.done && <i className="bi-check" style={{ fontSize: primary ? 13 : 12, color: 'white' }}></i>}
                 </button>
                 <div
                   onClick={() => setExpandedId(isExpanded ? null : item.id)}
                   style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
                 >
-                  <div style={{ fontSize: 13, color: item.done ? '#9e9e9e' : '#1b1b1b', textDecoration: item.done ? 'line-through' : 'none', fontWeight: 500, lineHeight: 1.35, wordBreak: 'break-word' }}>
+                  <div style={{ fontSize: primary ? 13.5 : 13, color: item.done ? '#9e9e9e' : '#1b1b1b', textDecoration: item.done ? 'line-through' : 'none', fontWeight: 500, lineHeight: 1.35, wordBreak: 'break-word' }}>
                     {item.title}
                   </div>
                   {(item.description || due) && !isExpanded && (
@@ -445,34 +547,76 @@ const PersonalChecklist = ({ user }) => {
       </div>
 
       {/* Add area */}
-      <div style={{ padding: '10px 16px 12px', borderTop: '1px solid #f5f5f5' }}>
+      <div style={{
+        padding: primary ? '12px 18px 16px' : '10px 16px 12px',
+        borderTop: '1px solid #f5f5f5',
+        flexShrink: 0,
+        background: primary ? '#fbfafc' : 'white',
+      }}>
         {!showAddForm ? (
-          <div style={{ display: 'flex', gap: 6 }}>
+          <div style={{ display: 'flex', gap: primary ? 8 : 6 }}>
             <input
               ref={titleInputRef}
               value={draft.title}
               onChange={e => setDraft(d => ({ ...d, title: e.target.value }))}
               onKeyDown={quickAdd}
-              placeholder="Add a task... (Enter to save)"
-              style={{ flex: 1, height: 32, padding: '0 10px', borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 12, outline: 'none', fontFamily: 'inherit', color: '#1b1b1b' }}
+              placeholder={primary ? 'Add a task… press Enter to save' : 'Add a task... (Enter to save)'}
+              style={{
+                flex: 1,
+                height: primary ? 38 : 32,
+                padding: primary ? '0 14px' : '0 10px',
+                borderRadius: primary ? 10 : 8,
+                border: '1px solid #e8e8e8',
+                fontSize: primary ? 13 : 12,
+                outline: 'none',
+                fontFamily: 'inherit',
+                color: '#1b1b1b',
+                background: 'white',
+              }}
               onFocus={e => e.target.style.borderColor = '#7c3aed'}
               onBlur={e => e.target.style.borderColor = '#e8e8e8'}
             />
             <button
               onClick={() => { if (draft.title.trim()) setShowAddForm(true); else titleInputRef.current?.focus(); }}
               title="Add details (description, due date)"
-              style={{ height: 32, padding: '0 10px', borderRadius: 8, border: '1px solid #e8e8e8', background: 'white', color: '#616161', fontSize: 11, fontWeight: 600, cursor: 'pointer', transition: 'all .15s' }}
+              style={{
+                height: primary ? 38 : 32,
+                padding: primary ? '0 12px' : '0 10px',
+                borderRadius: primary ? 10 : 8,
+                border: '1px solid #e8e8e8',
+                background: 'white',
+                color: '#616161',
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all .15s',
+              }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = '#7c3aed'; e.currentTarget.style.color = '#7c3aed'; }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = '#e8e8e8'; e.currentTarget.style.color = '#616161'; }}
             >
-              <i className="bi-sliders" style={{ fontSize: 12 }}></i>
+              <i className="bi-sliders" style={{ fontSize: primary ? 13 : 12 }}></i>
             </button>
             <button
               onClick={() => add()}
               disabled={!draft.title.trim()}
-              style={{ height: 32, padding: '0 14px', borderRadius: 8, border: 'none', background: draft.title.trim() ? '#7c3aed' : '#e8e8e8', color: draft.title.trim() ? 'white' : '#9e9e9e', fontSize: 12, fontWeight: 700, cursor: draft.title.trim() ? 'pointer' : 'default', transition: 'all .15s' }}
+              style={{
+                height: primary ? 38 : 32,
+                padding: primary ? '0 18px' : '0 14px',
+                borderRadius: primary ? 10 : 8,
+                border: 'none',
+                background: draft.title.trim() ? '#7c3aed' : '#e8e8e8',
+                color: draft.title.trim() ? 'white' : '#9e9e9e',
+                fontSize: primary ? 13 : 12,
+                fontWeight: 700,
+                cursor: draft.title.trim() ? 'pointer' : 'default',
+                transition: 'all .15s',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
             >
-              <i className="bi-plus" style={{ fontSize: 14 }}></i>
+              <i className="bi-plus" style={{ fontSize: primary ? 16 : 14 }}></i>
+              {primary && <span>Add</span>}
             </button>
           </div>
         ) : (
