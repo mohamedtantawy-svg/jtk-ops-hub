@@ -852,13 +852,22 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           {/* "N hidden by filters" nudge — only when filters are genuinely
               masking work. Catches the "all chips show 0 but I know there
               are tasks" state that used to bite Team Leads with stale
-              localStorage filters. */}
+              localStorage filters. Clicking the chip clears every filter
+              in one shot — same action as "Clear all" next to it, just
+              promoted to the visible warning surface so users don't have
+              to hunt for the separate link. */}
           {hasActiveFilters && hiddenByFilters > 0 && (
-            <span title={`Your active filters are hiding ${hiddenByFilters} ${hiddenByFilters === 1 ? 'task' : 'tasks'}. Click Clear all to see everything.`}
-              style={{height:32,display:'inline-flex',alignItems:'center',gap:5,padding:'0 10px',borderRadius:8,background:'#fff7ed',border:'1px solid #fed7aa',color:'#b45309',fontSize:11,fontWeight:600,whiteSpace:'nowrap'}}>
+            <button
+              type="button"
+              onClick={()=>{setFTool(null);setFStatus([]);setFSla(null);setFUnassigned(false);setSearch('');}}
+              title={`Your active filters are hiding ${hiddenByFilters} ${hiddenByFilters === 1 ? 'task' : 'tasks'}. Click to clear all filters.`}
+              style={{height:32,display:'inline-flex',alignItems:'center',gap:5,padding:'0 10px',borderRadius:8,background:'#fff7ed',border:'1px solid #fed7aa',color:'#b45309',fontSize:11,fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',fontFamily:'inherit'}}
+              onMouseEnter={e=>{e.currentTarget.style.background='#ffedd5';}}
+              onMouseLeave={e=>{e.currentTarget.style.background='#fff7ed';}}
+            >
               <i className="bi-funnel-fill" style={{fontSize:10}}></i>
-              {hiddenByFilters} hidden
-            </span>
+              {hiddenByFilters} hidden — click to clear
+            </button>
           )}
 
           {/* Clear all */}
@@ -995,7 +1004,23 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
             ? <div style={{textAlign:'center',padding:'60px 20px',color:'var(--text-muted)'}}>
                 <i className="bi bi-inbox" style={{fontSize:32,display:'block',marginBottom:12,opacity:0.3}}/>
                 <div style={{fontSize:15,fontWeight:600,color:'#616161',marginBottom:4}}>No tasks found</div>
-                <div style={{fontSize:13,color:'#9e9e9e'}}>Try adjusting your filters</div>
+                {hiddenByFilters > 0 ? (
+                  <>
+                    <div style={{fontSize:13,color:'#9e9e9e',marginBottom:16}}>
+                      Your active filters are hiding {hiddenByFilters} {hiddenByFilters === 1 ? 'task' : 'tasks'} in your scope.
+                    </div>
+                    <button
+                      type="button"
+                      onClick={()=>{setFTool(null);setFStatus([]);setFSla(null);setFUnassigned(false);setSearch('');}}
+                      style={{display:'inline-flex',alignItems:'center',gap:6,padding:'8px 16px',borderRadius:8,border:'1px solid #1f74b3',background:'#1f74b3',color:'#fff',fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}
+                    >
+                      <i className="bi-x-circle" style={{fontSize:12}}></i>
+                      Clear filters
+                    </button>
+                  </>
+                ) : (
+                  <div style={{fontSize:13,color:'#9e9e9e'}}>Try adjusting your filters</div>
+                )}
               </div>
             : <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',flex:1,padding:40,textAlign:'center',minHeight:300}}>
                 <i className="bi-inbox" style={{fontSize:48,color:'#c0c0c0',display:'block',marginBottom:16}}></i>
