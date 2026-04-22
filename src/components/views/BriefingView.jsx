@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef, useContext, useCallback } from 'r
 import { TOOLS, STATUSES, FUNCTIONS, FLAGS } from '../../data/constants';
 import { MEMBERS } from '../../data/members';
 import { matchesAudience } from '../../data/comms';
+import { INITIAL_PROJECTS } from '../../data/projects';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import { CALENDAR_EVENTS } from '../../data/calendar';
 import { slaInfo, rel, getVisibleEmails } from '../../utils/helpers';
@@ -16,6 +17,16 @@ import {
   normalizeRedlines,
   normalizeWorkbench,
 } from '../../utils/normalizeSourceRows';
+// Authoritative Queue scoping — same functions Queue.jsx uses so Briefing counts
+// match what the user actually sees in each source table (incl. country-owner
+// visibility for onboarding/offboarding/amendments/redlines).
+import {
+  scopeOnboardingPeople,
+  scopeOffboardingCases,
+  scopeAmendmentRequests,
+  scopeRedlineRequests,
+  scopeWorkbenchTasks,
+} from '../../lib/queue-scoping';
 import Avatar from '../ui/Avatar';
 import { ToolBadge, FnBadge } from '../ui/Badges';
 import PersonalChecklist from '../home/PersonalChecklist';
@@ -113,20 +124,18 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const redlineRowsAll = useMemo(() => normalizeRedlines(changeRequestData.redlines), [changeRequestData.redlines]);
   const workbenchRowsAll = useMemo(() => normalizeWorkbench(workbenchData.tasks), [workbenchData.tasks]);
 
-  // Agent-scoped: admins see all, others only see rows with assigneeEmail in their visibleEmails
-  const filterSourceRows = useCallback((rows) => {
-    if (isAllScope) return rows;
-    return rows.filter(r => {
-      const email = (r.assigneeEmail || '').toLowerCase();
-      return email && visibleEmails.has(email);
-    });
-  }, [isAllScope, visibleEmails]);
-
-  const onboardingRows = useMemo(() => filterSourceRows(onboardingRowsAll), [onboardingRowsAll, filterSourceRows]);
-  const offboardingRows = useMemo(() => filterSourceRows(offboardingRowsAll), [offboardingRowsAll, filterSourceRows]);
-  const amendmentRows = useMemo(() => filterSourceRows(amendmentRowsAll), [amendmentRowsAll, filterSourceRows]);
-  const redlineRows = useMemo(() => filterSourceRows(redlineRowsAll), [redlineRowsAll, filterSourceRows]);
-  const workbenchRows = useMemo(() => filterSourceRows(workbenchRowsAll), [workbenchRowsAll, filterSourceRows]);
+  // Source-row scoping — delegate to the Queue's single source of truth so
+  // "Active Requests" here always matches what the user sees in each tab.
+  //   • Onboarding / Offboarding / Amendments / Redlines use country-OR-assignee
+  //     (a country owner sees their region's rows even without direct assignment).
+  //   • Workbench is assignee-only (admin bypasses).
+  // Admins/directors (isAllScope) short-circuit through these functions, so
+  // they see everything — exec totals roll up correctly.
+  const onboardingRows = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user), [onboardingRowsAll, user]);
+  const offboardingRows = useMemo(() => scopeOffboardingCases(offboardingRowsAll, user), [offboardingRowsAll, user]);
+  const amendmentRows = useMemo(() => scopeAmendmentRequests(amendmentRowsAll, user), [amendmentRowsAll, user]);
+  const redlineRows = useMemo(() => scopeRedlineRequests(redlineRowsAll, user), [redlineRowsAll, user]);
+  const workbenchRows = useMemo(() => scopeWorkbenchTasks(workbenchRowsAll, user), [workbenchRowsAll, user]);
 
   const inScope = useCallback(t => {
     if (scopeIds.includes(t.assigneeId)) return true;
@@ -151,6 +160,118 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const resolved=tasks.filter(t=>inScope(t)&&t.status==='resolved').length;
   const updated=scope.filter(t=>t.updatedMinsAgo!==undefined&&t.updatedMinsAgo<=120).length;
   const manager=user.lead?MEMBERS.find(m=>m.id===user.lead):null;
+
+  // ── Cross-source "Active Requests" count ───────────────────────────────
+  // Pilar's rule: Active Requests must equal the FULL open-item count across
+  // every queue (Zendesk + Jira + Onboarding + Offboarding + Amendments +
+  // Redlines + Workbench) minus resolved, scoped to what the user actually
+  // sees in each tab.
+  //   • Agent     → personal tasks + their scoped Deel rows
+  //   • Team Lead → team scope (self + direct reports) — their Deel rows are
+  //                 already country/assignee-scoped by the Queue rules above.
+  //   • Exec (RM/Director/Admin) → org-wide open + all Deel rows.
+  // The Deel source rows are "open by definition" — resolved ones don't come
+  // back from the actionable-queue endpoints — so no status filter needed.
+  const deelSourceRowsLen =
+    onboardingRows.length + offboardingRows.length + amendmentRows.length +
+    redlineRows.length + workbenchRows.length;
+  const activeRequestsCount = isOwnScope
+    ? personal.length + deelSourceRowsLen
+    : isTeamScope
+      ? scope.length + deelSourceRowsLen
+      : orgOpen.length + onboardingRowsAll.length + offboardingRowsAll.length +
+        amendmentRowsAll.length + redlineRowsAll.length + workbenchRowsAll.length;
+
+  // ── Today's meetings ───────────────────────────────────────────────────
+  // Calendar events carry a type — we only count real meetings, not deadlines
+  // or leave markers (those show up in other cards). Same rule for every role
+  // since the calendar is org-wide and users care about their own day.
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayMeetingsCount = CALENDAR_EVENTS.filter(e => e.date === todayStr && e.type === 'meeting').length;
+
+  // ── Projects assigned / visible ───────────────────────────────────────
+  // Follows the permission tree:
+  //   • Agent     → projects where I'm lead, explicitly in assigneeIds, or
+  //                 the scope is team==mine / everyone.
+  //   • Team Lead / Regional / Director → anything led by or assigned to
+  //                 anyone in my scope, plus team/everyone scopes. Admin
+  //                 (isAllScope) sees all active projects.
+  // Completed/cancelled are excluded — Pilar asked for "only projects assigned
+  // to them" which implies active work, not archived records.
+  const projectsAssignedCount = useMemo(() => {
+    const active = INITIAL_PROJECTS.filter(p => p.status !== 'completed' && p.status !== 'cancelled');
+    if (isAllScope) return active.length;
+    const scopeIdSet = new Set(scopeIds);
+    return active.filter(p => {
+      if (p.assignScope === 'everyone') return true;
+      if (p.assignScope === 'team' && p.assignTeam && p.assignTeam === user.team) return true;
+      if (scopeIdSet.has(p.leadId)) return true;
+      if (Array.isArray(p.assigneeIds) && p.assigneeIds.some(id => scopeIdSet.has(id))) return true;
+      return false;
+    }).length;
+  }, [isAllScope, scopeIds, user.team]);
+
+  // ── Escalations assigned to the viewer ────────────────────────────────
+  // Previous behaviour counted every pending escalation in scope — that over-
+  // counted for TL/Regional/Director who saw their whole subtree's backlog.
+  // New rule (Pilar): "only assigned to them" per role:
+  //   • Agent           → pending escalations I raised (waiting on my manager)
+  //   • TL/RM/Director  → pending escalations where I'm the expected responder
+  //                       (managerId === my user id). Tree visibility is
+  //                       preserved — `escalations` is already the scoped list.
+  const myEscalationsCount = useMemo(() => {
+    const uname = (user.name || '').toLowerCase();
+    return escalations.filter(e => {
+      if (e.status !== 'pending') return false;
+      if (isOwnScope) {
+        const byName = (e.escalatedBy || '').toLowerCase() === uname;
+        const byTask = e.task && e.task.assigneeId === user.id;
+        return byName || byTask;
+      }
+      return e.managerId === user.id;
+    }).length;
+  }, [escalations, isOwnScope, user.id, user.name]);
+
+  // ── Personal checklist count (incomplete only) ────────────────────────
+  // Reads the per-user key written by PersonalChecklist.jsx. Re-reads on
+  // `storage` events so adding/toggling an item in another tab updates the
+  // tile without a refresh. Falls back to the legacy global key for users
+  // who haven't triggered a write since the schema change.
+  const [checklistCount, setChecklistCount] = useState(0);
+  useEffect(() => {
+    const userKey = (user.email || '').toLowerCase().trim()
+      ? `ops_hub_checklist_v2:${(user.email || '').toLowerCase().trim()}`
+      : 'ops_hub_checklist_v2';
+    const readCount = () => {
+      try {
+        const raw = localStorage.getItem(userKey) || localStorage.getItem('ops_hub_checklist');
+        if (!raw) return 0;
+        const parsed = JSON.parse(raw);
+        const items = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.items) ? parsed.items : []);
+        return items.filter(i => i && !i.done).length;
+      } catch { return 0; }
+    };
+    setChecklistCount(readCount());
+    const onStorage = (e) => {
+      if (!e.key || e.key === userKey || e.key === 'ops_hub_checklist') setChecklistCount(readCount());
+    };
+    window.addEventListener('storage', onStorage);
+    // Cross-tab channel the checklist itself uses for instant updates
+    let channel = null;
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        channel = new BroadcastChannel('ops_hub_checklist_sync');
+        channel.onmessage = () => setChecklistCount(readCount());
+      }
+    } catch {}
+    // Poll every 30s as a belt-and-braces fallback (cheap, synchronous read)
+    const tick = setInterval(() => setChecklistCount(readCount()), 30_000);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      if (channel) { try { channel.close(); } catch {} }
+      clearInterval(tick);
+    };
+  }, [user.email]);
 
   // ── DYNAMIC CAPACITY — scoped to permission level ──────────────────
   const allAgents=MEMBERS.filter(m=>m.role==='agent'&&scopeIds.includes(m.id)).map(m=>{
@@ -556,6 +677,41 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             EXECUTIVE SUMMARY — Director / Regional Manager ONLY
         ══════════════════════════════════════════════════════════════════ */}
         {isExec&&<div style={{padding:'12px 24px'}}>
+          {/* ── Exec 6-tile KPI row — same rules as Agent/TL, org-wide scope ─
+              Director/Regional Manager see the full org: Active Requests rolls
+              up every queue minus resolved; Meetings/Projects/Escalations/
+              Announcements/My-To-Do remain personally scoped so the tile is
+              actionable (an exec's "my escalations" are ones awaiting THEIR
+              sign-off, not every pending escalation in the org — avoids a
+              useless 50+ number). */}
+          {(()=>{
+            const inAudExec=(c)=>matchesAudience(c.target,user.team)||(c.author&&c.author.id===user.id);
+            const execUnackedCount=comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='alert'||c.type==='guidance')&&!c.acks.includes(user.id)&&inAudExec(c)).length;
+            return(
+              <div style={{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:10,marginBottom:16}}>
+                {[
+                  {icon:'bi-inbox-fill',label:'Active Requests',value:activeRequestsCount,color:'var(--g)',sub:'org-wide'},
+                  {icon:'bi-calendar-event',label:'Meetings',value:todayMeetingsCount,color:'#1f74b3',sub:'today',nav:()=>setView('calendar')},
+                  {icon:'bi-kanban',label:'Projects',value:projectsAssignedCount,color:'#8b6dca',sub:'assigned',nav:()=>setView('projects')},
+                  {icon:'bi-exclamation-triangle-fill',label:'Escalations',value:myEscalationsCount,color:myEscalationsCount>0?'#d42d35':'#616161',alert:myEscalationsCount>0,nav:()=>setView('escalations'),accent:myEscalationsCount>0?'#ffe2de':null,sub:'mine'},
+                  {icon:'bi-megaphone-fill',label:'Announcements',value:execUnackedCount,color:execUnackedCount>0?'#ed8d00':'#616161',alert:execUnackedCount>0,nav:()=>setView('announcements'),accent:execUnackedCount>0?'#fff8e6':null,sub:'unacked'},
+                  {icon:'bi-check2-square',label:'My To-Do',value:checklistCount,color:checklistCount>0?'#7c3aed':'#616161',sub:'open items'},
+                ].map(m=>(
+                  <DeelCard key={m.label}
+                    onClick={m.nav}
+                    style={{padding:'16px 18px',position:'relative',cursor:m.nav?'pointer':'default',background:m.accent||'white',border:m.accent?`1px solid ${m.color}22`:'1px solid #e8e8e8'}}>
+                    {m.alert&&m.value>0&&<span className="pulse" style={{position:'absolute',top:10,right:12,width:7,height:7,borderRadius:'50%',background:'#d42d35'}}></span>}
+                    <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}>
+                      <i className={m.icon} style={{fontSize:12,color:m.color}}></i>
+                      <span style={{fontSize:13,fontWeight:600,color:'#9e9e9e',textTransform:'none',letterSpacing:'normal'}}>{m.label}</span>
+                    </div>
+                    <div style={{fontSize:24,fontWeight:700,color:m.nav?'#1f74b3':m.color,lineHeight:1,fontVariantNumeric:'tabular-nums'}}>{m.value}</div>
+                    {m.sub&&<div style={{fontSize:10,color:'#9e9e9e',marginTop:6}}>{m.sub}</div>}
+                  </DeelCard>
+                ))}
+              </div>
+            );
+          })()}
           <div style={{marginBottom:16}}>
             <div style={{fontSize:'var(--font-md)',fontWeight:600,color:'var(--text)',letterSpacing:0}}>Department Executive Summary</div>
             <div style={{fontSize:13,color:'#616161',marginTop:2}}>{orgOpen.length+orgResolved.length} total tasks today</div>
@@ -768,23 +924,29 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
         {isOwnScope&&<div style={{padding:'12px 24px'}}>
           {/* ── Stat cards ──── */}
           {(()=>{
-            const pendingEscalCount=escalations.filter(e=>e.status==='pending').length;
             const inAudience=(c)=>matchesAudience(c.target,user.team)||(c.author&&c.author.id===user.id);
             const unackedComms=comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='alert'||c.type==='guidance')&&!c.acks.includes(user.id)&&inAudience(c));
             const unackedCount=unackedComms.length;
-            const todayStr=new Date().toISOString().slice(0,10);
-            const todayMeetings=CALENDAR_EVENTS.filter(e=>e.date===todayStr);
-            // Source breakdown for Active card expand
-            const srcBreakdown=Object.entries(personal.reduce((a,t)=>{a[t.source]=(a[t.source]||0)+1;return a;},{})).sort((a,b)=>b[1]-a[1]);
+            // Source breakdown for Active-Requests expand — must include every
+            // source the user actually has open rows in (Zendesk/Jira from
+            // `personal` + the normalized Deel source rows). This is what the
+            // user sees in their Queue tabs, so the sum matches Active Requests.
+            const srcMap=personal.reduce((a,t)=>{a[t.source]=(a[t.source]||0)+1;return a;},{});
+            if(onboardingRows.length)  srcMap.onboarding  =(srcMap.onboarding  ||0)+onboardingRows.length;
+            if(offboardingRows.length) srcMap.offboarding =(srcMap.offboarding ||0)+offboardingRows.length;
+            if(amendmentRows.length)   srcMap.amendments  =(srcMap.amendments  ||0)+amendmentRows.length;
+            if(redlineRows.length)     srcMap.redlines    =(srcMap.redlines    ||0)+redlineRows.length;
+            if(workbenchRows.length)   srcMap.workbench   =(srcMap.workbench   ||0)+workbenchRows.length;
+            const srcBreakdown=Object.entries(srcMap).sort((a,b)=>b[1]-a[1]);
             return(<>
           <div style={{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:10}}>
             {[
-              {icon:'bi-inbox-fill',label:'Active Requests',value:personal.length,color:'var(--g)',sub:`avg ${teamAvg.toFixed(1)}`,tr:trend(),expandKey:'active-breakdown'},
-              {icon:'bi-calendar-event',label:'Meetings',value:todayMeetings.length,color:'#1f74b3',nav:()=>setView('calendar')},
-              {icon:'bi-kanban',label:'Projects',value:srcEntries.length,color:'#8b6dca',nav:()=>setView('projects')},
-              {icon:'bi-exclamation-triangle-fill',label:'Escalations',value:pendingEscalCount,color:pendingEscalCount>0?'#d42d35':'#616161',alert:pendingEscalCount>0,nav:()=>setView('escalations'),accent:pendingEscalCount>0?'#ffe2de':null},
-              {icon:'bi-megaphone-fill',label:'Announcements',value:unackedCount,color:unackedCount>0?'#ed8d00':'#616161',alert:unackedCount>0,nav:()=>setView('announcements'),accent:unackedCount>0?'#fff8e6':null},
-              {icon:'bi-check-circle-fill',label:'Resolved',value:resolved,color:'#29811e',sub:'today',tr:trend(),nav:()=>{setView('my-queue');setTimeout(()=>setSubFilter&&setSubFilter('Resolved'),50);}},
+              {icon:'bi-inbox-fill',label:'Active Requests',value:activeRequestsCount,color:'var(--g)',sub:`avg ${teamAvg.toFixed(1)}`,tr:trend(),expandKey:'active-breakdown'},
+              {icon:'bi-calendar-event',label:'Meetings',value:todayMeetingsCount,color:'#1f74b3',sub:'today',nav:()=>setView('calendar')},
+              {icon:'bi-kanban',label:'Projects',value:projectsAssignedCount,color:'#8b6dca',sub:'assigned',nav:()=>setView('projects')},
+              {icon:'bi-exclamation-triangle-fill',label:'Escalations',value:myEscalationsCount,color:myEscalationsCount>0?'#d42d35':'#616161',alert:myEscalationsCount>0,nav:()=>setView('escalations'),accent:myEscalationsCount>0?'#ffe2de':null,sub:'mine'},
+              {icon:'bi-megaphone-fill',label:'Announcements',value:unackedCount,color:unackedCount>0?'#ed8d00':'#616161',alert:unackedCount>0,nav:()=>setView('announcements'),accent:unackedCount>0?'#fff8e6':null,sub:'unacked'},
+              {icon:'bi-check2-square',label:'My To-Do',value:checklistCount,color:checklistCount>0?'#7c3aed':'#616161',sub:'open items'},
             ].map((m,i)=>(
               <DeelCard key={m.label}
                 onClick={m.expandKey?()=>setExpandedSla(expandedSla===m.expandKey?null:m.expandKey):m.nav?m.nav:undefined}
@@ -806,16 +968,16 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             <div style={{background:'#fafaf9',border:'1px solid #e8e8e8',borderRadius:12,padding:'12px 16px',animation:'fadeSlide .2s ease'}}>
               {srcBreakdown.length===0?<div style={{fontSize:11,color:'#9e9e9e',padding:'12px 0',textAlign:'center'}}>No active tasks</div>:
               srcBreakdown.map(([src,cnt])=>{
-                const tl=TOOLS[src];
+                const tl=TOOLS[src];const color=SOURCE_COLOURS[src]||tl?.color||'#bebebe';
                 return(
                   <div key={src} onClick={()=>{setView('my-queue');}}
                     style={{display:'flex',alignItems:'center',gap:10,padding:'8px 4px',cursor:'pointer',borderRadius:8,transition:'background .15s'}}
                     onMouseEnter={e=>e.currentTarget.style.background='#f0f0f0'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
                     <div style={{width:24,height:24,borderRadius:6,background:tl?.bg||'#f7f5f2',display:'flex',alignItems:'center',justifyContent:'center'}}>
-                      <i className={tl?.icon||'bi-circle'} style={{fontSize:10,color:tl?.color||'#bebebe'}}></i>
+                      <i className={tl?.icon||'bi-circle'} style={{fontSize:10,color}}></i>
                     </div>
-                    <span style={{fontSize:13,color:'#1b1b1b',flex:1,fontWeight:500}}>{tl?.label||src}</span>
-                    <span style={{fontSize:16,fontWeight:700,color:'#1f74b3',fontVariantNumeric:'tabular-nums'}}>{cnt} tasks</span>
+                    <span style={{fontSize:13,color:'#1b1b1b',flex:1,fontWeight:500}}>{tl?.label||src.charAt(0).toUpperCase()+src.slice(1)}</span>
+                    <span style={{fontSize:16,fontWeight:700,color:'#1f74b3',fontVariantNumeric:'tabular-nums'}}>{cnt} {cnt===1?'task':'tasks'}</span>
                   </div>
                 );
               })}
@@ -880,21 +1042,27 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
         ══════════════════════════════════════════════════════════════════ */}
         {isTeamScope&&<div style={{margin:'12px 24px 0',background:'white',border:'1px solid #e8e8e8',borderRadius:16,padding:'12px 20px'}}>
           {(()=>{
-            const pendingEscalCount=escalations.filter(e=>e.status==='pending').length;
             const inAudLead=(c)=>matchesAudience(c.target,user.team)||(c.author&&c.author.id===user.id);
             const unackedCount=comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='alert'||c.type==='guidance')&&!c.acks.includes(user.id)&&inAudLead(c)).length;
-            const leadSrcBreakdown=Object.entries(scope.reduce((a,t)=>{a[t.source]=(a[t.source]||0)+1;return a;},{})).sort((a,b)=>b[1]-a[1]);
-            const leadTodayStr=new Date().toISOString().slice(0,10);
-            const leadTodayMeetings=CALENDAR_EVENTS.filter(e=>e.date===leadTodayStr);
+            // Breakdown spans every queue the team has open items in —
+            // Zendesk/Jira from `scope`, plus the country/assignee-scoped Deel
+            // rows so the total matches Active Requests.
+            const leadSrcMap=scope.reduce((a,t)=>{a[t.source]=(a[t.source]||0)+1;return a;},{});
+            if(onboardingRows.length)  leadSrcMap.onboarding  =(leadSrcMap.onboarding  ||0)+onboardingRows.length;
+            if(offboardingRows.length) leadSrcMap.offboarding =(leadSrcMap.offboarding ||0)+offboardingRows.length;
+            if(amendmentRows.length)   leadSrcMap.amendments  =(leadSrcMap.amendments  ||0)+amendmentRows.length;
+            if(redlineRows.length)     leadSrcMap.redlines    =(leadSrcMap.redlines    ||0)+redlineRows.length;
+            if(workbenchRows.length)   leadSrcMap.workbench   =(leadSrcMap.workbench   ||0)+workbenchRows.length;
+            const leadSrcBreakdown=Object.entries(leadSrcMap).sort((a,b)=>b[1]-a[1]);
             return(<>
           <div style={{display:'flex',alignItems:'center',gap:0}}>
           {[
-            {l:'Active Requests',v:total,c:'var(--g)',sub:`${personal.length} yours`,tr:trend(),expandKey:'active-breakdown'},
-            {l:'Meetings',v:leadTodayMeetings.length,c:'#1f74b3',nav:()=>setView('calendar')},
-            {l:'Projects',v:srcEntries.length,c:'#8b6dca',nav:()=>setView('projects')},
-            {l:'Escalations',v:pendingEscalCount,c:pendingEscalCount>0?'#d42d35':'#616161',alert:pendingEscalCount>0,nav:()=>setView('escalations')},
-            {l:'Announcements',v:unackedCount,c:unackedCount>0?'#ed8d00':'#616161',alert:unackedCount>0,nav:()=>setView('announcements')},
-            {l:'Resolved',v:resolved,c:'#29811e',sub:'today',tr:trend(),nav:()=>{setView('my-queue');setTimeout(()=>setSubFilter&&setSubFilter('Resolved'),50);}},
+            {l:'Active Requests',v:activeRequestsCount,c:'var(--g)',sub:`${personal.length} yours`,tr:trend(),expandKey:'active-breakdown'},
+            {l:'Meetings',v:todayMeetingsCount,c:'#1f74b3',sub:'today',nav:()=>setView('calendar')},
+            {l:'Projects',v:projectsAssignedCount,c:'#8b6dca',sub:'assigned',nav:()=>setView('projects')},
+            {l:'Escalations',v:myEscalationsCount,c:myEscalationsCount>0?'#d42d35':'#616161',alert:myEscalationsCount>0,sub:'mine',nav:()=>setView('escalations')},
+            {l:'Announcements',v:unackedCount,c:unackedCount>0?'#ed8d00':'#616161',alert:unackedCount>0,sub:'unacked',nav:()=>setView('announcements')},
+            {l:'My To-Do',v:checklistCount,c:checklistCount>0?'#7c3aed':'#616161',sub:'open items'},
           ].map((m,i,arr)=>(
             <div key={m.l} className={`metric-cell count-up count-up-${i+1}`}
               onClick={m.expandKey?()=>setExpandedSla(expandedSla===m.expandKey?null:m.expandKey):m.nav?m.nav:undefined}
@@ -925,16 +1093,16 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             <div style={{background:'#fafaf9',border:'1px solid #e8e8e8',borderRadius:12,padding:'12px 16px',animation:'fadeSlide .2s ease'}}>
               {leadSrcBreakdown.length===0?<div style={{fontSize:11,color:'#9e9e9e',padding:'12px 0',textAlign:'center'}}>No active tasks</div>:
               leadSrcBreakdown.map(([src,cnt])=>{
-                const tl=TOOLS[src];
+                const tl=TOOLS[src];const color=SOURCE_COLOURS[src]||tl?.color||'#bebebe';
                 return(
                   <div key={src} onClick={()=>setView('my-queue')}
                     style={{display:'flex',alignItems:'center',gap:10,padding:'8px 4px',cursor:'pointer',borderRadius:8,transition:'background .15s'}}
                     onMouseEnter={e=>e.currentTarget.style.background='#f0f0f0'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
                     <div style={{width:24,height:24,borderRadius:6,background:tl?.bg||'#f7f5f2',display:'flex',alignItems:'center',justifyContent:'center'}}>
-                      <i className={tl?.icon||'bi-circle'} style={{fontSize:10,color:tl?.color||'#bebebe'}}></i>
+                      <i className={tl?.icon||'bi-circle'} style={{fontSize:10,color}}></i>
                     </div>
-                    <span style={{fontSize:13,color:'#1b1b1b',flex:1,fontWeight:500}}>{tl?.label||src}</span>
-                    <span style={{fontSize:16,fontWeight:700,color:'#1f74b3',fontVariantNumeric:'tabular-nums'}}>{cnt} tasks</span>
+                    <span style={{fontSize:13,color:'#1b1b1b',flex:1,fontWeight:500}}>{tl?.label||src.charAt(0).toUpperCase()+src.slice(1)}</span>
+                    <span style={{fontSize:16,fontWeight:700,color:'#1f74b3',fontVariantNumeric:'tabular-nums'}}>{cnt} {cnt===1?'task':'tasks'}</span>
                   </div>
                 );
               })}
@@ -1013,9 +1181,20 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
 
           <div style={{display:'grid',gridTemplateColumns:isManager?'1.2fr 1fr':'1.2fr 1fr',gap:20,alignItems:'start'}}>
 
-            {/* ── COL 1: Priority Tasks ─────────────────────────────────────── */}
+            {/* ── COL 1: Priority Tasks ───────────────────────────────────────
+                Whole header row is clickable — Pilar reported that clicking
+                "Priority Tasks" did nothing because the click target was just
+                the tiny "View all →" button. Now any click on the header (icon,
+                title, count, button) navigates to the queue. Individual task
+                rows below remain independently clickable and stopPropagation
+                isn't needed because row clicks supersede the header (they
+                handle their own onClick). */}
             <DeelCard style={{padding:0,overflow:'hidden',display:'flex',flexDirection:'column'}}>
-              <div style={{padding:'18px 22px 14px',borderBottom:'1px solid #e8e8e8',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}}>
+              <div onClick={()=>setView('my-queue')}
+                role="button" tabIndex={0}
+                onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();setView('my-queue');}}}
+                style={{padding:'18px 22px 14px',borderBottom:'1px solid #e8e8e8',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0,cursor:'pointer',transition:'background .15s'}}
+                onMouseEnter={e=>e.currentTarget.style.background='#fafaf9'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
                 <div style={{display:'flex',alignItems:'center',gap:10}}>
                   <div style={{width:32,height:32,borderRadius:10,background:'linear-gradient(135deg,#FEF3C7,#fff8e6)',display:'flex',alignItems:'center',justifyContent:'center'}}>
                     <i className="bi-lightning-charge-fill" style={{fontSize:14,color:'#ed8d00'}}></i>
@@ -1023,8 +1202,9 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   <span style={{fontSize:16,fontWeight:700,color:'#1b1b1b'}}>Priority Tasks</span>
                   <span style={{background:'#f3eff8',borderRadius:128,padding:'3px 10px',fontSize:11,fontWeight:700,color:'#8b6dca'}}>{topP.length}</span>
                 </div>
-                <button onClick={()=>setView('my-queue')} style={{fontSize:12,color:'#1f74b3',fontWeight:600,background:'none',border:'none',cursor:'pointer',padding:'6px 12px',borderRadius:128,transition:'all .15s'}}
-                  onMouseEnter={e=>{e.currentTarget.style.background='#f3eff8';e.currentTarget.style.transform='translateX(2px)';}} onMouseLeave={e=>{e.currentTarget.style.background='none';e.currentTarget.style.transform='none';}}>View all &rarr;</button>
+                <span style={{fontSize:12,color:'#1f74b3',fontWeight:600,padding:'6px 12px',borderRadius:128,background:'#f3eff8',display:'inline-flex',alignItems:'center',gap:4}}>
+                  View all <i className="bi-arrow-right" style={{fontSize:11}}></i>
+                </span>
               </div>
               <div style={{flex:1,overflowY:'auto'}}>
                 {topP.length===0?(
