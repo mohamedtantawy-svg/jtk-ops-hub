@@ -1091,6 +1091,9 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               {isTeamScope && <DailySummary tasks={scope} escalations={escalations} scope="team" />}
               {isExec && <DailySummary tasks={allOrgTasks} escalations={escalations} scope="org" />}
 
+              {/* ── PersonalChecklist — all roles, sits right under Morning Briefing ── */}
+              <PersonalChecklist user={user} />
+
               {/* ── ApproachingBreach — all roles ────────────────────────────── */}
               {isOwnScope && <ApproachingBreach tasks={personal} slaInfo={slaInfo} onViewTask={task => { setSelTask(task); setView('my-queue'); }} />}
               {isTeamScope && <ApproachingBreach tasks={scope} slaInfo={slaInfo} onViewTask={task => { setSelTask(task); setView('my-queue'); }} />}
@@ -1107,9 +1110,6 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               {/* ── StaleTickets — team lead & admin ─────────────────────────── */}
               {isTeamScope && <StaleTickets tasks={scope} defaultDays={3} />}
               {isExec && <StaleTickets tasks={orgOpen} defaultDays={3} />}
-
-              {/* ── PersonalChecklist — all roles ────────────────────────────── */}
-              <PersonalChecklist />
 
               {/* AGENT: Team Availability */}
               {isOwnScope&&<DeelCard style={{padding:0,overflow:'hidden'}}>
