@@ -135,8 +135,17 @@ export async function middleware(request) {
     console.warn(`[middleware] origin-check would reject: method=${request.method} path=${pathname} origin=${request.headers.get('origin') || 'none'} referer=${request.headers.get('referer') || 'none'}`);
   }
 
-  // Skip auth for auth routes, config, and integration status endpoint
-  if (pathname.startsWith('/api/v1/auth') || pathname === '/api/v1/config' || pathname === '/api/v1/integrations/status') {
+  // Skip auth for auth routes, config, and integration status endpoint.
+  // The Google Calendar OAuth callback is also bypassed here because it's
+  // hit as a top-level browser redirect from Google's consent screen — no
+  // bearer token is available at that point. The callback itself
+  // authenticates via the signed `state` JWT (see src/lib/oauth-state.js).
+  if (
+    pathname.startsWith('/api/v1/auth') ||
+    pathname === '/api/v1/config' ||
+    pathname === '/api/v1/integrations/status' ||
+    pathname === '/api/v1/calendar/oauth/callback'
+  ) {
     return NextResponse.next();
   }
 

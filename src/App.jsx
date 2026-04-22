@@ -19,6 +19,7 @@ import { useIntegrations } from './hooks/useIntegrations';
 import { useDeelData } from './hooks/useDeelData';
 import { useJiraData } from './hooks/useJiraData';
 import { useSlackData } from './hooks/useSlackData';
+import { useMeetingAlerts } from './hooks/useMeetingAlerts';
 
 // ── API services + normalizers ──────────────────────────────────────────────
 import { login as apiLogin, fetchMe as apiFetchMe } from './services/authApi';
@@ -441,6 +442,17 @@ const App=()=>{
     addNotif(type,title,body);
   },[addNotif]);
   const dismissToast=useCallback(id=>setToasts(prev=>prev.filter(t=>t.id!==id)),[]);
+
+  // ── Meeting alerts ──────────────────────────────────────────────────────
+  // Runs globally (not just on the Calendar tab) so the 5-minute reminder
+  // toast fires no matter where the user is in the app. Gated to the
+  // Calendar-integration owner — the same soft-launch cohort that sees
+  // the tab and can reach the /api/v1/calendar/* endpoints.
+  useMeetingAlerts({
+    enabled: isOwner && !!user?.email,
+    addToast,
+    setView,
+  });
 
   // ── Escalation handlers ────────────────────────────────────────────────────
   // Close all action modals — prevents dual-modal state
@@ -974,7 +986,7 @@ const App=()=>{
           {view==='analytics'     &&isOwner&&perms?.canView('analytics')!==false    &&<div className="page-enter"><Analytics tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} currentUser={effectiveUser} subFilter={subFilter} escalations={scopedEscalations}/></div>}
           {view==='escalations'   &&isOwner&&perms?.canView('escalations')!==false  &&<div className="page-enter"><EscalationsView escalations={scopedEscalations} setEscalations={setEscalations} currentUser={effectiveUser} onNewEscalation={()=>setCreateEscalModal(true)}/></div>}
           {view==='announcements' &&isOwner&&perms?.canView('announcements')!==false&&<div className="page-enter"><AnnouncementsView user={effectiveUser} comms={comms} setComms={setComms} addToast={addToast} tasks={tasks} apiAcknowledge={apiAcknowledge} apiCreate={apiCreate} apiSend={apiSend} apiUpdate={apiUpdate} apiArchive={apiArchive} apiRemove={apiRemove} apiTogglePin={apiTogglePin} openCompose={announceCompose} onComposeOpened={()=>setAnnounceCompose(false)} apiUnarchive={apiUnarchive} apiComments={apiComments} apiSetComments={apiSetComments} apiLoadComments={apiLoadComments} apiAddComment={apiAddCommentFn} apiDeleteComment={apiDeleteCommentFn} apiLinks={apiLinks} apiLoadLinks={apiLoadLinks} apiLinkAnnouncement={apiLinkAnnouncementFn} apiUnlinkAnnouncement={apiUnlinkAnnouncementFn} apiReact={apiReactFn}/></div>}
-          {view==='calendar'      &&isOwner&&perms?.canView('calendar')!==false     &&<div className="page-enter"><CalendarView tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks}/></div>}
+          {view==='calendar'      &&isOwner&&perms?.canView('calendar')!==false     &&<div className="page-enter"><CalendarView user={effectiveUser} addToast={addToast} setView={setView}/></div>}
           {view==='knowledge-hub' &&isOwner&&perms?.canView('knowledge-hub')!==false&&<div className="page-enter"><KnowledgeHub subFilter={subFilter} user={effectiveUser}/></div>}
           {view==='hr-reports'    &&isOwner&&perms?.canView('hr-reports')!==false   &&<div className="page-enter"><GMReportingView user={effectiveUser} addToast={addToast} createReportModal={createReportModal} setCreateReportModal={setCreateReportModal}/></div>}
           {view==='settings'      &&perms?.canView('settings')!==false     &&<div className="page-enter"><SettingsView settings={settings} setSettings={setSettings} user={user} addToast={addToast} tasks={tasks} setTasks={setTasks} subFilter={subFilter} accessTypes={accessTypes} setAccessTypes={setAccessTypes} userAccessMap={userAccessMap} setUserAccessMap={setUserAccessMap} perms={perms}/></div>}
