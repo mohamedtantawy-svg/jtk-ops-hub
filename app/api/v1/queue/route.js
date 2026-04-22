@@ -382,22 +382,30 @@ async function fetchZendeskQueue() {
 // is excluded. No done-grace window — if a ticket transitioned to a closed
 // state, it's out of our queue immediately.
 //
-// `ownerFieldIds` is { 'hrx responsible': 'customfield_12345' } — if the
-// field doesn't exist on this Jira instance the entry is omitted and we
-// fall back to assignee + reporter only.
-//
-// Duplicates: Jira returns each issue once even when matched via multiple
-// OR clauses; the pagination loop adds a Set-based belt-and-braces guard.
+// ── Why we return AN ARRAY of queries instead of one big OR ────────────────
+// With 100+ registered emails, concatenating every role into a single OR-of-
+// IN clause produces a JQL string whose URL-encoded form exceeds Atlassian's
+// ~8KB edge-proxy limit — the fetch returns HTTP 414 ("Request-URI Too Long")
+// and the queue feed goes dark. To stay robust, and to avoid depending on the
+// POST /search/jql endpoint (which behaves inconsistently across tenants),
+// we run ONE query per role clause. Each JQL is ~3KB and fits comfortably in
+// a normal GET. fetchJiraQueue unions the per-query results and dedups by
+// issue key, so user-visible behavior is identical to a single OR.
 const JIRA_DONE_STATUSES = [
   'Done', 'Closed', 'Resolved', 'Solved', 'Completed',
   'Cancelled', 'Canceled', 'Rejected', 'Denied', 'Withdrawn', 'Declined',
   'Won\'t Do', 'Wont Do', 'Duplicate', 'Abandoned',
 ];
 
-function buildJiraJql(ownerFieldIds = {}) {
+function buildJiraJqlQueries(ownerFieldIds = {}) {
   const emailsList = ADMIN_EMAILS_LIST.map(e => `"${e}"`).join(', ');
+  const doneList = JIRA_DONE_STATUSES.map(s => `"${s}"`).join(', ');
+  // Also filter via resolution — many workflows mark a ticket resolved
+  // without moving to a "Done" status name; using both status+resolution
+  // catches either path.
+  const statusFilter = `(status NOT IN (${doneList}) AND (resolution IS EMPTY OR resolution = Unresolved))`;
 
-  const orClauses = [
+  const clauses = [
     `assignee IN (${emailsList})`,
     `reporter IN (${emailsList})`,
   ];
@@ -405,64 +413,80 @@ function buildJiraJql(ownerFieldIds = {}) {
     if (!cfId) continue;
     const num = String(cfId).replace(/^customfield_/, '');
     // cf[12345] IN (...) works for both single and multi-user picker fields.
-    orClauses.push(`cf[${num}] IN (${emailsList})`);
+    clauses.push(`cf[${num}] IN (${emailsList})`);
   }
-  const whoClause = `(${orClauses.join(' OR ')})`;
 
-  const doneList = JIRA_DONE_STATUSES.map(s => `"${s}"`).join(', ');
-  // Also filter via resolution — many workflows mark a ticket resolved
-  // without moving to a "Done" status name. `resolution IS NOT EMPTY` alone
-  // would exclude those reliably, but some workflows don't set resolution,
-  // so we keep both filters ORed-with-AND for belt-and-braces accuracy.
-  const statusFilter = `(status NOT IN (${doneList}) AND (resolution IS EMPTY OR resolution = Unresolved))`;
-
-  return `${whoClause} AND ${statusFilter} ORDER BY updated DESC`;
+  // One query per role. Each is self-contained (own status filter + ORDER BY)
+  // so per-clause pagination works normally and results can be unioned with
+  // a plain Set-based dedup.
+  return clauses.map(c => `${c} AND ${statusFilter} ORDER BY updated DESC`);
 }
 
-// ── Fetch Jira issues (paginated, by registered emails) ─────────────────────
+// ── Fetch Jira issues (paginated per clause, unioned) ──────────────────────
 async function fetchJiraQueue() {
   if (!isJiraConfigured()) return { items: [], status: 'skipped', error: null };
 
   try {
     // Discover the HRX-owner custom field IDs once per hour (cached in
     // jira-api). If discovery fails the map is empty and we fall back to
-    // assignee-only search — never breaks the queue.
+    // assignee + reporter only — never breaks the queue.
     const ownerFieldIds = await resolveHrxOwnerFields(HRX_OWNER_FIELD_NAMES);
     const ownerFieldList = Object.values(ownerFieldIds);
 
-    const jql = buildJiraJql(ownerFieldIds);
+    const jqlQueries = buildJiraJqlQueries(ownerFieldIds);
     const allIssues = [];
-    const seenKeys = new Set();       // dedup guard — same key never lands twice
-    let startAt = 0;
+    const seenKeys = new Set();       // dedup across clauses — same key never lands twice
     const pageSize = 100;
+    const MAX_ISSUES_PER_CLAUSE = 300; // safety cap per clause
 
-    // Paginate through Jira results
-    while (true) {
-      const result = await searchIssues(jql, {
-        maxResults: pageSize,
-        startAt,
-        fields: [
-          'summary', 'status', 'assignee', 'reporter', 'priority',
-          'created', 'updated', 'issuetype', 'project', 'labels',
-          'description',
-          ...ownerFieldList,
-        ],
-      });
+    const fieldsToFetch = [
+      'summary', 'status', 'assignee', 'reporter', 'priority',
+      'created', 'updated', 'issuetype', 'project', 'labels',
+      'description',
+      ...ownerFieldList,
+    ];
 
-      const issues = result?.issues || [];
-      for (const issue of issues) {
-        if (issue?.key && !seenKeys.has(issue.key)) {
-          seenKeys.add(issue.key);
-          allIssues.push(issue);
+    // Paginate each clause independently; union the results. Running them
+    // sequentially (instead of Promise.all) keeps Jira rate-limit headroom
+    // and avoids any single request's backoff stalling the others.
+    for (const jql of jqlQueries) {
+      let startAt = 0;
+      let fetched = 0;
+      while (true) {
+        let result;
+        try {
+          result = await searchIssues(jql, {
+            maxResults: pageSize,
+            startAt,
+            fields: fieldsToFetch,
+          });
+        } catch (clauseErr) {
+          // One clause failing must not take the whole queue down — log and
+          // move on to the next clause so users still see the majority of
+          // their tickets.
+          console.warn('[queue] Jira clause failed, continuing:', clauseErr.message);
+          break;
         }
-      }
 
-      // Stop if we got fewer than pageSize or total reached
-      const total = result?.total || 0;
-      if (issues.length < pageSize || allIssues.length >= total) break;
-      startAt += pageSize;
-      // Safety: cap at 300 issues to limit memory usage
-      if (startAt >= 300) break;
+        const issues = result?.issues || [];
+        for (const issue of issues) {
+          if (issue?.key && !seenKeys.has(issue.key)) {
+            seenKeys.add(issue.key);
+            allIssues.push(issue);
+          }
+        }
+
+        fetched += issues.length;
+        const total = result?.total;
+        // Stop conditions:
+        //  - page was smaller than pageSize (no more results)
+        //  - we've fetched every issue for this clause
+        //  - we've hit the safety cap
+        if (issues.length < pageSize) break;
+        if (Number.isFinite(total) && fetched >= total) break;
+        startAt += pageSize;
+        if (startAt >= MAX_ISSUES_PER_CLAUSE) break;
+      }
     }
 
     const items = allIssues.map(issue => {
