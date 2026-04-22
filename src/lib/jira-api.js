@@ -132,22 +132,18 @@ export function emailsFromJiraFieldValue(value) {
 
 // ── Search (JQL) ─────────────────────────────────────────────────────────────
 //
-// Jira Cloud has migrated to /search/jql. Historically this client sent a GET
-// with the JQL in the querystring, but the queue route now builds very long
-// OR-clauses (assignee/reporter/HRX Responsible ∈ 100+ emails), which pushes
-// the URL-encoded querystring past the ~8KB request-line cap and the server
-// returns HTTP 414 ("Request-URI Too Long"). To keep the transport robust we
-// switch to POST whenever the JQL is non-trivially long, and we also fall
-// back to POST on any 414/404/405 response so future JQL growth doesn't take
-// the Jira feed offline again.
-
-// Threshold below which we keep using GET (fast, caches better). Chosen to
-// stay comfortably under common 4-8KB URI caps even after URL-encoding.
-const GET_JQL_MAX = 1500;
-
-function _searchJqlBody(jql, fields, maxResults, startAt) {
-  return { jql, maxResults, startAt: startAt || 0, fields };
-}
+// Jira Cloud migrated `/rest/api/3/search/jql` in 2024:
+//   - Body must be POSTed (GET querystring overflows the 8KB request-line cap
+//     on any non-trivial JQL → HTTP 414).
+//   - Pagination switched from offset-based (`startAt`) to token-based
+//     (`nextPageToken`). Sending `startAt` in the body is a schema violation
+//     → HTTP 400 "Invalid request payload".
+//   - The response no longer includes `total`; loops must stop on `isLast`
+//     or a missing `nextPageToken`.
+// We always POST and always use `nextPageToken` — simplest, and immune to
+// JQL size growth (since nothing sits in the URL).
+//
+// Response shape: { issues: [...], nextPageToken?: "...", isLast: boolean }
 
 export async function searchIssues(jql, params = {}) {
   const fields = params.fields || [
@@ -156,48 +152,14 @@ export async function searchIssues(jql, params = {}) {
     'comment', 'description',
   ];
   const maxResults = params.maxResults || 50;
-  const startAt = params.startAt || 0;
-  const body = _searchJqlBody(jql, fields, maxResults, startAt);
 
-  const tryPost = async () => {
-    try {
-      return await jiraFetch('/search/jql', {
-        method: 'POST',
-        body: JSON.stringify(body),
-      });
-    } catch (err) {
-      // Some older Jira Cloud tenants only expose the legacy /search endpoint.
-      if (err.status === 404 || err.status === 405) {
-        return jiraFetch('/search', {
-          method: 'POST',
-          body: JSON.stringify(body),
-        });
-      }
-      throw err;
-    }
-  };
+  const body = { jql, maxResults, fields };
+  if (params.nextPageToken) body.nextPageToken = params.nextPageToken;
 
-  // For long JQL, skip GET entirely — we already know the URL would 414.
-  if (jql && jql.length > GET_JQL_MAX) {
-    return tryPost();
-  }
-
-  const qs = new URLSearchParams();
-  qs.set('jql', jql);
-  qs.set('maxResults', String(maxResults));
-  qs.set('fields', fields.join(','));
-  if (startAt) qs.set('startAt', String(startAt));
-
-  try {
-    return await jiraFetch(`/search/jql?${qs.toString()}`);
-  } catch (err) {
-    // Fall back to POST on: URI too long (414), endpoint gone (404/405),
-    // or method not allowed. Anything else is a real error — rethrow.
-    if (err.status === 414 || err.status === 404 || err.status === 405) {
-      return tryPost();
-    }
-    throw err;
-  }
+  return jiraFetch('/search/jql', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 }
 
 // ── Single Issue ─────────────────────────────────────────────────────────────
