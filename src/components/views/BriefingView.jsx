@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef, useContext, useCallback } from 'react';
 import { TOOLS, STATUSES, FUNCTIONS, FLAGS } from '../../data/constants';
-import { MEMBERS } from '../../data/members';
+import { MEMBERS, TEAM_MEMBERS } from '../../data/members';
 import { matchesAudience } from '../../data/comms';
 import { INITIAL_PROJECTS } from '../../data/projects';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
@@ -46,7 +46,7 @@ const SOURCE_COLOURS = {
   amendments: '#ed8d00', redlines: '#7c3aed',
 };
 
-const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSubFilter,requests=[]})=>{
+const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSubFilter,requests=[],managerOnCall=null,onChangeManagerOnCall})=>{
   // Drift-proof ack check — matches Announcements view + App.jsx. Local
   // MEMBERS.id is an array-position index that collides with DB members.id
   // values. When the server gives us `ackEmails` (our source of truth) we
@@ -76,6 +76,19 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     } catch(e) { return new Set(); }
   });
   const healthBreakdownRef=useRef(null);
+  // Manager-on-call picker lives here now (moved out of the top nav).
+  // Click-outside closes the dropdown; we scope it to a ref on the pill
+  // wrapper so clicking the edit button inside still toggles cleanly.
+  const [showMocPicker,setShowMocPicker]=useState(false);
+  const mocRef=useRef(null);
+  useEffect(()=>{
+    if(!showMocPicker)return;
+    const onDocClick=(e)=>{
+      if(mocRef.current&&!mocRef.current.contains(e.target)) setShowMocPicker(false);
+    };
+    document.addEventListener('mousedown',onDocClick);
+    return ()=>document.removeEventListener('mousedown',onDocClick);
+  },[showMocPicker]);
   const now=new Date();
   const hour=now.getHours();
   const greeting=hour<12?'Good Morning':hour<17?'Good Afternoon':'Good Evening';
@@ -589,6 +602,72 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 <div style={{marginTop:5,fontSize:12,color:'#1f74b3',fontWeight:600,display:'flex',alignItems:'center',gap:5}}>
                   <i className="bi-globe2" style={{fontSize:11}}></i>
                   Viewing: {user.region||'All Regions'}
+                </div>
+              )}
+              {/* ── Manager on Call — relocated here from the top nav ───────
+                  Shows the current escalation contact front-and-center on the
+                  home page, with inline editing for anyone (per the original
+                  top-nav behavior). Avatar + name + pencil, visually matched
+                  to the neighboring "Viewing: All" / "Live" pill row. */}
+              {managerOnCall&&(
+                <div ref={mocRef} style={{marginTop:8,display:'inline-flex',position:'relative'}}>
+                  <div style={{display:'inline-flex',alignItems:'center',gap:8,padding:'5px 12px 5px 5px',borderRadius:128,background:'rgba(255,255,255,0.85)',border:'1px solid rgba(232,232,232,0.8)',backdropFilter:'blur(4px)'}}>
+                    <Avatar
+                      name={managerOnCall.name}
+                      initials={managerOnCall.initials}
+                      src={managerOnCall.avatarUrl}
+                      size={22}
+                    />
+                    <div style={{fontSize:12,lineHeight:'16px',whiteSpace:'nowrap'}}>
+                      <span style={{color:'#9e9e9e',fontWeight:500}}>Manager On Call:</span>{' '}
+                      <span style={{fontWeight:700,color:'#1b1b1b'}}>{managerOnCall.name}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={()=>setShowMocPicker(p=>!p)}
+                      aria-label="Change manager on call"
+                      title="Change manager on call"
+                      style={{width:22,height:22,padding:0,border:'none',background:'transparent',borderRadius:'50%',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'background .12s'}}
+                      onMouseEnter={e=>e.currentTarget.style.background='#f0f0f0'}
+                      onMouseLeave={e=>e.currentTarget.style.background='transparent'}
+                    >
+                      <i className="bi bi-pencil" style={{fontSize:11,color:'#9e9e9e'}}></i>
+                    </button>
+                  </div>
+                  {showMocPicker&&(
+                    <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,background:'#ffffff',borderRadius:14,border:'1px solid #e8e8e8',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'6px 0',minWidth:300,maxHeight:360,overflowY:'auto',zIndex:1000}}>
+                      <div style={{padding:'6px 16px 8px',fontSize:10,fontWeight:700,color:'#bebebe',letterSpacing:'.04em',textTransform:'uppercase'}}>Select Manager On Call</div>
+                      {TEAM_MEMBERS
+                        .filter(m=>m.access==='team_lead'||m.access==='regional_manager'||m.access==='admin')
+                        .map(m=>(
+                          <div
+                            key={m.email}
+                            role="button"
+                            tabIndex={0}
+                            onClick={()=>{
+                              onChangeManagerOnCall?.({name:m.name,initials:m.initials,email:m.email,avatarUrl:m.avatarUrl});
+                              setShowMocPicker(false);
+                            }}
+                            onKeyDown={e=>{
+                              if(e.key==='Enter'||e.key===' '){
+                                e.preventDefault();
+                                onChangeManagerOnCall?.({name:m.name,initials:m.initials,email:m.email,avatarUrl:m.avatarUrl});
+                                setShowMocPicker(false);
+                              }
+                            }}
+                            onMouseEnter={e=>e.currentTarget.style.background='#fafaf9'}
+                            onMouseLeave={e=>e.currentTarget.style.background=managerOnCall.email===m.email?'#fafaf9':'transparent'}
+                            style={{display:'flex',alignItems:'center',gap:10,padding:'8px 16px',cursor:'pointer',transition:'background .12s',background:managerOnCall.email===m.email?'#fafaf9':'transparent'}}
+                          >
+                            <Avatar name={m.name} initials={m.initials} src={m.avatarUrl} size={28}/>
+                            <div style={{minWidth:0,flex:1}}>
+                              <div style={{fontSize:13,fontWeight:managerOnCall.email===m.email?600:400,color:managerOnCall.email===m.email?'#7c3aed':'#1b1b1b',lineHeight:'17px',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{m.name}</div>
+                              <div style={{fontSize:11,color:'#9e9e9e',lineHeight:'15px'}}>{m.team}</div>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  )}
                 </div>
               )}
               {/* Live integrations status */}
@@ -1242,7 +1321,17 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             </div>
           </DeelCard>}
 
-          <div style={{display:'grid',gridTemplateColumns:isManager?'1.2fr 1fr':'1.2fr 1fr',gap:20,alignItems:'start'}}>
+          {/* ── Responsive grid: 2 columns on wide screens, stacks to 1 when
+              the viewport is too narrow to fit both without the right column's
+              Team Leads table clipping its Tasks/SLA columns. The media-query
+              breakpoint (980px) is the width below which the Team Leads inner
+              grid (1fr 60px 80px × row padding + avatar/label content) starts
+              to overflow its 1fr outer column. */}
+          <style>{`
+            .briefing-main-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; align-items: start; }
+            @media (max-width: 980px) { .briefing-main-grid { grid-template-columns: 1fr; } }
+          `}</style>
+          <div className="briefing-main-grid">
 
             {/* ── COL 1: My To-Do (Personal Checklist, primary variant) ──────
                 Pilar reported that the old "Priority Tasks" column was visually
@@ -1345,19 +1434,19 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   <span style={{fontSize:16,fontWeight:700,color:'#1b1b1b'}}>Team Leads</span>
                 </div>
                 {/* Deel-style table header */}
-                <div style={{display:'grid',gridTemplateColumns:'1fr 60px 80px',gap:0,padding:'8px 22px',background:'#fafaf9',borderBottom:'1px solid #e8e8e8'}}>
+                <div style={{display:'grid',gridTemplateColumns:'minmax(0,1fr) 60px 80px',gap:0,padding:'8px 22px',background:'#fafaf9',borderBottom:'1px solid #e8e8e8'}}>
                   <span style={{fontSize:13,fontWeight:500,color:'#9e9e9e',textTransform:'none',letterSpacing:'normal'}}>Lead</span>
                   <span style={{fontSize:13,fontWeight:500,color:'#9e9e9e',textTransform:'none',letterSpacing:'normal',textAlign:'center'}}>Tasks</span>
                   <span style={{fontSize:13,fontWeight:500,color:'#9e9e9e',textTransform:'none',letterSpacing:'normal',textAlign:'center'}}>SLA</span>
                 </div>
                 <div style={{padding:'4px 22px 14px'}}>
                   {leads.map(ld=>(
-                    <div key={ld.id} style={{display:'grid',gridTemplateColumns:'1fr 60px 80px',gap:0,alignItems:'center',padding:'10px 0',borderBottom:'1px solid #f5f5f5'}}>
-                      <div style={{display:'flex',alignItems:'center',gap:10}}>
+                    <div key={ld.id} style={{display:'grid',gridTemplateColumns:'minmax(0,1fr) 60px 80px',gap:0,alignItems:'center',padding:'10px 0',borderBottom:'1px solid #f5f5f5'}}>
+                      <div style={{display:'flex',alignItems:'center',gap:10,minWidth:0}}>
                         <Avatar name={ld.name} size={30}/>
-                        <div>
-                          <div style={{fontSize:13,fontWeight:600,color:'#1b1b1b'}}>{ld.name}</div>
-                          <div style={{fontSize:11,color:'#9e9e9e',display:'flex',gap:8}}>
+                        <div style={{minWidth:0,flex:1}}>
+                          <div style={{fontSize:13,fontWeight:600,color:'#1b1b1b',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{ld.name}</div>
+                          <div style={{fontSize:11,color:'#9e9e9e',display:'flex',gap:8,flexWrap:'wrap'}}>
                             <span style={{padding:'1px 6px',borderRadius:128,background:'#fafaf9',border:'1px solid #e8e8e8',fontWeight:600,fontSize:9}}>{ld.team}</span>
                             <span>{ld.ag.length} agents</span>
                             <span>avg {ld.avg.toFixed(1)}</span>

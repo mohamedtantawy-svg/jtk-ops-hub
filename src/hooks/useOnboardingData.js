@@ -3,17 +3,23 @@
 // Groups by country. Caches in localStorage.
 // Stale-while-revalidate: always shows previous data until fresh data arrives.
 // De-dupes concurrent refresh() calls and adopts cross-tab broadcasts.
+// Auto-refreshes every CACHE_TTL while the tab is visible so long-lived tabs
+// don't show a stale "X mins ago" banner.
+// Cache key is user-scoped so different signed-in users on the same browser
+// never inherit each other's server-scoped payload.
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { fetchDeelOnboarding } from '../services/integrationsApi';
 import { getQueueChannel, broadcastSync } from './queueSyncChannel';
 
 const SOURCE_ID = 'onboarding';
 const CACHE_TTL = 5 * 60 * 1000;
-const CACHE_KEY = 'ops_hub_onboarding_cache';
+const CACHE_KEY_BASE = 'ops_hub_onboarding_cache';
+const cacheKeyFor = (userEmail) =>
+  userEmail ? `${CACHE_KEY_BASE}:${String(userEmail).toLowerCase()}` : CACHE_KEY_BASE;
 
-function loadCache() {
+function loadCache(userEmail) {
   try {
-    const cached = localStorage.getItem(CACHE_KEY);
+    const cached = localStorage.getItem(cacheKeyFor(userEmail));
     if (cached) {
       const parsed = JSON.parse(cached);
       // Return cached data regardless of TTL — stale data is better than empty
@@ -23,8 +29,8 @@ function loadCache() {
   return { items: [], ts: 0 };
 }
 
-export function useOnboardingData(enabled = true) {
-  const cached = useMemo(() => loadCache(), []);
+export function useOnboardingData(enabled = true, userEmail = null) {
+  const cached = useMemo(() => loadCache(userEmail), [userEmail]);
   const [items, setItems] = useState(cached.items);
   const [loading, setLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -50,9 +56,9 @@ export function useOnboardingData(enabled = true) {
         if (fetched.length > 0 || items.length === 0) {
           setItems(fetched);
           try {
-            localStorage.setItem(CACHE_KEY, JSON.stringify({ items: fetched, ts: now }));
+            localStorage.setItem(cacheKeyFor(userEmail), JSON.stringify({ items: fetched, ts: now }));
           } catch (e) {}
-          broadcastSync(SOURCE_ID, fetched);
+          broadcastSync(SOURCE_ID, fetched, null, userEmail);
         }
         lastFetchRef.current = now;
         setLastSyncAt(now);
@@ -69,17 +75,43 @@ export function useOnboardingData(enabled = true) {
     })();
     inFlightRef.current = run;
     return run;
-  }, [enabled, items.length]);
+  }, [enabled, items.length, userEmail]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  // Adopt cross-tab broadcasts for this source
+  // ── Auto-refresh while visible ─────────────────────────────────────────────
+  // Previously the hook only fetched on mount, which meant a tab left open for
+  // 10+ minutes displayed a "Synced 10+ mins ago · stale" warning. Refresh on
+  // the same cadence as CACHE_TTL, pause while hidden, and re-sync on visibility
+  // return to keep the badge green without hammering the API.
+  useEffect(() => {
+    if (!enabled) return;
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      refresh();
+    };
+    const id = setInterval(tick, CACHE_TTL);
+    const onVis = () => {
+      if (typeof document !== 'undefined' && !document.hidden) refresh();
+    };
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVis);
+    return () => {
+      clearInterval(id);
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [enabled, refresh]);
+
+  // Adopt cross-tab broadcasts for this source — reject broadcasts from a
+  // different signed-in user so we never pick up their scoped payload.
   useEffect(() => {
     const ch = getQueueChannel();
     if (!ch) return;
     const handler = (e) => {
       const msg = e.data;
       if (!msg || msg.source !== SOURCE_ID) return;
+      const myKey = (userEmail || '').toLowerCase();
+      const theirKey = (msg.userKey || '').toLowerCase();
+      if (myKey && theirKey && myKey !== theirKey) return;
       if (msg.ts && msg.ts > lastFetchRef.current) {
         setItems(msg.items || []);
         lastFetchRef.current = msg.ts;
@@ -88,7 +120,7 @@ export function useOnboardingData(enabled = true) {
     };
     ch.addEventListener('message', handler);
     return () => ch.removeEventListener('message', handler);
-  }, []);
+  }, [userEmail]);
 
   // Severity helper
   const getSeverity = (item) => item.action?.severity || 'active';

@@ -29,10 +29,22 @@ import { loadMutations, applyMutationsToTasks, clearMutation, clearCreatedTask }
 const LOCAL_MUTATION_WINDOW_MS = 5 * 60 * 1000;
 
 // ── Per-source sync config ──────────────────────────────────────────────────
+// Cache keys are the base — the actual localStorage key is user-scoped via
+// cacheKeyFor() so that two different signed-in users on the same browser
+// never inherit each other's server-scoped payload (was causing Jira counts
+// to flash to 0 when switching accounts because the previous user's scoped
+// cache hydrated before the new user's /queue call returned their own scope).
 const SOURCE_CONFIG = {
   zendesk: { interval: 2 * 60 * 1000, cacheKey: 'ops_hub_queue_zendesk', cacheTtl: 2 * 60 * 1000 },
   jira:    { interval: 3 * 60 * 1000, cacheKey: 'ops_hub_queue_jira',    cacheTtl: 3 * 60 * 1000 },
 };
+
+function cacheKeyFor(source, userEmail) {
+  const cfg = SOURCE_CONFIG[source];
+  if (!cfg) return null;
+  const lc = (userEmail || '').toLowerCase();
+  return lc ? `${cfg.cacheKey}:${lc}` : cfg.cacheKey;
+}
 
 // ── Normalize a queue item from the backend ─────────────────────────────────
 function normalizeQueueItem(item) {
@@ -103,11 +115,12 @@ function normalizeQueueItem(item) {
 }
 
 // ── Read/write per-source localStorage cache ────────────────────────────────
-function readSourceCache(source) {
+function readSourceCache(source, userEmail) {
   const cfg = SOURCE_CONFIG[source];
   if (!cfg) return null;
   try {
-    const raw = localStorage.getItem(cfg.cacheKey);
+    const key = cacheKeyFor(source, userEmail);
+    const raw = localStorage.getItem(key);
     if (raw) {
       const parsed = JSON.parse(raw);
       // Always return the parsed payload — cache hydrates instantly on reload
@@ -130,20 +143,24 @@ function emitQuotaFailed(source, err) {
   } catch {}
 }
 
-function writeSourceCache(source, items, meta) {
+function writeSourceCache(source, items, meta, userEmail) {
   const cfg = SOURCE_CONFIG[source];
   if (!cfg) return;
+  const key = cacheKeyFor(source, userEmail);
   try {
-    localStorage.setItem(cfg.cacheKey, JSON.stringify({ items, meta, ts: Date.now() }));
+    localStorage.setItem(key, JSON.stringify({ items, meta, ts: Date.now() }));
   } catch (err) {
     // QuotaExceededError — most common cause is another app filling localStorage.
-    // Try evicting the *other* source's cache as a last-ditch attempt before
-    // giving up + notifying the UI. No silent drops.
+    // Try evicting the *other* source's cache (for this same user) as a last-
+    // ditch attempt before giving up + notifying the UI. No silent drops.
     try {
       for (const other of Object.keys(SOURCE_CONFIG)) {
-        if (other !== source) localStorage.removeItem(SOURCE_CONFIG[other].cacheKey);
+        if (other !== source) {
+          const otherKey = cacheKeyFor(other, userEmail);
+          if (otherKey) localStorage.removeItem(otherKey);
+        }
       }
-      localStorage.setItem(cfg.cacheKey, JSON.stringify({ items, meta, ts: Date.now() }));
+      localStorage.setItem(key, JSON.stringify({ items, meta, ts: Date.now() }));
     } catch (retryErr) {
       emitQuotaFailed(source, retryErr);
     }
@@ -236,7 +253,7 @@ function loadInitialTasks(userEmail) {
   const seen = new Set();
   const meta = {};
   for (const source of Object.keys(SOURCE_CONFIG)) {
-    const cached = readSourceCache(source);
+    const cached = readSourceCache(source, userEmail);
     if (cached?.items?.length) {
       for (const item of cached.items) {
         const normalized = normalizeQueueItem(item);
@@ -370,11 +387,11 @@ export function useQueueSync(arg = true) {
         // Only persist & broadcast non-empty responses so a transient empty
         // payload never wipes the cache or other tabs.
         if (rawItems.length > 0) {
-          writeSourceCache(source, rawItems, meta);
+          writeSourceCache(source, rawItems, meta, userEmailRef.current);
           broadcastSync(source, rawItems, meta, userEmailRef.current);
         } else {
           // Still refresh the cache timestamp so TTL checks work.
-          writeSourceCache(source, rawItems, meta);
+          writeSourceCache(source, rawItems, meta, userEmailRef.current);
         }
         return synced;
       } catch (err) {
@@ -509,7 +526,7 @@ export function useQueueSync(arg = true) {
       setSourceLoading(prev => ({ ...prev, [msg.source]: false }));
       lastFetchTsRefs.current[msg.source] = msg.ts;
       syncCounts.current[msg.source] = (syncCounts.current[msg.source] || 0) + 1;
-      writeSourceCache(msg.source, items, msg.meta || null);
+      writeSourceCache(msg.source, items, msg.meta || null, userEmailRef.current);
     };
     ch.addEventListener('message', handler);
     return () => ch.removeEventListener('message', handler);

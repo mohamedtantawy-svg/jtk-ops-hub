@@ -1,17 +1,21 @@
 // ── usePausedOnboardingData hook ────────────────────────────────────────────
 // Fetches paused onboarding contracts from the Deel Admin API.
 // Same pattern as useOnboardingData but for Onboarding.EA.EASigning.Paused.
+// Auto-refreshes while visible and user-scopes the cache so signed-in users
+// never inherit each other's payload.
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { fetchDeelOnboardingPaused } from '../services/integrationsApi';
 import { getQueueChannel, broadcastSync } from './queueSyncChannel';
 
 const SOURCE_ID = 'pausedOnboarding';
 const CACHE_TTL = 5 * 60 * 1000;
-const CACHE_KEY = 'ops_hub_onboarding_paused_cache';
+const CACHE_KEY_BASE = 'ops_hub_onboarding_paused_cache';
+const cacheKeyFor = (userEmail) =>
+  userEmail ? `${CACHE_KEY_BASE}:${String(userEmail).toLowerCase()}` : CACHE_KEY_BASE;
 
-function loadCache() {
+function loadCache(userEmail) {
   try {
-    const cached = localStorage.getItem(CACHE_KEY);
+    const cached = localStorage.getItem(cacheKeyFor(userEmail));
     if (cached) {
       const parsed = JSON.parse(cached);
       if (parsed.items?.length > 0) return { items: parsed.items, ts: parsed.ts || 0 };
@@ -20,8 +24,8 @@ function loadCache() {
   return { items: [], ts: 0 };
 }
 
-export function usePausedOnboardingData(enabled = true) {
-  const cached = useMemo(() => loadCache(), []);
+export function usePausedOnboardingData(enabled = true, userEmail = null) {
+  const cached = useMemo(() => loadCache(userEmail), [userEmail]);
   const [items, setItems] = useState(cached.items);
   const [loading, setLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -47,9 +51,9 @@ export function usePausedOnboardingData(enabled = true) {
         if (fetched.length > 0 || items.length === 0) {
           setItems(fetched);
           try {
-            localStorage.setItem(CACHE_KEY, JSON.stringify({ items: fetched, ts: now }));
+            localStorage.setItem(cacheKeyFor(userEmail), JSON.stringify({ items: fetched, ts: now }));
           } catch (e) {}
-          broadcastSync(SOURCE_ID, fetched);
+          broadcastSync(SOURCE_ID, fetched, null, userEmail);
         }
         lastFetchRef.current = now;
         setLastSyncAt(now);
@@ -66,9 +70,28 @@ export function usePausedOnboardingData(enabled = true) {
     })();
     inFlightRef.current = run;
     return run;
-  }, [enabled, items.length]);
+  }, [enabled, items.length, userEmail]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // Auto-refresh while visible (mirrors useOnboardingData) so the card doesn't
+  // pin to its first mount timestamp and trip the "stale" banner.
+  useEffect(() => {
+    if (!enabled) return;
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      refresh();
+    };
+    const id = setInterval(tick, CACHE_TTL);
+    const onVis = () => {
+      if (typeof document !== 'undefined' && !document.hidden) refresh();
+    };
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVis);
+    return () => {
+      clearInterval(id);
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [enabled, refresh]);
 
   useEffect(() => {
     const ch = getQueueChannel();
@@ -76,6 +99,9 @@ export function usePausedOnboardingData(enabled = true) {
     const handler = (e) => {
       const msg = e.data;
       if (!msg || msg.source !== SOURCE_ID) return;
+      const myKey = (userEmail || '').toLowerCase();
+      const theirKey = (msg.userKey || '').toLowerCase();
+      if (myKey && theirKey && myKey !== theirKey) return;
       if (msg.ts && msg.ts > lastFetchRef.current) {
         setItems(msg.items || []);
         lastFetchRef.current = msg.ts;
@@ -84,7 +110,7 @@ export function usePausedOnboardingData(enabled = true) {
     };
     ch.addEventListener('message', handler);
     return () => ch.removeEventListener('message', handler);
-  }, []);
+  }, [userEmail]);
 
   return {
     items,

@@ -3,17 +3,21 @@
 // Groups by task type, then by country. Caches in localStorage.
 // Stale-while-revalidate: always shows previous data until fresh data arrives.
 // De-dupes concurrent refresh() calls and adopts cross-tab broadcasts.
+// Auto-refreshes while visible and user-scopes the cache so signed-in users
+// never inherit each other's server-scoped payload.
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { fetchDeelWorkbench } from '../services/integrationsApi';
 import { getQueueChannel, broadcastSync } from './queueSyncChannel';
 
 const SOURCE_ID = 'workbench';
 const CACHE_TTL = 3 * 60 * 1000;
-const CACHE_KEY = 'ops_hub_workbench_cache';
+const CACHE_KEY_BASE = 'ops_hub_workbench_cache';
+const cacheKeyFor = (userEmail) =>
+  userEmail ? `${CACHE_KEY_BASE}:${String(userEmail).toLowerCase()}` : CACHE_KEY_BASE;
 
-function loadCache() {
+function loadCache(userEmail) {
   try {
-    const cached = localStorage.getItem(CACHE_KEY);
+    const cached = localStorage.getItem(cacheKeyFor(userEmail));
     if (cached) {
       const parsed = JSON.parse(cached);
       if (parsed.items?.length > 0) return { items: parsed.items, ts: parsed.ts || 0 };
@@ -22,8 +26,8 @@ function loadCache() {
   return { items: [], ts: 0 };
 }
 
-export function useWorkbenchData(enabled = true) {
-  const cached = useMemo(() => loadCache(), []);
+export function useWorkbenchData(enabled = true, userEmail = null) {
+  const cached = useMemo(() => loadCache(userEmail), [userEmail]);
   const [tasks, setTasks] = useState(cached.items);
   const [loading, setLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -49,9 +53,9 @@ export function useWorkbenchData(enabled = true) {
         if (fetched.length > 0 || tasks.length === 0) {
           setTasks(fetched);
           try {
-            localStorage.setItem(CACHE_KEY, JSON.stringify({ items: fetched, ts: now }));
+            localStorage.setItem(cacheKeyFor(userEmail), JSON.stringify({ items: fetched, ts: now }));
           } catch (e) {}
-          broadcastSync(SOURCE_ID, fetched);
+          broadcastSync(SOURCE_ID, fetched, null, userEmail);
         }
         lastFetchRef.current = now;
         setLastSyncAt(now);
@@ -68,9 +72,27 @@ export function useWorkbenchData(enabled = true) {
     })();
     inFlightRef.current = run;
     return run;
-  }, [enabled, tasks.length]);
+  }, [enabled, tasks.length, userEmail]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // Auto-refresh while visible so long-open tabs don't show a stale indicator.
+  useEffect(() => {
+    if (!enabled) return;
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      refresh();
+    };
+    const id = setInterval(tick, CACHE_TTL);
+    const onVis = () => {
+      if (typeof document !== 'undefined' && !document.hidden) refresh();
+    };
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVis);
+    return () => {
+      clearInterval(id);
+      if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVis);
+    };
+  }, [enabled, refresh]);
 
   useEffect(() => {
     const ch = getQueueChannel();
@@ -78,6 +100,9 @@ export function useWorkbenchData(enabled = true) {
     const handler = (e) => {
       const msg = e.data;
       if (!msg || msg.source !== SOURCE_ID) return;
+      const myKey = (userEmail || '').toLowerCase();
+      const theirKey = (msg.userKey || '').toLowerCase();
+      if (myKey && theirKey && myKey !== theirKey) return;
       if (msg.ts && msg.ts > lastFetchRef.current) {
         setTasks(msg.items || []);
         lastFetchRef.current = msg.ts;
@@ -86,7 +111,7 @@ export function useWorkbenchData(enabled = true) {
     };
     ch.addEventListener('message', handler);
     return () => ch.removeEventListener('message', handler);
-  }, []);
+  }, [userEmail]);
 
   // ── Status counts ──
   const counts = useMemo(() => {
