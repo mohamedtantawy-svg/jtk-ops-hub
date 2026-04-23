@@ -20,7 +20,10 @@ const PRIMARY_TABS = [
   { id: 'escalations',   icon: 'bi-arrow-up-circle',  label: 'Escalations',   badge: true,                       restrictToEmail: OWNER_EMAIL },
   { id: 'hr-reports',    icon: 'bi-clipboard-data',   label: 'Reports',       restrictToEmail: OWNER_EMAIL },
   { id: 'announcements', icon: 'bi-megaphone',        label: 'Announcements' },
-  { id: 'approval-queue',icon: 'bi-inbox',            label: 'Approval Queue', approverOnly: true },
+  // Approval queue — visible to EVERYONE. Approvers see all pending items;
+  // requesters see just their own submissions so they can track status.
+  // Label swaps based on role (see visiblePrimary mapping below).
+  { id: 'approval-queue',icon: 'bi-clipboard-check',  label: 'Approval Queue', approvalBadge: true },
   { id: 'team',          icon: 'bi-people',           label: 'Team' },
 ];
 
@@ -49,6 +52,7 @@ const DeelTopNav = ({
   onCreateAnnouncement, onCreateRequest, onCreateReport,
   setSelTask, tasks,
   managerOnCall, onChangeManagerOnCall,
+  approvalPendingCount = 0,
 }) => {
   const perms = useContext(PermissionsContext);
   const [showMore,    setShowMore]    = useState(false);
@@ -108,7 +112,13 @@ const DeelTopNav = ({
     if (t.approverOnly && !isApprover(user?.email)) return false;
     return !perms || perms.canView(t.id) !== false;
   };
-  const visiblePrimary = PRIMARY_TABS.filter(tabAllowed);
+  // Non-approvers submitting requests should see the tab as "My Requests"
+  // (that's the only content they can see in that view); approvers keep the
+  // full "Approval Queue" label.
+  const userIsApprover = isApprover(user?.email);
+  const visiblePrimary = PRIMARY_TABS.filter(tabAllowed).map(t =>
+    t.id === 'approval-queue' && !userIsApprover ? { ...t, label: 'My Requests' } : t
+  );
   const visibleMore = MORE_TABS.filter(tabAllowed);
   const visibleCreate = CREATE_ACTIONS.filter(ca => {
     if (ca.restrictToEmail && emailLc !== ca.restrictToEmail.toLowerCase()) return false;
@@ -135,7 +145,13 @@ const DeelTopNav = ({
       <div className="deel-nav-items">
         {visiblePrimary.map(tab => {
           const active = view === tab.id;
-          const badge = tab.badge && escalCount > 0 ? escalCount : 0;
+          // Escalations uses `badge` (red pill from escalCount).
+          // Approval Queue uses `approvalBadge` (red pill from approvalPendingCount):
+          //   - For approvers: count of pending+needs_info requests across the org.
+          //   - For requesters: count of their own pending+needs_info submissions.
+          let badge = 0;
+          if (tab.badge && escalCount > 0) badge = escalCount;
+          else if (tab.approvalBadge && approvalPendingCount > 0) badge = approvalPendingCount;
           return (
             <div key={tab.id} className={`deel-nav-item${active ? ' active' : ''}`}
               role="button"
