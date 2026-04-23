@@ -28,6 +28,7 @@ import {
   scopeAmendmentRequests,
   scopeRedlineRequests,
   scopeWorkbenchTasks,
+  filterByAssignee,
 } from '../../lib/queue-scoping';
 import Avatar from '../ui/Avatar';
 import { ToolBadge, FnBadge } from '../ui/Badges';
@@ -141,6 +142,14 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const redlineRows = useMemo(() => scopeRedlineRequests(redlineRowsAll, user), [redlineRowsAll, user]);
   const workbenchRows = useMemo(() => scopeWorkbenchTasks(workbenchRowsAll, user), [workbenchRowsAll, user]);
 
+  // Assignee-only subset of onboarding rows — for "Needs Your Attention",
+  // which should list only rows the user themselves must action (Pilar
+  // 2026-04-23). The country-OR-assignee scoped `onboardingRows` above
+  // surfaces country-visible rows (e.g. an agent sees every onboarding in
+  // a country they own even when assigned to a teammate), which is right
+  // for tab counts but wrong for "you need to act on this right now".
+  const myOnboardingRows = useMemo(() => filterByAssignee(onboardingRowsAll, user), [onboardingRowsAll, user]);
+
   const inScope = useCallback(t => {
     if (scopeIds.includes(t.assigneeId)) return true;
     if (t.assigneeEmail && visibleEmails.has(t.assigneeEmail.toLowerCase())) return true;
@@ -153,9 +162,14 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const slaScope=scope.filter(t=>t.status!=='waiting');
   const breached=slaScope.filter(t=>{const s=slaInfo(t);return s&&s.breach;});
   const atRisk=slaScope.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;});
-  // Onboarding source rows use age-based SLA (3d at-risk, 7d breached) — same as Queue.jsx
-  const onbBreached=onboardingRows.filter(r=>{const ageMs=r.createdAt?Date.now()-new Date(r.createdAt).getTime():0;return ageMs/(1000*60*60*24)>=7;});
-  const onbAtRisk=onboardingRows.filter(r=>{const ageMs=r.createdAt?Date.now()-new Date(r.createdAt).getTime():0;const d=ageMs/(1000*60*60*24);return d>=3&&d<7;});
+  // Onboarding source rows use age-based SLA (3d at-risk, 7d breached) — same
+  // as Queue.jsx. We use `myOnboardingRows` (assignee-only) not `onboardingRows`
+  // (country-OR-assignee) so "Needs Your Attention" strictly lists rows the
+  // user themselves is the assignee for — otherwise a country owner would
+  // get flagged about every onboarding in their region even when assigned
+  // to a teammate.
+  const onbBreached=myOnboardingRows.filter(r=>{const ageMs=r.createdAt?Date.now()-new Date(r.createdAt).getTime():0;return ageMs/(1000*60*60*24)>=7;});
+  const onbAtRisk=myOnboardingRows.filter(r=>{const ageMs=r.createdAt?Date.now()-new Date(r.createdAt).getTime():0;const d=ageMs/(1000*60*60*24);return d>=3&&d<7;});
   breached.push(...onbBreached);
   atRisk.push(...onbAtRisk);
   const newT=scope.filter(t=>t.status==='new');
