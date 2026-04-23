@@ -41,8 +41,15 @@ function normalizeApiAnnouncement(a) {
     scheduledFor: a.scheduledFor || a.scheduled_for || null,
     target: a.target,
     status: a.status,
-    // acks comes from server read_by (numeric user IDs)
+    // acks comes from server read_by (numeric user IDs). Kept for
+    // backwards-compat + id-based lookups, but email matching is preferred.
     acks: Array.isArray(a.acks) ? a.acks.map(Number).filter(Boolean) : [],
+    // ackEmails is the drift-proof source: compare the caller's email against
+    // this array to know if they've acked. The static MEMBERS array uses
+    // array-position ids that can differ from DB members.id; emails are stable.
+    ackEmails: Array.isArray(a.ackEmails)
+      ? a.ackEmails.map(e => String(e || '').toLowerCase()).filter(Boolean)
+      : [],
     link: a.link || '',
     priority: a.priority,
     isPopup: a.isPopup || false,
@@ -85,6 +92,9 @@ export function useAnnouncements() {
   // tracker to show the user as pending. Consumers should use this when
   // deciding whether an announcement has been acked by the caller.
   const [serverUserId, setServerUserId] = useState(null);
+  // Canonical email, lowercased, as reported by the server. This is the id we
+  // prefer for ack matching — emails don't drift across re-seeds or re-ids.
+  const [serverUserEmail, setServerUserEmail] = useState(null);
   const loadedRef = useRef(false);
 
   // Track the token so we re-fetch after logout → login cycles
@@ -118,6 +128,7 @@ export function useAnnouncements() {
         if (data?.items) {
           setComms(data.items.map(normalizeApiAnnouncement));
           if (data.callerId) setServerUserId(Number(data.callerId));
+          if (data.callerEmail) setServerUserEmail(String(data.callerEmail).toLowerCase());
           setIsOnline(true);
         }
       } catch (_) {
@@ -167,6 +178,7 @@ export function useAnnouncements() {
           ];
         });
         if (data.callerId) setServerUserId(Number(data.callerId));
+        if (data.callerEmail) setServerUserEmail(String(data.callerEmail).toLowerCase());
         setIsOnline(true);
       }
     } catch (_) {
@@ -272,13 +284,21 @@ export function useAnnouncements() {
     writePendingAcks(next);
   }, []);
 
-  const acknowledge = useCallback(async (id, userId) => {
-    const uid = Number(userId);
-    setComms(prev => prev.map(c =>
-      c.id === id && uid && !c.acks.includes(uid)
-        ? { ...c, acks: [...c.acks, uid] }
-        : c
-    ));
+  // acknowledge(id, userId?, userEmail?) — both are optimistic inputs. We'll
+  // merge whatever the server returns into the canonical state. userEmail is
+  // highly recommended because the frontend uses email-first matching.
+  const acknowledge = useCallback(async (id, userId, userEmail) => {
+    const uid = Number(userId) || null;
+    const emailLc = userEmail ? String(userEmail).toLowerCase() : null;
+    setComms(prev => prev.map(c => {
+      if (c.id !== id) return c;
+      const nextAcks = uid && !c.acks.includes(uid) ? [...c.acks, uid] : c.acks;
+      const existingEmails = Array.isArray(c.ackEmails) ? c.ackEmails : [];
+      const nextEmails = emailLc && !existingEmails.includes(emailLc)
+        ? [...existingEmails, emailLc]
+        : existingEmails;
+      return { ...c, acks: nextAcks, ackEmails: nextEmails };
+    }));
     // Enqueue BEFORE the network call — if the call throws or the tab is
     // closed mid-flight, the id is already persisted and will be retried.
     queuePendingAck(id);
@@ -286,15 +306,28 @@ export function useAnnouncements() {
       try {
         const res = await apiAcknowledge(id);
         if (res?.userId) setServerUserId(Number(res.userId));
-        if (res?.acks) {
-          const canonical = res.acks.map(Number).filter(Boolean);
-          // Guarantee we keep the caller's id in acks even if the server
-          // response races ahead of a concurrent write. Without this belt +
-          // braces, the popup briefly reappears between the ack write and the
-          // next GET refresh.
+        if (res?.userEmail) setServerUserEmail(String(res.userEmail).toLowerCase());
+        if (res?.acks || res?.ackEmails) {
+          const canonicalIds = Array.isArray(res.acks) ? res.acks.map(Number).filter(Boolean) : [];
+          const canonicalEmails = Array.isArray(res.ackEmails)
+            ? res.ackEmails.map(e => String(e || '').toLowerCase()).filter(Boolean)
+            : [];
+          // Belt + braces: guarantee the caller's id AND email are present in
+          // the canonical arrays even if the server response races ahead of a
+          // concurrent write. Without this, the popup briefly reappears
+          // between the ack write and the next GET refresh.
           const serverId = Number(res.userId) || uid;
-          const final = canonical.includes(serverId) ? canonical : [...canonical, serverId];
-          setComms(prev => prev.map(c => c.id === id ? { ...c, acks: final } : c));
+          const serverEmail = (res.userEmail || emailLc || '').toLowerCase() || null;
+          const finalIds = serverId && !canonicalIds.includes(serverId)
+            ? [...canonicalIds, serverId]
+            : canonicalIds;
+          const finalEmails = serverEmail && !canonicalEmails.includes(serverEmail)
+            ? [...canonicalEmails, serverEmail]
+            : canonicalEmails;
+          setComms(prev => prev.map(c => c.id === id
+            ? { ...c, acks: finalIds, ackEmails: finalEmails }
+            : c
+          ));
         }
         removePendingAck(id);
       } catch (e) {
@@ -318,9 +351,17 @@ export function useAnnouncements() {
       for (const id of ids.slice()) {
         try {
           const res = await apiAcknowledge(id);
-          if (res?.acks) {
-            const canonical = res.acks.map(Number).filter(Boolean);
-            setComms(prev => prev.map(c => c.id === id ? { ...c, acks: canonical } : c));
+          if (res?.userId) setServerUserId(Number(res.userId));
+          if (res?.userEmail) setServerUserEmail(String(res.userEmail).toLowerCase());
+          if (res?.acks || res?.ackEmails) {
+            const canonicalIds = Array.isArray(res.acks) ? res.acks.map(Number).filter(Boolean) : [];
+            const canonicalEmails = Array.isArray(res.ackEmails)
+              ? res.ackEmails.map(e => String(e || '').toLowerCase()).filter(Boolean)
+              : [];
+            setComms(prev => prev.map(c => c.id === id
+              ? { ...c, acks: canonicalIds, ackEmails: canonicalEmails }
+              : c
+            ));
           }
           removePendingAck(id);
         } catch (e) {
@@ -519,9 +560,13 @@ export function useAnnouncements() {
     setComms,
     isOnline,
     // Canonical DB id for the logged-in caller; populated on every list/ack
-    // roundtrip. null until the first successful call. Prefer this to user.id
-    // for any "is this acked by me" comparison.
+    // roundtrip. null until the first successful call. Prefer `serverUserEmail`
+    // over this for any "is this acked by me" comparison — emails don't drift
+    // across re-seeds, while ids can.
     serverUserId,
+    // Canonical lowercased email for the logged-in caller. This is the
+    // drift-proof id used by ack-comparison logic throughout the UI.
+    serverUserEmail,
     refresh,
     create,
     send,

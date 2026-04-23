@@ -17,7 +17,7 @@ import ApprovalQueueView from './ApprovalQueueView';
   Pending items get a "Start Acknowledging" button that walks through each
   unacknowledged announcement as a popup, one by one.
 */
-const AnnouncementsView = ({ user, serverUserId, comms, setComms, addToast, tasks, apiAcknowledge, apiCreate, apiSend, apiUpdate, apiArchive, apiRemove, apiTogglePin, openCompose, onComposeOpened, apiUnarchive, apiComments, apiSetComments, apiLoadComments, apiAddComment, apiDeleteComment, apiLinks, apiLoadLinks, apiLinkAnnouncement, apiUnlinkAnnouncement, apiReact }) => {
+const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComms, addToast, tasks, apiAcknowledge, apiCreate, apiSend, apiUpdate, apiArchive, apiRemove, apiTogglePin, openCompose, onComposeOpened, apiUnarchive, apiComments, apiSetComments, apiLoadComments, apiAddComment, apiDeleteComment, apiLinks, apiLoadLinks, apiLinkAnnouncement, apiUnlinkAnnouncement, apiReact }) => {
   const perms = useContext(PermissionsContext);
   const settings = useContext(SettingsContext);
   const isLA = perms?.canDo('can_compose_comms')||perms?.canDo('can_compose_announcements')||isApprover(user?.email)||false;
@@ -84,20 +84,38 @@ const AnnouncementsView = ({ user, serverUserId, comms, setComms, addToast, task
   }),[comms,filter,isLA,user,serverUserId,isApproverUser]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const uid=Number(user.id);
-  // Ack check mirrors App.jsx — accept EITHER the local id or the canonical
-  // DB id from the server. Fixes the pending-forever bug when the two drift.
+  // Ack check (three-axis, email-preferred) — mirrors App.jsx. We match on
+  // email FIRST because the static MEMBERS array uses array-position ids that
+  // can drift from the DB's members.id. Email is stable across re-seeds.
   const serverUid = serverUserId ? Number(serverUserId) : null;
+  const myEmailLc = (user.email || '').toLowerCase() || null;
+  const serverEmailLc = serverUserEmail ? String(serverUserEmail).toLowerCase() : null;
   const isAckedByMe = (c) => {
-    if (!Array.isArray(c.acks)) return false;
-    if (uid && c.acks.includes(uid)) return true;
-    if (serverUid && c.acks.includes(serverUid)) return true;
+    if (Array.isArray(c.ackEmails)) {
+      if (myEmailLc && c.ackEmails.includes(myEmailLc)) return true;
+      if (serverEmailLc && c.ackEmails.includes(serverEmailLc)) return true;
+    }
+    if (Array.isArray(c.acks)) {
+      if (uid && c.acks.includes(uid)) return true;
+      if (serverUid && c.acks.includes(serverUid)) return true;
+    }
     return false;
   };
-  const pendingForMe=useMemo(()=>comms.filter(c=>c.status==='sent'&&targetMatch(c)&&!isAckedByMe(c)&&!(c.author&&c.author.id===user.id)),[comms,user,uid,serverUid]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pendingForMe=useMemo(()=>comms.filter(c=>c.status==='sent'&&targetMatch(c)&&!isAckedByMe(c)&&!(c.author&&c.author.id===user.id)),[comms,user,uid,serverUid,myEmailLc,serverEmailLc]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const acknowledge=(id)=>{
-    if(apiAcknowledge) apiAcknowledge(id, uid);
-    else setComms(prev=>prev.map(c=>c.id===id&&!c.acks.includes(uid)?{...c,acks:[...c.acks,uid]}:c));
+    // Always pass both axes to the API — the hook uses email first in its
+    // optimistic update so the popup/tracker state flips immediately.
+    if(apiAcknowledge) apiAcknowledge(id, uid, user.email);
+    else setComms(prev=>prev.map(c=>{
+      if (c.id !== id) return c;
+      const nextAcks = uid && !c.acks.includes(uid) ? [...c.acks, uid] : c.acks;
+      const existingEmails = Array.isArray(c.ackEmails) ? c.ackEmails : [];
+      const nextEmails = myEmailLc && !existingEmails.includes(myEmailLc)
+        ? [...existingEmails, myEmailLc]
+        : existingEmails;
+      return { ...c, acks: nextAcks, ackEmails: nextEmails };
+    }));
   };
   const acknowledgeAll=()=>{
     pendingForMe.forEach(c=>acknowledge(c.id));
@@ -185,6 +203,11 @@ const AnnouncementsView = ({ user, serverUserId, comms, setComms, addToast, task
   //    (using the canonical matcher so AMERICAS = NAM ∪ LATAM etc).
   // 2) Role-scope that list so TLs only see their team, agents only see self,
   //    while admins and regional managers see everyone.
+  // 3) Compute `acked` per member by checking EMAIL against the server's
+  //    `ackEmails` list first, then falling back to id matching. Emails are
+  //    the drift-proof identifier — this is what makes the Acknowledgement
+  //    Tracker reflect who actually clicked, even if the static MEMBERS
+  //    array's id drifts from the DB's members.id.
   const accessType=perms?.raw;
   const getAckMembers=(comm)=>{
     let audienceMembers;
@@ -195,7 +218,16 @@ const AnnouncementsView = ({ user, serverUserId, comms, setComms, addToast, task
       audienceMembers=MEMBERS.filter(m=>matchesAudience(comm.target, m.team));
     }
     const scoped=scopeAckMembers(audienceMembers, user, accessType, comm);
-    return scoped.map(m=>({ member:m, acked:comm.acks.includes(m.id) }));
+    const ackEmailSet = new Set(
+      (Array.isArray(comm.ackEmails) ? comm.ackEmails : []).map(e => String(e || '').toLowerCase())
+    );
+    const ackIdSet = new Set(Array.isArray(comm.acks) ? comm.acks : []);
+    return scoped.map(m => {
+      const memberEmailLc = String(m.email || '').toLowerCase();
+      const ackedByEmail = memberEmailLc && ackEmailSet.has(memberEmailLc);
+      const ackedById = ackIdSet.has(m.id);
+      return { member: m, acked: ackedByEmail || ackedById };
+    });
   };
 
   const ackDeadlineHrs=settings.comms_ack_deadline_hrs||48;
@@ -361,10 +393,17 @@ const AnnouncementsView = ({ user, serverUserId, comms, setComms, addToast, task
             <tbody>
               {visible.map(comm => {
                 const t = COMMS_TYPES[comm.type] || COMMS_TYPES.update;
-                const iAcked = comm.acks.includes(uid);
+                // Use the shared, email-preferred check so the per-row badge
+                // matches what the popup/pending counter says. Avoids the
+                // "Pending" label sticking after I acked via popup.
+                const iAcked = isAckedByMe(comm);
                 const overdue = !iAcked && isOverdue(comm);
                 const ackMembers = getAckMembers(comm);
-                const ackedCount = comm.acks.filter(id => ackMembers.find(x => x.member.id === id)).length;
+                // Count from the scoped ackMembers list directly — every member
+                // row already has `acked` computed from emails-first. This
+                // replaces the old id-intersection count that under-reported
+                // when the DB id didn't line up with the static MEMBERS id.
+                const ackedCount = ackMembers.filter(x => x.acked).length;
                 const ackPct = ackMembers.length ? Math.round(ackedCount / ackMembers.length * 100) : 0;
                 const isAckOpen = expandedAck === comm.id;
 
@@ -819,7 +858,12 @@ function WalkthroughOverlay({ comm, remaining, onAcknowledge, onSkip, onExit, on
 // ── Detail overlay — view single announcement ──
 function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setComms, apiComments, apiSetComments, apiLoadComments, apiAddComment, apiDeleteComment, apiLinks, apiLoadLinks, apiLinkAnnouncement, apiUnlinkAnnouncement, setDetailId, onReact }) {
   const t = COMMS_TYPES[comm.type] || COMMS_TYPES.update;
-  const iAcked = comm.acks.includes(Number(user.id));
+  // Email-first ack check to match the rest of the UI — otherwise users saw
+  // the "Acknowledge" button stay active in Detail view even after clicking it
+  // via the popup (because the DB id differed from the local MEMBERS id).
+  const myEmailLc = (user.email || '').toLowerCase();
+  const iAcked = (Array.isArray(comm.ackEmails) && myEmailLc && comm.ackEmails.includes(myEmailLc))
+    || comm.acks.includes(Number(user.id));
   const PRIO_COLORS={high:'#d42d35',medium:'#ed8d00',low:'#29811e',critical:'#d42d35'};
 
   // ── Emoji floaters ──

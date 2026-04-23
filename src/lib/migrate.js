@@ -273,6 +273,17 @@ BEGIN
   END IF;
 END $$;
 
+-- Backfill user_email for legacy ack rows that were recorded before we started
+-- storing the email on each ack. The frontend prefers email matching (drift-
+-- proof vs member-id re-seeds), so every row needs one. Safe to re-run: we
+-- only update rows where user_email is NULL and the member lookup succeeds.
+UPDATE announcement_acks aa
+   SET user_email = LOWER(m.email)
+  FROM members m
+ WHERE aa.user_email IS NULL
+   AND m.id = aa.user_id
+   AND m.email IS NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
 CREATE INDEX IF NOT EXISTS idx_requests_to_team ON requests(to_team);
 CREATE INDEX IF NOT EXISTS idx_requests_from_member ON requests(from_member_id);
