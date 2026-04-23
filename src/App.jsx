@@ -463,11 +463,15 @@ const App=()=>{
       if(c.author&&c.author.id===user.id) continue;
       const inAudience=(Array.isArray(c.target)&&c.target.includes(user.id))||matchesAudience(c.target,user.team);
       if(!inAudience) continue;
-      // Skip notifying on already-acked comms — check both email (drift-proof)
-      // and id axes so suppression matches the rest of the UI.
+      // Skip notifying on already-acked comms. Email-only suppression when
+      // the server has the email axis — see popupQueue comment for why the
+      // id-axis fallback is unsafe (MEMBERS.id / DB members.id collisions).
       const myEmailForNotif = (user.email || '').toLowerCase();
-      if (Array.isArray(c.ackEmails) && myEmailForNotif && c.ackEmails.includes(myEmailForNotif)) continue;
-      if(c.acks&&c.acks.includes(user.id)) continue;
+      if (Array.isArray(c.ackEmails)) {
+        if (myEmailForNotif && c.ackEmails.includes(myEmailForNotif)) continue;
+      } else if (c.acks && c.acks.includes(user.id)) {
+        continue; // legacy payload (no ackEmails) — id fallback
+      }
       addNotif(c.type||'announce', c.title, c.body||'');
     }
   },[comms,user,addNotif]);
@@ -912,14 +916,14 @@ const App=()=>{
   // Uses the canonical audience matcher so NAM/LATAM/AMERICAS/global and
   // dual-region members resolve correctly.
   //
-  // Ack matching (three-axis, email-preferred):
-  //   1. user.email  — the durable, drift-proof identifier. Emails never
-  //      change across DB re-seeds, so matching against `ackEmails` is what
-  //      we trust first.
-  //   2. apiServerUserId — canonical DB members.id reported by the server.
-  //   3. user.id — the local MEMBERS array-position id (weakest — can drift).
-  // A hit on ANY axis = "acked by me". This is the belt+braces that finally
-  // kills the "popup reappears after I click Acknowledge" class of bugs.
+  // Ack matching (EMAIL-ONLY when the server provides `ackEmails`):
+  //   Emails are the durable, drift-proof identifier. We intentionally do NOT
+  //   OR in any id-axis fallback when email data is present — MEMBERS.id is
+  //   an array-position index that collides with DB members.id values. Such
+  //   a collision would falsely mark the viewer as acked whenever a real
+  //   acker's DB id happens to equal the viewer's MEMBERS-array index,
+  //   suppressing the popup for team members who never clicked it.
+  //   Id matching is only used when `ackEmails` is missing entirely.
   const popupQueue=React.useMemo(()=>{
     if(!user)return [];
     const localUid=Number(user.id);
@@ -930,6 +934,7 @@ const App=()=>{
       if (Array.isArray(c.ackEmails)) {
         if (myEmail && c.ackEmails.includes(myEmail)) return true;
         if (serverEmail && c.ackEmails.includes(serverEmail)) return true;
+        return false; // email axis available → trust it exclusively
       }
       if (Array.isArray(c.acks)) {
         if (localUid && c.acks.includes(localUid)) return true;

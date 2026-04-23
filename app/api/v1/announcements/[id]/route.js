@@ -14,12 +14,18 @@ export async function GET(req, { params }) {
     if (rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     const r = rows[0];
 
-    // Read canonical acks from announcement_acks table (source of truth)
+    // Read canonical acks from announcement_acks table (source of truth).
+    // Return BOTH user_ids and lowercased emails — the frontend prefers
+    // email-based matching (drift-proof vs MEMBERS-array / DB id collisions).
     const acksResult = await query(
-      'SELECT ARRAY_AGG(user_id) AS user_ids FROM announcement_acks WHERE announcement_id = $1',
+      `SELECT ARRAY_AGG(user_id) AS user_ids,
+              ARRAY_AGG(LOWER(user_email)) AS user_emails
+         FROM announcement_acks
+        WHERE announcement_id = $1`,
       [id]
     );
     const acks = acksResult.rows[0]?.user_ids?.map(Number) || [];
+    const ackEmails = (acksResult.rows[0]?.user_emails || []).filter(Boolean);
 
     return NextResponse.json({
       id: r.id, type: r.type, title: r.title, body: r.body,
@@ -27,6 +33,7 @@ export async function GET(req, { params }) {
       imageUrl: r.image_url, link: r.link, status: r.status,
       authorId: r.author_id, pinned: r.pinned,
       acks,
+      ackEmails,
       soundKey: r.sound_key || 'chime',
       sentAt: r.sent_at,
       createdAt: r.created_at, updatedAt: r.updated_at,

@@ -84,9 +84,14 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
   }),[comms,filter,isLA,user,serverUserId,isApproverUser]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const uid=Number(user.id);
-  // Ack check (three-axis, email-preferred) — mirrors App.jsx. We match on
-  // email FIRST because the static MEMBERS array uses array-position ids that
-  // can drift from the DB's members.id. Email is stable across re-seeds.
+  // Ack check — EMAIL-FIRST, drift-proof. The static MEMBERS array uses
+  // array-position ids that collide with DB `members.id` values. If we allow
+  // an id-axis fallback when the server has already reported `ackEmails` (our
+  // source of truth), *any* user whose MEMBERS-index happens to equal a real
+  // acker's DB id shows up as "acked" — this is the Mohamed/Alaetra ghost-ack
+  // bug. Rule: if the server gave us `ackEmails` (even as an empty array), we
+  // trust ONLY email matching. Id matching is only a fallback for the rare
+  // case the field is truly missing (legacy payload shape).
   const serverUid = serverUserId ? Number(serverUserId) : null;
   const myEmailLc = (user.email || '').toLowerCase() || null;
   const serverEmailLc = serverUserEmail ? String(serverUserEmail).toLowerCase() : null;
@@ -94,7 +99,9 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
     if (Array.isArray(c.ackEmails)) {
       if (myEmailLc && c.ackEmails.includes(myEmailLc)) return true;
       if (serverEmailLc && c.ackEmails.includes(serverEmailLc)) return true;
+      return false; // email data present → trust it exclusively
     }
+    // Only reached when the payload has no ackEmails field at all.
     if (Array.isArray(c.acks)) {
       if (uid && c.acks.includes(uid)) return true;
       if (serverUid && c.acks.includes(serverUid)) return true;
@@ -203,11 +210,12 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
   //    (using the canonical matcher so AMERICAS = NAM ∪ LATAM etc).
   // 2) Role-scope that list so TLs only see their team, agents only see self,
   //    while admins and regional managers see everyone.
-  // 3) Compute `acked` per member by checking EMAIL against the server's
-  //    `ackEmails` list first, then falling back to id matching. Emails are
-  //    the drift-proof identifier — this is what makes the Acknowledgement
-  //    Tracker reflect who actually clicked, even if the static MEMBERS
-  //    array's id drifts from the DB's members.id.
+  // 3) Compute `acked` per member using EMAIL matching only. Id matching is
+  //    unsafe here because MEMBERS.id is an array-position index that can
+  //    collide with real DB members.id values — that collision was the
+  //    "Mohamed + Alaetra appear acked on every announcement" ghost bug.
+  //    Id-axis is only consulted as a last resort when the server payload
+  //    has no `ackEmails` field at all (legacy / unreachable API).
   const accessType=perms?.raw;
   const getAckMembers=(comm)=>{
     let audienceMembers;
@@ -218,15 +226,24 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
       audienceMembers=MEMBERS.filter(m=>matchesAudience(comm.target, m.team));
     }
     const scoped=scopeAckMembers(audienceMembers, user, accessType, comm);
+    const hasEmailAxis = Array.isArray(comm.ackEmails);
     const ackEmailSet = new Set(
-      (Array.isArray(comm.ackEmails) ? comm.ackEmails : []).map(e => String(e || '').toLowerCase())
+      (hasEmailAxis ? comm.ackEmails : []).map(e => String(e || '').toLowerCase())
     );
     const ackIdSet = new Set(Array.isArray(comm.acks) ? comm.acks : []);
     return scoped.map(m => {
       const memberEmailLc = String(m.email || '').toLowerCase();
-      const ackedByEmail = memberEmailLc && ackEmailSet.has(memberEmailLc);
-      const ackedById = ackIdSet.has(m.id);
-      return { member: m, acked: ackedByEmail || ackedById };
+      let acked;
+      if (hasEmailAxis) {
+        // Trust email exclusively. No id fallback → no ghost acks from
+        // MEMBERS-array-index / DB-id collisions.
+        acked = !!(memberEmailLc && ackEmailSet.has(memberEmailLc));
+      } else {
+        // Legacy payload (no ackEmails) — fall back to id matching. This
+        // branch should not fire against the current backend.
+        acked = ackIdSet.has(m.id);
+      }
+      return { member: m, acked };
     });
   };
 
@@ -858,12 +875,14 @@ function WalkthroughOverlay({ comm, remaining, onAcknowledge, onSkip, onExit, on
 // ── Detail overlay — view single announcement ──
 function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setComms, apiComments, apiSetComments, apiLoadComments, apiAddComment, apiDeleteComment, apiLinks, apiLoadLinks, apiLinkAnnouncement, apiUnlinkAnnouncement, setDetailId, onReact }) {
   const t = COMMS_TYPES[comm.type] || COMMS_TYPES.update;
-  // Email-first ack check to match the rest of the UI — otherwise users saw
-  // the "Acknowledge" button stay active in Detail view even after clicking it
-  // via the popup (because the DB id differed from the local MEMBERS id).
+  // Email-only ack check to match the rest of the UI. We do NOT OR in an
+  // id-axis fallback here — MEMBERS.id collides with DB members.id values,
+  // which would falsely mark this viewer as acked whenever another user's
+  // DB id happens to equal the viewer's MEMBERS-array index.
   const myEmailLc = (user.email || '').toLowerCase();
-  const iAcked = (Array.isArray(comm.ackEmails) && myEmailLc && comm.ackEmails.includes(myEmailLc))
-    || comm.acks.includes(Number(user.id));
+  const iAcked = Array.isArray(comm.ackEmails)
+    ? !!(myEmailLc && comm.ackEmails.includes(myEmailLc))
+    : comm.acks.includes(Number(user.id)); // legacy-only fallback
   const PRIO_COLORS={high:'#d42d35',medium:'#ed8d00',low:'#29811e',critical:'#d42d35'};
 
   // ── Emoji floaters ──
