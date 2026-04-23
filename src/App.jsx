@@ -180,7 +180,7 @@ const App=()=>{
     {id:'ESC-SEED-002',task:null,taskId:null,reason:'Client reporting incorrect salary calculation for March payroll — urgent correction needed before end of day',subject:'Payroll discrepancy — March salary',escalatedBy:'James Okafor',escalatedAt:'11:42',managerId:3,managerName:'Omar Khalil',status:'resolved',managerResponseStatus:'responded',managerResponse:'Payroll team notified, correction processing.',managerRespondedAt:'12:10',managerRespondedBy:'Omar Khalil',escalationSource:'slack',slackChannel:'#hr-urgent',slackUser:'@james.okafor',slackMessageUrl:null},
     {id:'ESC-SEED-003',task:null,taskId:null,reason:'Worker contract termination requires legal sign-off but legal team unresponsive for 48h',subject:'Contract termination — legal sign-off',escalatedBy:'Priya Nair',escalatedAt:'14:05',managerId:3,managerName:'Omar Khalil',status:'pending',managerResponseStatus:'pending_response',managerResponse:null,managerRespondedAt:null,managerRespondedBy:null,escalationSource:'manual',slackChannel:null,slackUser:null,slackMessageUrl:null},
   ]);
-  const { comms, setComms, refresh: apiRefreshAnnouncements, acknowledge: apiAcknowledge, create: apiCreate, send: apiSend, update: apiUpdate, archive: apiArchive, remove: apiRemove, togglePin: apiTogglePin, isOnline: apiOnline, serverUserId: apiServerUserId, unarchive: apiUnarchive, comments: apiComments, setComments: apiSetComments, loadComments: apiLoadComments, addComment: apiAddCommentFn, deleteComment: apiDeleteCommentFn, links: apiLinks, loadLinks: apiLoadLinks, linkAnnouncement: apiLinkAnnouncementFn, unlinkAnnouncement: apiUnlinkAnnouncementFn, react: apiReactFn } = useAnnouncements();
+  const { comms, setComms, refresh: apiRefreshAnnouncements, acknowledge: apiAcknowledge, create: apiCreate, send: apiSend, update: apiUpdate, archive: apiArchive, remove: apiRemove, togglePin: apiTogglePin, isOnline: apiOnline, serverUserId: apiServerUserId, serverUserEmail: apiServerUserEmail, unarchive: apiUnarchive, comments: apiComments, setComments: apiSetComments, loadComments: apiLoadComments, addComment: apiAddCommentFn, deleteComment: apiDeleteCommentFn, links: apiLinks, loadLinks: apiLoadLinks, linkAnnouncement: apiLinkAnnouncementFn, unlinkAnnouncement: apiUnlinkAnnouncementFn, react: apiReactFn } = useAnnouncements();
   // Approval-queue pending count for the nav badge. Backend scopes the list
   // automatically: approvers see the full queue, everyone else sees only their
   // own submissions. Counting pending+needs_info gives the right badge for both.
@@ -463,6 +463,10 @@ const App=()=>{
       if(c.author&&c.author.id===user.id) continue;
       const inAudience=(Array.isArray(c.target)&&c.target.includes(user.id))||matchesAudience(c.target,user.team);
       if(!inAudience) continue;
+      // Skip notifying on already-acked comms — check both email (drift-proof)
+      // and id axes so suppression matches the rest of the UI.
+      const myEmailForNotif = (user.email || '').toLowerCase();
+      if (Array.isArray(c.ackEmails) && myEmailForNotif && c.ackEmails.includes(myEmailForNotif)) continue;
       if(c.acks&&c.acks.includes(user.id)) continue;
       addNotif(c.type||'announce', c.title, c.body||'');
     }
@@ -908,18 +912,29 @@ const App=()=>{
   // Uses the canonical audience matcher so NAM/LATAM/AMERICAS/global and
   // dual-region members resolve correctly.
   //
-  // Ack matching: we check BOTH user.id (local) and apiServerUserId (canonical
-  // DB id from the server). This makes the popup dismiss reliably even when
-  // the two ids don't match — which can happen if the static MEMBERS roster
-  // drifts from the DB's members table.
+  // Ack matching (three-axis, email-preferred):
+  //   1. user.email  — the durable, drift-proof identifier. Emails never
+  //      change across DB re-seeds, so matching against `ackEmails` is what
+  //      we trust first.
+  //   2. apiServerUserId — canonical DB members.id reported by the server.
+  //   3. user.id — the local MEMBERS array-position id (weakest — can drift).
+  // A hit on ANY axis = "acked by me". This is the belt+braces that finally
+  // kills the "popup reappears after I click Acknowledge" class of bugs.
   const popupQueue=React.useMemo(()=>{
     if(!user)return [];
     const localUid=Number(user.id);
     const serverUid=apiServerUserId?Number(apiServerUserId):null;
+    const myEmail=(user.email||'').toLowerCase()||null;
+    const serverEmail=apiServerUserEmail?String(apiServerUserEmail).toLowerCase():null;
     const isAckedByMe=(c)=>{
-      if (!Array.isArray(c.acks)) return false;
-      if (localUid && c.acks.includes(localUid)) return true;
-      if (serverUid && c.acks.includes(serverUid)) return true;
+      if (Array.isArray(c.ackEmails)) {
+        if (myEmail && c.ackEmails.includes(myEmail)) return true;
+        if (serverEmail && c.ackEmails.includes(serverEmail)) return true;
+      }
+      if (Array.isArray(c.acks)) {
+        if (localUid && c.acks.includes(localUid)) return true;
+        if (serverUid && c.acks.includes(serverUid)) return true;
+      }
       return false;
     };
     const targetMatch=(c)=>{
@@ -929,20 +944,22 @@ const App=()=>{
     return comms.filter(c=>
       c.isPopup&&c.status==='sent'&&!isAckedByMe(c)&&!dismissedPopups.includes(c.id)&&(targetMatch(c)||(c.author&&c.author.id===user.id))
     );
-  },[comms,user,dismissedPopups,apiServerUserId]);
+  },[comms,user,dismissedPopups,apiServerUserId,apiServerUserEmail]);
 
   const handlePopupAcknowledge=useCallback((commId)=>{
     // Immediately dismiss from popup queue + acknowledge in state/API.
     // Also persist to localStorage so even if the server call fails silently
     // the popup doesn't reappear after refresh (apiAcknowledge itself queues
-    // retries — this is belt-and-braces for the UX).
+    // retries — this is belt-and-braces for the UX). We pass the email too
+    // so the hook can record it in ackEmails even before the server round-trip
+    // completes, killing the last race window for the popup bug.
     setDismissedPopups(prev=>{
       if (prev.includes(commId)) return prev;
       const next = [...prev, commId];
       try { localStorage.setItem('ops_hub_dismissed_popups', JSON.stringify(next)); } catch(e){}
       return next;
     });
-    apiAcknowledge(commId, user.id);
+    apiAcknowledge(commId, user.id, user.email);
   },[user, apiAcknowledge]);
 
   useEffect(()=>{setSubFilter(null);},[view]);
@@ -1049,7 +1066,7 @@ const App=()=>{
           {view==='team'          &&perms?.canView('team')!==false         &&<div className="page-enter"><Team user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setTask={setSelTask} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
           {view==='analytics'     &&isOwner&&perms?.canView('analytics')!==false    &&<div className="page-enter"><Analytics tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} currentUser={effectiveUser} subFilter={subFilter} escalations={scopedEscalations}/></div>}
           {view==='escalations'   &&isOwner&&perms?.canView('escalations')!==false  &&<div className="page-enter"><EscalationsView escalations={scopedEscalations} setEscalations={setEscalations} currentUser={effectiveUser} onNewEscalation={()=>setCreateEscalModal(true)}/></div>}
-          {view==='announcements' &&perms?.canView('announcements')!==false&&<div className="page-enter"><AnnouncementsView user={effectiveUser} serverUserId={apiServerUserId} comms={comms} setComms={setComms} addToast={addToast} tasks={tasks} apiAcknowledge={apiAcknowledge} apiCreate={apiCreate} apiSend={apiSend} apiUpdate={apiUpdate} apiArchive={apiArchive} apiRemove={apiRemove} apiTogglePin={apiTogglePin} openCompose={announceCompose} onComposeOpened={()=>setAnnounceCompose(false)} apiUnarchive={apiUnarchive} apiComments={apiComments} apiSetComments={apiSetComments} apiLoadComments={apiLoadComments} apiAddComment={apiAddCommentFn} apiDeleteComment={apiDeleteCommentFn} apiLinks={apiLinks} apiLoadLinks={apiLoadLinks} apiLinkAnnouncement={apiLinkAnnouncementFn} apiUnlinkAnnouncement={apiUnlinkAnnouncementFn} apiReact={apiReactFn}/></div>}
+          {view==='announcements' &&perms?.canView('announcements')!==false&&<div className="page-enter"><AnnouncementsView user={effectiveUser} serverUserId={apiServerUserId} serverUserEmail={apiServerUserEmail} comms={comms} setComms={setComms} addToast={addToast} tasks={tasks} apiAcknowledge={apiAcknowledge} apiCreate={apiCreate} apiSend={apiSend} apiUpdate={apiUpdate} apiArchive={apiArchive} apiRemove={apiRemove} apiTogglePin={apiTogglePin} openCompose={announceCompose} onComposeOpened={()=>setAnnounceCompose(false)} apiUnarchive={apiUnarchive} apiComments={apiComments} apiSetComments={apiSetComments} apiLoadComments={apiLoadComments} apiAddComment={apiAddCommentFn} apiDeleteComment={apiDeleteCommentFn} apiLinks={apiLinks} apiLoadLinks={apiLoadLinks} apiLinkAnnouncement={apiLinkAnnouncementFn} apiUnlinkAnnouncement={apiUnlinkAnnouncementFn} apiReact={apiReactFn}/></div>}
           {view==='approval-queue' &&<div className="page-enter"><ApprovalQueueView user={effectiveUser} addToast={addToast}/></div>}
           {view==='calendar'      &&isOwner&&perms?.canView('calendar')!==false     &&<div className="page-enter"><CalendarView user={effectiveUser} addToast={addToast} setView={setView}/></div>}
           {view==='knowledge-hub' &&isOwner&&perms?.canView('knowledge-hub')!==false&&<div className="page-enter"><KnowledgeHub subFilter={subFilter} user={effectiveUser}/></div>}

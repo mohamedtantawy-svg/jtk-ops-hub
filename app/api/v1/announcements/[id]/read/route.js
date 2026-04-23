@@ -36,17 +36,30 @@ export async function POST(req, { params }) {
     // Update timestamp
     await query('UPDATE announcements SET updated_at = NOW() WHERE id = $1', [id]);
 
-    // Return canonical acks from announcement_acks table (source of truth)
+    // Return canonical acks from announcement_acks table (source of truth).
+    // Return both user_ids and emails — frontend prefers email matching because
+    // the static MEMBERS array id is an array position index that can drift
+    // from DB members.id. Emails are stable and drift-proof.
     const acksResult = await query(
-      'SELECT ARRAY_AGG(user_id) AS user_ids FROM announcement_acks WHERE announcement_id = $1',
+      `SELECT ARRAY_AGG(user_id) AS user_ids,
+              ARRAY_AGG(LOWER(user_email)) AS user_emails
+         FROM announcement_acks
+        WHERE announcement_id = $1`,
       [id]
     );
-    const acks = acksResult.rows[0]?.user_ids?.map(Number) || [];
+    const acks = (acksResult.rows[0]?.user_ids || []).map(Number).filter(Boolean);
+    const ackEmails = (acksResult.rows[0]?.user_emails || []).filter(Boolean);
 
-    // Return the resolved userId as well — the frontend can then use this
-    // canonical id to update its local popup-dismiss state without relying on
-    // the (possibly stale) id it had in memory. Fixes popup-reappearing bug.
-    return NextResponse.json({ ok: true, acks, userId });
+    // Return the resolved userId + userEmail so the frontend can update its
+    // local "who acked" state using the canonical identity, without relying on
+    // a possibly-stale id in memory. Fixes popup-reappearing bug.
+    return NextResponse.json({
+      ok: true,
+      acks,
+      ackEmails,
+      userId,
+      userEmail: (user.email || '').toLowerCase(),
+    });
   } catch (err) {
     console.error('[announcements/read]', err.message);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });

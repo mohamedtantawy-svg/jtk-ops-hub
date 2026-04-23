@@ -88,16 +88,27 @@ export async function GET(req) {
           (callerId && r.author_id === callerId) || matchesAudience(r.target, callerTeam)
         );
 
-    // Read canonical acks from announcement_acks table (source of truth)
+    // Read canonical acks from announcement_acks table (source of truth).
+    // We return BOTH user_ids (legacy) AND lowercased emails — the frontend
+    // prefers email-based matching because the static MEMBERS array's id is
+    // only an array-position index, which can drift from the DB's members.id
+    // (re-seeds, deletes, manual inserts). Emails are stable.
     const announcementIds = filtered.map(r => r.id);
-    let acksMap = {};
+    let acksIdMap = {};
+    let acksEmailMap = {};
     if (announcementIds.length > 0) {
       const acksResult = await query(
-        'SELECT announcement_id, ARRAY_AGG(user_id) AS user_ids FROM announcement_acks WHERE announcement_id = ANY($1) GROUP BY announcement_id',
+        `SELECT announcement_id,
+                ARRAY_AGG(user_id) AS user_ids,
+                ARRAY_AGG(LOWER(user_email)) AS user_emails
+           FROM announcement_acks
+          WHERE announcement_id = ANY($1)
+          GROUP BY announcement_id`,
         [announcementIds]
       );
       for (const row of acksResult.rows) {
-        acksMap[row.announcement_id] = row.user_ids.map(Number);
+        acksIdMap[row.announcement_id] = (row.user_ids || []).map(Number);
+        acksEmailMap[row.announcement_id] = (row.user_emails || []).filter(Boolean);
       }
     }
 
@@ -106,7 +117,8 @@ export async function GET(req) {
       target: r.target, priority: r.priority, isPopup: r.is_popup,
       imageUrl: r.image_url, link: r.link, status: r.status,
       authorId: r.author_id, pinned: r.pinned,
-      acks: acksMap[r.id] || [],
+      acks: acksIdMap[r.id] || [],
+      ackEmails: acksEmailMap[r.id] || [],
       soundKey: r.sound_key || 'chime',
       sentAt: r.sent_at,
       scheduledFor: r.scheduled_for,
@@ -114,10 +126,14 @@ export async function GET(req) {
     }));
 
     const total = parseInt(countResult.rows[0].count, 10);
-    // Expose the caller's canonical DB id so the frontend can check
-    // `acks.includes(callerId)` reliably — even if the client was holding a
-    // stale/legacy id. See App.jsx / useAnnouncements.js for the consumer.
-    return NextResponse.json({ items, page, limit, total, callerId });
+    // Expose the caller's canonical DB id AND email so the frontend can match
+    // acks by EITHER axis. Email is the durable one; id is preserved for
+    // backwards compat with older clients mid-deploy.
+    return NextResponse.json({
+      items, page, limit, total,
+      callerId,
+      callerEmail: (user.email || '').toLowerCase(),
+    });
   } catch (err) {
     console.error('[announcements GET]', err.message);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
@@ -189,6 +205,7 @@ export async function POST(req) {
       imageUrl: published.image_url, link: published.link, status: published.status,
       authorId: published.author_id, pinned: published.pinned,
       acks: [],
+      ackEmails: [],
       soundKey: published.sound_key || 'chime',
       sentAt: published.sent_at,
       scheduledFor: published.scheduled_for,

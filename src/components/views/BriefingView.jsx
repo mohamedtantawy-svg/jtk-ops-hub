@@ -47,6 +47,17 @@ const SOURCE_COLOURS = {
 };
 
 const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSubFilter,requests=[]})=>{
+  // Drift-proof ack check — matches Announcements view + App.jsx. Local
+  // MEMBERS.id is an array-position index that can diverge from the DB's
+  // members.id, so we prefer email matching (emails don't drift) and fall
+  // back to id comparison for older records that predate ackEmails.
+  const myAckEmail = (user?.email || '').toLowerCase();
+  const isAckedByMe = (c) => {
+    if (!c) return false;
+    if (Array.isArray(c.ackEmails) && myAckEmail && c.ackEmails.includes(myAckEmail)) return true;
+    if (Array.isArray(c.acks) && c.acks.includes(user?.id)) return true;
+    return false;
+  };
   const [expandedSource,setExpandedSource]=useState(null);
   const [expandedSla,setExpandedSla]=useState(null);
   const [ackBannerIdx,setAckBannerIdx]=useState(0);
@@ -663,7 +674,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             if(c.author&&c.author.id===user.id)return true;
             return matchesAudience(c.target, user.team);
           };
-          const pendingAcks=comms.filter(c=>c.status==='sent'&&targetMatch(c)&&!c.acks.includes(user.id)&&!(c.author&&c.author.id===user.id));
+          const pendingAcks=comms.filter(c=>c.status==='sent'&&targetMatch(c)&&!isAckedByMe(c)&&!(c.author&&c.author.id===user.id));
           if(pendingAcks.length===0)return null;
           const BANNER_THEMES={
             alert:    {bg:'#ffe2de',accent:'#d42d35',circle1:'rgba(212,45,53,0.08)',circle2:'rgba(212,45,53,0.05)',icon:'bi-exclamation-triangle-fill',iconBg:'#d42d35'},
@@ -769,7 +780,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               useless 50+ number). */}
           {(()=>{
             const inAudExec=(c)=>matchesAudience(c.target,user.team)||(c.author&&c.author.id===user.id);
-            const execUnackedCount=comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='alert'||c.type==='guidance')&&!c.acks.includes(user.id)&&inAudExec(c)).length;
+            const execUnackedCount=comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='alert'||c.type==='guidance')&&!isAckedByMe(c)&&inAudExec(c)).length;
             return(
               <div style={{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:10,marginBottom:16}}>
                 {[
@@ -1008,7 +1019,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
           {/* ── Stat cards ──── */}
           {(()=>{
             const inAudience=(c)=>matchesAudience(c.target,user.team)||(c.author&&c.author.id===user.id);
-            const unackedComms=comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='alert'||c.type==='guidance')&&!c.acks.includes(user.id)&&inAudience(c));
+            const unackedComms=comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='alert'||c.type==='guidance')&&!isAckedByMe(c)&&inAudience(c));
             const unackedCount=unackedComms.length;
             // Source breakdown for Active-Requests expand — must include every
             // source the user actually has open rows in (Zendesk/Jira from
@@ -1082,7 +1093,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
         {isTeamScope&&<div style={{margin:'12px 24px 0',background:'white',border:'1px solid #e8e8e8',borderRadius:16,padding:'12px 20px'}}>
           {(()=>{
             const inAudLead=(c)=>matchesAudience(c.target,user.team)||(c.author&&c.author.id===user.id);
-            const unackedCount=comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='alert'||c.type==='guidance')&&!c.acks.includes(user.id)&&inAudLead(c)).length;
+            const unackedCount=comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='alert'||c.type==='guidance')&&!isAckedByMe(c)&&inAudLead(c)).length;
             // Breakdown spans every queue the team has open items in —
             // Zendesk/Jira from `scope`, plus the country/assignee-scoped Deel
             // rows so the total matches Active Requests.
