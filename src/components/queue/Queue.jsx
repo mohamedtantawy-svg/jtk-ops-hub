@@ -11,6 +11,7 @@ import {
   scopeAmendmentRequests,
   scopeRedlineRequests,
   filterByAssignee as scopeTicketsByAssignee,
+  getVisibleEmails,
   isAdminUser,
 } from '../../lib/queue-scoping';
 
@@ -93,6 +94,14 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const [showMeetingInvites,setShowMeetingInvites]=useState(false);
   const [search,setSearch]=useState('');
   const [fSla,setFSla]=useState(saved?.fSla||null); // null | 'ok' | 'at_risk' | 'breached'
+  // Jira role filters (Ljubica 2026-04-23) — let users separate tickets they
+  // can act on (assignee / HRX Responsible) from tickets they only raised
+  // (reporter). Defaults: Actionable ON, Raised by You OFF — matching the
+  // Home page semantic where reporter-only tickets don't count toward "your
+  // work". Toggles are independently selectable; turning both on shows the
+  // full Jira dataset, turning both off shows nothing.
+  const [fJiraActionable,setFJiraActionable]=useState(saved?.fJiraActionable!==undefined?!!saved.fJiraActionable:true);
+  const [fJiraRaised,setFJiraRaised]=useState(saved?.fJiraRaised!==undefined?!!saved.fJiraRaised:false);
   // Sub-tab state removed 2026-04-21 — Action Needed / Paused are now merged
   // into a single list per source. SourceTable renders the paused-SLA badge
   // per row when `row.pausedAt` is set (and `showPausedSla` is passed), so
@@ -158,6 +167,45 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const isLead = perms?.dataScope === 'team_tasks';
   const ns = (tasks || []).filter(t => t.source !== 'slack' && t.source !== 'calendar');
 
+  // Emails the current viewer "owns" — their email + every teammate below
+  // them in the hierarchy (empty set is treated as admin-all downstream).
+  // Used to classify each Jira ticket as Actionable (assignee / HRX) vs
+  // Raised by You (reporter) for the filter chips and counts below.
+  const visibleEmails = useMemo(() => getVisibleEmails(user), [user]);
+
+  // Per-ticket role check. A user (or any teammate in their scope) is:
+  //   actionable  ⇢ assignee OR HRX Responsible
+  //   raised      ⇢ reporter
+  // The two are non-exclusive — a ticket where the user is BOTH reporter and
+  // HRX responsible counts as actionable AND raised, so it survives either
+  // filter individually. Admin sees every ticket as in-scope because
+  // `visibleEmails` is the full email set.
+  const jiraIsActionable = useCallback((t) => {
+    if (t?.source !== 'jira') return false;
+    if (isAdmin) return true;
+    if (t.assigneeEmail && visibleEmails.has(t.assigneeEmail.toLowerCase())) return true;
+    if (Array.isArray(t.jiraHrxEmails)) {
+      for (const e of t.jiraHrxEmails) {
+        if (e && visibleEmails.has(e.toLowerCase())) return true;
+      }
+    }
+    return false;
+  }, [visibleEmails, isAdmin]);
+  const jiraIsRaised = useCallback((t) => {
+    if (t?.source !== 'jira') return false;
+    if (!t.jiraReporterEmail) return false;
+    if (isAdmin) return true;
+    return visibleEmails.has(t.jiraReporterEmail.toLowerCase());
+  }, [visibleEmails, isAdmin]);
+  // Single-source predicate applied to Jira tickets in the main vis memo and
+  // the Jira Q count below. Non-Jira tickets always pass.
+  const passesJiraRoleFilter = useCallback((t) => {
+    if (t?.source !== 'jira') return true;
+    const act = fJiraActionable && jiraIsActionable(t);
+    const rai = fJiraRaised && jiraIsRaised(t);
+    return act || rai;
+  }, [fJiraActionable, fJiraRaised, jiraIsActionable, jiraIsRaised]);
+
   // ── Per-source scoping (see src/lib/queue-scoping.js for the full matrix) ──
   // Assignee-based: Zendesk / Jira / Offboarding / Workbench
   // Country-based:  Onboarding / Paused Onboarding / Amendments / Redlines
@@ -198,7 +246,11 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const { vis, baseVis, visPreSla, active, snoozed, open, done, all } = useMemo(() => {
     // Scope ZD / Jira tickets (the only sources in `ns`) through the shared
     // assignee-based helper — exact same rules the /queue backend applies.
-    let _vis = scopeTicketsByAssignee(ns, user);
+    // Then apply the Jira role filter (Actionable / Raised by You). The
+    // role filter runs BEFORE _baseVis so the Jira tab count, SLA header
+    // counts, and main list all move together — there's no state where the
+    // tab pill says "12" but the table shows 20.
+    let _vis = scopeTicketsByAssignee(ns, user).filter(passesJiraRoleFilter);
     const _baseVis=_vis.filter(t=>!t.isCalendarBooking);
     if(fTool)       _vis=_vis.filter(t=>t.source===fTool);
     if(fStatus.length) _vis=_vis.filter(t=>fStatus.includes(t.status));
@@ -227,8 +279,12 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     const _done=_vis.filter(t=>t.status==='resolved');
     const _all=[..._sorted,..._snoozed,..._done];
     return { vis:_vis, baseVis:_baseVis, visPreSla:_visPreSla, active:_sorted, snoozed:_snoozed, open:_sorted, done:_done, all:_all };
-  }, [ns, user, fTool, fStatus, fUnassigned, fSla, showMeetingInvites, search, settings.sla_enabled]);
-  const hasActiveFilters=useMemo(()=>!!(fTool||fStatus.length>0||fSla||fUnassigned||search),[fTool,fStatus,fSla,fUnassigned,search]);
+  }, [ns, user, fTool, fStatus, fUnassigned, fSla, showMeetingInvites, search, settings.sla_enabled, passesJiraRoleFilter]);
+  // Jira role toggles are "non-default" only when they diverge from the
+  // baseline (Actionable ON, Raised OFF). Both-ON or both-OFF is a user
+  // choice worth surfacing in the Clear-all affordance.
+  const jiraRoleFilterActive = fJiraActionable !== true || fJiraRaised !== false;
+  const hasActiveFilters=useMemo(()=>!!(fTool||fStatus.length>0||fSla||fUnassigned||search||jiraRoleFilterActive),[fTool,fStatus,fSla,fUnassigned,search,jiraRoleFilterActive]);
 
   // ── Source-panel filter (status severity + unassigned) ────────────────
   // Applied to all 5 source panels (onboarding / offboarding / amendments /
@@ -485,12 +541,13 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   }, [workSource, fTool, baseVis, allSourceRows, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows]);
   const hiddenByFilters = Math.max(0, rawCounts.open - headerCounts.open);
 
-  // Persist filters to localStorage (fCtry + sort removed 2026-04-21)
+  // Persist filters to localStorage (fCtry + sort removed 2026-04-21;
+  // fJiraActionable / fJiraRaised added 2026-04-23).
   useEffect(()=>{
     try {
-      localStorage.setItem('ops_hub_queue_filters',JSON.stringify({fTool,fStatus,fSla,fUnassigned}));
+      localStorage.setItem('ops_hub_queue_filters',JSON.stringify({fTool,fStatus,fSla,fUnassigned,fJiraActionable,fJiraRaised}));
     } catch {}
-  },[fTool,fStatus,fSla,fUnassigned]);
+  },[fTool,fStatus,fSla,fUnassigned,fJiraActionable,fJiraRaised]);
 
   const visIds=useMemo(()=>new Set(vis.map(t=>t.id)),[vis]);
   useEffect(()=>{
@@ -849,6 +906,28 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
             <i className="bi-person-dash" style={{fontSize:11}}></i>Unassigned
           </button>
 
+          {/* Jira role filters (Ljubica 2026-04-23) — only relevant on the
+              Jira tab. Actionable = assignee or HRX Responsible; Raised by
+              You = reporter. Independent toggles; both ON = all tickets,
+              both OFF = empty list. Default: Actionable ON, Raised OFF. */}
+          {fTool==='jira' && !workSource && (
+            <>
+              <div style={{width:1,height:20,background:'#e8e8e8',flexShrink:0,margin:'0 4px'}} />
+              <button
+                onClick={()=>setFJiraActionable(v=>!v)}
+                title="Tickets where you (or someone on your team) are the assignee or HRX Responsible"
+                style={{height:32,display:'inline-flex',alignItems:'center',gap:5,padding:'0 12px',borderRadius:8,border:fJiraActionable?'1px solid #2563eb':'1px solid #e8e8e8',background:fJiraActionable?'#eff6ff':'white',color:fJiraActionable?'#2563eb':'#616161',fontSize:12,fontWeight:fJiraActionable?600:500,cursor:'pointer',transition:'all .15s',whiteSpace:'nowrap'}}>
+                <i className="bi-check2-circle" style={{fontSize:11}}></i>Actionable
+              </button>
+              <button
+                onClick={()=>setFJiraRaised(v=>!v)}
+                title="Tickets where you (or someone on your team) are the reporter"
+                style={{height:32,display:'inline-flex',alignItems:'center',gap:5,padding:'0 12px',borderRadius:8,border:fJiraRaised?'1px solid #7c3aed':'1px solid #e8e8e8',background:fJiraRaised?'#f5f3ff':'white',color:fJiraRaised?'#7c3aed':'#616161',fontSize:12,fontWeight:fJiraRaised?600:500,cursor:'pointer',transition:'all .15s',whiteSpace:'nowrap'}}>
+                <i className="bi-megaphone" style={{fontSize:11}}></i>Raised by You
+              </button>
+            </>
+          )}
+
           {/* "N hidden by filters" nudge — only when filters are genuinely
               masking work. Catches the "all chips show 0 but I know there
               are tasks" state that used to bite Team Leads with stale
@@ -859,7 +938,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           {hasActiveFilters && hiddenByFilters > 0 && (
             <button
               type="button"
-              onClick={()=>{setFTool(null);setFStatus([]);setFSla(null);setFUnassigned(false);setSearch('');}}
+              onClick={()=>{setFTool(null);setFStatus([]);setFSla(null);setFUnassigned(false);setSearch('');setFJiraActionable(true);setFJiraRaised(false);}}
               title={`Your active filters are hiding ${hiddenByFilters} ${hiddenByFilters === 1 ? 'task' : 'tasks'}. Click to clear all filters.`}
               style={{height:32,display:'inline-flex',alignItems:'center',gap:5,padding:'0 10px',borderRadius:8,background:'#fff7ed',border:'1px solid #fed7aa',color:'#b45309',fontSize:11,fontWeight:600,whiteSpace:'nowrap',cursor:'pointer',fontFamily:'inherit'}}
               onMouseEnter={e=>{e.currentTarget.style.background='#ffedd5';}}
@@ -872,7 +951,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
 
           {/* Clear all */}
           {hasActiveFilters&&(
-            <button onClick={()=>{setFTool(null);setFStatus([]);setFSla(null);setFUnassigned(false);setSearch('');}} style={{height:32,display:'inline-flex',alignItems:'center',gap:4,padding:'0 10px',borderRadius:8,border:'none',background:'transparent',color:'#9e9e9e',fontSize:11,cursor:'pointer',whiteSpace:'nowrap',textDecoration:'underline'}}>
+            <button onClick={()=>{setFTool(null);setFStatus([]);setFSla(null);setFUnassigned(false);setSearch('');setFJiraActionable(true);setFJiraRaised(false);}} style={{height:32,display:'inline-flex',alignItems:'center',gap:4,padding:'0 10px',borderRadius:8,border:'none',background:'transparent',color:'#9e9e9e',fontSize:11,cursor:'pointer',whiteSpace:'nowrap',textDecoration:'underline'}}>
               Clear all
             </button>
           )}
@@ -1011,7 +1090,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
                     </div>
                     <button
                       type="button"
-                      onClick={()=>{setFTool(null);setFStatus([]);setFSla(null);setFUnassigned(false);setSearch('');}}
+                      onClick={()=>{setFTool(null);setFStatus([]);setFSla(null);setFUnassigned(false);setSearch('');setFJiraActionable(true);setFJiraRaised(false);}}
                       style={{display:'inline-flex',alignItems:'center',gap:6,padding:'8px 16px',borderRadius:8,border:'1px solid #1f74b3',background:'#1f74b3',color:'#fff',fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}
                     >
                       <i className="bi-x-circle" style={{fontSize:12}}></i>

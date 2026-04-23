@@ -28,7 +28,6 @@ import {
   scopeAmendmentRequests,
   scopeRedlineRequests,
   scopeWorkbenchTasks,
-  filterByAssignee,
 } from '../../lib/queue-scoping';
 import Avatar from '../ui/Avatar';
 import { ToolBadge, FnBadge } from '../ui/Badges';
@@ -142,17 +141,20 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const redlineRows = useMemo(() => scopeRedlineRequests(redlineRowsAll, user), [redlineRowsAll, user]);
   const workbenchRows = useMemo(() => scopeWorkbenchTasks(workbenchRowsAll, user), [workbenchRowsAll, user]);
 
-  // Assignee-only subset of onboarding rows — for "Needs Your Attention",
-  // which should list only rows the user themselves must action (Pilar
-  // 2026-04-23). The country-OR-assignee scoped `onboardingRows` above
-  // surfaces country-visible rows (e.g. an agent sees every onboarding in
-  // a country they own even when assigned to a teammate), which is right
-  // for tab counts but wrong for "you need to act on this right now".
-  const myOnboardingRows = useMemo(() => filterByAssignee(onboardingRowsAll, user), [onboardingRowsAll, user]);
-
   const inScope = useCallback(t => {
     if (scopeIds.includes(t.assigneeId)) return true;
     if (t.assigneeEmail && visibleEmails.has(t.assigneeEmail.toLowerCase())) return true;
+    // Jira-specific: a user is "actionable" on a ticket if they're the
+    // assignee OR the HRX Responsible. Reporter-only visibility is
+    // intentionally NOT counted here — per Ljubica's 2026-04-23 ask, Home
+    // task counts should reflect actionables only (not tickets the user
+    // merely raised). Reporter-only tickets remain reachable in the Queue's
+    // "Raised by You" filter.
+    if (t.source === 'jira' && Array.isArray(t.jiraHrxEmails)) {
+      for (const e of t.jiraHrxEmails) {
+        if (e && visibleEmails.has(e.toLowerCase())) return true;
+      }
+    }
     return false;
   }, [scopeIds, visibleEmails]);
   const scope=tasks.filter(t=>inScope(t)&&t.status!=='resolved');
@@ -163,13 +165,11 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const breached=slaScope.filter(t=>{const s=slaInfo(t);return s&&s.breach;});
   const atRisk=slaScope.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;});
   // Onboarding source rows use age-based SLA (3d at-risk, 7d breached) — same
-  // as Queue.jsx. We use `myOnboardingRows` (assignee-only) not `onboardingRows`
-  // (country-OR-assignee) so "Needs Your Attention" strictly lists rows the
-  // user themselves is the assignee for — otherwise a country owner would
-  // get flagged about every onboarding in their region even when assigned
-  // to a teammate.
-  const onbBreached=myOnboardingRows.filter(r=>{const ageMs=r.createdAt?Date.now()-new Date(r.createdAt).getTime():0;return ageMs/(1000*60*60*24)>=7;});
-  const onbAtRisk=myOnboardingRows.filter(r=>{const ageMs=r.createdAt?Date.now()-new Date(r.createdAt).getTime():0;const d=ageMs/(1000*60*60*24);return d>=3&&d<7;});
+  // as Queue.jsx. Uses the country-OR-assignee scoped `onboardingRows` so
+  // exec/team SLA aggregates (slaCompRate, orgBreach, orgBreachedTasks)
+  // line up with what the Onboarding tab displays.
+  const onbBreached=onboardingRows.filter(r=>{const ageMs=r.createdAt?Date.now()-new Date(r.createdAt).getTime():0;return ageMs/(1000*60*60*24)>=7;});
+  const onbAtRisk=onboardingRows.filter(r=>{const ageMs=r.createdAt?Date.now()-new Date(r.createdAt).getTime():0;const d=ageMs/(1000*60*60*24);return d>=3&&d<7;});
   breached.push(...onbBreached);
   atRisk.push(...onbAtRisk);
   const newT=scope.filter(t=>t.status==='new');
@@ -1068,56 +1068,12 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
           </div>}
             </>);
           })()}
-          {/* Needs Attention — items requiring action */}
-          {(()=>{
-            const attentionItems=[];
-            // Breached tasks
-            breached.forEach(t=>attentionItems.push({id:'b-'+t.id,icon:'bi-exclamation-triangle-fill',color:'#d42d35',bg:'#ffe2de',label:'SLA Breached',desc:t.subject,sub:t.id,nav:()=>{setSelTask(t);setView('my-queue');}}));
-            // At-risk tasks
-            atRisk.forEach(t=>attentionItems.push({id:'r-'+t.id,icon:'bi-clock-fill',color:'#ed5e2a',bg:'#fff3e6',label:'At Risk',desc:t.subject,sub:t.id,nav:()=>{setSelTask(t);setView('my-queue');}}));
-            // Pending escalations
-            escalations.filter(e=>e.status==='pending').forEach(e=>attentionItems.push({id:'e-'+e.id,icon:'bi-arrow-up-circle-fill',color:'#1f74b3',bg:'#e8f0fe',label:'Escalation Pending',desc:e.task?.subject||e.taskId,sub:e.managerName,nav:()=>setView('escalations')}));
-            // Alerts from comms (audience-filtered)
-            const inAud=(c)=>matchesAudience(c.target,user.team)||(c.author&&c.author.id===user.id);
-            comms.filter(c=>c.status==='sent'&&c.type==='alert'&&!c.acks.includes(user.id)&&inAud(c)).forEach(c=>attentionItems.push({id:'a-'+c.id,icon:'bi-exclamation-circle-fill',color:'#d42d35',bg:'#ffe2de',label:'Alert',desc:c.title,sub:'Requires acknowledgment',nav:()=>setView('announcements')}));
-            // New announcements (audience-filtered)
-            comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='guidance')&&!c.acks.includes(user.id)&&inAud(c)).forEach(c=>attentionItems.push({id:'n-'+c.id,icon:'bi-megaphone-fill',color:'#ed8d00',bg:'#fff8e6',label:'New Announcement',desc:c.title,sub:'Requires acknowledgment',nav:()=>setView('announcements')}));
-            // Projects/deadlines close (calendar events within 3 days)
-            const soon=new Date();soon.setDate(soon.getDate()+3);
-            CALENDAR_EVENTS.filter(e=>e.type!=='meeting'&&new Date(e.date)<=soon&&new Date(e.date)>=new Date(new Date().toISOString().slice(0,10))).forEach(e=>attentionItems.push({id:'d-'+e.id,icon:'bi-calendar-x-fill',color:'#8b6dca',bg:'#f3eff8',label:'Deadline Soon',desc:e.title,sub:e.dateLabel,nav:()=>setView('calendar')}));
-            return(
-          <DeelCard style={{marginTop:10,padding:0,overflow:'hidden'}}>
-            <div style={{padding:'12px 20px 10px',borderBottom:'1px solid #e8e8e8',display:'flex',alignItems:'center',gap:8}}>
-              <i className="bi-bell-fill" style={{fontSize:13,color:'#ed8d00'}}></i>
-              <span style={{fontSize:14,fontWeight:700,color:'#1b1b1b'}}>Needs Your Attention</span>
-              {attentionItems.length>0&&<span style={{background:'#ffe2de',borderRadius:128,padding:'2px 10px',fontSize:11,fontWeight:700,color:'#d42d35'}}>{attentionItems.length}</span>}
-            </div>
-            <div style={{maxHeight:260,overflowY:'auto'}}>
-              {attentionItems.length===0?(
-                <div style={{padding:'32px 16px',textAlign:'center'}}>
-                  <i className="bi-check-circle" style={{fontSize:28,color:'#29811e',display:'block',marginBottom:6}}></i>
-                  <div style={{fontSize:13,color:'#9e9e9e'}}>All clear — nothing needs your attention</div>
-                </div>
-              ):attentionItems.map(item=>(
-                <div key={item.id} onClick={item.nav}
-                  style={{display:'flex',alignItems:'center',gap:12,padding:'10px 20px',cursor:'pointer',borderBottom:'1px solid #f5f5f5',transition:'background .15s'}}
-                  onMouseEnter={e=>e.currentTarget.style.background='#fafaf9'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                  <div style={{width:28,height:28,borderRadius:8,background:item.bg,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                    <i className={item.icon} style={{fontSize:12,color:item.color}}></i>
-                  </div>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{display:'flex',alignItems:'center',gap:6}}>
-                      <span style={{fontSize:10,fontWeight:700,color:item.color,textTransform:'none',letterSpacing:'normal'}}>{item.label}</span>
-                    </div>
-                    <div style={{fontSize:12,fontWeight:500,color:'#1b1b1b',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',marginTop:1}}>{item.desc}</div>
-                  </div>
-                  <span style={{fontSize:10,color:'#9e9e9e',flexShrink:0}}>{item.sub}</span>
-                  <i className="bi-chevron-right" style={{fontSize:10,color:'#bebebe',flexShrink:0}}></i>
-                </div>
-              ))}
-            </div>
-          </DeelCard>);
-          })()}
+          {/* "Needs Your Attention" card removed 2026-04-23 — was aggregating
+              items from multiple scoping models (ZD/Jira assignee-only, onboarding
+              country-OR-assignee, comms, calendar) which gave country-owners a
+              misleading list of "your action needed" items that were actually
+              assigned to teammates. Source panels on the Queue already surface
+              per-user actionables with consistent scoping. */}
         </div>}
 
         {/* ══════════════════════════════════════════════════════════════════

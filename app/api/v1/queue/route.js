@@ -563,18 +563,29 @@ async function fetchJiraQueue() {
       // the primary assignee — used by the scoping layer so the ticket is
       // visible to e.g. the Country Owner, HRX Responsible, or Reporter even
       // when they aren't the assignee. Deduped via Set.
-      const ownerEmails = new Set();
+      //
+      // We also track HRX-responsible and reporter emails SEPARATELY so the
+      // client can classify each ticket as "Actionable" (assignee or HRX
+      // responsible) vs "Raised by You" (reporter only). Ljubica's
+      // 2026-04-23 ask: tickets where a teammate is only the reporter (not
+      // the HRX Responsible) were surfacing as "your breached items" — they
+      // should be reachable via a separate filter but excluded from the
+      // default Actionable view. Tickets where a user is BOTH reporter AND
+      // HRX responsible stay in Actionable (non-exclusive classification).
+      const hrxEmails = new Set();
       for (const cfId of Object.values(ownerFieldIds)) {
         if (!cfId) continue;
         const emails = emailsFromJiraFieldValue(f[cfId]);
-        for (const e of emails) ownerEmails.add(e);
+        for (const e of emails) hrxEmails.add(e);
       }
-      // Reporter also contributes to visibility — per Pilar's 2026-04-22 rule
-      // ("pull any ticket if any of our users is the HRX Responsible or
-      // Reporter"). Lowercased to match scoping's comparison convention.
-      if (reporter.emailAddress) {
-        ownerEmails.add(reporter.emailAddress.toLowerCase());
-      }
+      const reporterEmailLower = reporter.emailAddress
+        ? reporter.emailAddress.toLowerCase()
+        : null;
+      // Union for visibility — keep existing scoping behaviour (see
+      // src/lib/queue-scoping.js::filterByAssignee) so no ticket drops out
+      // of the dataset.
+      const ownerEmails = new Set(hrxEmails);
+      if (reporterEmailLower) ownerEmails.add(reporterEmailLower);
 
       return {
         id: issue.key,
@@ -592,6 +603,10 @@ async function fetchJiraQueue() {
         // matches on primary assignee OR any secondary — see
         // src/lib/queue-scoping.js::filterByAssignee.
         secondaryAssigneeEmails: [...ownerEmails],
+        // Per-role breakdown for client-side Actionable / Raised by You
+        // classification. Lowercased for consistent comparison on the client.
+        jiraHrxEmails: [...hrxEmails],
+        jiraReporterEmail: reporterEmailLower,
         requesterName: reporter.displayName || 'System',
         requesterEmail: reporter.emailAddress || null,
         lastCustomerResponseAt: f.updated, // Jira updated tracks last activity

@@ -51,6 +51,26 @@ function normalizeApiAnnouncement(a) {
   };
 }
 
+// ── Pending ack durability ────────────────────────────────────────────────
+// Acks we haven't yet confirmed on the server (network failure / offline).
+// We persist these to localStorage and retry on reconnect + periodically so
+// no acknowledgement is ever lost — requirement #3 (100% ack capture) is
+// enforced end-to-end, not just best-effort.
+const PENDING_ACKS_KEY = 'ops_hub_pending_acks';
+function readPendingAcks() {
+  try {
+    if (typeof window === 'undefined') return [];
+    const raw = localStorage.getItem(PENDING_ACKS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) { return []; }
+}
+function writePendingAcks(ids) {
+  try {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(PENDING_ACKS_KEY, JSON.stringify(ids));
+  } catch (e) { /* ignore quota errors — best effort */ }
+}
+
 export function useAnnouncements() {
   const [comms, setComms] = useState(INITIAL_COMMS);
   const [isOnline, setIsOnline] = useState(false); // true when backend responds
@@ -58,6 +78,12 @@ export function useAnnouncements() {
 
   // Track the token so we re-fetch after logout → login cycles
   const lastTokenRef = useRef(null);
+  // Ref wrapper for refresh() — polling effect reads via ref to avoid re-subscribing
+  const refreshRef = useRef(null);
+  // Mirror of the persisted pending-acks list so the drain loop can read it
+  // without importing it from localStorage on every tick.
+  const pendingAcksRef = useRef(readPendingAcks());
+  const drainingRef = useRef(false);
 
   // ── Initial load — try API, fall back to static data ─────────────────────
   useEffect(() => {
@@ -89,6 +115,28 @@ export function useAnnouncements() {
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps — refs + localStorage only; runs once on mount
 
+  // ── Polling: refresh every 45 s so scheduled announcements + new pop-ups
+  // arrive promptly without a WebSocket. Only runs while the tab is visible.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const POLL_MS = 45_000;
+    let timer = null;
+    const kick = () => {
+      if (document.visibilityState !== 'visible') return;
+      const hasToken = !!localStorage.getItem('ops_hub_token');
+      if (!hasToken) return;
+      // Use the latest refresh() ref value without capturing it (avoid loops)
+      refreshRef.current?.();
+    };
+    timer = setInterval(kick, POLL_MS);
+    const onVis = () => { if (document.visibilityState === 'visible') kick(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, []);
+
   // ── Refresh from API ─────────────────────────────────────────────────────
   // Server is the source of truth for acks now (announcement_acks table),
   // so we replace rather than union with stale local state.
@@ -112,6 +160,9 @@ export function useAnnouncements() {
       setIsOnline(false);
     }
   }, []);
+
+  // Keep the ref in sync so polling always calls the current refresh()
+  useEffect(() => { refreshRef.current = refresh; }, [refresh]);
 
   // ── Create ───────────────────────────────────────────────────────────────
   // Always attempt the API call (don't gate on isOnline — it may be stale).
@@ -185,6 +236,29 @@ export function useAnnouncements() {
   // ── Acknowledge ──────────────────────────────────────────────────────────
   // Optimistic add → server persist → the 15 s poll in App.jsx picks up the
   // canonical ack list on the next tick so all sessions agree.
+  //
+  // Durability: if the server call fails (offline, transient error, 500), we
+  // enqueue the ID in a pendingAcks list that survives page reloads via
+  // localStorage. A drain loop + refresh-triggered retry keep hammering the
+  // server until every queued ack lands. The server endpoint is idempotent
+  // (announcement_acks has a composite primary key + ON CONFLICT DO NOTHING)
+  // so retrying is always safe — no duplicate rows, no changed timestamps.
+  const queuePendingAck = useCallback((id) => {
+    if (!id) return;
+    const cur = pendingAcksRef.current;
+    if (cur.includes(id)) return;
+    const next = [...cur, id];
+    pendingAcksRef.current = next;
+    writePendingAcks(next);
+  }, []);
+  const removePendingAck = useCallback((id) => {
+    const cur = pendingAcksRef.current;
+    if (!cur.includes(id)) return;
+    const next = cur.filter(x => x !== id);
+    pendingAcksRef.current = next;
+    writePendingAcks(next);
+  }, []);
+
   const acknowledge = useCallback(async (id, userId) => {
     const uid = Number(userId);
     setComms(prev => prev.map(c =>
@@ -192,17 +266,70 @@ export function useAnnouncements() {
         ? { ...c, acks: [...c.acks, uid] }
         : c
     ));
+    // Enqueue BEFORE the network call — if the call throws or the tab is
+    // closed mid-flight, the id is already persisted and will be retried.
+    queuePendingAck(id);
     if (isOnline) {
       try {
         const res = await apiAcknowledge(id);
-        // Server returns the canonical acks array — trust it
         if (res?.acks) {
           const canonical = res.acks.map(Number).filter(Boolean);
           setComms(prev => prev.map(c => c.id === id ? { ...c, acks: canonical } : c));
         }
-      } catch (e) { console.warn('[announcements] acknowledge failed:', e.message); }
+        removePendingAck(id);
+      } catch (e) {
+        console.warn('[announcements] acknowledge failed — queued for retry:', e.message);
+      }
     }
-  }, [isOnline]);
+  }, [isOnline, queuePendingAck, removePendingAck]);
+
+  // ── Drain pending acks ──────────────────────────────────────────────────
+  // Retries every 30s while there are queued acks, and again immediately
+  // after a successful refresh (so a reconnect drains fast).
+  const drainPendingAcks = useCallback(async () => {
+    if (drainingRef.current) return;
+    const ids = pendingAcksRef.current;
+    if (!ids.length) return;
+    const hasToken = typeof window !== 'undefined' && !!localStorage.getItem('ops_hub_token');
+    if (!hasToken) return;
+    drainingRef.current = true;
+    try {
+      // Retry sequentially to avoid hammering the server.
+      for (const id of ids.slice()) {
+        try {
+          const res = await apiAcknowledge(id);
+          if (res?.acks) {
+            const canonical = res.acks.map(Number).filter(Boolean);
+            setComms(prev => prev.map(c => c.id === id ? { ...c, acks: canonical } : c));
+          }
+          removePendingAck(id);
+        } catch (e) {
+          // Keep it in the queue for the next drain — break early if the
+          // server is clearly unreachable so we don't spin on the rest.
+          break;
+        }
+      }
+    } finally {
+      drainingRef.current = false;
+    }
+  }, [removePendingAck]);
+
+  // Periodic drain + on reconnect
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let timer = setInterval(() => { drainPendingAcks(); }, 30_000);
+    const onFocus = () => drainPendingAcks();
+    const onOnline = () => drainPendingAcks();
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('online', onOnline);
+    // Drain once on mount in case we still have queued acks from a prior tab.
+    drainPendingAcks();
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('online', onOnline);
+    };
+  }, [drainPendingAcks]);
 
   // ── Archive ──────────────────────────────────────────────────────────────
   const archive = useCallback(async (id) => {

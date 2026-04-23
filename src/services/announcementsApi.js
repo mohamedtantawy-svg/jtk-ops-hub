@@ -20,10 +20,20 @@ export async function fetchAnnouncementById(id) {
 }
 
 // ── Create announcement ──────────────────────────────────────────────────────
-export async function createAnnouncement({ type, title, body, target, priority, isPopup, imageUrl, link, soundKey }) {
+// Approvers may additionally pass { scheduledFor, urgentOverride } to schedule
+// for later or override the 2/day + 4h-gap rate limits.
+export async function createAnnouncement(payload) {
+  const {
+    type, title, body, target, priority, isPopup, imageUrl, link, soundKey,
+    scheduledFor, urgentOverride,
+  } = payload || {};
   return apiFetch('/announcements', {
     method: 'POST',
-    body: JSON.stringify({ type, title, body, target, priority, isPopup, imageUrl, link, soundKey }),
+    body: JSON.stringify({
+      type, title, body, target, priority, isPopup, imageUrl, link, soundKey,
+      scheduledFor: scheduledFor || null,
+      urgentOverride: urgentOverride || false,
+    }),
   });
 }
 

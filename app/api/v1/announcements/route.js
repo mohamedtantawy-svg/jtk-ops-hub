@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../src/lib/db';
-import { getAuthUser, requireRole } from '../../../../src/lib/auth-helpers';
+import { getAuthUser } from '../../../../src/lib/auth-helpers';
+import { isApprover } from '../../../../src/data/approvers';
+import {
+  VALID_TARGETS,
+  checkPublishingRules,
+  publishFromRequest,
+  normalizePayload,
+} from '../../../../src/lib/announcementFlow';
 
 // Server-side audience match — mirrors src/data/comms.js matchesAudience()
 function matchesAudience(target, memberTeam) {
@@ -14,7 +21,25 @@ function matchesAudience(target, memberTeam) {
   return false;
 }
 
-const VALID_TARGETS = ['all','global','emea','apac','americas','nam','latam'];
+// Promote any scheduled announcements whose time has passed to 'sent'.
+// Runs before every GET — keeps the audience view fresh without a cron job.
+// Idempotent: uses a guarded UPDATE so repeated calls are free.
+async function promoteDueScheduled() {
+  try {
+    await query(
+      `UPDATE announcements
+         SET status = 'sent',
+             sent_at = COALESCE(sent_at, scheduled_for, NOW()),
+             updated_at = NOW()
+       WHERE status = 'scheduled'
+         AND scheduled_for IS NOT NULL
+         AND scheduled_for <= NOW()`
+    );
+  } catch (err) {
+    // Non-fatal — readers may briefly see stale data if this fails once
+    console.error('[announcements.promoteDueScheduled]', err.message);
+  }
+}
 
 export async function GET(req) {
   try {
@@ -22,6 +47,9 @@ export async function GET(req) {
     if (!user.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    // Lazy-promote any scheduled rows whose time has arrived.
+    await promoteDueScheduled();
 
     const { searchParams } = new URL(req.url);
     const status = searchParams.get('status');
@@ -38,12 +66,16 @@ export async function GET(req) {
       const statuses = status.split(',');
       whereSql += ` AND status = ANY($${idx++})`;
       params.push(statuses);
+    } else {
+      // Default: hide scheduled rows from the audience feed. Approvers can
+      // opt in via ?status=scheduled on the Approval Queue.
+      whereSql += ` AND status <> 'scheduled'`;
     }
     if (target) { whereSql += ` AND target = $${idx++}`; params.push(target); }
 
     const countSql = 'SELECT COUNT(*) FROM announcements' + whereSql;
     const dataSql = `SELECT id, type, title, body, target, priority, is_popup, image_url, link,
-                            status, author_id, pinned, sound_key, sent_at,
+                            status, author_id, pinned, sound_key, sent_at, scheduled_for,
                             created_at, updated_at
                        FROM announcements${whereSql}
                       ORDER BY pinned DESC, COALESCE(sent_at, created_at) DESC
@@ -94,6 +126,7 @@ export async function GET(req) {
       acks: acksMap[r.id] || [],
       soundKey: r.sound_key || 'chime',
       sentAt: r.sent_at,
+      scheduledFor: r.scheduled_for,
       createdAt: r.created_at, updatedAt: r.updated_at,
     }));
 
@@ -105,50 +138,81 @@ export async function GET(req) {
   }
 }
 
+// POST /api/v1/announcements — direct publish (bypasses the approval queue).
+// Allowed for: admins, regional_managers, managers, team_leads, and anyone
+// in the approver roster. Everyone else must go through
+// /api/v1/announcement-requests.
+//
+// Body may include:
+//   scheduledFor   — ISO timestamp; if set, announcement is created with
+//                    status='scheduled' and will lazy-promote to 'sent'
+//                    when the time arrives.
+//   urgentOverride — boolean; skips the 2/day + 4h-gap rate limits. Only
+//                    honoured for approvers.
 export async function POST(req) {
   try {
-    const { authorized, user, status, error } = requireRole(req, 'admin', 'regional_manager', 'manager', 'team_lead');
-    if (!authorized) return NextResponse.json({ error }, { status });
-
-    const { type, title, body, target, priority, isPopup, imageUrl, link, soundKey } = await req.json();
-    if (!title) return NextResponse.json({ error: 'Title required' }, { status: 400 });
-
-    const normalizedTarget = (target || 'all').toLowerCase();
-    if (!VALID_TARGETS.includes(normalizedTarget)) {
-      return NextResponse.json({ error: `Invalid target. Must be one of: ${VALID_TARGETS.join(', ')}` }, { status: 400 });
+    const user = getAuthUser(req);
+    if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const allowedRoles = ['admin', 'regional_manager', 'manager', 'team_lead'];
+    const approver = isApprover(user.email);
+    if (!approver && !allowedRoles.includes(user.role)) {
+      return NextResponse.json(
+        { error: 'Not allowed to publish directly. Submit via the approval queue.' },
+        { status: 403 }
+      );
     }
 
-    const { rows } = await query(
-      `INSERT INTO announcements
-         (type, title, body, target, priority, is_popup, image_url, link, author_id, sound_key)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
-      [
-        type || 'info',
-        title,
-        body || '',
-        normalizedTarget,
-        priority || 'normal',
-        isPopup || false,
-        imageUrl || null,
-        link || null,
-        user?.id || null,
-        soundKey || 'chime',
-      ]
-    );
+    const raw = await req.json();
+    let payload;
+    try { payload = normalizePayload(raw); }
+    catch (e) { return NextResponse.json({ error: e.message }, { status: 400 }); }
 
-    const r = rows[0];
+    const scheduledFor = raw.scheduledFor ? new Date(raw.scheduledFor) : null;
+    if (scheduledFor && Number.isNaN(scheduledFor.getTime())) {
+      return NextResponse.json({ error: 'Invalid scheduledFor' }, { status: 400 });
+    }
+    const urgentOverride = approver && Boolean(raw.urgentOverride);
+
+    let published;
+    try {
+      published = await publishFromRequest(
+        {
+          type: payload.type,
+          title: payload.title,
+          body: payload.body,
+          target: payload.target,
+          priority: payload.priority,
+          is_popup: payload.isPopup,
+          image_url: payload.imageUrl,
+          link: payload.link,
+          sound_key: payload.soundKey,
+          requested_by_id: user.id || null,
+        },
+        { sendAt: scheduledFor, urgentOverride, actor: user }
+      );
+    } catch (e) {
+      if (e.code === 'RATE_LIMIT') {
+        return NextResponse.json({ error: e.message, code: 'RATE_LIMIT' }, { status: 409 });
+      }
+      throw e;
+    }
+
     return NextResponse.json({
-      id: r.id, type: r.type, title: r.title, body: r.body,
-      target: r.target, priority: r.priority, isPopup: r.is_popup,
-      imageUrl: r.image_url, link: r.link, status: r.status,
-      authorId: r.author_id, pinned: r.pinned,
+      id: published.id, type: published.type, title: published.title, body: published.body,
+      target: published.target, priority: published.priority, isPopup: published.is_popup,
+      imageUrl: published.image_url, link: published.link, status: published.status,
+      authorId: published.author_id, pinned: published.pinned,
       acks: [],
-      soundKey: r.sound_key || 'chime',
-      sentAt: r.sent_at,
-      createdAt: r.created_at,
+      soundKey: published.sound_key || 'chime',
+      sentAt: published.sent_at,
+      scheduledFor: published.scheduled_for,
+      createdAt: published.created_at,
     }, { status: 201 });
   } catch (err) {
     console.error('[announcements POST]', err.message);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }
 }
+
+// Re-export rule helpers for routes that import from here (none currently).
+export { checkPublishingRules, VALID_TARGETS };

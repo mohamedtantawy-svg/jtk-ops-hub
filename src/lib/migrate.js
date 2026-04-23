@@ -386,6 +386,96 @@ DO $$ BEGIN
     ALTER TABLE members ADD CONSTRAINT fk_members_lead FOREIGN KEY (lead_id) REFERENCES members(id) ON DELETE SET NULL;
   END IF;
 END $$;
+
+-- ── Announcement approval flow (2026-04-23) ─────────────────────────────────
+-- All new tables/columns are additive so redeploys never destroy existing
+-- announcements, acks, comments, reactions, or links.
+--
+-- Scheduling:
+--   * announcements.scheduled_for is populated when an approver picks a future
+--     send time. The GET handler lazy-promotes past-scheduled rows to 'sent'
+--     before returning, so no cron worker is strictly required.
+--   * status values: 'draft' | 'scheduled' | 'sent' | 'archived'. Older
+--     announcements without scheduled_for behave exactly as before.
+-- Approval:
+--   * Any user can create an announcement_requests row; approvers
+--     (src/data/approvers.js) approve/reject/edit before the request becomes
+--     a real announcements row. The join is one-to-one via published_id.
+-- Audit log:
+--   * announcement_request_audit captures every state change - creation,
+--     edits, comments, approvals, rejections, scheduling, publishing - so
+--     approvers see a full timeline per request. Never deleted.
+-- Comments:
+--   * announcement_request_comments is the clarification thread, separate
+--     from the public announcement_comments table. Visible to the requester
+--     and all approvers.
+ALTER TABLE announcements ADD COLUMN IF NOT EXISTS scheduled_for TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_announcements_scheduled_for ON announcements(scheduled_for) WHERE scheduled_for IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS announcement_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  -- Requester identity (every authenticated user can create)
+  requested_by_id       INTEGER REFERENCES members(id) ON DELETE SET NULL,
+  requested_by_email    VARCHAR(255) NOT NULL,
+  requested_by_name     VARCHAR(255),
+  -- Lifecycle
+  status                VARCHAR(20) DEFAULT 'pending' NOT NULL,
+  --   'pending'   | 'approved' | 'rejected' | 'withdrawn' | 'needs_info'
+  rejection_reason      TEXT,
+  -- Approver identity (set on approve/reject/needs_info)
+  decided_by_id         INTEGER REFERENCES members(id) ON DELETE SET NULL,
+  decided_by_email      VARCHAR(255),
+  decided_by_name       VARCHAR(255),
+  decided_at            TIMESTAMPTZ,
+  -- Scheduling (null = send immediately on approval)
+  scheduled_for         TIMESTAMPTZ,
+  urgent_override       BOOLEAN DEFAULT false,
+  -- Announcement payload — same shape as announcements. Approvers can edit
+  -- any of these until the request is decided.
+  type                  VARCHAR(50) DEFAULT 'announce' NOT NULL,
+  title                 VARCHAR(500) NOT NULL,
+  body                  TEXT,
+  target                VARCHAR(100) DEFAULT 'global',
+  priority              VARCHAR(50) DEFAULT 'medium',
+  is_popup              BOOLEAN DEFAULT false,
+  image_url             TEXT,
+  link                  TEXT,
+  sound_key             VARCHAR(32) DEFAULT 'chime',
+  -- If approved and published, this points at the resulting announcements row
+  published_id          UUID REFERENCES announcements(id) ON DELETE SET NULL,
+  published_at          TIMESTAMPTZ,
+  created_at            TIMESTAMPTZ DEFAULT NOW(),
+  updated_at            TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT chk_ann_requests_status CHECK (status IN ('pending','approved','rejected','withdrawn','needs_info'))
+);
+CREATE INDEX IF NOT EXISTS idx_ann_requests_status ON announcement_requests(status);
+CREATE INDEX IF NOT EXISTS idx_ann_requests_requested_by ON announcement_requests(requested_by_email);
+CREATE INDEX IF NOT EXISTS idx_ann_requests_created ON announcement_requests(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS announcement_request_audit (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  request_id  UUID NOT NULL REFERENCES announcement_requests(id) ON DELETE CASCADE,
+  actor_id    INTEGER REFERENCES members(id) ON DELETE SET NULL,
+  actor_email VARCHAR(255),
+  actor_name  VARCHAR(255),
+  action      VARCHAR(40) NOT NULL,
+  --   'created' | 'edited' | 'comment_added' | 'requested_info' |
+  --   'approved' | 'rejected' | 'withdrawn' | 'scheduled' | 'published'
+  meta        JSONB DEFAULT '{}'::jsonb,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ann_request_audit_req ON announcement_request_audit(request_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS announcement_request_comments (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  request_id  UUID NOT NULL REFERENCES announcement_requests(id) ON DELETE CASCADE,
+  author_id   INTEGER REFERENCES members(id) ON DELETE SET NULL,
+  author_email VARCHAR(255),
+  author_name VARCHAR(255),
+  body        TEXT NOT NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_ann_request_comments_req ON announcement_request_comments(request_id, created_at);
 `;
 
 export async function runMigrations() {
