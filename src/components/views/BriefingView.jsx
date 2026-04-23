@@ -48,13 +48,18 @@ const SOURCE_COLOURS = {
 
 const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSubFilter,requests=[]})=>{
   // Drift-proof ack check — matches Announcements view + App.jsx. Local
-  // MEMBERS.id is an array-position index that can diverge from the DB's
-  // members.id, so we prefer email matching (emails don't drift) and fall
-  // back to id comparison for older records that predate ackEmails.
+  // MEMBERS.id is an array-position index that collides with DB members.id
+  // values. When the server gives us `ackEmails` (our source of truth) we
+  // trust email matching exclusively — no id fallback. OR-ing id into the
+  // check was what made Mohamed + Alaetra appear acked on every announcement
+  // (their MEMBERS indices collided with actual DB ids of real ackers).
   const myAckEmail = (user?.email || '').toLowerCase();
   const isAckedByMe = (c) => {
     if (!c) return false;
-    if (Array.isArray(c.ackEmails) && myAckEmail && c.ackEmails.includes(myAckEmail)) return true;
+    if (Array.isArray(c.ackEmails)) {
+      return !!(myAckEmail && c.ackEmails.includes(myAckEmail));
+    }
+    // Legacy fallback — only reached if the API payload lacks ackEmails.
     if (Array.isArray(c.acks) && c.acks.includes(user?.id)) return true;
     return false;
   };
