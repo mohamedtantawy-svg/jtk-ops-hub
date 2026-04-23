@@ -11,12 +11,17 @@ export async function POST(req, { params }) {
 
     const { id } = await params;
 
-    // Resolve user.id — JWT usually carries it, but fall back to DB lookup
-    let userId = user.id ? Number(user.id) : null;
-    if (!userId) {
+    // Resolve user.id — the JWT's `sub` claim is the primary source, but we
+    // ALWAYS cross-check against the DB by email. Rationale: if a stale token
+    // was issued before a members table re-seed, the sub claim can point at a
+    // deleted or reassigned id. Trusting the DB id here means the ack lands on
+    // the row the UI will later compare against — no silent mismatches.
+    let userId = null;
+    if (user.email) {
       const r = await query('SELECT id FROM members WHERE LOWER(email) = LOWER($1) LIMIT 1', [user.email]);
       userId = r.rows[0]?.id || null;
     }
+    if (!userId && user.id) userId = Number(user.id); // final fallback to JWT
     if (!userId) {
       return NextResponse.json({ error: 'Could not resolve user id' }, { status: 400 });
     }
@@ -38,7 +43,10 @@ export async function POST(req, { params }) {
     );
     const acks = acksResult.rows[0]?.user_ids?.map(Number) || [];
 
-    return NextResponse.json({ ok: true, acks });
+    // Return the resolved userId as well — the frontend can then use this
+    // canonical id to update its local popup-dismiss state without relying on
+    // the (possibly stale) id it had in memory. Fixes popup-reappearing bug.
+    return NextResponse.json({ ok: true, acks, userId });
   } catch (err) {
     console.error('[announcements/read]', err.message);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });

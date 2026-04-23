@@ -8,7 +8,7 @@ import { INITIAL_ACTIVITY, INITIAL_NOTES } from './data/tasks';
 import { FEED_EVENTS } from './data/feed';
 import { ALL_AGENT_IDS, matchesAudience } from './data/comms';
 import { useAnnouncements } from './hooks/useAnnouncements';
-import { useAnnouncementRequests } from './hooks/useAnnouncementRequests';
+import { useAnnouncementRequests, AnnouncementRequestsProvider } from './hooks/useAnnouncementRequests';
 import { useQueueSync } from './hooks/useQueueSync';
 import { DEFAULT_SETTINGS } from './data/settings';
 import { DEFAULT_ACCESS_TYPES } from './data/accessControl';
@@ -111,17 +111,35 @@ const App=()=>{
   });
 
   const [user,setUser]=useState(()=>{
-    // Restore user from stored email — check MEMBERS first, then JWT token
+    // Restore user from stored email — check MEMBERS first, then JWT token.
+    //
+    // IMPORTANT: the JWT's `sub` claim carries the DB `members.id`, which is
+    // what the server uses as the canonical user id on every authenticated
+    // endpoint (incl. announcement_acks.user_id). The static MEMBERS array is
+    // indexed by array position (id = i + 1), which *usually* matches the DB
+    // but can drift if the DB was seeded with a different roster ordering or
+    // members were added/removed via the API. When that drift happens, `acks`
+    // stored server-side never match the id the frontend compares against, so
+    // popups re-appear forever and the ack tracker shows the user as pending
+    // even after they clicked acknowledge. Fix: always prefer the JWT-derived
+    // id over the static array id.
     if(loggedInEmail){
-      const m=MEMBERS.find(mm=>mm.email.toLowerCase()===loggedInEmail.toLowerCase());
-      if(m) return m;
-      // User not in hardcoded MEMBERS but has a stored session — create placeholder
-      // Session revalidation useEffect will replace this with server data
+      let tokenId = null;
       const token = typeof window !== 'undefined' ? localStorage.getItem('ops_hub_token') : null;
       if(token){
         try{
           const payload = JSON.parse(atob(token.split('.')[1]));
-          return { id: payload.sub||0, email: payload.email||loggedInEmail, name: payload.name||loggedInEmail.split('@')[0], role: payload.role||'member', team:'JTK', initials:(payload.name||loggedInEmail.split('@')[0]).split(' ').map(w=>w[0]?.toUpperCase()).slice(0,2).join('') };
+          if (payload?.sub) tokenId = Number(payload.sub);
+        }catch(e){ /* token unparseable — will fall through */ }
+      }
+      const m=MEMBERS.find(mm=>mm.email.toLowerCase()===loggedInEmail.toLowerCase());
+      if(m) return tokenId ? { ...m, id: tokenId } : m;
+      // User not in hardcoded MEMBERS but has a stored session — create placeholder
+      // Session revalidation useEffect will replace this with server data
+      if(token){
+        try{
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          return { id: Number(payload.sub)||0, email: payload.email||loggedInEmail, name: payload.name||loggedInEmail.split('@')[0], role: payload.role||'member', team:'JTK', initials:(payload.name||loggedInEmail.split('@')[0]).split(' ').map(w=>w[0]?.toUpperCase()).slice(0,2).join('') };
         }catch(e){}
       }
     }
@@ -162,7 +180,7 @@ const App=()=>{
     {id:'ESC-SEED-002',task:null,taskId:null,reason:'Client reporting incorrect salary calculation for March payroll — urgent correction needed before end of day',subject:'Payroll discrepancy — March salary',escalatedBy:'James Okafor',escalatedAt:'11:42',managerId:3,managerName:'Omar Khalil',status:'resolved',managerResponseStatus:'responded',managerResponse:'Payroll team notified, correction processing.',managerRespondedAt:'12:10',managerRespondedBy:'Omar Khalil',escalationSource:'slack',slackChannel:'#hr-urgent',slackUser:'@james.okafor',slackMessageUrl:null},
     {id:'ESC-SEED-003',task:null,taskId:null,reason:'Worker contract termination requires legal sign-off but legal team unresponsive for 48h',subject:'Contract termination — legal sign-off',escalatedBy:'Priya Nair',escalatedAt:'14:05',managerId:3,managerName:'Omar Khalil',status:'pending',managerResponseStatus:'pending_response',managerResponse:null,managerRespondedAt:null,managerRespondedBy:null,escalationSource:'manual',slackChannel:null,slackUser:null,slackMessageUrl:null},
   ]);
-  const { comms, setComms, refresh: apiRefreshAnnouncements, acknowledge: apiAcknowledge, create: apiCreate, send: apiSend, update: apiUpdate, archive: apiArchive, remove: apiRemove, togglePin: apiTogglePin, isOnline: apiOnline, unarchive: apiUnarchive, comments: apiComments, setComments: apiSetComments, loadComments: apiLoadComments, addComment: apiAddCommentFn, deleteComment: apiDeleteCommentFn, links: apiLinks, loadLinks: apiLoadLinks, linkAnnouncement: apiLinkAnnouncementFn, unlinkAnnouncement: apiUnlinkAnnouncementFn, react: apiReactFn } = useAnnouncements();
+  const { comms, setComms, refresh: apiRefreshAnnouncements, acknowledge: apiAcknowledge, create: apiCreate, send: apiSend, update: apiUpdate, archive: apiArchive, remove: apiRemove, togglePin: apiTogglePin, isOnline: apiOnline, serverUserId: apiServerUserId, unarchive: apiUnarchive, comments: apiComments, setComments: apiSetComments, loadComments: apiLoadComments, addComment: apiAddCommentFn, deleteComment: apiDeleteCommentFn, links: apiLinks, loadLinks: apiLoadLinks, linkAnnouncement: apiLinkAnnouncementFn, unlinkAnnouncement: apiUnlinkAnnouncementFn, react: apiReactFn } = useAnnouncements();
   // Approval-queue pending count for the nav badge. Backend scopes the list
   // automatically: approvers see the full queue, everyone else sees only their
   // own submissions. Counting pending+needs_info gives the right badge for both.
@@ -230,7 +248,13 @@ const App=()=>{
       apiFetchMe()
         .then((serverUser) => {
           if (serverUser?.email) {
-            const member = MEMBERS.find(m => m.email.toLowerCase() === serverUser.email.toLowerCase()) || serverUser;
+            // Prefer the server's authoritative id (from members table) so the
+            // frontend's user.id always matches what's stored in
+            // announcement_acks.user_id. See the user-init comment above.
+            const staticMember = MEMBERS.find(m => m.email.toLowerCase() === serverUser.email.toLowerCase());
+            const member = staticMember
+              ? { ...staticMember, id: serverUser.id || staticMember.id }
+              : serverUser;
             setUser(member);
           }
         })
@@ -268,7 +292,14 @@ const App=()=>{
     localStorage.setItem('ops_hub_token', res.token);
     localStorage.setItem('ops_hub_token_ts', String(Date.now()));
     const userEmail = res.user?.email || email;
-    const member = MEMBERS.find(m => m.email.toLowerCase() === userEmail.toLowerCase()) || res.user;
+    // Always take the DB id from the login response — the JWT is signed with
+    // this same id (sub claim), and every server-side endpoint uses it as the
+    // canonical user reference (announcement_acks, author_id, escalated_by…).
+    // Falling back to MEMBERS.id silently breaks popup acks when the two drift.
+    const staticMember = MEMBERS.find(m => m.email.toLowerCase() === userEmail.toLowerCase());
+    const member = staticMember
+      ? { ...staticMember, id: res.user?.id || staticMember.id }
+      : res.user;
     if (member) {
       setUser(member);
       setLoggedInEmail(userEmail);
@@ -876,21 +907,41 @@ const App=()=>{
   // ── Popup queue — derived from comms, minus dismissed ones ──────────────
   // Uses the canonical audience matcher so NAM/LATAM/AMERICAS/global and
   // dual-region members resolve correctly.
+  //
+  // Ack matching: we check BOTH user.id (local) and apiServerUserId (canonical
+  // DB id from the server). This makes the popup dismiss reliably even when
+  // the two ids don't match — which can happen if the static MEMBERS roster
+  // drifts from the DB's members table.
   const popupQueue=React.useMemo(()=>{
     if(!user)return [];
-    const uid=Number(user.id);
+    const localUid=Number(user.id);
+    const serverUid=apiServerUserId?Number(apiServerUserId):null;
+    const isAckedByMe=(c)=>{
+      if (!Array.isArray(c.acks)) return false;
+      if (localUid && c.acks.includes(localUid)) return true;
+      if (serverUid && c.acks.includes(serverUid)) return true;
+      return false;
+    };
     const targetMatch=(c)=>{
       if(Array.isArray(c.target)&&c.target.includes(user.id))return true;
       return matchesAudience(c.target, user.team);
     };
     return comms.filter(c=>
-      c.isPopup&&c.status==='sent'&&!c.acks.includes(uid)&&!dismissedPopups.includes(c.id)&&(targetMatch(c)||(c.author&&c.author.id===user.id))
+      c.isPopup&&c.status==='sent'&&!isAckedByMe(c)&&!dismissedPopups.includes(c.id)&&(targetMatch(c)||(c.author&&c.author.id===user.id))
     );
-  },[comms,user,dismissedPopups]);
+  },[comms,user,dismissedPopups,apiServerUserId]);
 
   const handlePopupAcknowledge=useCallback((commId)=>{
-    // Immediately dismiss from popup queue + acknowledge in state/API
-    setDismissedPopups(prev=>[...prev,commId]);
+    // Immediately dismiss from popup queue + acknowledge in state/API.
+    // Also persist to localStorage so even if the server call fails silently
+    // the popup doesn't reappear after refresh (apiAcknowledge itself queues
+    // retries — this is belt-and-braces for the UX).
+    setDismissedPopups(prev=>{
+      if (prev.includes(commId)) return prev;
+      const next = [...prev, commId];
+      try { localStorage.setItem('ops_hub_dismissed_popups', JSON.stringify(next)); } catch(e){}
+      return next;
+    });
     apiAcknowledge(commId, user.id);
   },[user, apiAcknowledge]);
 
@@ -998,7 +1049,7 @@ const App=()=>{
           {view==='team'          &&perms?.canView('team')!==false         &&<div className="page-enter"><Team user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setTask={setSelTask} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
           {view==='analytics'     &&isOwner&&perms?.canView('analytics')!==false    &&<div className="page-enter"><Analytics tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} currentUser={effectiveUser} subFilter={subFilter} escalations={scopedEscalations}/></div>}
           {view==='escalations'   &&isOwner&&perms?.canView('escalations')!==false  &&<div className="page-enter"><EscalationsView escalations={scopedEscalations} setEscalations={setEscalations} currentUser={effectiveUser} onNewEscalation={()=>setCreateEscalModal(true)}/></div>}
-          {view==='announcements' &&perms?.canView('announcements')!==false&&<div className="page-enter"><AnnouncementsView user={effectiveUser} comms={comms} setComms={setComms} addToast={addToast} tasks={tasks} apiAcknowledge={apiAcknowledge} apiCreate={apiCreate} apiSend={apiSend} apiUpdate={apiUpdate} apiArchive={apiArchive} apiRemove={apiRemove} apiTogglePin={apiTogglePin} openCompose={announceCompose} onComposeOpened={()=>setAnnounceCompose(false)} apiUnarchive={apiUnarchive} apiComments={apiComments} apiSetComments={apiSetComments} apiLoadComments={apiLoadComments} apiAddComment={apiAddCommentFn} apiDeleteComment={apiDeleteCommentFn} apiLinks={apiLinks} apiLoadLinks={apiLoadLinks} apiLinkAnnouncement={apiLinkAnnouncementFn} apiUnlinkAnnouncement={apiUnlinkAnnouncementFn} apiReact={apiReactFn}/></div>}
+          {view==='announcements' &&perms?.canView('announcements')!==false&&<div className="page-enter"><AnnouncementsView user={effectiveUser} serverUserId={apiServerUserId} comms={comms} setComms={setComms} addToast={addToast} tasks={tasks} apiAcknowledge={apiAcknowledge} apiCreate={apiCreate} apiSend={apiSend} apiUpdate={apiUpdate} apiArchive={apiArchive} apiRemove={apiRemove} apiTogglePin={apiTogglePin} openCompose={announceCompose} onComposeOpened={()=>setAnnounceCompose(false)} apiUnarchive={apiUnarchive} apiComments={apiComments} apiSetComments={apiSetComments} apiLoadComments={apiLoadComments} apiAddComment={apiAddCommentFn} apiDeleteComment={apiDeleteCommentFn} apiLinks={apiLinks} apiLoadLinks={apiLoadLinks} apiLinkAnnouncement={apiLinkAnnouncementFn} apiUnlinkAnnouncement={apiUnlinkAnnouncementFn} apiReact={apiReactFn}/></div>}
           {view==='approval-queue' &&<div className="page-enter"><ApprovalQueueView user={effectiveUser} addToast={addToast}/></div>}
           {view==='calendar'      &&isOwner&&perms?.canView('calendar')!==false     &&<div className="page-enter"><CalendarView user={effectiveUser} addToast={addToast} setView={setView}/></div>}
           {view==='knowledge-hub' &&isOwner&&perms?.canView('knowledge-hub')!==false&&<div className="page-enter"><KnowledgeHub subFilter={subFilter} user={effectiveUser}/></div>}
@@ -1027,4 +1078,15 @@ const App=()=>{
   );
 };
 
-export default App;
+// Top-level wrapper — keeps the approval-queue hook's polling timer & state
+// shared across every view that mounts a consumer. Previously each of App,
+// AnnouncementsView and ApprovalQueueView instantiated the hook independently,
+// triggering 3x polling and noticeable lag after an approve/reject action
+// while the other views re-fetched. One provider = one source of truth.
+const AppRoot = () => (
+  <AnnouncementRequestsProvider>
+    <App />
+  </AnnouncementRequestsProvider>
+);
+
+export default AppRoot;
