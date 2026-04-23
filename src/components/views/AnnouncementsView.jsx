@@ -9,6 +9,8 @@ import ComposeModal from '../modals/ComposeModal';
 import AnnouncementPopup from '../modals/AnnouncementPopup';
 import { isApprover } from '../../data/approvers';
 import { createRequest as apiCreateRequest } from '../../services/announcementRequestsApi';
+import { useAnnouncementRequests } from '../../hooks/useAnnouncementRequests';
+import ApprovalQueueView from './ApprovalQueueView';
 
 /*
   Announcements — clean table view.
@@ -28,6 +30,16 @@ const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowle
   const [filter,setFilter]=useState('all');
   const [showCompose,setShowCompose]=useState(false);
   const [editDraft,setEditDraft]=useState(null);
+
+  // ── Announcement requests (for the "Pending Approval" tab + badge) ─────
+  // Backend auto-scopes: approvers see the whole queue, requesters see only
+  // their own submissions. We just count pending+needs_info for the tab badge.
+  const { items: pendingApprovalItems } = useAnnouncementRequests();
+  const pendingApprovalCount = useMemo(() => (
+    Array.isArray(pendingApprovalItems)
+      ? pendingApprovalItems.filter(r => r?.status === 'pending' || r?.status === 'needs_info').length
+      : 0
+  ), [pendingApprovalItems]);
 
   // Auto-open compose when triggered from top nav (any user — non-approvers
   // get routed through the approval queue on submit)
@@ -176,6 +188,9 @@ const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowle
 
   const PRIO_COLORS={high:'#d42d35',medium:'#ed8d00',low:'#29811e',critical:'#d42d35'};
 
+  // Approval queue tab — label adapts to role. Approvers see org-wide queue,
+  // requesters see only their own submissions (backend auto-scopes).
+  const approvalTabLabel = isApproverUser ? 'Pending Approval' : 'My Requests';
   const FILTERS=[
     {id:'all',label:'All',icon:'bi-grid'},
     ...(enabledTypes.alert!==false?[{id:'alert',label:'Alerts',icon:'bi-exclamation-triangle-fill'}]:[]),
@@ -183,6 +198,9 @@ const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowle
     ...(enabledTypes.update!==false?[{id:'update',label:'Updates',icon:'bi-arrow-up-circle-fill'}]:[]),
     ...(enabledTypes.guidance!==false?[{id:'guidance',label:'Guidance',icon:'bi-book-half'}]:[]),
     ...(enabledTypes.kudos!==false?[{id:'kudos',label:'Kudos',icon:'bi-trophy-fill'}]:[]),
+    // Pending Approval lives in-tab so users don't have to context-switch to
+    // see or action requests. Visible to everyone.
+    {id:'pending-approval',label:approvalTabLabel,icon:'bi-clipboard-check',highlight:true},
     ...(isLA&&settings.comms_show_drafts_tab!==false?[{id:'drafts',label:'Drafts',icon:'bi-pencil'}]:[]),
     ...(isLA?[{id:'archived',label:'Archived',icon:'bi-archive'}]:[]),
   ];
@@ -271,11 +289,24 @@ const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowle
         {/* Filter tabs */}
         <div style={{ display: 'flex', gap: 2, overflowX: 'auto' }}>
           {FILTERS.map(f => {
-            const ct = f.id === 'all' ? visible.length : f.id === 'drafts' ? comms.filter(c => c.status === 'draft').length : f.id === 'archived' ? comms.filter(c => c.status === 'archived').length : comms.filter(c => c.type === f.id && c.status === 'sent').length;
+            let ct;
+            if (f.id === 'all') ct = visible.length;
+            else if (f.id === 'drafts') ct = comms.filter(c => c.status === 'draft').length;
+            else if (f.id === 'archived') ct = comms.filter(c => c.status === 'archived').length;
+            else if (f.id === 'pending-approval') ct = pendingApprovalCount;
+            else ct = comms.filter(c => c.type === f.id && c.status === 'sent').length;
+            const isPendingTab = f.id === 'pending-approval';
+            // Pending-Approval tab gets a red badge (urgency cue) when count > 0.
+            const badgeBg = isPendingTab && ct > 0
+              ? '#fce8ea'
+              : filter === f.id ? 'rgba(107,63,160,0.15)' : '#f2f2f2';
+            const badgeColor = isPendingTab && ct > 0
+              ? '#d42d35'
+              : filter === f.id ? '#6b3fa0' : '#616161';
             return (
               <button key={f.id} onClick={() => setFilter(f.id)} style={tabBtnStyle(filter === f.id)}>
                 <i className={f.icon} style={{ fontSize: 11 }}></i>{f.label}
-                {ct > 0 && <span style={{ background: filter === f.id ? 'rgba(107,63,160,0.15)' : '#f2f2f2', color: filter === f.id ? '#6b3fa0' : '#616161', borderRadius: 128, padding: '1px 7px', fontSize: 10, fontWeight: 700 }}>{ct}</span>}
+                {ct > 0 && <span style={{ background: badgeBg, color: badgeColor, borderRadius: 128, padding: '1px 7px', fontSize: 10, fontWeight: 700 }}>{ct}</span>}
               </button>
             );
           })}
@@ -284,7 +315,9 @@ const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowle
 
       {/* ── Table ── */}
       <div style={{ flex: 1, overflowY: 'auto', background: '#fafaf9' }}>
-        {visible.length === 0 ? (
+        {filter === 'pending-approval' ? (
+          <ApprovalQueueView user={user} addToast={addToast} embedded />
+        ) : visible.length === 0 ? (
           <EmptyState icon="bi-inbox" title="No announcements" subtitle="All clear!" />
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
