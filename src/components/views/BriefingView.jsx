@@ -144,6 +144,17 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const inScope = useCallback(t => {
     if (scopeIds.includes(t.assigneeId)) return true;
     if (t.assigneeEmail && visibleEmails.has(t.assigneeEmail.toLowerCase())) return true;
+    // Jira-specific: a user is "actionable" on a ticket if they're the
+    // assignee OR the HRX Responsible. Reporter-only visibility is
+    // intentionally NOT counted here — per Ljubica's 2026-04-23 ask, Home
+    // task counts should reflect actionables only (not tickets the user
+    // merely raised). Reporter-only tickets remain reachable in the Queue's
+    // "Raised by You" filter.
+    if (t.source === 'jira' && Array.isArray(t.jiraHrxEmails)) {
+      for (const e of t.jiraHrxEmails) {
+        if (e && visibleEmails.has(e.toLowerCase())) return true;
+      }
+    }
     return false;
   }, [scopeIds, visibleEmails]);
   const scope=tasks.filter(t=>inScope(t)&&t.status!=='resolved');
