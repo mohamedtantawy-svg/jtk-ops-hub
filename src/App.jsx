@@ -56,14 +56,27 @@ const QUEUE_STORAGE_KEYS = [
 
 function clearQueueCaches() {
   try {
+    // Remove the legacy (unscoped) base keys first so a user upgrading from a
+    // pre-user-scoped build doesn't inherit their old contents.
     for (const k of QUEUE_STORAGE_KEYS) localStorage.removeItem(k);
-    // Remove any leftover per-user OOO / mutation keys for ANY user since
-    // logout doesn't always know who we were signed in as.
+    // Remove all user-scoped per-source caches (format: `${base}:${email}`),
+    // any OOO keys, and any per-user mutation keys. Scans the whole
+    // localStorage once so we don't need to know which users were ever
+    // signed in on this browser.
     const toRemove = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      if (k && (k.startsWith('ops_hub_queuev2_ooo_') || k.startsWith('ops_hub_queue_mutations:'))) {
+      if (!k) continue;
+      if (k.startsWith('ops_hub_queuev2_ooo_') || k.startsWith('ops_hub_queue_mutations:')) {
         toRemove.push(k);
+        continue;
+      }
+      // User-scoped cache variants of every base key in QUEUE_STORAGE_KEYS.
+      for (const base of QUEUE_STORAGE_KEYS) {
+        if (k.startsWith(`${base}:`)) {
+          toRemove.push(k);
+          break;
+        }
       }
     }
     for (const k of toRemove) localStorage.removeItem(k);

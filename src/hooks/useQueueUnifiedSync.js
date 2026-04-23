@@ -27,12 +27,16 @@ function isoToMs(iso) {
   return Number.isFinite(t) ? t : null;
 }
 
-export function useQueueUnifiedSync({ queueSync, enabled = true } = {}) {
-  const onboardingData = useOnboardingData(enabled);
-  const pausedOnboardingData = usePausedOnboardingData(enabled);
-  const offboardingData = useOffboardingData(enabled);
-  const changeRequestData = useChangeRequestData(enabled);
-  const workbenchData = useWorkbenchData(enabled);
+export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = null } = {}) {
+  // Plumb the signed-in user's email into every source hook so each one can
+  // namespace its localStorage cache per-user (prevents cross-user bleed-
+  // through when multiple people sign into the same browser) and reject
+  // BroadcastChannel messages from other users on the same machine.
+  const onboardingData = useOnboardingData(enabled, userEmail);
+  const pausedOnboardingData = usePausedOnboardingData(enabled, userEmail);
+  const offboardingData = useOffboardingData(enabled, userEmail);
+  const changeRequestData = useChangeRequestData(enabled, userEmail);
+  const workbenchData = useWorkbenchData(enabled, userEmail);
 
   // ── Shared "now" tick — one 30s timer powers every "X min ago" label ─────
   // Pauses while the tab is hidden so we don't wake the CPU for nothing;

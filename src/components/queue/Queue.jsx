@@ -148,7 +148,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   const { queueSync } = useContext(IntegrationsContext);
   // Unified sync aggregator — one source of truth for all Deel feeds + tickets.
   // Exposes per-source refresh() (for row-level retries) alongside refreshAll().
-  const unified = useQueueUnifiedSync({ queueSync, enabled: !!user });
+  const unified = useQueueUnifiedSync({ queueSync, enabled: !!user, userEmail: user?.email || null });
   const {
     onboardingData, pausedOnboardingData, offboardingData,
     changeRequestData, workbenchData,
