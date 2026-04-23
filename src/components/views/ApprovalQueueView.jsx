@@ -71,7 +71,10 @@ const ACTION_LABELS = {
   published:       'published',
 };
 
-const ApprovalQueueView = ({ user, addToast }) => {
+// `embedded` mode strips the outer page chrome (padding + big title) so this
+// view can be rendered inside another view (e.g. AnnouncementsView's
+// "Pending Approval" tab) without duplicating headers.
+const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
   const {
     items, canApprove, loading, refresh,
     fetchDetail, approve, reject, askClarification, withdraw, addComment,
@@ -219,21 +222,26 @@ const ApprovalQueueView = ({ user, addToast }) => {
   if (!user) return null;
 
   return (
-    <div style={{ padding: 24, width: '100%', maxWidth: 1280, margin: '0 auto' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.02em', margin: 0 }}>Announcement requests</h1>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-            {isApproverUser
-              ? 'Review, approve, or reject announcements before they publish.'
-              : 'Track your submitted announcement requests.'}
+    <div style={embedded
+      ? { padding: '12px 24px 24px', width: '100%' }
+      : { padding: 24, width: '100%', maxWidth: 1280, margin: '0 auto' }
+    }>
+      {/* Header — hidden in embedded mode since the host view already has one */}
+      {!embedded && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <div>
+            <h1 style={{ fontSize: 22, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.02em', margin: 0 }}>Announcement requests</h1>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+              {isApproverUser
+                ? 'Review, approve, or reject announcements before they publish.'
+                : 'Track your submitted announcement requests.'}
+            </div>
           </div>
+          <button onClick={refresh} style={{ padding: '6px 12px', fontSize: 12, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-pill)', color: 'var(--text)', cursor: 'pointer' }}>
+            <i className="bi-arrow-clockwise" style={{ marginRight: 4 }}></i> Refresh
+          </button>
         </div>
-        <button onClick={refresh} style={{ padding: '6px 12px', fontSize: 12, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-pill)', color: 'var(--text)', cursor: 'pointer' }}>
-          <i className="bi-arrow-clockwise" style={{ marginRight: 4 }}></i> Refresh
-        </button>
-      </div>
+      )}
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)', marginBottom: 12 }}>
