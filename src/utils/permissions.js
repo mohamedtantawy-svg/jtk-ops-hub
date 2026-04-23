@@ -97,9 +97,25 @@ export const scopeEscalations = (escalations, user, accessType, allMembers) => {
 //   admin / regional_manager → full roster (everyone in the audience)
 //   team_lead                → self + direct reports only
 //   agent                    → self only
+//
+// Special case: if `announcement` is passed and the caller authored the
+// announcement, they always see the full roster — a sender needs visibility
+// into delivery regardless of their own scope.
+//
 // The set is reduced AFTER the audience filter runs.
-export const scopeAckMembers = (members, user, accessType) => {
+export const scopeAckMembers = (members, user, accessType, announcement) => {
   if (!Array.isArray(members)) return [];
+  // Sender override: whoever created / requested the announcement always
+  // sees everyone, so delivery numbers are accurate for them.
+  if (announcement && user) {
+    const authorId = announcement.author?.id ?? announcement.authorId ?? null;
+    const authorEmailLc = String(announcement.author?.email || announcement.authorEmail || announcement.requestedByEmail || '').toLowerCase();
+    const selfEmailLc = String(user.email || '').toLowerCase();
+    const selfId = user.id != null ? Number(user.id) : null;
+    if ((authorId != null && selfId === Number(authorId)) || (authorEmailLc && authorEmailLc === selfEmailLc)) {
+      return members;
+    }
+  }
   const scope = getDataScope(accessType);
   if (scope === 'all_tasks' || scope === 'regional_tasks') return members;
   const email = (user?.email || '').toLowerCase();

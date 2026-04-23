@@ -78,6 +78,7 @@ import Team from './components/views/Team';
 import Analytics from './components/views/Analytics';
 import EscalationsView from './components/views/EscalationsView';
 import AnnouncementsView from './components/views/AnnouncementsView';
+import ApprovalQueueView from './components/views/ApprovalQueueView';
 import CalendarView from './components/views/CalendarView';
 import KnowledgeHub from './components/views/KnowledgeHub';
 import GMReportingView from './components/views/GMReportingView';
@@ -138,7 +139,7 @@ const App=()=>{
   // Remove this + the `restrictToEmail` props in DeelTopNav when the app ships.
   const OWNER_EMAIL = 'mohamed.tantawy@deel.com';
   const RESTRICTED_VIEWS = React.useMemo(() => new Set([
-    'projects', 'hr-reports', 'announcements',
+    'projects', 'hr-reports',
     'calendar', 'knowledge-hub', 'analytics',
     'escalations',
   ]), []);
@@ -985,7 +986,8 @@ const App=()=>{
           {view==='team'          &&perms?.canView('team')!==false         &&<div className="page-enter"><Team user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setTask={setSelTask} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
           {view==='analytics'     &&isOwner&&perms?.canView('analytics')!==false    &&<div className="page-enter"><Analytics tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} currentUser={effectiveUser} subFilter={subFilter} escalations={scopedEscalations}/></div>}
           {view==='escalations'   &&isOwner&&perms?.canView('escalations')!==false  &&<div className="page-enter"><EscalationsView escalations={scopedEscalations} setEscalations={setEscalations} currentUser={effectiveUser} onNewEscalation={()=>setCreateEscalModal(true)}/></div>}
-          {view==='announcements' &&isOwner&&perms?.canView('announcements')!==false&&<div className="page-enter"><AnnouncementsView user={effectiveUser} comms={comms} setComms={setComms} addToast={addToast} tasks={tasks} apiAcknowledge={apiAcknowledge} apiCreate={apiCreate} apiSend={apiSend} apiUpdate={apiUpdate} apiArchive={apiArchive} apiRemove={apiRemove} apiTogglePin={apiTogglePin} openCompose={announceCompose} onComposeOpened={()=>setAnnounceCompose(false)} apiUnarchive={apiUnarchive} apiComments={apiComments} apiSetComments={apiSetComments} apiLoadComments={apiLoadComments} apiAddComment={apiAddCommentFn} apiDeleteComment={apiDeleteCommentFn} apiLinks={apiLinks} apiLoadLinks={apiLoadLinks} apiLinkAnnouncement={apiLinkAnnouncementFn} apiUnlinkAnnouncement={apiUnlinkAnnouncementFn} apiReact={apiReactFn}/></div>}
+          {view==='announcements' &&perms?.canView('announcements')!==false&&<div className="page-enter"><AnnouncementsView user={effectiveUser} comms={comms} setComms={setComms} addToast={addToast} tasks={tasks} apiAcknowledge={apiAcknowledge} apiCreate={apiCreate} apiSend={apiSend} apiUpdate={apiUpdate} apiArchive={apiArchive} apiRemove={apiRemove} apiTogglePin={apiTogglePin} openCompose={announceCompose} onComposeOpened={()=>setAnnounceCompose(false)} apiUnarchive={apiUnarchive} apiComments={apiComments} apiSetComments={apiSetComments} apiLoadComments={apiLoadComments} apiAddComment={apiAddCommentFn} apiDeleteComment={apiDeleteCommentFn} apiLinks={apiLinks} apiLoadLinks={apiLoadLinks} apiLinkAnnouncement={apiLinkAnnouncementFn} apiUnlinkAnnouncement={apiUnlinkAnnouncementFn} apiReact={apiReactFn}/></div>}
+          {view==='approval-queue' &&<div className="page-enter"><ApprovalQueueView user={effectiveUser} addToast={addToast}/></div>}
           {view==='calendar'      &&isOwner&&perms?.canView('calendar')!==false     &&<div className="page-enter"><CalendarView user={effectiveUser} addToast={addToast} setView={setView}/></div>}
           {view==='knowledge-hub' &&isOwner&&perms?.canView('knowledge-hub')!==false&&<div className="page-enter"><KnowledgeHub subFilter={subFilter} user={effectiveUser}/></div>}
           {view==='hr-reports'    &&isOwner&&perms?.canView('hr-reports')!==false   &&<div className="page-enter"><GMReportingView user={effectiveUser} addToast={addToast} createReportModal={createReportModal} setCreateReportModal={setCreateReportModal}/></div>}

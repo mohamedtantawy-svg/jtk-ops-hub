@@ -58,6 +58,8 @@ export function useAnnouncements() {
 
   // Track the token so we re-fetch after logout → login cycles
   const lastTokenRef = useRef(null);
+  // Ref wrapper for refresh() — polling effect reads via ref to avoid re-subscribing
+  const refreshRef = useRef(null);
 
   // ── Initial load — try API, fall back to static data ─────────────────────
   useEffect(() => {
@@ -89,6 +91,28 @@ export function useAnnouncements() {
     })();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps — refs + localStorage only; runs once on mount
 
+  // ── Polling: refresh every 45 s so scheduled announcements + new pop-ups
+  // arrive promptly without a WebSocket. Only runs while the tab is visible.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const POLL_MS = 45_000;
+    let timer = null;
+    const kick = () => {
+      if (document.visibilityState !== 'visible') return;
+      const hasToken = !!localStorage.getItem('ops_hub_token');
+      if (!hasToken) return;
+      // Use the latest refresh() ref value without capturing it (avoid loops)
+      refreshRef.current?.();
+    };
+    timer = setInterval(kick, POLL_MS);
+    const onVis = () => { if (document.visibilityState === 'visible') kick(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVis);
+    };
+  }, []);
+
   // ── Refresh from API ─────────────────────────────────────────────────────
   // Server is the source of truth for acks now (announcement_acks table),
   // so we replace rather than union with stale local state.
@@ -112,6 +136,9 @@ export function useAnnouncements() {
       setIsOnline(false);
     }
   }, []);
+
+  // Keep the ref in sync so polling always calls the current refresh()
+  useEffect(() => { refreshRef.current = refresh; }, [refresh]);
 
   // ── Create ───────────────────────────────────────────────────────────────
   // Always attempt the API call (don't gate on isOnline — it may be stale).

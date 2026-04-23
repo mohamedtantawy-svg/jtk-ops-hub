@@ -1,0 +1,170 @@
+// ---------------------------------------------------------------------------
+// Announcement flow helpers — shared between the publish endpoint and the
+// approval-queue endpoints. Keeps publishing rules in a single place.
+// ---------------------------------------------------------------------------
+import { query } from './db';
+
+export const VALID_TARGETS = ['all', 'global', 'emea', 'apac', 'americas', 'nam', 'latam'];
+export const VALID_TYPES = ['announce', 'kudos', 'info', 'general', 'alert'];
+
+// Publishing rate limits
+export const MAX_PUBLISHED_PER_DAY = 2;
+export const MIN_GAP_HOURS = 4;
+
+/**
+ * Check whether publishing `at` (Date) would violate rate limits.
+ * Counts 'sent' and 'scheduled' announcements whose effective publish time
+ * falls within the last 24h. Returns { ok, reason } — reason is a
+ * human-readable string suitable for surfacing to approvers in the UI.
+ */
+export async function checkPublishingRules(at) {
+  const target = at instanceof Date ? at : new Date(at);
+  if (Number.isNaN(target.getTime())) {
+    return { ok: false, reason: 'Invalid publish time' };
+  }
+
+  // Count published + scheduled announcements whose effective publish time
+  // is within a rolling 24h window centred on the candidate time. We count
+  // both past (sent) and future (scheduled) to avoid double-booking a day.
+  const { rows: dayRows } = await query(
+    `SELECT COUNT(*)::int AS n
+       FROM announcements
+      WHERE status IN ('sent', 'scheduled')
+        AND COALESCE(sent_at, scheduled_for) >= $1::timestamptz - interval '24 hours'
+        AND COALESCE(sent_at, scheduled_for) <= $1::timestamptz + interval '24 hours'`,
+    [target.toISOString()]
+  );
+  const perDay = dayRows[0]?.n || 0;
+  if (perDay >= MAX_PUBLISHED_PER_DAY) {
+    return {
+      ok: false,
+      reason: `Daily limit reached: ${MAX_PUBLISHED_PER_DAY} announcements already within 24 h of that time.`,
+    };
+  }
+
+  // Nearest neighbour — either past sent_at or future scheduled_for
+  const { rows: gapRows } = await query(
+    `SELECT ABS(EXTRACT(EPOCH FROM (COALESCE(sent_at, scheduled_for) - $1::timestamptz))) AS secs
+       FROM announcements
+      WHERE status IN ('sent', 'scheduled')
+        AND COALESCE(sent_at, scheduled_for) IS NOT NULL
+      ORDER BY secs ASC
+      LIMIT 1`,
+    [target.toISOString()]
+  );
+  const nearestSecs = gapRows[0] ? Number(gapRows[0].secs) : Infinity;
+  if (nearestSecs < MIN_GAP_HOURS * 3600) {
+    const hours = (nearestSecs / 3600).toFixed(1);
+    return {
+      ok: false,
+      reason: `Too close to another announcement (${hours} h away). Minimum gap is ${MIN_GAP_HOURS} h.`,
+    };
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Insert a row into the request audit log. Non-throwing — audit failures
+ * must never block the main action.
+ */
+export async function recordAudit(requestId, user, action, meta = {}) {
+  try {
+    await query(
+      `INSERT INTO announcement_request_audit
+         (request_id, actor_id, actor_email, actor_name, action, meta)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+      [
+        requestId,
+        user?.id || null,
+        user?.email || null,
+        user?.name || null,
+        action,
+        JSON.stringify(meta || {}),
+      ]
+    );
+  } catch (err) {
+    console.error('[announcementFlow.recordAudit]', err.message);
+  }
+}
+
+/**
+ * Normalize a raw payload from a client. Returns a sanitized object or
+ * throws an Error with a human-readable message.
+ */
+export function normalizePayload(raw) {
+  const title = (raw?.title || '').toString().trim();
+  if (!title) throw new Error('Title required');
+  if (title.length > 500) throw new Error('Title too long (max 500 chars)');
+
+  const target = String(raw?.target || 'global').toLowerCase();
+  if (!VALID_TARGETS.includes(target)) {
+    throw new Error(`Invalid target. Must be one of: ${VALID_TARGETS.join(', ')}`);
+  }
+
+  return {
+    type: (raw?.type || 'announce').toString(),
+    title,
+    body: (raw?.body || '').toString(),
+    target,
+    priority: (raw?.priority || 'medium').toString(),
+    isPopup: Boolean(raw?.isPopup),
+    imageUrl: raw?.imageUrl ? String(raw.imageUrl).slice(0, 2000) : null,
+    link: raw?.link ? String(raw.link).slice(0, 2000) : null,
+    soundKey: (raw?.soundKey || 'chime').toString().slice(0, 32),
+  };
+}
+
+/**
+ * Publish a request — either immediately or scheduled for later.
+ * Returns the announcements row created. Caller is responsible for
+ * updating the request row afterwards and recording audit.
+ *
+ * Rate-limit checks happen here (skippable via urgentOverride).
+ */
+export async function publishFromRequest(request, options = {}) {
+  const sendAt = options.sendAt instanceof Date ? options.sendAt : null;
+  const urgentOverride = Boolean(options.urgentOverride);
+  const actor = options.actor || {};
+  const immediate = !sendAt || sendAt.getTime() <= Date.now();
+
+  const effective = immediate ? new Date() : sendAt;
+
+  if (!urgentOverride) {
+    const check = await checkPublishingRules(effective);
+    if (!check.ok) {
+      const err = new Error(check.reason);
+      err.code = 'RATE_LIMIT';
+      throw err;
+    }
+  }
+
+  const status = immediate ? 'sent' : 'scheduled';
+  const sent_at = immediate ? effective : null;
+  const scheduled_for = immediate ? null : effective;
+
+  const { rows } = await query(
+    `INSERT INTO announcements
+       (type, title, body, target, priority, is_popup, image_url, link,
+        author_id, sound_key, status, sent_at, scheduled_for)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+     RETURNING *`,
+    [
+      request.type || 'announce',
+      request.title,
+      request.body || '',
+      request.target || 'global',
+      request.priority || 'medium',
+      Boolean(request.is_popup),
+      request.image_url || null,
+      request.link || null,
+      // Author = the REQUESTER (per user spec: "show as the requester, not approver")
+      request.requested_by_id || actor.id || null,
+      request.sound_key || 'chime',
+      status,
+      sent_at,
+      scheduled_for,
+    ]
+  );
+  return rows[0];
+}

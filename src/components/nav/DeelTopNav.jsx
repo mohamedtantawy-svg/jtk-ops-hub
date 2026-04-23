@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useContext } from 'react';
 import { PermissionsContext } from '../../App';
 import { TEAM_MEMBERS } from '../../data/members';
+import { isApprover } from '../../data/approvers';
 import Avatar from '../ui/Avatar';
 
 // Temporary gate: these surfaces are hidden from everyone except the owner
@@ -18,7 +19,8 @@ const PRIMARY_TABS = [
   { id: 'projects',      icon: 'bi-kanban',           label: 'Projects',      restrictToEmail: OWNER_EMAIL },
   { id: 'escalations',   icon: 'bi-arrow-up-circle',  label: 'Escalations',   badge: true,                       restrictToEmail: OWNER_EMAIL },
   { id: 'hr-reports',    icon: 'bi-clipboard-data',   label: 'Reports',       restrictToEmail: OWNER_EMAIL },
-  { id: 'announcements', icon: 'bi-megaphone',        label: 'Announcements', restrictToEmail: OWNER_EMAIL },
+  { id: 'announcements', icon: 'bi-megaphone',        label: 'Announcements' },
+  { id: 'approval-queue',icon: 'bi-inbox',            label: 'Approval Queue', approverOnly: true },
   { id: 'team',          icon: 'bi-people',           label: 'Team' },
 ];
 
@@ -35,7 +37,7 @@ const CREATE_ACTIONS = [
   { icon: 'bi-plus-square',       label: 'New Task',         action: 'task',         desc: 'Create a queue task',         perm: 'can_create_task' },
   { icon: 'bi-arrow-up-circle',   label: 'New Escalation',   action: 'escalation',   desc: 'Raise an escalation',         perm: 'can_create_escalation' },
   { icon: 'bi-kanban',            label: 'New Project',      action: 'project',       desc: 'Start a project',             perm: 'can_create_project',          restrictToEmail: OWNER_EMAIL },
-  { icon: 'bi-megaphone',         label: 'New Announcement', action: 'announcement',  desc: 'Post to the team',            perm: 'can_compose_announcements',   restrictToEmail: OWNER_EMAIL },
+  { icon: 'bi-megaphone',         label: 'New Announcement', action: 'announcement',  desc: 'Post to the team' },
   { icon: 'bi-clipboard-data',    label: 'New Report',       action: 'report',        desc: 'Submit an HR report',         viewReq: 'hr-reports',               restrictToEmail: OWNER_EMAIL },
 ];
 
@@ -103,6 +105,7 @@ const DeelTopNav = ({
   const emailLc = (user?.email || '').toLowerCase();
   const tabAllowed = (t) => {
     if (t.restrictToEmail) return emailLc === t.restrictToEmail.toLowerCase();
+    if (t.approverOnly && !isApprover(user?.email)) return false;
     return !perms || perms.canView(t.id) !== false;
   };
   const visiblePrimary = PRIMARY_TABS.filter(tabAllowed);

@@ -7,6 +7,8 @@ import Avatar from '../ui/Avatar';
 import EmptyState from '../ui/EmptyState';
 import ComposeModal from '../modals/ComposeModal';
 import AnnouncementPopup from '../modals/AnnouncementPopup';
+import { isApprover } from '../../data/approvers';
+import { createRequest as apiCreateRequest } from '../../services/announcementRequestsApi';
 
 /*
   Announcements — clean table view.
@@ -16,18 +18,22 @@ import AnnouncementPopup from '../modals/AnnouncementPopup';
 const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowledge, apiCreate, apiSend, apiUpdate, apiArchive, apiRemove, apiTogglePin, openCompose, onComposeOpened, apiUnarchive, apiComments, apiSetComments, apiLoadComments, apiAddComment, apiDeleteComment, apiLinks, apiLoadLinks, apiLinkAnnouncement, apiUnlinkAnnouncement, apiReact }) => {
   const perms = useContext(PermissionsContext);
   const settings = useContext(SettingsContext);
-  const isLA = perms?.canDo('can_compose_comms')||perms?.canDo('can_compose_announcements')||false;
+  const isLA = perms?.canDo('can_compose_comms')||perms?.canDo('can_compose_announcements')||isApprover(user?.email)||false;
   const canPin = perms?.canDo('can_pin_announcement')||false;
+  // Approvers and admin-role users can send direct; everyone else submits a request.
+  const canComposeRequest = true; // any authenticated user can ASK
+  const isApproverUser = isApprover(user?.email);
 
   // ── State ──
   const [filter,setFilter]=useState('all');
   const [showCompose,setShowCompose]=useState(false);
   const [editDraft,setEditDraft]=useState(null);
 
-  // Auto-open compose when triggered from top nav
+  // Auto-open compose when triggered from top nav (any user — non-approvers
+  // get routed through the approval queue on submit)
   useEffect(()=>{
-    if(openCompose&&isLA){ setShowCompose(true); onComposeOpened?.(); }
-  },[openCompose]);
+    if(openCompose&&canComposeRequest){ setShowCompose(true); onComposeOpened?.(); }
+  },[openCompose]); // eslint-disable-line react-hooks/exhaustive-deps
   const [reminderSent,setReminderSent]=useState({});
   const [expandedAck,setExpandedAck]=useState(null); // which row has ack tracker open
   const [walkthrough,setWalkthrough]=useState(false); // popup walkthrough mode
@@ -93,9 +99,10 @@ const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowle
     if(addToast) addToast('info','Reminder Sent',`Nudge sent for: ${comm.title.slice(0,40)}`);
   };
 
-  const handleSend=async ({type,title,body,target,priority,status,isPopup,imageUrl,link,soundKey})=>{
+  const handleSend=async (payload)=>{
+    const {type,title,body,target,priority,status,isPopup,imageUrl,link,soundKey,scheduledFor,urgentOverride} = payload;
     const now=new Date().toISOString().slice(0,10);
-    const draft={type,title,body,target,priority,isPopup:isPopup||false,imageUrl:imageUrl||'',link:link||'',soundKey:soundKey||'chime',author:{id:user.id,name:user.name}};
+    const draft={type,title,body,target,priority,isPopup:isPopup||false,imageUrl:imageUrl||'',link:link||'',soundKey:soundKey||'chime',scheduledFor:scheduledFor||null,urgentOverride:urgentOverride||false,author:{id:user.id,name:user.name}};
     try {
       if(editDraft){
         if(apiUpdate) await apiUpdate(editDraft.id, draft);
@@ -107,11 +114,34 @@ const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowle
           if(status==='sent'&&created&&apiSend) await apiSend(created.id);
         }
       }
+      if(status==='sent' && addToast){
+        addToast('success', scheduledFor?'Scheduled':'Sent', scheduledFor?`Will publish at ${new Date(scheduledFor).toLocaleString()}`:'Announcement sent to recipients');
+      }
     } catch(err) {
       console.error('[announcements] handleSend failed:', err.message);
       if(addToast) addToast('error','Send Failed', err.body?.error || err.message || 'Could not save announcement. Check console.');
+      throw err;
     }
     setEditDraft(null);
+  };
+
+  // Submit for approval — used by non-approvers AND approvers who want another
+  // set of eyes on it. Always posts to the request queue; approval happens
+  // in the Approval Queue view.
+  const handleSubmitRequest=async (payload)=>{
+    const {type,title,body,target,priority,isPopup,imageUrl,link,soundKey,scheduledFor} = payload;
+    try {
+      await apiCreateRequest({
+        type,title,body,target,priority,
+        isPopup:!!isPopup,imageUrl:imageUrl||null,link:link||null,soundKey:soundKey||'chime',
+        scheduledFor: scheduledFor || null,
+      });
+      if(addToast) addToast('success','Submitted for approval','Approvers will review your request shortly');
+    } catch(err) {
+      console.error('[announcement-requests] submit failed:', err.message);
+      if(addToast) addToast('error','Submit Failed', err.body?.error || err.message || 'Could not submit request.');
+      throw err;
+    }
   };
 
   const deleteDraft=(id)=>{
@@ -133,7 +163,7 @@ const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowle
     } else {
       audienceMembers=MEMBERS.filter(m=>matchesAudience(comm.target, m.team));
     }
-    const scoped=scopeAckMembers(audienceMembers, user, accessType);
+    const scoped=scopeAckMembers(audienceMembers, user, accessType, comm);
     return scoped.map(m=>({ member:m, acked:comm.acks.includes(m.id) }));
   };
 
@@ -516,7 +546,7 @@ const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowle
         />
       )}
 
-      {showCompose && <ComposeModal onClose={() => { setShowCompose(false); setEditDraft(null); }} onSend={handleSend} draft={editDraft} currentUser={user} />}
+      {showCompose && <ComposeModal onClose={() => { setShowCompose(false); setEditDraft(null); }} onSend={handleSend} onSubmitRequest={handleSubmitRequest} draft={editDraft} currentUser={user} />}
     </div>
   );
 };
