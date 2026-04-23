@@ -391,35 +391,65 @@ async function fetchZendeskQueue() {
 // we run ONE query per role clause. Each JQL is ~3KB and fits comfortably in
 // a normal GET. fetchJiraQueue unions the per-query results and dedups by
 // issue key, so user-visible behavior is identical to a single OR.
+//
+// ── Why we ALSO chunk the email IN-list (2026-04-23) ───────────────────────
+// Previously we ran one query per role with ALL ~104 emails in a single IN
+// clause, capped at 300 issues/clause. Across 104 people that cap is far
+// below the actual volume of in-flight work, so the query truncated —
+// always dropping the oldest-`updated` tickets first. That's exactly the
+// CLIENT APPROVAL / EOR SIGNING / PRM REVIEW / "pending another team"
+// buckets (they sit stale for weeks waiting on externals), so agents like
+// Susana and Anne saw wildly under-counted queues ("84 expected, 15 shown").
+// The fix: chunk ADMIN_EMAILS_LIST into groups small enough that each
+// sub-query stays well under the 300 cap in typical team-wide volume.
+// With EMAIL_CHUNK_SIZE=20 and a 300/clause cap, each agent's 15-50
+// tickets comfortably fit whether they're freshly updated or months stale.
 const JIRA_DONE_STATUSES = [
   'Done', 'Closed', 'Resolved', 'Solved', 'Completed',
   'Cancelled', 'Canceled', 'Rejected', 'Denied', 'Withdrawn', 'Declined',
   'Won\'t Do', 'Wont Do', 'Duplicate', 'Abandoned',
 ];
 
+// Group size for chunking ADMIN_EMAILS_LIST in Jira IN-clauses. Keeps each
+// sub-query's total ticket count below MAX_ISSUES_PER_CLAUSE so stale-status
+// tickets aren't truncated by the ORDER BY updated DESC tail.
+const EMAIL_CHUNK_SIZE = 20;
+
+function chunkArray(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
 function buildJiraJqlQueries(ownerFieldIds = {}) {
-  const emailsList = ADMIN_EMAILS_LIST.map(e => `"${e}"`).join(', ');
   const doneList = JIRA_DONE_STATUSES.map(s => `"${s}"`).join(', ');
   // Also filter via resolution — many workflows mark a ticket resolved
   // without moving to a "Done" status name; using both status+resolution
   // catches either path.
   const statusFilter = `(status NOT IN (${doneList}) AND (resolution IS EMPTY OR resolution = Unresolved))`;
 
-  const clauses = [
-    `assignee IN (${emailsList})`,
-    `reporter IN (${emailsList})`,
-  ];
+  // Roles that can make a ticket "ours": primary assignee, reporter, plus
+  // any HRX-owner custom fields discovered dynamically.
+  const roleFields = ['assignee', 'reporter'];
   for (const cfId of Object.values(ownerFieldIds)) {
     if (!cfId) continue;
     const num = String(cfId).replace(/^customfield_/, '');
-    // cf[12345] IN (...) works for both single and multi-user picker fields.
-    clauses.push(`cf[${num}] IN (${emailsList})`);
+    roleFields.push(`cf[${num}]`);
   }
 
-  // One query per role. Each is self-contained (own status filter + ORDER BY)
-  // so per-clause pagination works normally and results can be unioned with
-  // a plain Set-based dedup.
-  return clauses.map(c => `${c} AND ${statusFilter} ORDER BY updated DESC`);
+  // One query per (role × email-chunk). With 104 emails / 20-per-chunk = 6
+  // chunks × 3 role fields = 18 sub-queries. Each is self-contained (own
+  // status filter + ORDER BY) so per-clause pagination works normally and
+  // fetchJiraQueue unions+dedups the results.
+  const emailChunks = chunkArray(ADMIN_EMAILS_LIST, EMAIL_CHUNK_SIZE);
+  const queries = [];
+  for (const roleField of roleFields) {
+    for (const chunk of emailChunks) {
+      const emailsList = chunk.map(e => `"${e}"`).join(', ');
+      queries.push(`${roleField} IN (${emailsList}) AND ${statusFilter} ORDER BY updated DESC`);
+    }
+  }
+  return queries;
 }
 
 // ── Fetch Jira issues (paginated per clause, unioned) ──────────────────────
