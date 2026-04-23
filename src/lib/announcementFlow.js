@@ -116,6 +116,36 @@ export function normalizePayload(raw) {
 }
 
 /**
+ * Promote any 'scheduled' announcements whose scheduled_for time has passed
+ * to 'sent'. Idempotent — safe to call from any authenticated endpoint.
+ *
+ * We don't have a cron worker, so the promotion runs opportunistically on
+ * every authenticated API call. Any logged-in user keeps the publishing loop
+ * alive. This is why we call it from multiple hot endpoints (list
+ * announcements, list announcement requests, /me) rather than only on the
+ * announcements page — otherwise scheduled items silently miss their time
+ * until someone happens to open the Announcements view.
+ */
+export async function promoteDueScheduled() {
+  try {
+    const { rowCount } = await query(
+      `UPDATE announcements
+         SET status = 'sent',
+             sent_at = COALESCE(sent_at, scheduled_for, NOW()),
+             updated_at = NOW()
+       WHERE status = 'scheduled'
+         AND scheduled_for IS NOT NULL
+         AND scheduled_for <= NOW()`
+    );
+    return rowCount || 0;
+  } catch (err) {
+    // Non-fatal — the next call will try again.
+    console.error('[announcementFlow.promoteDueScheduled]', err.message);
+    return 0;
+  }
+}
+
+/**
  * Publish a request — either immediately or scheduled for later.
  * Returns the announcements row created. Caller is responsible for
  * updating the request row afterwards and recording audit.

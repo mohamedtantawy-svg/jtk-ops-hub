@@ -7,6 +7,7 @@ import {
   checkPublishingRules,
   publishFromRequest,
   normalizePayload,
+  promoteDueScheduled,
 } from '../../../../src/lib/announcementFlow';
 
 // Server-side audience match — mirrors src/data/comms.js matchesAudience()
@@ -19,26 +20,6 @@ function matchesAudience(target, memberTeam) {
   if (team === 'latam + nam' && (t === 'nam' || t === 'latam' || t === 'americas')) return true;
   if (t === 'americas' && (team === 'nam' || team === 'latam' || team === 'latam + nam')) return true;
   return false;
-}
-
-// Promote any scheduled announcements whose time has passed to 'sent'.
-// Runs before every GET — keeps the audience view fresh without a cron job.
-// Idempotent: uses a guarded UPDATE so repeated calls are free.
-async function promoteDueScheduled() {
-  try {
-    await query(
-      `UPDATE announcements
-         SET status = 'sent',
-             sent_at = COALESCE(sent_at, scheduled_for, NOW()),
-             updated_at = NOW()
-       WHERE status = 'scheduled'
-         AND scheduled_for IS NOT NULL
-         AND scheduled_for <= NOW()`
-    );
-  } catch (err) {
-    // Non-fatal — readers may briefly see stale data if this fails once
-    console.error('[announcements.promoteDueScheduled]', err.message);
-  }
 }
 
 export async function GET(req) {
@@ -82,13 +63,15 @@ export async function GET(req) {
                       LIMIT $${idx++} OFFSET $${idx++}`;
     params.push(limit, offset);
 
-    // Look up caller's info once (team for audience scope, id for author match)
+    // Look up caller's info once (team for audience scope, id for author match
+    // + ack match). Always resolve by email so the caller id we return is the
+    // real DB members.id — trusting the JWT sub risks drift against seeds.
     let callerTeam = null;
-    let callerId = user.id ? Number(user.id) : null;
-    if (user.role !== 'admin' || !callerId) {
+    let callerId = null;
+    {
       const r = await query('SELECT id, team FROM members WHERE LOWER(email) = LOWER($1) LIMIT 1', [user.email]);
       callerTeam = r.rows[0]?.team || null;
-      if (!callerId) callerId = r.rows[0]?.id || null;
+      callerId = r.rows[0]?.id || (user.id ? Number(user.id) : null);
     }
 
     const [{ rows }, countResult] = await Promise.all([
@@ -131,7 +114,10 @@ export async function GET(req) {
     }));
 
     const total = parseInt(countResult.rows[0].count, 10);
-    return NextResponse.json({ items, page, limit, total });
+    // Expose the caller's canonical DB id so the frontend can check
+    // `acks.includes(callerId)` reliably — even if the client was holding a
+    // stale/legacy id. See App.jsx / useAnnouncements.js for the consumer.
+    return NextResponse.json({ items, page, limit, total, callerId });
   } catch (err) {
     console.error('[announcements GET]', err.message);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });

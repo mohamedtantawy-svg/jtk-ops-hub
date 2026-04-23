@@ -13,6 +13,59 @@ const sanitizeImageUrl=(url)=>{
   return '';
 };
 
+// Resize + compress an uploaded image before embedding it as a data URL.
+// Why: the backend receives the image inline inside a JSON body, and the
+// ingress caps request size (~10 MB). Raw camera photos or high-DPI PNGs can
+// easily break that ceiling. By downscaling to 1200px max + re-encoding as
+// JPEG at q=0.85 we guarantee the payload stays small (<500 KB typical) and
+// the 503s the user hit go away.
+//
+// Falls back to the original data URL if compression fails for any reason
+// (e.g. PNG with transparency the user wants to keep, browser Canvas error).
+function compressImageFile(file) {
+  return new Promise((resolve, reject) => {
+    if (!file) { reject(new Error('No file')); return; }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Could not read file'));
+    reader.onload = (ev) => {
+      const original = ev.target.result;
+      const img = new Image();
+      img.onerror = () => resolve(original); // fall back to raw data URL
+      img.onload = () => {
+        try {
+          const MAX = 1200;
+          let { width, height } = img;
+          if (width > MAX || height > MAX) {
+            if (width >= height) {
+              height = Math.round((height / width) * MAX);
+              width = MAX;
+            } else {
+              width = Math.round((width / height) * MAX);
+              height = MAX;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          // Preserve PNG if the source is PNG (transparency, text screenshots).
+          // JPEG for everything else — best size/quality ratio.
+          const isPng = /^data:image\/png/i.test(original);
+          const out = canvas.toDataURL(isPng ? 'image/png' : 'image/jpeg', 0.85);
+          // Safety net: if the "compressed" output is somehow larger than the
+          // original (tiny PNGs sometimes inflate as JPEG), keep the original.
+          resolve(out.length < original.length ? out : original);
+        } catch (e) {
+          resolve(original);
+        }
+      };
+      img.src = original;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 // Convert a Date to a value suitable for <input type="datetime-local"> in the
 // user's locale. We strip TZ info — the datetime-local control is TZ-naive.
 function toDatetimeLocal(d) {
@@ -191,10 +244,12 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
                   e.preventDefault();setDragActive(false);
                   const file=e.dataTransfer.files?.[0];
                   if(file&&file.type.startsWith('image/')){
-                    if(file.size>5*1024*1024){alert('Image must be under 5MB');return;}
-                    const reader=new FileReader();
-                    reader.onload=ev=>setImageUrl(ev.target.result);
-                    reader.readAsDataURL(file);
+                    if(file.size>10*1024*1024){alert('Image must be under 10MB');return;}
+                    compressImageFile(file).then(setImageUrl).catch(()=>{
+                      const reader=new FileReader();
+                      reader.onload=ev=>setImageUrl(ev.target.result);
+                      reader.readAsDataURL(file);
+                    });
                   }
                 }}
                 style={{border:`2px dashed ${dragActive?'#6b3fa0':'#e0e0e0'}`,borderRadius:12,padding:'20px 16px',textAlign:'center',background:dragActive?'#f9f5ff':'#fafaf9',cursor:'pointer',transition:'all .15s'}}
@@ -203,15 +258,17 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
                 <input ref={fileInputRef} type="file" accept="image/*" style={{display:'none'}} onChange={e=>{
                   const file=e.target.files?.[0];
                   if(file&&file.type.startsWith('image/')){
-                    if(file.size>5*1024*1024){alert('Image must be under 5MB');return;}
-                    const reader=new FileReader();
-                    reader.onload=ev=>setImageUrl(ev.target.result);
-                    reader.readAsDataURL(file);
+                    if(file.size>10*1024*1024){alert('Image must be under 10MB');return;}
+                    compressImageFile(file).then(setImageUrl).catch(()=>{
+                      const reader=new FileReader();
+                      reader.onload=ev=>setImageUrl(ev.target.result);
+                      reader.readAsDataURL(file);
+                    });
                   }
                 }}/>
                 <i className="bi-cloud-arrow-up" style={{fontSize:24,color:dragActive?'#6b3fa0':'#b5b5b5',display:'block',marginBottom:6}}></i>
                 <div style={{fontSize:12,fontWeight:600,color:'#616161'}}>Click to upload or drag & drop</div>
-                <div style={{fontSize:11,color:'#9e9e9e',marginTop:3}}>PNG, JPG, GIF, WebP up to 5MB</div>
+                <div style={{fontSize:11,color:'#9e9e9e',marginTop:3}}>PNG, JPG, GIF, WebP up to 10MB — we'll compress it for you</div>
                 <div style={{display:'flex',alignItems:'center',gap:8,justifyContent:'center',marginTop:10}}>
                   <div style={{height:1,flex:1,background:'#e8e8e8'}}></div>
                   <span style={{fontSize:10,color:'#9e9e9e',fontWeight:600}}>OR</span>

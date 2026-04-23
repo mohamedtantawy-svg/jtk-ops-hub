@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { query } from '../../../../src/lib/db';
 import { getAuthUser } from '../../../../src/lib/auth-helpers';
 import { isApprover } from '../../../../src/data/approvers';
-import { normalizePayload, recordAudit } from '../../../../src/lib/announcementFlow';
+import { normalizePayload, recordAudit, promoteDueScheduled } from '../../../../src/lib/announcementFlow';
 
 // GET /api/v1/announcement-requests
 //   Approvers:   sees everything (optionally filter via ?status=…)
@@ -15,6 +15,13 @@ export async function GET(req) {
     if (!user.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    // Keep the publishing loop alive: promote any scheduled announcements
+    // whose time has passed. useAnnouncementRequests polls this endpoint every
+    // 45s, so as long as any authenticated user is logged in, scheduled
+    // announcements will reliably auto-publish — no cron worker required.
+    await promoteDueScheduled();
+
     const approver = isApprover(user.email);
     const { searchParams } = new URL(req.url);
     const statusParam = searchParams.get('status');

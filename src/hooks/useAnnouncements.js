@@ -35,6 +35,10 @@ function normalizeApiAnnouncement(a) {
     body: a.body,
     author: a.author || { id: a.authorId, name: '' },
     sentAt: a.sentAt || '',
+    // scheduledFor is present on rows with status='scheduled'; we preserve the
+    // raw ISO so the UI can render a localised time and the "Send now" action
+    // can decide whether to show the button.
+    scheduledFor: a.scheduledFor || a.scheduled_for || null,
     target: a.target,
     status: a.status,
     // acks comes from server read_by (numeric user IDs)
@@ -74,6 +78,13 @@ function writePendingAcks(ids) {
 export function useAnnouncements() {
   const [comms, setComms] = useState(INITIAL_COMMS);
   const [isOnline, setIsOnline] = useState(false); // true when backend responds
+  // Canonical DB user id for the caller, as reported by the server on every
+  // list/ack response. We prefer this over the client-side user.id because the
+  // static MEMBERS array can drift out of sync with the DB's members.id — that
+  // drift is what caused popups to reappear after "Acknowledge" and the ack
+  // tracker to show the user as pending. Consumers should use this when
+  // deciding whether an announcement has been acked by the caller.
+  const [serverUserId, setServerUserId] = useState(null);
   const loadedRef = useRef(false);
 
   // Track the token so we re-fetch after logout → login cycles
@@ -106,6 +117,7 @@ export function useAnnouncements() {
         const data = await fetchAnnouncements({ limit: 200 });
         if (data?.items) {
           setComms(data.items.map(normalizeApiAnnouncement));
+          if (data.callerId) setServerUserId(Number(data.callerId));
           setIsOnline(true);
         }
       } catch (_) {
@@ -154,6 +166,7 @@ export function useAnnouncements() {
             ...localOnly,
           ];
         });
+        if (data.callerId) setServerUserId(Number(data.callerId));
         setIsOnline(true);
       }
     } catch (_) {
@@ -272,9 +285,16 @@ export function useAnnouncements() {
     if (isOnline) {
       try {
         const res = await apiAcknowledge(id);
+        if (res?.userId) setServerUserId(Number(res.userId));
         if (res?.acks) {
           const canonical = res.acks.map(Number).filter(Boolean);
-          setComms(prev => prev.map(c => c.id === id ? { ...c, acks: canonical } : c));
+          // Guarantee we keep the caller's id in acks even if the server
+          // response races ahead of a concurrent write. Without this belt +
+          // braces, the popup briefly reappears between the ack write and the
+          // next GET refresh.
+          const serverId = Number(res.userId) || uid;
+          const final = canonical.includes(serverId) ? canonical : [...canonical, serverId];
+          setComms(prev => prev.map(c => c.id === id ? { ...c, acks: final } : c));
         }
         removePendingAck(id);
       } catch (e) {
@@ -498,6 +518,10 @@ export function useAnnouncements() {
     comms,
     setComms,
     isOnline,
+    // Canonical DB id for the logged-in caller; populated on every list/ack
+    // roundtrip. null until the first successful call. Prefer this to user.id
+    // for any "is this acked by me" comparison.
+    serverUserId,
     refresh,
     create,
     send,

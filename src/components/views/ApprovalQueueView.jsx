@@ -187,6 +187,22 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
     );
   };
 
+  // "Approve & send now" — ignores any scheduled_for the requester asked for
+  // and any time currently in the approver's picker. Useful when an approver
+  // wants to release an announcement immediately even though the request was
+  // originally filed as a scheduled drop.
+  const handleApproveSendNow = () => {
+    const overrideEdits = editMode ? { ...edits } : {};
+    runWithBusy(
+      () => approve(selectedId, {
+        urgentOverride: urgentOverrideLocal,
+        scheduledFor: null, // force immediate publish
+        overrideEdits,
+      }),
+      { title: 'Published', body: 'Announcement sent to audience immediately' },
+    );
+  };
+
   const handleReject = () => {
     const reason = rejectionDraft.trim();
     if (!reason) { if (addToast) addToast('warn', 'Reason required', 'Add a short reason so the requester can iterate'); return; }
@@ -483,6 +499,15 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
                         <i className="bi-check-circle" style={{ marginRight: 4 }}></i>
                         {scheduledForLocal ? 'Approve & schedule' : 'Approve & publish'}
                       </button>
+                      {/* Always-visible "send now" shortcut — bypasses any schedule the
+                          requester picked or the approver typed. Hidden when no
+                          schedule is set (the primary button already publishes now). */}
+                      {scheduledForLocal && (
+                        <button disabled={busy} onClick={handleApproveSendNow} title="Ignore the schedule and publish immediately" style={{ padding: '8px 14px', fontSize: 12, fontWeight: 600, color: 'white', background: '#0a66c2', border: 'none', borderRadius: 'var(--radius-pill)', cursor: busy ? 'wait' : 'pointer' }}>
+                          <i className="bi-lightning-fill" style={{ marginRight: 4 }}></i>
+                          Approve &amp; send now
+                        </button>
+                      )}
                     </div>
 
                     <div style={{ marginTop: 10 }}>

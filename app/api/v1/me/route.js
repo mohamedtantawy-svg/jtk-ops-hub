@@ -11,6 +11,20 @@ export async function GET(req) {
     try {
       if (process.env.DATABASE_URL) {
         const { query } = await import('../../../../src/lib/db');
+
+        // Belt-and-braces: run the scheduled-announcements promotion loop
+        // opportunistically so that even quiet tabs (with nobody actively
+        // loading the announcement-requests list) keep the publishing
+        // pipeline moving. /me is called on session revalidation and
+        // occasional auth checks.
+        try {
+          const { promoteDueScheduled } = await import('../../../../src/lib/announcementFlow');
+          await promoteDueScheduled();
+        } catch (e) {
+          // Non-fatal — promotion will retry on the next hot endpoint.
+          console.warn('[me] promoteDueScheduled failed:', e.message);
+        }
+
         const { rows } = await query(
           'SELECT id, name, initials, role, team, region, country, lead_id, email, avatar_url, is_active, created_at, updated_at FROM members WHERE email = $1',
           [authUser.email]

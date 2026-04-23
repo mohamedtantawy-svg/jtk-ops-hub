@@ -17,7 +17,7 @@ import ApprovalQueueView from './ApprovalQueueView';
   Pending items get a "Start Acknowledging" button that walks through each
   unacknowledged announcement as a popup, one by one.
 */
-const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowledge, apiCreate, apiSend, apiUpdate, apiArchive, apiRemove, apiTogglePin, openCompose, onComposeOpened, apiUnarchive, apiComments, apiSetComments, apiLoadComments, apiAddComment, apiDeleteComment, apiLinks, apiLoadLinks, apiLinkAnnouncement, apiUnlinkAnnouncement, apiReact }) => {
+const AnnouncementsView = ({ user, serverUserId, comms, setComms, addToast, tasks, apiAcknowledge, apiCreate, apiSend, apiUpdate, apiArchive, apiRemove, apiTogglePin, openCompose, onComposeOpened, apiUnarchive, apiComments, apiSetComments, apiLoadComments, apiAddComment, apiDeleteComment, apiLinks, apiLoadLinks, apiLinkAnnouncement, apiUnlinkAnnouncement, apiReact }) => {
   const perms = useContext(PermissionsContext);
   const settings = useContext(SettingsContext);
   const isLA = perms?.canDo('can_compose_comms')||perms?.canDo('can_compose_announcements')||isApprover(user?.email)||false;
@@ -66,15 +66,34 @@ const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowle
     return targetMatch(c);
   };
 
+  // "Scheduled" tab — visible to approvers (who can manage anyone's) and to
+  // requesters who have scheduled items of their own. Uses the author match
+  // so a non-approver still sees their own pending-to-go-out announcements.
+  const canSeeScheduled = (c) => {
+    if (c.status !== 'scheduled') return false;
+    if (isApproverUser || isLA) return true;
+    return c.author && (c.author.id === user.id || c.author.id === serverUserId);
+  };
+
   const visible=useMemo(()=>comms.filter(c=>{
     if(filter==='drafts')return c.status==='draft'&&isLA;
     if(filter==='archived')return c.status==='archived'&&isLA;
+    if(filter==='scheduled')return canSeeScheduled(c);
     if(filter!=='all')return c.type===filter&&c.status==='sent'&&canSee(c);
     return c.status==='sent'&&canSee(c);
-  }),[comms,filter,isLA,user]);
+  }),[comms,filter,isLA,user,serverUserId,isApproverUser]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const uid=Number(user.id);
-  const pendingForMe=useMemo(()=>comms.filter(c=>c.status==='sent'&&targetMatch(c)&&!c.acks.includes(uid)&&!(c.author&&c.author.id===user.id)),[comms,user,uid]);
+  // Ack check mirrors App.jsx — accept EITHER the local id or the canonical
+  // DB id from the server. Fixes the pending-forever bug when the two drift.
+  const serverUid = serverUserId ? Number(serverUserId) : null;
+  const isAckedByMe = (c) => {
+    if (!Array.isArray(c.acks)) return false;
+    if (uid && c.acks.includes(uid)) return true;
+    if (serverUid && c.acks.includes(serverUid)) return true;
+    return false;
+  };
+  const pendingForMe=useMemo(()=>comms.filter(c=>c.status==='sent'&&targetMatch(c)&&!isAckedByMe(c)&&!(c.author&&c.author.id===user.id)),[comms,user,uid,serverUid]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const acknowledge=(id)=>{
     if(apiAcknowledge) apiAcknowledge(id, uid);
@@ -201,6 +220,10 @@ const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowle
     // Pending Approval lives in-tab so users don't have to context-switch to
     // see or action requests. Visible to everyone.
     {id:'pending-approval',label:approvalTabLabel,icon:'bi-clipboard-check',highlight:true},
+    // Scheduled — anything approved-and-queued but not yet sent. Shown when
+    // there's at least one scheduled item the caller can see, so the tab doesn't
+    // pollute the filter bar for regular members.
+    ...(comms.some(c => canSeeScheduled(c)) ? [{id:'scheduled',label:'Scheduled',icon:'bi-clock-history'}] : []),
     ...(isLA&&settings.comms_show_drafts_tab!==false?[{id:'drafts',label:'Drafts',icon:'bi-pencil'}]:[]),
     ...(isLA?[{id:'archived',label:'Archived',icon:'bi-archive'}]:[]),
   ];
@@ -293,6 +316,7 @@ const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowle
             if (f.id === 'all') ct = visible.length;
             else if (f.id === 'drafts') ct = comms.filter(c => c.status === 'draft').length;
             else if (f.id === 'archived') ct = comms.filter(c => c.status === 'archived').length;
+            else if (f.id === 'scheduled') ct = comms.filter(c => canSeeScheduled(c)).length;
             else if (f.id === 'pending-approval') ct = pendingApprovalCount;
             else ct = comms.filter(c => c.type === f.id && c.status === 'sent').length;
             const isPendingTab = f.id === 'pending-approval';
@@ -389,6 +413,11 @@ const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowle
                         <span style={{ color: '#9e9e9e', fontSize: 11 }}>Draft</span>
                       ) : comm.status === 'archived' ? (
                         <span style={{ color: '#9e9e9e', fontSize: 11 }}>Archived</span>
+                      ) : comm.status === 'scheduled' ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#0a66c2', fontWeight: 600 }}>
+                          <i className="bi-clock-history" style={{ fontSize: 10 }}></i>
+                          {comm.scheduledFor ? new Date(comm.scheduledFor).toLocaleString() : 'Scheduled'}
+                        </span>
                       ) : !isLA ? (
                         iAcked
                           ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, color: '#29811e', fontWeight: 600 }}><i className="bi-check-circle-fill" style={{ fontSize: 10 }}></i>Done</span>
@@ -415,6 +444,28 @@ const AnnouncementsView = ({ user, comms, setComms, addToast, tasks, apiAcknowle
                     {/* Actions — role-appropriate */}
                     <td style={tdStyle} onClick={e => e.stopPropagation()}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
+                        {/* Scheduled: "Send now" — visible to approver OR the
+                            original author (requester). Calls PATCH /send
+                            which clears scheduled_for and flips status='sent'. */}
+                        {comm.status === 'scheduled' && (
+                          isApproverUser || isLA
+                            || (comm.author && (comm.author.id === user.id || (serverUserId && comm.author.id === serverUserId)))
+                        ) && (
+                          <button
+                            onClick={() => {
+                              if (!apiSend) return;
+                              if (!window.confirm('Publish this announcement right now? The scheduled time will be cleared.')) return;
+                              Promise.resolve(apiSend(comm.id)).then(() => {
+                                if (addToast) addToast('success', 'Published', 'Announcement sent to audience');
+                              }).catch(err => {
+                                if (addToast) addToast('error', 'Send failed', err?.body?.error || err?.message || 'Could not publish');
+                              });
+                            }}
+                            title="Send now (cancels the schedule)"
+                            style={actionBtnStyle('#e6f4ff', '#0a66c2')}>
+                            <i className="bi-lightning-fill" style={{ fontSize: 11 }}></i>
+                          </button>
+                        )}
                         {/* Everyone: open detail / comment */}
                         {comm.status === 'sent' && (
                           <button onClick={() => setDetailId(comm.id)} title="View & Comment"
