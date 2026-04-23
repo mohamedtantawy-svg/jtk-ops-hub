@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useContext } from 'react';
 import { PermissionsContext } from '../../App';
-import { TEAM_MEMBERS } from '../../data/members';
 import { isApprover } from '../../data/approvers';
 import Avatar from '../ui/Avatar';
 
@@ -51,15 +50,16 @@ const DeelTopNav = ({
   onCreateTask, onCreateEscalation, onCreateProject,
   onCreateAnnouncement, onCreateRequest, onCreateReport,
   setSelTask, tasks,
-  managerOnCall, onChangeManagerOnCall,
   approvalPendingCount = 0,
 }) => {
+  // Manager on Call was previously rendered here as a pill in the right-side
+  // icon bar. It's been moved to the BriefingView hero so it's front-and-center
+  // on the home page for every role. DeelTopNav no longer owns that state.
   const perms = useContext(PermissionsContext);
   const [showMore,    setShowMore]    = useState(false);
   const [showCreate,  setShowCreate]  = useState(false);
   const [showNotifs,  setShowNotifs]  = useState(false);
   const [showUser,    setShowUser]    = useState(false);
-  const [showMocPicker, setShowMocPicker] = useState(false);
   const [darkMode,    setDarkMode]    = useState(() => {
     try { return localStorage.getItem('ops_hub_theme') === 'dark'; } catch(e) { return false; }
   });
@@ -68,7 +68,6 @@ const DeelTopNav = ({
   const createRef = useRef(null);
   const notifRef  = useRef(null);
   const userRef   = useRef(null);
-  const mocRef    = useRef(null);
 
   // Unified outside-click handler for all dropdowns (fixes QA #149)
   useEffect(() => {
@@ -77,7 +76,6 @@ const DeelTopNav = ({
       if (moreRef.current && !moreRef.current.contains(e.target)) setShowMore(false);
       if (notifRef.current && !notifRef.current.contains(e.target)) setShowNotifs(false);
       if (userRef.current && !userRef.current.contains(e.target)) setShowUser(false);
-      if (mocRef.current && !mocRef.current.contains(e.target)) setShowMocPicker(false);
     };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
@@ -217,74 +215,7 @@ const DeelTopNav = ({
       {/* ── Right: Figma icon bar ───────────────────────── */}
       <div className="deel-nav-right" style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto' }}>
 
-        {/* Manager on Call */}
-        {managerOnCall && (
-          <div ref={mocRef} style={{ position: 'relative', marginRight: 4 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px', borderRadius: 'var(--radius-pill)', background: 'var(--surface-2)' }}>
-              <Avatar
-                name={managerOnCall.name}
-                initials={managerOnCall.initials}
-                src={managerOnCall.avatarUrl}
-                size={26}
-              />
-              <div style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap', lineHeight: '16px' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Manager On Call:</span>{' '}
-                <span style={{ fontWeight: 600, color: 'var(--text)' }}>{managerOnCall.name}</span>
-              </div>
-              <button
-                className="deel-icon-btn"
-                onClick={() => setShowMocPicker(p => !p)}
-                aria-label="Change manager on call"
-                title="Change manager on call"
-                style={{ width: 22, height: 22, padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              >
-                <i className="bi bi-pencil" style={{ fontSize: 11, color: 'var(--text-muted)' }}></i>
-              </button>
-            </div>
-            {showMocPicker && (
-              <div style={{ ...dropdown, right: 0, borderRadius: 14, padding: '6px 0', minWidth: 300, maxHeight: 360, overflowY: 'auto' }}>
-                <div style={{ padding: '6px 16px 8px', fontSize: 10, fontWeight: 700, color: 'var(--text-disabled)', letterSpacing: 'var(--ls-caps)', textTransform: 'uppercase' }}>Select Manager On Call</div>
-                {TEAM_MEMBERS
-                  .filter(m => m.access === 'team_lead' || m.access === 'regional_manager' || m.access === 'admin')
-                  .map(m => (
-                    <div
-                      key={m.email}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => {
-                        onChangeManagerOnCall?.({ name: m.name, initials: m.initials, email: m.email, avatarUrl: m.avatarUrl });
-                        setShowMocPicker(false);
-                      }}
-                      onKeyDown={e => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          onChangeManagerOnCall?.({ name: m.name, initials: m.initials, email: m.email, avatarUrl: m.avatarUrl });
-                          setShowMocPicker(false);
-                        }
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 10,
-                        padding: '8px 16px', cursor: 'pointer', transition: 'background .12s',
-                        background: managerOnCall.email === m.email ? 'var(--surface-2)' : 'transparent',
-                      }}
-                    >
-                      <Avatar name={m.name} initials={m.initials} src={m.avatarUrl} size="sm" />
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{
-                          fontSize: 13, fontWeight: managerOnCall.email === m.email ? 600 : 400,
-                          color: managerOnCall.email === m.email ? 'var(--purple)' : 'var(--text)',
-                          lineHeight: '17px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                        }}>{m.name}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: '15px' }}>{m.team}</div>
-                      </div>
-                    </div>
-                  ))}
-              </div>
-            )}
-          </div>
-        )}
+        {/* Manager on Call relocated to BriefingView hero — see src/components/views/BriefingView.jsx */}
 
         {/* Apps grid */}
         <div ref={createRef} style={{ position: 'relative' }}>
