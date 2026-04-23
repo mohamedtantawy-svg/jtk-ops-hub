@@ -404,11 +404,19 @@ async function fetchZendeskQueue() {
 // sub-query stays well under the 300 cap in typical team-wide volume.
 // With EMAIL_CHUNK_SIZE=20 and a 300/clause cap, each agent's 15-50
 // tickets comfortably fit whether they're freshly updated or months stale.
-const JIRA_DONE_STATUSES = [
-  'Done', 'Closed', 'Resolved', 'Solved', 'Completed',
-  'Cancelled', 'Canceled', 'Rejected', 'Denied', 'Withdrawn', 'Declined',
-  'Won\'t Do', 'Wont Do', 'Duplicate', 'Abandoned',
-];
+//
+// ── Why we filter by statusCategory, not by status-name list (2026-04-23) ──
+// Earlier iteration used `status NOT IN ("Done", "Closed", ...)` — a hand-
+// maintained blocklist of status-name strings. Jira workflows can name their
+// terminal states anything (e.g. "Done: Work Completed", "Done/Approved",
+// "Completed by Vendor"), and any name not in our list slipped through.
+// Pilar flagged EXPOS-26770 ("Done: Work Completed") appearing in the queue
+// as a result. The fix: use Jira's built-in `statusCategory` taxonomy —
+// every status in every workflow is mapped by the project admin to exactly
+// one of three categories: New / Indeterminate / Done. Filtering by
+// `statusCategory != Done` catches every terminal state regardless of what
+// it's named. Belt-and-suspenders: keep the resolution filter to also drop
+// issues marked resolved while still sitting in an indeterminate status.
 
 // Group size for chunking ADMIN_EMAILS_LIST in Jira IN-clauses. Keeps each
 // sub-query's total ticket count below MAX_ISSUES_PER_CLAUSE so stale-status
@@ -422,11 +430,11 @@ function chunkArray(arr, size) {
 }
 
 function buildJiraJqlQueries(ownerFieldIds = {}) {
-  const doneList = JIRA_DONE_STATUSES.map(s => `"${s}"`).join(', ');
-  // Also filter via resolution — many workflows mark a ticket resolved
-  // without moving to a "Done" status name; using both status+resolution
-  // catches either path.
-  const statusFilter = `(status NOT IN (${doneList}) AND (resolution IS EMPTY OR resolution = Unresolved))`;
+  // statusCategory is Jira's universal 3-value taxonomy (New/Indeterminate/
+  // Done) that every custom status is mapped to — drops "Done: Work
+  // Completed" and any other creative name without us maintaining a list.
+  // Paired with resolution to also drop resolved-but-still-open-statuswise.
+  const statusFilter = `statusCategory != Done AND (resolution IS EMPTY OR resolution = Unresolved)`;
 
   // Roles that can make a ticket "ours": primary assignee, reporter, plus
   // any HRX-owner custom fields discovered dynamically.
@@ -533,9 +541,23 @@ async function fetchJiraQueue() {
     const items = allIssues.map(issue => {
       const f = issue.fields || {};
       const statusName = f.status?.name || '';
+      // Jira returns status.statusCategory.key ∈ {"new","indeterminate","done"}
+      // — the universal 3-value taxonomy every workflow's statuses are mapped
+      // to. We use it as a robust fallback when a custom status name
+      // (e.g. "Done: Work Completed") isn't in JIRA_STATUS_MAP.
+      const statusCategoryKey = (f.status?.statusCategory?.key || '').toLowerCase();
       const priorityName = f.priority?.name || '';
       const assignee = f.assignee || {};
       const reporter = f.reporter || {};
+
+      // Status: prefer fine-grained name match (gives us "waiting" for
+      // "Client Approval" etc.), fall back to statusCategory for unmapped
+      // names so we never mislabel a done ticket as in_progress.
+      const statusFromCategory =
+        statusCategoryKey === 'done' ? 'resolved' :
+        statusCategoryKey === 'new'  ? 'new' :
+        'in_progress'; // 'indeterminate' or unknown
+      const appStatus = JIRA_STATUS_MAP[statusName.toLowerCase()] || statusFromCategory;
 
       // Collect every email associated with this ticket via roles OTHER than
       // the primary assignee — used by the scoping layer so the ticket is
@@ -560,7 +582,7 @@ async function fetchJiraQueue() {
         externalId: issue.key,
         subject: f.summary || '(no summary)',
         description: adfToText(f.description).substring(0, 200),
-        status: JIRA_STATUS_MAP[statusName.toLowerCase()] || 'in_progress',
+        status: appStatus,
         priority: JIRA_PRIORITY_MAP[priorityName.toLowerCase()] || 'medium',
         type: detectType(f.summary, [], f.labels || []),
         country: detectCountry(f.summary, f.labels || []),
