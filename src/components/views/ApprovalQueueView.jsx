@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useAnnouncementRequests } from '../../hooks/useAnnouncementRequests';
 import { isApprover } from '../../data/approvers';
 import { AUDIENCE_LABELS, AUDIENCES, SOUND_PRESETS, COMMS_TYPES } from '../../data/comms';
@@ -76,7 +76,11 @@ const ApprovalQueueView = ({ user, addToast }) => {
     items, canApprove, loading, refresh,
     fetchDetail, approve, reject, askClarification, withdraw, addComment,
   } = useAnnouncementRequests();
-  const [tab, setTab] = useState('pending'); // pending | mine | all | decided
+  // Default tab: approvers start on Pending, everyone else on My Requests (the
+  // only tab they can see). Using a lazy initializer with the roster directly
+  // avoids a first-render flash for non-approvers whose canApprove is still
+  // loading from the hook.
+  const [tab, setTab] = useState(() => (isApprover(user?.email) ? 'pending' : 'mine'));
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -120,13 +124,30 @@ const ApprovalQueueView = ({ user, addToast }) => {
   useEffect(() => { if (selectedId) loadDetail(selectedId); }, [selectedId, loadDetail]);
 
   // When the selected request changes, reset the approver's edit draft so
-  // we don't leak field values from the previous request.
+  // we don't leak field values from the previous request. We also flag the
+  // selection as "needs seed" so the next detail load can seed the schedule
+  // picker with whatever time the requester originally asked for.
+  const seedRef = useRef(null);
   useEffect(() => {
     setEditMode(false);
     setEdits({});
     setUrgentOverrideLocal(false);
-    setScheduledForLocal(detail?.item?.scheduledFor ? isoToLocalInput(detail.item.scheduledFor) : '');
-  }, [selectedId, detail?.item?.scheduledFor]);
+    setScheduledForLocal('');
+    seedRef.current = selectedId;
+  }, [selectedId]);
+
+  // Seed the schedule picker exactly once per selection, when the detail
+  // arrives. Crucially, this effect does NOT run on subsequent detail reloads
+  // (after approve / comment / etc. refresh) — otherwise any unsaved approver
+  // edits to the schedule (or any field, since this effect used to reset all
+  // of them) would be wiped mid-workflow.
+  useEffect(() => {
+    if (!detail?.item) return;
+    if (seedRef.current !== selectedId) return;
+    if (detail.item.id !== selectedId) return;
+    setScheduledForLocal(detail.item.scheduledFor ? isoToLocalInput(detail.item.scheduledFor) : '');
+    seedRef.current = null;
+  }, [detail, selectedId]);
 
   const runWithBusy = async (fn, successMsg) => {
     setBusy(true);
@@ -144,16 +165,21 @@ const ApprovalQueueView = ({ user, addToast }) => {
 
   const handleApprove = () => {
     const overrideEdits = editMode ? { ...edits } : {};
-    const effectiveIso = scheduledForLocal ? localInputToIso(scheduledForLocal) : (detail?.item?.scheduledFor || null);
+    // The approver's schedule picker is authoritative. If they cleared it we
+    // send an explicit null so the backend publishes immediately — never
+    // silently fall back to the requester's original time (that would make
+    // the "Clear" button a no-op). The backend checks `'scheduledFor' in body`
+    // so null vs. undefined are distinguishable.
+    const scheduledForOverride = scheduledForLocal ? localInputToIso(scheduledForLocal) : null;
     runWithBusy(
       () => approve(selectedId, {
         urgentOverride: urgentOverrideLocal,
-        scheduledFor: effectiveIso,
+        scheduledFor: scheduledForOverride,
         overrideEdits,
       }),
       {
-        title: effectiveIso ? 'Scheduled' : 'Published',
-        body: effectiveIso ? `Will publish at ${formatTime(effectiveIso)}` : 'Announcement sent to audience',
+        title: scheduledForOverride ? 'Scheduled' : 'Published',
+        body: scheduledForOverride ? `Will publish at ${formatTime(scheduledForOverride)}` : 'Announcement sent to audience',
       },
     );
   };

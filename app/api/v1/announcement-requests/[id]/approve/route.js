@@ -55,13 +55,23 @@ export async function POST(req, { params }) {
       await recordAudit(id, user, 'edited', { fields: editedFields, duringApproval: true });
     }
 
-    // Scheduling
+    // Scheduling — the approver's picker is authoritative. We distinguish
+    // three cases:
+    //   1. body.scheduledFor is a non-empty string  → use that time
+    //   2. body.scheduledFor is explicit null/empty → publish immediately,
+    //      OVERRIDING whatever time the requester asked for (otherwise the
+    //      approver could never override a scheduled-ahead request).
+    //   3. body does not include scheduledFor at all → keep requester's value.
     let sendAt = null;
-    if (body.scheduledFor) {
-      sendAt = new Date(body.scheduledFor);
-      if (Number.isNaN(sendAt.getTime())) {
-        return NextResponse.json({ error: 'Invalid scheduledFor' }, { status: 400 });
+    if ('scheduledFor' in body) {
+      const raw = body.scheduledFor;
+      if (raw !== null && raw !== undefined && raw !== '') {
+        sendAt = new Date(raw);
+        if (Number.isNaN(sendAt.getTime())) {
+          return NextResponse.json({ error: 'Invalid scheduledFor' }, { status: 400 });
+        }
       }
+      // explicit null/empty → sendAt stays null → publishFromRequest publishes now
     } else if (r.scheduled_for) {
       sendAt = new Date(r.scheduled_for);
     }
