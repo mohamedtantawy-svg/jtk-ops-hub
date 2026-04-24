@@ -15,12 +15,4 @@ RUN npm install --no-save pg pg-hstore
 EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
-# APP_VERSION is baked at build time by the CI (see .github/workflows/ci.yml,
-# build-args: BUILD_SHA=${{ github.sha }}). The /api/v1/version endpoint reads
-# this so the client can detect when the server has rolled to a new deploy and
-# prompt the user to reload (see src/hooks/useVersionCheck.js). We do it here
-# rather than in the Helm chart because Nexus's platform periodically syncs
-# helm/templates/ back to its base template and would wipe a custom env block.
-ARG BUILD_SHA=unknown
-ENV APP_VERSION=$BUILD_SHA
 CMD ["node", "server.js"]
