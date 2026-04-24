@@ -52,6 +52,15 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
   const [walkthroughDismissed,setWalkthroughDismissed]=useState([]); // dismissed during this walkthrough
   const [detailId,setDetailId]=useState(null); // single item detail popup
 
+  // Allow other views (e.g. the home "Review & acknowledge" CTA) to open the
+  // detail overlay programmatically without coupling them to this view's
+  // internal state. Listeners are cheap and scoped to mount.
+  useEffect(()=>{
+    const handler=(ev)=>{ const id=ev?.detail?.id; if(id) setDetailId(id); };
+    window.addEventListener('announcements:openDetail', handler);
+    return ()=>window.removeEventListener('announcements:openDetail', handler);
+  },[]);
+
   const enabledTypes=settings.comms_types_enabled||{alert:true,announce:true,update:true,guidance:true,kudos:true};
 
   // Audience match uses the canonical matcher so NAM/LATAM/AMERICAS and
@@ -883,6 +892,15 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
   const iAcked = Array.isArray(comm.ackEmails)
     ? !!(myEmailLc && comm.ackEmails.includes(myEmailLc))
     : comm.acks.includes(Number(user.id)); // legacy-only fallback
+  // Hide ack button only from the author of this announcement — NOT from
+  // every user with compose access. Previously we gated on `!isLA` which
+  // excluded every regional_manager / admin, so an announcement targeted at
+  // "global" could never be acknowledged by the management team and the
+  // tracker permanently showed 1-2%. Author identity is stable across
+  // id/email drift because we compare both axes.
+  const authorEmailLc = String(comm.author?.email || '').toLowerCase();
+  const isAuthor = (authorEmailLc && myEmailLc && authorEmailLc === myEmailLc)
+    || (comm.author?.id != null && Number(comm.author.id) === Number(user.id));
   const PRIO_COLORS={high:'#d42d35',medium:'#ed8d00',low:'#29811e',critical:'#d42d35'};
 
   // ── Emoji floaters ──
@@ -1210,8 +1228,11 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
             </div>
           </div>
         </div>
-        {/* Ack footer */}
-        {comm.status === 'sent' && !isLA && (
+        {/* Ack footer — shown to everyone except the announcement's author.
+            Previously we gated on `!isLA`, which hid the ack button from
+            every regional_manager/admin. That silently capped the tracker
+            at the author's own ack. */}
+        {comm.status === 'sent' && !isAuthor && (
           <div style={{ padding: '14px 24px', borderTop: '1px solid #f2f2f2', background: iAcked ? '#f9faf9' : '#fffcf0' }}>
             {iAcked ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
