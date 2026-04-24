@@ -192,13 +192,17 @@ export async function POST(req) {
     // ── Look up user in database (graceful fallback if DB unavailable) ──
     const dbUser = await findMemberByEmail(email);
 
-    // Build user object — prefer DB data, fall back to Google profile
+    // Build user object — prefer DB data, fall back to Google profile.
+    // Team is intentionally null for DB-less fallbacks: the /me revalidation
+    // cycle will populate the real team once the row is seeded. Hardcoding
+    // 'JTK' caused cross-team announcement audiences to mis-deliver popups
+    // to anyone who authenticated before their members row was created.
     const user = dbUser || {
       id: 0,
       email,
       name: name || email.split('@')[0],
       role: isAdmin ? 'admin' : 'member',
-      team: 'JTK',
+      team: null,
     };
 
 
