@@ -25,6 +25,11 @@ import {
   normalizeEvent,
 } from '../../../../../src/lib/google-calendar';
 import { getConnectionStatus } from '../../../../../src/lib/calendar-token-store';
+import {
+  isServiceAccountConfigured,
+  listEventsSA,
+  resolveCalendarId,
+} from '../../../../../src/lib/google-calendar-sa';
 
 const OWNER_EMAIL = 'mohamed.tantawy@deel.com';
 
@@ -62,9 +67,35 @@ export async function GET(req) {
     return NextResponse.json({ error: `Window too wide — max ${MAX_WINDOW_DAYS} days` }, { status: 400 });
   }
 
-  // Quick status check so we can return 409 (needs reconnect) distinctly
-  // from 500 (upstream blew up). Saves one DB round-trip for the common
-  // case where we skip straight to the token fetch.
+  // Service account path: if Nexus has provisioned a GCP SA for us, skip
+  // the per-user OAuth dance entirely and read the calendar the owner has
+  // shared with the SA email. This is the default in all environments
+  // where GOOGLE_APPLICATION_CREDENTIALS_JSON is injected.
+  if (isServiceAccountConfigured()) {
+    const calendarId = resolveCalendarId(user.email);
+    if (!calendarId) {
+      return NextResponse.json({ error: 'No calendar configured' }, { status: 500 });
+    }
+    try {
+      const raw = await listEventsSA({ calendarId, timeMin, timeMax, timeZone });
+      const events = raw.map(normalizeEvent);
+      return NextResponse.json({ events });
+    } catch (err) {
+      if (err.notShared) {
+        // Calendar not shared with the SA yet — the UI can surface a
+        // one-time "share your calendar with <sa-email>" instruction.
+        return NextResponse.json(
+          { error: 'Calendar not shared with service account', needsShare: true },
+          { status: 409 }
+        );
+      }
+      console.error('[calendar/events][sa]', err.message);
+      return NextResponse.json({ error: 'Failed to fetch events' }, { status: 502 });
+    }
+  }
+
+  // OAuth fallback — unused in normal operation now, kept so a future
+  // non-SA environment (or the reverse-pilot rollback) still works.
   const status = await getConnectionStatus(user.email);
   if (!status.connected) {
     return NextResponse.json({ error: 'Not connected', needsReconnect: true }, { status: 409 });

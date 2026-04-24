@@ -102,6 +102,7 @@ const CalendarView = ({ user, addToast }) => {
   // ── Connection state ─────────────────────────────────────────────────────
   const {
     connected,
+    mode: connectionMode,
     googleEmail,
     lastError,
     loading: connectionLoading,
@@ -110,6 +111,10 @@ const CalendarView = ({ user, addToast }) => {
     disconnect,
     refresh: refreshConnection,
   } = useCalendarConnection({ enabled, addToast });
+
+  // When the backend is in service-account mode, there's nothing to
+  // "connect" or "disconnect" — IT provisions the calendar share once.
+  const isServiceAccount = connectionMode === 'service_account';
 
   const [connecting, setConnecting] = useState(false);
 
@@ -331,24 +336,26 @@ const CalendarView = ({ user, addToast }) => {
             >
               <i className={`bi-arrow-clockwise${eventsLoading ? ' spin' : ''}`} />
             </button>
-            <button
-              type="button"
-              onClick={handleDisconnect}
-              title="Disconnect"
-              style={{
-                background: 'var(--surface)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-pill)',
-                padding: '6px 14px',
-                cursor: 'pointer',
-                color: 'var(--text-2)',
-                fontSize: 12,
-                fontWeight: 600,
-              }}
-            >
-              <i className="bi-plug" style={{ marginRight: 6 }} />
-              Disconnect
-            </button>
+            {!isServiceAccount && (
+              <button
+                type="button"
+                onClick={handleDisconnect}
+                title="Disconnect"
+                style={{
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-pill)',
+                  padding: '6px 14px',
+                  cursor: 'pointer',
+                  color: 'var(--text-2)',
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                <i className="bi-plug" style={{ marginRight: 6 }} />
+                Disconnect
+              </button>
+            )}
           </div>
         )}
       />

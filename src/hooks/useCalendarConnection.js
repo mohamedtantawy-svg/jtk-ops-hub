@@ -118,6 +118,8 @@ export function useCalendarConnection({ enabled, addToast } = {}) {
 
   return {
     connected: !!status?.connected,
+    mode: status?.mode || null,
+    serviceAccountEmail: status?.serviceAccountEmail || null,
     googleEmail: status?.googleEmail || null,
     connectedAt: status?.connectedAt || null,
     lastError: status?.lastError || null,
