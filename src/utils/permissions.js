@@ -1,12 +1,36 @@
 import { TEAM_MEMBERS, MEMBERS_BY_EMAIL, getVisibleEmailsForAccess, getDirectReports, ALL_EMAILS_SET } from '../data/members';
 
-// Resolve the access type for a user given their email
-export const resolveUserPermissions = (userEmail, accessTypes, userAccessMap) => {
-  if (!userEmail || !userAccessMap || !accessTypes) return null;
-  const mapping = userAccessMap[userEmail];
-  if (!mapping) return null;
-  const accessType = accessTypes.find(at => at.id === mapping.accessTypeId);
-  return accessType || null;
+// Resolve the access type for a user. Accepts either an email string
+// (legacy callers) or a full user object. When given the object we can fall
+// back to a role-derived access type for people who exist only in
+// team_member_overrides (not in the static TEAM_MEMBERS baseline) and so
+// have no entry in DEFAULT_USER_ACCESS_MAP. Without this fallback those
+// users resolve to a null accessType → canAccessView returns false for every
+// view → the whole app renders blank after impersonation. This was the
+// Olga-blank-screen bug: Olga exists only in the override roster.
+export const resolveUserPermissions = (userOrEmail, accessTypes, userAccessMap) => {
+  if (!userOrEmail || !userAccessMap || !accessTypes) return null;
+  const email = typeof userOrEmail === 'string' ? userOrEmail : userOrEmail?.email;
+  const role  = typeof userOrEmail === 'object' ? userOrEmail?.role : null;
+  if (!email) return null;
+  const mapping = userAccessMap[email] || userAccessMap[String(email).toLowerCase()];
+  if (mapping) {
+    const at = accessTypes.find(a => a.id === mapping.accessTypeId);
+    if (at) return at;
+  }
+  // Role → accessType fallback. IDs match src/data/accessControl.js.
+  const roleToAt = {
+    admin: 'at_admin',
+    regional_manager: 'at_regional_mgr',
+    regional_mgr: 'at_regional_mgr',
+    manager: 'at_regional_mgr',
+    team_lead: 'at_lead',
+    lead: 'at_lead',
+    agent: 'at_agent',
+    member: 'at_agent',
+  };
+  const atId = roleToAt[String(role || '').toLowerCase()] || 'at_agent';
+  return accessTypes.find(a => a.id === atId) || null;
 };
 
 export const canAccessView = (accessType, viewId) =>

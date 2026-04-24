@@ -1148,7 +1148,7 @@ const App=()=>{
           <i className="bi-eye-fill" style={{fontSize:14}}></i>
           <span>Viewing as <strong>{effectiveUser.name}</strong></span>
           <span style={{opacity:0.5}}>·</span>
-          <span style={{opacity:0.8,fontWeight:400,fontSize:12}}>{MEMBERS_BY_EMAIL[impersonating]?.title || ''} · {MEMBERS_BY_EMAIL[impersonating]?.team || ''}</span>
+          <span style={{opacity:0.8,fontWeight:400,fontSize:12}}>{(liveMembersByEmail?.[String(impersonating).toLowerCase()]?.title || MEMBERS_BY_EMAIL[impersonating]?.title || '')} · {(liveMembersByEmail?.[String(impersonating).toLowerCase()]?.team || effectiveUser?.team || MEMBERS_BY_EMAIL[impersonating]?.team || '')}</span>
           <button onClick={()=>setImpersonating(null)} style={{marginLeft:8,padding:'4px 14px',borderRadius:128,border:'1px solid rgba(255,255,255,0.3)',background:'rgba(255,255,255,0.15)',color:'white',fontSize:12,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:4,transition:'background .15s'}}
             onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.25)'} onMouseLeave={e=>e.currentTarget.style.background='rgba(255,255,255,0.15)'}>
             <i className="bi-box-arrow-left" style={{fontSize:11}}></i>Exit

@@ -3,7 +3,10 @@ import { resolveUserPermissions, canAccessView, canPerformAction, getDataScope, 
 
 export const usePermissions = (user, accessTypes, userAccessMap) => {
   return useMemo(() => {
-    const accessType = resolveUserPermissions(user?.email, accessTypes, userAccessMap);
+    // Pass the full user object so resolveUserPermissions can fall back to
+    // a role-derived accessType when the email isn't in DEFAULT_USER_ACCESS_MAP
+    // (override-only roster members like Olga — see permissions.js).
+    const accessType = resolveUserPermissions(user, accessTypes, userAccessMap);
 
     return {
       raw: accessType,
