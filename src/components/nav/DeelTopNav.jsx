@@ -19,10 +19,10 @@ const PRIMARY_TABS = [
   { id: 'escalations',   icon: 'bi-arrow-up-circle',  label: 'Escalations',   badge: true,                       restrictToEmail: OWNER_EMAIL },
   { id: 'hr-reports',    icon: 'bi-clipboard-data',   label: 'Reports',       restrictToEmail: OWNER_EMAIL },
   { id: 'announcements', icon: 'bi-megaphone',        label: 'Announcements' },
-  // Approval queue — visible to EVERYONE. Approvers see all pending items;
-  // requesters see just their own submissions so they can track status.
-  // Label swaps based on role (see visiblePrimary mapping below).
-  { id: 'approval-queue',icon: 'bi-clipboard-check',  label: 'Approval Queue', approvalBadge: true },
+  // Approval queue and "My Requests" are surfaced inside the Announcements
+  // view (as filter tabs) — we intentionally do not repeat them in the top
+  // nav to avoid the double-entry confusion. The `approval-queue` view route
+  // in App.jsx remains for deep-links / notifications / programmatic nav.
   { id: 'team',          icon: 'bi-people',           label: 'Team' },
 ];
 
@@ -50,7 +50,6 @@ const DeelTopNav = ({
   onCreateTask, onCreateEscalation, onCreateProject,
   onCreateAnnouncement, onCreateRequest, onCreateReport,
   setSelTask, tasks,
-  approvalPendingCount = 0,
 }) => {
   // Manager on Call was previously rendered here as a pill in the right-side
   // icon bar. It's been moved to the BriefingView hero so it's front-and-center
@@ -110,13 +109,7 @@ const DeelTopNav = ({
     if (t.approverOnly && !isApprover(user?.email)) return false;
     return !perms || perms.canView(t.id) !== false;
   };
-  // Non-approvers submitting requests should see the tab as "My Requests"
-  // (that's the only content they can see in that view); approvers keep the
-  // full "Approval Queue" label.
-  const userIsApprover = isApprover(user?.email);
-  const visiblePrimary = PRIMARY_TABS.filter(tabAllowed).map(t =>
-    t.id === 'approval-queue' && !userIsApprover ? { ...t, label: 'My Requests' } : t
-  );
+  const visiblePrimary = PRIMARY_TABS.filter(tabAllowed);
   const visibleMore = MORE_TABS.filter(tabAllowed);
   const visibleCreate = CREATE_ACTIONS.filter(ca => {
     if (ca.restrictToEmail && emailLc !== ca.restrictToEmail.toLowerCase()) return false;
@@ -143,13 +136,11 @@ const DeelTopNav = ({
       <div className="deel-nav-items">
         {visiblePrimary.map(tab => {
           const active = view === tab.id;
-          // Escalations uses `badge` (red pill from escalCount).
-          // Approval Queue uses `approvalBadge` (red pill from approvalPendingCount):
-          //   - For approvers: count of pending+needs_info requests across the org.
-          //   - For requesters: count of their own pending+needs_info submissions.
+          // Escalations uses `badge` (red pill from escalCount). Approval-queue
+          // counts are surfaced inside the Announcements view instead of in
+          // the top nav — see AnnouncementsView for the pending-approval pill.
           let badge = 0;
           if (tab.badge && escalCount > 0) badge = escalCount;
-          else if (tab.approvalBadge && approvalPendingCount > 0) badge = approvalPendingCount;
           return (
             <div key={tab.id} className={`deel-nav-item${active ? ' active' : ''}`}
               role="button"

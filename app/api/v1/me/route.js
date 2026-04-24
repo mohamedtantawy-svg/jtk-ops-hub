@@ -44,7 +44,12 @@ export async function GET(req) {
       });
     }
 
-    // Fallback to JWT claims when DB is unavailable
+    // Fallback to JWT claims when DB is unavailable. Note: we intentionally
+    // leave team/region/country as null rather than defaulting to 'JTK'.
+    // Hardcoding a default team caused announcement audiences to mis-route
+    // for any authenticated user missing a members row — e.g. a NAM user
+    // whose DB row hadn't been seeded would silently receive JTK popups
+    // and miss the ones targeted to their actual team.
     const nameParts = (authUser.name || authUser.email.split('@')[0]).split(' ');
     const initials = nameParts.map(p => p.charAt(0).toUpperCase()).slice(0, 2).join('');
 
@@ -53,7 +58,7 @@ export async function GET(req) {
       name: authUser.name || authUser.email.split('@')[0],
       initials,
       role: authUser.role || 'member',
-      team: 'JTK',
+      team: null,
       region: null,
       country: null,
       leadId: null,

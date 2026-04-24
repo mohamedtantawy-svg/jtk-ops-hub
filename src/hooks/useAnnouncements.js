@@ -82,7 +82,17 @@ function writePendingAcks(ids) {
   } catch (e) { /* ignore quota errors — best effort */ }
 }
 
-export function useAnnouncements() {
+// `toastRef` is an optional React ref whose `.current` points to an addToast
+// function (type, title, body) => void. We accept a ref rather than the
+// callback directly because App.jsx declares addToast *after* useAnnouncements()
+// runs (temporal dead zone), so passing the value at call-time would be
+// undefined. The ref is patched by a useEffect in App.jsx once addToast exists.
+export function useAnnouncements({ toastRef } = {}) {
+  // notifyError is a tiny helper that safely fires a toast if (a) the ref is
+  // populated, and (b) the caller gave us one. Noop in isolation / tests.
+  const notifyError = useCallback((title, body) => {
+    try { toastRef?.current?.('error', title, body); } catch(_) {}
+  }, [toastRef]);
   const [comms, setComms] = useState(INITIAL_COMMS);
   const [isOnline, setIsOnline] = useState(false); // true when backend responds
   // Canonical DB user id for the caller, as reported by the server on every
@@ -232,10 +242,16 @@ export function useAnnouncements() {
       try {
         await apiSend(id);
         setTimeout(() => refresh(), 500);
-      } catch (e) { console.error('[announcements] send failed:', e.message, e.status); }
+      } catch (e) {
+        console.error('[announcements] send failed:', e.message, e.status);
+        notifyError('Send failed', e.message || 'Could not publish announcement');
+        // Re-throw so the caller can react (AnnouncementsView.handleSend
+        // already catches this to flip the UI state back).
+        throw e;
+      }
     }
     setComms(prev => prev.map(c => c.id === id ? { ...c, status: 'sent', sentAt: new Date().toISOString() } : c));
-  }, [refresh]);
+  }, [refresh, notifyError]);
 
   // ── Update ───────────────────────────────────────────────────────────────
   const update = useCallback(async (id, fields) => {
@@ -254,9 +270,10 @@ export function useAnnouncements() {
       } catch (e) {
         console.warn('[announcements] update failed, reverting:', e.message);
         setComms(prev => prev.map(c => c.id === id ? { ...c, ...prevSnapshot } : c));
+        notifyError('Update failed', e.message || 'Could not save announcement changes');
       }
     }
-  }, [isOnline]);
+  }, [isOnline, notifyError]);
 
   // ── Acknowledge ──────────────────────────────────────────────────────────
   // Optimistic add → server persist → the 15 s poll in App.jsx picks up the
@@ -403,28 +420,48 @@ export function useAnnouncements() {
         console.warn('[announcements] archive failed, reverting:', e.message);
         // Revert on failure — server still has the old status
         setComms(prev => prev.map(c => c.id === id && c.status === 'archived' ? { ...c, status: 'sent' } : c));
+        notifyError('Archive failed', e.message || 'Could not archive announcement');
       }
     }
-  }, [isOnline]);
+  }, [isOnline, notifyError]);
 
   // ── Delete ───────────────────────────────────────────────────────────────
+  // Optimistic remove with revert on failure — if the server rejects the
+  // delete we re-add the row locally so the user sees the real state rather
+  // than a phantom-deleted announcement that comes back on next refresh.
   const remove = useCallback(async (id) => {
+    let prevRow = null;
+    setComms(prev => {
+      prevRow = prev.find(c => c.id === id) || null;
+      return prev.filter(c => c.id !== id);
+    });
     if (isOnline) {
-      try { await apiDelete(id); } catch (e) { console.warn('[announcements] API error:', e.message); }
+      try {
+        await apiDelete(id);
+      } catch (e) {
+        console.warn('[announcements] delete failed, reverting:', e.message);
+        if (prevRow) setComms(prev => prev.some(c => c.id === id) ? prev : [prevRow, ...prev]);
+        notifyError('Delete failed', e.message || 'Could not delete announcement');
+      }
     }
-    setComms(prev => prev.filter(c => c.id !== id));
-  }, [isOnline]);
+  }, [isOnline, notifyError]);
 
   // ── Pin / Unpin ──────────────────────────────────────────────────────────
   const togglePin = useCallback(async (id) => {
     const comm = comms.find(c => c.id === id);
     if (!comm) return;
     const newPinned = !comm.isPinned;
-    if (isOnline) {
-      try { await apiUpdate(id, { isPinned: newPinned }); } catch (e) { console.warn('[announcements] API error:', e.message); }
-    }
     setComms(prev => prev.map(c => c.id === id ? { ...c, isPinned: newPinned } : c));
-  }, [isOnline, comms]);
+    if (isOnline) {
+      try {
+        await apiUpdate(id, { isPinned: newPinned });
+      } catch (e) {
+        console.warn('[announcements] togglePin failed, reverting:', e.message);
+        setComms(prev => prev.map(c => c.id === id ? { ...c, isPinned: !newPinned } : c));
+        notifyError('Pin toggle failed', e.message || 'Could not update pin state');
+      }
+    }
+  }, [isOnline, comms, notifyError]);
 
   // ── Unarchive ─────────────────────────────────────────────────────────
   const unarchive = useCallback(async (id) => {
@@ -435,9 +472,10 @@ export function useAnnouncements() {
       } catch (e) {
         console.warn('[announcements] unarchive failed, reverting:', e.message);
         setComms(prev => prev.map(c => c.id === id && c.status === 'sent' ? { ...c, status: 'archived' } : c));
+        notifyError('Unarchive failed', e.message || 'Could not restore announcement');
       }
     }
-  }, [isOnline]);
+  }, [isOnline, notifyError]);
 
   // ── Comments ──────────────────────────────────────────────────────────
   const [comments, setComments] = useState({}); // map: announcementId -> comment[]
@@ -532,11 +570,24 @@ export function useAnnouncements() {
       reactions[emoji] = (reactions[emoji] || 0) + 1;
       return { ...c, reactions };
     }));
-    // Fire API call in background
+    // Fire API call in background — revert the optimistic bump on failure so
+    // the count doesn't drift from what the server actually recorded.
     if (isOnline) {
-      try { await apiReactToAnnouncement(id, emoji); } catch (e) { console.warn('[announcements] react error:', e.message); }
+      try {
+        await apiReactToAnnouncement(id, emoji);
+      } catch (e) {
+        console.warn('[announcements] react error:', e.message);
+        setComms(prev => prev.map(c => {
+          if (c.id !== id) return c;
+          const reactions = { ...(c.reactions || {}) };
+          reactions[emoji] = Math.max(0, (reactions[emoji] || 1) - 1);
+          if (reactions[emoji] === 0) delete reactions[emoji];
+          return { ...c, reactions };
+        }));
+        notifyError('Reaction failed', e.message || 'Could not save your reaction');
+      }
     }
-  }, [isOnline]);
+  }, [isOnline, notifyError]);
 
   const unlinkAnnouncementFn = useCallback(async (id, targetId) => {
     if (isOnline) {

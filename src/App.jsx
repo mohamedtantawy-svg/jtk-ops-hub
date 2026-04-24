@@ -8,7 +8,7 @@ import { INITIAL_ACTIVITY, INITIAL_NOTES } from './data/tasks';
 import { FEED_EVENTS } from './data/feed';
 import { ALL_AGENT_IDS, matchesAudience } from './data/comms';
 import { useAnnouncements } from './hooks/useAnnouncements';
-import { useAnnouncementRequests, AnnouncementRequestsProvider } from './hooks/useAnnouncementRequests';
+import { AnnouncementRequestsProvider } from './hooks/useAnnouncementRequests';
 import { useQueueSync } from './hooks/useQueueSync';
 import { DEFAULT_SETTINGS } from './data/settings';
 import { DEFAULT_ACCESS_TYPES } from './data/accessControl';
@@ -147,12 +147,28 @@ const App=()=>{
       }
       const m=MEMBERS.find(mm=>mm.email.toLowerCase()===loggedInEmail.toLowerCase());
       if(m) return tokenId ? { ...m, id: tokenId } : m;
-      // User not in hardcoded MEMBERS but has a stored session — create placeholder
-      // Session revalidation useEffect will replace this with server data
+      // User not in hardcoded MEMBERS but has a stored session. Prefer the
+      // `ops_hub_user` snapshot (persisted by /auth/callback and refreshed on
+      // every /me revalidation — it carries the real DB `team`, `role`, etc.)
+      // and fall back to JWT claims only if that snapshot is missing. Hardcoded
+      // defaults like `team:'JTK'` caused the announcement routing to mis-deliver
+      // popups for any user outside the static MEMBERS roster.
+      try {
+        const storedRaw = localStorage.getItem('ops_hub_user');
+        if (storedRaw) {
+          const stored = JSON.parse(storedRaw);
+          if (stored?.email?.toLowerCase() === loggedInEmail.toLowerCase()) {
+            return tokenId ? { ...stored, id: tokenId } : stored;
+          }
+        }
+      } catch(e) { /* fall through to JWT-derived placeholder */ }
       if(token){
         try{
           const payload = JSON.parse(atob(token.split('.')[1]));
-          return { id: Number(payload.sub)||0, email: payload.email||loggedInEmail, name: payload.name||loggedInEmail.split('@')[0], role: payload.role||'member', team:'JTK', initials:(payload.name||loggedInEmail.split('@')[0]).split(' ').map(w=>w[0]?.toUpperCase()).slice(0,2).join('') };
+          // No team hardcode — leave null so matchesAudience defaults to
+          // "no audience match" rather than silently routing as JTK. The
+          // session-revalidation /me call will populate the real team.
+          return { id: Number(payload.sub)||0, email: payload.email||loggedInEmail, name: payload.name||loggedInEmail.split('@')[0], role: payload.role||'member', team: payload.team||null, initials:(payload.name||loggedInEmail.split('@')[0]).split(' ').map(w=>w[0]?.toUpperCase()).slice(0,2).join('') };
         }catch(e){}
       }
     }
@@ -193,17 +209,16 @@ const App=()=>{
     {id:'ESC-SEED-002',task:null,taskId:null,reason:'Client reporting incorrect salary calculation for March payroll — urgent correction needed before end of day',subject:'Payroll discrepancy — March salary',escalatedBy:'James Okafor',escalatedAt:'11:42',managerId:3,managerName:'Omar Khalil',status:'resolved',managerResponseStatus:'responded',managerResponse:'Payroll team notified, correction processing.',managerRespondedAt:'12:10',managerRespondedBy:'Omar Khalil',escalationSource:'slack',slackChannel:'#hr-urgent',slackUser:'@james.okafor',slackMessageUrl:null},
     {id:'ESC-SEED-003',task:null,taskId:null,reason:'Worker contract termination requires legal sign-off but legal team unresponsive for 48h',subject:'Contract termination — legal sign-off',escalatedBy:'Priya Nair',escalatedAt:'14:05',managerId:3,managerName:'Omar Khalil',status:'pending',managerResponseStatus:'pending_response',managerResponse:null,managerRespondedAt:null,managerRespondedBy:null,escalationSource:'manual',slackChannel:null,slackUser:null,slackMessageUrl:null},
   ]);
-  const { comms, setComms, refresh: apiRefreshAnnouncements, acknowledge: apiAcknowledge, create: apiCreate, send: apiSend, update: apiUpdate, archive: apiArchive, remove: apiRemove, togglePin: apiTogglePin, isOnline: apiOnline, serverUserId: apiServerUserId, serverUserEmail: apiServerUserEmail, unarchive: apiUnarchive, comments: apiComments, setComments: apiSetComments, loadComments: apiLoadComments, addComment: apiAddCommentFn, deleteComment: apiDeleteCommentFn, links: apiLinks, loadLinks: apiLoadLinks, linkAnnouncement: apiLinkAnnouncementFn, unlinkAnnouncement: apiUnlinkAnnouncementFn, react: apiReactFn } = useAnnouncements();
-  // Approval-queue pending count for the nav badge. Backend scopes the list
-  // automatically: approvers see the full queue, everyone else sees only their
-  // own submissions. Counting pending+needs_info gives the right badge for both.
-  const { items: approvalRequestsForBadge } = useAnnouncementRequests();
-  const approvalPendingCount = React.useMemo(() => {
-    if (!Array.isArray(approvalRequestsForBadge)) return 0;
-    return approvalRequestsForBadge.filter(
-      r => r?.status === 'pending' || r?.status === 'needs_info'
-    ).length;
-  }, [approvalRequestsForBadge]);
+  // Ref-based toast bridge: useAnnouncements() fires before addToast is declared
+  // (JS temporal dead zone on line ~496), so we can't pass addToast directly
+  // into the hook here. Instead we hand the hook a ref and patch it with the
+  // real addToast in a useEffect once it's available.
+  const toastRef = React.useRef(null);
+  const { comms, setComms, refresh: apiRefreshAnnouncements, acknowledge: apiAcknowledge, create: apiCreate, send: apiSend, update: apiUpdate, archive: apiArchive, remove: apiRemove, togglePin: apiTogglePin, isOnline: apiOnline, serverUserId: apiServerUserId, serverUserEmail: apiServerUserEmail, unarchive: apiUnarchive, comments: apiComments, setComments: apiSetComments, loadComments: apiLoadComments, addComment: apiAddCommentFn, deleteComment: apiDeleteCommentFn, links: apiLinks, loadLinks: apiLoadLinks, linkAnnouncement: apiLinkAnnouncementFn, unlinkAnnouncement: apiUnlinkAnnouncementFn, react: apiReactFn } = useAnnouncements({ toastRef });
+  // Approval-queue pending counts are now surfaced inside AnnouncementsView
+  // (the pending-approval filter tab in that view displays the count). We no
+  // longer need a top-nav badge, so App.jsx doesn't consume the requests
+  // provider directly — AnnouncementsView reads it via useAnnouncementRequests().
   const [dismissedPopups,setDismissedPopups]=useState(()=>{try{const d=localStorage.getItem('ops_hub_dismissed_popups');return d?JSON.parse(d):[];}catch(e){return[];}});
   const [settings,setSettings]=useState(()=>{try{const s=localStorage.getItem('ops_hub_settings');return s?{...DEFAULT_SETTINGS,...JSON.parse(s)}:DEFAULT_SETTINGS;}catch(e){return DEFAULT_SETTINGS;}});
   const [accessTypes,setAccessTypes]=useState(()=>{try{const s=localStorage.getItem('ops_hub_access_types');return s?JSON.parse(s):DEFAULT_ACCESS_TYPES;}catch(e){return DEFAULT_ACCESS_TYPES;}});
@@ -506,6 +521,10 @@ const App=()=>{
     addNotif(type,title,body);
   },[addNotif]);
   const dismissToast=useCallback(id=>setToasts(prev=>prev.filter(t=>t.id!==id)),[]);
+  // Patch the toast bridge used by useAnnouncements (declared earlier in the
+  // render). The hook reads `toastRef.current` on every error path, so keeping
+  // this in sync means latest-addToast is always used.
+  useEffect(()=>{ toastRef.current = addToast; },[addToast]);
 
   // ── Meeting alerts ──────────────────────────────────────────────────────
   // Runs globally (not just on the Calendar tab) so the 5-minute reminder
@@ -1073,7 +1092,6 @@ const App=()=>{
         onCreateRequest={()=>setRequestModal(true)}
         onCreateReport={()=>{setView('hr-reports');setCreateReportModal(true);}}
         setSelTask={setSelTask} tasks={tasks}
-        approvalPendingCount={approvalPendingCount}
       />
       <div style={{height:impersonating?104:68,flexShrink:0}}/>
       <DeelSubNav view={view} subFilter={subFilter} setSubFilter={setSubFilter} tasks={tasks} user={effectiveUser}/>
