@@ -5,41 +5,44 @@ import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 export async function POST(req, { params }) {
   try {
     const user = getAuthUser(req);
-    if (!user.email) {
+    const email = (user.email || '').trim().toLowerCase();
+    if (!email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const { id } = await params;
 
-    // Resolve user.id — the JWT's `sub` claim is the primary source, but we
-    // ALWAYS cross-check against the DB by email. Rationale: if a stale token
-    // was issued before a members table re-seed, the sub claim can point at a
-    // deleted or reassigned id. Trusting the DB id here means the ack lands on
-    // the row the UI will later compare against — no silent mismatches.
-    let userId = null;
-    if (user.email) {
-      const r = await query('SELECT id FROM members WHERE LOWER(email) = LOWER($1) LIMIT 1', [user.email]);
-      userId = r.rows[0]?.id || null;
-    }
-    if (!userId && user.id) userId = Number(user.id); // final fallback to JWT
-    if (!userId) {
-      return NextResponse.json({ error: 'Could not resolve user id' }, { status: 400 });
+    // Resolve the caller's members.id best-effort — it's a nice-to-have for
+    // historical reporting, but user_email is the canonical identity for
+    // acks (see the migration comment in migrate.js). If we can't resolve an
+    // id — the common case for override-only users whose JWT sub=0 — we
+    // persist user_id=NULL rather than 400'ing the way we used to. The ack
+    // still lands; the frontend matches by email; the tracker counts them.
+    let userId = user.id ? Number(user.id) : null;
+    if (!userId || userId === 0) {
+      try {
+        const r = await query(
+          'SELECT id FROM members WHERE LOWER(email) = $1 LIMIT 1',
+          [email]
+        );
+        userId = r.rows[0]?.id || null;
+      } catch (_) { /* DB blip — proceed with null id */ }
     }
 
-    // Source of truth: announcement_acks table. Preserved forever.
+    // Source of truth: announcement_acks table. Idempotent via the PK on
+    // (announcement_id, user_email) — a retrying client or the drain loop
+    // in useAnnouncements can re-POST safely.
     await query(
       `INSERT INTO announcement_acks (announcement_id, user_id, user_email)
        VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-      [id, userId, user.email]
+      [id, userId, email]
     );
 
-    // Update timestamp
     await query('UPDATE announcements SET updated_at = NOW() WHERE id = $1', [id]);
 
-    // Return canonical acks from announcement_acks table (source of truth).
-    // Return both user_ids and emails — frontend prefers email matching because
-    // the static MEMBERS array id is an array position index that can drift
-    // from DB members.id. Emails are stable and drift-proof.
+    // Return canonical acks from announcement_acks (source of truth). We
+    // surface BOTH user_ids (legacy, nullable) and lowercased emails so the
+    // frontend can keep matching either way while we migrate callers.
     const acksResult = await query(
       `SELECT ARRAY_AGG(user_id) AS user_ids,
               ARRAY_AGG(LOWER(user_email)) AS user_emails
@@ -50,15 +53,12 @@ export async function POST(req, { params }) {
     const acks = (acksResult.rows[0]?.user_ids || []).map(Number).filter(Boolean);
     const ackEmails = (acksResult.rows[0]?.user_emails || []).filter(Boolean);
 
-    // Return the resolved userId + userEmail so the frontend can update its
-    // local "who acked" state using the canonical identity, without relying on
-    // a possibly-stale id in memory. Fixes popup-reappearing bug.
     return NextResponse.json({
       ok: true,
       acks,
       ackEmails,
       userId,
-      userEmail: (user.email || '').toLowerCase(),
+      userEmail: email,
     });
   } catch (err) {
     console.error('[announcements/read]', err.message);

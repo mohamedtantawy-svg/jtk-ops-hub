@@ -24,6 +24,7 @@ const HRX_OWNER_FIELD_NAMES = [
 import { ADMIN_EMAILS_LIST } from '../../../../src/data/adminEmails';
 import { cacheGet, cacheSet } from '../../../../src/lib/server-cache';
 import { filterByAssignee } from '../../../../src/lib/queue-scoping';
+import { ensureRosterHydrated } from '../../../../src/lib/roster-server';
 
 // ── Server-side scope filter ─────────────────────────────────────────────────
 // Zendesk and Jira are assignee-based queues — delegates to the shared scoping
@@ -639,6 +640,10 @@ export async function GET(req) {
   if (!user.email) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  // Hydrate server roster from team_member_overrides so scopeQueueItems sees
+  // the latest roster (TTL-gated; collapses concurrent calls into one query).
+  await ensureRosterHydrated();
 
   const url = new URL(req.url);
   const bustCache = url.searchParams.has('_t');

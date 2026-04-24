@@ -155,6 +155,9 @@ export async function promoteDueScheduled() {
 export async function publishFromRequest(request, options = {}) {
   const sendAt = options.sendAt instanceof Date ? options.sendAt : null;
   const urgentOverride = Boolean(options.urgentOverride);
+  const urgentOverrideReason = options.urgentOverrideReason
+    ? String(options.urgentOverrideReason)
+    : '';
   const actor = options.actor || {};
   const immediate = !sendAt || sendAt.getTime() <= Date.now();
 
@@ -167,6 +170,14 @@ export async function publishFromRequest(request, options = {}) {
       err.code = 'RATE_LIMIT';
       throw err;
     }
+  } else {
+    // Intentional: rate-limit bypasses are low-volume and must be traceable
+    // in server logs even when the direct-publish path doesn't write an
+    // announcement_request_audit row. The reason string arrives validated
+    // (min length) from the caller.
+    console.log(
+      `[announcementFlow] urgent-override bypass by ${actor.email || 'unknown'} — reason: ${urgentOverrideReason || '(none)'}`
+    );
   }
 
   const status = immediate ? 'sent' : 'scheduled';

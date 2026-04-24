@@ -10,6 +10,7 @@ import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { listRedlineRequests, isDeelConfigured } from '../../../../../../src/lib/deel-api';
 import { cacheGet, cacheSet } from '../../../../../../src/lib/server-cache';
 import { scopeRedlineRequests } from '../../../../../../src/lib/queue-scoping';
+import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
 
 // Default: both Review (legalReview) and Execution (HRXToExecute) buckets —
 // the two "Action Needed" surfaces on admin.deel.network.
@@ -36,6 +37,9 @@ export async function GET(req) {
   if (!isDeelConfigured()) {
     return NextResponse.json({ error: 'Deel API not configured' }, { status: 503 });
   }
+
+  // Hydrate the server roster before scopeRedlineRequests runs.
+  await ensureRosterHydrated();
 
   try {
     const { searchParams } = new URL(req.url);

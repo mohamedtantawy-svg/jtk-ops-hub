@@ -53,6 +53,33 @@ export async function POST(req, { params }) {
     const editedFields = Object.keys(edits);
     if (editedFields.length > 0) {
       await recordAudit(id, user, 'edited', { fields: editedFields, duringApproval: true });
+      // Surface the edit to the requester via a visible comment — the audit
+      // log is buried in a collapsed tab, and a silent approval rewrite is
+      // exactly the kind of change the requester ought to know about before
+      // the announcement reaches the audience. Best-effort: a comment insert
+      // failure must never block approval itself.
+      try {
+        const human = (f) => ({
+          title: 'title', body: 'body', target: 'audience', priority: 'priority',
+          isPopup: 'popup mode', imageUrl: 'image', link: 'link',
+          soundKey: 'sound', type: 'type',
+        }[f] || f);
+        const summary = editedFields.map(human).join(', ');
+        await query(
+          `INSERT INTO announcement_request_comments
+             (request_id, author_id, author_email, author_name, body)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [
+            id,
+            user.id || null,
+            user.email,
+            user.name || null,
+            `Approver edited before publishing: ${summary}. Open the request to see the final version sent to the audience.`,
+          ]
+        );
+      } catch (commentErr) {
+        console.warn('[approve] edit-notice comment failed:', commentErr.message);
+      }
     }
 
     // Scheduling — the approver's picker is authoritative. We distinguish
@@ -76,6 +103,22 @@ export async function POST(req, { params }) {
       sendAt = new Date(r.scheduled_for);
     }
     const urgentOverride = Boolean(body.urgentOverride ?? r.urgent_override);
+
+    // An approver bypassing the 2/day + 4h-gap rate limits must record a
+    // reason. The reason lands in the audit log, so anyone auditing an
+    // out-of-policy publication later has a one-line explanation. Accepts
+    // body.urgentOverrideReason; falls back to the request's
+    // rejection_reason column (unused in the approve path) for older
+    // clients, with a short default when nothing is provided.
+    const urgentOverrideReason = urgentOverride
+      ? String(body.urgentOverrideReason || '').trim()
+      : '';
+    if (urgentOverride && urgentOverrideReason.length < 5) {
+      return NextResponse.json(
+        { error: 'An urgent-override reason (≥5 chars) is required to bypass publishing rate limits' },
+        { status: 400 }
+      );
+    }
 
     let published;
     try {
@@ -119,6 +162,7 @@ export async function POST(req, { params }) {
 
     await recordAudit(id, user, 'approved', {
       urgentOverride,
+      urgentOverrideReason: urgentOverride ? urgentOverrideReason : undefined,
       scheduledFor: scheduledISO,
     });
     await recordAudit(id, user, scheduledISO ? 'scheduled' : 'published', {

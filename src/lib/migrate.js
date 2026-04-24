@@ -284,6 +284,75 @@ UPDATE announcement_acks aa
    AND m.id = aa.user_id
    AND m.email IS NOT NULL;
 
+-- ── 2026-04-24: promote user_email to the canonical ack identity ────────────
+-- The previous PK was (announcement_id, user_id). That broke for every user
+-- whose JWT sub=0 — which is what the email/Google login paths issue for
+-- anyone authenticated only via team_member_overrides (i.e. most of the
+-- 104-person roster, since the seed members table only has 20 rows). These
+-- users' acks all collided on (announcement_id, 0) and either silently
+-- dropped (ON CONFLICT DO NOTHING) or, when user_id couldn't be resolved at
+-- all, the /read endpoint returned 400 and the ack was never persisted.
+--
+-- New scheme: user_email is the PK. It's the identity the frontend already
+-- matches on anyway (see ackEmails source-of-truth comments in the hook),
+-- it's case-normalised on write and read, and it doesn't depend on a
+-- members.id ever being resolvable.
+DO $$
+DECLARE
+  old_pk_on_user_id boolean;
+BEGIN
+  SELECT EXISTS (
+    SELECT 1 FROM pg_constraint c
+    JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey)
+    WHERE c.conrelid = 'announcement_acks'::regclass
+      AND c.contype = 'p'
+      AND a.attname = 'user_id'
+  ) INTO old_pk_on_user_id;
+
+  IF old_pk_on_user_id THEN
+    -- Make sure every surviving row has a usable email before we promote
+    -- user_email to NOT NULL.
+    UPDATE announcement_acks aa
+       SET user_email = LOWER(m.email)
+      FROM members m
+     WHERE aa.user_email IS NULL
+       AND m.id = aa.user_id
+       AND m.email IS NOT NULL;
+
+    -- Rows that still have NULL user_email are pre-fix ghost acks (user_id=0
+    -- with no corresponding member). Synthesise a placeholder so the new
+    -- NOT NULL + PK hold; these synthetic emails will never match a real
+    -- caller, so ack checks behave exactly as they did before (the user
+    -- simply stays "pending" against those rows, which is already the
+    -- correct answer).
+    UPDATE announcement_acks
+       SET user_email = 'legacy-' || COALESCE(user_id, 0) || '@unknown.local'
+     WHERE user_email IS NULL;
+
+    -- Case-normalise existing values so new inserts' lowercased emails
+    -- conflict correctly with legacy rows.
+    UPDATE announcement_acks
+       SET user_email = LOWER(user_email)
+     WHERE user_email <> LOWER(user_email);
+
+    -- Defensive dedup in case historical writes produced two rows for the
+    -- same (announcement, email). Keeps the oldest by ctid.
+    DELETE FROM announcement_acks aa
+     USING announcement_acks bb
+     WHERE aa.ctid > bb.ctid
+       AND aa.announcement_id = bb.announcement_id
+       AND aa.user_email = bb.user_email;
+
+    ALTER TABLE announcement_acks DROP CONSTRAINT announcement_acks_pkey;
+    ALTER TABLE announcement_acks ALTER COLUMN user_email SET NOT NULL;
+    ALTER TABLE announcement_acks ALTER COLUMN user_id DROP NOT NULL;
+    ALTER TABLE announcement_acks ADD CONSTRAINT announcement_acks_pkey
+      PRIMARY KEY (announcement_id, user_email);
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_ann_acks_user_email ON announcement_acks(user_email);
+
 CREATE INDEX IF NOT EXISTS idx_requests_status ON requests(status);
 CREATE INDEX IF NOT EXISTS idx_requests_to_team ON requests(to_team);
 CREATE INDEX IF NOT EXISTS idx_requests_from_member ON requests(from_member_id);

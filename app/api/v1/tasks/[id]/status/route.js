@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { withTransaction } from '../../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { canOperateOnTask, loadTaskForGuard, FORBIDDEN } from '../../../../../../src/lib/task-scope-guard';
+import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
 
 const VALID_STATUSES = ['open', 'in_progress', 'escalated', 'snoozed', 'resolved', 'closed'];
 
@@ -13,6 +14,7 @@ export async function PATCH(req, { params }) {
   try {
     const authUser = getAuthUser(req);
     if (!authUser.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    await ensureRosterHydrated();
     const { id } = await params;
     const { status } = await req.json();
     if (!status) return NextResponse.json({ error: 'Status required' }, { status: 400 });
