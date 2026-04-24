@@ -9,6 +9,9 @@ metadata:
     app.kubernetes.io/instance: {{ .Release.Name }}
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: 10m
+    {{- if .Values.publicIngress.whitelistSourceRange }}
+    nginx.ingress.kubernetes.io/whitelist-source-range: {{ .Values.publicIngress.whitelistSourceRange }}
+    {{- end }}
 spec:
   ingressClassName: nginx
   rules:
