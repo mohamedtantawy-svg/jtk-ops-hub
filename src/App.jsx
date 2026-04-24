@@ -211,7 +211,23 @@ const App=()=>{
     return MEMBERS.find(mm => mm.email.toLowerCase() === emailLc) || null;
   }, [liveMembersByEmail]);
 
-  const [impersonating, setImpersonating] = useState(null);
+  // Impersonation survives reloads (e.g. from the version-update banner or a
+  // refresh after Login-as) by keying off sessionStorage — which lives for the
+  // lifetime of the tab so closing the browser still drops it, matching the
+  // "session" semantics users expect.
+  const [impersonating, setImpersonatingRaw] = useState(() => {
+    try {
+      const stored = sessionStorage.getItem('ops_hub_impersonating');
+      return stored ? String(stored).toLowerCase() : null;
+    } catch (e) { return null; }
+  });
+  const setImpersonating = useCallback((next) => {
+    setImpersonatingRaw(next);
+    try {
+      if (next) sessionStorage.setItem('ops_hub_impersonating', String(next).toLowerCase());
+      else sessionStorage.removeItem('ops_hub_impersonating');
+    } catch (e) {}
+  }, []);
   const effectiveUser = React.useMemo(() => {
     if (!impersonating || !user) return user;
     return resolveEffectiveMember(impersonating) || user;
