@@ -143,6 +143,7 @@ export async function middleware(request) {
   if (
     pathname.startsWith('/api/v1/auth') ||
     pathname === '/api/v1/config' ||
+    pathname === '/api/v1/version' ||
     pathname === '/api/v1/integrations/status' ||
     pathname === '/api/v1/calendar/oauth/callback'
   ) {
