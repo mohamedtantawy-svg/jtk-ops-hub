@@ -8,12 +8,18 @@ import {
 } from '../../../../../../src/lib/task-scope-guard';
 import { MEMBERS_BY_EMAIL } from '../../../../../../src/data/members';
 import { getVisibleMemberEmails, isAdmin } from '../../../../../../src/lib/scope-helpers';
+import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
 
 export async function PATCH(req, { params }) {
   try {
     // Only admin, regional_manager, and team_lead can reassign tasks.
     const { authorized, user: authUser, status, error } = requireRole(req, 'admin', 'regional_manager', 'team_lead');
     if (!authorized) return NextResponse.json({ error }, { status });
+
+    // Hydrate roster so MEMBERS_BY_EMAIL + getVisibleMemberEmails reflect
+    // the latest access / hierarchy overrides — a newly-promoted TL must be
+    // able to reassign within their fresh set of direct reports.
+    await ensureRosterHydrated();
 
     const { id } = await params;
     const { assigneeId } = await req.json();

@@ -15,6 +15,7 @@ import { query } from '../../../../src/lib/db';
 import { getAuthUser } from '../../../../src/lib/auth-helpers';
 import { mergeTeamMembers } from '../../../../src/lib/team-members-merge';
 import { TEAM_MEMBERS } from '../../../../src/data/members';
+import { invalidateRosterCache, ensureRosterHydrated } from '../../../../src/lib/roster-server';
 
 const VALID_ACCESS = ['admin', 'regional_manager', 'team_lead', 'agent'];
 const VALID_SERVICES = ['EOR', 'LifeCycle', 'New Services', 'All'];
@@ -143,6 +144,12 @@ export async function POST(req) {
     } catch (memErr) {
       console.warn('[team-members POST] members seed failed:', memErr.message);
     }
+
+    // Flush the server-side roster cache + rehydrate now so the next scoped
+    // request (queue / tasks / escalations) sees the new person without
+    // waiting for the 5s TTL to expire.
+    invalidateRosterCache();
+    await ensureRosterHydrated({ force: true });
 
     return NextResponse.json({
       email, name, initials, title, access, managerEmail, team, region,

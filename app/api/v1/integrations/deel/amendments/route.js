@@ -8,6 +8,7 @@ import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { listAmendmentRequests, isDeelConfigured } from '../../../../../../src/lib/deel-api';
 import { cacheGet, cacheSet } from '../../../../../../src/lib/server-cache';
 import { scopeAmendmentRequests } from '../../../../../../src/lib/queue-scoping';
+import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
 
 // Default status set: Action Needed (AmendmentRequested + WaitingHrxAction)
 // + all three Paused reasons (LegalReview, PausedByHRX, MobilityInput).
@@ -37,6 +38,8 @@ export async function GET(req) {
   if (!isDeelConfigured()) {
     return NextResponse.json({ error: 'Deel API not configured' }, { status: 503 });
   }
+
+  await ensureRosterHydrated();
 
   try {
     const { searchParams } = new URL(req.url);

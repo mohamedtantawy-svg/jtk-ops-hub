@@ -4,6 +4,7 @@ import { getVisibleMemberEmails, isAdmin } from '../../../../../../src/lib/scope
 import { getVisibleCountries } from '../../../../../../src/lib/queue-scoping';
 import { cacheGet } from '../../../../../../src/lib/server-cache';
 import { query } from '../../../../../../src/lib/db';
+import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
 
 const ZD_SUBDOMAIN = process.env.ZENDESK_SUBDOMAIN || '';
 const ZD_TOKEN = process.env.ZENDESK_API_TOKEN || '';
@@ -120,6 +121,10 @@ async function fetchJiraComments(issueKey) {
 export async function GET(req, { params }) {
   const user = getAuthUser(req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  // Hydrate before ticketInUserScope — its team_lead / agent paths call
+  // getVisibleMemberEmails, which must see the latest hierarchy.
+  await ensureRosterHydrated();
 
   const { ticketId } = await params;
 

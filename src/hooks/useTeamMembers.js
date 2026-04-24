@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../services/api';
-import { TEAM_MEMBERS } from '../data/members';
+import { TEAM_MEMBERS, hydrateRoster } from '../data/members';
 
 // Shape-compat fallback: baseline TEAM_MEMBERS with defaulted metadata fields
 // so consumers can read every property regardless of whether the API returned.
@@ -54,6 +54,16 @@ export function useTeamMembers() {
   }, []);
 
   useEffect(() => { fetchMembers(); }, [fetchMembers]);
+
+  // ── Hydrate the module-level roster whenever `members` changes ────────
+  // This is the bridge that makes Team-tab edits (add, move, access-change,
+  // remove) visible to every static import of members.js in the app:
+  // scope-helpers, queue-scoping, Briefing / Queue / Home memos. The
+  // hydrateRoster helper no-ops on structural equality, so identical refetches
+  // don't trigger unnecessary re-renders downstream.
+  useEffect(() => {
+    hydrateRoster(members);
+  }, [members]);
 
   // ── Derived lookups (memoised) ────────────────────────────────────────
   const membersByEmail = useMemo(() => {

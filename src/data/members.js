@@ -112,20 +112,194 @@ export const TEAM_MEMBERS = [
   { email: 'ziyaad.mahomed@deel.com', name: 'Ziyaad Mahomed', initials: 'ZM', avatarUrl: 'https://api.dicebear.com/7.x/initials/svg?seed=Ziyaad%20Mahomed&backgroundColor=6b3fa0&textColor=ffffff&fontSize=40', title: 'HR Experience Manager', access: 'agent', managerEmail: 'melissa.capicchiano@deel.com', team: 'APAC', service: 'EOR', startDate: '2024-04-15' },
 ];
 
-// ── Lookup helpers ───────────────────────────────────────────────────────
-export const MEMBERS_BY_EMAIL = Object.fromEntries(
-  TEAM_MEMBERS.map(m => [m.email, m])
-);
+// ---------------------------------------------------------------------------
+// Hydratable roster — single source of truth that mirrors team_member_overrides
+// ---------------------------------------------------------------------------
+// TEAM_MEMBERS above is the BASELINE. _currentRoster is the mutable runtime
+// state that hydrateRoster(merged) replaces whenever overrides land (on login,
+// or whenever the client hook / server helper pulls from the DB).
+//
+// The derived exports below (MEMBERS_BY_EMAIL, ALL_EMAILS, ALL_EMAILS_SET,
+// MEMBERS, DEFAULT_USER_ACCESS_MAP) are declared with `export let` so they can
+// be rebuilt on every hydration. Thanks to ES module live bindings, every
+// `import { MEMBERS_BY_EMAIL } from '.../members'` elsewhere in the app sees
+// the newest reference without needing to re-import or remount.
+//
+// Helper functions (getDirectReports, getAllReports, getVisibleEmailsForAccess)
+// close over the module-level _currentRoster / ALL_EMAILS_SET names, so they
+// track hydration automatically — no caller needs to change.
+//
+// React integration: subscribeRoster(cb) lets React components bridge module
+// state into state, so a re-render fires after hydration. App.jsx reads the
+// roster version from the subscription and threads it through PermissionsContext
+// so memoised derivations in Briefing / Queue / Home invalidate correctly.
 
-// ── Flat email lists ─────────────────────────────────────────────────────
-export const ALL_EMAILS = TEAM_MEMBERS.map(m => m.email);
-export const ALL_EMAILS_SET = new Set(ALL_EMAILS);
+function _normaliseMember(m) {
+  return {
+    ...m,
+    email: String(m.email || '').toLowerCase(),
+    managerEmail: m.managerEmail ? String(m.managerEmail).toLowerCase() : null,
+  };
+}
 
-// ── Hierarchy helpers ────────────────────────────────────────────────────
+let _currentRoster = TEAM_MEMBERS.map(_normaliseMember);
+let _rosterVersion = 0;
+const _subscribers = new Set();
+
+function _buildMembersByEmail(roster) {
+  return Object.fromEntries(roster.map(m => [m.email, m]));
+}
+
+function _buildMembers(roster) {
+  return roster.map((m, i) => ({
+    id: i + 1,
+    name: m.name,
+    initials: m.initials,
+    avatarUrl: m.avatarUrl,
+    role: m.access,
+    team: m.team,
+    region: m.team,
+    country: m.country || null,
+    lead: null,
+    email: m.email,
+  }));
+}
+
+function _accessTypeId(access) {
+  return (
+    {
+      admin: 'at_admin',
+      regional_manager: 'at_regional_mgr',
+      team_lead: 'at_lead',
+      agent: 'at_agent',
+    }[access] || 'at_agent'
+  );
+}
+
+function _buildAccessMap(roster) {
+  return Object.fromEntries(
+    roster.map(m => [
+      m.email,
+      {
+        accessTypeId: _accessTypeId(m.access),
+        name: m.name,
+        title: m.title,
+        startDate: m.startDate,
+        managerEmail: m.managerEmail,
+        region: m.team,
+        team: m.team,
+        department: 'HR Experience',
+        country: m.country || null,
+        status: m.isDeleted ? 'inactive' : 'active',
+        access: m.access,
+        service: m.service,
+      },
+    ])
+  );
+}
+
+// ── Live-binding derived exports ────────────────────────────────────────
+// These are `export let` specifically so hydrateRoster() can reassign them —
+// consumers using `import { MEMBERS_BY_EMAIL } from '.../members'` will see
+// the new values on their very next read (ES module live bindings).
+export let MEMBERS_BY_EMAIL = _buildMembersByEmail(_currentRoster);
+export let ALL_EMAILS = _currentRoster.map(m => m.email);
+export let ALL_EMAILS_SET = new Set(ALL_EMAILS);
+export let MEMBERS = _buildMembers(_currentRoster);
+export let DEFAULT_USER_ACCESS_MAP = _buildAccessMap(_currentRoster);
+
+// ── Structural equality short-circuit ───────────────────────────────────
+// Avoid rebuilding every derived map when hydration returns the same data
+// (e.g. the client hook fetches the same roster twice in a row). Comparing
+// on the subset of fields that actually impact scoping / permissions is
+// cheap and eliminates thrash + unnecessary subscriber callbacks.
+function _rostersEqual(a, b) {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (!x || !y) return false;
+    if (
+      x.email !== y.email ||
+      x.access !== y.access ||
+      x.managerEmail !== y.managerEmail ||
+      x.team !== y.team ||
+      x.service !== y.service ||
+      x.name !== y.name ||
+      x.title !== y.title ||
+      (x.country || null) !== (y.country || null) ||
+      Boolean(x.isDeleted) !== Boolean(y.isDeleted) ||
+      Boolean(x.onLeave) !== Boolean(y.onLeave)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Swap the runtime roster and rebuild every derived export. Returns true if
+ * the swap happened (nextMembers differed from the current roster), false
+ * otherwise. A no-op swap does NOT fire subscribers and does NOT bump the
+ * version — callers can rely on rosterVersion only changing when something
+ * actually changed.
+ */
+export function hydrateRoster(nextMembers) {
+  if (!Array.isArray(nextMembers) || nextMembers.length === 0) return false;
+  const normalised = nextMembers.map(_normaliseMember);
+  if (_rostersEqual(_currentRoster, normalised)) return false;
+
+  _currentRoster = normalised;
+  MEMBERS_BY_EMAIL = _buildMembersByEmail(_currentRoster);
+  ALL_EMAILS = _currentRoster.map(m => m.email);
+  ALL_EMAILS_SET = new Set(ALL_EMAILS);
+  MEMBERS = _buildMembers(_currentRoster);
+  DEFAULT_USER_ACCESS_MAP = _buildAccessMap(_currentRoster);
+  _rosterVersion += 1;
+
+  for (const cb of _subscribers) {
+    try {
+      cb(_rosterVersion);
+    } catch (err) {
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn('[members subscribeRoster]', err?.message || err);
+      }
+    }
+  }
+  return true;
+}
+
+/** Current monotonically-increasing roster version (0 if untouched). */
+export function getRosterVersion() {
+  return _rosterVersion;
+}
+
+/** Register a callback fired after each successful hydration. Returns an
+ *  unsubscribe function. Intentionally tiny — consumers (React, caches) call
+ *  setState / invalidate inside their own handler. */
+export function subscribeRoster(cb) {
+  if (typeof cb !== 'function') return () => {};
+  _subscribers.add(cb);
+  return () => {
+    _subscribers.delete(cb);
+  };
+}
+
+/** Read-only snapshot of the current roster for server-side consumers that
+ *  don't want to touch the live binding directly. */
+export function getCurrentRoster() {
+  return [..._currentRoster];
+}
+
+// ── Hierarchy helpers — read from the hydrated _currentRoster ───────────
+// Soft-deleted members (isDeleted=true) are filtered out so removing a person
+// on the Team tab has immediate effect on Queue / Briefing / Home scoping.
 export function getDirectReports(email) {
   if (!email) return [];
   const e = email.toLowerCase();
-  return TEAM_MEMBERS.filter(m => m.managerEmail === e);
+  return _currentRoster.filter(m => m.managerEmail === e && !m.isDeleted);
 }
 
 export function getAllReports(email) {
@@ -134,7 +308,8 @@ export function getAllReports(email) {
   const queue = [email.toLowerCase()];
   while (queue.length > 0) {
     const mgr = queue.shift();
-    for (const m of TEAM_MEMBERS) {
+    for (const m of _currentRoster) {
+      if (m.isDeleted) continue;
       if (m.managerEmail === mgr && !reports.has(m.email)) {
         reports.add(m.email);
         queue.push(m.email);
@@ -145,18 +320,16 @@ export function getAllReports(email) {
 }
 
 // ── Get the visible email set for a user based on access level + hierarchy
+// Admin → all. Regional manager → self + full subtree.
+// Team lead → self + direct reports. Agent → self only.
 export function getVisibleEmailsForAccess(email) {
   if (!email) return new Set();
-  const member = MEMBERS_BY_EMAIL[email.toLowerCase()];
-  if (!member) return new Set([email.toLowerCase()]);
-
-  // Admin sees everyone
+  const lower = email.toLowerCase();
+  const member = MEMBERS_BY_EMAIL[lower];
+  if (!member) return new Set([lower]);
   if (member.access === 'admin') return ALL_EMAILS_SET;
 
-  // Regional Manager: own + all reports (TLs + their agents — full tree)
-  // Team Lead: own + direct reports only
-  // Agent: own only
-  const visible = new Set([email.toLowerCase()]);
+  const visible = new Set([lower]);
   if (member.access === 'regional_manager') {
     for (const r of getAllReports(email)) visible.add(r);
   } else if (member.access === 'team_lead') {
@@ -164,39 +337,3 @@ export function getVisibleEmailsForAccess(email) {
   }
   return visible;
 }
-
-// ── Backward-compatible MEMBERS array (with numeric IDs) ────────────────
-export const MEMBERS = TEAM_MEMBERS.map((m, i) => ({
-  id: i + 1,
-  name: m.name,
-  initials: m.initials,
-  avatarUrl: m.avatarUrl,
-  role: m.access,
-  team: m.team,
-  region: m.team,
-  country: null,
-  lead: null,
-  email: m.email,
-}));
-
-// ── DEFAULT_USER_ACCESS_MAP — maps email → access config ────────────────
-function _accessTypeId(access) {
-  return { admin: 'at_admin', regional_manager: 'at_regional_mgr', team_lead: 'at_lead', agent: 'at_agent' }[access] || 'at_agent';
-}
-
-export const DEFAULT_USER_ACCESS_MAP = Object.fromEntries(
-  TEAM_MEMBERS.map(m => [m.email, {
-    accessTypeId: _accessTypeId(m.access),
-    name: m.name,
-    title: m.title,
-    startDate: m.startDate,
-    managerEmail: m.managerEmail,
-    region: m.team,
-    team: m.team,
-    department: 'HR Experience',
-    country: null,
-    status: 'active',
-    access: m.access,
-    service: m.service,
-  }])
-);

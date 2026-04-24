@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useCallback, createContext } from '
 import { TOOLS, STATUSES, FUNCTIONS, FLAGS } from './data/constants';
 import { INITIAL_PROJECTS } from './data/projects';
 import { INITIAL_REQUESTS } from './data/requests';
-import { MEMBERS, MEMBERS_BY_EMAIL, DEFAULT_USER_ACCESS_MAP, TEAM_MEMBERS, getAllReports } from './data/members';
+import { MEMBERS, MEMBERS_BY_EMAIL, DEFAULT_USER_ACCESS_MAP, TEAM_MEMBERS, getAllReports, subscribeRoster, getRosterVersion } from './data/members';
 import { useTeamMembers } from './hooks/useTeamMembers';
 import { INITIAL_ACTIVITY, INITIAL_NOTES } from './data/tasks';
 import { FEED_EVENTS } from './data/feed';
@@ -264,6 +264,62 @@ const App=()=>{
   const [settings,setSettings]=useState(()=>{try{const s=localStorage.getItem('ops_hub_settings');return s?{...DEFAULT_SETTINGS,...JSON.parse(s)}:DEFAULT_SETTINGS;}catch(e){return DEFAULT_SETTINGS;}});
   const [accessTypes,setAccessTypes]=useState(()=>{try{const s=localStorage.getItem('ops_hub_access_types');return s?JSON.parse(s):DEFAULT_ACCESS_TYPES;}catch(e){return DEFAULT_ACCESS_TYPES;}});
   const [userAccessMap,setUserAccessMap]=useState(()=>{try{const ver=localStorage.getItem('ops_hub_uam_ver');if(ver!==ADMIN_LIST_VERSION){localStorage.removeItem('ops_hub_user_access_map');localStorage.setItem('ops_hub_uam_ver',ADMIN_LIST_VERSION);return{...DEFAULT_USER_ACCESS_MAP};}const s=localStorage.getItem('ops_hub_user_access_map');return s?JSON.parse(s):{...DEFAULT_USER_ACCESS_MAP};}catch(e){return DEFAULT_USER_ACCESS_MAP;}});
+
+  // ── Roster-version bridge ────────────────────────────────────────────────
+  // The module-level roster in src/data/members.js is hydrated by
+  // useTeamMembers when the /api/v1/team-members fetch completes. React has
+  // no built-in way to know the module rebuilt its derived exports, so we
+  // subscribe to hydrations and bump a counter that every dependent memo
+  // (userAccessMap reconcile, PermissionsContext consumers) can key off of.
+  const [rosterVersion,setRosterVersion]=useState(()=>getRosterVersion());
+  useEffect(() => {
+    const unsub = subscribeRoster((v) => setRosterVersion(v));
+    return unsub;
+  }, []);
+
+  // ── userAccessMap reconciliation after roster hydration ─────────────────
+  // DEFAULT_USER_ACCESS_MAP is derived from the CURRENT roster (thanks to ES
+  // live bindings), so every time hydrateRoster runs it reflects the latest
+  // overrides. We merge it into userAccessMap on every version bump:
+  //   • preserve custom accessTypeIds (admin may have assigned a non-canonical
+  //     at_* id via Settings — don't clobber)
+  //   • for every other field (managerEmail, team, region, service, country,
+  //     title, name, startDate, status), re-sync from the baseline-derived
+  //     map so a Team-tab edit takes effect without a page refresh.
+  // New emails are added outright; soft-deleted ones are marked inactive.
+  useEffect(() => {
+    setUserAccessMap((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      const canonicalIds = new Set(['at_admin', 'at_regional_mgr', 'at_lead', 'at_agent']);
+
+      // Merge baseline-derived data into existing entries + add new emails.
+      for (const [email, baseEntry] of Object.entries(DEFAULT_USER_ACCESS_MAP)) {
+        const current = prev[email];
+        if (!current) {
+          next[email] = { ...baseEntry };
+          changed = true;
+          continue;
+        }
+        // Keep admin-assigned custom accessTypeIds (anything outside the
+        // 4 canonical ones). For canonical ones, keep the baseline-derived
+        // value so Team-tab access-type changes propagate.
+        const preserveAccessTypeId = current.accessTypeId && !canonicalIds.has(current.accessTypeId);
+        const merged = {
+          ...current,
+          ...baseEntry,
+          accessTypeId: preserveAccessTypeId ? current.accessTypeId : baseEntry.accessTypeId,
+        };
+        // Only overwrite if something actually differs (avoid re-render churn).
+        for (const key of Object.keys(merged)) {
+          if (merged[key] !== current[key]) { changed = true; break; }
+        }
+        next[email] = merged;
+      }
+      return changed ? next : prev;
+    });
+  }, [rosterVersion]);
+
   // ── Session revalidation on page load ─────────────────────────────────────
   // The JWT is valid for 24 hours. We only hit /me when the token is older than
   // 1 hour — this prevents noisy logouts on every page refresh while still
@@ -1134,7 +1190,7 @@ const App=()=>{
 
   return(
     <ErrorBoundary>
-    <PermissionsContext.Provider value={perms}>
+    <PermissionsContext.Provider value={{ ...perms, rosterVersion }}>
     <IntegrationsContext.Provider value={integrationsCtx}>
     <SettingsContext.Provider value={settings}>
     <div style={{minHeight:'100vh',background:'var(--bg)',color:'var(--text)',display:'flex',flexDirection:'column'}} role="application" aria-label="Ops Hub Dashboard">

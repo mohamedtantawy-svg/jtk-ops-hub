@@ -8,6 +8,7 @@ import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { listWorkbenchTasks, isDeelConfigured } from '../../../../../../src/lib/deel-api';
 import { cacheGet, cacheSet } from '../../../../../../src/lib/server-cache';
 import { scopeWorkbenchTasks } from '../../../../../../src/lib/queue-scoping';
+import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
 
 const CACHE_KEY = 'deel_workbench';
 const CACHE_TTL = 3 * 60 * 1000;    // fresh for 3 minutes
@@ -27,6 +28,11 @@ export async function GET(req) {
   if (!isDeelConfigured()) {
     return NextResponse.json({ error: 'Deel API not configured' }, { status: 503 });
   }
+
+  // Hydrate the server roster before scopeWorkbenchTasks runs so the latest
+  // team_member_overrides shape the visibility set (e.g. new TL's direct
+  // reports, moved agents).
+  await ensureRosterHydrated();
 
   try {
     const { searchParams } = new URL(req.url);

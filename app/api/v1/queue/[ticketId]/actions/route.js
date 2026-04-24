@@ -16,6 +16,7 @@ import { cacheDelMany, cacheGet } from '../../../../../../src/lib/server-cache';
 import { getVisibleMemberEmails, isAdmin } from '../../../../../../src/lib/scope-helpers';
 import { getVisibleCountries } from '../../../../../../src/lib/queue-scoping';
 import { canAssignTo } from '../../../../../../src/lib/task-scope-guard';
+import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
 
 const STALE_TTL_MS = 30 * 60_000;
 
@@ -237,6 +238,10 @@ async function upsertShadowAndLog({ ticketId, source, eventType, eventText, acto
 export async function POST(req, { params }) {
   const user = getAuthUser(req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  // Hydrate before any scope / canAssignTo check so a just-added TL can
+  // reassign to a just-onboarded agent without a server restart.
+  await ensureRosterHydrated();
 
   const { ticketId } = await params;
   const body = await req.json();

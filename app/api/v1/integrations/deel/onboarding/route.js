@@ -8,6 +8,7 @@ import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { listOnboardingPeople, isDeelConfigured } from '../../../../../../src/lib/deel-api';
 import { cacheGet, cacheSet } from '../../../../../../src/lib/server-cache';
 import { scopeOnboardingPeople } from '../../../../../../src/lib/queue-scoping';
+import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
 
 const CACHE_KEY = 'deel_onboarding';
 const CACHE_TTL = 5 * 60 * 1000;    // fresh for 5 minutes
@@ -29,6 +30,8 @@ export async function GET(req) {
   if (!isDeelConfigured()) {
     return NextResponse.json({ error: 'Deel API not configured' }, { status: 503 });
   }
+
+  await ensureRosterHydrated();
 
   try {
     const { searchParams } = new URL(req.url);
