@@ -30,6 +30,65 @@ export async function GET(req) {
           [authUser.email]
         );
         if (rows.length > 0) dbUser = rows[0];
+
+        // Fall back to team_member_overrides for users who were added via the
+        // Team tab but never had a members row seeded (e.g. new hires created
+        // after the initial seed). Prevents /me from returning team=null for
+        // them, which would break permissions + Home/Team-Summary filters.
+        if (!dbUser) {
+          try {
+            const { rows: ovRows } = await query(
+              `SELECT email, name, initials, access, team, region, country, avatar_url, manager_email
+                 FROM team_member_overrides
+                WHERE email = $1 AND (is_deleted IS NULL OR is_deleted = false)`,
+              [authUser.email]
+            );
+            if (ovRows.length > 0) {
+              const o = ovRows[0];
+              dbUser = {
+                id: 0,
+                name: o.name || authUser.name || authUser.email,
+                initials: o.initials,
+                role: o.access || 'agent',
+                team: o.team,
+                region: o.region,
+                country: o.country,
+                lead_id: null,
+                email: o.email,
+                avatar_url: o.avatar_url,
+                is_active: true,
+                created_at: null,
+                updated_at: null,
+              };
+            }
+          } catch (ovErr) {
+            console.warn('[me] override lookup failed:', ovErr.message);
+          }
+        }
+
+        // Touch last_login_at on every session revalidation. /me is called
+        // on boot and on route changes, so this doubles as a reliable
+        // "user is active" signal — critical because the auth callback only
+        // fires on fresh OAuth, not on cached JWT sessions. Without this,
+        // everyone with an existing session shows as "Never logged in"
+        // until their JWT expires.
+        //
+        // We only bump login_count on the first INSERT (seed row); subsequent
+        // refreshes just update the timestamp so we don't inflate the counter
+        // to meaningless numbers. Fresh OAuth / email-login explicitly +1
+        // the counter in their own code paths.
+        try {
+          await query(
+            `INSERT INTO team_member_overrides (email, last_login_at, login_count)
+             VALUES ($1, NOW(), 1)
+             ON CONFLICT (email) DO UPDATE
+             SET last_login_at = NOW(),
+                 updated_at    = NOW()`,
+            [authUser.email]
+          );
+        } catch (touchErr) {
+          console.warn('[me] last_login touch failed:', touchErr.message);
+        }
       }
     } catch (err) {
       console.warn('[me] DB lookup failed, using JWT claims:', err.message);

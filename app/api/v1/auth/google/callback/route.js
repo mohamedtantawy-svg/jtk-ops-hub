@@ -55,7 +55,35 @@ async function findMemberByEmail(email) {
       'SELECT * FROM members WHERE email = $1 AND is_active = true',
       [email]
     );
-    return rows.length > 0 ? rows[0] : null;
+    if (rows.length > 0) return rows[0];
+
+    // Fallback to team_member_overrides so newly-added users (added via the
+    // Team tab before the members seed caught up) can still SSO and get a
+    // fully-formed user object back rather than the null-team fallback.
+    const { rows: ovRows } = await query(
+      `SELECT email, name, initials, access AS role, team, region, country,
+              avatar_url, manager_email
+         FROM team_member_overrides
+        WHERE email = $1 AND (is_deleted IS NULL OR is_deleted = false)`,
+      [email]
+    );
+    if (ovRows.length > 0) {
+      const o = ovRows[0];
+      return {
+        id: 0,
+        email: o.email,
+        name: o.name || email,
+        initials: o.initials,
+        role: o.role || 'agent',
+        team: o.team,
+        region: o.region,
+        country: o.country,
+        avatar_url: o.avatar_url,
+        lead_id: null,
+        is_active: true,
+      };
+    }
+    return null;
   } catch (err) {
     console.warn('[auth/google/callback] DB lookup failed, proceeding without DB:', err.message);
     return null;
