@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { query } from '../../../../src/lib/db';
 import { getAuthUser } from '../../../../src/lib/auth-helpers';
 import { isApprover } from '../../../../src/data/approvers';
+import { MEMBERS_BY_EMAIL } from '../../../../src/data/members';
 import {
   VALID_TARGETS,
   checkPublishingRules,
@@ -9,6 +10,45 @@ import {
   normalizePayload,
   promoteDueScheduled,
 } from '../../../../src/lib/announcementFlow';
+
+// Resolve a caller's scoping profile — their members.id and team — from any
+// of the three identity sources, in order of freshness:
+//   1. team_member_overrides (DB) — authoritative for override-only users
+//      and for anyone whose team was re-assigned via the Team tab.
+//   2. members (DB) — the 20-row seed baseline. Has a real id, useful for
+//      legacy reporting that still keys off numeric ids.
+//   3. TEAM_MEMBERS baseline (static JS) — the 104-person roster shipped
+//      with the bundle. Catches everyone the DB doesn't know about yet.
+//
+// Without all three, non-seed users (most of the 104-person roster) saw
+// callerTeam=null, which made matchesAudience() drop every region-targeted
+// announcement — the "some users see no banners" bug.
+async function resolveCallerProfile(email) {
+  const emailLc = String(email || '').trim().toLowerCase();
+  if (!emailLc) return { id: null, team: null };
+
+  let id = null;
+  let team = null;
+  try {
+    const { rows } = await query(
+      `SELECT m.id AS member_id, m.team AS member_team, o.team AS override_team
+         FROM (SELECT $1::text AS email) c
+         LEFT JOIN members m ON LOWER(m.email) = c.email
+         LEFT JOIN team_member_overrides o ON LOWER(o.email) = c.email`,
+      [emailLc]
+    );
+    if (rows.length > 0) {
+      id = rows[0].member_id || null;
+      team = rows[0].override_team || rows[0].member_team || null;
+    }
+  } catch (_) { /* DB blip — fall through to static baseline */ }
+
+  if (!team) {
+    const baseline = MEMBERS_BY_EMAIL[emailLc];
+    if (baseline) team = baseline.team || null;
+  }
+  return { id, team };
+}
 
 // Server-side audience match — mirrors src/data/comms.js matchesAudience()
 function matchesAudience(target, memberTeam) {
@@ -64,15 +104,12 @@ export async function GET(req) {
     params.push(limit, offset);
 
     // Look up caller's info once (team for audience scope, id for author match
-    // + ack match). Always resolve by email so the caller id we return is the
-    // real DB members.id — trusting the JWT sub risks drift against seeds.
-    let callerTeam = null;
-    let callerId = null;
-    {
-      const r = await query('SELECT id, team FROM members WHERE LOWER(email) = LOWER($1) LIMIT 1', [user.email]);
-      callerTeam = r.rows[0]?.team || null;
-      callerId = r.rows[0]?.id || (user.id ? Number(user.id) : null);
-    }
+    // + ack match). Cascades through DB overrides → DB seed → static roster,
+    // so callers whose members row is missing (most of the 104-person team)
+    // still get the correct team and see region-targeted announcements.
+    const profile = await resolveCallerProfile(user.email);
+    let callerTeam = profile.team;
+    let callerId = profile.id || (user.id && Number(user.id) > 0 ? Number(user.id) : null);
 
     const [{ rows }, countResult] = await Promise.all([
       query(dataSql, params),
@@ -196,6 +233,17 @@ export async function POST(req) {
       return NextResponse.json({ error: 'Invalid scheduledFor' }, { status: 400 });
     }
     const urgentOverride = approver && Boolean(raw.urgentOverride);
+    const urgentOverrideReason = urgentOverride
+      ? String(raw.urgentOverrideReason || '').trim()
+      : '';
+    // Bypassing the 2/day + 4h-gap limits must be accompanied by a reason so
+    // future audits can see *why* a limit was skipped.
+    if (urgentOverride && urgentOverrideReason.length < 5) {
+      return NextResponse.json(
+        { error: 'An urgent-override reason (≥5 chars) is required to bypass publishing rate limits' },
+        { status: 400 }
+      );
+    }
 
     let published;
     try {
@@ -212,7 +260,12 @@ export async function POST(req) {
           sound_key: payload.soundKey,
           requested_by_id: user.id || null,
         },
-        { sendAt: scheduledFor, urgentOverride, actor: user }
+        {
+          sendAt: scheduledFor,
+          urgentOverride,
+          urgentOverrideReason,
+          actor: user,
+        }
       );
     } catch (e) {
       if (e.code === 'RATE_LIMIT') {

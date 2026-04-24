@@ -25,7 +25,7 @@ export async function fetchAnnouncementById(id) {
 export async function createAnnouncement(payload) {
   const {
     type, title, body, target, priority, isPopup, imageUrl, link, soundKey,
-    scheduledFor, urgentOverride,
+    scheduledFor, urgentOverride, urgentOverrideReason,
   } = payload || {};
   return apiFetch('/announcements', {
     method: 'POST',
@@ -33,6 +33,7 @@ export async function createAnnouncement(payload) {
       type, title, body, target, priority, isPopup, imageUrl, link, soundKey,
       scheduledFor: scheduledFor || null,
       urgentOverride: urgentOverride || false,
+      urgentOverrideReason: urgentOverrideReason || '',
     }),
   });
 }

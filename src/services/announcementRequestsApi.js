@@ -29,10 +29,10 @@ export async function editRequest(id, patch) {
   });
 }
 
-export async function approveRequest(id, { scheduledFor, urgentOverride, overrideEdits } = {}) {
+export async function approveRequest(id, { scheduledFor, urgentOverride, urgentOverrideReason, overrideEdits } = {}) {
   return apiFetch(`/announcement-requests/${id}/approve`, {
     method: 'POST',
-    body: JSON.stringify({ scheduledFor, urgentOverride, overrideEdits }),
+    body: JSON.stringify({ scheduledFor, urgentOverride, urgentOverrideReason, overrideEdits }),
   });
 }
 

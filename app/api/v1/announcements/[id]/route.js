@@ -125,6 +125,8 @@ export async function DELETE(req, { params }) {
     }
 
     const { id } = await params;
+    // Hard delete — announcement_acks, comments, reactions, links all cascade
+    // via ON DELETE CASCADE on their FKs. No orphan rows left behind.
     await query('DELETE FROM announcements WHERE id = $1', [id]);
     return new NextResponse(null, { status: 204 });
   } catch (err) {

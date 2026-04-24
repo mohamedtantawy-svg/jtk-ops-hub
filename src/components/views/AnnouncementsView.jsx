@@ -614,19 +614,33 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
                           )}
                         </div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                          {ackMembers.slice().sort((a, b) => b.acked - a.acked).map(({ member, acked }) => (
-                            <div key={member.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 10, background: acked ? 'white' : '#fffcf0', border: `1px solid ${acked ? '#e8e8e8' : '#ffe27c'}`, minWidth: 180 }}>
-                              <Avatar name={member.name} size={24} />
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 12, fontWeight: 600, color: '#1b1b1b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{member.name}</div>
-                                <div style={{ fontSize: 10, color: '#9e9e9e' }}>{member.team}</div>
+                          {ackMembers.slice().sort((a, b) => b.acked - a.acked).map(({ member, acked }) => {
+                            // Per-member overdue status — highlights which
+                            // specific people are past the configured ACK
+                            // deadline for THIS announcement. Leads and
+                            // admins can then chase those names directly
+                            // instead of eyeballing sentAt timestamps.
+                            const memberOverdue = !acked && isOverdue(comm);
+                            const rowBg = acked ? 'white' : (memberOverdue ? '#fdecea' : '#fffcf0');
+                            const rowBorder = acked ? '#e8e8e8' : (memberOverdue ? '#f5bcbc' : '#ffe27c');
+                            return (
+                              <div key={member.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 10, background: rowBg, border: `1px solid ${rowBorder}`, minWidth: 180 }}>
+                                <Avatar name={member.name} size={24} />
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 12, fontWeight: 600, color: '#1b1b1b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{member.name}</div>
+                                  <div style={{ fontSize: 10, color: memberOverdue ? '#b02020' : '#9e9e9e' }}>
+                                    {memberOverdue ? `Overdue · ${member.team}` : member.team}
+                                  </div>
+                                </div>
+                                {acked
+                                  ? <i className="bi-check-circle-fill" style={{ color: '#29811e', fontSize: 12 }}></i>
+                                  : memberOverdue
+                                    ? <i className="bi-clock-fill" style={{ color: '#d42d35', fontSize: 12 }} title={`Past the ${ackDeadlineHrs}h ack deadline`}></i>
+                                    : <i className="bi-clock" style={{ color: '#ed8d00', fontSize: 11 }}></i>
+                                }
                               </div>
-                              {acked
-                                ? <i className="bi-check-circle-fill" style={{ color: '#29811e', fontSize: 12 }}></i>
-                                : <i className="bi-clock" style={{ color: '#ed8d00', fontSize: 11 }}></i>
-                              }
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </td>
                     </tr>
