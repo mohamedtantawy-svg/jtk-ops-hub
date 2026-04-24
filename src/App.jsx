@@ -4,6 +4,7 @@ import { TOOLS, STATUSES, FUNCTIONS, FLAGS } from './data/constants';
 import { INITIAL_PROJECTS } from './data/projects';
 import { INITIAL_REQUESTS } from './data/requests';
 import { MEMBERS, MEMBERS_BY_EMAIL, DEFAULT_USER_ACCESS_MAP, TEAM_MEMBERS, getAllReports } from './data/members';
+import { useTeamMembers } from './hooks/useTeamMembers';
 import { INITIAL_ACTIVITY, INITIAL_NOTES } from './data/tasks';
 import { FEED_EVENTS } from './data/feed';
 import { ALL_AGENT_IDS, matchesAudience } from './data/comms';
@@ -177,11 +178,44 @@ const App=()=>{
     return null;
   });
   // ── Impersonation — TLs/RMs/Admin can "login as" their reports ──────────
+  // Live team roster (baseline × team_member_overrides). We use this instead
+  // of the static MEMBERS/MEMBERS_BY_EMAIL so that newly-added users (Olga
+  // et al — created via the Team tab, not in the frozen baseline) can be
+  // impersonated AND see the right Home view when impersonated. Previously
+  // this code short-circuited on `MEMBERS_BY_EMAIL[email]` which only knew
+  // about the 104-person baseline → "Login as Olga" silently did nothing.
+  const { membersByEmail: liveMembersByEmail, getAllReports: liveGetAllReports } = useTeamMembers();
+
+  // Shape-adapter: the useTeamMembers hook returns entries with `access`
+  // (team-tab vocabulary), but the rest of the app reads `role` off the
+  // user object. This returns a MEMBERS-compatible shape so BriefingView /
+  // permissions / queue scoping keep working under impersonation.
+  const resolveEffectiveMember = React.useCallback((email) => {
+    if (!email) return null;
+    const emailLc = email.toLowerCase();
+    const live = liveMembersByEmail?.[emailLc];
+    if (live) {
+      return {
+        id: 0,
+        name: live.name,
+        initials: live.initials,
+        avatarUrl: live.avatarUrl,
+        role: live.access,
+        team: live.team,
+        region: live.region || live.team,
+        country: live.country || null,
+        lead: null,
+        email: live.email,
+      };
+    }
+    return MEMBERS.find(mm => mm.email.toLowerCase() === emailLc) || null;
+  }, [liveMembersByEmail]);
+
   const [impersonating, setImpersonating] = useState(null);
   const effectiveUser = React.useMemo(() => {
     if (!impersonating || !user) return user;
-    return MEMBERS.find(mm => mm.email.toLowerCase() === impersonating.toLowerCase()) || user;
-  }, [impersonating, user]);
+    return resolveEffectiveMember(impersonating) || user;
+  }, [impersonating, user, resolveEffectiveMember]);
   const [view,setView]=useState('briefing');
   // Temporary: gate unready features behind the owner's email. Nav tabs are
   // also filtered in DeelTopNav.jsx; this guards deep-link / programmatic
@@ -359,16 +393,42 @@ const App=()=>{
   }, []);
 
   // ── Impersonation handler ──────────────────────────────────────────────────
+  // Resolves everything against the LIVE team roster so newly-added users
+  // (team_member_overrides rows not in the static baseline) can both
+  // impersonate and be impersonated. Falls back to the static baseline
+  // only when live data hasn't loaded yet (first paint after login).
   const handleImpersonate = useCallback((email) => {
     if (!email) { setImpersonating(null); return; }
     if (!user) return;
-    const me = MEMBERS_BY_EMAIL[user.email];
+    const emailLc = email.toLowerCase();
+    const myEmailLc = user.email.toLowerCase();
+
+    // Resolve the actor (the admin/TL/RM doing the impersonation)
+    const meLive = liveMembersByEmail?.[myEmailLc];
+    const me = meLive
+      ? { access: meLive.access, email: meLive.email }
+      : MEMBERS_BY_EMAIL[user.email];
     if (!me || me.access === 'agent') return; // agents can't impersonate
-    if (me.access === 'admin') { if (!MEMBERS_BY_EMAIL[email]) return; setImpersonating(email); setView('briefing'); return; }
-    // TL/RM: verify target is in their reports chain
-    const myReports = getAllReports(user.email);
-    if (myReports.includes(email)) { setImpersonating(email); setView('briefing'); }
-  }, [user]);
+
+    // Resolve the target — must exist in live roster OR baseline
+    const targetExists = Boolean(liveMembersByEmail?.[emailLc] || MEMBERS_BY_EMAIL[email]);
+    if (!targetExists) return;
+
+    if (me.access === 'admin') {
+      setImpersonating(email);
+      setView('briefing');
+      return;
+    }
+    // TL/RM: verify target is in their reports chain (live data first, then baseline)
+    const reports = liveGetAllReports
+      ? liveGetAllReports(user.email)
+      : getAllReports(user.email);
+    const reportsLc = (reports || []).map(e => typeof e === 'string' ? e.toLowerCase() : (e?.email || '').toLowerCase());
+    if (reportsLc.includes(emailLc)) {
+      setImpersonating(email);
+      setView('briefing');
+    }
+  }, [user, liveMembersByEmail, liveGetAllReports]);
 
   const [announceCompose,setAnnounceCompose]=useState(false);
   const [escalModal,setEscalModal]=useState(null);
