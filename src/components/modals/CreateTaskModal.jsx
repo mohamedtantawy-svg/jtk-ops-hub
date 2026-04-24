@@ -9,7 +9,7 @@ const CreateTaskModal=({onConfirm,onClose,currentUser})=>{
   const subjectRef=useRef(null);
   useEffect(()=>{ subjectRef.current?.focus(); },[]);
   const upd=(k,v)=>setForm(f=>({...f,[k]:v}));
-  const agents=MEMBERS.filter(m=>m.role==='agent'||m.role==='lead');
+  const agents=MEMBERS.filter(m=>m.role==='agent'||m.role==='team_lead');
   const types=Object.keys(SLA_MINS);
   const countries=Object.keys(FLAGS);
   const sources=Object.entries(TOOLS).filter(([k])=>k!=='slack');

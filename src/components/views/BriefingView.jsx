@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useContext, useCallback } from 'react';
 import { TOOLS, STATUSES, FUNCTIONS, FLAGS } from '../../data/constants';
 import { MEMBERS, TEAM_MEMBERS } from '../../data/members';
+import { useTeamMembers } from '../../hooks/useTeamMembers';
 import { matchesAudience } from '../../data/comms';
 import { INITIAL_PROJECTS } from '../../data/projects';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
@@ -47,6 +48,14 @@ const SOURCE_COLOURS = {
 };
 
 const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSubFilter,requests=[],managerOnCall=null,onChangeManagerOnCall})=>{
+  // Live roster for the Manager-on-call picker so admins see managers added
+  // via the Team tab (not just the baked-in baseline). Filter out
+  // soft-deleted rows so we don't offer to impersonate a disabled account.
+  const { members: liveMembers } = useTeamMembers();
+  const mocCandidates = useMemo(() => (liveMembers || TEAM_MEMBERS)
+    .filter(m => !m.isDeleted)
+    .filter(m => m.access === 'team_lead' || m.access === 'regional_manager' || m.access === 'admin'),
+    [liveMembers]);
   // Drift-proof ack check — matches Announcements view + App.jsx. Local
   // MEMBERS.id is an array-position index that collides with DB members.id
   // values. When the server gives us `ackEmails` (our source of truth) we
@@ -637,9 +646,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   {showMocPicker&&(
                     <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,background:'#ffffff',borderRadius:14,border:'1px solid #e8e8e8',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'6px 0',minWidth:300,maxHeight:360,overflowY:'auto',zIndex:1000}}>
                       <div style={{padding:'6px 16px 8px',fontSize:10,fontWeight:700,color:'#bebebe',letterSpacing:'.04em',textTransform:'uppercase'}}>Select Manager On Call</div>
-                      {TEAM_MEMBERS
-                        .filter(m=>m.access==='team_lead'||m.access==='regional_manager'||m.access==='admin')
-                        .map(m=>(
+                      {mocCandidates.map(m=>(
                           <div
                             key={m.email}
                             role="button"

@@ -427,6 +427,17 @@ const App=()=>{
             const member = staticMember
               ? { ...staticMember, id: serverUser.id || staticMember.id }
               : serverUser;
+            // If the server promoted or demoted us since the cache was
+            // written, any cached queue tasks were scoped to the old role.
+            // mergeSourceIntoTasks would otherwise see the newly-scoped
+            // server response missing some tasks and mark them 'resolved'
+            // locally — which is wrong (they're just out of scope, not
+            // closed). Purge the cache so the next sync rebuilds cleanly.
+            const prevAccess = String(user?.access || user?.role || '').toLowerCase();
+            const nextAccess = String(member?.access || member?.role || '').toLowerCase();
+            if (prevAccess && nextAccess && prevAccess !== nextAccess) {
+              try { clearQueueCaches(); } catch (e) {}
+            }
             setUser(member);
           }
         })

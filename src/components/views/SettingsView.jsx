@@ -465,7 +465,7 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
                 <Avatar name={m.name} size={22}/>
                 <span style={{fontWeight:600,color:'#1b1b1b'}}>{m.name}</span>
               </div>
-              <span style={{width:70,fontSize:11,fontWeight:600,color:m.role==='admin'?'#c4b1f9':m.role==='lead'?'#ed8d00':'#616161',textTransform:'capitalize'}}>{m.role}</span>
+              <span style={{width:70,fontSize:11,fontWeight:600,color:m.role==='admin'?'#c4b1f9':m.role==='team_lead'?'#ed8d00':'#616161',textTransform:'capitalize'}}>{m.role}</span>
               <span style={{width:60,fontSize:11,color:'#616161'}}>{m.team}</span>
               <span style={{width:40,fontSize:14}}>{FLAGS[m.country]||''}</span>
               <span style={{width:60,textAlign:'right'}}>

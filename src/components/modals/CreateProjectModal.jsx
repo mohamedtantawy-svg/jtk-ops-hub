@@ -68,7 +68,7 @@ export default function CreateProjectModal({ onConfirm, onClose, project, curren
     onClose();
   };
 
-  const leads = MEMBERS.filter(m => ['lead','regional_mgr','admin'].includes(m.role));
+  const leads = MEMBERS.filter(m => ['team_lead','regional_manager','admin'].includes(m.role));
 
   return (
     <div

@@ -30,7 +30,7 @@ export default function CreateEscalationModal({ onConfirm, onClose, currentUser,
   const [slackMsgUrl, setMsgUrl]    = useState('');
   const backdropRef = useRef(null);
 
-  const managers = MEMBERS.filter(m => ['lead','regional_mgr','admin'].includes(m.role));
+  const managers = MEMBERS.filter(m => ['team_lead','regional_manager','admin'].includes(m.role));
 
   useEffect(() => {
     const handler = e => { if (e.key === 'Escape') onClose(); };

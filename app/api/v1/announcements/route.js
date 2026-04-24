@@ -50,18 +50,6 @@ async function resolveCallerProfile(email) {
   return { id, team };
 }
 
-// Server-side audience match — mirrors src/data/comms.js matchesAudience()
-function matchesAudience(target, memberTeam) {
-  if (!target || target === 'all' || target === 'global') return true;
-  const t = String(target).toLowerCase();
-  const team = String(memberTeam || '').toLowerCase();
-  if (!team) return false;
-  if (t === team) return true;
-  if (team === 'latam + nam' && (t === 'nam' || t === 'latam' || t === 'americas')) return true;
-  if (t === 'americas' && (team === 'nam' || team === 'latam' || team === 'latam + nam')) return true;
-  return false;
-}
-
 export async function GET(req) {
   try {
     const user = getAuthUser(req);
@@ -79,6 +67,12 @@ export async function GET(req) {
     const limit = Math.min(500, Math.max(1, parseInt(searchParams.get('limit') || '100')));
     const offset = (page - 1) * limit;
 
+    // Resolve caller's profile up-front — we need team + id to build the
+    // audience filter into the SQL WHERE (see below).
+    const profile = await resolveCallerProfile(user.email);
+    let callerTeam = profile.team;
+    let callerId = profile.id || (user.id && Number(user.id) > 0 ? Number(user.id) : null);
+
     let whereSql = ' WHERE 1=1';
     const params = [];
     let idx = 1;
@@ -94,6 +88,35 @@ export async function GET(req) {
     }
     if (target) { whereSql += ` AND target = $${idx++}`; params.push(target); }
 
+    // Push the audience gate into SQL for non-admins. Previously this ran in
+    // JS after LIMIT/OFFSET, which meant a non-admin's page of 100 could
+    // return <100 rows AND `total` over-counted (it reflected the unfiltered
+    // set). Now count + pagination operate on the audience-filtered set so
+    // the UI never shows a phantom "page 5 of 10" that can't actually be
+    // reached. Admins still bypass — they see everything for moderation.
+    // Authors always see their own announcements regardless of target.
+    if (user.role !== 'admin') {
+      const audienceClauses = [
+        `(target IS NULL OR target = 'all' OR target = 'global')`,
+      ];
+      if (callerTeam) {
+        const teamLc = String(callerTeam).toLowerCase();
+        audienceClauses.push(`LOWER(target) = $${idx++}`);
+        params.push(teamLc);
+        if (teamLc === 'latam + nam') {
+          audienceClauses.push(`LOWER(target) IN ('nam', 'latam', 'americas')`);
+        }
+        if (teamLc === 'nam' || teamLc === 'latam' || teamLc === 'latam + nam') {
+          audienceClauses.push(`LOWER(target) = 'americas'`);
+        }
+      }
+      if (callerId) {
+        audienceClauses.push(`author_id = $${idx++}`);
+        params.push(callerId);
+      }
+      whereSql += ` AND (${audienceClauses.join(' OR ')})`;
+    }
+
     const countSql = 'SELECT COUNT(*) FROM announcements' + whereSql;
     const dataSql = `SELECT id, type, title, body, target, priority, is_popup, image_url, link,
                             status, author_id, pinned, sound_key, sent_at, scheduled_for,
@@ -103,27 +126,13 @@ export async function GET(req) {
                       LIMIT $${idx++} OFFSET $${idx++}`;
     params.push(limit, offset);
 
-    // Look up caller's info once (team for audience scope, id for author match
-    // + ack match). Cascades through DB overrides → DB seed → static roster,
-    // so callers whose members row is missing (most of the 104-person team)
-    // still get the correct team and see region-targeted announcements.
-    const profile = await resolveCallerProfile(user.email);
-    let callerTeam = profile.team;
-    let callerId = profile.id || (user.id && Number(user.id) > 0 ? Number(user.id) : null);
-
     const [{ rows }, countResult] = await Promise.all([
       query(dataSql, params),
       query(countSql, params.slice(0, -2)),
     ]);
 
-    // Intentional: admins bypass audience filtering so they can see all
-    // announcements across every region for management / moderation purposes.
-    // Always include announcements authored by the caller regardless of target.
-    const filtered = user.role === 'admin'
-      ? rows
-      : rows.filter(r =>
-          (callerId && r.author_id === callerId) || matchesAudience(r.target, callerTeam)
-        );
+    // Audience filtering is now in SQL; keep the result as-is.
+    const filtered = rows;
 
     // Read canonical acks from announcement_acks table (source of truth).
     // We return BOTH user_ids (legacy) AND lowercased emails — the frontend

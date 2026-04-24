@@ -32,7 +32,7 @@ function RequestDetail({ req, onClose, onUpdateStatus, onUpdateRef, currentUser 
   const initials   = raiser?.name.split(' ').map(w=>w[0]).join('').slice(0,2) ?? '??';
 
   const canEdit = currentUser?.id === req.raisedById
-    || ['lead','regional_mgr','admin'].includes(currentUser?.role);
+    || ['team_lead','regional_manager','admin'].includes(currentUser?.role);
 
   const nextStatuses = REQUEST_STATUSES.filter(s => s.id !== req.status && req.status !== 'resolved');
 
