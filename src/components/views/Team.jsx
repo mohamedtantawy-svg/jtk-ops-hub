@@ -1,10 +1,44 @@
-import { useState, useContext, useMemo, useRef, useEffect, useCallback } from 'react';
+import { useState, useContext, useMemo, useRef, useEffect } from 'react';
 import { PermissionsContext, IntegrationsContext } from '../../App';
-import { TEAM_MEMBERS, MEMBERS_BY_EMAIL, getDirectReports, getAllReports } from '../../data/members';
-import { FLAGS, SLA_MINS } from '../../data/constants';
+import { FLAGS } from '../../data/constants';
 import { slaInfo } from '../../utils/helpers';
+import { useTeamMembers } from '../../hooks/useTeamMembers';
 import Avatar from '../ui/Avatar';
 import PageHeader from '../ui/PageHeader';
+
+// ── Last-login badge helper ─────────────────────────────────────────────────
+// Renders a small pill next to each member that's accurate to the last hour.
+// "Never logged in" (amber) if the DB has no row; "Today", "Yesterday",
+// "X days ago", or the short date otherwise. Tooltip shows the full ISO time
+// for anyone who needs an exact timestamp (ops / audit).
+function formatLastLogin(iso) {
+  if (!iso) return { label: 'Never logged in', tone: 'never' };
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return { label: 'Never logged in', tone: 'never' };
+
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  const diffHr  = Math.floor(diffMs / 3600000);
+  const diffDay = Math.floor(diffMs / 86400000);
+
+  // Less than 1 hour → minutes
+  if (diffMin < 1) return { label: 'Just now', tone: 'fresh', iso };
+  if (diffMin < 60) return { label: `${diffMin} min ago`, tone: 'fresh', iso };
+  if (diffHr < 24) return { label: `${diffHr} hr ago`, tone: 'fresh', iso };
+  if (diffDay === 1) return { label: 'Yesterday', tone: 'recent', iso };
+  if (diffDay < 7) return { label: `${diffDay} days ago`, tone: 'recent', iso };
+  if (diffDay < 30) return { label: `${Math.floor(diffDay / 7)}w ago`, tone: 'stale', iso };
+  if (diffDay < 365) return { label: `${Math.floor(diffDay / 30)}mo ago`, tone: 'stale', iso };
+  return { label: d.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }), tone: 'stale', iso };
+}
+
+const LAST_LOGIN_TONE = {
+  fresh:  { bg: '#e8f5e3', color: '#29811e' }, // green — active user
+  recent: { bg: '#e8f0fe', color: '#1f74b3' }, // blue — logged in this week
+  stale:  { bg: '#f7f5f2', color: '#616161' }, // grey — hasn't been here in a while
+  never:  { bg: '#ffe2de', color: '#d42d35' }, // red — never signed in
+};
 
 // ── Parental Leave mock data ────────────────────────────────────────────────
 const PARENTAL_LEAVE_DATA=[
@@ -44,8 +78,31 @@ const ACCESS_BADGE = {
 const TEAM_OPTIONS = ['All', 'EMEA', 'APAC', 'LATAM', 'NAM', 'LATAM + NAM'];
 const ROLE_OPTIONS = ['agent', 'team_lead', 'regional_manager', 'admin'];
 const REGION_OPTIONS = ['EMEA', 'APAC', 'LATAM', 'NAM', 'LATAM + NAM'];
+const SERVICE_OPTIONS = ['EOR', 'LifeCycle', 'New Services', 'All'];
 
-const EMPTY_FORM = { name: '', email: '', team: 'EMEA', role: 'agent', region: 'EMEA', country: '' };
+const EMPTY_FORM = {
+  name: '',
+  email: '',
+  team: 'EMEA',
+  role: 'agent',
+  region: 'EMEA',
+  country: '',
+  managerEmail: '',
+  service: 'EOR',
+  title: 'HR Experience Specialist',
+};
+
+// Shape for the Edit Allocation modal — prefilled from the member being edited.
+const EMPTY_ALLOC = {
+  name: '',
+  title: '',
+  team: '',
+  role: '',
+  region: '',
+  country: '',
+  managerEmail: '',
+  service: '',
+};
 
 const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, impersonating }) => {
   const [expanded, setExpanded] = useState(new Set());
@@ -55,16 +112,34 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
   const [hoveredRow, setHoveredRow] = useState(null);
   const [showParentalLeave, setShowParentalLeave] = useState(false);
 
-  // ── User management state ───────────────────────────────────────────────
-  const [localMembers, setLocalMembers] = useState(TEAM_MEMBERS);
-  const [onLeaveSet, setOnLeaveSet] = useState(() => {
-    try { const d = localStorage.getItem('ops_hub_on_leave'); return d ? new Set(JSON.parse(d)) : new Set(); } catch(e) { return new Set(); }
-  });
+  // ── Team-member roster (persisted via useTeamMembers hook) ───────────────
+  // The hook handles: fetching the merged baseline+overrides list, optimistic
+  // local mutations, and reconciliation with /api/v1/team-members. Any edit
+  // here survives reloads and pod restarts (zero data loss, per the Apr-2026
+  // Team-tab overhaul).
+  const {
+    members: localMembers,
+    membersByEmail: localMembersByEmail,
+    getDirectReports: localGetDirectReports,
+    getAllReports: localGetAllReports,
+    addMember,
+    updateMember,
+    removeMember,
+    toggleOnLeave,
+  } = useTeamMembers();
+
+  // UI state
   const [showAddModal, setShowAddModal] = useState(false);
   const [addForm, setAddForm] = useState({ ...EMPTY_FORM });
+  const [addError, setAddError] = useState(null);
+  const [addSaving, setAddSaving] = useState(false);
   const [actionMenuOpen, setActionMenuOpen] = useState(null); // email of member whose menu is open
-  const [editAllocEmail, setEditAllocEmail] = useState(null); // email of member being re-allocated
+  const [editAllocEmail, setEditAllocEmail] = useState(null); // email of member being re-allocated (modal)
+  const [allocForm, setAllocForm] = useState({ ...EMPTY_ALLOC });
+  const [allocError, setAllocError] = useState(null);
+  const [allocSaving, setAllocSaving] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(null);   // email of member pending removal
+  const [removeSaving, setRemoveSaving] = useState(false);
   const actionMenuRef = useRef(null);
 
   // Close action menu on outside click
@@ -78,76 +153,99 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
     return () => document.removeEventListener('mousedown', handler);
   }, [actionMenuOpen]);
 
-  // ── Local member helpers (mirror the module helpers but on localMembers) ──
-  const localMembersByEmail = useMemo(() =>
-    Object.fromEntries(localMembers.map(m => [m.email, m])), [localMembers]);
-
-  const localGetDirectReports = useCallback((email) => {
-    if (!email) return [];
-    const e = email.toLowerCase();
-    return localMembers.filter(m => m.managerEmail === e);
-  }, [localMembers]);
-
-  const localGetAllReports = useCallback((email) => {
-    if (!email) return [];
-    const reports = new Set();
-    const queue = [email.toLowerCase()];
-    while (queue.length > 0) {
-      const mgr = queue.shift();
-      for (const m of localMembers) {
-        if (m.managerEmail === mgr && !reports.has(m.email)) {
-          reports.add(m.email);
-          queue.push(m.email);
-        }
-      }
-    }
-    return [...reports];
-  }, [localMembers]);
-
   // ── Add Member handler ──────────────────────────────────────────────────
-  const handleAddMember = () => {
-    if (!addForm.name.trim() || !addForm.email.trim()) return;
-    const initials = addForm.name.trim().split(' ').map(n => n[0] || '').join('').slice(0, 2).toUpperCase();
-    const newMember = {
-      email: addForm.email.trim().toLowerCase(),
-      name: addForm.name.trim(),
-      initials,
-      title: 'HR Experience Specialist',
+  const handleAddMember = async () => {
+    const name = addForm.name.trim();
+    const email = addForm.email.trim().toLowerCase();
+    if (!name || !email) return;
+    if (!email.endsWith('@deel.com')) {
+      setAddError('Email must be a valid @deel.com address.');
+      return;
+    }
+    setAddError(null);
+    setAddSaving(true);
+    const result = await addMember({
+      email,
+      name,
+      title: addForm.title.trim() || 'HR Experience Specialist',
       access: addForm.role,
-      managerEmail: (user?.email || '').toLowerCase(),
-      team: addForm.team,
-      service: 'EOR',
-      startDate: new Date().toISOString().slice(0, 10),
+      team: addForm.team === 'All' ? null : addForm.team,
+      region: addForm.region,
+      service: addForm.service,
       country: addForm.country.trim() || null,
-    };
-    setLocalMembers(prev => [...prev, newMember]);
+      managerEmail: addForm.managerEmail.trim().toLowerCase() || null,
+    });
+    setAddSaving(false);
+    if (!result.ok) {
+      setAddError(result.error || 'Failed to add member.');
+      return;
+    }
     setAddForm({ ...EMPTY_FORM });
     setShowAddModal(false);
   };
 
-  // ── Change allocation handler ───────────────────────────────────────────
-  const handleChangeAllocation = (email, newTeam) => {
-    setLocalMembers(prev => prev.map(m => m.email === email ? { ...m, team: newTeam } : m));
-    setEditAllocEmail(null);
-    setActionMenuOpen(null);
-  };
-
-  // ── Toggle on-leave ─────────────────────────────────────────────────────
-  const handleToggleLeave = (email) => {
-    setOnLeaveSet(prev => {
-      const next = new Set(prev);
-      next.has(email) ? next.delete(email) : next.add(email);
-      try { localStorage.setItem('ops_hub_on_leave', JSON.stringify([...next])); } catch(e) {}
-      return next;
+  // ── Edit Allocation — open modal prefilled from the target member ─────
+  const openEditAllocation = (email) => {
+    const m = localMembersByEmail[email.toLowerCase()];
+    if (!m) return;
+    setAllocForm({
+      name: m.name || '',
+      title: m.title || '',
+      team: m.team || '',
+      role: m.access || 'agent',
+      region: m.region || m.team || 'EMEA',
+      country: m.country || '',
+      managerEmail: m.managerEmail || '',
+      service: m.service || 'EOR',
     });
+    setAllocError(null);
+    setEditAllocEmail(email);
     setActionMenuOpen(null);
   };
 
-  // ── Remove member ───────────────────────────────────────────────────────
-  const handleRemoveMember = (email) => {
-    setLocalMembers(prev => prev.filter(m => m.email !== email));
-    setConfirmRemove(null);
+  const handleSaveAllocation = async () => {
+    if (!editAllocEmail) return;
+    setAllocSaving(true);
+    setAllocError(null);
+
+    // Build a patch body — every field is editable. Empty country is sent as null
+    // so the DB clears it; other fields pass through verbatim.
+    const patch = {
+      name: allocForm.name.trim() || null,
+      title: allocForm.title.trim() || null,
+      team: allocForm.team === 'All' ? null : allocForm.team || null,
+      access: allocForm.role || 'agent',
+      region: allocForm.region || null,
+      country: allocForm.country.trim() || null,
+      managerEmail: allocForm.managerEmail.trim().toLowerCase() || null,
+      service: allocForm.service || null,
+    };
+
+    const result = await updateMember(editAllocEmail, patch);
+    setAllocSaving(false);
+    if (!result.ok) {
+      setAllocError(result.error || 'Failed to save allocation.');
+      return;
+    }
+    setEditAllocEmail(null);
+    setAllocForm({ ...EMPTY_ALLOC });
+  };
+
+  // ── Toggle on-leave (persisted) ────────────────────────────────────────
+  const handleToggleLeave = async (email) => {
     setActionMenuOpen(null);
+    await toggleOnLeave(email);
+  };
+
+  // ── Remove member (persisted soft-delete for baseline, hard-delete new) ─
+  const handleRemoveMember = async (email) => {
+    setRemoveSaving(true);
+    const result = await removeMember(email);
+    setRemoveSaving(false);
+    if (result.ok) {
+      setConfirmRemove(null);
+      setActionMenuOpen(null);
+    }
   };
 
   const perms = useContext(PermissionsContext);
@@ -232,6 +330,14 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
   const allReportEmails = useMemo(() => [userEmail, ...localGetAllReports(userEmail)], [userEmail, localGetAllReports]);
   const ov = useMemo(() => statsByEmails(allReportEmails), [allReportEmails, ns]);
 
+  // Manager picker options — anyone whose access puts them above "agent".
+  // Sorted alphabetically by name for a predictable dropdown. Includes admins
+  // so the top-of-org managers can be selected too.
+  const managerOptions = useMemo(() => {
+    const eligible = localMembers.filter(m => ['admin', 'regional_manager', 'team_lead'].includes(m.access));
+    return [...eligible].sort((a, b) => a.name.localeCompare(b.name));
+  }, [localMembers]);
+
   // EOD summary
   const resolvedToday = tasks.filter(t => t.status === 'resolved').length;
   const stillOpen = tasks.filter(t => t.status !== 'resolved').length;
@@ -255,7 +361,9 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
     const isManager = hasSubReports;
     const badge = ACCESS_BADGE[member.access] || ACCESS_BADGE.agent;
     const isHovered = hoveredRow === email;
-    const isOnLeave = onLeaveSet.has(email);
+    const isOnLeave = member.onLeave === true;
+    const lastLogin = formatLastLogin(member.lastLoginAt);
+    const lastLoginTone = LAST_LOGIN_TONE[lastLogin.tone] || LAST_LOGIN_TONE.never;
 
     // Stats: for managers, aggregate self + all reports; for agents, just self
     const reportEmails = hasSubReports ? [email, ...localGetAllReports(email)] : [email];
@@ -273,7 +381,6 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
 
     const showLoginAs = canLoginAs(email) && onImpersonate;
     const isMenuOpen = actionMenuOpen === email;
-    const isEditingAlloc = editAllocEmail === email;
 
     return (
       <div key={email}>
@@ -305,6 +412,24 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
               <div style={{ fontSize: 13, fontWeight: isManager ? 700 : 500, color: '#1b1b1b', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                 {member.name}
                 <span style={{ background: badge.bg, color: badge.color, fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 128 }}>{badge.label}</span>
+                <span
+                  title={lastLogin.iso ? `Last login: ${new Date(lastLogin.iso).toLocaleString()}` : 'This user has never signed in to Ops Hub'}
+                  style={{
+                    background: lastLoginTone.bg,
+                    color: lastLoginTone.color,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    padding: '2px 8px',
+                    borderRadius: 128,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  <i className={lastLogin.tone === 'never' ? 'bi-person-slash' : 'bi-clock-history'} style={{ fontSize: 9 }} />
+                  {lastLogin.tone === 'never' ? 'Never logged in' : lastLogin.label}
+                </span>
                 {isOnLeave && (
                   <span style={{ background: '#fff8e6', color: '#ed8d00', fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 128 }}>On Leave</span>
                 )}
@@ -342,28 +467,10 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
               </button>
             )}
           </div>
-          {/* Team badge — or inline allocation editor */}
-          {isEditingAlloc ? (
-            <div style={{ position: 'relative' }} onClick={e => e.stopPropagation()}>
-              <select
-                value={member.team}
-                onChange={e => handleChangeAllocation(email, e.target.value)}
-                onBlur={() => setEditAllocEmail(null)}
-                autoFocus
-                style={{
-                  width: 72, padding: '2px 4px', fontSize: 11, borderRadius: 8,
-                  border: '1px solid #7c3aed', outline: 'none', background: 'white',
-                  color: '#1b1b1b', fontWeight: 600, cursor: 'pointer',
-                }}
-              >
-                {TEAM_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
-          ) : (
-            <span style={{ textAlign: 'center', fontSize: 11, color: '#616161', background: '#f7f5f2', borderRadius: 128, padding: '2px 8px', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              {member.team}
-            </span>
-          )}
+          {/* Team badge (click the three-dot menu → Edit Allocation to change) */}
+          <span style={{ textAlign: 'center', fontSize: 11, color: '#616161', background: '#f7f5f2', borderRadius: 128, padding: '2px 8px', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {member.team || '—'}
+          </span>
           <span style={{ textAlign: 'center', fontSize: isManager ? 15 : 14, fontWeight: isManager ? 700 : 600, color: '#1b1b1b', fontVariantNumeric: 'tabular-nums' }}>{s.total}</span>
           <span style={{ textAlign: 'center', fontSize: isManager ? 14 : 13, fontWeight: isManager ? 600 : 500, color: '#1f74b3', fontVariantNumeric: 'tabular-nums' }}>{s.n}</span>
           <span style={{ textAlign: 'center', fontSize: isManager ? 14 : 13, fontWeight: isManager ? 600 : 500, color: '#ed8d00', fontVariantNumeric: 'tabular-nums' }}>{s.ip}</span>
@@ -401,7 +508,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                 }}
               >
                 <button
-                  onClick={() => { setEditAllocEmail(email); setActionMenuOpen(null); }}
+                  onClick={() => openEditAllocation(email)}
                   style={{
                     width: '100%', padding: '8px 14px', border: 'none', background: 'transparent',
                     fontSize: 12, fontWeight: 500, color: '#1b1b1b', cursor: 'pointer',
@@ -410,7 +517,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                   onMouseEnter={e => e.currentTarget.style.background = '#f9f8f6'}
                   onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                 >
-                  <i className="bi-arrow-left-right" style={{ fontSize: 12, color: '#7c3aed' }} />
+                  <i className="bi-sliders" style={{ fontSize: 12, color: '#7c3aed' }} />
                   Edit Allocation
                 </button>
                 <button
@@ -467,12 +574,15 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                   </button>
                   <button
                     onClick={() => handleRemoveMember(email)}
+                    disabled={removeSaving}
                     style={{
                       padding: '4px 12px', borderRadius: 128, border: 'none',
-                      background: '#d42d35', fontSize: 11, fontWeight: 700, color: 'white', cursor: 'pointer',
+                      background: removeSaving ? '#e8e8e8' : '#d42d35', fontSize: 11, fontWeight: 700,
+                      color: removeSaving ? '#9e9e9e' : 'white',
+                      cursor: removeSaving ? 'not-allowed' : 'pointer',
                     }}
                   >
-                    Remove
+                    {removeSaving ? 'Removing…' : 'Remove'}
                   </button>
                 </div>
               </div>
@@ -784,10 +894,10 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
               </button>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxHeight: 'calc(90vh - 200px)', overflowY: 'auto' }}>
               {/* Name */}
               <div>
-                <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Name</label>
+                <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Name <span style={{ color: '#d42d35' }}>*</span></label>
                 <input
                   type="text"
                   value={addForm.name}
@@ -804,7 +914,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
 
               {/* Email */}
               <div>
-                <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Email</label>
+                <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Email <span style={{ color: '#d42d35' }}>*</span></label>
                 <input
                   type="email"
                   value={addForm.email}
@@ -819,10 +929,27 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                 />
               </div>
 
+              {/* Title */}
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Job title</label>
+                <input
+                  type="text"
+                  value={addForm.title}
+                  onChange={e => setAddForm(f => ({ ...f, title: e.target.value }))}
+                  placeholder="e.g. HR Experience Specialist"
+                  style={{
+                    width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
+                    fontSize: 13, color: '#1b1b1b', outline: 'none', boxSizing: 'border-box',
+                  }}
+                  onFocus={e => e.currentTarget.style.borderColor = '#7c3aed'}
+                  onBlur={e => e.currentTarget.style.borderColor = '#e8e8e8'}
+                />
+              </div>
+
               {/* Team + Role row */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Team</label>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Team / section</label>
                   <select
                     value={addForm.team}
                     onChange={e => setAddForm(f => ({ ...f, team: e.target.value }))}
@@ -835,7 +962,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                   </select>
                 </div>
                 <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Role</label>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Role / access</label>
                   <select
                     value={addForm.role}
                     onChange={e => setAddForm(f => ({ ...f, role: e.target.value }))}
@@ -847,6 +974,41 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                     {ROLE_OPTIONS.map(r => (
                       <option key={r} value={r}>{ACCESS_BADGE[r]?.label || r}</option>
                     ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Manager + Service row (NEW: fixes "cannot assign manager" gap) */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Manager</label>
+                  <select
+                    value={addForm.managerEmail}
+                    onChange={e => setAddForm(f => ({ ...f, managerEmail: e.target.value }))}
+                    style={{
+                      width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
+                      fontSize: 13, color: '#1b1b1b', background: 'white', cursor: 'pointer',
+                    }}
+                  >
+                    <option value="">— Select a manager —</option>
+                    {managerOptions.map(m => (
+                      <option key={m.email} value={m.email}>
+                        {m.name} ({ACCESS_BADGE[m.access]?.label || m.access})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Service line</label>
+                  <select
+                    value={addForm.service}
+                    onChange={e => setAddForm(f => ({ ...f, service: e.target.value }))}
+                    style={{
+                      width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
+                      fontSize: 13, color: '#1b1b1b', background: 'white', cursor: 'pointer',
+                    }}
+                  >
+                    {SERVICE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
               </div>
@@ -867,7 +1029,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                   </select>
                 </div>
                 <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Country</label>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Countries</label>
                   <input
                     type="text"
                     value={addForm.country}
@@ -884,35 +1046,273 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
               </div>
             </div>
 
+            {addError && (
+              <div style={{ marginTop: 14, padding: '10px 14px', background: '#ffe2de', color: '#d42d35', borderRadius: 10, fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <i className="bi-exclamation-triangle-fill" style={{ fontSize: 13 }} />
+                {addError}
+              </div>
+            )}
+
             {/* Actions */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 22 }}>
               <button
-                onClick={() => setShowAddModal(false)}
+                onClick={() => { setShowAddModal(false); setAddError(null); }}
+                disabled={addSaving}
                 style={{
                   padding: '8px 18px', borderRadius: 128, border: '1px solid #e8e8e8',
-                  background: 'white', fontSize: 13, fontWeight: 600, color: '#616161', cursor: 'pointer',
+                  background: 'white', fontSize: 13, fontWeight: 600, color: '#616161',
+                  cursor: addSaving ? 'not-allowed' : 'pointer',
+                  opacity: addSaving ? 0.6 : 1,
                 }}
               >
                 Cancel
               </button>
               <button
                 onClick={handleAddMember}
-                disabled={!addForm.name.trim() || !addForm.email.trim()}
+                disabled={!addForm.name.trim() || !addForm.email.trim() || addSaving}
                 style={{
                   padding: '8px 18px', borderRadius: 128, border: 'none',
-                  background: (!addForm.name.trim() || !addForm.email.trim()) ? '#e8e8e8' : '#7c3aed',
+                  background: (!addForm.name.trim() || !addForm.email.trim() || addSaving) ? '#e8e8e8' : '#7c3aed',
                   fontSize: 13, fontWeight: 700,
-                  color: (!addForm.name.trim() || !addForm.email.trim()) ? '#9e9e9e' : 'white',
-                  cursor: (!addForm.name.trim() || !addForm.email.trim()) ? 'not-allowed' : 'pointer',
+                  color: (!addForm.name.trim() || !addForm.email.trim() || addSaving) ? '#9e9e9e' : 'white',
+                  cursor: (!addForm.name.trim() || !addForm.email.trim() || addSaving) ? 'not-allowed' : 'pointer',
                   transition: 'all .15s',
                 }}
               >
-                Add Member
+                {addSaving ? 'Adding…' : 'Add Member'}
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* ── Edit Allocation Modal (full-settings editor) ─────────────────── */}
+      {editAllocEmail && (() => {
+        const target = localMembersByEmail[editAllocEmail.toLowerCase()];
+        if (!target) return null;
+        return (
+          <div
+            style={{
+              position: 'fixed', inset: 0, zIndex: 1000,
+              background: 'rgba(0,0,0,0.3)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+            onClick={() => { if (!allocSaving) { setEditAllocEmail(null); setAllocError(null); } }}
+          >
+            <div
+              onClick={e => e.stopPropagation()}
+              style={{
+                background: 'white', borderRadius: 16, padding: '28px 32px',
+                width: 460, maxWidth: '90vw', maxHeight: '90vh',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.16)',
+                display: 'flex', flexDirection: 'column',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: '#1b1b1b' }}>Edit Allocation</div>
+                  <div style={{ fontSize: 12, color: '#616161', marginTop: 2 }}>
+                    {target.name} · <span style={{ fontFamily: 'monospace' }}>{target.email}</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => { if (!allocSaving) { setEditAllocEmail(null); setAllocError(null); } }}
+                  disabled={allocSaving}
+                  style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: '#f7f5f2', cursor: allocSaving ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#616161', fontSize: 14 }}
+                >
+                  <i className="bi-x-lg" />
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 14, overflowY: 'auto', paddingRight: 4 }}>
+                {/* Name + Title */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Display name</label>
+                    <input
+                      type="text"
+                      value={allocForm.name}
+                      onChange={e => setAllocForm(f => ({ ...f, name: e.target.value }))}
+                      style={{
+                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
+                        fontSize: 13, color: '#1b1b1b', outline: 'none', boxSizing: 'border-box',
+                      }}
+                      onFocus={e => e.currentTarget.style.borderColor = '#7c3aed'}
+                      onBlur={e => e.currentTarget.style.borderColor = '#e8e8e8'}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Job title</label>
+                    <input
+                      type="text"
+                      value={allocForm.title}
+                      onChange={e => setAllocForm(f => ({ ...f, title: e.target.value }))}
+                      style={{
+                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
+                        fontSize: 13, color: '#1b1b1b', outline: 'none', boxSizing: 'border-box',
+                      }}
+                      onFocus={e => e.currentTarget.style.borderColor = '#7c3aed'}
+                      onBlur={e => e.currentTarget.style.borderColor = '#e8e8e8'}
+                    />
+                  </div>
+                </div>
+
+                {/* Team + Role */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Team / section</label>
+                    <select
+                      value={allocForm.team}
+                      onChange={e => setAllocForm(f => ({ ...f, team: e.target.value }))}
+                      style={{
+                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
+                        fontSize: 13, color: '#1b1b1b', background: 'white', cursor: 'pointer',
+                      }}
+                    >
+                      <option value="">— Unassigned —</option>
+                      {TEAM_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Role / access</label>
+                    <select
+                      value={allocForm.role}
+                      onChange={e => setAllocForm(f => ({ ...f, role: e.target.value }))}
+                      style={{
+                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
+                        fontSize: 13, color: '#1b1b1b', background: 'white', cursor: 'pointer',
+                      }}
+                    >
+                      {ROLE_OPTIONS.map(r => (
+                        <option key={r} value={r}>{ACCESS_BADGE[r]?.label || r}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Manager + Service */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Manager</label>
+                    <select
+                      value={allocForm.managerEmail}
+                      onChange={e => setAllocForm(f => ({ ...f, managerEmail: e.target.value }))}
+                      style={{
+                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
+                        fontSize: 13, color: '#1b1b1b', background: 'white', cursor: 'pointer',
+                      }}
+                    >
+                      <option value="">— No manager —</option>
+                      {managerOptions
+                        .filter(m => m.email.toLowerCase() !== target.email.toLowerCase())
+                        .map(m => (
+                          <option key={m.email} value={m.email}>
+                            {m.name} ({ACCESS_BADGE[m.access]?.label || m.access})
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Service line</label>
+                    <select
+                      value={allocForm.service}
+                      onChange={e => setAllocForm(f => ({ ...f, service: e.target.value }))}
+                      style={{
+                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
+                        fontSize: 13, color: '#1b1b1b', background: 'white', cursor: 'pointer',
+                      }}
+                    >
+                      {SERVICE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Region + Country */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Region</label>
+                    <select
+                      value={allocForm.region}
+                      onChange={e => setAllocForm(f => ({ ...f, region: e.target.value }))}
+                      style={{
+                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
+                        fontSize: 13, color: '#1b1b1b', background: 'white', cursor: 'pointer',
+                      }}
+                    >
+                      <option value="">— No region —</option>
+                      {REGION_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Countries</label>
+                    <input
+                      type="text"
+                      value={allocForm.country}
+                      onChange={e => setAllocForm(f => ({ ...f, country: e.target.value }))}
+                      placeholder="e.g. DE, US, SG"
+                      style={{
+                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
+                        fontSize: 13, color: '#1b1b1b', outline: 'none', boxSizing: 'border-box',
+                      }}
+                      onFocus={e => e.currentTarget.style.borderColor = '#7c3aed'}
+                      onBlur={e => e.currentTarget.style.borderColor = '#e8e8e8'}
+                    />
+                  </div>
+                </div>
+
+                {/* Last-login read-only info */}
+                <div style={{ padding: '10px 14px', background: '#f9f8f6', borderRadius: 10, fontSize: 11, color: '#616161', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <i className="bi-clock-history" style={{ fontSize: 14, color: '#7c3aed' }} />
+                  <div>
+                    <div style={{ fontWeight: 600, color: '#1b1b1b', fontSize: 12 }}>
+                      {target.lastLoginAt ? `Last logged in: ${new Date(target.lastLoginAt).toLocaleString()}` : 'Has never signed in to Ops Hub'}
+                    </div>
+                    {target.loginCount > 0 && (
+                      <div>Total logins: {target.loginCount}</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {allocError && (
+                <div style={{ marginTop: 14, padding: '10px 14px', background: '#ffe2de', color: '#d42d35', borderRadius: 10, fontSize: 12, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <i className="bi-exclamation-triangle-fill" style={{ fontSize: 13 }} />
+                  {allocError}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 22 }}>
+                <button
+                  onClick={() => { setEditAllocEmail(null); setAllocError(null); }}
+                  disabled={allocSaving}
+                  style={{
+                    padding: '8px 18px', borderRadius: 128, border: '1px solid #e8e8e8',
+                    background: 'white', fontSize: 13, fontWeight: 600, color: '#616161',
+                    cursor: allocSaving ? 'not-allowed' : 'pointer',
+                    opacity: allocSaving ? 0.6 : 1,
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveAllocation}
+                  disabled={allocSaving}
+                  style={{
+                    padding: '8px 18px', borderRadius: 128, border: 'none',
+                    background: allocSaving ? '#e8e8e8' : '#7c3aed',
+                    fontSize: 13, fontWeight: 700,
+                    color: allocSaving ? '#9e9e9e' : 'white',
+                    cursor: allocSaving ? 'not-allowed' : 'pointer',
+                    transition: 'all .15s',
+                  }}
+                >
+                  {allocSaving ? 'Saving…' : 'Save allocation'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };
