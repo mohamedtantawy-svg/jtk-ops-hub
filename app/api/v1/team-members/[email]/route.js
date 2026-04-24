@@ -9,6 +9,7 @@ import { NextResponse } from 'next/server';
 import { query } from '../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { TEAM_MEMBERS } from '../../../../../src/data/members';
+import { invalidateRosterCache, ensureRosterHydrated } from '../../../../../src/lib/roster-server';
 
 const VALID_ACCESS = ['admin', 'regional_manager', 'team_lead', 'agent'];
 const VALID_SERVICES = ['EOR', 'LifeCycle', 'New Services', 'All'];
@@ -142,6 +143,11 @@ export async function PATCH(req, { params }) {
       console.warn('[team-members PATCH] members sync failed:', memErr.message);
     }
 
+    // Force a fresh hydration so the very next scoped API call reflects
+    // this allocation / access change (no waiting on the 5s TTL).
+    invalidateRosterCache();
+    await ensureRosterHydrated({ force: true });
+
     return NextResponse.json({
       email: row.email,
       name: row.name,
@@ -195,6 +201,8 @@ export async function DELETE(req, { params }) {
       } catch (memErr) {
         console.warn('[team-members DELETE] members deactivate failed:', memErr.message);
       }
+      invalidateRosterCache();
+      await ensureRosterHydrated({ force: true });
       return NextResponse.json({ email, isDeleted: true, mode: 'soft' });
     }
 
@@ -207,6 +215,8 @@ export async function DELETE(req, { params }) {
     } catch (memErr) {
       console.warn('[team-members DELETE] members purge failed:', memErr.message);
     }
+    invalidateRosterCache();
+    await ensureRosterHydrated({ force: true });
     return NextResponse.json({ email, isDeleted: true, mode: 'hard' });
   } catch (err) {
     console.error('[team-members DELETE]', err.message);

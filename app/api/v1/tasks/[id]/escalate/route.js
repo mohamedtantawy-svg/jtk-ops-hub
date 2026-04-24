@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { withTransaction } from '../../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { canOperateOnTask, loadTaskForGuard, FORBIDDEN } from '../../../../../../src/lib/task-scope-guard';
+import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
 
 // Authorization note: All authenticated users can escalate tasks. Agents
 // escalate to their managers — this is the expected workflow. The auth check
@@ -12,6 +13,7 @@ export async function PATCH(req, { params }) {
     if (!authUser.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    await ensureRosterHydrated();
 
     const { id } = await params;
     const { managerId, reason } = await req.json();

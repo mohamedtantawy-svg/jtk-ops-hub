@@ -27,10 +27,10 @@ export async function register() {
       // Seed tasks if table is empty
       const { rows: taskRows } = await query('SELECT COUNT(*) as count FROM tasks');
       if (parseInt(taskRows[0].count) === 0) {
-        console.log('[db] Seeding tasks, activity, notes, escalations, projects, requests, announcements...');
+        console.log('[db] Seeding tasks, activity, notes, escalations, projects, requests...');
         const {
           SEED_TASKS, SEED_TASK_ACTIVITY, SEED_TASK_NOTES,
-          SEED_ESCALATIONS, SEED_PROJECTS, SEED_REQUESTS, SEED_ANNOUNCEMENTS,
+          SEED_ESCALATIONS, SEED_PROJECTS, SEED_REQUESTS,
         } = await import('./src/lib/seed-data');
 
         // --- Tasks ---
@@ -102,14 +102,13 @@ export async function register() {
           );
         }
 
-        // --- Announcements ---
-        for (const a of SEED_ANNOUNCEMENTS) {
-          await query(
-            `INSERT INTO announcements (type, title, body, target, priority, is_popup, status, author_id, pinned, link)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-            [a.type, a.title, a.body, a.target, a.priority, a.is_popup, a.status, a.author_id, a.pinned || false, a.link || null]
-          );
-        }
+        // Announcements are deliberately NOT seeded. They were previously
+        // bootstrapped from SEED_ANNOUNCEMENTS, but that meant the demo
+        // "HRX Continuity & Redundancy Plan" and "Payroll Freeze" popups
+        // resurfaced on every fresh container with an empty tasks table,
+        // even after an approver had archived or deleted them server-side
+        // on the previous deployment. Announcements must be authored
+        // through the app, full stop.
 
         console.log('[db] All seed data inserted.');
       }

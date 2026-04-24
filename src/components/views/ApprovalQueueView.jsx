@@ -92,6 +92,7 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
   const [questionDraft, setQuestionDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [urgentOverrideLocal, setUrgentOverrideLocal] = useState(false);
+  const [urgentOverrideReasonLocal, setUrgentOverrideReasonLocal] = useState('');
   // Approver edit mode — when true, reveals inline editable fields so the
   // approver can adjust wording/pictures/schedule/popup mode before approving.
   const [editMode, setEditMode] = useState(false);
@@ -167,6 +168,10 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
   };
 
   const handleApprove = () => {
+    if (urgentOverrideLocal && urgentOverrideReasonLocal.trim().length < 5) {
+      if (addToast) addToast('warn', 'Reason required', 'Urgent override needs a reason of at least 5 characters');
+      return;
+    }
     const overrideEdits = editMode ? { ...edits } : {};
     // The approver's schedule picker is authoritative. If they cleared it we
     // send an explicit null so the backend publishes immediately — never
@@ -177,6 +182,7 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
     runWithBusy(
       () => approve(selectedId, {
         urgentOverride: urgentOverrideLocal,
+        urgentOverrideReason: urgentOverrideLocal ? urgentOverrideReasonLocal.trim() : '',
         scheduledFor: scheduledForOverride,
         overrideEdits,
       }),
@@ -192,10 +198,15 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
   // wants to release an announcement immediately even though the request was
   // originally filed as a scheduled drop.
   const handleApproveSendNow = () => {
+    if (urgentOverrideLocal && urgentOverrideReasonLocal.trim().length < 5) {
+      if (addToast) addToast('warn', 'Reason required', 'Urgent override needs a reason of at least 5 characters');
+      return;
+    }
     const overrideEdits = editMode ? { ...edits } : {};
     runWithBusy(
       () => approve(selectedId, {
         urgentOverride: urgentOverrideLocal,
+        urgentOverrideReason: urgentOverrideLocal ? urgentOverrideReasonLocal.trim() : '',
         scheduledFor: null, // force immediate publish
         overrideEdits,
       }),
@@ -490,10 +501,22 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
                       )}
                     </div>
 
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 8 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 6 }}>
                       <input type="checkbox" checked={urgentOverrideLocal} onChange={e => setUrgentOverrideLocal(e.target.checked)} />
                       Urgent — override the 2/day + 4h-gap limits
                     </label>
+                    {urgentOverrideLocal && (
+                      <div style={{ marginBottom: 10 }}>
+                        <input
+                          type="text"
+                          value={urgentOverrideReasonLocal}
+                          onChange={e => setUrgentOverrideReasonLocal(e.target.value)}
+                          placeholder="Reason for bypassing the limits (required, ≥ 5 characters)"
+                          style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px', fontSize: 12, background: 'var(--surface)', fontFamily: 'inherit' }}
+                          maxLength={500}
+                        />
+                      </div>
+                    )}
                     <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
                       <button disabled={busy} onClick={handleApprove} style={{ padding: '8px 14px', fontSize: 12, fontWeight: 600, color: 'white', background: '#0b7a3f', border: 'none', borderRadius: 'var(--radius-pill)', cursor: busy ? 'wait' : 'pointer' }}>
                         <i className="bi-check-circle" style={{ marginRight: 4 }}></i>

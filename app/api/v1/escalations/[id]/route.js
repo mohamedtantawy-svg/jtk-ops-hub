@@ -2,12 +2,14 @@ import { NextResponse } from 'next/server';
 import { query } from '../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { getVisibleMemberEmails, isAdmin } from '../../../../../src/lib/scope-helpers';
+import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
 
 export async function GET(req, { params }) {
   const user = getAuthUser(req);
   if (!user.email) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+  await ensureRosterHydrated();
   try {
     const { id } = await params;
     const { rows } = await query(

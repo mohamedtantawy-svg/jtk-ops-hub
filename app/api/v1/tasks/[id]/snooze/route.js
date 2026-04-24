@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { query, withTransaction } from '../../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { canOperateOnTask, loadTaskForGuard, FORBIDDEN } from '../../../../../../src/lib/task-scope-guard';
+import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
 
 // PATCH /api/v1/tasks/[id]/snooze
 // `id` is either a UUID (internal tasks.id) or an external_id like "ZD-123".
@@ -13,6 +14,7 @@ export async function PATCH(req, { params }) {
     if (!user.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+    await ensureRosterHydrated();
 
     const { id } = await params;
     const { until } = await req.json();

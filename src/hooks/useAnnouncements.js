@@ -1,9 +1,12 @@
 // ── useAnnouncements hook ────────────────────────────────────────────────────
-// Manages announcement state — tries the real API first, falls back to local
-// INITIAL_COMMS data if the backend is unreachable (demo / offline mode).
+// Manages announcement state from the real API. On first paint, state is
+// empty — we never seed the UI with hardcoded demo popups, because those have
+// caused archived-looking announcements to reappear immediately after deploy
+// (the bundled demo rows rendered before the first /announcements GET
+// returned, so is_popup=true rows surfaced even after the real ones had been
+// archived or deleted server-side).
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { INITIAL_COMMS } from '../data/comms';
 import {
   fetchAnnouncements,
   createAnnouncement as apiCreate,
@@ -95,7 +98,7 @@ export function useAnnouncements({ toastRef } = {}) {
   const notifyError = useCallback((title, body) => {
     try { toastRef?.current?.('error', title, body); } catch(_) {}
   }, [toastRef]);
-  const [comms, setComms] = useState(INITIAL_COMMS);
+  const [comms, setComms] = useState([]);
   const [isOnline, setIsOnline] = useState(false); // true when backend responds
   // Canonical DB user id for the caller, as reported by the server on every
   // list/ack response. We prefer this over the client-side user.id because the
@@ -144,7 +147,9 @@ export function useAnnouncements({ toastRef } = {}) {
           setIsOnline(true);
         }
       } catch (_) {
-        // Backend unreachable — keep INITIAL_COMMS (demo mode)
+        // Backend unreachable — stay with an empty list rather than injecting
+        // hardcoded demo announcements. A brief blank state after deploy is
+        // strictly better than a stale popup that no one can dismiss.
         setIsOnline(false);
       }
     })();
@@ -179,16 +184,10 @@ export function useAnnouncements({ toastRef } = {}) {
     try {
       const data = await fetchAnnouncements({ limit: 200 });
       if (data?.items) {
-        setComms(prev => {
-          // Preserve any local-only drafts (INITIAL_COMMS / offline) that
-          // the server doesn't know about yet.
-          const serverIds = new Set(data.items.map(a => a.id));
-          const localOnly = prev.filter(c => !serverIds.has(c.id) && String(c.id).startsWith('COM-'));
-          return [
-            ...data.items.map(normalizeApiAnnouncement),
-            ...localOnly,
-          ];
-        });
+        // Server is the only source of truth. Replacing (rather than merging
+        // with any stale local state) prevents archived / deleted rows from
+        // lingering in the UI after they've been removed server-side.
+        setComms(data.items.map(normalizeApiAnnouncement));
         if (data.callerId) setServerUserId(Number(data.callerId));
         if (data.callerEmail) setServerUserEmail(String(data.callerEmail).toLowerCase());
         setIsOnline(true);
@@ -202,39 +201,18 @@ export function useAnnouncements({ toastRef } = {}) {
   useEffect(() => { refreshRef.current = refresh; }, [refresh]);
 
   // ── Create ───────────────────────────────────────────────────────────────
-  // Always attempt the API call (don't gate on isOnline — it may be stale).
-  // Only fall back to local if there's no auth token at all.
+  // Always routes through the real API. No local-only fallback: a draft that
+  // lives only in memory is worse than a loud error — it silently vanishes on
+  // refresh and leaks no indication to the author that their announcement was
+  // never saved.
   const create = useCallback(async (draft) => {
-    const hasToken = typeof window !== 'undefined' && !!localStorage.getItem('ops_hub_token');
-    if (hasToken) {
-      try {
-        const created = await apiCreate(draft);
-        const normalised = normalizeApiAnnouncement(created);
-        normalised.author = draft.author || normalised.author;
-        normalised.acks = [];
-        setComms(prev => [normalised, ...prev]);
-        setIsOnline(true);
-        return normalised;
-      } catch (err) {
-        console.error('[announcements] create failed:', err.message, err.status);
-        // Don't fall through to local — the announcement would be lost on refresh.
-        // Re-throw so the caller knows it failed.
-        throw err;
-      }
-    }
-    // No token — truly offline / local-only fallback
-    const localComm = {
-      id: `COM-${Date.now()}`,
-      ...draft,
-      status: 'draft',
-      acks: [],
-      sentAt: '',
-      isPopup: draft.isPopup || false,
-      imageUrl: draft.imageUrl || '',
-      link: draft.link || '',
-    };
-    setComms(prev => [localComm, ...prev]);
-    return localComm;
+    const created = await apiCreate(draft);
+    const normalised = normalizeApiAnnouncement(created);
+    normalised.author = draft.author || normalised.author;
+    normalised.acks = [];
+    setComms(prev => [normalised, ...prev]);
+    setIsOnline(true);
+    return normalised;
   }, []);
 
   // ── Send ─────────────────────────────────────────────────────────────────

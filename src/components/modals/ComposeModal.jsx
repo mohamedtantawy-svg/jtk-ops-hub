@@ -114,16 +114,27 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
     draft?.scheduledFor ? toDatetimeLocal(draft.scheduledFor) : defaultScheduledFor()
   );
   const [urgentOverride,setUrgentOverride]=useState(!!draft?.urgentOverride);
+  const [urgentOverrideReason,setUrgentOverrideReason]=useState(draft?.urgentOverrideReason || '');
 
   const approver = isApprover(currentUser?.email);
   const canBypassQueue = approver; // only approvers & admin-roled RMs/TLs; kept simple
-  const valid = title.trim().length > 0 && (body.trim().length > 0 || !!imageUrl);
+  // When the urgent flag is checked, require a reason string that matches the
+  // server-side minimum (5 chars). Mirrors the 400 we'd otherwise receive.
+  const needsUrgentReason = canBypassQueue && urgentOverride;
+  const urgentReasonOk = !needsUrgentReason || urgentOverrideReason.trim().length >= 5;
+  const valid =
+    title.trim().length > 0 &&
+    (body.trim().length > 0 || !!imageUrl) &&
+    urgentReasonOk;
 
   const buildDraft = (status, extra = {}) => ({
     type, title, body, target, priority, status,
     isPopup, imageUrl, link, soundKey,
     scheduledFor: scheduleLater ? new Date(scheduledFor).toISOString() : null,
     urgentOverride: canBypassQueue && urgentOverride,
+    urgentOverrideReason: canBypassQueue && urgentOverride
+      ? urgentOverrideReason.trim()
+      : '',
     ...extra,
   });
 
@@ -388,6 +399,26 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
                   <div style={{fontSize:11,color:'#a17a2c',marginTop:2}}>Skips the 2-per-day cap and 4-hour gap rule. Only use for time-critical communications.</div>
                 </div>
               </label>
+              {urgentOverride && (
+                <div style={{marginTop:10}}>
+                  <label style={{display:'block',fontSize:11,fontWeight:600,color:'#8a5a00',marginBottom:4}}>
+                    Reason (required, ≥ 5 characters)
+                  </label>
+                  <input
+                    type="text"
+                    value={urgentOverrideReason}
+                    onChange={e=>setUrgentOverrideReason(e.target.value)}
+                    placeholder="e.g. Critical payroll outage — must reach agents before next shift"
+                    style={{width:'100%',border:'1px solid #fcd79a',borderRadius:6,padding:'6px 10px',fontSize:12,outline:'none',fontFamily:'inherit',color:'#1b1b1b',background:'#fff'}}
+                    maxLength={500}
+                  />
+                  {!urgentReasonOk && (
+                    <div style={{fontSize:11,color:'#b02020',marginTop:4}}>
+                      A reason of at least 5 characters is required to bypass the publishing rate limits.
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
