@@ -71,13 +71,16 @@ export async function PATCH(req, { params }) {
 
     if (!updatedRow) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
-    // Log activity (best-effort)
+    // Log activity (best-effort). Must not fail the snooze itself, but
+    // at least surface failures in server logs instead of swallowing.
     try {
       await query(
         'INSERT INTO task_activity (task_id, event_type, event_text, actor_name) VALUES ($1, $2, $3, $4)',
         [updatedRow.id, 'snooze', until ? `Snoozed until ${until}` : 'Unsnoozed', user.name || 'System'],
       );
-    } catch {}
+    } catch (e) {
+      console.warn('[tasks/snooze] activity log failed:', e.message);
+    }
 
     return NextResponse.json({ ok: true, snoozedUntil: updatedRow.snoozed_until });
   } catch (err) {

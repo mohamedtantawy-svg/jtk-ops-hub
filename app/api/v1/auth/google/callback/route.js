@@ -231,7 +231,10 @@ export async function POST(req) {
 
     // Only allow users in the admin allowlist (or DB if available)
     if (!ADMIN_EMAILS.has(email) && !process.env.DATABASE_URL) {
-      console.warn('[auth/google/callback] User not in allowlist:', email);
+      // Don't log the raw email — rejected-user logs shouldn't expose the
+      // full allowlist miss to anyone with log access. Domain already
+      // passed the @deel.com gate above; that's enough for triage.
+      console.warn('[auth/google/callback] Allowlist miss (domain=%s)', domain);
       return NextResponse.json(
         { error: 'You do not have access to Ops Hub. Please contact your admin.' },
         { status: 403 }

@@ -7,7 +7,7 @@ const EscalModal=({task,bulkCount,onConfirm,onClose})=>{
   const isBulk=bulkCount>0;
   const asgn=MEMBERS.find(m=>m.id===task.assigneeId);
   const defaultMgr=asgn?MEMBERS.find(m=>m.id===asgn.lead):null;
-  const managers=MEMBERS.filter(m=>m.role==='lead'||m.role==='admin'||m.role==='regional_mgr');
+  const managers=MEMBERS.filter(m=>m.role==='team_lead'||m.role==='admin'||m.role==='regional_manager');
   const [selId,setSelId]=useState(defaultMgr?.id||managers[0]?.id||null);
   const [reason,setReason]=useState('');
   const [search,setSearch]=useState('');
@@ -31,7 +31,7 @@ const EscalModal=({task,bulkCount,onConfirm,onClose})=>{
 
   const roleLabel=(r)=>{
     if(r==='admin') return 'Admin';
-    if(r==='regional_mgr') return 'Regional Manager';
+    if(r==='regional_manager') return 'Regional Manager';
     return 'Team Lead';
   };
 

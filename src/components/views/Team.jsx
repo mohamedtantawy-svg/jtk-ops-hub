@@ -308,6 +308,10 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
     if (!['admin', 'regional_manager', 'team_lead'].includes(realUserMember.access)) return false;
     const te = targetEmail.toLowerCase();
     if (te === (impersonating || '').toLowerCase()) return false;
+    // Don't offer Login-as on deleted/deactivated members — impersonating
+    // them would load a permissions context we explicitly revoked.
+    const target = localMembersByEmail[te];
+    if (!target || target.isDeleted) return false;
     return realUserAllReports.has(te);
   };
 
@@ -446,7 +450,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
             {isManager && (
               <i className={`bi-chevron-${isExpanded ? 'up' : 'down'}`} style={{ fontSize: 11, color: '#9e9e9e', marginLeft: 4, flexShrink: 0 }} />
             )}
-            {showLoginAs && isHovered && (
+            {showLoginAs && (
               <button
                 onClick={(e) => { e.stopPropagation(); onImpersonate(email); }}
                 style={{
@@ -459,6 +463,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                   cursor: 'pointer', flexShrink: 0,
                   transition: 'all .15s',
                   whiteSpace: 'nowrap',
+                  opacity: isHovered ? 1 : 0.75,
                 }}
                 title={`Login as ${member.name}`}
               >

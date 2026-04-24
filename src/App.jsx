@@ -211,7 +211,54 @@ const App=()=>{
     return MEMBERS.find(mm => mm.email.toLowerCase() === emailLc) || null;
   }, [liveMembersByEmail]);
 
-  const [impersonating, setImpersonating] = useState(null);
+  // Impersonation survives reloads (e.g. from the version-update banner or a
+  // refresh after Login-as) by keying off sessionStorage — which lives for the
+  // lifetime of the tab so closing the browser still drops it, matching the
+  // "session" semantics users expect.
+  //
+  // Stored as { actor, target } so a session token handoff (user A logs out →
+  // user B logs in on the same tab without closing it) can't carry user A's
+  // impersonation into user B's session. On mount we start with null and only
+  // restore once `user` is known AND the stored actor matches — anything else
+  // is treated as stale and dropped.
+  const [impersonating, setImpersonatingRaw] = useState(null);
+  const setImpersonating = useCallback((next) => {
+    setImpersonatingRaw(next);
+    try {
+      if (next && user?.email) {
+        sessionStorage.setItem('ops_hub_impersonating', JSON.stringify({
+          actor: String(user.email).toLowerCase(),
+          target: String(next).toLowerCase(),
+        }));
+      } else {
+        sessionStorage.removeItem('ops_hub_impersonating');
+      }
+    } catch (e) {}
+  }, [user]);
+  useEffect(() => {
+    if (!user?.email) return;
+    const actorEmail = String(user.email).toLowerCase();
+    try {
+      const stored = sessionStorage.getItem('ops_hub_impersonating');
+      if (!stored) return;
+      const parsed = JSON.parse(stored);
+      if (
+        parsed
+        && typeof parsed === 'object'
+        && !Array.isArray(parsed)
+        && parsed.actor === actorEmail
+        && typeof parsed.target === 'string'
+        && parsed.target
+      ) {
+        setImpersonatingRaw(parsed.target);
+      } else {
+        // Actor mismatch, malformed, or legacy string-only format — drop it.
+        sessionStorage.removeItem('ops_hub_impersonating');
+      }
+    } catch (e) {
+      try { sessionStorage.removeItem('ops_hub_impersonating'); } catch (e2) {}
+    }
+  }, [user?.email]);
   const effectiveUser = React.useMemo(() => {
     if (!impersonating || !user) return user;
     return resolveEffectiveMember(impersonating) || user;
@@ -380,6 +427,17 @@ const App=()=>{
             const member = staticMember
               ? { ...staticMember, id: serverUser.id || staticMember.id }
               : serverUser;
+            // If the server promoted or demoted us since the cache was
+            // written, any cached queue tasks were scoped to the old role.
+            // mergeSourceIntoTasks would otherwise see the newly-scoped
+            // server response missing some tasks and mark them 'resolved'
+            // locally — which is wrong (they're just out of scope, not
+            // closed). Purge the cache so the next sync rebuilds cleanly.
+            const prevAccess = String(user?.access || user?.role || '').toLowerCase();
+            const nextAccess = String(member?.access || member?.role || '').toLowerCase();
+            if (prevAccess && nextAccess && prevAccess !== nextAccess) {
+              try { clearQueueCaches(); } catch (e) {}
+            }
             setUser(member);
           }
         })
