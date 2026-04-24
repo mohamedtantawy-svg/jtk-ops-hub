@@ -487,6 +487,47 @@ CREATE TABLE IF NOT EXISTS announcement_request_comments (
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_ann_request_comments_req ON announcement_request_comments(request_id, created_at);
+
+-- ── Team-tab overrides (2026-04-24) ─────────────────────────────────────────
+-- The Team view historically sourced its data from the static TEAM_MEMBERS
+-- array in src/data/members.js (104 hardcoded people). That worked for a
+-- read-only org chart but meant *every* edit (add member, re-assign, change
+-- manager, mark on-leave, remove) lived in React state and vanished on
+-- refresh. This table layers per-email overrides on top of the baseline so
+-- edits persist with zero data loss.
+--
+-- Keyed by email (PK) - one row per person. Fields are nullable: NULL means
+-- "fall back to the baseline TEAM_MEMBERS value". is_new=true marks rows
+-- for people not in the baseline (newly onboarded); their fields are the
+-- full source of truth. is_deleted=true hides a baseline row from the
+-- merged list without destroying it (undo-able). last_login_at is bumped
+-- on every successful auth so the Team UI can badge "Never logged in" or
+-- "Last seen X ago".
+CREATE TABLE IF NOT EXISTS team_member_overrides (
+  email         VARCHAR(255) PRIMARY KEY,
+  name          VARCHAR(255),
+  initials      VARCHAR(8),
+  title         TEXT,
+  access        VARCHAR(50),       -- admin | regional_manager | team_lead | agent
+  manager_email VARCHAR(255),
+  team          VARCHAR(100),
+  region        VARCHAR(100),
+  service       VARCHAR(100),      -- EOR | LifeCycle | New Services | All
+  country       VARCHAR(10),
+  avatar_url    TEXT,
+  start_date    DATE,
+  is_new        BOOLEAN DEFAULT FALSE,
+  is_deleted    BOOLEAN DEFAULT FALSE,
+  on_leave      BOOLEAN DEFAULT FALSE,
+  last_login_at TIMESTAMPTZ,
+  login_count   INTEGER DEFAULT 0,
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_tmo_manager ON team_member_overrides(manager_email);
+CREATE INDEX IF NOT EXISTS idx_tmo_is_new ON team_member_overrides(is_new) WHERE is_new = true;
+CREATE INDEX IF NOT EXISTS idx_tmo_is_deleted ON team_member_overrides(is_deleted) WHERE is_deleted = true;
+CREATE INDEX IF NOT EXISTS idx_tmo_last_login ON team_member_overrides(last_login_at DESC NULLS LAST);
 `;
 
 export async function runMigrations() {

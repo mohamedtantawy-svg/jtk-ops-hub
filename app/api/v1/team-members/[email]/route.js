@@ -1,0 +1,172 @@
+// ── Single team-member override endpoint ───────────────────────────────────
+// PATCH  /api/v1/team-members/:email — upsert override fields (allocation edit)
+// DELETE /api/v1/team-members/:email — soft-delete (baseline) or hard-delete (is_new)
+//
+// Email is URL-decoded by Next.js's dynamic segment handler; we lowercase
+// before any DB access so `MOHAMED@Deel.com` and `mohamed@deel.com` match.
+
+import { NextResponse } from 'next/server';
+import { query } from '../../../../../src/lib/db';
+import { getAuthUser } from '../../../../../src/lib/auth-helpers';
+import { TEAM_MEMBERS } from '../../../../../src/data/members';
+
+const VALID_ACCESS = ['admin', 'regional_manager', 'team_lead', 'agent'];
+const VALID_SERVICES = ['EOR', 'LifeCycle', 'New Services', 'All'];
+const VALID_TEAMS = ['All', 'EMEA', 'APAC', 'LATAM', 'NAM', 'LATAM + NAM'];
+
+function canMutateRoster(user) {
+  if (!user?.email) return false;
+  if (user.role === 'admin') return true;
+  const baseline = TEAM_MEMBERS.find(m => m.email.toLowerCase() === user.email.toLowerCase());
+  if (!baseline) return false;
+  return baseline.access === 'admin' || baseline.access === 'regional_manager';
+}
+
+// Resolve a subject email from URL params. Next.js 16 makes params a promise.
+async function resolveEmail(params) {
+  const { email } = await params;
+  return decodeURIComponent(email || '').trim().toLowerCase();
+}
+
+function hasBaseline(email) {
+  return TEAM_MEMBERS.some(m => m.email.toLowerCase() === email);
+}
+
+export async function PATCH(req, { params }) {
+  try {
+    const user = getAuthUser(req);
+    if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!canMutateRoster(user)) {
+      return NextResponse.json({ error: 'Only admins or regional managers can edit allocations' }, { status: 403 });
+    }
+
+    const email = await resolveEmail(params);
+    if (!email) return NextResponse.json({ error: 'Email is required' }, { status: 400 });
+
+    const body = await req.json();
+
+    // Whitelist the fields we accept. Any column not in this set is ignored.
+    // camelCase (from client) → snake_case (for SQL).
+    const FIELD_MAP = {
+      name: 'name',
+      initials: 'initials',
+      title: 'title',
+      access: 'access',
+      managerEmail: 'manager_email',
+      team: 'team',
+      region: 'region',
+      service: 'service',
+      country: 'country',
+      avatarUrl: 'avatar_url',
+      startDate: 'start_date',
+      onLeave: 'on_leave',
+    };
+
+    // Enum guards
+    if (body.access !== undefined && body.access !== null && !VALID_ACCESS.includes(body.access)) {
+      return NextResponse.json({ error: `Invalid access. Must be one of: ${VALID_ACCESS.join(', ')}` }, { status: 400 });
+    }
+    if (body.service !== undefined && body.service !== null && !VALID_SERVICES.includes(body.service)) {
+      return NextResponse.json({ error: `Invalid service. Must be one of: ${VALID_SERVICES.join(', ')}` }, { status: 400 });
+    }
+    if (body.team !== undefined && body.team !== null && !VALID_TEAMS.includes(body.team)) {
+      return NextResponse.json({ error: `Invalid team. Must be one of: ${VALID_TEAMS.join(', ')}` }, { status: 400 });
+    }
+
+    const updates = [];
+    const values = [];
+    for (const [clientKey, dbCol] of Object.entries(FIELD_MAP)) {
+      if (Object.prototype.hasOwnProperty.call(body, clientKey)) {
+        let val = body[clientKey];
+        if (typeof val === 'string') val = val.trim();
+        if (val === '') val = null;
+        if (clientKey === 'managerEmail' && typeof val === 'string') val = val.toLowerCase();
+        updates.push(dbCol);
+        values.push(val);
+      }
+    }
+
+    if (updates.length === 0) {
+      return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
+    }
+
+    // Upsert: row may not exist yet for baseline users (first edit creates it).
+    // ON CONFLICT DO UPDATE covers both new-row and existing-row paths.
+    const isBaseline = hasBaseline(email);
+    const insertCols = ['email', ...updates, 'is_new', 'is_deleted'];
+    const insertVals = [email, ...values, !isBaseline, false];
+    const placeholders = insertVals.map((_, i) => `$${i + 1}`).join(', ');
+    const updateSet = updates.map((c, i) => `${c} = EXCLUDED.${c}`).join(', ');
+
+    const sql = `
+      INSERT INTO team_member_overrides (${insertCols.join(', ')})
+      VALUES (${placeholders})
+      ON CONFLICT (email) DO UPDATE
+      SET ${updateSet}, updated_at = NOW()
+      RETURNING email, name, initials, title, access, manager_email, team, region,
+                service, country, avatar_url, start_date, is_new, is_deleted,
+                on_leave, last_login_at, login_count, created_at, updated_at
+    `;
+
+    const { rows } = await query(sql, insertVals);
+    const row = rows[0];
+
+    return NextResponse.json({
+      email: row.email,
+      name: row.name,
+      initials: row.initials,
+      title: row.title,
+      access: row.access,
+      managerEmail: row.manager_email,
+      team: row.team,
+      region: row.region,
+      service: row.service,
+      country: row.country,
+      avatarUrl: row.avatar_url,
+      startDate: row.start_date ? (typeof row.start_date === 'string' ? row.start_date : row.start_date.toISOString().slice(0, 10)) : null,
+      isNew: row.is_new,
+      isDeleted: row.is_deleted,
+      onLeave: row.on_leave,
+      lastLoginAt: row.last_login_at ? (typeof row.last_login_at === 'string' ? row.last_login_at : row.last_login_at.toISOString()) : null,
+      loginCount: row.login_count || 0,
+    });
+  } catch (err) {
+    console.error('[team-members PATCH]', err.message);
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
+  }
+}
+
+export async function DELETE(req, { params }) {
+  try {
+    const user = getAuthUser(req);
+    if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!canMutateRoster(user)) {
+      return NextResponse.json({ error: 'Only admins or regional managers can remove members' }, { status: 403 });
+    }
+
+    const email = await resolveEmail(params);
+    if (!email) return NextResponse.json({ error: 'Email is required' }, { status: 400 });
+
+    const isBaseline = hasBaseline(email);
+
+    if (isBaseline) {
+      // Soft-delete: persist is_deleted=true override row (or update existing)
+      await query(
+        `INSERT INTO team_member_overrides (email, is_deleted)
+         VALUES ($1, true)
+         ON CONFLICT (email) DO UPDATE
+         SET is_deleted = true, updated_at = NOW()`,
+        [email]
+      );
+      return NextResponse.json({ email, isDeleted: true, mode: 'soft' });
+    }
+
+    // Not in baseline → hard delete the override row (it only existed to
+    // represent a net-new member; removing it is the true remove).
+    await query('DELETE FROM team_member_overrides WHERE email = $1', [email]);
+    return NextResponse.json({ email, isDeleted: true, mode: 'hard' });
+  } catch (err) {
+    console.error('[team-members DELETE]', err.message);
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
+  }
+}

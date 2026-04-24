@@ -41,6 +41,21 @@ export async function POST(req) {
 
     const user = rows[0];
 
+    // Record login for the Team-tab last-login badge (best-effort)
+    try {
+      await query(
+        `INSERT INTO team_member_overrides (email, last_login_at, login_count)
+         VALUES ($1, NOW(), 1)
+         ON CONFLICT (email) DO UPDATE
+         SET last_login_at = NOW(),
+             login_count   = team_member_overrides.login_count + 1,
+             updated_at    = NOW()`,
+        [trimmed]
+      );
+    } catch (err) {
+      console.warn('[auth/login] recordLogin failed:', err.message);
+    }
+
     // Issue signed JWT
     const token = signToken({
       sub: user.id,

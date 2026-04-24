@@ -62,6 +62,30 @@ async function findMemberByEmail(email) {
   }
 }
 
+/**
+ * Record a successful login in team_member_overrides so the Team tab can
+ * show accurate "last login" / "never logged in" badges. Upsert semantics
+ * — baseline users don't have an override row until they first log in.
+ * Best-effort; failures here never block the login.
+ */
+async function recordLogin(email) {
+  try {
+    if (!process.env.DATABASE_URL) return;
+    const { query } = await import('../../../../../../src/lib/db');
+    await query(
+      `INSERT INTO team_member_overrides (email, last_login_at, login_count)
+       VALUES ($1, NOW(), 1)
+       ON CONFLICT (email) DO UPDATE
+       SET last_login_at = NOW(),
+           login_count   = team_member_overrides.login_count + 1,
+           updated_at    = NOW()`,
+      [email]
+    );
+  } catch (err) {
+    console.warn('[auth/google/callback] recordLogin failed:', err.message);
+  }
+}
+
 export async function POST(req) {
   try {
     const body = await req.json();
@@ -205,6 +229,10 @@ export async function POST(req) {
       team: null,
     };
 
+
+    // ── Record login (last_login_at + counter) for the Team-tab badge ──
+    // Fire-and-forget: DB hiccups must not block an otherwise-valid login.
+    await recordLogin(email);
 
     // ── Issue signed JWT ────────────────────────────────────────────────
     const token = signToken({
