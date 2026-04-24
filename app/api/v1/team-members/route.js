@@ -118,6 +118,32 @@ export async function POST(req) {
       [email, name, initials, title, access, managerEmail, team, region, service, country, avatarUrl, startDate]
     );
 
+    // Also seed a members row so auth (findMemberByEmail), /me, and permissions
+    // recognise the new user. Without this, a newly-added team member could
+    // pass the OAuth callback but /me would return team=null/role=member and
+    // their Home view would be empty. ON CONFLICT is a safety net — if a
+    // members row already exists (e.g. re-adding a previously-removed user),
+    // we leave the auth table alone.
+    try {
+      await query(
+        `INSERT INTO members (name, initials, role, team, region, country, email, avatar_url, is_active)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,true)
+         ON CONFLICT (email) DO UPDATE
+         SET name = EXCLUDED.name,
+             initials = EXCLUDED.initials,
+             role = EXCLUDED.role,
+             team = EXCLUDED.team,
+             region = EXCLUDED.region,
+             country = EXCLUDED.country,
+             avatar_url = EXCLUDED.avatar_url,
+             is_active = true,
+             updated_at = NOW()`,
+        [name, initials, access, team, region, country, email, avatarUrl]
+      );
+    } catch (memErr) {
+      console.warn('[team-members POST] members seed failed:', memErr.message);
+    }
+
     return NextResponse.json({
       email, name, initials, title, access, managerEmail, team, region,
       service, country, avatarUrl, startDate,

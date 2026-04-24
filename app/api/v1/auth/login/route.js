@@ -32,14 +32,30 @@ export async function POST(req) {
       [trimmed]
     );
 
-    if (rows.length === 0) {
+    let user = rows[0];
+
+    // Fallback: accept users recorded only in team_member_overrides (new hires
+    // added via the Team tab that don't yet have a members row). Without this
+    // fallback, newly-added users cannot email-login.
+    if (!user) {
+      const { rows: ovRows } = await query(
+        `SELECT email, name, access
+           FROM team_member_overrides
+          WHERE email = $1 AND (is_deleted IS NULL OR is_deleted = false)`,
+        [trimmed]
+      );
+      if (ovRows.length > 0) {
+        const o = ovRows[0];
+        user = { id: 0, email: o.email, name: o.name || trimmed, role: o.access || 'agent' };
+      }
+    }
+
+    if (!user) {
       return NextResponse.json(
         { error: 'No active account found for this email. Contact your admin for access.' },
         { status: 404 }
       );
     }
-
-    const user = rows[0];
 
     // Record login for the Team-tab last-login badge (best-effort)
     try {

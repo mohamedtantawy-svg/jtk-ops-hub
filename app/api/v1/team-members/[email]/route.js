@@ -111,6 +111,37 @@ export async function PATCH(req, { params }) {
     const { rows } = await query(sql, insertVals);
     const row = rows[0];
 
+    // Keep the members table in sync with edited allocation. Auth + /me +
+    // permissions all read from `members`, so a stale row there would cause
+    // the Home view to mis-scope even if the override row is correct.
+    // Only patch fields we can confidently map (auth-relevant ones).
+    try {
+      const memPatch = [];
+      const memVals = [];
+      const memMap = {
+        name: 'name', initials: 'initials', access: 'role', team: 'team',
+        region: 'region', country: 'country', avatarUrl: 'avatar_url',
+      };
+      for (const [clientKey, dbCol] of Object.entries(memMap)) {
+        if (Object.prototype.hasOwnProperty.call(body, clientKey)) {
+          let val = body[clientKey];
+          if (typeof val === 'string') val = val.trim();
+          if (val === '') val = null;
+          memPatch.push(`${dbCol} = $${memPatch.length + 2}`);
+          memVals.push(val);
+        }
+      }
+      if (memPatch.length > 0) {
+        memPatch.push('updated_at = NOW()');
+        await query(
+          `UPDATE members SET ${memPatch.join(', ')} WHERE email = $1`,
+          [email, ...memVals]
+        );
+      }
+    } catch (memErr) {
+      console.warn('[team-members PATCH] members sync failed:', memErr.message);
+    }
+
     return NextResponse.json({
       email: row.email,
       name: row.name,
@@ -158,12 +189,24 @@ export async function DELETE(req, { params }) {
          SET is_deleted = true, updated_at = NOW()`,
         [email]
       );
+      // Mirror to members: mark inactive so auth blocks and /me treats as gone.
+      try {
+        await query('UPDATE members SET is_active = false, updated_at = NOW() WHERE email = $1', [email]);
+      } catch (memErr) {
+        console.warn('[team-members DELETE] members deactivate failed:', memErr.message);
+      }
       return NextResponse.json({ email, isDeleted: true, mode: 'soft' });
     }
 
     // Not in baseline → hard delete the override row (it only existed to
     // represent a net-new member; removing it is the true remove).
     await query('DELETE FROM team_member_overrides WHERE email = $1', [email]);
+    // And remove the members row seeded when the override was created.
+    try {
+      await query('DELETE FROM members WHERE email = $1', [email]);
+    } catch (memErr) {
+      console.warn('[team-members DELETE] members purge failed:', memErr.message);
+    }
     return NextResponse.json({ email, isDeleted: true, mode: 'hard' });
   } catch (err) {
     console.error('[team-members DELETE]', err.message);
