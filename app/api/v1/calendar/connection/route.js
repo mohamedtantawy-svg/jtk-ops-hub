@@ -13,6 +13,11 @@ import {
   deleteTokens,
 } from '../../../../../src/lib/calendar-token-store';
 import { revokeToken } from '../../../../../src/lib/google-calendar';
+import {
+  isServiceAccountConfigured,
+  getServiceAccountEmail,
+  resolveCalendarId,
+} from '../../../../../src/lib/google-calendar-sa';
 
 const OWNER_EMAIL = 'mohamed.tantawy@deel.com';
 
@@ -29,6 +34,21 @@ export async function GET(req) {
   const gate = ownerGate(user);
   if (!gate.ok) return NextResponse.json({ error: gate.error }, { status: gate.status });
 
+  // SA mode: we're "connected" the moment the pod has SA creds. The only
+  // thing that can fail at this layer is token minting, but we don't try
+  // to mint here — mount is a hot path called on every view switch, and
+  // a failing mint shouldn't block the UI; the /events call will surface
+  // it distinctly (notShared vs auth error).
+  if (isServiceAccountConfigured()) {
+    return NextResponse.json({
+      connected: true,
+      mode: 'service_account',
+      serviceAccountEmail: getServiceAccountEmail(),
+      calendarId: resolveCalendarId(user.email),
+      googleEmail: user.email,
+    });
+  }
+
   try {
     const status = await getConnectionStatus(user.email);
     return NextResponse.json(status);
@@ -42,6 +62,13 @@ export async function DELETE(req) {
   const user = getAuthUser(req);
   const gate = ownerGate(user);
   if (!gate.ok) return NextResponse.json({ error: gate.error }, { status: gate.status });
+
+  // SA mode: nothing to disconnect on our end. The user "disconnects" by
+  // unsharing their calendar from the SA email on Google's side; we can
+  // still return OK so UI flows (if any) don't choke.
+  if (isServiceAccountConfigured()) {
+    return NextResponse.json({ ok: true, mode: 'service_account' });
+  }
 
   try {
     // Best-effort revoke with Google first. We use the refresh token because
