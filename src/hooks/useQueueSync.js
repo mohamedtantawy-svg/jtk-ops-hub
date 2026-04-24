@@ -143,15 +143,36 @@ function emitQuotaFailed(source, err) {
   } catch {}
 }
 
+// Fields that are large but not needed to restore the queue view on reload.
+// `body` is the raw ticket description (can be several KB per item — the main
+// cause of QuotaExceededError on large Jira queues). `aiSummary` and
+// `suggestedReply` are always empty strings at persist time (generated lazily
+// on demand) so they're pure wasted bytes in localStorage.
+// These fields are re-fetched from the live API the next time data is synced,
+// so dropping them from the cache has zero visible effect on the user.
+const CACHE_STRIP_FIELDS = ['body', 'aiSummary', 'suggestedReply'];
+
+function slimForCache(items) {
+  if (!Array.isArray(items)) return items;
+  return items.map(item => {
+    const slim = { ...item };
+    for (const f of CACHE_STRIP_FIELDS) delete slim[f];
+    return slim;
+  });
+}
+
 function writeSourceCache(source, items, meta, userEmail) {
   const cfg = SOURCE_CONFIG[source];
   if (!cfg) return;
   const key = cacheKeyFor(source, userEmail);
+  // Strip large per-item text fields before persisting. Ticket descriptions
+  // (body) are the primary cause of QuotaExceededError — they can be several
+  // KB each and accumulate to well over 5 MB for a large Jira queue.
+  const slim = slimForCache(items);
   try {
-    localStorage.setItem(key, JSON.stringify({ items, meta, ts: Date.now() }));
+    localStorage.setItem(key, JSON.stringify({ items: slim, meta, ts: Date.now() }));
   } catch (err) {
-    // QuotaExceededError — most common cause is another app filling localStorage.
-    // Try evicting the *other* source's cache (for this same user) as a last-
+    // QuotaExceededError — try evicting the other source's cache as a last-
     // ditch attempt before giving up + notifying the UI. No silent drops.
     try {
       for (const other of Object.keys(SOURCE_CONFIG)) {
@@ -160,7 +181,7 @@ function writeSourceCache(source, items, meta, userEmail) {
           if (otherKey) localStorage.removeItem(otherKey);
         }
       }
-      localStorage.setItem(key, JSON.stringify({ items, meta, ts: Date.now() }));
+      localStorage.setItem(key, JSON.stringify({ items: slim, meta, ts: Date.now() }));
     } catch (retryErr) {
       emitQuotaFailed(source, retryErr);
     }
