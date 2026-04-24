@@ -55,12 +55,6 @@ jobs:
         with:
           context: .
           push: true
-          # BUILD_SHA is baked into APP_VERSION inside the image (see Dockerfile).
-          # The client polls /api/v1/version and, when the value changes, prompts
-          # the user to reload — which is how long-lived tabs pick up new deploys
-          # without a manual cache-clear.
-          build-args: |
-            BUILD_SHA=${{ steps.meta.outputs.image_tag }}
           tags: |
             ${{ steps.meta.outputs.image_uri }}
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
