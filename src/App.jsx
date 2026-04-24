@@ -8,6 +8,8 @@ import { INITIAL_ACTIVITY, INITIAL_NOTES } from './data/tasks';
 import { FEED_EVENTS } from './data/feed';
 import { ALL_AGENT_IDS, matchesAudience } from './data/comms';
 import { useAnnouncements } from './hooks/useAnnouncements';
+import { useVersionCheck } from './hooks/useVersionCheck';
+import UpdateBanner from './components/ui/UpdateBanner';
 import { AnnouncementRequestsProvider } from './hooks/useAnnouncementRequests';
 import { useQueueSync } from './hooks/useQueueSync';
 import { DEFAULT_SETTINGS } from './data/settings';
@@ -215,6 +217,11 @@ const App=()=>{
   // real addToast in a useEffect once it's available.
   const toastRef = React.useRef(null);
   const { comms, setComms, refresh: apiRefreshAnnouncements, acknowledge: apiAcknowledge, create: apiCreate, send: apiSend, update: apiUpdate, archive: apiArchive, remove: apiRemove, togglePin: apiTogglePin, isOnline: apiOnline, serverUserId: apiServerUserId, serverUserEmail: apiServerUserEmail, unarchive: apiUnarchive, comments: apiComments, setComments: apiSetComments, loadComments: apiLoadComments, addComment: apiAddCommentFn, deleteComment: apiDeleteCommentFn, links: apiLinks, loadLinks: apiLoadLinks, linkAnnouncement: apiLinkAnnouncementFn, unlinkAnnouncement: apiUnlinkAnnouncementFn, react: apiReactFn } = useAnnouncements({ toastRef });
+  // Detect when the server has rolled to a new deploy so we can prompt the
+  // user to reload — otherwise long-lived tabs sit on stale code until the
+  // user manually clears their cache. Fires at the app root so the banner
+  // is visible on both the login screen and the main app.
+  const { hasUpdate: versionHasUpdate, reload: versionReload, latestVersion: versionLatest } = useVersionCheck();
   // Approval-queue pending counts are now surfaced inside AnnouncementsView
   // (the pending-approval filter tab in that view displays the count). We no
   // longer need a top-nav badge, so App.jsx doesn't consume the requests
@@ -1057,9 +1064,12 @@ const App=()=>{
 
   // ── If not logged in, show login screen ────────────────────────────────────
   if(!user) return(
-    <LoginScreen
-      onLogin={handleLogin}
-    />
+    <>
+      <UpdateBanner hasUpdate={versionHasUpdate} reload={versionReload} latestVersion={versionLatest} />
+      <LoginScreen
+        onLogin={handleLogin}
+      />
+    </>
   );
 
   return(
@@ -1068,8 +1078,13 @@ const App=()=>{
     <IntegrationsContext.Provider value={integrationsCtx}>
     <SettingsContext.Provider value={settings}>
     <div style={{minHeight:'100vh',background:'var(--bg)',color:'var(--text)',display:'flex',flexDirection:'column'}} role="application" aria-label="Ops Hub Dashboard">
+      <UpdateBanner hasUpdate={versionHasUpdate} reload={versionReload} latestVersion={versionLatest} />
+      {/* When the update banner is visible, push every other fixed-position bar
+          down by its height so nothing is obscured. 44px matches UpdateBanner's
+          minHeight. */}
+      {versionHasUpdate && <style>{`.deel-topnav{top:${impersonating?80:44}px!important;} .deel-impersonation-bar{top:44px!important;}`}</style>}
       {impersonating && effectiveUser && (
-        <div style={{position:'fixed',top:0,left:0,right:0,zIndex:101,background:'linear-gradient(90deg,#7c3aed,#6d28d9)',color:'white',padding:'8px 24px',display:'flex',alignItems:'center',justifyContent:'center',gap:12,fontSize:13,fontWeight:600,boxShadow:'0 2px 8px rgba(124,58,237,0.3)',height:36}}>
+        <div className="deel-impersonation-bar" style={{position:'fixed',top:0,left:0,right:0,zIndex:101,background:'linear-gradient(90deg,#7c3aed,#6d28d9)',color:'white',padding:'8px 24px',display:'flex',alignItems:'center',justifyContent:'center',gap:12,fontSize:13,fontWeight:600,boxShadow:'0 2px 8px rgba(124,58,237,0.3)',height:36}}>
           <i className="bi-eye-fill" style={{fontSize:14}}></i>
           <span>Viewing as <strong>{effectiveUser.name}</strong></span>
           <span style={{opacity:0.5}}>·</span>
@@ -1093,7 +1108,7 @@ const App=()=>{
         onCreateReport={()=>{setView('hr-reports');setCreateReportModal(true);}}
         setSelTask={setSelTask} tasks={tasks}
       />
-      <div style={{height:impersonating?104:68,flexShrink:0}}/>
+      <div style={{height:(impersonating?104:68)+(versionHasUpdate?44:0),flexShrink:0}}/>
       <DeelSubNav view={view} subFilter={subFilter} setSubFilter={setSubFilter} tasks={tasks} user={effectiveUser}/>
       <div className="deel-content" data-region="main-content" aria-label="Main content" style={{display:'flex',overflowX:'hidden',overflowY:'auto',position:'relative',flex:1}}>
           {view==='briefing'      &&perms?.canView('briefing')!==false     &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={setSelTask} comms={comms} escalations={scopedEscalations} setSubFilter={setSubFilter} requests={requests} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall}/></div>}
