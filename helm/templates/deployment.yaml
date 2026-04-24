@@ -47,15 +47,6 @@ spec:
           env:
             - name: Playground
               value: {{ .Values.sandboxName }}
-            # APP_VERSION is the immutable image tag — which Nexus CI sets to the
-            # git SHA of the commit that built the image (see values.yaml). The
-            # client polls /api/v1/version and compares against the value it
-            # received at boot; when it changes (pod rolled to a new image) the
-            # UpdateBanner prompts the user to reload. This is the single source
-            # of truth for "what version is running" — do not read it from
-            # anywhere else.
-            - name: APP_VERSION
-              value: {{ .Values.app.image.tag | quote }}
             {{- if .Values.s3.enabled }}
             - name: S3_BUCKET
               value: {{ .Values.s3.bucket }}
