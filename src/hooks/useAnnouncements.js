@@ -33,7 +33,9 @@ function normalizeApiAnnouncement(a) {
     type: a.type,
     title: a.title,
     body: a.body,
-    author: a.author || { id: a.authorId, name: '' },
+    author: a.author
+      ? { id: a.author.id, name: a.author.name || '', email: String(a.author.email || '').toLowerCase() }
+      : { id: a.authorId, name: '', email: '' },
     sentAt: a.sentAt || '',
     // scheduledFor is present on rows with status='scheduled'; we preserve the
     // raw ISO so the UI can render a localised time and the "Send now" action

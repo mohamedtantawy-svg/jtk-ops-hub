@@ -777,7 +777,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
           return(
             <div style={{padding:'12px 24px 0'}}>
               {/* Banner */}
-              <div onClick={()=>setView('announcements')} style={{
+              <div onClick={()=>{setView('announcements');try{window.dispatchEvent(new CustomEvent('announcements:openDetail',{detail:{id:comm.id}}));}catch(_){}}} style={{
                 background:bt.bg,borderRadius:16,padding:'20px 28px',cursor:'pointer',
                 position:'relative',overflow:'hidden',transition:'all .2s',minHeight:80,
                 display:'flex',alignItems:'center',gap:20,
@@ -793,7 +793,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 <div style={{flex:1,minWidth:0,position:'relative',zIndex:1}}>
                   <div style={{fontSize:17,fontWeight:700,color:'#1b1b1b',lineHeight:1.3,marginBottom:6}}>{comm.title}</div>
                   <div style={{fontSize:13,color:'#4a4a4a',lineHeight:1.5,maxWidth:600,overflow:'hidden',textOverflow:'ellipsis',display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical'}}>{comm.body.slice(0,160)}{comm.body.length>160?'...':''}</div>
-                  <button onClick={(e)=>{e.stopPropagation();setView('announcements');}} style={{
+                  <button onClick={(e)=>{e.stopPropagation();setView('announcements');try{window.dispatchEvent(new CustomEvent('announcements:openDetail',{detail:{id:comm.id}}));}catch(_){}}} style={{
                     marginTop:12,display:'inline-flex',alignItems:'center',gap:6,
                     padding:'8px 20px',borderRadius:128,border:'none',
                     background:'#1b1b1b',color:'white',fontSize:13,fontWeight:600,

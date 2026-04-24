@@ -112,11 +112,33 @@ export async function GET(req) {
       }
     }
 
+    // Hydrate author name + email by looking up members for every distinct
+     // author_id in this page. Without this the frontend renders "—" in the
+     // AUTHOR column, and — more importantly — the ack-button visibility
+     // check can't tell whether the viewer is the author (it compares by
+     // email, which wasn't populated). Batch-lookup keeps this O(1) query.
+    const authorIds = Array.from(new Set(filtered.map(r => r.author_id).filter(Boolean)));
+    const authorMap = {};
+    if (authorIds.length > 0) {
+      try {
+        const ar = await query(
+          'SELECT id, name, email FROM members WHERE id = ANY($1)',
+          [authorIds]
+        );
+        for (const row of ar.rows) {
+          authorMap[row.id] = { id: row.id, name: row.name, email: (row.email || '').toLowerCase() };
+        }
+      } catch (e) {
+        console.warn('[announcements GET] author lookup failed:', e.message);
+      }
+    }
+
     const items = filtered.map(r => ({
       id: r.id, type: r.type, title: r.title, body: r.body,
       target: r.target, priority: r.priority, isPopup: r.is_popup,
       imageUrl: r.image_url, link: r.link, status: r.status,
       authorId: r.author_id, pinned: r.pinned,
+      author: authorMap[r.author_id] || { id: r.author_id, name: '', email: '' },
       acks: acksIdMap[r.id] || [],
       ackEmails: acksEmailMap[r.id] || [],
       soundKey: r.sound_key || 'chime',
