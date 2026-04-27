@@ -93,6 +93,18 @@ async function _deelFetch(path, options = {}) {
   return res.json();
 }
 
+// ── Internal-employee filter ────────────────────────────────────────────────
+// Deel-internal employees ("Deelers") are tagged on their contract with the
+// literal string "Deeler" in `contract.tags[]`. The HRX queues should not
+// surface them — they're handled by an internal People Ops workflow, not the
+// EOR workbench. Matching is case-insensitive and trimmed for robustness, but
+// strict-equality on the token (no substring match — "Non-Deeler" or "Deelers"
+// must not be filtered).
+export function hasDeelerTag(tags) {
+  if (!Array.isArray(tags)) return false;
+  return tags.some(t => typeof t === 'string' && t.trim().toLowerCase() === 'deeler');
+}
+
 /**
  * Deel API fetch with automatic retry.
  */
@@ -187,7 +199,16 @@ export async function listOnboardingPeople(params = {}) {
   const onboardingStatus = res?.statuses?.find(s => s.name === 'Onboarding');
   const actionableTotal = onboardingStatus?.actionableTasksTotal || allItems.length;
 
-  const items = allItems.map(p => ({
+  // Drop Deel-internal employees ("Deeler" tag on the contract) before
+  // mapping — they're handled by an internal workflow, not the EOR queue.
+  const beforeFilter = allItems.length;
+  const filteredItems = allItems.filter(p => !hasDeelerTag(p.contract?.tags));
+  const droppedDeelers = beforeFilter - filteredItems.length;
+  if (droppedDeelers > 0) {
+    console.info(`[onboarding] filtered ${droppedDeelers} Deeler contract(s) of ${beforeFilter}`);
+  }
+
+  const items = filteredItems.map(p => ({
     id:                p.onboardingId || p.oid || '',
     oid:               p.oid || '',                              // contract OID
     name:              p.employeeName || '',
@@ -257,7 +278,16 @@ export async function listPausedOnboarding() {
     }
   }
 
-  const items = allItems.map(p => ({
+  // Drop Deel-internal employees before mapping (same rule as the actionable
+  // queue — they're handled by an internal workflow).
+  const beforeFilter = allItems.length;
+  const filteredItems = allItems.filter(p => !hasDeelerTag(p.contract?.tags));
+  const droppedDeelers = beforeFilter - filteredItems.length;
+  if (droppedDeelers > 0) {
+    console.info(`[paused-onboarding] filtered ${droppedDeelers} Deeler contract(s) of ${beforeFilter}`);
+  }
+
+  const items = filteredItems.map(p => ({
     id:                p.onboardingId || p.oid || '',
     oid:               p.oid || '',
     name:              p.employeeName || '',
@@ -525,6 +555,9 @@ async function fetchContractDetailForRedline(contractOid) {
       country:      c?.country || '',
       orgName:      c?.Team?.Organization?.name || '',
       contractOid:  c?.oid || c?.id || key,
+      // Carry the contract tags so the caller can filter Deel-internal
+      // contracts ("Deeler" tag) without a second round trip.
+      tags:         Array.isArray(c?.tags) ? c.tags : [],
     };
     REDLINE_CONTRACT_CACHE.set(key, { detail, ts: Date.now() });
     return detail;
@@ -534,30 +567,41 @@ async function fetchContractDetailForRedline(contractOid) {
 }
 
 async function enrichRedlines(items) {
-  const needEnrich = items.filter(i =>
-    i.contractOid && (!i.employeeName || !i.countryCode || !i.orgName)
-  );
-  if (needEnrich.length === 0) return items;
+  // Fetch contract detail for every item that references one — we need the
+  // detail both for missing display fields AND to read `tags` so we can drop
+  // Deel-internal contracts ("Deeler" tag). Template redlines (no contractOid)
+  // skip the fetch and the filter; they're not tied to an employee.
+  const ids = [...new Set(items.filter(i => i.contractOid).map(i => i.contractOid))];
+  if (ids.length === 0) return items;
 
   const resolved = new Map();
-  const ids = [...new Set(needEnrich.map(i => i.contractOid))];
   for (let i = 0; i < ids.length; i += REDLINE_CONTRACT_CONCURRENCY) {
     const batch = ids.slice(i, i + REDLINE_CONTRACT_CONCURRENCY);
     const results = await Promise.all(batch.map(fetchContractDetailForRedline));
     batch.forEach((id, idx) => { if (results[idx]) resolved.set(id, results[idx]); });
   }
 
-  return items.map(item => {
-    if (!item.contractOid) return item;
+  let droppedDeelers = 0;
+  const out = [];
+  for (const item of items) {
+    if (!item.contractOid) { out.push(item); continue; }
     const detail = resolved.get(item.contractOid);
-    if (!detail) return item;
-    return {
+    if (detail && hasDeelerTag(detail.tags)) {
+      droppedDeelers++;
+      continue;
+    }
+    if (!detail) { out.push(item); continue; }
+    out.push({
       ...item,
       employeeName: item.employeeName || detail.employeeName || '',
       countryCode:  item.countryCode  || detail.country      || '',
       orgName:      item.orgName      || detail.orgName      || '',
-    };
-  });
+    });
+  }
+  if (droppedDeelers > 0) {
+    console.info(`[redlines] filtered ${droppedDeelers} Deeler contract(s) of ${items.length}`);
+  }
+  return out;
 }
 
 /**
@@ -779,7 +823,15 @@ export async function listAmendmentRequests(params = {}) {
     }
   }
 
-  const items = rawItems.map(a => {
+  // Drop amendments tied to Deel-internal employee contracts ("Deeler" tag).
+  const beforeFilter = rawItems.length;
+  const visibleItems = rawItems.filter(a => !hasDeelerTag(a.contract?.tags));
+  const droppedDeelers = beforeFilter - visibleItems.length;
+  if (droppedDeelers > 0) {
+    console.info(`[amendments] filtered ${droppedDeelers} Deeler contract(s) of ${beforeFilter}`);
+  }
+
+  const items = visibleItems.map(a => {
     const currentStatus = resolveCurrentStatus(a.amendmentStatuses);
     const pausedAt = resolvePausedAt(a.amendmentStatuses);
     return {
