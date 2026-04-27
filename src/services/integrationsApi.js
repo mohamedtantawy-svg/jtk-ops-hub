@@ -297,3 +297,10 @@ export async function closeSideConversation(ticketId, sideConvId) {
     method: 'POST',
   });
 }
+
+// AI summary (Phase 5) — server-side cache keyed by ticketId + thread hash;
+// `force` busts the cache for the Regenerate button.
+export async function fetchTicketAISummary(ticketId, { force } = {}) {
+  const qs = force ? '?force=1' : '';
+  return apiFetch(`/queue/${encodeURIComponent(ticketId)}/ai-summary${qs}`);
+}

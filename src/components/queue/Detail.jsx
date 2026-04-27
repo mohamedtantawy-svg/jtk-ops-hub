@@ -19,7 +19,7 @@ import Avatar from '../ui/Avatar';
 import { ToolBadge } from '../ui/Badges';
 import NotesTab from './NotesTab';
 import TimelineTab from './TimelineTab';
-import { fetchTicketComments, postTicketAction, updateTicketCustomFields, fetchZendeskMacros, previewTicketMacro, applyTicketMacro } from '../../services/integrationsApi';
+import { fetchTicketComments, postTicketAction, updateTicketCustomFields, fetchZendeskMacros, previewTicketMacro, applyTicketMacro, fetchTicketAISummary } from '../../services/integrationsApi';
 import { useTicketFieldsMeta } from '../../hooks/useTicketFieldsMeta';
 import SideConversationsModal from './SideConversationsModal';
 
@@ -872,18 +872,11 @@ const Detail = ({
 
         {/* ═══ RIGHT RAIL ═══════════════════════════════════════════════ */}
         <aside style={{ display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', minHeight: 0, paddingLeft: 4 }}>
-          {/* AI summary placeholder */}
-          <RailCard
-            title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-              <i className="bi-stars" style={{ fontSize: 11, color: '#7c3aed' }} />
-              <span>AI Summary</span>
-            </span>}
-          >
-            <div style={{ padding: '12px 0', textAlign: 'center', color: '#9e9e9e', fontSize: 11 }}>
-              <i className="bi-clock-history" style={{ fontSize: 18, display: 'block', marginBottom: 4, color: '#d0d0d0' }} />
-              Coming in Phase 5
-            </div>
-          </RailCard>
+          {/* AI summary — auto-loaded once per ticket open. Server caches
+              for 10 min keyed by thread hash, so navigating prev/next on a
+              quiet ticket hits the cache instantly. */}
+          <AISummaryCard ticketId={task.id} isZD={isZD} />
+
 
           {/* Notes — uses NotesTab's own internal padding. */}
           <RailCard title="Notes" padded={false}>
@@ -1662,6 +1655,124 @@ const iconBtnStyle = {
   color: '#616161', cursor: 'pointer',
   transition: 'all .15s',
 };
+
+// ── AI Summary card (Phase 5) ─────────────────────────────────────────────
+// Auto-fetches the LLM summary on mount + when the ticket changes (prev/next
+// navigation triggers a remount with a new ticketId). Server caches for 10
+// min keyed by thread hash, so normal browsing rarely hits the API.
+//
+// Shown only for Zendesk tickets — the BE returns 400 on Jira (Jira tickets
+// follow a different conversation model and don't fit this prompt shape).
+// On Jira, we render a clear "Zendesk-only" placeholder.
+//
+// Loads ONLY on the first mount per session by default. Detail mounts when a
+// user clicks a ticket; prev/next navigation gives this component a new key
+// (ticketId), so it remounts and refetches naturally.
+const AISummaryCard = memo(function AISummaryCard({ ticketId, isZD }) {
+  const [data, setData] = useState(null);     // { summary, source, generatedAt, cached }
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+
+  const load = useCallback(async ({ force = false } = {}) => {
+    if (!isZD) return;
+    if (!ticketId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetchTicketAISummary(ticketId, { force });
+      if (!mountedRef.current) return;
+      setData(res);
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setError(err?.message || 'Summary unavailable');
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, [ticketId, isZD]);
+
+  // Reset + auto-load when the ticket changes.
+  useEffect(() => {
+    setData(null);
+    setError(null);
+    if (isZD) load();
+  }, [ticketId, isZD, load]);
+
+  return (
+    <RailCard
+      title={
+        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <i className="bi-stars" style={{ fontSize: 11, color: '#7c3aed' }} />
+            <span>AI Summary</span>
+          </span>
+          {isZD && (data || error) && (
+            <button
+              onClick={() => load({ force: true })}
+              disabled={loading}
+              title="Regenerate summary"
+              aria-label="Regenerate summary"
+              style={{
+                width: 22, height: 22, borderRadius: 6, border: '1px solid #e8e8e8',
+                background: 'white', color: '#616161', cursor: loading ? 'wait' : 'pointer',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                fontFamily: 'inherit',
+              }}
+              onMouseEnter={e => { if (!loading) { e.currentTarget.style.borderColor = '#7c3aed'; e.currentTarget.style.color = '#7c3aed'; } }}
+              onMouseLeave={e => { if (!loading) { e.currentTarget.style.borderColor = '#e8e8e8'; e.currentTarget.style.color = '#616161'; } }}
+            >
+              <i className={loading ? 'bi-arrow-clockwise spin' : 'bi-arrow-clockwise'} style={{ fontSize: 10 }} />
+            </button>
+          )}
+        </span>
+      }
+    >
+      {!isZD ? (
+        <div style={{ padding: '8px 0', textAlign: 'center', color: '#9e9e9e', fontSize: 11 }}>
+          <i className="bi-info-circle" style={{ fontSize: 14, display: 'block', marginBottom: 4, color: '#d0d0d0' }} />
+          Zendesk-only feature
+        </div>
+      ) : loading && !data ? (
+        <div style={{ padding: '4px 0' }}>
+          <div className="skeleton" style={{ height: 11, marginBottom: 6, borderRadius: 4 }} />
+          <div className="skeleton" style={{ height: 11, marginBottom: 6, width: '85%', borderRadius: 4 }} />
+          <div className="skeleton" style={{ height: 11, width: '70%', borderRadius: 4 }} />
+        </div>
+      ) : error ? (
+        <div style={{ padding: '4px 0', fontSize: 12 }}>
+          <div style={{ color: '#991b1b', marginBottom: 6 }}>
+            <i className="bi-exclamation-triangle-fill" style={{ marginRight: 4 }} />
+            {error}
+          </div>
+          <button
+            onClick={() => load({ force: true })}
+            style={{ background: 'none', border: 'none', color: '#1f74b3', textDecoration: 'underline', cursor: 'pointer', padding: 0, fontSize: 11, fontFamily: 'inherit' }}
+          >
+            Try again
+          </button>
+        </div>
+      ) : data ? (
+        <div>
+          <div style={{ fontSize: 12, color: '#1b1b1b', lineHeight: 1.55, whiteSpace: 'pre-wrap' }}>
+            {data.summary}
+          </div>
+          <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #f0efed', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 10, color: '#9e9e9e' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <i className="bi-cpu" style={{ fontSize: 9 }} />
+              {data.source || 'claude'}
+              {data.cached && (
+                <span title="From cache" style={{ marginLeft: 6, padding: '0 6px', borderRadius: 128, background: '#eff6ff', color: '#1f74b3', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Cached
+                </span>
+              )}
+            </span>
+          </div>
+        </div>
+      ) : null}
+    </RailCard>
+  );
+});
 
 // ── Macro preview modal (Phase 3) ─────────────────────────────────────────
 // Modal overlay shown after the user selects a macro from the picker. Lists
