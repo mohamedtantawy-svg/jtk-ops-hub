@@ -199,16 +199,7 @@ export async function listOnboardingPeople(params = {}) {
   const onboardingStatus = res?.statuses?.find(s => s.name === 'Onboarding');
   const actionableTotal = onboardingStatus?.actionableTasksTotal || allItems.length;
 
-  // Drop Deel-internal employees ("Deeler" tag on the contract) before
-  // mapping — they're handled by an internal workflow, not the EOR queue.
-  const beforeFilter = allItems.length;
-  const filteredItems = allItems.filter(p => !hasDeelerTag(p.contract?.tags));
-  const droppedDeelers = beforeFilter - filteredItems.length;
-  if (droppedDeelers > 0) {
-    console.info(`[onboarding] filtered ${droppedDeelers} Deeler contract(s) of ${beforeFilter}`);
-  }
-
-  const items = filteredItems.map(p => ({
+  const mapped = allItems.map(p => ({
     id:                p.onboardingId || p.oid || '',
     oid:               p.oid || '',                              // contract OID
     name:              p.employeeName || '',
@@ -218,7 +209,7 @@ export async function listOnboardingPeople(params = {}) {
     createdAt:         p.createdAt || '',
     taskCreatedAt:     p.taskCreatedAt || '',
     flowStep:          p.onboardingFlowStep || '',               // e.g. "Onboarding.ComplianceDocs.AwaitingReview"
-    tag:               p.tag || '',                              // e.g. "VIP EOR"
+    tag:               p.tag || '',                              // e.g. "VIP EOR" — display tag, NOT the Deeler tag
     avatarUrl:         p.avatarUrl || '',
     assignee:          p.assignee?.name || '',
     assigneeEmail:     p.assignee?.email || '',
@@ -226,6 +217,11 @@ export async function listOnboardingPeople(params = {}) {
     isHourly:          p.timeTracking?.isHourly || false,
     clientName:        p.organizationName || p.clientLegalEntityName || p.clientName || p.client?.name || '',
   }));
+
+  // Drop Deel-internal employees ("Deeler" tag on the contract). The upstream
+  // onboarding row does NOT include contract.tags — we have to fetch the
+  // contract by OID. Cached per OID for an hour and shared across feeds.
+  const items = await dropDeelersByContractOid(mapped, (it) => it.oid, 'onboarding');
 
   return { items, total: actionableTotal, cursor: currentCursor || null };
 }
@@ -278,16 +274,7 @@ export async function listPausedOnboarding() {
     }
   }
 
-  // Drop Deel-internal employees before mapping (same rule as the actionable
-  // queue — they're handled by an internal workflow).
-  const beforeFilter = allItems.length;
-  const filteredItems = allItems.filter(p => !hasDeelerTag(p.contract?.tags));
-  const droppedDeelers = beforeFilter - filteredItems.length;
-  if (droppedDeelers > 0) {
-    console.info(`[paused-onboarding] filtered ${droppedDeelers} Deeler contract(s) of ${beforeFilter}`);
-  }
-
-  const items = filteredItems.map(p => ({
+  const mapped = allItems.map(p => ({
     id:                p.onboardingId || p.oid || '',
     oid:               p.oid || '',
     name:              p.employeeName || '',
@@ -307,6 +294,10 @@ export async function listPausedOnboarding() {
     assigneeId:        p.assigneeId || null,
     clientName:        p.organizationName || p.clientLegalEntityName || p.clientName || p.client?.name || '',
   }));
+
+  // Drop Deel-internal employees ("Deeler" tag on the contract) — same rule
+  // as the actionable queue. Resolves contract tags by OID.
+  const items = await dropDeelersByContractOid(mapped, (it) => it.oid, 'paused-onboarding');
 
   return { items, total: items.length };
 }
@@ -434,7 +425,7 @@ export async function listOffboardingCases() {
     console.log(`[offboarding] mode=${mode}, pages=${page + 1}, scanned=${scanned}, kept=${kept.length} (server reports ${serverTotal} total open)`);
   }
 
-  return kept.map(c => ({
+  const mapped = kept.map(c => ({
     id: c.id,                                         // termination ID (e.g. 165810)
     contractId: c.eorContractId || c.contractOid || '',
     contractOid: c.contractOid || '',                 // short OID (e.g. "35jp4gq")
@@ -471,6 +462,10 @@ export async function listOffboardingCases() {
     isDuplicate: c.isDuplicate === true,
     _serverTotal: serverTotal, // for diagnostics
   }));
+
+  // Drop offboarding cases tied to Deel-internal employee contracts
+  // ("Deeler" tag) — same rule as the rest of the queue feeds.
+  return dropDeelersByContractOid(mapped, (it) => it.contractOid || it.contractId, 'offboarding');
 }
 
 // ── Contract Amendments (REST v2 API) ───────────────────────────────────────
@@ -526,13 +521,16 @@ async function fetchAllRedlinesForStatus(status) {
   return all;
 }
 
-// Fill in org name (and country/employee when missing) for contract redlines.
-// Template redlines get everything from the redline payload; contract redlines
-// put contractOid/contractName/employmentCountry at the ROOT but lack the org
-// — we pull it from /admin/api/contract/{oid} → Team.Organization.name.
-const REDLINE_CONTRACT_CACHE = new Map();
-const REDLINE_CONTRACT_TTL_MS = 60 * 60 * 1000;
-const REDLINE_CONTRACT_CONCURRENCY = 5;
+// ── Shared contract-detail cache + helpers ────────────────────────────────
+// Used by every queue feed that needs to read `contract.tags[]` to apply the
+// Deeler filter (Onboarding, Paused Onboarding, Amendments, Redlines,
+// Workbench, Offboarding). The Deel admin payloads don't carry contract tags
+// inline on most rows — we have to fetch /admin/api/contract/{oid} to read
+// them. The cache is shared across feeds so a contract referenced by both an
+// amendment and a workbench task only round-trips once per hour.
+const CONTRACT_DETAIL_CACHE = new Map();
+const CONTRACT_DETAIL_TTL_MS = 60 * 60 * 1000;
+const CONTRACT_DETAIL_CONCURRENCY = 5;
 
 // Contract name format from Deel: "<Employee Legal Name> - <Job Title>".
 // Split on the first " - " — job titles may themselves contain " - "
@@ -543,11 +541,13 @@ function parseContractName(name) {
   return idx > 0 ? name.slice(0, idx).trim() : name.trim();
 }
 
-async function fetchContractDetailForRedline(contractOid) {
+// Fetch a contract detail object by OID. Returns the cached value if fresh.
+// Returns null on error (caller falls back to "no detail available").
+async function fetchContractDetail(contractOid) {
   if (!contractOid) return null;
   const key = String(contractOid);
-  const hit = REDLINE_CONTRACT_CACHE.get(key);
-  if (hit && Date.now() - hit.ts < REDLINE_CONTRACT_TTL_MS) return hit.detail;
+  const hit = CONTRACT_DETAIL_CACHE.get(key);
+  if (hit && Date.now() - hit.ts < CONTRACT_DETAIL_TTL_MS) return hit.detail;
   try {
     const c = await deelFetch(`/admin/api/contract/${encodeURIComponent(key)}`);
     const detail = {
@@ -555,37 +555,68 @@ async function fetchContractDetailForRedline(contractOid) {
       country:      c?.country || '',
       orgName:      c?.Team?.Organization?.name || '',
       contractOid:  c?.oid || c?.id || key,
-      // Carry the contract tags so the caller can filter Deel-internal
-      // contracts ("Deeler" tag) without a second round trip.
       tags:         Array.isArray(c?.tags) ? c.tags : [],
     };
-    REDLINE_CONTRACT_CACHE.set(key, { detail, ts: Date.now() });
+    CONTRACT_DETAIL_CACHE.set(key, { detail, ts: Date.now() });
     return detail;
   } catch (e) {
     return hit?.detail || null;
   }
 }
 
-async function enrichRedlines(items) {
-  // Fetch contract detail for every item that references one — we need the
-  // detail both for missing display fields AND to read `tags` so we can drop
-  // Deel-internal contracts ("Deeler" tag). Template redlines (no contractOid)
-  // skip the fetch and the filter; they're not tied to an employee.
-  const ids = [...new Set(items.filter(i => i.contractOid).map(i => i.contractOid))];
-  if (ids.length === 0) return items;
-
+// Bulk-resolve contract details for a set of OIDs. De-duplicates IDs and
+// respects the global concurrency limit. Returns Map<oid, detail>.
+async function resolveContractDetails(oids) {
+  const unique = [...new Set(oids.filter(Boolean).map(String))];
   const resolved = new Map();
-  for (let i = 0; i < ids.length; i += REDLINE_CONTRACT_CONCURRENCY) {
-    const batch = ids.slice(i, i + REDLINE_CONTRACT_CONCURRENCY);
-    const results = await Promise.all(batch.map(fetchContractDetailForRedline));
+  for (let i = 0; i < unique.length; i += CONTRACT_DETAIL_CONCURRENCY) {
+    const batch = unique.slice(i, i + CONTRACT_DETAIL_CONCURRENCY);
+    const results = await Promise.all(batch.map(fetchContractDetail));
     batch.forEach((id, idx) => { if (results[idx]) resolved.set(id, results[idx]); });
   }
+  return resolved;
+}
+
+// Drop items whose contract has the "Deeler" tag. `oidGetter(item)` returns
+// the contract OID for that item (or falsy if the item isn't tied to a
+// contract — e.g. template redlines, internal-tooling tasks). Items without
+// a resolvable contract pass through unchanged: better to surface a real
+// task we couldn't classify than to drop a customer task by mistake.
+async function dropDeelersByContractOid(items, oidGetter, label) {
+  if (!Array.isArray(items) || items.length === 0) return items;
+  const oids = items.map(oidGetter).filter(Boolean);
+  if (oids.length === 0) return items;
+  const details = await resolveContractDetails(oids);
+  let dropped = 0;
+  const kept = [];
+  for (const item of items) {
+    const oid = oidGetter(item);
+    if (!oid) { kept.push(item); continue; }
+    const detail = details.get(String(oid));
+    if (detail && hasDeelerTag(detail.tags)) { dropped++; continue; }
+    kept.push(item);
+  }
+  if (dropped > 0) {
+    console.info(`[${label}] filtered ${dropped} Deeler contract(s) of ${items.length}`);
+  }
+  return kept;
+}
+
+async function enrichRedlines(items) {
+  // Fetch contract detail for every contract redline (contractOid present)
+  // — we need the detail both for missing display fields AND to drop
+  // Deel-internal contracts ("Deeler" tag). Template redlines (no
+  // contractOid) skip the fetch and the filter; they're not tied to an
+  // employee.
+  const oids = items.filter(i => i.contractOid).map(i => i.contractOid);
+  if (oids.length === 0) return items;
+  const resolved = await resolveContractDetails(oids);
 
   let droppedDeelers = 0;
   const out = [];
   for (const item of items) {
     if (!item.contractOid) { out.push(item); continue; }
-    const detail = resolved.get(item.contractOid);
+    const detail = resolved.get(String(item.contractOid));
     if (detail && hasDeelerTag(detail.tags)) {
       droppedDeelers++;
       continue;
@@ -823,15 +854,7 @@ export async function listAmendmentRequests(params = {}) {
     }
   }
 
-  // Drop amendments tied to Deel-internal employee contracts ("Deeler" tag).
-  const beforeFilter = rawItems.length;
-  const visibleItems = rawItems.filter(a => !hasDeelerTag(a.contract?.tags));
-  const droppedDeelers = beforeFilter - visibleItems.length;
-  if (droppedDeelers > 0) {
-    console.info(`[amendments] filtered ${droppedDeelers} Deeler contract(s) of ${beforeFilter}`);
-  }
-
-  const items = visibleItems.map(a => {
+  const items = rawItems.map(a => {
     const currentStatus = resolveCurrentStatus(a.amendmentStatuses);
     const pausedAt = resolvePausedAt(a.amendmentStatuses);
     return {
@@ -868,7 +891,12 @@ export async function listAmendmentRequests(params = {}) {
   });
 
   const enriched = await enrichClientNames(items);
-  return { items: enriched, total: enriched.length, cursor: null };
+  // Drop amendments whose contract has the "Deeler" tag. The amendment
+  // payload's `a.contract` may carry tags inline, but we don't trust that
+  // path — we resolve via the same /admin/api/contract/{oid} endpoint as
+  // the redline pipeline so the rule is uniform across feeds.
+  const filtered = await dropDeelersByContractOid(enriched, (it) => it.contractOid, 'amendments');
+  return { items: filtered, total: filtered.length, cursor: null };
 }
 
 // ── OpsWorkbench Tasks (Admin API) ─────────────────────────────────────────
@@ -973,7 +1001,14 @@ export async function listWorkbenchTasks(params = {}) {
     escalations:      t.escalations || [],
   }));
 
-  return { items, total: serverCount || items.length, cursor: null };
+  // Drop workbench tasks tied to Deel-internal employee contracts ("Deeler"
+  // tag). Tasks without a contractOid (e.g. internal tooling work) pass
+  // through — they're not employee-bound. Filtering happens AFTER the page
+  // pull so the upstream count isn't affected; the route handler reports
+  // the post-filter total to the UI.
+  const filtered = await dropDeelersByContractOid(items, (it) => it.contractOid, 'workbench');
+
+  return { items: filtered, total: filtered.length, cursor: null };
 }
 
 // ── Payslips (REST v2 API) ──────────────────────────────────────────────────
