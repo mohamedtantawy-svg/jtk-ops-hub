@@ -195,6 +195,47 @@ function formatDue(iso) {
   if (diff <= 7) return { label: `${diff}d`, color: '#1f74b3', bg: '#DBEAFE', icon: 'bi-calendar' };
   return { label: d.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' }), color: '#616161', bg: '#f7f5f2', icon: 'bi-calendar' };
 }
+// Linkify free-text description content. Splits on http(s) URLs and returns
+// a mixed array of strings and <a> nodes. Trailing punctuation (.,;:!?)] etc.)
+// is stripped from the matched URL so it doesn't break the link target. Only
+// http(s) is matched — javascript:/data: schemes can't sneak in. We also stop
+// click events on the anchor so the surrounding click-to-edit container
+// doesn't swallow the navigation.
+const URL_REGEX = /\bhttps?:\/\/[^\s<>"'`]+/g;
+function renderTextWithLinks(text) {
+  if (!text) return null;
+  const out = [];
+  let last = 0;
+  URL_REGEX.lastIndex = 0;
+  let m;
+  while ((m = URL_REGEX.exec(text)) !== null) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    let url = m[0];
+    // Strip trailing punctuation that's almost certainly not part of the URL
+    const trailing = url.match(/[.,;:!?)\]}>]+$/);
+    let suffix = '';
+    if (trailing) {
+      suffix = trailing[0];
+      url = url.slice(0, -suffix.length);
+    }
+    out.push(
+      <a
+        key={`lnk-${m.index}`}
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={e => e.stopPropagation()}
+        style={{ color: '#7c3aed', textDecoration: 'underline', wordBreak: 'break-all' }}
+      >
+        {url}
+      </a>
+    );
+    if (suffix) out.push(suffix);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
 // Due-date urgency bucket used for sorting (lower = more urgent). Items without
 // a due date fall below anything dated so the top of the list is always
 // "something with a deadline". Within a bucket we further sort by priority.
@@ -280,6 +321,74 @@ const PriorityPicker = ({ value, onChange, mode = 'compact' }) => {
           </button>
         );
       })}
+    </div>
+  );
+};
+
+// ── DescriptionField ────────────────────────────────────────────────────────
+// Click-to-edit description for a checklist item. Default state shows the
+// description as rendered text with clickable URLs (so a user can open a
+// linked ticket without first having to "edit" the field). Clicking the
+// rendered view switches to the underlying textarea for editing; blurring
+// the textarea (when there's content) switches back to the link view.
+//
+// Empty descriptions start in edit mode so first-time entry is identical to
+// the previous textarea-only UX — no extra click required to type.
+const DescriptionField = ({ value, onChange }) => {
+  const [editing, setEditing] = useState(!value);
+  const taRef = useRef(null);
+
+  if (editing) {
+    return (
+      <textarea
+        ref={taRef}
+        autoFocus
+        value={value || ''}
+        onChange={e => onChange(e.target.value)}
+        onBlur={() => { if ((value || '').trim()) setEditing(false); }}
+        placeholder="Description (optional)"
+        rows={2}
+        style={{
+          width: '100%',
+          padding: '6px 10px',
+          borderRadius: 8,
+          border: '1px solid #e8e8e8',
+          fontSize: 12,
+          outline: 'none',
+          fontFamily: 'inherit',
+          color: '#1b1b1b',
+          resize: 'vertical',
+          boxSizing: 'border-box',
+          lineHeight: 1.4,
+        }}
+        onFocus={e => e.target.style.borderColor = '#7c3aed'}
+      />
+    );
+  }
+  return (
+    <div
+      onClick={() => setEditing(true)}
+      title="Click to edit"
+      style={{
+        width: '100%',
+        padding: '6px 10px',
+        borderRadius: 8,
+        border: '1px solid #e8e8e8',
+        fontSize: 12,
+        color: '#1b1b1b',
+        boxSizing: 'border-box',
+        lineHeight: 1.4,
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+        cursor: 'text',
+        minHeight: 32,
+        background: 'white',
+        transition: 'border-color .15s',
+      }}
+      onMouseEnter={e => e.currentTarget.style.borderColor = '#7c3aed'}
+      onMouseLeave={e => e.currentTarget.style.borderColor = '#e8e8e8'}
+    >
+      {renderTextWithLinks(value)}
     </div>
   );
 };
@@ -774,14 +883,9 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
                     onFocus={e => e.target.style.borderColor = '#7c3aed'}
                     onBlur={e => e.target.style.borderColor = '#e8e8e8'}
                   />
-                  <textarea
-                    value={item.description || ''}
-                    onChange={e => updateField(item.id, 'description', e.target.value)}
-                    placeholder="Description (optional)"
-                    rows={2}
-                    style={{ width: '100%', padding: '6px 10px', borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 12, fontFamily: 'inherit', outline: 'none', color: '#1b1b1b', resize: 'vertical', boxSizing: 'border-box', lineHeight: 1.4 }}
-                    onFocus={e => e.target.style.borderColor = '#7c3aed'}
-                    onBlur={e => e.target.style.borderColor = '#e8e8e8'}
+                  <DescriptionField
+                    value={item.description}
+                    onChange={(v) => updateField(item.id, 'description', v)}
                   />
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <label style={{ fontSize: 11, color: '#9e9e9e', fontWeight: 600 }}>Due</label>
