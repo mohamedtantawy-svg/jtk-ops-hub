@@ -475,12 +475,15 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
         })()}
       </td>
 
-      {/* SLA */}
+      {/* SLA — prefer the row's computed slaRemaining (honours dynamic
+          Team-tab SLA settings) over the hardcoded-48h PausedSlaBadge.
+          PausedSlaBadge only fires as a fallback when slaRemaining is
+          missing (rare — happens when the row has no createdAt). */}
       <td style={tdStyle}>
-        {showPausedSla && row.pausedAt ? (
-          <PausedSlaBadge pausedAt={row.pausedAt} />
-        ) : row.slaRemaining != null ? (
+        {row.slaRemaining != null ? (
           <WorkbenchSlaBadge slaRemaining={row.slaRemaining} slaBreachStatus={row.slaBreachStatus} />
+        ) : showPausedSla && row.pausedAt ? (
+          <PausedSlaBadge pausedAt={row.pausedAt} />
         ) : sla ? (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 8px', borderRadius: 128, background: sla.bg, color: sla.color, fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' }}>
             <i className="bi-clock" style={{ fontSize: 8 }} /> {sla.label}
