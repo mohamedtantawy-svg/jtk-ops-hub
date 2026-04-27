@@ -57,6 +57,11 @@ const HOUR_MS                  = 60 * 60 * 1000;
 const DAY_MS                   = 24 * HOUR_MS;
 const PAUSED_SLA_MS            = 48 * HOUR_MS;
 
+// These constants are the FALLBACKS used when the runtime SLA settings
+// (Team-tab editable table, persisted in app_settings.queue_sla_thresholds)
+// haven't loaded yet, or when a normalizer is called without a slaConfig
+// argument. Pilar's spec values per 2026-04-27. Once the hook delivers a
+// config, slaMsFor() resolves to those values instead.
 const AMENDMENT_SLA_ACTIVE_MS  = 24 * HOUR_MS;
 const AMENDMENT_SLA_PAUSED_MS  = PAUSED_SLA_MS;
 const REDLINE_SLA_ACTIVE_MS    = 72 * HOUR_MS;
@@ -66,6 +71,22 @@ const ONBOARDING_SLA_PAUSED_MS = PAUSED_SLA_MS;
 const OFFBOARDING_SLA_ACTIVE_MS= 21 * DAY_MS;
 const OFFBOARDING_SLA_PAUSED_MS= PAUSED_SLA_MS;
 const WORKBENCH_SLA_ACTIVE_MS  = 48 * HOUR_MS;
+
+// Resolve the active/paused window for a given queue. Reads slaConfig
+// (the per-queue { activeMins, pausedMins? } object delivered by
+// useQueueSlaSettings) when present, otherwise falls back to the
+// hardcoded defaults above. Minutes → ms inline so callers can pass the
+// result straight into computeSlaWindow.
+function slaMsFor(slaConfig, queueId, fallbackActiveMs, fallbackPausedMs) {
+  const cfg = slaConfig && slaConfig[queueId];
+  const activeMs = (cfg && Number.isFinite(cfg.activeMins) && cfg.activeMins > 0)
+    ? cfg.activeMins * 60 * 1000
+    : fallbackActiveMs;
+  const pausedMs = (cfg && Number.isFinite(cfg.pausedMins) && cfg.pausedMins > 0)
+    ? cfg.pausedMins * 60 * 1000
+    : fallbackPausedMs;
+  return { activeMs, pausedMs };
+}
 
 // Shared SLA computation. Returns `{ slaRemaining (seconds), slaBreachStatus }`
 // shaped exactly like the Workbench upstream so the SourceTable badge renders
@@ -181,7 +202,8 @@ function fmtShortDate(dateStr) {
 }
 
 // ── Onboarding → normalized rows ──
-export function normalizeOnboarding(items = []) {
+export function normalizeOnboarding(items = [], slaConfig = null) {
+  const { activeMs } = slaMsFor(slaConfig, 'onboarding', ONBOARDING_SLA_ACTIVE_MS, ONBOARDING_SLA_PAUSED_MS);
   return items.map(p => {
     // Friendly flow step: "Onboarding.ComplianceDocs.AwaitingReview" → "Compliance Docs · Awaiting Review"
     const flowParts = (p.flowStep || '').split('.').slice(1);
@@ -195,7 +217,7 @@ export function normalizeOnboarding(items = []) {
       : (p.oid ? `${DEEL_ADMIN_BASE}/dashboards/employees/GLOBAL/status/Onboarding.ActionableQueue/contract/${p.oid}` : '');
 
     const createdAt = p.taskCreatedAt || p.createdAt || '';
-    const sla = computeSlaWindow(ONBOARDING_SLA_ACTIVE_MS, createdAt);
+    const sla = computeSlaWindow(activeMs, createdAt);
 
     return {
       id: p.id || p.oid || '',
@@ -219,7 +241,8 @@ export function normalizeOnboarding(items = []) {
 }
 
 // ── Paused Onboarding → normalized rows ──
-export function normalizePausedOnboarding(items = []) {
+export function normalizePausedOnboarding(items = [], slaConfig = null) {
+  const { activeMs, pausedMs } = slaMsFor(slaConfig, 'onboarding', ONBOARDING_SLA_ACTIVE_MS, ONBOARDING_SLA_PAUSED_MS);
   return items.map(p => {
     // Pause type label: REDLINE → "Redline", MANUAL → "Manual", AMENDMENT → "Amendment"
     const pauseLabel = (p.pauseType || 'Paused')
@@ -229,10 +252,7 @@ export function normalizePausedOnboarding(items = []) {
 
     const createdAt = p.createdAt || '';
     const pausedAt = p.updatedAt || p.taskCreatedAt || '';   // best proxy for when it was paused
-    const sla = computeSlaWindow(ONBOARDING_SLA_ACTIVE_MS, createdAt, {
-      pausedMs: ONBOARDING_SLA_PAUSED_MS,
-      pausedAt,
-    });
+    const sla = computeSlaWindow(activeMs, createdAt, { pausedMs, pausedAt });
 
     return {
       id: p.id || p.oid || '',
@@ -261,14 +281,15 @@ export function normalizePausedOnboarding(items = []) {
 }
 
 // ── Offboarding → normalized rows ──
-export function normalizeOffboarding(items = []) {
+export function normalizeOffboarding(items = [], slaConfig = null) {
+  const { activeMs, pausedMs } = slaMsFor(slaConfig, 'offboarding', OFFBOARDING_SLA_ACTIVE_MS, OFFBOARDING_SLA_PAUSED_MS);
   return items.map(c => {
     const createdAt = c.requestedDate || c.createdAt || '';
     // Offboarding has no native paused state in the upstream payload, but
     // honour `c.isPaused` / `c.pausedAt` if either ever surfaces — keeps the
     // 48h paused rule applicable here too.
-    const sla = computeSlaWindow(OFFBOARDING_SLA_ACTIVE_MS, createdAt, {
-      pausedMs: c.isPaused ? OFFBOARDING_SLA_PAUSED_MS : null,
+    const sla = computeSlaWindow(activeMs, createdAt, {
+      pausedMs: c.isPaused ? pausedMs : null,
       pausedAt: c.pausedAt || null,
     });
     return {
@@ -302,15 +323,16 @@ export function normalizeOffboarding(items = []) {
 }
 
 // ── Amendments → normalized rows ──
-export function normalizeAmendments(items = []) {
+export function normalizeAmendments(items = [], slaConfig = null) {
+  const { activeMs, pausedMs } = slaMsFor(slaConfig, 'amendments', AMENDMENT_SLA_ACTIVE_MS, AMENDMENT_SLA_PAUSED_MS);
   return items.map(a => {
     const changesSummary = a.changes?.length > 0
       ? a.changes.map(c => c.label || c.dataPoint).filter(Boolean).join(', ')
       : '';
 
-    // SLA: 24h from createdAt when active, 48h from pausedAt when paused.
-    const sla = computeSlaWindow(AMENDMENT_SLA_ACTIVE_MS, a.createdAt, {
-      pausedMs: a.isPaused ? AMENDMENT_SLA_PAUSED_MS : null,
+    // SLA: configurable active window (24h default), paused 48h default.
+    const sla = computeSlaWindow(activeMs, a.createdAt, {
+      pausedMs: a.isPaused ? pausedMs : null,
       pausedAt: a.pausedAt,
     });
     const slaRemaining = sla.slaRemaining;
@@ -339,7 +361,8 @@ export function normalizeAmendments(items = []) {
 }
 
 // ── Redlines → normalized rows ──
-export function normalizeRedlines(items = []) {
+export function normalizeRedlines(items = [], slaConfig = null) {
+  const { activeMs, pausedMs } = slaMsFor(slaConfig, 'redlines', REDLINE_SLA_ACTIVE_MS, REDLINE_SLA_PAUSED_MS);
   return items.map(r => {
     const typeLabel = r.type === 'templateRedline' ? 'Template' : r.type === 'contractRedline' ? 'Contract' : r.type || '';
 
@@ -354,12 +377,9 @@ export function normalizeRedlines(items = []) {
                  || r.templateName
                  || (r.id ? `${typeLabel || 'Redline'} ${String(r.id).slice(0, 8)}` : 'Redline');
 
-    // 72h SLA from createdAt active; 48h from pausedAt when paused. Redline
-    // payloads don't normally expose a pause state — `isPaused`/`pausedAt`
-    // are honoured if upstream ever provides them so the universal pause
-    // rule applies wherever it can be detected.
-    const sla = computeSlaWindow(REDLINE_SLA_ACTIVE_MS, r.createdAt, {
-      pausedMs: r.isPaused ? REDLINE_SLA_PAUSED_MS : null,
+    // Configurable active window (72h default); 48h from pausedAt when paused.
+    const sla = computeSlaWindow(activeMs, r.createdAt, {
+      pausedMs: r.isPaused ? pausedMs : null,
       pausedAt: r.pausedAt || null,
     });
     const slaRemaining = sla.slaRemaining;
@@ -397,14 +417,15 @@ export function normalizeRedlines(items = []) {
 }
 
 // ── Workbench → normalized rows ──
-export function normalizeWorkbench(items = []) {
+export function normalizeWorkbench(items = [], slaConfig = null) {
+  const { activeMs, pausedMs } = slaMsFor(slaConfig, 'workbench', WORKBENCH_SLA_ACTIVE_MS, PAUSED_SLA_MS);
   return items.map(t => {
-    // Override upstream Deel-side SLA with our flat 48h-from-creation policy
-    // (per Pilar's spec). The upstream `t.slaTime`/`t.slaRemaining` vary
-    // arbitrarily per task config and don't match the team's operating model.
-    // 48h paused branch applies if upstream ever flags a pause state.
-    const sla = computeSlaWindow(WORKBENCH_SLA_ACTIVE_MS, t.createdAt, {
-      pausedMs: t.isPaused || t.status === 'ON_HOLD' ? PAUSED_SLA_MS : null,
+    // Override upstream Deel-side SLA with the configured flat-from-creation
+    // policy. The upstream `t.slaTime`/`t.slaRemaining` vary arbitrarily per
+    // task config and don't match the team's operating model. Paused branch
+    // (configurable) applies when upstream flags a pause state.
+    const sla = computeSlaWindow(activeMs, t.createdAt, {
+      pausedMs: t.isPaused || t.status === 'ON_HOLD' ? pausedMs : null,
       pausedAt: t.pausedAt || (t.status === 'ON_HOLD' ? t.updatedAt : null),
     });
     return {
