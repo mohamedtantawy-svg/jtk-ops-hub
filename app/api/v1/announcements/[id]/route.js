@@ -58,6 +58,12 @@ export async function PATCH(req, { params }) {
     const { id } = await params;
     const body = await req.json();
 
+    // Archiving is reserved for Regional Managers and Directors only.
+    // Team Leads can edit other fields but cannot toggle the archived state.
+    if (body.status === 'archived' && !['admin', 'regional_manager', 'manager'].includes(user.role)) {
+      return NextResponse.json({ error: 'Only Regional Managers and Directors can archive announcements' }, { status: 403 });
+    }
+
     // Enum validation — kept in lockstep with POST + compose UI
     const VALID_TYPES = ['info', 'alert', 'announce', 'celebration', 'policy', 'update', 'guidance', 'kudos', 'general'];
     const VALID_PRIORITIES = ['low', 'medium', 'high', 'critical', 'normal'];
