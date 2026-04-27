@@ -695,6 +695,10 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
         </div>
       )}
 
+      {/* When a ticket is open, the full-page Detail (below) takes over the
+          flex space — header + filters + table all hide. workMode keeps its
+          own overlay path. */}
+      {!selTask && !workMode && (<>
       {/* ── Single Header — matches Announcements ──
           Reworked 2026-04-21:
             • SLA pills moved to the LEFT of Line 1 (was right-aligned).
@@ -1112,23 +1116,38 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           </table>
         )}
       </div>}
+      </>)}
 
-      {/* ── Detail modal ── */}
-      {selTask&&(
-        <Detail key={selTask.id} task={selTask} onClose={()=>setSelTask(null)} onAction={act} tasks={tasks} setTasks={setTasks} notes={notes} setNotes={setNotes} activity={activity} setActivity={setActivity} currentUser={user} onEscalMgr={onEscalMgr} escalations={escalations} onResolve={handleResolve} addToast={addToast}/>
-      )}
-
-      {/* ── Keyboard shortcut strip ── */}
-      {selTask&&!workMode&&(
-        <div style={{background:'#fafaf9',borderTop:'1px solid #e8e8e8',padding:'6px 20px',display:'flex',alignItems:'center',gap:12,flexShrink:0,flexWrap:'wrap'}}>
-          <span style={{fontSize:10.5,color:'#9e9e9e',fontWeight:600,marginRight:4,letterSpacing:'.04em'}}>SHORTCUTS:</span>
-          {[['j/k','navigate'],['e','escalate'],['s','snooze'],['r','reassign'],['x','resolve'],['Esc','close']].map(([k,l])=>(
-            <span key={k} style={{display:'flex',alignItems:'center',gap:4,fontSize:11,color:'#616161'}}>
-              <span style={{background:'#f2f2f2',border:'1px solid #e0e0e0',borderRadius:4,padding:'1px 5px',fontSize:10,fontWeight:600,color:'#1b1b1b',fontFamily:'monospace'}}>{k}</span>{l}
-            </span>
-          ))}
-        </div>
-      )}
+      {/* ── Detail (full-page, replaces queue header + table when open) ── */}
+      {selTask && !workMode && (() => {
+        // Navigate within the user's currently sorted+filtered view (`all`).
+        // Falls back gracefully when the selected task is no longer in the
+        // list (e.g. just resolved + filtered out): both buttons disable.
+        const idx = all.findIndex(t => t.id === selTask.id);
+        const canPrev = idx > 0;
+        const canNext = idx >= 0 && idx < all.length - 1;
+        return (
+          <Detail
+            key={selTask.id}
+            task={selTask}
+            onClose={() => setSelTask(null)}
+            tasks={tasks}
+            setTasks={setTasks}
+            notes={notes}
+            setNotes={setNotes}
+            activity={activity}
+            setActivity={setActivity}
+            currentUser={user}
+            escalations={escalations}
+            onResolve={handleResolve}
+            addToast={addToast}
+            onPrev={canPrev ? () => setSelTask(all[idx - 1]) : undefined}
+            onNext={canNext ? () => setSelTask(all[idx + 1]) : undefined}
+            canPrev={canPrev}
+            canNext={canNext}
+          />
+        );
+      })()}
 
       {/* ── Bulk actions bar ── */}
       {settings.enable_bulk_actions!==false&&checkedIds.size>0&&(

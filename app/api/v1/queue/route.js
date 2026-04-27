@@ -387,6 +387,10 @@ async function fetchZendeskQueue() {
         subject: t.subject || '(no subject)',
         description: (t.description || '').substring(0, 200),
         status: ZD_STATUS_MAP[t.status] || 'new',
+        // Preserve the raw Zendesk status so the Detail page can distinguish
+        // `pending` (waiting on requester) from `hold` (waiting on internal)
+        // even though both collapse to our app-level 'waiting' bucket.
+        zdStatus: t.status || null,
         priority: ZD_PRIORITY_MAP[t.priority] || 'medium',
         type: detectType(t.subject, t.tags || []),
         country: detectCountry(t.subject, t.tags || []),

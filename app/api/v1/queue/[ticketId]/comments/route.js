@@ -82,27 +82,62 @@ async function ticketInUserScope(ticketId, user) {
 
 async function fetchZendeskComments(ticketId) {
   if (!ZD_SUBDOMAIN || !ZD_TOKEN) return [];
-  const url = `https://${ZD_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}/comments?sort_order=desc&per_page=5`;
   const auth = Buffer.from(`${ZD_EMAIL}/token:${ZD_TOKEN}`).toString('base64');
-  const res = await fetch(url, {
-    headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/json' },
-  });
+  const headers = { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/json' };
+
+  const res = await fetch(
+    `https://${ZD_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}/comments?sort_order=desc&per_page=10`,
+    { headers },
+  );
   if (!res.ok) return [];
   const data = await res.json();
-  return (data.comments || []).map(c => ({
-    id: c.id,
-    body: (c.body || '').substring(0, 1000),
-    htmlBody: (c.html_body || '').substring(0, 2000),
-    author: c.author_id,
-    public: c.public,
-    createdAt: c.created_at,
-  }));
+  const raw = data.comments || [];
+
+  // Resolve author IDs → name/email/role in one batch call so the FE can
+  // display "Jane Doe (end-user)" instead of "#384720". Falls back silently
+  // if the user lookup fails — comments still render with the numeric ID.
+  const userIds = [...new Set(raw.map(c => c.author_id).filter(Boolean))];
+  const userMap = {};
+  if (userIds.length > 0) {
+    try {
+      const usersRes = await fetch(
+        `https://${ZD_SUBDOMAIN}.zendesk.com/api/v2/users/show_many.json?ids=${userIds.join(',')}`,
+        { headers },
+      );
+      if (usersRes.ok) {
+        const usersData = await usersRes.json();
+        for (const u of (usersData.users || [])) {
+          userMap[u.id] = { name: u.name, email: u.email, role: u.role };
+        }
+      }
+    } catch (err) {
+      console.warn('[queue/comments] Zendesk user batch lookup failed:', err.message);
+    }
+  }
+
+  return raw.map(c => {
+    const u = userMap[c.author_id] || {};
+    return {
+      id: c.id,
+      // 5000 chars covers the vast majority of single emails without bloating
+      // the response. Threads with longer messages get truncated with the
+      // existing "click to expand" UI on the FE.
+      body: (c.body || '').substring(0, 5000),
+      htmlBody: (c.html_body || '').substring(0, 8000),
+      authorId: c.author_id,
+      authorName: u.name || `User #${c.author_id || '?'}`,
+      authorEmail: u.email || null,
+      authorRole: u.role || null,
+      public: c.public,
+      createdAt: c.created_at,
+    };
+  });
 }
 
 async function fetchJiraComments(issueKey) {
   if (!JIRA_BASE || !JIRA_TOKEN) return [];
   const auth = Buffer.from(`${JIRA_EMAIL}:${JIRA_TOKEN}`).toString('base64');
-  const url = `${JIRA_BASE}/rest/api/3/issue/${issueKey}/comment?orderBy=-created&maxResults=5`;
+  const url = `${JIRA_BASE}/rest/api/3/issue/${issueKey}/comment?orderBy=-created&maxResults=10`;
   const res = await fetch(url, {
     headers: { 'Authorization': `Basic ${auth}`, 'Accept': 'application/json' },
   });
@@ -110,9 +145,14 @@ async function fetchJiraComments(issueKey) {
   const data = await res.json();
   return (data.comments || []).map(c => ({
     id: c.id,
-    body: typeof c.body === 'string' ? c.body.substring(0, 1000) : (c.body?.content?.map(b => b.content?.map(t => t.text).join('')).join('\n') || '').substring(0, 1000),
+    body: typeof c.body === 'string'
+      ? c.body.substring(0, 5000)
+      : (c.body?.content?.map(b => b.content?.map(t => t.text).join('')).join('\n') || '').substring(0, 5000),
     htmlBody: '',
-    author: c.author?.displayName || c.author?.emailAddress || c.author?.accountId || '',
+    authorId: c.author?.accountId || null,
+    authorName: c.author?.displayName || c.author?.emailAddress || 'Unknown',
+    authorEmail: c.author?.emailAddress || null,
+    authorRole: null,
     public: true,
     createdAt: c.created,
   }));

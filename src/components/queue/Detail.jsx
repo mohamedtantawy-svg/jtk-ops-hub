@@ -1,601 +1,937 @@
-import { useState, useEffect, useRef, useContext, useCallback } from 'react';
+// ── Detail (Phase 1) ─────────────────────────────────────────────────────────
+// Full-page 3-column ticket view that replaces the old tabbed modal.
+//   Left rail   — status changer + ticket metadata + external links
+//   Center      — email chain (last 10) + reply composer
+//   Right rail  — AI summary placeholder, Notes, Timeline
+//
+// Phase 1 ships the layout, status changes, comments, and reply (with the
+// internal-first default from PR #263). Editable custom fields, macros,
+// side conversations, and the AI summary follow in later phases.
+// ────────────────────────────────────────────────────────────────────────────
+
+import { useState, useEffect, useRef, useContext, useCallback, useMemo, memo } from 'react';
 import { PermissionsContext, SettingsContext } from '../../App';
 import { MEMBERS } from '../../data/members';
-import { TOOLS, STATUSES, FLAGS, SLA_MINS, getFlag } from '../../data/constants';
-import { slaInfo, rel, getUrl } from '../../utils/helpers';
-import { ToolBadge, FnBadge, StatusBadge } from '../ui/Badges';
+import { TOOLS, SLA_MINS, getFlag } from '../../data/constants';
+import { slaInfo } from '../../utils/helpers';
 import Avatar from '../ui/Avatar';
+import { ToolBadge } from '../ui/Badges';
 import NotesTab from './NotesTab';
 import TimelineTab from './TimelineTab';
 import { fetchTicketComments, postTicketAction } from '../../services/integrationsApi';
 
-// ZD status tooltip descriptions
-const STATUS_TOOLTIPS={
-  new:'Just received, not yet opened by an agent.',
-  in_progress:'ZD Open / Jira In Progress — actively being worked.',
-  waiting:'ZD Pending (waiting on requester) / ZD On-Hold.',
-  resolved:'ZD Solved / Jira Done — issue has been closed.',
-};
+// Visible status options (FE → app status). Maps to ZD via actions/route.js
+// statusMap. "On hold" requires actions/route.js to accept on_hold → hold.
+const STATUS_OPTIONS = [
+  { value: 'in_progress', label: 'Open',     icon: 'bi-arrow-repeat',         color: '#1d4ed8', bg: '#eff6ff', border: '#bddcf0' },
+  { value: 'waiting',     label: 'Pending',  icon: 'bi-hourglass-split',      color: '#92400E', bg: '#fff8e6', border: '#fde68a' },
+  { value: 'on_hold',     label: 'On hold',  icon: 'bi-pause-circle',         color: '#6b6560', bg: '#f5f3ef', border: '#e0d9d2' },
+  { value: 'resolved',    label: 'Resolved', icon: 'bi-check-circle-fill',    color: '#15803d', bg: '#e8f5e9', border: '#bbf7d0' },
+];
 
-// Supported translation languages
-const TRANSLATE_LANGS=['Japanese','French','German','Spanish','Portuguese'];
+// ZD raw status → app-level button id (used to highlight the active option).
+// ZD's `hold` collapses to our 'waiting' bucket in queue/route.js, so we
+// look at the raw `zdStatus` field first when present, falling back to the
+// app-level `status` for Jira / older payloads.
+function deriveActiveStatus(task) {
+  const zd = (task?.zdStatus || '').toLowerCase();
+  if (zd === 'hold') return 'on_hold';
+  if (zd === 'pending') return 'waiting';
+  if (zd === 'open') return 'in_progress';
+  if (zd === 'new') return 'in_progress';        // new is also "actively in queue"
+  if (zd === 'solved' || zd === 'closed') return 'resolved';
+  // Jira fallback (no zdStatus). The app statuses already match.
+  return task?.status || 'in_progress';
+}
 
-// Mock translation — prepend language tag
-const mockTranslate=(text,lang)=>`[Translated to ${lang}]: ${text||''}`;
+// admin.deel.network deep-link for the ticket requester. The exact path (e.g.
+// /people/<id>) varies per environment, so for Phase 1 we open the admin
+// portal's people search with the requester's email pre-filled — guaranteed
+// to land on a usable result regardless of current URL conventions.
+function employeeProfileUrl(email) {
+  if (!email) return null;
+  return `https://admin.deel.network/people?search=${encodeURIComponent(email)}`;
+}
 
-// Quick reply templates keyed by task type
-const REPLY_TEMPLATES={
-  default:'Thank you for reaching out. I\'m reviewing your request and will follow up within [SLA time].',
+function relTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  const mins = Math.max(0, Math.floor((Date.now() - d.getTime()) / 60000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  if (mins < 1440) {
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m ? `${h}h ${m}m ago` : `${h}h ago`;
+  }
+  const days = Math.floor(mins / 1440);
+  return `${days}d ago`;
+}
+
+function absTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  return d.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+// Quick reply templates keyed by task type — preserved from the previous
+// Detail. Used by the inline templates dropdown on the reply composer.
+const REPLY_TEMPLATES = {
+  default:        'Thank you for reaching out. I\'m reviewing your request and will follow up within [SLA time].',
   'Payment Issue':'I can see there\'s a discrepancy in your payslip. I\'ve raised this with the payroll team and expect a correction within 2 business days.',
-  'Immigration':'Your immigration case has been received. Please allow 5-10 business days for processing.',
-  'Onboarding':'Welcome! Your onboarding request has been received. Your manager will be in touch shortly.',
-  'Benefits':'Your benefits query has been logged. Our benefits team will respond within 24 hours.',
+  'Immigration':  'Your immigration case has been received. Please allow 5-10 business days for processing.',
+  'Onboarding':   'Welcome! Your onboarding request has been received. Your manager will be in touch shortly.',
+  'Benefits':     'Your benefits query has been logged. Our benefits team will respond within 24 hours.',
   'Leave Request':'Your leave request has been reviewed. Please check your leave balance in the HR portal.',
-  'Leave Query':'Your leave request has been reviewed. Please check your leave balance in the HR portal.',
 };
 
-const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setActivity,currentUser,onEscalMgr,escalations=[],onResolve,addToast})=>{
-  const perms=useContext(PermissionsContext);
-  const settings=useContext(SettingsContext);
-  const [tab,setTab]=useState('overview');
-  const [showTemplates,setShowTemplates]=useState(false);
-  const [replyText,setReplyText]=useState('');
-  const [aiGenerating,setAiGenerating]=useState(false);
-  const [showTranslateDD,setShowTranslateDD]=useState(false);
-  const [activeLang,setActiveLang]=useState(null);
-  const [originalReplyText,setOriginalReplyText]=useState(null);
-  const [comments, setComments] = useState([]);
-  const [commentsLoading, setCommentsLoading] = useState(false);
-  const [commentsError, setCommentsError] = useState(null);
-  const [actionLoading, setActionLoading] = useState(false);
-  // Default to INTERNAL — public replies go to the requester (often the
-  // affected employee), so making "public" an explicit affirmative click
-  // prevents an agent from accidentally publishing internal notes. Jira
-  // ignores this flag (its comments aren't split public/internal here).
-  const [replyPublic, setReplyPublic] = useState(false);
+const Detail = ({
+  task: selectedTask,
+  onClose,
+  tasks,
+  setTasks,
+  notes,
+  setNotes,
+  activity,
+  setActivity,
+  currentUser,
+  escalations = [],
+  onResolve,
+  addToast,
+  onPrev,
+  onNext,
+  canPrev = false,
+  canNext = false,
+}) => {
+  const perms = useContext(PermissionsContext);
+  const settings = useContext(SettingsContext);
+  const canResolve = perms?.canDo ? perms.canDo('can_resolve_task') !== false : true;
 
-  // Track mount state so async handlers (reply send, comment refresh) don't
-  // setState on an unmounted component if the user closes the modal mid-flight.
+  // The parent passes `selectedTask` (Queue.jsx's `selTask` state). When
+  // setTasks updates the list, that state object stays stale — so the
+  // status changer would keep highlighting the pre-update value until the
+  // user navigated. Resolve the live row from the current `tasks` array on
+  // every render so optimistic updates AND server-side refreshes both flow
+  // through visibly. Falls back to the passed-in object when the row is
+  // momentarily out of the list (e.g. just resolved + filter active).
+  const task = useMemo(() => {
+    if (!selectedTask?.id) return selectedTask;
+    if (!Array.isArray(tasks)) return selectedTask;
+    return tasks.find(t => t.id === selectedTask.id) || selectedTask;
+  }, [selectedTask, tasks]);
+
+  // ── Component-local state ──────────────────────────────────────────────
+  const [replyText, setReplyText] = useState('');
+  // Default to INTERNAL — public replies go to the requester (usually the
+  // affected employee), so making "public" an explicit affirmative click
+  // prevents accidental publication of internal notes. Jira ignores this.
+  const [replyPublic, setReplyPublic] = useState(false);
+  const [replySending, setReplySending] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [comments, setComments] = useState([]);
+  const [commentsLoading, setCommentsLoading] = useState(true);
+  const [commentsError, setCommentsError] = useState(null);
+  const [statusUpdating, setStatusUpdating] = useState(null); // status value currently in-flight
+  const [expandedComments, setExpandedComments] = useState(new Set());
+
+  // Reset transient state when the task changes (next/prev navigation).
+  useEffect(() => {
+    setReplyText('');
+    setReplyPublic(false);
+    setShowTemplates(false);
+    setComments([]);
+    setCommentsLoading(true);
+    setCommentsError(null);
+    setStatusUpdating(null);
+    setExpandedComments(new Set());
+  }, [task?.id]);
+
+  // ── Comment fetching (lazy, deduped) ───────────────────────────────────
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
 
-  // Reset tab, reply, public toggle, and error state when task changes
-  useEffect(()=>{
-    setTab('overview'); setReplyText(''); setReplyPublic(false);
-    setCommentsError(null); setComments([]);
-  },[task.id]);
-  // Fetch comments when Messages tab is opened (supports Zendesk + Jira).
-  // Dedup via inflightRef so rapid tab-toggles don't fire parallel fetches.
-  // Surfaces a distinct error state so users can tell 403/500 from empty.
-  const commentsFetchRef = useRef(null);
+  const fetchInflightRef = useRef(null);
+  // Monotonic sequence so a comment fetch that resolves AFTER the user
+  // navigated to a different ticket can't clobber the new ticket's data
+  // (race condition: prev/next switches task.id while a fetch is mid-flight).
+  const fetchSeqRef = useRef(0);
   const loadComments = useCallback(() => {
-    if (!task.id) return;
-    if (task.source !== 'zendesk' && task.source !== 'jira') return;
-    if (commentsFetchRef.current === task.id) return;
-    commentsFetchRef.current = task.id;
-    let cancelled = false;
+    if (!task?.id) return;
+    if (task.source !== 'zendesk' && task.source !== 'jira') {
+      setCommentsLoading(false);
+      return;
+    }
+    if (fetchInflightRef.current === task.id) return;
+    fetchInflightRef.current = task.id;
+    const seq = ++fetchSeqRef.current;
+    const targetId = task.id;
     setCommentsLoading(true);
     setCommentsError(null);
     fetchTicketComments(task.id)
-      .then(data => { if (!cancelled && mountedRef.current) {
-        // Render the full comment list returned by /queue/[ticketId]/comments
-        // (server already caps at 5 via per_page=5). Previously sliced to the
-        // most recent 2, which silently hid 60% of the conversation context
-        // an agent needs before replying.
+      .then(data => {
+        if (!mountedRef.current || fetchSeqRef.current !== seq) return;
         setComments(data.comments || []);
-      }})
-      .catch(err => { if (!cancelled && mountedRef.current) {
+      })
+      .catch(err => {
+        if (!mountedRef.current || fetchSeqRef.current !== seq) return;
         setCommentsError(err?.message || 'Failed to load messages');
-      }})
+      })
       .finally(() => {
-        if (!cancelled && mountedRef.current) setCommentsLoading(false);
-        if (commentsFetchRef.current === task.id) commentsFetchRef.current = null;
+        if (mountedRef.current && fetchSeqRef.current === seq) setCommentsLoading(false);
+        if (fetchInflightRef.current === targetId) fetchInflightRef.current = null;
       });
-    return () => { cancelled = true; };
-  }, [task.id, task.source]);
-  useEffect(() => {
-    if (tab !== 'messages') return;
-    const cleanup = loadComments();
-    return cleanup;
-  }, [tab, loadComments]);
+  }, [task?.id, task?.source]);
 
-  // Translate dropdown close on outside click
-  const translateRef = useRef(null);
-  useEffect(() => {
-    if (!showTranslateDD) return;
-    const h = (e) => { if (translateRef.current && !translateRef.current.contains(e.target)) setShowTranslateDD(false); };
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
-  }, [showTranslateDD]);
+  useEffect(() => { loadComments(); }, [loadComments]);
 
-  // ── Focus trap ─────────────────────────────────────────────────────────
-  // Keeps keyboard focus inside the modal while it's open so screen-reader
-  // and keyboard-only users can't accidentally tab out to background content.
-  // Sets initial focus to the first interactive element. Tab cycles forward
-  // from last → first; Shift+Tab cycles backward from first → last.
-  const modalRef = useRef(null);
-  useEffect(() => {
-    const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-    // Focus the first focusable after paint so it respects the rendered DOM
-    const t = setTimeout(() => {
-      const first = modalRef.current?.querySelector(FOCUSABLE);
-      if (first && !modalRef.current.contains(document.activeElement)) first.focus();
-    }, 0);
-    const handleTab = (e) => {
-      if (e.key !== 'Tab' || !modalRef.current) return;
-      const nodes = modalRef.current.querySelectorAll(FOCUSABLE);
-      if (nodes.length === 0) return;
-      const first = nodes[0];
-      const last = nodes[nodes.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener('keydown', handleTab);
-    return () => {
-      clearTimeout(t);
-      document.removeEventListener('keydown', handleTab);
-    };
+  // ── Derived data ───────────────────────────────────────────────────────
+  const assignee = useMemo(() => {
+    if (task?.assigneeId) {
+      const m = MEMBERS.find(x => x.id === task.assigneeId);
+      if (m) return m;
+    }
+    if (task?.assigneeEmail) {
+      const m = MEMBERS.find(x => x.email.toLowerCase() === task.assigneeEmail.toLowerCase());
+      if (m) return m;
+      return { id: null, name: task.assigneeName || task.assigneeEmail, email: task.assigneeEmail };
+    }
+    return null;
+  }, [task?.assigneeId, task?.assigneeEmail, task?.assigneeName]);
+
+  const activeStatus = useMemo(() => deriveActiveStatus(task), [task]);
+  const isZD = task?.source === 'zendesk';
+  const isJira = task?.source === 'jira';
+  const isResolved = activeStatus === 'resolved';
+
+  const sla = useMemo(() => slaInfo(task), [task]);
+  const slaLim = (Number.isFinite(task?.slaMinsOverride) && task.slaMinsOverride > 0)
+    ? task.slaMinsOverride
+    : (SLA_MINS[task?.type] || 1440);
+  const slaRem = slaLim - ((task?.minutesSinceLastResponse ?? task?.minutesAgo) ?? 0);
+  const slaPct = Math.max(0, Math.min(100, (slaRem / slaLim) * 100));
+
+  // ── Action handlers ────────────────────────────────────────────────────
+  const handleStatusChange = useCallback(async (next) => {
+    if (statusUpdating) return;
+    if (next === activeStatus) return;
+    setStatusUpdating(next);
+    // Optimistic — update parent task list immediately so the rest of the
+    // queue reflects the change. Roll back if the API call fails.
+    const previousStatus = task.status;
+    const optimisticStatus = next === 'on_hold' ? 'waiting' : next; // app maps on_hold → waiting bucket
+    const optimisticZd = next === 'on_hold' ? 'hold'
+      : next === 'waiting' ? 'pending'
+      : next === 'in_progress' ? 'open'
+      : next === 'resolved' ? 'solved'
+      : task.zdStatus;
+    setTasks?.(prev => prev.map(t => t.id === task.id
+      ? { ...t, status: optimisticStatus, zdStatus: optimisticZd }
+      : t));
+    try {
+      await postTicketAction(task.id, { action: 'status', status: next });
+      addToast?.('success', 'Status updated', `Set to ${STATUS_OPTIONS.find(s => s.value === next)?.label}.`);
+      // For "Resolved" also surface the standard onResolve hook so any other
+      // queue side-effect (e.g. recordMutation, locallyResolvedAt) fires.
+      if (next === 'resolved' && onResolve) onResolve(task);
+    } catch (err) {
+      setTasks?.(prev => prev.map(t => t.id === task.id
+        ? { ...t, status: previousStatus, zdStatus: task.zdStatus }
+        : t));
+      addToast?.('error', 'Status change failed', err?.message || 'Please retry.');
+    } finally {
+      if (mountedRef.current) setStatusUpdating(null);
+    }
+  }, [activeStatus, statusUpdating, task, setTasks, addToast, onResolve]);
+
+  const handleSendReply = useCallback(async () => {
+    if (!replyText.trim() || replySending) return;
+    setReplySending(true);
+    const sentMode = isZD
+      ? (replyPublic ? 'Public reply sent' : 'Internal note added')
+      : 'Reply sent';
+    const sentDetail = isZD && replyPublic
+      ? 'Visible to the requester in Zendesk.'
+      : isZD ? 'Only visible to your team in Zendesk.'
+      : 'Your reply has been posted to the ticket.';
+    try {
+      await postTicketAction(task.id, { action: 'reply', message: replyText, public: replyPublic });
+      if (!mountedRef.current) return;
+      addToast?.('success', sentMode, sentDetail);
+      setReplyText('');
+      // Refresh comment list so the new entry shows. Reset the dedup ref
+      // so the fetch isn't suppressed.
+      fetchInflightRef.current = null;
+      loadComments();
+    } catch (err) {
+      if (mountedRef.current) addToast?.('error', 'Reply failed', err?.message || 'Could not send reply.');
+    } finally {
+      if (mountedRef.current) setReplySending(false);
+    }
+  }, [replyText, replyPublic, replySending, isZD, task?.id, addToast, loadComments]);
+
+  const toggleCommentExpansion = useCallback((id) => {
+    setExpandedComments(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
   }, []);
 
-  const assignee=MEMBERS.find(m=>m.id===task.assigneeId)||(task.assigneeEmail?MEMBERS.find(m=>m.email.toLowerCase()===task.assigneeEmail.toLowerCase()):null)||{id:null,name:task.assigneeName||'Unassigned',initials:(task.assigneeName||'U').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(),email:task.assigneeEmail};
-  const taskEscalation=escalations.find(e=>e.taskId===task.id);
-  const sla=slaInfo(task);
+  // ── Keyboard shortcuts ─────────────────────────────────────────────────
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
+        // Cmd/Ctrl+Enter from inside the textarea sends the reply.
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && e.target.tagName === 'TEXTAREA') {
+          e.preventDefault();
+          handleSendReply();
+        }
+        return;
+      }
+      if (e.key === 'Escape') { e.preventDefault(); onClose?.(); }
+      if (e.key === 'ArrowLeft' && canPrev) { e.preventDefault(); onPrev?.(); }
+      if (e.key === 'ArrowRight' && canNext) { e.preventDefault(); onNext?.(); }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [onClose, onPrev, onNext, canPrev, canNext, handleSendReply]);
 
-  // SLA progress bar data — honour the per-task slaMinsOverride first
-  // (set in queue/route.js for ZD/Jira from app_settings.queue_sla_thresholds)
-  // before falling back to the static type-based SLA_MINS map. Without
-  // this, the Detail panel would show a different SLA window than the row
-  // pill / Briefing aggregate for ZD and Jira tickets after the spec
-  // values diverged from per-type defaults.
-  const slaLim = (Number.isFinite(task.slaMinsOverride) && task.slaMinsOverride > 0)
-    ? task.slaMinsOverride
-    : (SLA_MINS[task.type] || 1440);
-  const slaRem=slaLim-((task.minutesSinceLastResponse??task.minutesAgo)??0);
-  const slaPct=Math.max(0,Math.min(100,(slaRem/slaLim)*100));
-  const slaBarColor = slaRem<=0
-    ? 'var(--red, #b91c1c)'
-    : slaPct>50
-    ? 'var(--green, #15803d)'
-    : slaPct>20
-    ? 'var(--orange, #b45309)'
-    : 'var(--red, #b91c1c)';
-  const slaBarText=slaRem<=0?`Breached ${Math.abs(slaRem)}m ago`:`${slaRem>=60?Math.floor(slaRem/60)+'h '+(slaRem%60?slaRem%60+'m':''):slaRem+'m'} remaining`;
+  if (!task) return null;
+  const taskEscalation = escalations.find(e => e.taskId === task.id);
+  const employeeUrl = employeeProfileUrl(task.requesterEmail);
 
-  // Template list for this task type
-  const templateKeys=['default',...Object.keys(REPLY_TEMPLATES).filter(k=>k!=='default')];
-  const getTemplate=(type)=>REPLY_TEMPLATES[type]||REPLY_TEMPLATES.default;
-
-  const tabItems=['overview','messages','notes','timeline','attachments','related'];
-
-  // Modal overlay + centered popup style
-  const overlayStyle = {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    background: 'rgba(0,0,0,0.4)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 9000,
-    animation: 'fadeInOverlay 0.2s ease both',
-  };
-  const modalStyle = {
-    width: '90vw',
-    height: '90vh',
-    background: 'white',
-    borderRadius: 16,
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
-    boxShadow: '0 24px 80px rgba(0,0,0,0.25)',
-    animation: 'scaleInModal 0.2s cubic-bezier(0.16, 1, 0.3, 1) both',
-  };
-
-  return(
-    <div style={overlayStyle} onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
-      <div ref={modalRef} className="detail-modal" style={modalStyle} role="dialog" aria-modal="true" aria-label={`Task details: ${task.subject}`}>
+  return (
+    <div data-role="zd-detail-page" style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#fafaf9', overflow: 'hidden', minHeight: 0 }}>
       <style>{`
-        @keyframes fadeInOverlay { from { opacity:0; } to { opacity:1; } }
-        @keyframes scaleInModal { from { opacity:0; transform:scale(0.97) translateY(10px); } to { opacity:1; transform:scale(1) translateY(0); } }
+        @keyframes detailFadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+        .zd-comment-body { white-space: pre-wrap; word-break: break-word; line-height: 1.55; }
+        .zd-rail-section { animation: detailFadeIn 0.18s ease both; }
+        .zd-status-btn:focus-visible { outline: 2px solid #1f74b3; outline-offset: 2px; }
+        .zd-status-btn:disabled { cursor: not-allowed; opacity: 0.55; }
       `}</style>
-      {/* Header */}
-      <div style={{padding:'16px 20px',borderBottom:'1px solid #e8e8e8',flexShrink:0}}>
-        <div style={{display:'flex',alignItems:'flex-start',gap:8}}>
-          <div style={{flex:1,minWidth:0}}>
-            <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:8,alignItems:'center'}}>
-              <ToolBadge source={task.source}/>
-              {/* D: Status badge with info tooltip */}
-              <div className="tooltip-wrap" style={{display:'inline-flex',alignItems:'center',gap:4,position:'relative'}}>
-                <StatusBadge status={task.status}/>
-                <i className="bi-info-circle" style={{fontSize:11,color:'#bebebe',cursor:'default'}}></i>
-                <span className="tooltip-text" style={{position:'absolute',top:'calc(100% + 6px)',left:0,zIndex:200,background:'#1b1b1b',color:'white',fontSize:11,padding:'6px 10px',borderRadius:8,whiteSpace:'nowrap',pointerEvents:'none',boxShadow:'0 4px 12px rgba(0,0,0,0.2)',minWidth:220,lineHeight:1.6}}>
-                  {STATUS_TOOLTIPS[task.status]||'Status unknown'}
-                </span>
-              </div>
-              {task.isAlert&&<span style={{background:'#fff8e6',color:'#ed8d00',borderRadius:128,padding:'2px 10px',fontSize:11,fontWeight:600}}>Alert</span>}
-            </div>
-            <div title={task.subject} style={{color:'#1b1b1b',fontWeight:700,fontSize:16,lineHeight:1.35,display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden',wordBreak:'break-word'}}>{task.subject}</div>
-            <div style={{display:'flex',alignItems:'center',gap:8,marginTop:4}}>
-              <span style={{color:'#9e9e9e',fontSize:12}}>{task.id}</span>
-              {/* E: Open in Source button — guarded */}
-              {task.externalUrl&&(
-                <button onClick={()=>window.open(task.externalUrl,'_blank')} style={{display:'inline-flex',alignItems:'center',gap:4,height:22,padding:'0 8px',borderRadius:128,border:'1px solid var(--border,#e8e4df)',background:'white',color:'#616161',fontSize:11,fontWeight:500,cursor:'pointer',transition:'all .12s'}}
-                  onMouseEnter={e=>{e.currentTarget.style.background='#f2f2f2';e.currentTarget.style.borderColor='#c0c0c0';}}
-                  onMouseLeave={e=>{e.currentTarget.style.background='white';e.currentTarget.style.borderColor='var(--border,#e8e4df)';}}>
-                  <i className="bi-box-arrow-up-right" style={{fontSize:9}}></i>
-                  Open in {TOOLS[task.source]?.label||'Source'}
-                </button>
-              )}
-            </div>
-          </div>
-          <div style={{display:'flex',gap:6,flexShrink:0,alignItems:'center'}}>
-            <a href={getUrl(task)} target="_blank" rel="noreferrer" title={`Open in ${TOOLS[task.source]?.label||'source'}`} style={{display:'flex',alignItems:'center',justifyContent:'center',width:32,height:32,borderRadius:8,border:'1px solid #e8e8e8',color:'#616161',textDecoration:'none',fontSize:14,transition:'all .15s'}} onMouseEnter={e=>{e.currentTarget.style.borderColor='#1f74b3';e.currentTarget.style.color='#1f74b3';}} onMouseLeave={e=>{e.currentTarget.style.borderColor='#e8e8e8';e.currentTarget.style.color='#616161';}}><i className="bi-box-arrow-up-right"></i></a>
-            <button aria-label="Close detail panel" onClick={onClose} style={{display:'flex',alignItems:'center',justifyContent:'center',width:32,height:32,background:'none',border:'none',color:'#9e9e9e',cursor:'pointer',borderRadius:8,transition:'all .15s',fontSize:18}} onMouseEnter={e=>{e.currentTarget.style.background='#f2f2f2';e.currentTarget.style.color='#1b1b1b';}} onMouseLeave={e=>{e.currentTarget.style.background='none';e.currentTarget.style.color='#9e9e9e';}}><i className="bi-x-lg"></i></button>
-          </div>
+
+      {/* ── Top bar ─────────────────────────────────────────────────────── */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'auto auto 1fr auto',
+        alignItems: 'center',
+        gap: 12,
+        padding: '12px 24px',
+        background: 'white',
+        borderBottom: '1px solid #e8e8e8',
+        flexShrink: 0,
+      }}>
+        <button
+          onClick={onClose}
+          aria-label="Back to queue"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid #e8e8e8', background: 'white', color: '#1b1b1b', fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all .15s' }}
+          onMouseEnter={e => { e.currentTarget.style.background = '#f7f5f2'; }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'white'; }}
+        >
+          <i className="bi-arrow-left" style={{ fontSize: 13 }} />
+          Back
+        </button>
+
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          <ToolBadge source={task.source} />
+          <span style={{ fontSize: 12, color: '#9e9e9e', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>{task.id}</span>
         </div>
-        {/* Tabs — Title Case labels */}
-        <div role="tablist" aria-label="Task detail sections" style={{display:'flex',marginTop:14,gap:0,borderBottom:'1px solid #e8e8e8',marginLeft:-20,marginRight:-20,paddingLeft:20,paddingRight:20}}>
-          {tabItems.map(t=>{
-            const active=tab===t;
-            const label={overview:'Overview',messages:'Messages',notes:'Notes',timeline:'Timeline',attachments:'Attachments',related:'Related'}[t]||t;
-            const noteCount=t==='notes'?(notes[task.id]||[]).length:0;
-            return(
-              <div
-                key={t}
-                role="tab"
-                tabIndex={active?0:-1}
-                aria-selected={active}
-                aria-label={`${label} tab${noteCount>0?` (${noteCount} notes)`:''}`}
-                onClick={()=>setTab(t)}
-                onKeyDown={(e)=>{ if (e.key==='Enter'||e.key===' '){ e.preventDefault(); setTab(t); } }}
-                style={{padding:'10px 8px',marginRight:16,fontSize:14,fontWeight:active?700:400,color:active?'#1b1b1b':'#9e9e9e',borderBottom:active?'2px solid #1b1b1b':'2px solid transparent',cursor:'pointer',transition:'all .15s',display:'flex',alignItems:'center',gap:4,marginBottom:-1}}>
-                {label}
-                {noteCount>0&&<span aria-hidden="true" style={{background:active?'#1b1b1b':'#f2f2f2',color:active?'white':'#616161',borderRadius:10,padding:'0 6px',fontSize:10,fontWeight:700,lineHeight:'18px'}}>{noteCount}</span>}
-              </div>
-            );
-          })}
+
+        <div title={task.subject} style={{
+          fontSize: 15, fontWeight: 700, color: '#1b1b1b',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          minWidth: 0,
+        }}>
+          {task.subject || '(no subject)'}
+        </div>
+
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <button
+            onClick={onPrev}
+            disabled={!canPrev}
+            aria-label="Previous ticket"
+            title="Previous ticket (←)"
+            style={{ ...iconBtnStyle, opacity: canPrev ? 1 : 0.35, cursor: canPrev ? 'pointer' : 'not-allowed' }}
+          >
+            <i className="bi-chevron-left" style={{ fontSize: 13 }} />
+          </button>
+          <button
+            onClick={onNext}
+            disabled={!canNext}
+            aria-label="Next ticket"
+            title="Next ticket (→)"
+            style={{ ...iconBtnStyle, opacity: canNext ? 1 : 0.35, cursor: canNext ? 'pointer' : 'not-allowed' }}
+          >
+            <i className="bi-chevron-right" style={{ fontSize: 13 }} />
+          </button>
+          {task.externalUrl && (
+            <a
+              href={task.externalUrl}
+              target="_blank"
+              rel="noreferrer"
+              title={`Open in ${TOOLS[task.source]?.label || 'source'}`}
+              style={{ ...iconBtnStyle, color: '#1f74b3', textDecoration: 'none' }}
+            >
+              <i className="bi-box-arrow-up-right" style={{ fontSize: 12 }} />
+            </a>
+          )}
         </div>
       </div>
-      {/* Body */}
-      <div role="tabpanel" style={{flex:1,overflowY:'auto'}}>
-        {/* ═══ OVERVIEW TAB — compact meta, SLA, escalation, linked systems ═══ */}
-        {tab==='overview'&&(
-          <div style={{padding:'16px 20px',display:'flex',flexDirection:'column',gap:12}}>
-            {/* Meta — compact horizontal strip */}
-            <div style={{display:'flex',flexWrap:'wrap',gap:6,alignItems:'center',padding:'10px 14px',background:'#fafaf9',borderRadius:10,border:'1px solid #f2f2f2'}}>
-              {[
-                {l:'Assignee',v:<span style={{display:'inline-flex',alignItems:'center',gap:4}}><Avatar name={assignee?.name||'Unassigned'} size={18}/>{assignee?.name||'Unassigned'}</span>},
-                {l:'Country',v:`${getFlag(task.country)} ${task.country||'--'}`},
-                {l:'Received',v:task.receivedAt||'--'},
-                {l:'Updated',v:task.updatedMinsAgo!=null?rel(task.updatedMinsAgo):'--'},
-                ...(task.requesterName?[{l:'Requester',v:task.requesterName}]:[])
-              ].map((m,i,arr)=>(
-                <span key={m.l} style={{display:'inline-flex',alignItems:'center',gap:4,fontSize:12,color:'#1b1b1b',whiteSpace:'nowrap'}}>
-                  <span style={{fontWeight:600,color:'#9e9e9e',fontSize:11,textTransform:'uppercase',letterSpacing:'0.03em'}}>{m.l}:</span>
-                  {m.v}
-                  {i<arr.length-1&&<span style={{color:'#e0e0e0',margin:'0 4px'}}>|</span>}
-                </span>
-              ))}
-            </div>
-            {/* SLA Remaining bar */}
-            {settings.sla_enabled!==false&&task.status!=='resolved'&&task.status!=='waiting'&&(
-              <div aria-live="polite" aria-atomic="true">
-                <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
-                  <span style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>SLA</span>
-                  <div
-                    role="progressbar"
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-valuenow={Math.round(slaPct)}
-                    aria-valuetext={`${Math.round(slaPct)}% SLA remaining — ${slaBarText}`}
-                    aria-label="SLA remaining"
-                    style={{flex:1,background:'#f2f2f2',borderRadius:4,height:5,overflow:'hidden'}}
+
+      {/* ── 3-column body ──────────────────────────────────────────────── */}
+      <div style={{
+        flex: 1,
+        display: 'grid',
+        gridTemplateColumns: 'minmax(280px, 320px) minmax(0, 1fr) minmax(280px, 340px)',
+        gap: 16,
+        padding: 16,
+        overflow: 'hidden',
+        minHeight: 0,
+      }}>
+        {/* ═══ LEFT RAIL ═════════════════════════════════════════════════ */}
+        <aside style={{ display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', minHeight: 0, paddingRight: 4 }}>
+          {/* Status changer */}
+          <RailCard title="Status">
+            <div role="radiogroup" aria-label="Ticket status" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+              {STATUS_OPTIONS.map(opt => {
+                const isActive = activeStatus === opt.value;
+                const isLoading = statusUpdating === opt.value;
+                const permissionLocked = opt.value === 'resolved' && !canResolve;
+                const disabled = !!statusUpdating || permissionLocked;
+                return (
+                  <button
+                    key={opt.value}
+                    role="radio"
+                    aria-checked={isActive}
+                    disabled={disabled}
+                    title={permissionLocked ? "You don't have permission to resolve tasks" : undefined}
+                    onClick={() => handleStatusChange(opt.value)}
+                    className="zd-status-btn"
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                      height: 36, padding: '0 10px', borderRadius: 10,
+                      border: `1px solid ${isActive ? opt.color : '#e8e8e8'}`,
+                      background: isActive ? opt.bg : 'white',
+                      color: isActive ? opt.color : '#616161',
+                      fontSize: 12, fontWeight: isActive ? 700 : 500,
+                      cursor: disabled ? 'not-allowed' : 'pointer',
+                      transition: 'all .15s',
+                      boxShadow: isActive ? `0 0 0 2px ${opt.color}18` : 'none',
+                    }}
                   >
-                    <div style={{height:'100%',width:`${slaPct}%`,background:slaBarColor,borderRadius:4,transition:'width .3s'}}></div>
-                  </div>
-                  <span style={{fontSize:11,color:'var(--text-muted)',whiteSpace:'nowrap'}}>{slaBarText}</span>
-                  {!task.status?.includes('resolved')&&(
-                    <span style={{fontSize:11,color:slaPct<20?'var(--red)':'var(--text-muted)',whiteSpace:'nowrap'}}>
-                      ({Math.round(slaPct)}%)
-                    </span>
-                  )}
+                    <i className={isLoading ? 'bi-arrow-clockwise spin' : opt.icon} style={{ fontSize: 12 }} />
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </RailCard>
+
+          {/* SLA bar (hidden once resolved or paused — both Pending and On hold
+              are treated as paused so the bar doesn't keep ticking down while
+              we're blocked on someone else). */}
+          {settings?.sla_enabled !== false && !isResolved && activeStatus !== 'waiting' && activeStatus !== 'on_hold' && (
+            <RailCard title="SLA">
+              <SlaBar pct={slaPct} remMins={slaRem} />
+              {sla?.label && (
+                <div style={{ marginTop: 6, fontSize: 11, color: sla.color, fontWeight: 600 }}>
+                  <i className={sla.breach ? 'bi-exclamation-triangle-fill' : 'bi-clock'} style={{ marginRight: 4 }} />
+                  {sla.label}
                 </div>
-              </div>
-            )}
-            {/* SLA Info banner */}
-            {settings.sla_enabled!==false&&sla&&(
-              <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 14px',borderRadius:10,background:sla.bg,border:`1px solid ${sla.color}22`}}>
-                <i className={sla.breach?'bi-exclamation-triangle-fill':'bi-clock'} style={{fontSize:12,color:sla.color}}></i>
-                <span style={{fontSize:12,fontWeight:600,color:sla.color}}>{sla.label}</span>
-              </div>
-            )}
-            {/* C: Offboarding Processing Time */}
-            {(task.source==='workbench'||/offboard|termination/i.test(task.subject))&&task.status!=='resolved'&&(()=>{
-              const dayNum=Math.round(task.minutesAgo/60/24)||1;
-              const ptColor=dayNum<=4?'#29811e':dayNum===5?'#ed8d00':'#d42d35';
-              const ptPct=Math.min(100,(dayNum/6)*100);
-              return(
-                <div style={{display:'flex',alignItems:'center',gap:8}}>
-                  <span style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',whiteSpace:'nowrap'}}>Processing</span>
-                  <div style={{flex:1,background:'#f2f2f2',borderRadius:4,height:5,overflow:'hidden'}}>
-                    <div style={{height:'100%',width:`${ptPct}%`,background:ptColor,borderRadius:4,transition:'width .3s'}}></div>
-                  </div>
-                  <span style={{fontSize:11,color:ptColor,fontWeight:600,whiteSpace:'nowrap'}}>Day {dayNum}/6</span>
-                </div>
-              );
-            })()}
-            {/* Escalation Status */}
-            {taskEscalation&&(
-              <div style={{background:taskEscalation.managerResponseStatus==='responded'?'#F0FDF9':'#fff8e6',border:`1px solid ${taskEscalation.managerResponseStatus==='responded'?'#A7F3D0':'#ffe27c'}`,borderRadius:10,padding:'10px 14px'}}>
-                <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
-                  <span style={{width:7,height:7,borderRadius:'50%',background:taskEscalation.managerResponseStatus==='responded'?'#29811e':'#ed8d00',display:'inline-block',flexShrink:0}}></span>
-                  <span style={{fontSize:12,fontWeight:700,color:taskEscalation.managerResponseStatus==='responded'?'#29811e':'#92400E'}}>
-                    <i className="bi-arrow-up-circle-fill" style={{marginRight:4,fontSize:11}}></i>
-                    Escalated to {taskEscalation.managerName}
-                    <span style={{fontWeight:400,marginLeft:6,color:'#616161'}}>
-                      {taskEscalation.managerResponseStatus==='responded'?'Responded':'Pending Response'}
-                    </span>
+              )}
+            </RailCard>
+          )}
+
+          {/* Ticket details */}
+          <RailCard title="Details">
+            <DetailRow label="Assignee" value={
+              assignee
+                ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <Avatar name={assignee.name} size={20} />
+                    <span>{assignee.name}</span>
                   </span>
-                </div>
-                <div style={{fontSize:12,color:'#616161'}}><span style={{fontWeight:600}}>Reason:</span> {taskEscalation.reason}</div>
+                : <span style={{ color: '#d42d35', fontWeight: 600 }}>Unassigned</span>
+            } />
+            {/* Country: heuristic (detected from tags/subject) — shown
+                immediately so the user has SOME signal. The actual
+                "Employee Country" Zendesk custom field is rendered below
+                as its own row; Phase 2 will fetch and let the user edit it. */}
+            <DetailRow label="Country (detected)" value={task.country
+              ? <span>{getFlag(task.country)} <span>{task.country}</span></span>
+              : '—'} />
+            <DetailRow label="Employee Country" value={readCustomField(task, 'employeeCountry')} hint="(editable in Phase 2)" />
+            <DetailRow label="Form" value={readCustomField(task, 'form')} hint="(editable in Phase 2)" />
+            <DetailRow label="Root Cause - Support" value={readCustomField(task, 'rootCauseSupport')} hint="(editable in Phase 2)" />
+            <DetailRow label="Root Cause Selector" value={readCustomField(task, 'rootCauseSelector')} hint="(editable in Phase 2)" />
+            <DetailRow label="Type" value={task.type || '—'} />
+            <DetailRow label="Requester" value={task.requesterName || '—'} />
+            {task.requesterEmail && (
+              <DetailRow label="Email" value={
+                <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11 }}>{task.requesterEmail}</span>
+              } />
+            )}
+            <DetailRow label="Received" value={task.createdAt ? absTime(task.createdAt) : '—'} />
+            <DetailRow label="Last update" value={task.updatedAt ? `${relTime(task.updatedAt)}` : '—'} />
+          </RailCard>
+
+          {/* Quick links */}
+          <RailCard title="Links">
+            {task.externalUrl && (
+              <RailLink href={task.externalUrl} icon={TOOLS[task.source]?.icon || 'bi-box-arrow-up-right'} label={`Open in ${TOOLS[task.source]?.label || 'source'}`} />
+            )}
+            {employeeUrl && (
+              <RailLink href={employeeUrl} icon="bi-person-badge" label="Employee profile" />
+            )}
+            <RailLink disabled icon="bi-chat-dots" label="Side conversations (Phase 4)" />
+          </RailCard>
+
+          {/* Escalation banner */}
+          {taskEscalation && (
+            <div style={{
+              background: taskEscalation.managerResponseStatus === 'responded' ? '#F0FDF9' : '#fff8e6',
+              border: `1px solid ${taskEscalation.managerResponseStatus === 'responded' ? '#A7F3D0' : '#ffe27c'}`,
+              borderRadius: 12,
+              padding: '10px 14px',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <span style={{ width: 7, height: 7, borderRadius: '50%', background: taskEscalation.managerResponseStatus === 'responded' ? '#29811e' : '#ed8d00', display: 'inline-block', flexShrink: 0 }} />
+                <span style={{ fontSize: 12, fontWeight: 700, color: taskEscalation.managerResponseStatus === 'responded' ? '#29811e' : '#92400E' }}>
+                  Escalated to {taskEscalation.managerName}
+                </span>
               </div>
-            )}
-            {/* Open in source link */}
-            <a href={getUrl(task)} target="_blank" rel="noreferrer" style={{display:'flex',alignItems:'center',justifyContent:'center',gap:6,padding:'10px 16px',borderRadius:128,border:'1px solid #e8e8e8',background:'white',color:'#1f74b3',fontSize:13,fontWeight:600,textDecoration:'none',transition:'all .15s'}} onMouseEnter={e=>{e.currentTarget.style.background='#e8f0fe';}} onMouseLeave={e=>{e.currentTarget.style.background='white';}}>
-              <i className={TOOLS[task.source]?.icon||'bi-box-arrow-up-right'} style={{fontSize:12}}></i>
-              Open in {TOOLS[task.source]?.label||'Source'}
-              <i className="bi-box-arrow-up-right" style={{fontSize:10,marginLeft:2}}></i>
-            </a>
-            {/* Mark Resolved button — gated by can_resolve_task */}
-            {task.status!=='resolved'&&onResolve&&perms?.canDo('can_resolve_task')!==false&&(
-              <button onClick={()=>onResolve(task)} style={{display:'flex',alignItems:'center',justifyContent:'center',gap:6,padding:'10px 16px',borderRadius:128,border:'1px solid #29811e',background:'#e8f5e9',color:'#29811e',fontSize:13,fontWeight:600,cursor:'pointer',transition:'all .15s',width:'100%'}}
-                onMouseEnter={e=>{e.currentTarget.style.background='#29811e';e.currentTarget.style.color='white';}} onMouseLeave={e=>{e.currentTarget.style.background='#e8f5e9';e.currentTarget.style.color='#29811e';}}>
-                <i className="bi-check-circle-fill" style={{fontSize:13}}></i>Mark Resolved
+              <div style={{ fontSize: 11, color: '#616161' }}>{taskEscalation.reason}</div>
+            </div>
+          )}
+        </aside>
+
+        {/* ═══ CENTER ═══════════════════════════════════════════════════ */}
+        <section style={{ display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, gap: 12 }}>
+          {/* Email chain */}
+          <div style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            background: 'white',
+            border: '1px solid #f0efed',
+            borderRadius: 14,
+            overflow: 'hidden',
+            minHeight: 0,
+          }}>
+            <div style={{
+              padding: '10px 16px',
+              borderBottom: '1px solid #f0efed',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexShrink: 0,
+            }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <i className="bi-envelope-paper" style={{ fontSize: 13, color: '#616161' }} />
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#1b1b1b' }}>Conversation</span>
+                {!commentsLoading && comments.length > 0 && (
+                  <span style={{ padding: '1px 8px', borderRadius: 128, background: '#f2f2f2', color: '#616161', fontSize: 10, fontWeight: 700 }}>
+                    {comments.length}
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={() => { fetchInflightRef.current = null; loadComments(); }}
+                title="Refresh conversation"
+                aria-label="Refresh conversation"
+                style={{ ...iconBtnStyle, width: 28, height: 28 }}
+              >
+                <i className={commentsLoading ? 'bi-arrow-clockwise spin' : 'bi-arrow-clockwise'} style={{ fontSize: 11 }} />
               </button>
-            )}
-          </div>
-        )}
-        {/* ═══ MESSAGES TAB — AI summary, message body, quick reply ═══ */}
-        {tab==='messages'&&(
-          <div style={{padding:'16px 20px',display:'flex',flexDirection:'column',gap:16,height:'100%'}}>
-            {/* G: AI Summary card */}
-            {task.aiSummary&&(
-              <div style={{background:'#f5f3ff',border:'1px solid #c4b1f9',borderRadius:12,padding:'12px 14px'}}>
-                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
-                  <div style={{display:'flex',alignItems:'center',gap:5}}>
-                    <i className="bi-stars" style={{fontSize:12,color:'#7c3aed'}}></i>
-                    <span style={{fontSize:11,fontWeight:700,color:'#7c3aed',letterSpacing:'.05em',textTransform:'uppercase'}}>AI Summary</span>
-                  </div>
-                  <button onClick={()=>{setAiGenerating(true);setTimeout(()=>setAiGenerating(false),1500);}} style={{display:'inline-flex',alignItems:'center',gap:3,height:22,padding:'0 8px',borderRadius:128,border:'1px solid #c4b1f9',background:'white',color:'#7c3aed',fontSize:11,fontWeight:500,cursor:'pointer',transition:'all .12s'}}
-                    onMouseEnter={e=>{e.currentTarget.style.background='#ede9fe';}} onMouseLeave={e=>{e.currentTarget.style.background='white';}}>
-                    <i className="bi-arrow-clockwise" style={{fontSize:9}}></i>
-                    {aiGenerating?'Generating...':'Regenerate'}
+            </div>
+
+            <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {commentsLoading && comments.length === 0 ? (
+                <CommentSkeleton />
+              ) : commentsError ? (
+                <div style={{ padding: '12px 14px', borderRadius: 10, background: '#fef2f2', border: '1px solid #fca5a5', color: '#991b1b', fontSize: 12 }}>
+                  <i className="bi-exclamation-triangle-fill" style={{ marginRight: 6 }} />
+                  Couldn't load conversation: {commentsError}
+                  <button onClick={() => { fetchInflightRef.current = null; loadComments(); }} style={{ marginLeft: 8, background: 'none', border: 'none', color: '#991b1b', textDecoration: 'underline', cursor: 'pointer', fontWeight: 600 }}>
+                    Retry
                   </button>
                 </div>
-                {aiGenerating?(
-                  <div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 0',color:'var(--text-muted)',fontSize:'var(--font-sm)'}}>
-                    <span className="skeleton" style={{width:120,height:12}}/>
-                    <span className="skeleton" style={{width:80,height:12}}/>
-                    <span className="skeleton" style={{width:100,height:12}}/>
-                  </div>
-                ):(
-                  <p style={{fontSize:13,color:'#4b5563',lineHeight:1.6,margin:0}}>{task.aiSummary}</p>
-                )}
-              </div>
-            )}
-            {/* Recent Messages — supports Zendesk + Jira */}
-            {(task.source === 'zendesk' || task.source === 'jira') && (
-              <div>
-                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
-                  <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Recent Messages</div>
-                  {commentsError && !commentsLoading && (
-                    <button onClick={loadComments} title="Retry loading messages" style={{padding:'2px 10px',borderRadius:128,border:'1px solid #fca5a5',background:'white',color:'#991b1b',fontSize:11,fontWeight:600,cursor:'pointer'}}>
-                      <i className="bi-arrow-clockwise" style={{fontSize:10,marginRight:4}}/>Retry
-                    </button>
-                  )}
+              ) : comments.length === 0 ? (
+                <div style={{ padding: '24px 14px', textAlign: 'center', color: '#9e9e9e', fontSize: 13 }}>
+                  <i className="bi-chat-square-text" style={{ fontSize: 24, display: 'block', marginBottom: 6, color: '#d0d0d0' }} />
+                  No messages yet on this {isZD ? 'Zendesk' : isJira ? 'Jira' : ''} ticket
                 </div>
-                {commentsLoading ? (
-                  <div style={{display:'flex',flexDirection:'column',gap:8}}>
-                    {[1,2].map(i=><div key={i} className="skeleton" style={{height:60,borderRadius:8}}/>)}
-                  </div>
-                ) : commentsError ? (
-                  <div style={{padding:'12px 14px',background:'#fef2f2',borderRadius:10,border:'1px solid #fca5a5',color:'#991b1b',fontSize:12}}>
-                    <i className="bi-exclamation-triangle-fill" style={{fontSize:11,marginRight:6}}/>
-                    Couldn't load messages: {commentsError}
-                  </div>
-                ) : comments.length === 0 ? (
-                  <div style={{padding:'12px 14px',background:'#fafaf9',borderRadius:10,border:'1px solid #f2f2f2',color:'#9e9e9e',fontSize:12,textAlign:'center'}}>
-                    No recent messages from {task.source === 'zendesk' ? 'Zendesk' : 'Jira'}
-                  </div>
-                ) : (
-                  <div style={{display:'flex',flexDirection:'column',gap:8}}>
-                    {comments.map(c => (
-                      <div key={c.id} style={{padding:'10px 14px',borderRadius:10,background:c.public?'#fafaf9':'#fffbeb',border:`1px solid ${c.public?'#f2f2f2':'#fde68a'}`,position:'relative'}}>
-                        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:4}}>
-                          <div style={{display:'flex',alignItems:'center',gap:6}}>
-                            <span style={{fontSize:11,fontWeight:600,color:'#616161'}}>#{c.author||'Unknown'}</span>
-                            {!c.public && <span style={{fontSize:9,fontWeight:700,color:'#92400E',background:'#fef3c7',padding:'1px 6px',borderRadius:128}}>INTERNAL</span>}
-                          </div>
-                          <span style={{fontSize:10,color:'#9e9e9e'}}>{c.createdAt ? new Date(c.createdAt).toLocaleString() : ''}</span>
-                        </div>
-                        <div style={{fontSize:12,color:'#4b5563',lineHeight:1.5,whiteSpace:'pre-wrap',maxHeight:80,overflowY:'auto'}}>{c.body}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-            {task.source !== 'zendesk' && task.source !== 'jira' && (
-              <div style={{padding:'12px 14px',background:'#f7f5f2',borderRadius:10,border:'1px solid #e8e8e8',color:'#616161',fontSize:12,display:'flex',alignItems:'center',gap:8}}>
-                <i className="bi-info-circle" style={{fontSize:13}}/>
-                Messages are only available for Zendesk and Jira tickets.
-              </div>
-            )}
-            {/* Message Body — expanded */}
-            {task.body&&(
-              <div style={{flex:'1 1 auto',minHeight:0,display:'flex',flexDirection:'column'}}>
-                <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6}}>Message</div>
-                <div style={{flex:1,background:'#fafaf9',borderRadius:10,padding:'14px 16px',color:'#4b5563',fontSize:13,lineHeight:1.7,border:'1px solid #f2f2f2',overflowY:'auto'}}>{task.body}</div>
-              </div>
-            )}
-            {!task.body&&!task.aiSummary&&(
-              <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',color:'#9e9e9e',fontSize:14}}>
-                <div style={{textAlign:'center'}}>
-                  <i className="bi-chat-left-text" style={{fontSize:28,display:'block',marginBottom:8,color:'#d0d0d0'}}></i>
-                  No messages yet
-                </div>
-              </div>
-            )}
-            {/* Quick reply templates + textarea — larger and more prominent */}
-            {settings.ai_replies_enabled!==false&&<div style={{flexShrink:0}}>
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
-                <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em'}}>Quick Reply</div>
-                <div style={{display:'flex',gap:6,alignItems:'center'}}>
-                  {/* H: Translate button */}
-                  <div ref={translateRef} style={{position:'relative'}}>
-                    <button onClick={()=>setShowTranslateDD(v=>!v)} aria-haspopup="menu" aria-expanded={showTranslateDD} aria-label={activeLang?`Translate reply (currently ${activeLang})`:'Translate reply'} style={{display:'inline-flex',alignItems:'center',gap:4,height:26,padding:'0 10px',borderRadius:6,border:'1px solid #e8e8e8',background:showTranslateDD?'#e8f0fe':'white',color:showTranslateDD?'#1f74b3':'#616161',fontSize:11,fontWeight:500,cursor:'pointer',transition:'all .12s'}}>
-                      Translate
-                    </button>
-                    {showTranslateDD&&(
-                      <div role="menu" aria-label="Translate to language" style={{position:'absolute',right:0,top:30,width:160,background:'white',border:'1px solid #e8e8e8',borderRadius:10,boxShadow:'0 4px 16px rgba(0,0,0,0.1)',zIndex:110,overflow:'hidden'}}>
-                        {TRANSLATE_LANGS.map(lang=>(
-                          <button key={lang} role="menuitem" onClick={()=>{
-                            const orig=activeLang?originalReplyText:replyText;
-                            setOriginalReplyText(orig);
-                            setReplyText(mockTranslate(orig,lang));
-                            setActiveLang(lang);
-                            setShowTranslateDD(false);
-                          }} style={{display:'block',width:'100%',textAlign:'left',padding:'8px 14px',border:'none',borderBottom:'1px solid #f2f2f2',background:'white',cursor:'pointer',fontSize:12,color:'#1b1b1b',transition:'background .1s'}}
-                            onMouseEnter={e=>e.currentTarget.style.background='#f7f5f2'} onMouseLeave={e=>e.currentTarget.style.background='white'}>
-                            {lang}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div style={{position:'relative'}}>
-                    <button onClick={()=>setShowTemplates(t=>!t)} aria-haspopup="menu" aria-expanded={showTemplates} aria-label="Choose reply template" style={{display:'inline-flex',alignItems:'center',gap:4,height:26,padding:'0 10px',borderRadius:6,border:'1px solid #e8e8e8',background:showTemplates?'#e8f0fe':'white',color:showTemplates?'#1f74b3':'#616161',fontSize:11,fontWeight:500,cursor:'pointer',transition:'all .12s'}}>
-                      <i className="bi-file-text" aria-hidden="true" style={{fontSize:10}}></i>Templates
-                    </button>
-                    {showTemplates&&(
-                      <div style={{position:'absolute',right:0,top:30,width:280,background:'white',border:'1px solid #e8e8e8',borderRadius:10,boxShadow:'0 4px 16px rgba(0,0,0,0.1)',zIndex:100,overflow:'hidden'}}>
-                        {templateKeys.map(key=>{
-                          const tpl=REPLY_TEMPLATES[key];
-                          const tplLabel=key==='default'?'General':key;
-                          return(
-                            <button key={key} onClick={()=>{setReplyText(tpl);setShowTemplates(false);}} style={{display:'block',width:'100%',textAlign:'left',padding:'10px 14px',border:'none',borderBottom:'1px solid #f2f2f2',background:'white',cursor:'pointer',fontSize:12,color:'#1b1b1b',transition:'background .1s'}}
-                              onMouseEnter={e=>e.currentTarget.style.background='#f7f5f2'} onMouseLeave={e=>e.currentTarget.style.background='white'}>
-                              <div style={{fontWeight:600,marginBottom:2,fontSize:12}}>{tplLabel}</div>
-                              <div style={{color:'#9e9e9e',fontSize:11,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{tpl.slice(0,60)}...</div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-              <textarea value={replyText} onChange={e=>setReplyText(e.target.value)} aria-label="Quick reply message" className="note-input" rows={6} placeholder="Type a reply or select a template above..." style={{width:'100%',boxSizing:'border-box',minHeight:120,fontSize:13,lineHeight:1.6}}/>
-              {/* H: Active translation badge */}
-              {activeLang&&(
-                <div style={{display:'inline-flex',alignItems:'center',gap:6,marginTop:6,padding:'4px 12px',borderRadius:128,background:'#e8f0fe',border:'1px solid #93c5fd',fontSize:11,color:'#1f74b3',fontWeight:500}}>
-                  Translated to: {activeLang}
-                  <button onClick={()=>{if(originalReplyText!=null)setReplyText(originalReplyText);setActiveLang(null);setOriginalReplyText(null);}} style={{background:'none',border:'none',cursor:'pointer',color:'#1f74b3',fontSize:12,padding:0,lineHeight:1,display:'flex',alignItems:'center'}} title="Revert translation">x</button>
-                </div>
+              ) : (
+                comments.map(c => (
+                  <CommentBubble
+                    key={c.id}
+                    comment={c}
+                    expanded={expandedComments.has(c.id)}
+                    onToggleExpand={toggleCommentExpansion}
+                  />
+                ))
               )}
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginTop:8}}>
-                <div style={{display:'flex',alignItems:'center',gap:8}}>
-                  {task.source === 'zendesk' && (
-                    <label
-                      title={replyPublic
-                        ? 'This reply will be sent to the requester.'
-                        : 'Internal notes are only visible to your team in Zendesk.'}
-                      style={{display:'inline-flex',alignItems:'center',gap:6,padding:'3px 10px',borderRadius:128,fontSize:11,fontWeight:600,cursor:'pointer',
-                        background:replyPublic?'#fef2f2':'#fef3c7',
-                        color:replyPublic?'#991b1b':'#92400E',
-                        border:`1px solid ${replyPublic?'#fca5a5':'#fde68a'}`,
-                      }}>
-                      <input type="checkbox" checked={replyPublic} onChange={e=>setReplyPublic(e.target.checked)} style={{accentColor:replyPublic?'#d42d35':'#92400E'}}/>
-                      {replyPublic ? 'Public — visible to requester' : 'Internal note'}
-                    </label>
-                  )}
-                </div>
-                <button
-                  disabled={!replyText.trim() || actionLoading}
-                  onClick={async()=>{
-                    if(!replyText.trim())return;
-                    setActionLoading(true);
-                    try{
-                      // Route reply to correct backend (Zendesk or Jira)
-                      await postTicketAction(task.id,{action:'reply',message:replyText,public:replyPublic});
-                      if (!mountedRef.current) return;
-                      const sentMode = task.source === 'zendesk'
-                        ? (replyPublic ? 'Public reply sent' : 'Internal note added')
-                        : 'Reply sent';
-                      const sentDetail = task.source === 'zendesk' && replyPublic
-                        ? 'Visible to the requester in Zendesk.'
-                        : task.source === 'zendesk'
-                          ? 'Only visible to your team in Zendesk.'
-                          : 'Your reply has been posted to the ticket.';
-                      addToast&&addToast('success',sentMode,sentDetail);
-                      setReplyText('');
-                      // Refresh comments — guard against unmount + re-dedup via ref
-                      commentsFetchRef.current = null;
-                      loadComments();
-                    }catch(err){
-                      if (mountedRef.current) addToast&&addToast('error','Reply failed',err.message||'Could not send reply.');
-                    }finally{
-                      if (mountedRef.current) setActionLoading(false);
-                    }
-                  }}
-                  style={{display:'inline-flex',alignItems:'center',gap:5,height:34,padding:'0 20px',borderRadius:128,border:'none',
-                    background:!replyText.trim()||actionLoading?'#e0e0e0':(task.source==='zendesk'&&replyPublic?'#b91c1c':'#1b1b1b'),
-                    color:replyText.trim()&&!actionLoading?'white':'#9e9e9e',fontSize:12,fontWeight:700,
-                    cursor:replyText.trim()&&!actionLoading?'pointer':'not-allowed',transition:'all .15s'}}
-                >
-                  {actionLoading
-                    ? <><i className="bi-hourglass-split" style={{fontSize:11}}></i>Sending...</>
-                    : task.source !== 'zendesk'
-                      ? <><i className="bi-send" style={{fontSize:11}}></i>Send Reply</>
-                      : replyPublic
-                        ? <><i className="bi-send-fill" style={{fontSize:11}}></i>Send Public Reply</>
-                        : <><i className="bi-journal-text" style={{fontSize:11}}></i>Add Internal Note</>}
-                </button>
-              </div>
-            </div>}
+            </div>
           </div>
-        )}
-        {/* ═══ NOTES TAB ═══ */}
-        {tab==='notes'&&<NotesTab taskId={task.id} notes={notes} setNotes={setNotes} currentUser={currentUser} setActivity={setActivity}/>}
-        {/* ═══ TIMELINE TAB ═══ */}
-        {tab==='timeline'&&<TimelineTab taskId={task.id} task={task} activity={activity} escalation={taskEscalation}/>}
-        {/* ═══ ATTACHMENTS TAB — placeholder ═══ */}
-        {tab==='attachments'&&(
-          <div style={{padding:'40px 20px',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',color:'#9e9e9e',textAlign:'center',minHeight:200}}>
-            <i className="bi-paperclip" style={{fontSize:32,color:'#d0d0d0',marginBottom:12}}></i>
-            <div style={{fontSize:15,fontWeight:600,color:'#616161',marginBottom:4}}>No Attachments</div>
-            <div style={{fontSize:13,color:'#9e9e9e',maxWidth:280}}>Attachments from this ticket will appear here. This feature is coming soon.</div>
-          </div>
-        )}
-        {/* ═══ RELATED TAB — placeholder ═══ */}
-        {tab==='related'&&(
-          <div style={{padding:'40px 20px',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',color:'#9e9e9e',textAlign:'center',minHeight:200}}>
-            <i className="bi-diagram-3" style={{fontSize:32,color:'#d0d0d0',marginBottom:12}}></i>
-            <div style={{fontSize:15,fontWeight:600,color:'#616161',marginBottom:4}}>No Related Tickets</div>
-            <div style={{fontSize:13,color:'#9e9e9e',maxWidth:280}}>Related and duplicate tickets will be shown here. This feature is coming soon.</div>
-          </div>
-        )}
-      </div>
+
+          {/* Reply composer */}
+          {settings?.ai_replies_enabled !== false && (
+            <ReplyComposer
+              isZD={isZD}
+              replyText={replyText}
+              setReplyText={setReplyText}
+              replyPublic={replyPublic}
+              setReplyPublic={setReplyPublic}
+              replySending={replySending}
+              onSend={handleSendReply}
+              showTemplates={showTemplates}
+              setShowTemplates={setShowTemplates}
+              taskType={task.type}
+            />
+          )}
+        </section>
+
+        {/* ═══ RIGHT RAIL ═══════════════════════════════════════════════ */}
+        <aside style={{ display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', minHeight: 0, paddingLeft: 4 }}>
+          {/* AI summary placeholder */}
+          <RailCard
+            title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <i className="bi-stars" style={{ fontSize: 11, color: '#7c3aed' }} />
+              <span>AI Summary</span>
+            </span>}
+          >
+            <div style={{ padding: '12px 0', textAlign: 'center', color: '#9e9e9e', fontSize: 11 }}>
+              <i className="bi-clock-history" style={{ fontSize: 18, display: 'block', marginBottom: 4, color: '#d0d0d0' }} />
+              Coming in Phase 5
+            </div>
+          </RailCard>
+
+          {/* Notes — uses NotesTab's own internal padding. */}
+          <RailCard title="Notes" padded={false}>
+            <NotesTab taskId={task.id} notes={notes} setNotes={setNotes} currentUser={currentUser} setActivity={setActivity} />
+          </RailCard>
+
+          {/* Timeline — capped at 280px tall so a long activity log doesn't
+              push the AI summary + Notes off the visible right rail. */}
+          <RailCard title="Timeline" padded={false}>
+            <div style={{ maxHeight: 280, overflowY: 'auto' }}>
+              <TimelineTab taskId={task.id} task={task} activity={activity} escalation={taskEscalation} />
+            </div>
+          </RailCard>
+        </aside>
       </div>
     </div>
   );
 };
 
 export default Detail;
+
+// ─────────────────────────────────────────────────────────────────────────
+// Sub-components & helpers
+// ─────────────────────────────────────────────────────────────────────────
+
+function RailCard({ title, children, padded = true }) {
+  // padded=true → standard 12/14 padding inside, title sits inline at top.
+  // padded=false → flush body (children handle their own padding); title
+  //                gets its own 12/14 strip and the body sits underneath
+  //                with no extra inset, so embedded components like
+  //                NotesTab don't double up on padding.
+  return (
+    <div className="zd-rail-section" style={{
+      background: 'white',
+      border: '1px solid #f0efed',
+      borderRadius: 12,
+      padding: padded ? '12px 14px' : '0',
+      overflow: 'hidden',
+    }}>
+      <div style={{
+        fontSize: 10, fontWeight: 700, color: '#9e9e9e',
+        textTransform: 'uppercase', letterSpacing: '0.06em',
+        marginBottom: padded ? 10 : 0,
+        padding: padded ? 0 : '12px 14px 4px',
+      }}>{title}</div>
+      <div>{children}</div>
+    </div>
+  );
+}
+
+function DetailRow({ label, value, hint }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '110px minmax(0, 1fr)', gap: 10, alignItems: 'baseline', padding: '4px 0', fontSize: 12, lineHeight: 1.5 }}>
+      <span style={{ color: '#9e9e9e', fontWeight: 500, fontSize: 11 }}>{label}</span>
+      <span style={{ color: '#1b1b1b', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        {value}
+        {hint && <span style={{ marginLeft: 6, fontSize: 10, color: '#bebebe', fontWeight: 400 }}>{hint}</span>}
+      </span>
+    </div>
+  );
+}
+
+function RailLink({ href, icon, label, disabled = false }) {
+  const baseStyle = {
+    display: 'flex', alignItems: 'center', gap: 8,
+    padding: '8px 10px', borderRadius: 8,
+    fontSize: 12, fontWeight: 500,
+    textDecoration: 'none',
+    color: disabled ? '#bebebe' : '#1f74b3',
+    background: 'transparent',
+    border: '1px solid transparent',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    transition: 'all .15s',
+  };
+  if (disabled) {
+    return (
+      <div style={baseStyle} aria-disabled="true">
+        <i className={icon} style={{ fontSize: 13 }} />
+        <span style={{ flex: 1 }}>{label}</span>
+      </div>
+    );
+  }
+  return (
+    <a
+      href={href} target="_blank" rel="noopener noreferrer"
+      style={baseStyle}
+      onMouseEnter={e => { e.currentTarget.style.background = '#eff6ff'; e.currentTarget.style.borderColor = '#bddcf0'; }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; }}
+    >
+      <i className={icon} style={{ fontSize: 13 }} />
+      <span style={{ flex: 1 }}>{label}</span>
+      <i className="bi-box-arrow-up-right" style={{ fontSize: 10, opacity: 0.6 }} />
+    </a>
+  );
+}
+
+function SlaBar({ pct, remMins }) {
+  const color = remMins <= 0 ? '#b91c1c' : pct > 50 ? '#15803d' : pct > 20 ? '#b45309' : '#b91c1c';
+  const label = remMins <= 0
+    ? `Breached ${Math.abs(remMins)}m ago`
+    : remMins >= 60 ? `${Math.floor(remMins / 60)}h ${remMins % 60}m remaining` : `${remMins}m remaining`;
+  return (
+    <div>
+      <div role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(pct)} aria-label={`SLA: ${label}`}
+        style={{ background: '#f2f2f2', borderRadius: 4, height: 6, overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: 4, transition: 'width .3s' }} />
+      </div>
+      <div style={{ marginTop: 6, fontSize: 11, color: '#616161', display: 'flex', justifyContent: 'space-between' }}>
+        <span>{label}</span>
+        <span>{Math.round(pct)}%</span>
+      </div>
+    </div>
+  );
+}
+
+function CommentSkeleton() {
+  return (
+    <>
+      {[1, 2, 3].map(i => (
+        <div key={i} style={{ background: '#fafaf9', borderRadius: 10, border: '1px solid #f0efed', padding: 12 }}>
+          <div className="skeleton" style={{ width: 140, height: 12, marginBottom: 8 }} />
+          <div className="skeleton" style={{ width: '100%', height: 12, marginBottom: 6 }} />
+          <div className="skeleton" style={{ width: '70%', height: 12 }} />
+        </div>
+      ))}
+    </>
+  );
+}
+
+const CommentBubble = memo(function CommentBubble({ comment, expanded, onToggleExpand }) {
+  const c = comment;
+  const isPublic = c.public !== false;
+  const isAgent = c.authorRole === 'agent' || c.authorRole === 'admin';
+  const bg = !isPublic ? '#fffbeb' : isAgent ? '#fafaf9' : '#eff6ff';
+  const border = !isPublic ? '#fde68a' : isAgent ? '#f0efed' : '#bddcf0';
+  const COLLAPSE_THRESHOLD = 700;
+  const isLong = (c.body || '').length > COLLAPSE_THRESHOLD;
+  const visibleBody = (isLong && !expanded) ? c.body.substring(0, COLLAPSE_THRESHOLD) + '…' : c.body;
+
+  return (
+    <article style={{
+      background: bg,
+      border: `1px solid ${border}`,
+      borderRadius: 10,
+      padding: '10px 14px',
+    }}>
+      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+          <Avatar name={c.authorName || '?'} size={24} />
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#1b1b1b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {c.authorName || 'Unknown'}
+              {isAgent && <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, color: '#0369a1', background: '#e0f2fe', padding: '1px 6px', borderRadius: 128, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Agent</span>}
+            </div>
+            {c.authorEmail && (
+              <div style={{ fontSize: 10, color: '#9e9e9e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'ui-monospace, monospace' }}>{c.authorEmail}</div>
+            )}
+          </div>
+        </div>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          {!isPublic && (
+            <span style={{ fontSize: 9, fontWeight: 700, color: '#92400E', background: '#fef3c7', padding: '2px 8px', borderRadius: 128, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Internal</span>
+          )}
+          <span title={absTime(c.createdAt)} style={{ fontSize: 11, color: '#9e9e9e' }}>{relTime(c.createdAt)}</span>
+        </div>
+      </header>
+      <div className="zd-comment-body" style={{ fontSize: 13, color: '#1b1b1b' }}>
+        {visibleBody || <span style={{ color: '#bebebe', fontStyle: 'italic' }}>(empty)</span>}
+      </div>
+      {isLong && (
+        <button
+          onClick={() => onToggleExpand(c.id)}
+          style={{ marginTop: 8, padding: 0, background: 'none', border: 'none', color: '#1f74b3', fontSize: 11, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline' }}
+        >
+          {expanded ? 'Show less' : `Show full message (${c.body.length} chars)`}
+        </button>
+      )}
+    </article>
+  );
+});
+
+function ReplyComposer({ isZD, replyText, setReplyText, replyPublic, setReplyPublic, replySending, onSend, showTemplates, setShowTemplates, taskType }) {
+  const templatesRef = useRef(null);
+  useEffect(() => {
+    if (!showTemplates) return;
+    const onDoc = (e) => { if (templatesRef.current && !templatesRef.current.contains(e.target)) setShowTemplates(false); };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [showTemplates, setShowTemplates]);
+
+  const canSend = replyText.trim() && !replySending;
+  const sendBg = !canSend ? '#e0e0e0' : (isZD && replyPublic) ? '#b91c1c' : '#1b1b1b';
+  const sendLabel = replySending
+    ? 'Sending…'
+    : !isZD ? 'Send Reply'
+    : replyPublic ? 'Send Public Reply'
+    : 'Add Internal Note';
+  const sendIcon = replySending ? 'bi-hourglass-split' : !isZD ? 'bi-send' : replyPublic ? 'bi-send-fill' : 'bi-journal-text';
+
+  return (
+    <div style={{
+      background: 'white',
+      border: '1px solid #f0efed',
+      borderRadius: 14,
+      padding: 14,
+      flexShrink: 0,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <i className="bi-pencil-square" style={{ fontSize: 13, color: '#616161' }} />
+          <span style={{ fontSize: 12, fontWeight: 700, color: '#1b1b1b' }}>Compose reply</span>
+        </div>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <button
+            disabled
+            title="Macros — Phase 3"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, height: 26, padding: '0 10px', borderRadius: 6, border: '1px dashed #e8e8e8', background: 'white', color: '#bebebe', fontSize: 11, fontWeight: 500, cursor: 'not-allowed' }}
+          >
+            <i className="bi-lightning" style={{ fontSize: 10 }} />
+            Macros
+          </button>
+          <div ref={templatesRef} style={{ position: 'relative' }}>
+            <button
+              onClick={() => setShowTemplates(v => !v)}
+              aria-haspopup="menu"
+              aria-expanded={showTemplates}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 4, height: 26, padding: '0 10px', borderRadius: 6, border: '1px solid #e8e8e8', background: showTemplates ? '#e8f0fe' : 'white', color: showTemplates ? '#1f74b3' : '#616161', fontSize: 11, fontWeight: 500, cursor: 'pointer', transition: 'all .12s' }}
+            >
+              <i className="bi-file-text" style={{ fontSize: 10 }} />
+              Templates
+            </button>
+            {showTemplates && (
+              <div role="menu" style={{ position: 'absolute', right: 0, top: 30, width: 280, background: 'white', border: '1px solid #e8e8e8', borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', zIndex: 100, overflow: 'hidden' }}>
+                {Object.keys(REPLY_TEMPLATES).map(key => (
+                  <button
+                    key={key}
+                    role="menuitem"
+                    onClick={() => { setReplyText(REPLY_TEMPLATES[key]); setShowTemplates(false); }}
+                    style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', border: 'none', borderBottom: '1px solid #f2f2f2', background: 'white', cursor: 'pointer', fontSize: 12, color: '#1b1b1b', transition: 'background .1s' }}
+                    onMouseEnter={e => e.currentTarget.style.background = '#f7f5f2'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'white'}
+                  >
+                    <div style={{ fontWeight: 600, marginBottom: 2 }}>{key === 'default' ? 'General' : key}</div>
+                    <div style={{ color: '#9e9e9e', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{REPLY_TEMPLATES[key].slice(0, 60)}…</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+      <textarea
+        value={replyText}
+        onChange={e => setReplyText(e.target.value)}
+        aria-label="Reply message"
+        placeholder={isZD ? "Type a reply… (Cmd+Enter to send)" : "Type a comment… (Cmd+Enter to send)"}
+        rows={5}
+        style={{
+          width: '100%', boxSizing: 'border-box', minHeight: 110,
+          padding: 12, borderRadius: 10, border: '1px solid #e8e8e8',
+          fontSize: 13, lineHeight: 1.6, fontFamily: 'inherit', resize: 'vertical', outline: 'none',
+          transition: 'border-color .12s',
+        }}
+        onFocus={e => e.target.style.borderColor = '#1f74b3'}
+        onBlur={e => e.target.style.borderColor = '#e8e8e8'}
+      />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, gap: 8 }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          {isZD && (
+            <label
+              title={replyPublic ? 'This reply will be sent to the requester.' : 'Internal notes are only visible to your team in Zendesk.'}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '4px 10px', borderRadius: 128,
+                fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                background: replyPublic ? '#fef2f2' : '#fef3c7',
+                color: replyPublic ? '#991b1b' : '#92400E',
+                border: `1px solid ${replyPublic ? '#fca5a5' : '#fde68a'}`,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={replyPublic}
+                onChange={e => setReplyPublic(e.target.checked)}
+                style={{ accentColor: replyPublic ? '#d42d35' : '#92400E' }}
+              />
+              {replyPublic ? 'Public — visible to requester' : 'Internal note'}
+            </label>
+          )}
+        </div>
+        <button
+          disabled={!canSend}
+          onClick={onSend}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            height: 36, padding: '0 18px', borderRadius: 128,
+            border: 'none', background: sendBg,
+            color: canSend ? 'white' : '#9e9e9e',
+            fontSize: 12, fontWeight: 700,
+            cursor: canSend ? 'pointer' : 'not-allowed',
+            transition: 'all .15s',
+          }}
+        >
+          <i className={sendIcon} style={{ fontSize: 12 }} />
+          {sendLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Reads a custom-field value off the task. Phase 1 surfaces these as
+// read-only — Phase 2 adds the discovery (GET /ticket_fields) + edit path.
+// For now we look up a flat namespace `task.customFields[<key>]`; if the
+// queue route hasn't populated it yet, we render an em-dash so the slot
+// is visible but clearly blank.
+function readCustomField(task, key) {
+  const v = task?.customFields?.[key];
+  if (v === null || v === undefined || v === '') return '—';
+  return String(v);
+}
+
+const iconBtnStyle = {
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+  width: 32, height: 32, borderRadius: 8,
+  border: '1px solid #e8e8e8', background: 'white',
+  color: '#616161', cursor: 'pointer',
+  transition: 'all .15s',
+};
