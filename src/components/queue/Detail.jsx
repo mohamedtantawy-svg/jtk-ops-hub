@@ -156,8 +156,15 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
   const taskEscalation=escalations.find(e=>e.taskId===task.id);
   const sla=slaInfo(task);
 
-  // SLA progress bar data
-  const slaLim=SLA_MINS[task.type]||1440;
+  // SLA progress bar data — honour the per-task slaMinsOverride first
+  // (set in queue/route.js for ZD/Jira from app_settings.queue_sla_thresholds)
+  // before falling back to the static type-based SLA_MINS map. Without
+  // this, the Detail panel would show a different SLA window than the row
+  // pill / Briefing aggregate for ZD and Jira tickets after the spec
+  // values diverged from per-type defaults.
+  const slaLim = (Number.isFinite(task.slaMinsOverride) && task.slaMinsOverride > 0)
+    ? task.slaMinsOverride
+    : (SLA_MINS[task.type] || 1440);
   const slaRem=slaLim-((task.minutesSinceLastResponse??task.minutesAgo)??0);
   const slaPct=Math.max(0,Math.min(100,(slaRem/slaLim)*100));
   const slaBarColor = slaRem<=0

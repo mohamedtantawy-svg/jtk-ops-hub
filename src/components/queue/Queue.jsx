@@ -403,47 +403,28 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     // Status or Unassigned updates the pills in lockstep with the table.
     let slaBase;
     if (workSource === 'onboarding') {
-      // Merged view (2026-04-21): Action Needed uses age-based SLA from
-      // createdAt; Paused rows use a 48h countdown from pausedAt. Classify
-      // per-row by presence of pausedAt so the header counts match what the
-      // SourceTable renders in each row's SLA cell.
+      // Onboarding: read the row's already-computed SLA fields. The
+      // normalizer (normalizeOnboarding / normalizePausedOnboarding) sets
+      // slaBreachStatus + slaRemaining honouring the dynamic Team-tab
+      // settings (active 7d default, paused 48h default). Aggregating from
+      // them keeps the header count in lockstep with the per-row pill.
       let atRisk = 0, breached = 0;
       for (const r of visOnboardingRows) {
-        if (r.pausedAt) {
-          let pausedMs = Date.now() - new Date(r.pausedAt).getTime();
-          if (isNaN(pausedMs)) pausedMs = 0;
-          const remaining = 48 * 60 * 60 * 1000 - pausedMs;
-          if (remaining <= 0) breached++;
-          else if (remaining < 24 * 60 * 60 * 1000) atRisk++;
-        } else {
-          let ageMs = r.createdAt ? Date.now() - new Date(r.createdAt).getTime() : 0;
-          if (isNaN(ageMs)) ageMs = 0;
-          const days = ageMs / (1000 * 60 * 60 * 24);
-          if (days >= 7) breached++;
-          else if (days >= 3) atRisk++;
-        }
+        if (r.slaBreachStatus === 'SLA_BREACHED') { breached++; continue; }
+        if (typeof r.slaRemaining === 'number' && r.slaRemaining > 0 && r.slaRemaining < 24 * 60 * 60) atRisk++;
       }
       return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: visOnboardingRows.length - atRisk - breached };
     }
-    // ── Source-panel age-based SLA ──
-    // Mirrors SourceTable's slaBadge() + offboardingSlaThreshold() so the
-    // header counts agree with the per-row badges. slaInfo() only understands
-    // ZD/Jira ticket shape, so source panels need their own computation.
-    const countAgeSLA = (rows, thresholdFor) => {
-      let atRisk = 0, breached = 0;
-      for (const r of rows) {
-        const createdMs = r.createdAt ? new Date(r.createdAt).getTime() : NaN;
-        if (!Number.isFinite(createdMs)) continue;
-        const ageDays = (Date.now() - createdMs) / 86400000;
-        const threshold = thresholdFor(r);
-        if (ageDays >= threshold) breached++;
-        else if (ageDays >= threshold * 0.7) atRisk++;
-      }
-      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: rows.length - atRisk - breached };
-    };
     if (workSource === 'offboarding') {
-      // Termination = 14d SLA, Resignation = 5d SLA (matches SourceTable.offboardingSlaThreshold)
-      return countAgeSLA(visOffboardingRows, r => (r.typeLabel || '').startsWith('Resignation') ? 5 : 14);
+      // Offboarding: read the row's SLA fields (normalizeOffboarding sets
+      // them per the configured 21-day default — was 14d/5d age-based here
+      // before, which diverged from Pilar's spec and the per-row pill).
+      let atRisk = 0, breached = 0;
+      for (const r of visOffboardingRows) {
+        if (r.slaBreachStatus === 'SLA_BREACHED') { breached++; continue; }
+        if (typeof r.slaRemaining === 'number' && r.slaRemaining > 0 && r.slaRemaining < 24 * 60 * 60) atRisk++;
+      }
+      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: visOffboardingRows.length - atRisk - breached };
     }
     if (workSource === 'amendments') {
       // Amendments use slaRemaining (seconds): breach at <=0, at-risk at <6h.
@@ -466,23 +447,14 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
       return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: visRedlineRows.length - atRisk - breached };
     }
     if (workSource === 'workbench') {
-      // Workbench rows may carry slaRemaining (seconds) + slaBreachStatus from upstream.
-      // Fall back to age-based 7d if missing.
+      // Workbench rows now carry slaRemaining + slaBreachStatus from the
+      // normalizer (overrides upstream Deel slaTime with the configured
+      // 48h-from-creation default). Read those directly so the header
+      // count matches the per-row pill exactly.
       let atRisk = 0, breached = 0;
       for (const r of visWorkbenchRows) {
-        if (r.slaBreachStatus === 'breached') { breached++; continue; }
-        if (r.slaBreachStatus === 'at_risk') { atRisk++; continue; }
-        if (typeof r.slaRemaining === 'number') {
-          if (r.slaRemaining <= 0) breached++;
-          else if (r.slaRemaining < 86400) atRisk++; // < 24h remaining
-          continue;
-        }
-        const createdMs = r.createdAt ? new Date(r.createdAt).getTime() : NaN;
-        if (Number.isFinite(createdMs)) {
-          const days = (Date.now() - createdMs) / 86400000;
-          if (days >= 7) breached++;
-          else if (days >= 3) atRisk++;
-        }
+        if (r.slaBreachStatus === 'SLA_BREACHED') { breached++; continue; }
+        if (typeof r.slaRemaining === 'number' && r.slaRemaining > 0 && r.slaRemaining < 24 * 60 * 60) atRisk++;
       }
       return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: visWorkbenchRows.length - atRisk - breached };
     }
