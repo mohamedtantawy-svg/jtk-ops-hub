@@ -54,7 +54,11 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentsError, setCommentsError] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
-  const [replyPublic, setReplyPublic] = useState(true);
+  // Default to INTERNAL — public replies go to the requester (often the
+  // affected employee), so making "public" an explicit affirmative click
+  // prevents an agent from accidentally publishing internal notes. Jira
+  // ignores this flag (its comments aren't split public/internal here).
+  const [replyPublic, setReplyPublic] = useState(false);
 
   // Track mount state so async handlers (reply send, comment refresh) don't
   // setState on an unmounted component if the user closes the modal mid-flight.
@@ -63,7 +67,7 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
 
   // Reset tab, reply, public toggle, and error state when task changes
   useEffect(()=>{
-    setTab('overview'); setReplyText(''); setReplyPublic(true);
+    setTab('overview'); setReplyText(''); setReplyPublic(false);
     setCommentsError(null); setComments([]);
   },[task.id]);
   // Sync linkedTickets when task changes
@@ -608,9 +612,17 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginTop:8}}>
                 <div style={{display:'flex',alignItems:'center',gap:8}}>
                   {task.source === 'zendesk' && (
-                    <label style={{display:'flex',alignItems:'center',gap:4,fontSize:11,color:'#616161',cursor:'pointer'}}>
-                      <input type="checkbox" checked={replyPublic} onChange={e=>setReplyPublic(e.target.checked)} style={{accentColor:'#7c3aed'}}/>
-                      Public reply
+                    <label
+                      title={replyPublic
+                        ? 'This reply will be sent to the requester.'
+                        : 'Internal notes are only visible to your team in Zendesk.'}
+                      style={{display:'inline-flex',alignItems:'center',gap:6,padding:'3px 10px',borderRadius:128,fontSize:11,fontWeight:600,cursor:'pointer',
+                        background:replyPublic?'#fef2f2':'#fef3c7',
+                        color:replyPublic?'#991b1b':'#92400E',
+                        border:`1px solid ${replyPublic?'#fca5a5':'#fde68a'}`,
+                      }}>
+                      <input type="checkbox" checked={replyPublic} onChange={e=>setReplyPublic(e.target.checked)} style={{accentColor:replyPublic?'#d42d35':'#92400E'}}/>
+                      {replyPublic ? 'Public — visible to requester' : 'Internal note'}
                     </label>
                   )}
                 </div>
@@ -623,7 +635,15 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
                       // Route reply to correct backend (Zendesk or Jira)
                       await postTicketAction(task.id,{action:'reply',message:replyText,public:replyPublic});
                       if (!mountedRef.current) return;
-                      addToast&&addToast('success','Reply sent','Your reply has been posted to the ticket.');
+                      const sentMode = task.source === 'zendesk'
+                        ? (replyPublic ? 'Public reply sent' : 'Internal note added')
+                        : 'Reply sent';
+                      const sentDetail = task.source === 'zendesk' && replyPublic
+                        ? 'Visible to the requester in Zendesk.'
+                        : task.source === 'zendesk'
+                          ? 'Only visible to your team in Zendesk.'
+                          : 'Your reply has been posted to the ticket.';
+                      addToast&&addToast('success',sentMode,sentDetail);
                       setReplyText('');
                       // Refresh comments — guard against unmount + re-dedup via ref
                       commentsFetchRef.current = null;
@@ -634,9 +654,18 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
                       if (mountedRef.current) setActionLoading(false);
                     }
                   }}
-                  style={{display:'inline-flex',alignItems:'center',gap:5,height:34,padding:'0 20px',borderRadius:128,border:'none',background:replyText.trim()&&!actionLoading?'#1b1b1b':'#e0e0e0',color:replyText.trim()&&!actionLoading?'white':'#9e9e9e',fontSize:12,fontWeight:700,cursor:replyText.trim()&&!actionLoading?'pointer':'not-allowed',transition:'all .15s'}}
+                  style={{display:'inline-flex',alignItems:'center',gap:5,height:34,padding:'0 20px',borderRadius:128,border:'none',
+                    background:!replyText.trim()||actionLoading?'#e0e0e0':(task.source==='zendesk'&&replyPublic?'#b91c1c':'#1b1b1b'),
+                    color:replyText.trim()&&!actionLoading?'white':'#9e9e9e',fontSize:12,fontWeight:700,
+                    cursor:replyText.trim()&&!actionLoading?'pointer':'not-allowed',transition:'all .15s'}}
                 >
-                  {actionLoading?<><i className="bi-hourglass-split" style={{fontSize:11}}></i>Sending...</>:<><i className="bi-send" style={{fontSize:11}}></i>Send Reply</>}
+                  {actionLoading
+                    ? <><i className="bi-hourglass-split" style={{fontSize:11}}></i>Sending...</>
+                    : task.source !== 'zendesk'
+                      ? <><i className="bi-send" style={{fontSize:11}}></i>Send Reply</>
+                      : replyPublic
+                        ? <><i className="bi-send-fill" style={{fontSize:11}}></i>Send Public Reply</>
+                        : <><i className="bi-journal-text" style={{fontSize:11}}></i>Add Internal Note</>}
                 </button>
               </div>
             </div>}
