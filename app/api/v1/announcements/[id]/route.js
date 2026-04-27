@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
+import { canManageAnnouncements, canArchiveAnnouncements } from '../../../../../src/lib/announcements-admin';
 
 export async function GET(req, { params }) {
   try {
@@ -50,18 +51,20 @@ export async function PATCH(req, { params }) {
     if (!user.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    // Only admins/managers can edit announcements
-    if (!['admin', 'regional_manager', 'manager', 'team_lead'].includes(user.role)) {
+    // Only admins/managers — or per-user announcements admins — can edit
+    // announcements.
+    if (!(await canManageAnnouncements(user))) {
       return NextResponse.json({ error: 'Only managers can edit announcements' }, { status: 403 });
     }
 
     const { id } = await params;
     const body = await req.json();
 
-    // Archiving is reserved for Regional Managers and Directors only.
-    // Team Leads can edit other fields but cannot toggle the archived state.
-    if (body.status === 'archived' && !['admin', 'regional_manager', 'manager'].includes(user.role)) {
-      return NextResponse.json({ error: 'Only Regional Managers and Directors can archive announcements' }, { status: 403 });
+    // Archiving is reserved for Regional Managers, Directors, or per-user
+    // announcements admins (Team Leads excluded). Team Leads can edit other
+    // fields but cannot toggle the archived state.
+    if (body.status === 'archived' && !(await canArchiveAnnouncements(user))) {
+      return NextResponse.json({ error: 'Only Regional Managers, Directors, or announcements admins can archive announcements' }, { status: 403 });
     }
 
     // Enum validation — kept in lockstep with POST + compose UI
@@ -125,9 +128,12 @@ export async function DELETE(req, { params }) {
     if (!user.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    // Only admins can delete announcements
-    if (user.role !== 'admin') {
-      return NextResponse.json({ error: 'Only admins can delete announcements' }, { status: 403 });
+    // Only admins or per-user announcements admins can delete announcements.
+    // Per-user grants extend the destroy privilege without granting full
+    // app-wide admin elsewhere.
+    const { canDeleteAnnouncements } = await import('../../../../../src/lib/announcements-admin');
+    if (!(await canDeleteAnnouncements(user))) {
+      return NextResponse.json({ error: 'Only admins or announcements admins can delete announcements' }, { status: 403 });
     }
 
     const { id } = await params;

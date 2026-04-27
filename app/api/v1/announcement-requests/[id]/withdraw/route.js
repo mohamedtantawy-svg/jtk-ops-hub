@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
-import { isApprover } from '../../../../../../src/data/approvers';
+import { canApproveAnnouncementRequests } from '../../../../../../src/lib/announcements-admin';
 import { recordAudit } from '../../../../../../src/lib/announcementFlow';
 
 // POST /api/v1/announcement-requests/:id/withdraw
@@ -21,7 +21,7 @@ export async function POST(req, { params }) {
     if (existing.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     const r = existing[0];
     const isRequester = String(r.requested_by_email || '').toLowerCase() === user.email.toLowerCase();
-    if (!isRequester && !isApprover(user.email)) {
+    if (!isRequester && !(await canApproveAnnouncementRequests(user))) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     if (!['pending', 'needs_info'].includes(r.status)) {

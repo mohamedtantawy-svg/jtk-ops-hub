@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { query } from '../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { isApprover } from '../../../../../src/data/approvers';
+import { isAnnouncementsAdmin } from '../../../../../src/lib/announcements-admin';
 import { normalizePayload, recordAudit } from '../../../../../src/lib/announcementFlow';
 
 // GET /api/v1/announcement-requests/:id — detail + comments + audit log
@@ -19,7 +20,7 @@ export async function GET(req, { params }) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
     const r = rows[0];
-    const approver = isApprover(user.email);
+    const approver = isApprover(user.email) || (await isAnnouncementsAdmin(user.email));
     const isRequester = String(r.requested_by_email || '').toLowerCase() === user.email.toLowerCase();
     if (!approver && !isRequester) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
@@ -113,7 +114,7 @@ export async function PATCH(req, { params }) {
     if (!['pending', 'needs_info'].includes(r.status)) {
       return NextResponse.json({ error: `Cannot edit a ${r.status} request` }, { status: 400 });
     }
-    const approver = isApprover(user.email);
+    const approver = isApprover(user.email) || (await isAnnouncementsAdmin(user.email));
     const isRequester = String(r.requested_by_email || '').toLowerCase() === user.email.toLowerCase();
     if (!approver && !isRequester) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });

@@ -40,7 +40,8 @@ export async function GET(req) {
     const { rows } = await query(
       `SELECT email, name, initials, title, access, manager_email, team, region,
               service, country, avatar_url, start_date, is_new, is_deleted,
-              on_leave, last_login_at, login_count, created_at, updated_at
+              on_leave, last_login_at, login_count, is_announcements_admin,
+              created_at, updated_at
          FROM team_member_overrides`
     );
 

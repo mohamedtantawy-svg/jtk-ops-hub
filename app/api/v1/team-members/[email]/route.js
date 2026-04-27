@@ -61,6 +61,8 @@ export async function PATCH(req, { params }) {
       avatarUrl: 'avatar_url',
       startDate: 'start_date',
       onLeave: 'on_leave',
+      // Per-user permission grants (Director-managed). Booleans, no enum.
+      isAnnouncementsAdmin: 'is_announcements_admin',
     };
 
     // Enum guards
@@ -82,6 +84,9 @@ export async function PATCH(req, { params }) {
         if (typeof val === 'string') val = val.trim();
         if (val === '') val = null;
         if (clientKey === 'managerEmail' && typeof val === 'string') val = val.toLowerCase();
+        // Coerce boolean permission flags so JSON `true`/`false` strings or
+        // numbers become real booleans for the JSONB write.
+        if (clientKey === 'isAnnouncementsAdmin') val = !!val;
         updates.push(dbCol);
         values.push(val);
       }
@@ -106,7 +111,8 @@ export async function PATCH(req, { params }) {
       SET ${updateSet}, updated_at = NOW()
       RETURNING email, name, initials, title, access, manager_email, team, region,
                 service, country, avatar_url, start_date, is_new, is_deleted,
-                on_leave, last_login_at, login_count, created_at, updated_at
+                on_leave, last_login_at, login_count, is_announcements_admin,
+                created_at, updated_at
     `;
 
     const { rows } = await query(sql, insertVals);
@@ -148,6 +154,16 @@ export async function PATCH(req, { params }) {
     invalidateRosterCache();
     await ensureRosterHydrated({ force: true });
 
+    // Also bust the announcements-admin per-user cache so the new flag
+    // value is honoured by the next announcement-route hit (otherwise
+    // there's up to 30s of stale-flag lag after a grant/revoke).
+    if (Object.prototype.hasOwnProperty.call(body, 'isAnnouncementsAdmin')) {
+      try {
+        const { bustAnnouncementsAdminCache } = await import('../../../../../src/lib/announcements-admin');
+        bustAnnouncementsAdminCache(email);
+      } catch {}
+    }
+
     return NextResponse.json({
       email: row.email,
       name: row.name,
@@ -166,6 +182,7 @@ export async function PATCH(req, { params }) {
       onLeave: row.on_leave,
       lastLoginAt: row.last_login_at ? (typeof row.last_login_at === 'string' ? row.last_login_at : row.last_login_at.toISOString()) : null,
       loginCount: row.login_count || 0,
+      isAnnouncementsAdmin: row.is_announcements_admin === true,
     });
   } catch (err) {
     console.error('[team-members PATCH]', err.message);

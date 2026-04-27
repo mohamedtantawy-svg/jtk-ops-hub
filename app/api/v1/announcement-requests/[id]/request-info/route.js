@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
-import { isApprover } from '../../../../../../src/data/approvers';
+import { canApproveAnnouncementRequests } from '../../../../../../src/lib/announcements-admin';
 import { recordAudit } from '../../../../../../src/lib/announcementFlow';
 
 // POST /api/v1/announcement-requests/:id/request-info
@@ -12,7 +12,7 @@ export async function POST(req, { params }) {
   try {
     const user = getAuthUser(req);
     if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!isApprover(user.email)) {
+    if (!(await canApproveAnnouncementRequests(user))) {
       return NextResponse.json({ error: 'Only approvers can ask for clarification' }, { status: 403 });
     }
     const { id } = await params;

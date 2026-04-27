@@ -76,7 +76,7 @@ export async function GET(req) {
           const { rows: ovRows } = await query(
             `SELECT email, name, initials, title, access, manager_email, team, region,
                     service, country, avatar_url, start_date, is_new, is_deleted,
-                    on_leave, last_login_at, login_count
+                    on_leave, last_login_at, login_count, is_announcements_admin
                FROM team_member_overrides`
           );
           const merged = mergeTeamMembers(ovRows);
@@ -169,6 +169,8 @@ export async function GET(req) {
         isActive: membersRow?.is_active ?? true,
         createdAt: membersRow?.created_at ?? null,
         updatedAt: membersRow?.updated_at ?? null,
+        // Additive per-user permission grants (Director-managed via Team tab).
+        isAnnouncementsAdmin: mergedEntry.isAnnouncementsAdmin === true,
       });
     }
 

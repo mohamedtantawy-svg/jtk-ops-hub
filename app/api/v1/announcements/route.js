@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { query } from '../../../../src/lib/db';
 import { getAuthUser } from '../../../../src/lib/auth-helpers';
 import { isApprover } from '../../../../src/data/approvers';
+import { isAnnouncementsAdmin, canManageAnnouncements } from '../../../../src/lib/announcements-admin';
 import { MEMBERS_BY_EMAIL } from '../../../../src/data/members';
 import {
   VALID_TARGETS,
@@ -93,9 +94,11 @@ export async function GET(req) {
     // return <100 rows AND `total` over-counted (it reflected the unfiltered
     // set). Now count + pagination operate on the audience-filtered set so
     // the UI never shows a phantom "page 5 of 10" that can't actually be
-    // reached. Admins still bypass — they see everything for moderation.
-    // Authors always see their own announcements regardless of target.
-    if (user.role !== 'admin') {
+    // reached. Admins (and per-user announcements admins) bypass — they
+    // see everything for moderation. Authors always see their own
+    // announcements regardless of target.
+    const isAnnAdmin = await isAnnouncementsAdmin(user.email);
+    if (user.role !== 'admin' && !isAnnAdmin) {
       const audienceClauses = [
         `(target IS NULL OR target = 'all' OR target = 'global')`,
       ];
@@ -225,7 +228,8 @@ export async function POST(req) {
     if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const allowedRoles = ['admin', 'regional_manager', 'manager', 'team_lead'];
     const approver = isApprover(user.email);
-    if (!approver && !allowedRoles.includes(user.role)) {
+    const annAdmin = await isAnnouncementsAdmin(user.email);
+    if (!approver && !annAdmin && !allowedRoles.includes(user.role)) {
       return NextResponse.json(
         { error: 'Not allowed to publish directly. Submit via the approval queue.' },
         { status: 403 }

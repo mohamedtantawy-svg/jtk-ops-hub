@@ -598,6 +598,18 @@ CREATE INDEX IF NOT EXISTS idx_tmo_is_new ON team_member_overrides(is_new) WHERE
 CREATE INDEX IF NOT EXISTS idx_tmo_is_deleted ON team_member_overrides(is_deleted) WHERE is_deleted = true;
 CREATE INDEX IF NOT EXISTS idx_tmo_last_login ON team_member_overrides(last_login_at DESC NULLS LAST);
 
+-- ── Per-user capabilities (2026-04-27) ─────────────────────────────────────
+-- Additive permission grants on top of the four-tier access model. Stored on
+-- team_member_overrides so a Director can grant/revoke them from the Team
+-- tab without giving someone full admin. First capability:
+--   • is_announcements_admin — manage the Announcements feature end to end
+--     (compose, approve, archive, override, send acknowledgements). Treated
+--     as if the user had `admin` for the announcements domain only — every
+--     other route still respects their normal access tier.
+ALTER TABLE team_member_overrides ADD COLUMN IF NOT EXISTS is_announcements_admin BOOLEAN DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS idx_tmo_is_announcements_admin
+  ON team_member_overrides(is_announcements_admin) WHERE is_announcements_admin = true;
+
 -- ── Personal Checklist (My To-Do) snapshots (2026-04-27) ───────────────────
 -- The My To-Do list lives in PersonalChecklist.jsx and historically stored
 -- items only in localStorage + IndexedDB on the client. That covers refresh

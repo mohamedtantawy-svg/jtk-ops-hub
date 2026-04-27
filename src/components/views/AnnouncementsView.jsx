@@ -20,16 +20,22 @@ import ApprovalQueueView from './ApprovalQueueView';
 const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComms, addToast, tasks, apiAcknowledge, apiCreate, apiSend, apiUpdate, apiArchive, apiRemove, apiTogglePin, openCompose, onComposeOpened, apiUnarchive, apiComments, apiSetComments, apiLoadComments, apiAddComment, apiDeleteComment, apiLinks, apiLoadLinks, apiLinkAnnouncement, apiUnlinkAnnouncement, apiReact }) => {
   const perms = useContext(PermissionsContext);
   const settings = useContext(SettingsContext);
-  const isLA = perms?.canDo('can_compose_comms')||perms?.canDo('can_compose_announcements')||isApprover(user?.email)||false;
-  const canPin = perms?.canDo('can_pin_announcement')||false;
-  // Archive/unarchive is restricted to Regional Managers and Directors only.
-  // perms.isAdmin is true iff the user has the can_manage_settings admin power,
-  // which only at_admin and at_regional_mgr carry by default. Team Leads keep
-  // compose/edit/send/pin but cannot toggle the archived state.
-  const canArchive = perms?.isAdmin || false;
-  // Approvers and admin-role users can send direct; everyone else submits a request.
+  // canManageAnnouncements is true for admins / RMs (via accessControl powers)
+  // AND for any user the Director has flipped on via the Team-tab "Manage
+  // permissions" modal. Treat this flag as a full announcements admin —
+  // they get everything an admin gets for the announcements domain only.
+  const isAnnAdmin = perms?.canManageAnnouncements || false;
+  const isLA = perms?.canDo('can_compose_comms')||perms?.canDo('can_compose_announcements')||isApprover(user?.email)||isAnnAdmin||false;
+  const canPin = perms?.canDo('can_pin_announcement')||isAnnAdmin||false;
+  // Archive/unarchive: Regional Managers, Directors, and per-user
+  // announcements admins. Team Leads keep compose/edit/send/pin but cannot
+  // toggle the archived state unless they've been granted the announcements
+  // admin permission explicitly.
+  const canArchive = perms?.isAdmin || isAnnAdmin || false;
+  // Approvers, admin-role users, and per-user announcements admins can send
+  // direct (and approve); everyone else submits via the approval queue.
   const canComposeRequest = true; // any authenticated user can ASK
-  const isApproverUser = isApprover(user?.email);
+  const isApproverUser = isApprover(user?.email) || isAnnAdmin;
 
   // ── State ──
   const [filter,setFilter]=useState('all');

@@ -137,6 +137,10 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
   const [addSaving, setAddSaving] = useState(false);
   const [actionMenuOpen, setActionMenuOpen] = useState(null); // email of member whose menu is open
   const [editAllocEmail, setEditAllocEmail] = useState(null); // email of member being re-allocated (modal)
+  const [permsModalEmail, setPermsModalEmail] = useState(null); // email of member whose permissions modal is open
+  const [permsDraft, setPermsDraft] = useState({ isAnnouncementsAdmin: false });
+  const [permsSaving, setPermsSaving] = useState(false);
+  const [permsError, setPermsError] = useState(null);
   const [allocForm, setAllocForm] = useState({ ...EMPTY_ALLOC });
   const [allocError, setAllocError] = useState(null);
   const [allocSaving, setAllocSaving] = useState(false);
@@ -237,6 +241,38 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
   const handleToggleLeave = async (email) => {
     setActionMenuOpen(null);
     await toggleOnLeave(email);
+  };
+
+  // ── Manage per-user permissions ────────────────────────────────────────
+  // Currently exposes one capability — Announcements Admin — which grants
+  // the user full access to the announcement workflow (compose, approve,
+  // archive, override, send acknowledgements). Saved via the same
+  // /api/v1/team-members/:email PATCH that handles allocation edits.
+  const openPermissionsModal = (email) => {
+    const member = localMembersByEmail[email];
+    setPermsDraft({ isAnnouncementsAdmin: member?.isAnnouncementsAdmin === true });
+    setPermsError(null);
+    setPermsModalEmail(email);
+    setActionMenuOpen(null);
+  };
+  const closePermissionsModal = () => {
+    setPermsModalEmail(null);
+    setPermsDraft({ isAnnouncementsAdmin: false });
+    setPermsError(null);
+  };
+  const handleSavePermissions = async () => {
+    if (!permsModalEmail) return;
+    setPermsSaving(true);
+    setPermsError(null);
+    try {
+      const ok = await updateMember(permsModalEmail, { isAnnouncementsAdmin: !!permsDraft.isAnnouncementsAdmin });
+      if (ok && ok.ok !== false) closePermissionsModal();
+      else setPermsError(ok?.error || 'Save failed');
+    } catch (e) {
+      setPermsError(e?.message || 'Save failed');
+    } finally {
+      setPermsSaving(false);
+    }
   };
 
   // ── Remove member (persisted soft-delete for baseline, hard-delete new) ─
@@ -436,6 +472,21 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                   <i className={lastLogin.tone === 'never' ? 'bi-person-slash' : 'bi-clock-history'} style={{ fontSize: 9 }} />
                   {lastLogin.tone === 'never' ? 'Never logged in' : lastLogin.label}
                 </span>
+                {member.isAnnouncementsAdmin && (
+                  <span
+                    title="This user has the Announcements Admin permission — full control over the announcement workflow (compose, approve, archive, override, send acknowledgements)."
+                    style={{
+                      background: '#f3eff8', color: '#7c3aed',
+                      fontSize: 10, fontWeight: 700,
+                      padding: '2px 8px', borderRadius: 128,
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <i className="bi-megaphone-fill" style={{ fontSize: 9 }} />
+                    Announcements Admin
+                  </span>
+                )}
                 {isOnLeave && (
                   <span style={{ background: '#fff8e6', color: '#ed8d00', fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 128 }}>On Leave</span>
                 )}
@@ -540,6 +591,24 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                   <i className={isOnLeave ? 'bi-person-check' : 'bi-calendar-x'} style={{ fontSize: 12, color: '#ed8d00' }} />
                   {isOnLeave ? 'End Leave' : 'Set On Leave'}
                 </button>
+                {/* Manage permissions — gated on the same edit gate as the
+                    PATCH route (admin / regional_manager). Hidden for everyone
+                    else so the menu item doesn't bait a 403. */}
+                {(isAdmin || (userMember && userMember.access === 'regional_manager')) && (
+                  <button
+                    onClick={() => openPermissionsModal(email)}
+                    style={{
+                      width: '100%', padding: '8px 14px', border: 'none', background: 'transparent',
+                      fontSize: 12, fontWeight: 500, color: '#1b1b1b', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = '#f9f8f6'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <i className="bi-shield-lock" style={{ fontSize: 12, color: '#7c3aed' }} />
+                    Manage permissions
+                  </button>
+                )}
                 <div style={{ height: 1, background: '#f2f2f2', margin: '2px 0' }} />
                 <button
                   onClick={() => setConfirmRemove(email)}
@@ -1314,6 +1383,99 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                   }}
                 >
                   {allocSaving ? 'Saving…' : 'Save allocation'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ── Manage permissions modal ────────────────────────────────────── */}
+      {permsModalEmail && (() => {
+        const target = localMembersByEmail[permsModalEmail];
+        const targetName = target?.name || permsModalEmail;
+        return (
+          <div
+            onClick={closePermissionsModal}
+            style={{
+              position: 'fixed', inset: 0, background: 'rgba(0,0,0,.32)', backdropFilter: 'blur(2px)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                background: 'white', borderRadius: 16,
+                width: 'min(92vw, 460px)',
+                boxShadow: '0 20px 50px rgba(0,0,0,.25)',
+                overflow: 'hidden',
+              }}
+            >
+              <div style={{ padding: '18px 22px 14px', borderBottom: '1px solid #f0eeec', display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: '#f3eff8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <i className="bi-shield-lock" style={{ fontSize: 16, color: '#7c3aed' }} />
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: '#1b1b1b' }}>Manage permissions</div>
+                  <div style={{ fontSize: 12, color: '#9e9e9e', marginTop: 1 }}>
+                    Additive grants for <strong style={{ color: '#1b1b1b' }}>{targetName}</strong>. These apply on top of their normal access tier.
+                  </div>
+                </div>
+              </div>
+              <div style={{ padding: '14px 22px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <label
+                  style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 10,
+                    padding: '12px 14px',
+                    border: `1.5px solid ${permsDraft.isAnnouncementsAdmin ? '#7c3aed' : '#e8e8e8'}`,
+                    borderRadius: 12,
+                    background: permsDraft.isAnnouncementsAdmin ? '#fbfafc' : 'white',
+                    cursor: 'pointer',
+                    transition: 'all .15s',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={permsDraft.isAnnouncementsAdmin}
+                    onChange={(e) => setPermsDraft({ ...permsDraft, isAnnouncementsAdmin: e.target.checked })}
+                    style={{ marginTop: 2, accentColor: '#7c3aed' }}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#1b1b1b', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <i className="bi-megaphone-fill" style={{ fontSize: 12, color: '#7c3aed' }} />
+                      Announcements Admin
+                    </div>
+                    <div style={{ fontSize: 11, color: '#616161', marginTop: 4, lineHeight: 1.5 }}>
+                      Full control over the announcement workflow — compose, approve / reject pending requests, archive &amp; unarchive, override draft fields before publishing, and send acknowledgement reminders. Treats this user as an admin for the announcements domain only; other permissions stay tied to their normal access tier.
+                    </div>
+                  </div>
+                </label>
+              </div>
+              <div style={{ padding: '12px 22px 18px', borderTop: '1px solid #f0eeec', display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'flex-end' }}>
+                {permsError && <span style={{ fontSize: 12, color: '#d42d35', fontWeight: 600 }}>{permsError}</span>}
+                <button
+                  onClick={closePermissionsModal}
+                  disabled={permsSaving}
+                  style={{
+                    padding: '8px 16px', borderRadius: 128, border: '1px solid #e8e8e8',
+                    background: 'white', color: '#1b1b1b', fontSize: 13, fontWeight: 600,
+                    cursor: permsSaving ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSavePermissions}
+                  disabled={permsSaving}
+                  style={{
+                    padding: '8px 18px', borderRadius: 128, border: 'none',
+                    background: permsSaving ? '#e8e8e8' : '#7c3aed',
+                    color: permsSaving ? '#9e9e9e' : 'white',
+                    fontSize: 13, fontWeight: 700,
+                    cursor: permsSaving ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {permsSaving ? 'Saving…' : 'Save'}
                 </button>
               </div>
             </div>
