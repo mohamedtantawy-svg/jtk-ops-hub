@@ -78,7 +78,11 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
     setCommentsError(null);
     fetchTicketComments(task.id)
       .then(data => { if (!cancelled && mountedRef.current) {
-        setComments((data.comments || []).slice(0, 2));
+        // Render the full comment list returned by /queue/[ticketId]/comments
+        // (server already caps at 5 via per_page=5). Previously sliced to the
+        // most recent 2, which silently hid 60% of the conversation context
+        // an agent needs before replying.
+        setComments(data.comments || []);
       }})
       .catch(err => { if (!cancelled && mountedRef.current) {
         setCommentsError(err?.message || 'Failed to load messages');
