@@ -129,6 +129,12 @@ export const scopeEscalations = (escalations, user, accessType, allMembers) => {
 // The set is reduced AFTER the audience filter runs.
 export const scopeAckMembers = (members, user, accessType, announcement) => {
   if (!Array.isArray(members)) return [];
+  // Per-user Announcements Admin grant: mirrors the Director's announcement
+  // scope (full roster) for ack-tracker visibility, regardless of the user's
+  // normal access tier. This is the "everything announcement-related uses
+  // admin scope" half of the grant — every other domain still respects
+  // their normal tier.
+  if (user?.isAnnouncementsAdmin === true) return members;
   // Sender override: whoever created / requested the announcement always
   // sees everyone, so delivery numbers are accurate for them.
   if (announcement && user) {
