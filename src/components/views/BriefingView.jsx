@@ -202,12 +202,17 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const slaScope=scope.filter(t=>t.status!=='waiting');
   const breached=slaScope.filter(t=>{const s=slaInfo(t);return s&&s.breach;});
   const atRisk=slaScope.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;});
-  // Onboarding source rows use age-based SLA (3d at-risk, 7d breached) — same
-  // as Queue.jsx. Uses the country-OR-assignee scoped `onboardingRows` so
-  // exec/team SLA aggregates (slaCompRate, orgBreach, orgBreachedTasks)
-  // line up with what the Onboarding tab displays.
-  const onbBreached=onboardingRows.filter(r=>{const ageMs=r.createdAt?Date.now()-new Date(r.createdAt).getTime():0;return ageMs/(1000*60*60*24)>=7;});
-  const onbAtRisk=onboardingRows.filter(r=>{const ageMs=r.createdAt?Date.now()-new Date(r.createdAt).getTime():0;const d=ageMs/(1000*60*60*24);return d>=3&&d<7;});
+  // Per-row SLA fields are now populated by normalizeSourceRows.js
+  // (Pilar's 2026-04-27 spec): Onboarding 7d, Paused Onboarding 48h-from-
+  // pausedAt, Offboarding 21d, Workbench 48h, Redlines 72h, Amendments 24h.
+  // The aggregate consumes those fields instead of recomputing — keeps the
+  // Briefing total in sync with what the per-row pill shows on each tab.
+  const onbBreached=onboardingRows.filter(r=>r.slaBreachStatus==='SLA_BREACHED');
+  const onbAtRisk=onboardingRows.filter(r=>{
+    if (r.slaBreachStatus==='SLA_BREACHED' || r.slaRemaining==null) return false;
+    // Within 24h of breach — same "at risk" band as the per-row pill.
+    return r.slaRemaining > 0 && r.slaRemaining <= 24*60*60;
+  });
   breached.push(...onbBreached);
   atRisk.push(...onbAtRisk);
   const newT=scope.filter(t=>t.status==='new');
@@ -354,14 +359,14 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   //                               per-agent counts omit these sources and a
   //                               footer note explains the gap.
   //
-  // Breach rules (match Queue.jsx):
+  // Breach rules (match Queue.jsx + normalizeSourceRows.js):
   //   • Tickets:       slaInfo(t).breach (null for waiting/resolved)
-  //   • Onboarding:    age ≥ 7 days (createdAt → now)
-  //   • Paused Onb:    age ≥ 7 days (pausedAt/updatedAt → now)
-  //   • Offboarding:   no per-row SLA field from admin → excluded
-  //   • Workbench / Amendments / Redlines:  slaBreachStatus === 'SLA_BREACHED'
+  //   • Every Deel queue (Onb / Paused Onb / Off / Wb / Amend / Redline):
+  //     reads slaBreachStatus === 'SLA_BREACHED' from the normalized row
+  //     so per-row pill and aggregate stay in lockstep with Pilar's spec
+  //     (Onb 7d, Paused 48h-from-pausedAt, Off 21d, Wb 48h, Redline 72h,
+  //     Amend 24h, paused 48h universal).
   const BASELINE_CAPACITY = 30;
-  const ONB_BREACH_MS = 7 * 24 * 60 * 60 * 1000;
 
   const allAgents = MEMBERS.filter(m => m.role === 'agent' && scopeIds.includes(m.id)).map(m => {
     const memEmail = (m.email || '').toLowerCase();
@@ -378,35 +383,29 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     const tEsc     = mTickets.filter(t => t.status === 'escalated').length;
     const tBreach  = mTickets.filter(t => { const s = slaInfo(t); return s && s.breach; }).length;
 
-    // — Onboarding (actionable queue rows are inherently "open") —
+    // — Onboarding (7-day SLA; per-row slaBreachStatus is the source of truth) —
     const mOnb = onboardingRowsAll.filter(r => r.assigneeEmail && r.assigneeEmail === memEmail);
     const onbOpen   = mOnb.length;
-    const onbBreach = mOnb.filter(r => {
-      if (!r.createdAt) return false;
-      return (Date.now() - new Date(r.createdAt).getTime()) >= ONB_BREACH_MS;
-    }).length;
+    const onbBreach = mOnb.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length;
 
-    // — Paused Onboarding (always paused by definition) —
+    // — Paused Onboarding (48h-from-pausedAt; per-row slaBreachStatus) —
     const mPausedOnb = pausedOnboardingRowsAll.filter(r => r.assigneeEmail && r.assigneeEmail === memEmail);
     const pausedOnbCount  = mPausedOnb.length;
-    const pausedOnbBreach = mPausedOnb.filter(r => {
-      const ts = r.pausedAt || r.updatedAt || r.createdAt;
-      if (!ts) return false;
-      return (Date.now() - new Date(ts).getTime()) >= ONB_BREACH_MS;
-    }).length;
+    const pausedOnbBreach = mPausedOnb.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length;
 
-    // — Offboarding (open by definition; no per-row breach field) —
+    // — Offboarding (21-day SLA; per-row slaBreachStatus now populated) —
     const mOff = offboardingRowsAll.filter(r => r.assigneeEmail && r.assigneeEmail === memEmail);
-    const offOpen = mOff.length;
+    const offOpen   = mOff.length;
+    const offBreach = mOff.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length;
 
-    // — Workbench (open by definition; BE-provided SLA flag) —
+    // — Workbench (48h-from-creation; per-row slaBreachStatus) —
     const mWb = workbenchRowsAll.filter(r => r.assigneeEmail && r.assigneeEmail === memEmail);
     const wbOpen   = mWb.length;
     const wbBreach = mWb.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length;
 
     const open    = tOpen + onbOpen + offOpen + wbOpen;
     const paused  = tPaused + pausedOnbCount;
-    const br      = tBreach + onbBreach + pausedOnbBreach + wbBreach;
+    const br      = tBreach + onbBreach + pausedOnbBreach + offBreach + wbBreach;
     const tc      = open + paused;   // strict invariant: Total = Open + Paused
 
     return { ...m, tc, br, open, paused, escalated: tEsc };

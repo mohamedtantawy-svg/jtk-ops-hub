@@ -938,10 +938,17 @@ function extractCountryFromCustomFields(customFields) {
 export async function listWorkbenchTasks(params = {}) {
   const statuses = params.statuses || ['TO_DO', 'IN_PROGRESS', 'ON_HOLD', 'ESCALATED'];
   const teamIds = params.teamIds || [HRX_OPERATIONS_TEAM_ID];
+  // Whether to also pull recently-completed tasks. Default ON so the queue
+  // and Briefing's "resolved today" count includes Workbench tasks closed
+  // in the last 24h — matches the cross-queue spec ("always show resolved
+  // items in the past 24h with no data loss across all Qs"). Caller can
+  // disable for endpoints that only care about the active backlog.
+  const includeCompleted = params.includeCompleted !== false;
+  const completedLookbackMs = (params.completedLookbackHours ?? 24) * 60 * 60 * 1000;
 
-  const buildQs = (cursor) => {
+  const buildQs = (cursor, statusList) => {
     const qs = new URLSearchParams();
-    for (const s of statuses) qs.append('status[]', s);
+    for (const s of statusList) qs.append('status[]', s);
     for (const id of teamIds) qs.append('teamIds[]', id);
     qs.set('limit', String(params.limit || WORKBENCH_PAGE_SIZE));
     if (cursor) qs.set('cursor', cursor);
@@ -952,7 +959,7 @@ export async function listWorkbenchTasks(params = {}) {
   let cursor = null;
   let serverCount = 0;
   for (let page = 0; page < WORKBENCH_MAX_PAGES; page++) {
-    const qs = buildQs(cursor);
+    const qs = buildQs(cursor, statuses);
     const res = await deelFetch(`/admin/ops_workbench/tasks?${qs.toString()}`);
     const pageItems = res?.result || [];
     serverCount = res?.count || serverCount;
@@ -960,6 +967,32 @@ export async function listWorkbenchTasks(params = {}) {
     allItems.push(...pageItems);
     cursor = res?.cursor || null;
     if (!cursor) break;
+  }
+
+  // Recently-completed tasks — bounded by `completedLookbackHours` (24h
+  // default) so the upstream call stays cheap. Fetch one page of COMPLETED
+  // ordered by completedAt desc, post-filter by timestamp. Items already in
+  // `allItems` (transitioning) are deduped by id below in the mapper.
+  if (includeCompleted) {
+    try {
+      const qs = buildQs(null, ['COMPLETED']);
+      const res = await deelFetch(`/admin/ops_workbench/tasks?${qs.toString()}`);
+      const pageItems = res?.result || [];
+      const cutoff = Date.now() - completedLookbackMs;
+      const seen = new Set(allItems.map(t => t.id));
+      let kept = 0;
+      for (const t of pageItems) {
+        if (seen.has(t.id)) continue;
+        const ts = t.completedAt ? new Date(t.completedAt).getTime() : 0;
+        if (!ts || ts < cutoff) continue;
+        allItems.push(t);
+        seen.add(t.id);
+        kept++;
+      }
+      if (kept > 0) console.info(`[workbench] kept ${kept} recently-completed task(s) (last ${completedLookbackMs / 3600000}h)`);
+    } catch (err) {
+      console.warn('[workbench] recently-completed fetch failed (non-fatal):', err.message);
+    }
   }
 
   const items = allItems.map(t => ({
@@ -973,6 +1006,11 @@ export async function listWorkbenchTasks(params = {}) {
                    || extractCountryFromCustomFields(t.taskConfiguration?.customFieldConfigurations)
                    || '',
     assignee:         t.assignee ? { id: t.assignee.id, email: t.assignee.email, name: t.assignee.name } : null,
+    // Flat alias so queue-scoping.js (which reads item.assigneeEmail) can
+    // match the assignee chain. Without this the workbench scope falls
+    // through to the country-owner path for every task — broader than the
+    // team spec, which calls for assignee-only on Workbench.
+    assigneeEmail:    t.assignee?.email || '',
     creator:          t.creator ? { id: t.creator.id, email: t.creator.email, name: t.creator.name } : null,
     createdAt:        t.createdAt || '',
     updatedAt:        t.updatedAt || '',

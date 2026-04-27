@@ -317,9 +317,15 @@ async function fetchZendeskQueue() {
         if (!seenZd.has(t.id)) { seenZd.add(t.id); allTickets.push(t); }
       }
     }
-    // Recently solved (last 4 hours) for transition detection — 1 page only
-    const solvedQuery = `group:"${ZD_GROUP_NAME}" status:solved updated<4hours`;
-    const solvedResults = await paginatedZendeskSearch(solvedQuery, { maxPages: 1 });
+    // Recently solved (last 24 hours) — keeps resolved tickets visible in
+    // the queue for a full day after they leave the active state. Pilar's
+    // rule: "always show the resolved items in the past 24h with no data
+    // loss across all Qs". Was 4 hours; bumped so a ticket Trish solved
+    // overnight is still represented in this morning's "resolved today"
+    // count. Page count bumped to 5 to keep the 24h window fully covered
+    // for high-volume teams.
+    const solvedQuery = `group:"${ZD_GROUP_NAME}" status:solved updated<24hours`;
+    const solvedResults = await paginatedZendeskSearch(solvedQuery, { maxPages: 5 });
     for (const t of solvedResults) {
       if (!seenZd.has(t.id)) { seenZd.add(t.id); allTickets.push(t); }
     }
@@ -357,6 +363,13 @@ async function fetchZendeskQueue() {
         lastCustomerResponseAt: t.updated_at, // Zendesk updated_at tracks last activity; this is a reasonable proxy
         createdAt: t.created_at,
         updatedAt: t.updated_at,
+        // Pilar's 2026-04-27 spec: every Zendesk ticket has a flat 24h SLA
+        // measured from the latest requester reply (using `updated_at` as the
+        // proxy — slaInfo() falls back to it as `minutesSinceLastResponse ??
+        // minutesAgo`). slaInfo() already excludes 'pending'/'hold' (mapped
+        // to 'waiting') and 'solved'/'closed' ('resolved'), so this only
+        // counts when the ticket is in 'new' or 'in_progress'.
+        slaMinsOverride: 24 * 60,
         externalUrl: ZD_SUBDOMAIN
           ? `https://${ZD_SUBDOMAIN}.zendesk.com/agent/tickets/${t.id}`
           : '',
@@ -436,6 +449,11 @@ function buildJiraJqlQueries(ownerFieldIds = {}) {
   // Completed" and any other creative name without us maintaining a list.
   // Paired with resolution to also drop resolved-but-still-open-statuswise.
   const statusFilter = `statusCategory != Done AND (resolution IS EMPTY OR resolution = Unresolved)`;
+  // Recently-resolved tickets — keep them visible for 24h after they
+  // transition to Done so the "Resolved (last 24h)" count never gaps when
+  // the team closes a batch overnight. JQL `resolved >= -24h` is a Jira-
+  // native relative time bound, no client-side post-filter needed.
+  const resolvedFilter = `statusCategory = Done AND resolved >= -24h`;
 
   // Roles that can make a ticket "ours": primary assignee, reporter, plus
   // any HRX-owner custom fields discovered dynamically.
@@ -446,16 +464,16 @@ function buildJiraJqlQueries(ownerFieldIds = {}) {
     roleFields.push(`cf[${num}]`);
   }
 
-  // One query per (role × email-chunk). With 104 emails / 20-per-chunk = 6
-  // chunks × 3 role fields = 18 sub-queries. Each is self-contained (own
-  // status filter + ORDER BY) so per-clause pagination works normally and
-  // fetchJiraQueue unions+dedups the results.
+  // One query per (role × email-chunk × bucket). Each is self-contained
+  // (own filter + ORDER BY) so per-clause pagination works normally and
+  // fetchJiraQueue unions+dedups across them.
   const emailChunks = chunkArray(ADMIN_EMAILS_LIST, EMAIL_CHUNK_SIZE);
   const queries = [];
   for (const roleField of roleFields) {
     for (const chunk of emailChunks) {
       const emailsList = chunk.map(e => `"${e}"`).join(', ');
       queries.push(`${roleField} IN (${emailsList}) AND ${statusFilter} ORDER BY updated DESC`);
+      queries.push(`${roleField} IN (${emailsList}) AND ${resolvedFilter} ORDER BY resolved DESC`);
     }
   }
   return queries;
@@ -613,11 +631,11 @@ async function fetchJiraQueue() {
         lastCustomerResponseAt: f.updated, // Jira updated tracks last activity
         createdAt: f.created,
         updatedAt: f.updated,
-        // Jira SLA is fixed at 24h from the latest update regardless of the
-        // inferred task type (Pilar's 2026-04-22 rule). slaInfo() in
+        // Jira SLA is fixed at 48h from the latest update (Pilar's 2026-
+        // 04-27 spec — bumped from the previous 24h). slaInfo() in
         // src/utils/helpers.js reads this override before falling back to
         // SLA_MINS[type].
-        slaMinsOverride: 1440,
+        slaMinsOverride: 48 * 60,
         externalUrl: JIRA_BASE ? `${JIRA_BASE}/browse/${issue.key}` : '',
         tags: f.labels || [],
         jiraStatus: statusName,
