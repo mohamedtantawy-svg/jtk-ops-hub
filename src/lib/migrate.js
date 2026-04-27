@@ -597,6 +597,28 @@ CREATE INDEX IF NOT EXISTS idx_tmo_manager ON team_member_overrides(manager_emai
 CREATE INDEX IF NOT EXISTS idx_tmo_is_new ON team_member_overrides(is_new) WHERE is_new = true;
 CREATE INDEX IF NOT EXISTS idx_tmo_is_deleted ON team_member_overrides(is_deleted) WHERE is_deleted = true;
 CREATE INDEX IF NOT EXISTS idx_tmo_last_login ON team_member_overrides(last_login_at DESC NULLS LAST);
+
+-- ── Personal Checklist (My To-Do) snapshots (2026-04-27) ───────────────────
+-- The My To-Do list lives in PersonalChecklist.jsx and historically stored
+-- items only in localStorage + IndexedDB on the client. That covers refresh
+-- and deploy churn but NOT browser data wipes, quota eviction, incognito,
+-- or device switches — any of which would destroy a user's personal task
+-- list silently. Snapshot persistence makes the list durable across all of
+-- those.
+--
+-- Shape: one row per user, keyed by user_email. items is the full JSON
+-- payload of the client-side items array (id, title, description, due_date,
+-- priority, done, created_at, updated_at). The server is treated as
+-- last-write-wins by updated_at: client writes its full snapshot on
+-- mutation (debounced); the next mount reconciles by comparing timestamps
+-- and adopting whichever side is newer. Local cache (localStorage+IDB)
+-- continues to provide instant paint + offline writes; the server is the
+-- durable backstop that survives browser-data wipes.
+CREATE TABLE IF NOT EXISTS personal_checklist_snapshots (
+  user_email VARCHAR(255) PRIMARY KEY,
+  items      JSONB NOT NULL DEFAULT '[]'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 `;
 
 export async function runMigrations() {

@@ -14,6 +14,16 @@ const DailySummary = ({ tasks = [], escalations = [], scope = 'team' }) => {
       (t.updatedMinsAgo ?? t.minutesAgo) <= minsSinceStart
     );
 
+    // The "Resolved" tile uses the in-scope all-time resolved count so it
+    // matches the Queue tab's Resolved counter (which is also all-time-in-
+    // scope). Daily-only resolutions still drive the summary sentence
+    // ("Today: N tasks resolved…") — that's the intent of that text.
+    // Without this alignment, Home shows "Resolved 0" while Queue shows
+    // "Resolved 7" for the same user, which reads as a real inconsistency.
+    const resolvedAll = tasks.filter(t =>
+      t.status === 'resolved' || t.status === 'closed'
+    );
+
     const newToday = tasks.filter(t =>
       t.minutesAgo != null &&
       t.minutesAgo <= minsSinceStart
@@ -59,10 +69,15 @@ const DailySummary = ({ tasks = [], escalations = [], scope = 'team' }) => {
       return `${h12}${suffix}-${nextH12}${nextSuffix}`;
     };
 
-    // Simple capacity estimate: resolved / (resolved + open active) as percentage
+    // "Completion" — share of today's incoming + held-over work that's
+    // already been resolved today. NOT a workload metric (that's the
+    // separate Workload chip on the hero ribbon, sized against a 30-task
+    // baseline). Renamed away from "Capacity" because the previous label
+    // collided with the Workload chip and confused agents who saw 0%
+    // here while the Workload chip read "Good" for the same backlog.
     const openActive = tasks.filter(t => t.status !== 'resolved' && t.status !== 'closed').length;
     const totalWork = resolvedToday.length + openActive;
-    const capacity = totalWork > 0 ? Math.round((resolvedToday.length / totalWork) * 100) : 100;
+    const completion = totalWork > 0 ? Math.round((resolvedToday.length / totalWork) * 100) : 100;
 
     const busiestStr = busiestHour !== null ? formatHour(busiestHour) : null;
 
@@ -73,15 +88,16 @@ const DailySummary = ({ tasks = [], escalations = [], scope = 'team' }) => {
     if (escalatedToday.length > 0) parts.push(`${escalatedToday.length} escalated`);
     if (breachesToday.length > 0) parts.push(`${breachesToday.length} SLA breach${breachesToday.length !== 1 ? 'es' : ''}`);
 
-    let summary = `Today: ${parts.join(', ')}. ${scope === 'team' ? 'Team' : 'Ops'} running at ${capacity}% capacity.`;
+    let summary = `Today: ${parts.join(', ')}. ${scope === 'team' ? 'Team' : 'Ops'} completion rate ${completion}%.`;
     if (busiestStr) summary += ` Busiest period: ${busiestStr}.`;
 
     return {
-      resolved: resolvedToday.length,
+      resolved: resolvedAll.length,
+      resolvedToday: resolvedToday.length,
       newCount: newToday.length,
       escalated: escalatedToday.length,
       breaches: breachesToday.length,
-      capacity,
+      completion,
       busiestHour: busiestStr,
       summary
     };
@@ -116,29 +132,40 @@ const DailySummary = ({ tasks = [], escalations = [], scope = 'team' }) => {
 
       {/* Stat strip */}
       <div style={{ display: 'flex', padding: '8px 16px 14px', gap: 8 }}>
-        {statItems.map(item => (
-          <div
-            key={item.label}
-            style={{
-              flex: 1, background: 'white', borderRadius: 10, padding: '10px 8px',
-              textAlign: 'center', border: '1px solid #E5E7EB'
-            }}
-          >
-            <i className={item.icon} style={{ fontSize: 14, color: item.color, display: 'block', marginBottom: 4 }}></i>
-            <div style={{ fontSize: 18, fontWeight: 800, color: '#1b1b1b' }}>{item.value}</div>
-            <div style={{ fontSize: 10, color: '#6B7280', fontWeight: 600, marginTop: 2 }}>{item.label}</div>
-          </div>
-        ))}
-        {/* Capacity gauge */}
+        {statItems.map(item => {
+          // The Resolved tile mirrors the Queue's "Resolved" counter (all-time
+          // in scope), not just today's resolutions, to keep the two surfaces
+          // consistent. Include today's count in the tooltip so the day-level
+          // detail isn't lost.
+          const tooltip = item.label === 'Resolved'
+            ? `${stats.resolved} resolved (in scope) — ${stats.resolvedToday} resolved today`
+            : undefined;
+          return (
+            <div
+              key={item.label}
+              title={tooltip}
+              style={{
+                flex: 1, background: 'white', borderRadius: 10, padding: '10px 8px',
+                textAlign: 'center', border: '1px solid #E5E7EB'
+              }}
+            >
+              <i className={item.icon} style={{ fontSize: 14, color: item.color, display: 'block', marginBottom: 4 }}></i>
+              <div style={{ fontSize: 18, fontWeight: 800, color: '#1b1b1b' }}>{item.value}</div>
+              <div style={{ fontSize: 10, color: '#6B7280', fontWeight: 600, marginTop: 2 }}>{item.label}</div>
+            </div>
+          );
+        })}
+        {/* Completion gauge — share of today's work that's been resolved. */}
         <div
           style={{
             flex: 1, background: 'white', borderRadius: 10, padding: '10px 8px',
             textAlign: 'center', border: '1px solid #E5E7EB'
           }}
+          title="Share of today's work (incoming + carried over) that's been resolved today"
         >
-          <i className="bi-speedometer2" style={{ fontSize: 14, color: stats.capacity >= 70 ? '#16A34A' : stats.capacity >= 40 ? '#D97706' : '#DC2626', display: 'block', marginBottom: 4 }}></i>
-          <div style={{ fontSize: 18, fontWeight: 800, color: '#1b1b1b' }}>{stats.capacity}%</div>
-          <div style={{ fontSize: 10, color: '#6B7280', fontWeight: 600, marginTop: 2 }}>Capacity</div>
+          <i className="bi-speedometer2" style={{ fontSize: 14, color: stats.completion >= 70 ? '#16A34A' : stats.completion >= 40 ? '#D97706' : '#DC2626', display: 'block', marginBottom: 4 }}></i>
+          <div style={{ fontSize: 18, fontWeight: 800, color: '#1b1b1b' }}>{stats.completion}%</div>
+          <div style={{ fontSize: 10, color: '#6B7280', fontWeight: 600, marginTop: 2 }}>Completion</div>
         </div>
       </div>
     </div>
