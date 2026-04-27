@@ -604,7 +604,7 @@ CREATE INDEX IF NOT EXISTS idx_tmo_last_login ON team_member_overrides(last_logi
 -- tab without giving someone full admin. First capability:
 --   • is_announcements_admin — manage the Announcements feature end to end
 --     (compose, approve, archive, override, send acknowledgements). Treated
---     as if the user had `admin` for the announcements domain only — every
+--     as if the user had 'admin' for the announcements domain only — every
 --     other route still respects their normal access tier.
 ALTER TABLE team_member_overrides ADD COLUMN IF NOT EXISTS is_announcements_admin BOOLEAN DEFAULT FALSE;
 CREATE INDEX IF NOT EXISTS idx_tmo_is_announcements_admin
