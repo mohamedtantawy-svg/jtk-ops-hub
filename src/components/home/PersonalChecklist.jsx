@@ -3,24 +3,41 @@
 // and priority.
 //
 // Durability contract (data MUST NOT be lost across refreshes / deploys / tab
-// churn / partial backend failures):
+// churn / partial backend failures / device switches / browser-cache wipes /
+// concurrent edits from multiple devices):
 //   1. Every mutation writes synchronously to localStorage (primary fast path).
 //   2. Every mutation also writes to IndexedDB (durable backup that survives
 //      even if localStorage is evicted due to quota pressure).
-//   3. On mount we read localStorage synchronously for instant paint, then
-//      asynchronously rehydrate from IDB. Whichever version is NEWER wins so
-//      we never overwrite newer data with stale data.
-//   4. A BroadcastChannel syncs mutations across tabs in real time; a
+//   3. Every mutation also pushes a debounced (600ms) PUT to the server
+//      (`personal_checklist_snapshots` in PostgreSQL). The server-side route
+//      performs a per-id last-write-wins MERGE against the existing snapshot
+//      (not a blind replace), so two devices editing concurrently can't
+//      clobber each other — every id present on either side is preserved,
+//      and the higher item.updatedAt wins per id. Deletes are explicit
+//      tombstones (`deleted: true`), so a delete on device A propagates to
+//      device B instead of being silently re-added when B pushes its copy.
+//   4. On mount we read localStorage synchronously for instant paint, then
+//      asynchronously rehydrate from IDB AND fetch the server snapshot.
+//      Reconciliation is last-write-wins by snapshot `updated_at` for the
+//      INITIAL adoption; subsequent edits go through the per-id merge in
+//      step 3 so no item is ever lost.
+//   5. A BroadcastChannel syncs mutations across tabs in real time; a
 //      `storage` event listener catches other tabs as a belt-and-braces backup.
-//   5. Items migrated from the legacy {id,text,done} shape once on first read
-//      and preserved forever — no data is ever dropped. Missing `priority`
-//      on existing items defaults to `normal`.
-//   6. All writes are best-effort — any thrown error is caught and the app
-//      keeps running; the user never sees their input vanish.
+//   6. Items migrated from the legacy {id,text,done} shape once on first read
+//      and preserved forever — no data is ever dropped. Tombstones survive
+//      the round-trip through LS / IDB / server so cross-device delete sync
+//      works. Missing `priority` on existing items defaults to `normal`.
+//   7. All writes are best-effort — any thrown error is caught and the app
+//      keeps running; the user never sees their input vanish. If the server
+//      PUT fails (offline / 5xx), the snapshot still lives in LS+IDB and is
+//      pushed up on the next mount.
+//   8. Tombstones older than 30 days are pruned server-side during the merge
+//      to keep the snapshot from growing without bound.
 //
 // Works for every role (Agent / Team Lead / Regional Manager / Admin/Director).
 // ─────────────────────────────────────────────────────────────────────────────
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { fetchChecklistSnapshot, putChecklistSnapshot } from '../../services/personalChecklistApi';
 
 const LEGACY_KEY = 'ops_hub_checklist';
 const SYNC_CHANNEL = 'ops_hub_checklist_sync';
@@ -46,10 +63,21 @@ function storageKey(userEmail) {
   return e ? `ops_hub_checklist_v2:${e}` : 'ops_hub_checklist_v2';
 }
 
-// Normalize an item from either the legacy shape {id,text,done} or the v2 shape
+// Normalize an item from either the legacy shape {id,text,done} or the v2 shape.
+// Preserves `deleted: true` tombstones so they survive the round-trip through
+// LS/IDB/server and continue to suppress the row across devices until the
+// server's TTL prunes them.
 function migrateItem(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const now = Date.now();
+  if (raw.deleted === true) {
+    return {
+      id: raw.id != null ? raw.id : now + Math.random(),
+      deleted: true,
+      createdAt: Number.isFinite(raw.createdAt) ? raw.createdAt : now,
+      updatedAt: Number.isFinite(raw.updatedAt) ? raw.updatedAt : now,
+    };
+  }
   const priority = typeof raw.priority === 'string' && VALID_PRIORITIES.has(raw.priority)
     ? raw.priority
     : 'normal';
@@ -418,6 +446,14 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
   const [showAddForm, setShowAddForm] = useState(false);
   const titleInputRef = useRef(null);
   const skipNextWriteRef = useRef(false); // set when we adopt a broadcast so we don't echo
+  // Server sync state — `serverSyncedRef` flips true after the first GET +
+  // reconciliation completes. The debounced server-PUT effect waits for it
+  // so we never overwrite a fresh server snapshot with the empty initial
+  // state. `skipNextServerPushRef` mutes a single PUT after we adopted the
+  // server's snapshot (so we don't immediately re-push what we just pulled).
+  const serverSyncedRef = useRef(false);
+  const skipNextServerPushRef = useRef(false);
+  const serverPushTimerRef = useRef(null);
 
   // Rehydrate from IDB once. If IDB has newer data than what we loaded, adopt it.
   useEffect(() => {
@@ -453,6 +489,85 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
     const ch = getChannel();
     if (ch) { try { ch.postMessage({ userKey, items, ts }); } catch {} }
   }, [items, key, userKey]);
+
+  // ── Server reconcile (one-shot on mount) ──────────────────────────────────
+  // Pull the durable snapshot from PostgreSQL. Compare `updated_at` from the
+  // server with the LS-recorded `ts` we have locally:
+  //   • Server newer  → adopt server items (replaces LS — cross-device sync).
+  //   • Local newer   → push local snapshot up (covers fresh devices and
+  //                     items added while offline).
+  //   • Equal/empty   → no-op; subsequent mutations sync via the PUT effect.
+  // If the call fails (offline, 5xx after retry), we silently bail; the next
+  // mount will retry, and any local writes in the meantime are queued in LS.
+  useEffect(() => {
+    if (!userEmail) { serverSyncedRef.current = true; return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await fetchChecklistSnapshot();
+        if (cancelled) return;
+        const serverItems = Array.isArray(data?.items) ? data.items.map(migrateItem).filter(Boolean) : [];
+        const serverTs = data?.updatedAt ? new Date(data.updatedAt).getTime() : 0;
+        const ls = readFromLS(key);
+        const localTs = ls?.ts || 0;
+        const localItems = ls?.items || [];
+
+        if (serverTs > localTs && serverItems.length) {
+          // Server is the freshest writer (e.g. user edited from another
+          // device, or local was wiped). Adopt server and skip both the
+          // local-write effect (since we mirror it manually here so LS is
+          // immediately consistent) and the immediate PUT echo.
+          skipNextWriteRef.current = true;
+          skipNextServerPushRef.current = true;
+          writeToLS(key, serverItems);
+          idbWrite(userKey, serverItems);
+          setItems(serverItems);
+        } else if (localItems.length > 0 && (serverTs === 0 || localTs > serverTs)) {
+          // Local has fresher data — push it up so the server is now the
+          // durable backstop. Don't await; UI is already correct.
+          putChecklistSnapshot(localItems).catch(() => {});
+        }
+      } catch {
+        // Offline / transient — no-op. Local cache is still authoritative.
+      } finally {
+        if (!cancelled) serverSyncedRef.current = true;
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userEmail]);
+
+  // ── Server PUT on change (debounced) ───────────────────────────────────────
+  // Every mutation kicks a 600ms debounced PUT. The server-side route now
+  // performs a per-id last-write-wins merge against the existing snapshot
+  // and returns the merged set, so we adopt the response — that's how items
+  // added on another device land in this tab without waiting for the next
+  // mount. We only re-set state when the merged set differs in length from
+  // what we sent (cheap heuristic: another device added or a tombstone was
+  // pruned); identical-length responses skip the setItems to avoid an echo
+  // loop. PUT failures are silent — local LS still holds the data and the
+  // next mount re-syncs.
+  useEffect(() => {
+    if (!userEmail) return;
+    if (!serverSyncedRef.current) return;
+    if (skipNextServerPushRef.current) { skipNextServerPushRef.current = false; return; }
+    clearTimeout(serverPushTimerRef.current);
+    const sent = items;
+    serverPushTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await putChecklistSnapshot(sent);
+        if (res && Array.isArray(res.items) && res.items.length !== sent.length) {
+          const merged = res.items.map(migrateItem).filter(Boolean);
+          skipNextWriteRef.current = true;
+          skipNextServerPushRef.current = true;
+          writeToLS(key, merged);
+          idbWrite(userKey, merged);
+          setItems(merged);
+        }
+      } catch {}
+    }, 600);
+    return () => clearTimeout(serverPushTimerRef.current);
+  }, [items, userEmail, key, userKey]);
 
   // Adopt cross-tab changes (BroadcastChannel primary, storage event fallback)
   useEffect(() => {
@@ -515,8 +630,16 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
     setItems(prev => prev.map(i => i.id === id ? { ...i, done: !i.done, updatedAt: Date.now() } : i));
   }, []);
 
+  // Soft delete via tombstone — the row stays in the items array with
+  // `deleted: true` and a fresh updatedAt. The display filters tombstones
+  // out, but persistence (LS, IDB, server) keeps them so the deletion
+  // syncs to other devices instead of being silently re-added next time
+  // they push their copy. Tombstones are pruned server-side after 30 days.
   const remove = useCallback((id) => {
-    setItems(prev => prev.filter(i => i.id !== id));
+    setItems(prev => prev.map(i => i.id === id
+      ? { id: i.id, deleted: true, createdAt: i.createdAt || Date.now(), updatedAt: Date.now() }
+      : i
+    ));
     setExpandedId(curr => curr === id ? null : curr);
   }, []);
 
@@ -525,6 +648,9 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
   }, []);
 
   // ── Derived ──────────────────────────────────────────────────────────────
+  // Tombstones (`deleted: true`) live in the persistence layer for cross-
+  // device sync but never render — strip them at the display boundary.
+  const liveItems = items.filter(i => !i.deleted);
   // Sort order (most actionable first):
   //   1. Done items sink to the bottom.
   //   2. Incomplete items sort by due-date bucket (overdue → today → tomorrow
@@ -533,7 +659,7 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
   //      low) — so an "urgent + due today" always beats "normal + due today".
   //   4. Within a bucket+priority, the earlier literal due date wins.
   //   5. Finally, creation order keeps identical items stable.
-  const sorted = [...items].sort((a, b) => {
+  const sorted = [...liveItems].sort((a, b) => {
     if (a.done !== b.done) return a.done ? 1 : -1;
     const ab = dueBucket(a.dueDate);
     const bb = dueBucket(b.dueDate);
@@ -546,11 +672,11 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
     if (ad && bd && ad !== bd) return ad.localeCompare(bd);
     return (a.createdAt || 0) - (b.createdAt || 0);
   });
-  const doneCount = items.filter(i => i.done).length;
-  const openCount = items.length - doneCount;
-  const overdueCount = items.filter(i => !i.done && i.dueDate && new Date(i.dueDate + 'T00:00:00') < new Date(todayISO() + 'T00:00:00')).length;
-  const todayCount = items.filter(i => !i.done && i.dueDate === todayISO()).length;
-  const progressPct = items.length > 0 ? Math.round((doneCount / items.length) * 100) : 0;
+  const doneCount = liveItems.filter(i => i.done).length;
+  const openCount = liveItems.length - doneCount;
+  const overdueCount = liveItems.filter(i => !i.done && i.dueDate && new Date(i.dueDate + 'T00:00:00') < new Date(todayISO() + 'T00:00:00')).length;
+  const todayCount = liveItems.filter(i => !i.done && i.dueDate === todayISO()).length;
+  const progressPct = liveItems.length > 0 ? Math.round((doneCount / liveItems.length) * 100) : 0;
 
   // ── UI ───────────────────────────────────────────────────────────────────
   // Primary variant fills a tall left-column slot: bigger header, gradient
@@ -594,7 +720,7 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div style={{ fontSize: primary ? 16 : 15, fontWeight: 700, color: '#1b1b1b' }}>My To-Do</div>
-            {primary && items.length > 0 && (
+            {primary && liveItems.length > 0 && (
               <span style={{ background: '#f3eff8', borderRadius: 128, padding: '3px 10px', fontSize: 11, fontWeight: 700, color: '#8b6dca' }}>{openCount} open</span>
             )}
           </div>
@@ -602,7 +728,7 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
             {primary ? 'Your personal to-do list — saved on this device and synced across tabs' : 'Your personal to-do list — saved locally and across tabs'}
           </div>
         </div>
-        {items.length > 0 && (
+        {liveItems.length > 0 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: primary ? 8 : 6, flexShrink: 0 }}>
             {todayCount > 0 && primary && (
               <span title={`${todayCount} due today`} style={{ fontSize: 10, fontWeight: 700, color: '#ed8d00', background: '#FEF3C7', padding: '3px 9px', borderRadius: 99, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
@@ -614,13 +740,13 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
                 <i className="bi-exclamation-circle-fill" style={{ fontSize: 9, marginRight: 3 }}></i>{overdueCount}
               </span>
             )}
-            <span style={{ fontSize: primary ? 12 : 11, color: '#9e9e9e', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{doneCount}/{items.length}</span>
+            <span style={{ fontSize: primary ? 12 : 11, color: '#9e9e9e', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{doneCount}/{liveItems.length}</span>
           </div>
         )}
       </div>
 
       {/* Progress bar (primary only, only if there are items) */}
-      {primary && items.length > 0 && (
+      {primary && liveItems.length > 0 && (
         <div style={{ padding: '10px 22px 0', flexShrink: 0 }}>
           <div style={{ height: 6, borderRadius: 999, background: '#f3f0f8', overflow: 'hidden' }}>
             <div style={{
@@ -788,7 +914,7 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
         overflowY: 'auto',
         minHeight: primary ? 180 : 'auto',
       }}>
-        {items.length === 0 && !showAddForm && (
+        {liveItems.length === 0 && !showAddForm && (
           <div style={{
             padding: primary ? '48px 24px 40px' : '20px 0',
             textAlign: 'center',
