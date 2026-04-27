@@ -57,6 +57,29 @@ export async function POST(req) {
       );
     }
 
+    // Hydrate per-user permission flags from team_member_overrides so the
+    // login response (and the localStorage snapshot it writes via
+    // /auth/callback) carries them. Without this, App.jsx's user state
+    // never sees `isAnnouncementsAdmin: true` until a /me revalidation
+    // runs — and that's gated to tokens older than 1 hour, so freshly-
+    // granted users wouldn't get the permission until their token aged.
+    try {
+      const { rows: permRows } = await query(
+        `SELECT is_announcements_admin
+           FROM team_member_overrides
+          WHERE email = $1`,
+        [trimmed]
+      );
+      if (permRows.length > 0) {
+        user.isAnnouncementsAdmin = permRows[0].is_announcements_admin === true;
+      } else {
+        user.isAnnouncementsAdmin = false;
+      }
+    } catch (permErr) {
+      console.warn('[auth/login] permission flag lookup failed:', permErr.message);
+      user.isAnnouncementsAdmin = false;
+    }
+
     // Record login for the Team-tab last-login badge (best-effort)
     try {
       await query(
