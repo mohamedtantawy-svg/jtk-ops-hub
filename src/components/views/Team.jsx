@@ -3,6 +3,8 @@ import { PermissionsContext, IntegrationsContext } from '../../App';
 import { FLAGS } from '../../data/constants';
 import { slaInfo } from '../../utils/helpers';
 import { useTeamMembers } from '../../hooks/useTeamMembers';
+import { useQueueSlaSettings, broadcastQueueSlaUpdate } from '../../hooks/useQueueSlaSettings';
+import { putQueueSlaSettings } from '../../services/queueSlaSettingsApi';
 import Avatar from '../ui/Avatar';
 import PageHeader from '../ui/PageHeader';
 
@@ -1318,7 +1320,260 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
           </div>
         );
       })()}
+
+      {/* ── Queue SLA settings ─ editable threshold table at the bottom ── */}
+      <QueueSlaSettingsCard />
     </div>
+  );
+};
+
+// ── QueueSlaSettingsCard ───────────────────────────────────────────────────
+// Director / RM / TL editable table that controls the SLA windows applied to
+// every queue (ZD / Jira / Workbench / Amendments / Redlines / Onboarding /
+// Offboarding) plus the universal paused window. Persisted in app_settings.
+// Anyone below TL sees read-only values. Saving triggers a BroadcastChannel
+// ping so every open tab adopts the new thresholds without a refresh.
+const QUEUE_META = [
+  { id: 'zendesk',     label: 'Zendesk',     anchor: 'last requester reply',  hasPaused: false },
+  { id: 'jira',        label: 'Jira',        anchor: 'last update',           hasPaused: false },
+  { id: 'workbench',   label: 'Workbench',   anchor: 'creation',              hasPaused: true  },
+  { id: 'amendments',  label: 'Amendments',  anchor: 'creation',              hasPaused: true  },
+  { id: 'redlines',    label: 'Redlines',    anchor: 'creation',              hasPaused: true  },
+  { id: 'onboarding',  label: 'Onboarding',  anchor: 'creation',              hasPaused: true  },
+  { id: 'offboarding', label: 'Offboarding', anchor: 'creation',              hasPaused: true  },
+];
+
+// Render `mins` as the most natural unit for the queue's spec (days when
+// ≥ 24h, hours otherwise). Edit input uses the raw minutes so saves are
+// lossless. The unit suffix is for display only.
+function formatMins(mins) {
+  if (!Number.isFinite(mins) || mins <= 0) return '—';
+  if (mins % (24 * 60) === 0) {
+    const days = mins / (24 * 60);
+    return `${days}d`;
+  }
+  if (mins % 60 === 0) return `${mins / 60}h`;
+  return `${mins}m`;
+}
+// Parse a user input like "24h" / "7d" / "1440" → minutes. Returns null on
+// a value we can't interpret so the form can show an inline error.
+function parseDurationToMins(input) {
+  if (input == null) return null;
+  const s = String(input).trim().toLowerCase();
+  if (!s) return null;
+  const m = s.match(/^(\d+(?:\.\d+)?)\s*([mhd]?)$/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const unit = m[2] || 'm';   // bare number → minutes
+  if (unit === 'm') return Math.round(n);
+  if (unit === 'h') return Math.round(n * 60);
+  if (unit === 'd') return Math.round(n * 24 * 60);
+  return null;
+}
+
+const QueueSlaSettingsCard = () => {
+  const perms = useContext(PermissionsContext);
+  const canEdit = !!(perms?.isAdmin || perms?.canDo?.('can_manage_team') || perms?.canDo?.('can_manage_settings'));
+  const { sla, updatedBy, updatedAt, isLoading } = useQueueSlaSettings();
+
+  // Local edit state — primed from the loaded settings, kept as { activeMins, pausedMins } per queue.
+  const [draft, setDraft] = useState(sla);
+  const [pausedMins, setPausedMins] = useState(48 * 60); // universal paused window — derived from any queue's pausedMins
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState(null);
+  const [error, setError] = useState('');
+
+  // Re-prime the form whenever the hook delivers fresh settings.
+  useEffect(() => {
+    setDraft(sla);
+    // Universal paused window — pick the first queue that has one. They all
+    // default to the same value, but the UI lets you change it once and we
+    // apply it across every queue that supports paused.
+    const firstWithPaused = QUEUE_META.find(q => q.hasPaused && Number.isFinite(sla?.[q.id]?.pausedMins));
+    if (firstWithPaused) setPausedMins(sla[firstWithPaused.id].pausedMins);
+  }, [sla]);
+
+  function setQueueActive(queueId, mins) {
+    setDraft(d => ({ ...d, [queueId]: { ...(d?.[queueId] || {}), activeMins: mins } }));
+  }
+  function setUniversalPaused(mins) {
+    setPausedMins(mins);
+    setDraft(d => {
+      const next = { ...d };
+      for (const q of QUEUE_META) if (q.hasPaused) next[q.id] = { ...(next[q.id] || {}), pausedMins: mins };
+      return next;
+    });
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setError('');
+    try {
+      const payload = {};
+      for (const q of QUEUE_META) {
+        const cfg = draft?.[q.id] || {};
+        const entry = { activeMins: cfg.activeMins };
+        if (q.hasPaused) entry.pausedMins = cfg.pausedMins ?? pausedMins;
+        payload[q.id] = entry;
+      }
+      const res = await putQueueSlaSettings(payload);
+      // Ping other tabs (and the SLA hook in this tab) so per-row pills
+      // adopt the new thresholds without a manual refresh.
+      if (res && res.sla) broadcastQueueSlaUpdate(res);
+      setSavedAt(new Date());
+    } catch (e) {
+      setError(e?.message || 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{
+      marginTop: 24, background: 'white', border: '1px solid #e8e8e8', borderRadius: 16,
+      overflow: 'hidden',
+    }}>
+      <div style={{ padding: '16px 22px 12px', borderBottom: '1px solid #f0eeec', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ width: 32, height: 32, borderRadius: 10, background: '#f3eff8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <i className="bi-shield-check" style={{ fontSize: 14, color: '#7c3aed' }} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: '#1b1b1b' }}>Queue SLA settings</div>
+          <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 1 }}>
+            {canEdit
+              ? 'Set the SLA window for each queue. Saved values apply across the app immediately.'
+              : 'Read-only — only Directors / Regional Managers / Team Leads can edit.'}
+            {updatedBy && updatedAt && (
+              <span> · Last updated by <strong>{updatedBy}</strong> · {new Date(updatedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ padding: '4px 22px 18px' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid #f0eeec' }}>
+              <th style={{ textAlign: 'left',  padding: '10px 8px', fontSize: 11, fontWeight: 700, color: '#9e9e9e', letterSpacing: '.04em', textTransform: 'uppercase' }}>Queue</th>
+              <th style={{ textAlign: 'left',  padding: '10px 8px', fontSize: 11, fontWeight: 700, color: '#9e9e9e', letterSpacing: '.04em', textTransform: 'uppercase' }}>Active SLA from</th>
+              <th style={{ textAlign: 'right', padding: '10px 8px', fontSize: 11, fontWeight: 700, color: '#9e9e9e', letterSpacing: '.04em', textTransform: 'uppercase' }}>Active window</th>
+              <th style={{ textAlign: 'right', padding: '10px 8px', fontSize: 11, fontWeight: 700, color: '#9e9e9e', letterSpacing: '.04em', textTransform: 'uppercase' }}>Paused window</th>
+            </tr>
+          </thead>
+          <tbody>
+            {QUEUE_META.map(q => {
+              const cfg = draft?.[q.id] || {};
+              return (
+                <tr key={q.id} style={{ borderBottom: '1px solid #f7f5f2' }}>
+                  <td style={{ padding: '10px 8px', fontWeight: 600, color: '#1b1b1b' }}>{q.label}</td>
+                  <td style={{ padding: '10px 8px', color: '#616161' }}>{q.anchor}</td>
+                  <td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                    <SlaInput
+                      value={cfg.activeMins}
+                      disabled={!canEdit || saving || isLoading}
+                      onCommit={(mins) => setQueueActive(q.id, mins)}
+                    />
+                  </td>
+                  <td style={{ padding: '6px 8px', textAlign: 'right', color: q.hasPaused ? '#1b1b1b' : '#c5c5c5' }}>
+                    {q.hasPaused ? formatMins(cfg.pausedMins ?? pausedMins) : 'n/a'}
+                  </td>
+                </tr>
+              );
+            })}
+            <tr style={{ background: '#fbfafc' }}>
+              <td colSpan={2} style={{ padding: '12px 8px', fontWeight: 700, color: '#1b1b1b' }}>
+                Universal paused window
+                <span style={{ marginLeft: 8, fontWeight: 500, fontSize: 11, color: '#9e9e9e' }}>(applies to every queue with a pause state)</span>
+              </td>
+              <td style={{ padding: '12px 8px', textAlign: 'right', color: '#9e9e9e', fontSize: 11 }}>—</td>
+              <td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                <SlaInput
+                  value={pausedMins}
+                  disabled={!canEdit || saving || isLoading}
+                  onCommit={setUniversalPaused}
+                />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'flex-end' }}>
+          {error && <span style={{ fontSize: 12, color: '#d42d35', fontWeight: 600 }}>{error}</span>}
+          {savedAt && !error && (
+            <span style={{ fontSize: 12, color: '#15803d', fontWeight: 600 }}>
+              Saved at {savedAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
+          {canEdit && (
+            <button
+              onClick={handleSave}
+              disabled={saving || isLoading}
+              style={{
+                padding: '8px 18px', borderRadius: 128, border: 'none',
+                background: saving ? '#e8e8e8' : '#7c3aed',
+                fontSize: 13, fontWeight: 700,
+                color: saving ? '#9e9e9e' : 'white',
+                cursor: saving ? 'not-allowed' : 'pointer',
+                transition: 'all .15s',
+              }}
+            >
+              {saving ? 'Saving…' : 'Save SLA settings'}
+            </button>
+          )}
+        </div>
+        <div style={{ marginTop: 10, fontSize: 11, color: '#9e9e9e' }}>
+          Tip: enter values like <code style={{ background: '#f5f5f5', padding: '1px 5px', borderRadius: 4 }}>24h</code>, <code style={{ background: '#f5f5f5', padding: '1px 5px', borderRadius: 4 }}>7d</code>, or <code style={{ background: '#f5f5f5', padding: '1px 5px', borderRadius: 4 }}>2880</code> (raw minutes). Per-row SLA pills and the Briefing aggregate update on next sync.
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Small inline input that accepts free-text duration ("24h" / "7d" / "1440")
+// and commits to the parent on blur or Enter. Renders the formatted value
+// when not focused so the row stays scannable.
+const SlaInput = ({ value, disabled, onCommit }) => {
+  const [draft, setDraft] = useState(formatMins(value));
+  const [focused, setFocused] = useState(false);
+  const [bad, setBad] = useState(false);
+
+  useEffect(() => { if (!focused) setDraft(formatMins(value)); }, [value, focused]);
+
+  const commit = () => {
+    setFocused(false);
+    const mins = parseDurationToMins(draft);
+    if (mins == null || mins <= 0) {
+      setBad(true);
+      setDraft(formatMins(value));
+      setTimeout(() => setBad(false), 1500);
+      return;
+    }
+    setBad(false);
+    if (mins !== value) onCommit(mins);
+  };
+
+  return (
+    <input
+      value={draft}
+      disabled={disabled}
+      onChange={e => setDraft(e.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={commit}
+      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } }}
+      style={{
+        width: 90, textAlign: 'right',
+        padding: '6px 10px',
+        borderRadius: 8,
+        border: `1px solid ${bad ? '#d42d35' : '#e8e8e8'}`,
+        fontSize: 13, fontFamily: 'inherit', color: disabled ? '#9e9e9e' : '#1b1b1b',
+        background: disabled ? '#fafafa' : 'white',
+        outline: 'none',
+        transition: 'border-color .15s',
+      }}
+      onFocusCapture={e => { if (!disabled) e.target.style.borderColor = '#7c3aed'; }}
+      onBlurCapture={e => { e.target.style.borderColor = bad ? '#d42d35' : '#e8e8e8'; }}
+    />
   );
 };
 

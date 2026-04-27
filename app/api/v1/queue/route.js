@@ -48,6 +48,36 @@ const CACHE_KEY = 'queue';
 const CACHE_TTL = 3 * 60_000;       // fresh for 3 minutes
 const STALE_TTL = 30 * 60_000;      // serve stale up to 30 minutes while refreshing
 
+// ── Runtime SLA settings (Team-tab editable) ────────────────────────────────
+// Reads app_settings.queue_sla_thresholds — same row the
+// /api/v1/settings/queue-sla route writes. Cached 30s in-process so the
+// per-request hop is one SELECT at most. Defaults to spec values when no
+// row exists yet (24h ZD / 48h Jira).
+const SLA_DEFAULTS = { zendeskMins: 24 * 60, jiraMins: 48 * 60 };
+let _slaCache = { value: null, ts: 0 };
+async function getSlaOverrides() {
+  const now = Date.now();
+  if (_slaCache.value && (now - _slaCache.ts) < 30_000) return _slaCache.value;
+  let result = { ...SLA_DEFAULTS };
+  if (process.env.DATABASE_URL) {
+    try {
+      const { query } = await import('../../../../src/lib/db');
+      const { rows } = await query(
+        "SELECT value FROM app_settings WHERE key = 'queue_sla_thresholds'"
+      );
+      const v = rows[0]?.value;
+      if (v) {
+        if (Number.isFinite(v.zendesk?.activeMins) && v.zendesk.activeMins > 0) result.zendeskMins = v.zendesk.activeMins;
+        if (Number.isFinite(v.jira?.activeMins) && v.jira.activeMins > 0) result.jiraMins = v.jira.activeMins;
+      }
+    } catch (err) {
+      console.warn('[queue] SLA settings read failed (using defaults):', err.message);
+    }
+  }
+  _slaCache = { value: result, ts: now };
+  return result;
+}
+
 // ── Zendesk status → app status ──────────────────────────────────────────────
 const ZD_STATUS_MAP = {
   new:      'new',
@@ -341,6 +371,10 @@ async function fetchZendeskQueue() {
     // Batch-fetch user details (handles >100 users)
     const userMap = await batchFetchUsers(userIds);
 
+    // Resolve runtime SLA settings (Team-tab editable). Cached 30s so the
+    // per-request hop is one SELECT at most.
+    const { zendeskMins } = await getSlaOverrides();
+
     // Normalize tickets
     const items = allTickets.map(t => {
       const assignee = userMap[t.assignee_id] || {};
@@ -363,13 +397,12 @@ async function fetchZendeskQueue() {
         lastCustomerResponseAt: t.updated_at, // Zendesk updated_at tracks last activity; this is a reasonable proxy
         createdAt: t.created_at,
         updatedAt: t.updated_at,
-        // Pilar's 2026-04-27 spec: every Zendesk ticket has a flat 24h SLA
-        // measured from the latest requester reply (using `updated_at` as the
-        // proxy — slaInfo() falls back to it as `minutesSinceLastResponse ??
-        // minutesAgo`). slaInfo() already excludes 'pending'/'hold' (mapped
-        // to 'waiting') and 'solved'/'closed' ('resolved'), so this only
-        // counts when the ticket is in 'new' or 'in_progress'.
-        slaMinsOverride: 24 * 60,
+        // Per-ticket SLA window from app_settings.queue_sla_thresholds.zendesk
+        // (default 24h, configurable via the Team-tab SLA settings table).
+        // slaInfo() reads this override before falling back to type-based
+        // SLA_MINS, and already excludes 'waiting'/'resolved' from the
+        // breach calc.
+        slaMinsOverride: zendeskMins,
         externalUrl: ZD_SUBDOMAIN
           ? `https://${ZD_SUBDOMAIN}.zendesk.com/agent/tickets/${t.id}`
           : '',
@@ -484,6 +517,9 @@ async function fetchJiraQueue() {
   if (!isJiraConfigured()) return { items: [], status: 'skipped', error: null };
 
   try {
+    // Resolve runtime SLA settings (Team-tab editable). Cached 30s.
+    const { jiraMins } = await getSlaOverrides();
+
     // Discover the HRX-owner custom field IDs once per hour (cached in
     // jira-api). If discovery fails the map is empty and we fall back to
     // assignee + reporter only — never breaks the queue.
@@ -631,11 +667,10 @@ async function fetchJiraQueue() {
         lastCustomerResponseAt: f.updated, // Jira updated tracks last activity
         createdAt: f.created,
         updatedAt: f.updated,
-        // Jira SLA is fixed at 48h from the latest update (Pilar's 2026-
-        // 04-27 spec — bumped from the previous 24h). slaInfo() in
-        // src/utils/helpers.js reads this override before falling back to
-        // SLA_MINS[type].
-        slaMinsOverride: 48 * 60,
+        // Per-ticket SLA window from app_settings.queue_sla_thresholds.jira
+        // (default 48h, configurable via the Team-tab SLA settings table).
+        // slaInfo() reads this override before falling back to SLA_MINS[type].
+        slaMinsOverride: jiraMins,
         externalUrl: JIRA_BASE ? `${JIRA_BASE}/browse/${issue.key}` : '',
         tags: f.labels || [],
         jiraStatus: statusName,

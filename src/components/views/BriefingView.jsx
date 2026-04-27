@@ -12,6 +12,7 @@ import { usePausedOnboardingData } from '../../hooks/usePausedOnboardingData';
 import { useOffboardingData } from '../../hooks/useOffboardingData';
 import { useChangeRequestData } from '../../hooks/useChangeRequestData';
 import { useWorkbenchData } from '../../hooks/useWorkbenchData';
+import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
 import {
   normalizeOnboarding,
   normalizePausedOnboarding,
@@ -159,12 +160,17 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const visibleEmails = useMemo(() => getVisibleEmails(user?.email), [user?.email]);
 
   // ── Deel API normalized rows (same pattern as Queue.jsx) ─────────────
-  const onboardingRowsAll = useMemo(() => normalizeOnboarding(onboardingData.items), [onboardingData.items]);
-  const pausedOnboardingRowsAll = useMemo(() => normalizePausedOnboarding(pausedOnboardingData.items), [pausedOnboardingData.items]);
-  const offboardingRowsAll = useMemo(() => normalizeOffboarding(offboardingData.items), [offboardingData.items]);
-  const amendmentRowsAll = useMemo(() => normalizeAmendments(changeRequestData.amendments), [changeRequestData.amendments]);
-  const redlineRowsAll = useMemo(() => normalizeRedlines(changeRequestData.redlines), [changeRequestData.redlines]);
-  const workbenchRowsAll = useMemo(() => normalizeWorkbench(workbenchData.tasks), [workbenchData.tasks]);
+  // Pass the team-tunable SLA thresholds so per-row pills + Briefing
+  // aggregates reflect whatever the Director / RM has set on the Team-tab
+  // SLA table. Falls back to the spec defaults baked into the normalizer
+  // until the hook resolves.
+  const { sla: queueSla } = useQueueSlaSettings();
+  const onboardingRowsAll = useMemo(() => normalizeOnboarding(onboardingData.items, queueSla), [onboardingData.items, queueSla]);
+  const pausedOnboardingRowsAll = useMemo(() => normalizePausedOnboarding(pausedOnboardingData.items, queueSla), [pausedOnboardingData.items, queueSla]);
+  const offboardingRowsAll = useMemo(() => normalizeOffboarding(offboardingData.items, queueSla), [offboardingData.items, queueSla]);
+  const amendmentRowsAll = useMemo(() => normalizeAmendments(changeRequestData.amendments, queueSla), [changeRequestData.amendments, queueSla]);
+  const redlineRowsAll = useMemo(() => normalizeRedlines(changeRequestData.redlines, queueSla), [changeRequestData.redlines, queueSla]);
+  const workbenchRowsAll = useMemo(() => normalizeWorkbench(workbenchData.tasks, queueSla), [workbenchData.tasks, queueSla]);
 
   // Source-row scoping — delegate to the Queue's single source of truth so
   // "Active Requests" here always matches what the user sees in each tab.
