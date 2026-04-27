@@ -8,9 +8,10 @@ export async function PATCH(req, { params }) {
     if (!user.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    // Only admins/managers can unarchive announcements
-    if (!['admin', 'regional_manager', 'manager', 'team_lead'].includes(user.role)) {
-      return NextResponse.json({ error: 'Only managers can unarchive announcements' }, { status: 403 });
+    // Unarchiving is reserved for Regional Managers and Directors only —
+    // mirrors the archive restriction so the toggle is symmetric.
+    if (!['admin', 'regional_manager', 'manager'].includes(user.role)) {
+      return NextResponse.json({ error: 'Only Regional Managers and Directors can unarchive announcements' }, { status: 403 });
     }
 
     const { id } = await params;

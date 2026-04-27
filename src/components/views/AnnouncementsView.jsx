@@ -22,6 +22,11 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
   const settings = useContext(SettingsContext);
   const isLA = perms?.canDo('can_compose_comms')||perms?.canDo('can_compose_announcements')||isApprover(user?.email)||false;
   const canPin = perms?.canDo('can_pin_announcement')||false;
+  // Archive/unarchive is restricted to Regional Managers and Directors only.
+  // perms.isAdmin is true iff the user has the can_manage_settings admin power,
+  // which only at_admin and at_regional_mgr carry by default. Team Leads keep
+  // compose/edit/send/pin but cannot toggle the archived state.
+  const canArchive = perms?.isAdmin || false;
   // Approvers and admin-role users can send direct; everyone else submits a request.
   const canComposeRequest = true; // any authenticated user can ASK
   const isApproverUser = isApprover(user?.email);
@@ -138,14 +143,14 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
   };
 
   const archiveComm=(id)=>{
-    if(!isLA)return;
+    if(!canArchive)return;
     if(apiArchive) apiArchive(id);
     else setComms(prev=>prev.map(c=>c.id===id?{...c,status:'archived'}:c));
     if(addToast)addToast('info','Archived','Communication archived');
   };
 
   const unarchiveComm=(id)=>{
-    if(!isLA)return;
+    if(!canArchive)return;
     if(apiUnarchive) apiUnarchive(id);
     else setComms(prev=>prev.map(c=>c.id===id?{...c,status:'sent'}:c));
     if(addToast)addToast('info','Unarchived','Communication restored to sent');
@@ -583,15 +588,15 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
                             <i className="bi-pencil" style={{ fontSize: 10 }}></i>
                           </button>
                         )}
-                        {/* Archive */}
-                        {comm.status === 'sent' && isLA && (
+                        {/* Archive — Regional Managers + Directors only */}
+                        {comm.status === 'sent' && canArchive && (
                           <button onClick={() => archiveComm(comm.id)} title="Archive"
                             style={actionBtnStyle('#f2f2f2', '#9e9e9e')}>
                             <i className="bi-archive" style={{ fontSize: 10 }}></i>
                           </button>
                         )}
-                        {/* Unarchive */}
-                        {comm.status === 'archived' && isLA && (
+                        {/* Unarchive — Regional Managers + Directors only */}
+                        {comm.status === 'archived' && canArchive && (
                           <button onClick={() => unarchiveComm(comm.id)} title="Unarchive"
                             style={actionBtnStyle('#f3eff8', '#6b3fa0')}>
                             <i className="bi-arrow-counterclockwise" style={{ fontSize: 11 }}></i>
