@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { query } from '../../../../src/lib/db';
 import { getAuthUser } from '../../../../src/lib/auth-helpers';
 import { isApprover } from '../../../../src/data/approvers';
+import { isAnnouncementsAdmin } from '../../../../src/lib/announcements-admin';
 import { normalizePayload, recordAudit, promoteDueScheduled } from '../../../../src/lib/announcementFlow';
 
 // GET /api/v1/announcement-requests
@@ -22,7 +23,7 @@ export async function GET(req) {
     // announcements will reliably auto-publish — no cron worker required.
     await promoteDueScheduled();
 
-    const approver = isApprover(user.email);
+    const approver = isApprover(user.email) || (await isAnnouncementsAdmin(user.email));
     const { searchParams } = new URL(req.url);
     const statusParam = searchParams.get('status');
     const scope = searchParams.get('scope'); // 'mine' | 'all'

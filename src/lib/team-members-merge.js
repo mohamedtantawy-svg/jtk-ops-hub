@@ -47,12 +47,18 @@ function normaliseOverrideRow(row) {
           : row.last_login_at.toISOString())
       : null,
     loginCount: row.login_count || 0,
+    // Additive per-user permissions (Director can grant from the Team tab).
+    isAnnouncementsAdmin: row.is_announcements_admin === true,
   };
 }
 
 // Apply non-null override fields on top of a baseline entry.
 function applyOverride(base, override) {
-  if (!override) return { ...base, isNew: false, isDeleted: false, onLeave: false, lastLoginAt: null, loginCount: 0 };
+  if (!override) return {
+    ...base,
+    isNew: false, isDeleted: false, onLeave: false, lastLoginAt: null, loginCount: 0,
+    isAnnouncementsAdmin: false,
+  };
   const merged = { ...base };
   // Only overwrite when the override has a non-null value for the field.
   const fields = ['name', 'initials', 'title', 'access', 'managerEmail', 'team', 'region', 'service', 'country', 'avatarUrl', 'startDate'];
@@ -67,6 +73,7 @@ function applyOverride(base, override) {
   merged.onLeave = override.onLeave;
   merged.lastLoginAt = override.lastLoginAt;
   merged.loginCount = override.loginCount;
+  merged.isAnnouncementsAdmin = override.isAnnouncementsAdmin === true;
   return merged;
 }
 
@@ -121,6 +128,7 @@ export function mergeTeamMembers(overrideRows = []) {
       onLeave: override.onLeave,
       lastLoginAt: override.lastLoginAt,
       loginCount: override.loginCount,
+      isAnnouncementsAdmin: override.isAnnouncementsAdmin === true,
     });
   }
 

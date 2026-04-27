@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
+import { canArchiveAnnouncements } from '../../../../../../src/lib/announcements-admin';
 
 export async function PATCH(req, { params }) {
   try {
@@ -8,10 +9,10 @@ export async function PATCH(req, { params }) {
     if (!user.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    // Unarchiving is reserved for Regional Managers and Directors only —
-    // mirrors the archive restriction so the toggle is symmetric.
-    if (!['admin', 'regional_manager', 'manager'].includes(user.role)) {
-      return NextResponse.json({ error: 'Only Regional Managers and Directors can unarchive announcements' }, { status: 403 });
+    // Unarchiving — symmetric with archive: Regional Managers, Directors,
+    // or per-user announcements admins.
+    if (!(await canArchiveAnnouncements(user))) {
+      return NextResponse.json({ error: 'Only Regional Managers, Directors, or announcements admins can unarchive announcements' }, { status: 403 });
     }
 
     const { id } = await params;
