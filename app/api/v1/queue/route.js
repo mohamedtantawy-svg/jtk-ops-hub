@@ -25,6 +25,7 @@ import { ADMIN_EMAILS_LIST } from '../../../../src/data/adminEmails';
 import { cacheGet, cacheSet } from '../../../../src/lib/server-cache';
 import { filterByAssignee } from '../../../../src/lib/queue-scoping';
 import { ensureRosterHydrated } from '../../../../src/lib/roster-server';
+import { resolveCustomFieldIds, extractCustomFieldValues } from '../../../../src/lib/zendesk-fields';
 
 // ── Server-side scope filter ─────────────────────────────────────────────────
 // Zendesk and Jira are assignee-based queues — delegates to the shared scoping
@@ -375,10 +376,18 @@ async function fetchZendeskQueue() {
     // per-request hop is one SELECT at most.
     const { zendeskMins } = await getSlaOverrides();
 
+    // Resolve our 4 named custom-field IDs once per request (cached 1h
+    // server-side). If discovery fails we silently fall back to null
+    // values per ticket — the queue still renders, agents see "—" until
+    // the next refresh recovers.
+    const customFieldMeta = await resolveCustomFieldIds();
+
     // Normalize tickets
     const items = allTickets.map(t => {
       const assignee = userMap[t.assignee_id] || {};
       const requester = userMap[t.requester_id] || {};
+      // Read the per-ticket values for our 4 fields from t.custom_fields.
+      const customFields = extractCustomFieldValues(t, customFieldMeta);
 
       return {
         id: `ZD-${t.id}`,
@@ -407,6 +416,10 @@ async function fetchZendeskQueue() {
         // SLA_MINS, and already excludes 'waiting'/'resolved' from the
         // breach calc.
         slaMinsOverride: zendeskMins,
+        // Phase 2 — values for the 4 ops-hub-tracked Zendesk custom fields.
+        // Detail.jsx renders these as editable selects; PUT through
+        // /queue/[id]/custom-fields persists changes back to Zendesk.
+        customFields,
         externalUrl: ZD_SUBDOMAIN
           ? `https://${ZD_SUBDOMAIN}.zendesk.com/agent/tickets/${t.id}`
           : '',

@@ -174,3 +174,14 @@ export async function showManyUsers(ids) {
   const batch = ids.slice(0, 100);
   return zendeskFetch(`/users/show_many.json?ids=${batch.join(',')}`);
 }
+
+// ── Ticket Fields (custom field metadata) ──────────────────────────────
+// Returns the full list of ticket fields (system + custom). Each entry has:
+//   { id, title, type, custom_field_options?: [{ name, value, default }] }
+// Used to discover the IDs of named custom fields ("Form", "Root Cause - Support",
+// "Employee Country", "Root Cause Selector") so the FE can render select boxes
+// and the backend can target the right field by ID on PUT.
+
+export async function getTicketFields() {
+  return zendeskFetch('/ticket_fields.json');
+}

@@ -212,6 +212,16 @@ export async function fetchZendeskViews() {
   return apiFetch('/integrations/zendesk/views');
 }
 
+// Discover the 4 ops-hub-tracked Zendesk custom fields (employeeCountry /
+// form / rootCauseSupport / rootCauseSelector). Cached server-side for 1h;
+// the FE can call this once per Detail mount and rely on the result.
+// `force=true` busts the server cache (admin/dev workflow when fields were
+// reconfigured in Zendesk and we want them visible immediately).
+export async function fetchZendeskTicketFields({ force } = {}) {
+  const qs = force ? '?force=1' : '';
+  return apiFetch(`/integrations/zendesk/ticket-fields${qs}`);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Ticket Comments & Actions
 // ─────────────────────────────────────────────────────────────────────────────
@@ -223,5 +233,16 @@ export async function postTicketAction(ticketId, actionPayload) {
   return apiFetch(`/queue/${ticketId}/actions`, {
     method: 'POST',
     body: JSON.stringify(actionPayload),
+  });
+}
+
+// PUT one or more of the 4 ops-hub-tracked Zendesk custom fields.
+// patch shape: { employeeCountry?, form?, rootCauseSupport?, rootCauseSelector? }
+// Backend resolves FE keys → Zendesk field IDs and PUTs the ticket;
+// queue cache is busted on success so the next sync reflects the change.
+export async function updateTicketCustomFields(ticketId, patch) {
+  return apiFetch(`/queue/${ticketId}/custom-fields`, {
+    method: 'PUT',
+    body: JSON.stringify(patch),
   });
 }

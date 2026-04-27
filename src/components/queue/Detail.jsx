@@ -14,11 +14,13 @@ import { PermissionsContext, SettingsContext } from '../../App';
 import { MEMBERS } from '../../data/members';
 import { TOOLS, SLA_MINS, getFlag } from '../../data/constants';
 import { slaInfo } from '../../utils/helpers';
+import { getVisibleEmails, isAdminUser } from '../../lib/queue-scoping';
 import Avatar from '../ui/Avatar';
 import { ToolBadge } from '../ui/Badges';
 import NotesTab from './NotesTab';
 import TimelineTab from './TimelineTab';
-import { fetchTicketComments, postTicketAction } from '../../services/integrationsApi';
+import { fetchTicketComments, postTicketAction, updateTicketCustomFields } from '../../services/integrationsApi';
+import { useTicketFieldsMeta } from '../../hooks/useTicketFieldsMeta';
 
 // Visible status options (FE → app status). Maps to ZD via actions/route.js
 // statusMap. "On hold" requires actions/route.js to accept on_hold → hold.
@@ -135,6 +137,12 @@ const Detail = ({
   const [commentsError, setCommentsError] = useState(null);
   const [statusUpdating, setStatusUpdating] = useState(null); // status value currently in-flight
   const [expandedComments, setExpandedComments] = useState(new Set());
+  // Phase 2 — which custom field's edit popover is open + which field is
+  // currently being saved (so we can show a spinner + lock other edits).
+  const [editingField, setEditingField] = useState(null);   // 'employeeCountry' | 'form' | ...
+  const [fieldSaving, setFieldSaving] = useState(null);     // same key while PUT is in flight
+  const [editingAssignee, setEditingAssignee] = useState(false);
+  const [assigneeSaving, setAssigneeSaving] = useState(false);
 
   // Reset transient state when the task changes (next/prev navigation).
   useEffect(() => {
@@ -146,7 +154,15 @@ const Detail = ({
     setCommentsError(null);
     setStatusUpdating(null);
     setExpandedComments(new Set());
+    setEditingField(null);
+    setFieldSaving(null);
+    setEditingAssignee(false);
+    setAssigneeSaving(false);
   }, [task?.id]);
+
+  // Discover the 4 ZD custom fields once per session — shared cache so
+  // navigating between tickets doesn't refetch the metadata.
+  const { meta: fieldsMeta, loading: fieldsLoading } = useTicketFieldsMeta();
 
   // ── Comment fetching (lazy, deduped) ───────────────────────────────────
   const mountedRef = useRef(true);
@@ -278,6 +294,89 @@ const Detail = ({
       return next;
     });
   }, []);
+
+  // ── Custom field edit (Phase 2) ────────────────────────────────────────
+  // Optimistic pattern: flip the FE value first, send the PUT, roll back on
+  // failure. Only one field saves at a time (UX simplicity + Zendesk rate-
+  // limit friendliness).
+  const handleFieldChange = useCallback(async (feKey, newValue) => {
+    if (fieldSaving) return;
+    if (!isZD) return;            // Phase 2 is Zendesk-only
+    if (!fieldsMeta?.[feKey]?.id) return; // field wasn't discovered
+    const previous = task.customFields?.[feKey] ?? null;
+    if (previous === newValue) { setEditingField(null); return; }
+    setFieldSaving(feKey);
+    setEditingField(null);
+    setTasks?.(prev => prev.map(t => t.id === task.id
+      ? { ...t, customFields: { ...(t.customFields || {}), [feKey]: newValue } }
+      : t));
+    try {
+      await updateTicketCustomFields(task.id, { [feKey]: newValue });
+      const optionName = fieldsMeta[feKey].options?.find(o => o.value === newValue)?.name;
+      addToast?.('success', `${fieldsMeta[feKey].title} updated`,
+        optionName ? `Set to "${optionName}".` : 'Saved to Zendesk.');
+    } catch (err) {
+      setTasks?.(prev => prev.map(t => t.id === task.id
+        ? { ...t, customFields: { ...(t.customFields || {}), [feKey]: previous } }
+        : t));
+      addToast?.('error', `${fieldsMeta[feKey].title} update failed`, err?.message || 'Please retry.');
+    } finally {
+      if (mountedRef.current) setFieldSaving(null);
+    }
+  }, [fieldSaving, isZD, fieldsMeta, task, setTasks, addToast]);
+
+  // ── Assignee change ────────────────────────────────────────────────────
+  // Reuses the existing /actions endpoint (`action: 'assignee'`) which
+  // already gates on admin/regional_manager/team_lead and applies
+  // canAssignTo() scope checks. Optimistic update + rollback on error.
+  const handleAssigneeChange = useCallback(async (newEmail) => {
+    if (assigneeSaving) return;
+    const prev = { id: task.assigneeId, email: task.assigneeEmail, name: task.assigneeName };
+    setAssigneeSaving(true);
+    setEditingAssignee(false);
+    const newMember = newEmail ? MEMBERS.find(m => m.email.toLowerCase() === newEmail.toLowerCase()) : null;
+    setTasks?.(p => p.map(t => t.id === task.id ? {
+      ...t,
+      assigneeId: newMember?.id || null,
+      assigneeEmail: newEmail || null,
+      assigneeName: newMember?.name || null,
+      _locallyReassignedAt: Date.now(),
+    } : t));
+    try {
+      await postTicketAction(task.id, { action: 'assignee', assigneeEmail: newEmail });
+      addToast?.('success', 'Assignee updated', newMember ? `Reassigned to ${newMember.name}.` : 'Unassigned.');
+    } catch (err) {
+      setTasks?.(p => p.map(t => t.id === task.id ? {
+        ...t, assigneeId: prev.id, assigneeEmail: prev.email, assigneeName: prev.name, _locallyReassignedAt: null,
+      } : t));
+      addToast?.('error', 'Assignee change failed', err?.message || 'Please retry.');
+    } finally {
+      if (mountedRef.current) setAssigneeSaving(false);
+    }
+  }, [assigneeSaving, task, setTasks, addToast]);
+
+  // Visible reassign targets: admin sees everyone; non-admin sees their
+  // hierarchy chain (self + reports/subtree). Matches the BE's canAssignTo.
+  const assigneeCandidates = useMemo(() => {
+    if (!isAdminUser(currentUser)) {
+      const allowed = getVisibleEmails(currentUser);
+      return MEMBERS.filter(m => allowed.has((m.email || '').toLowerCase()));
+    }
+    return MEMBERS;
+  }, [currentUser]);
+
+  // Mirror the BE role gate on /actions (admin / regional_manager / team_lead).
+  // Falls back to MEMBERS_BY_EMAIL when the JWT doesn't carry `role` so a TL
+  // who hasn't been pushed a role claim still gets the picker.
+  const canChangeAssignee = useMemo(() => {
+    if (isAdminUser(currentUser)) return true;
+    const direct = String(currentUser?.role || '').toLowerCase();
+    if (direct === 'regional_manager' || direct === 'team_lead') return true;
+    const email = (currentUser?.email || '').toLowerCase();
+    const m = email ? MEMBERS.find(x => x.email.toLowerCase() === email) : null;
+    const fallback = String(m?.access || '').toLowerCase();
+    return fallback === 'regional_manager' || fallback === 'team_lead';
+  }, [currentUser]);
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────
   useEffect(() => {
@@ -447,24 +546,76 @@ const Detail = ({
           {/* Ticket details */}
           <RailCard title="Details">
             <DetailRow label="Assignee" value={
-              assignee
-                ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    <Avatar name={assignee.name} size={20} />
-                    <span>{assignee.name}</span>
-                  </span>
-                : <span style={{ color: '#d42d35', fontWeight: 600 }}>Unassigned</span>
+              <AssigneePicker
+                assignee={assignee}
+                editing={editingAssignee}
+                saving={assigneeSaving}
+                canChange={canChangeAssignee}
+                candidates={assigneeCandidates}
+                onOpen={() => setEditingAssignee(true)}
+                onClose={() => setEditingAssignee(false)}
+                onSelect={handleAssigneeChange}
+              />
             } />
-            {/* Country: heuristic (detected from tags/subject) — shown
-                immediately so the user has SOME signal. The actual
-                "Employee Country" Zendesk custom field is rendered below
-                as its own row; Phase 2 will fetch and let the user edit it. */}
+            {/* Country: heuristic (detected from tags/subject) — kept
+                visible because the queue still uses it for filtering /
+                routing. The editable "Employee Country" custom field
+                is below. */}
             <DetailRow label="Country (detected)" value={task.country
               ? <span>{getFlag(task.country)} <span>{task.country}</span></span>
               : '—'} />
-            <DetailRow label="Employee Country" value={readCustomField(task, 'employeeCountry')} hint="(editable in Phase 2)" />
-            <DetailRow label="Form" value={readCustomField(task, 'form')} hint="(editable in Phase 2)" />
-            <DetailRow label="Root Cause - Support" value={readCustomField(task, 'rootCauseSupport')} hint="(editable in Phase 2)" />
-            <DetailRow label="Root Cause Selector" value={readCustomField(task, 'rootCauseSelector')} hint="(editable in Phase 2)" />
+            <EditableField
+              label="Employee Country"
+              feKey="employeeCountry"
+              task={task}
+              meta={fieldsMeta}
+              metaLoading={fieldsLoading}
+              isZD={isZD}
+              editing={editingField}
+              saving={fieldSaving}
+              onOpen={k => setEditingField(k)}
+              onClose={() => setEditingField(null)}
+              onSelect={handleFieldChange}
+            />
+            <EditableField
+              label="Form"
+              feKey="form"
+              task={task}
+              meta={fieldsMeta}
+              metaLoading={fieldsLoading}
+              isZD={isZD}
+              editing={editingField}
+              saving={fieldSaving}
+              onOpen={k => setEditingField(k)}
+              onClose={() => setEditingField(null)}
+              onSelect={handleFieldChange}
+            />
+            <EditableField
+              label="Root Cause - Support"
+              feKey="rootCauseSupport"
+              task={task}
+              meta={fieldsMeta}
+              metaLoading={fieldsLoading}
+              isZD={isZD}
+              editing={editingField}
+              saving={fieldSaving}
+              onOpen={k => setEditingField(k)}
+              onClose={() => setEditingField(null)}
+              onSelect={handleFieldChange}
+            />
+            <EditableField
+              label="Root Cause Selector"
+              feKey="rootCauseSelector"
+              task={task}
+              meta={fieldsMeta}
+              metaLoading={fieldsLoading}
+              isZD={isZD}
+              editing={editingField}
+              saving={fieldSaving}
+              onOpen={k => setEditingField(k)}
+              onClose={() => setEditingField(null)}
+              onSelect={handleFieldChange}
+            />
             <DetailRow label="Type" value={task.type || '—'} />
             <DetailRow label="Requester" value={task.requesterName || '—'} />
             {task.requesterEmail && (
@@ -919,14 +1070,315 @@ function ReplyComposer({ isZD, replyText, setReplyText, replyPublic, setReplyPub
 
 // Reads a custom-field value off the task. Phase 1 surfaces these as
 // read-only — Phase 2 adds the discovery (GET /ticket_fields) + edit path.
-// For now we look up a flat namespace `task.customFields[<key>]`; if the
-// queue route hasn't populated it yet, we render an em-dash so the slot
-// is visible but clearly blank.
-function readCustomField(task, key) {
-  const v = task?.customFields?.[key];
-  if (v === null || v === undefined || v === '') return '—';
-  return String(v);
+// ── Editable custom-field row ─────────────────────────────────────────────
+// Renders a DetailRow whose value is a click-to-edit chip. Click reveals a
+// popover with the discovered options (filtered via a tiny inline search
+// when the list is long). Selecting an option triggers the parent's save
+// handler, which does the optimistic update + PUT to Zendesk.
+//
+// Disabled states (no popover, just a static value):
+//   • Jira tickets — these custom fields are Zendesk-only.
+//   • Field metadata not yet loaded — chip shows a small spinner.
+//   • Field title not configured in Zendesk — chip shows "not configured".
+const EditableField = memo(function EditableField({
+  label, feKey, task, meta, metaLoading, isZD, editing, saving, onOpen, onClose, onSelect,
+}) {
+  const fieldMeta = meta?.[feKey];
+  const currentValue = task?.customFields?.[feKey] ?? null;
+  const currentName = fieldMeta?.options?.find(o => o.value === currentValue)?.name;
+  const isOpen = editing === feKey;
+  const isSaving = saving === feKey;
+
+  let chip;
+  if (!isZD) {
+    chip = <ChipReadOnly>{label === 'Form' || label === 'Root Cause - Support' || label === 'Root Cause Selector' || label === 'Employee Country' ? 'Zendesk-only' : '—'}</ChipReadOnly>;
+  } else if (metaLoading && !fieldMeta) {
+    chip = <ChipReadOnly><i className="bi-arrow-clockwise spin" style={{ fontSize: 9, marginRight: 4 }} />Loading…</ChipReadOnly>;
+  } else if (!fieldMeta?.id) {
+    chip = <ChipReadOnly>Not configured in Zendesk</ChipReadOnly>;
+  } else if (fieldMeta.type !== 'tagger') {
+    // Phase 2 only ships single-select dropdown editors. Multiselect/
+    // free-text/checkbox/etc. fall back to a read-only chip so the data
+    // is still visible — Phase 3+ can add specialised editors per type.
+    chip = <ChipReadOnly>{currentName || (currentValue == null ? '—' : String(currentValue))}</ChipReadOnly>;
+  } else {
+    chip = (
+      <FieldDropdownChip
+        label={currentName || (currentValue == null ? '—' : String(currentValue))}
+        isOpen={isOpen}
+        isSaving={isSaving}
+        currentValue={currentValue}
+        options={fieldMeta.options || []}
+        onOpen={() => onOpen(feKey)}
+        onClose={onClose}
+        onSelect={(v) => onSelect(feKey, v)}
+      />
+    );
+  }
+
+  return <DetailRow label={label} value={chip} />;
+});
+
+function ChipReadOnly({ children }) {
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center',
+      padding: '2px 8px', borderRadius: 128,
+      fontSize: 11, color: '#9e9e9e', background: '#f5f3ef',
+      border: '1px solid #e8e4df',
+    }}>
+      {children}
+    </span>
+  );
 }
+
+// Click-to-edit chip with an inline popover. Filters options when there
+// are more than 8 to avoid scrolling through long lists (e.g. country lists).
+function FieldDropdownChip({ label, isOpen, isSaving, currentValue, options, onOpen, onClose, onSelect }) {
+  const wrapRef = useRef(null);
+  const [filter, setFilter] = useState('');
+
+  useEffect(() => {
+    if (!isOpen) { setFilter(''); return; }
+    const onDoc = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) onClose();
+    };
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [isOpen, onClose]);
+
+  const filtered = filter
+    ? options.filter(o => o.name.toLowerCase().includes(filter.toLowerCase()))
+    : options;
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        type="button"
+        onClick={() => isOpen ? onClose() : onOpen()}
+        disabled={isSaving}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 4,
+          maxWidth: 200,
+          padding: '2px 6px 2px 10px', borderRadius: 128,
+          fontSize: 11, fontWeight: 600,
+          color: currentValue ? '#1b1b1b' : '#9e9e9e',
+          background: isOpen ? '#eff6ff' : currentValue ? '#f7f5f2' : 'white',
+          border: `1px solid ${isOpen ? '#bddcf0' : '#e8e8e8'}`,
+          cursor: isSaving ? 'wait' : 'pointer',
+          transition: 'all .12s',
+        }}
+        onMouseEnter={e => { if (!isSaving && !isOpen) e.currentTarget.style.borderColor = '#c0c0c0'; }}
+        onMouseLeave={e => { if (!isSaving && !isOpen) e.currentTarget.style.borderColor = '#e8e8e8'; }}
+      >
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+        {isSaving
+          ? <i className="bi-arrow-clockwise spin" style={{ fontSize: 9 }} />
+          : <i className="bi-chevron-down" style={{ fontSize: 9, color: '#9e9e9e' }} />}
+      </button>
+      {isOpen && (
+        <div role="listbox" style={{
+          position: 'absolute', left: 0, top: 28, zIndex: 100,
+          width: 240, maxHeight: 320, overflow: 'hidden',
+          background: 'white', border: '1px solid #e8e8e8', borderRadius: 10,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+          display: 'flex', flexDirection: 'column',
+        }}>
+          {options.length > 8 && (
+            <div style={{ padding: '8px 10px', borderBottom: '1px solid #f0efed' }}>
+              <input
+                autoFocus
+                placeholder="Filter…"
+                value={filter}
+                onChange={e => setFilter(e.target.value)}
+                style={{
+                  width: '100%', height: 28, padding: '0 8px',
+                  border: '1px solid #e8e8e8', borderRadius: 6,
+                  fontSize: 12, outline: 'none', boxSizing: 'border-box',
+                }}
+              />
+            </div>
+          )}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
+            <button
+              role="option"
+              aria-selected={currentValue == null}
+              onClick={() => onSelect(null)}
+              style={dropdownItemStyle(currentValue == null)}
+              onMouseEnter={e => e.currentTarget.style.background = '#f7f5f2'}
+              onMouseLeave={e => e.currentTarget.style.background = currentValue == null ? '#eff6ff' : 'white'}
+            >
+              <span style={{ color: '#9e9e9e', fontStyle: 'italic' }}>(none)</span>
+              {currentValue == null && <i className="bi-check-lg" style={{ fontSize: 11, color: '#1f74b3' }} />}
+            </button>
+            {filtered.length === 0 ? (
+              <div style={{ padding: '12px 14px', fontSize: 12, color: '#9e9e9e', textAlign: 'center' }}>No matches</div>
+            ) : filtered.map(opt => {
+              const selected = opt.value === currentValue;
+              return (
+                <button
+                  key={opt.value}
+                  role="option"
+                  aria-selected={selected}
+                  onClick={() => onSelect(opt.value)}
+                  style={dropdownItemStyle(selected)}
+                  onMouseEnter={e => e.currentTarget.style.background = '#f7f5f2'}
+                  onMouseLeave={e => e.currentTarget.style.background = selected ? '#eff6ff' : 'white'}
+                >
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{opt.name}</span>
+                  {selected && <i className="bi-check-lg" style={{ fontSize: 11, color: '#1f74b3' }} />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function dropdownItemStyle(selected) {
+  return {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6,
+    width: '100%', padding: '8px 14px',
+    background: selected ? '#eff6ff' : 'white',
+    color: '#1b1b1b', fontSize: 12, fontWeight: selected ? 600 : 500,
+    border: 'none', borderLeft: `3px solid ${selected ? '#1f74b3' : 'transparent'}`,
+    cursor: 'pointer', textAlign: 'left',
+    fontFamily: 'inherit',
+    transition: 'background .1s',
+  };
+}
+
+// ── Assignee picker ─────────────────────────────────────────────────────
+// Read-only (avatar + name) for users who can't reassign. Click-to-edit
+// for admin/regional_manager/team_lead. Uses the existing /actions
+// endpoint — its server-side scope check is the source of truth, this is
+// just a UX gate so unauthorized users don't get a dropdown that errors
+// every click.
+const AssigneePicker = memo(function AssigneePicker({
+  assignee, editing, saving, canChange, candidates, onOpen, onClose, onSelect,
+}) {
+  const wrapRef = useRef(null);
+  const [filter, setFilter] = useState('');
+
+  useEffect(() => {
+    if (!editing) { setFilter(''); return; }
+    const onDoc = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) onClose(); };
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [editing, onClose]);
+
+  const display = (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      {assignee
+        ? (<><Avatar name={assignee.name} size={20} /><span>{assignee.name}</span></>)
+        : <span style={{ color: '#d42d35', fontWeight: 600 }}>Unassigned</span>}
+    </span>
+  );
+
+  if (!canChange) return display;
+
+  const filtered = filter
+    ? candidates.filter(m => (m.name || '').toLowerCase().includes(filter.toLowerCase())
+        || (m.email || '').toLowerCase().includes(filter.toLowerCase()))
+    : candidates;
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        type="button"
+        onClick={() => editing ? onClose() : onOpen()}
+        disabled={saving}
+        aria-haspopup="listbox"
+        aria-expanded={!!editing}
+        title={saving ? 'Saving…' : 'Click to reassign'}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 4,
+          padding: '2px 4px 2px 0',
+          background: editing ? '#eff6ff' : 'transparent',
+          border: 'none', borderRadius: 6,
+          cursor: saving ? 'wait' : 'pointer',
+          fontSize: 12,
+          fontFamily: 'inherit',
+        }}
+        onMouseEnter={e => { if (!saving && !editing) e.currentTarget.style.background = '#f7f5f2'; }}
+        onMouseLeave={e => { if (!saving && !editing) e.currentTarget.style.background = 'transparent'; }}
+      >
+        {display}
+        {saving
+          ? <i className="bi-arrow-clockwise spin" style={{ fontSize: 9, marginLeft: 4 }} />
+          : <i className="bi-chevron-down" style={{ fontSize: 9, color: '#9e9e9e', marginLeft: 4 }} />}
+      </button>
+      {editing && (
+        <div role="listbox" style={{
+          position: 'absolute', left: 0, top: 28, zIndex: 100,
+          width: 280, maxHeight: 360, overflow: 'hidden',
+          background: 'white', border: '1px solid #e8e8e8', borderRadius: 10,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+          display: 'flex', flexDirection: 'column',
+        }}>
+          <div style={{ padding: '8px 10px', borderBottom: '1px solid #f0efed' }}>
+            <input
+              autoFocus
+              placeholder="Search by name or email…"
+              value={filter}
+              onChange={e => setFilter(e.target.value)}
+              style={{
+                width: '100%', height: 28, padding: '0 8px',
+                border: '1px solid #e8e8e8', borderRadius: 6,
+                fontSize: 12, outline: 'none', boxSizing: 'border-box',
+              }}
+            />
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
+            {/* Note: full "Unassign" via this picker is deferred — the
+                /actions endpoint requires a target assigneeEmail. To
+                unassign, do it from Zendesk directly. */}
+            {filtered.length === 0 ? (
+              <div style={{ padding: '12px 14px', fontSize: 12, color: '#9e9e9e', textAlign: 'center' }}>No matches in your scope</div>
+            ) : filtered.map(m => {
+              const selected = assignee?.email && m.email && assignee.email.toLowerCase() === m.email.toLowerCase();
+              return (
+                <button
+                  key={m.email || m.id}
+                  role="option"
+                  aria-selected={selected}
+                  onClick={() => onSelect(m.email)}
+                  style={{
+                    ...dropdownItemStyle(selected),
+                    alignItems: 'center', gap: 8,
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#f7f5f2'}
+                  onMouseLeave={e => e.currentTarget.style.background = selected ? '#eff6ff' : 'white'}
+                >
+                  <Avatar name={m.name} size={20} />
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.name}</span>
+                    <span style={{ display: 'block', fontSize: 10, color: '#9e9e9e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'ui-monospace, monospace' }}>{m.email}</span>
+                  </span>
+                  {selected && <i className="bi-check-lg" style={{ fontSize: 11, color: '#1f74b3' }} />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
 
 const iconBtnStyle = {
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
