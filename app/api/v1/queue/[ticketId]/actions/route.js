@@ -135,7 +135,7 @@ async function transitionJiraIssue(issueKey, status) {
   });
   if (!tRes.ok) throw new Error(`Jira transitions fetch failed: ${tRes.status}`);
   const { transitions } = await tRes.json();
-  const statusMap = { new: 'To Do', in_progress: 'In Progress', waiting: 'On Hold', resolved: 'Done' };
+  const statusMap = { new: 'To Do', in_progress: 'In Progress', waiting: 'On Hold', on_hold: 'On Hold', resolved: 'Done' };
   const targetName = statusMap[status] || status;
   const match = transitions.find(t => t.name.toLowerCase() === targetName.toLowerCase());
   if (!match) return { ok: true, note: `No transition found for "${targetName}"` };
@@ -293,7 +293,11 @@ export async function POST(req, { params }) {
       if (!body.status) return NextResponse.json({ error: 'status required for status action' }, { status: 400 });
       if (isZD) {
         const zdId = ticketId.replace('ZD-', '');
-        const statusMap = { new: 'new', in_progress: 'open', waiting: 'pending', resolved: 'solved' };
+        // FE → ZD status mapping. `on_hold` is a new FE-only value introduced
+        // for the Phase 1 detail page so agents can pick "On hold" (ZD `hold`)
+        // distinctly from "Pending" (ZD `pending`) — both collapse to our
+        // app-level 'waiting' bucket but mean different things in Zendesk.
+        const statusMap = { new: 'new', in_progress: 'open', waiting: 'pending', on_hold: 'hold', resolved: 'solved' };
         const zdStatus = statusMap[body.status] || body.status;
         await updateZendeskTicket(zdId, { status: zdStatus });
       } else {

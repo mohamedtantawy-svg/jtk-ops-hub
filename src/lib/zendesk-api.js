@@ -174,3 +174,92 @@ export async function showManyUsers(ids) {
   const batch = ids.slice(0, 100);
   return zendeskFetch(`/users/show_many.json?ids=${batch.join(',')}`);
 }
+
+// ── Ticket Fields (custom field metadata) ──────────────────────────────
+// Returns the full list of ticket fields (system + custom). Each entry has:
+//   { id, title, type, custom_field_options?: [{ name, value, default }] }
+// Used to discover the IDs of named custom fields ("Form", "Root Cause - Support",
+// "Employee Country", "Root Cause Selector") so the FE can render select boxes
+// and the backend can target the right field by ID on PUT.
+
+export async function getTicketFields() {
+  return zendeskFetch('/ticket_fields.json');
+}
+
+// ── Macros ─────────────────────────────────────────────────────────────
+// Macros are pre-canned bundles of ticket changes (set field, add comment,
+// change status, etc.) that agents apply with one click. Phase 3 ships
+// preview-then-apply: list macros, fetch a per-ticket preview, then commit
+// via PUT /tickets/{id}.json with `macro_ids: [...]`.
+
+// Active macros, paginated. ZD returns up to 100 per page; with usage_24h
+// we can sort by recent popularity client-side.
+export async function listMacros({ page, per_page = 100, include } = {}) {
+  const qs = new URLSearchParams({ active: 'true', per_page: String(per_page) });
+  if (page) qs.set('page', String(page));
+  if (include) qs.set('include', include);
+  return zendeskFetch(`/macros.json?${qs.toString()}`);
+}
+
+// Preview the changes a macro would make to a SPECIFIC ticket. Returns the
+// would-be ticket — the macro is NOT committed. Apply via PUT /tickets/{id}
+// with macro_ids: [macroId].
+export async function previewMacroOnTicket(ticketId, macroId) {
+  return zendeskFetch(`/tickets/${ticketId}/macros/${macroId}/apply.json`);
+}
+
+// ── Side Conversations ─────────────────────────────────────────────────
+// Side conversations are off-ticket threads (email / Slack / child ticket)
+// agents use to coordinate with internal teams or external parties without
+// looping the original requester. Phase 4 supports email side conversations:
+// list / create / read events / reply / close.
+
+export async function listSideConversations(ticketId, { page, per_page = 100 } = {}) {
+  const qs = new URLSearchParams({ per_page: String(per_page) });
+  if (page) qs.set('page', String(page));
+  return zendeskFetch(`/tickets/${ticketId}/side_conversations.json?${qs.toString()}`);
+}
+
+export async function getSideConversation(ticketId, sideConvId) {
+  return zendeskFetch(`/tickets/${ticketId}/side_conversations/${sideConvId}.json`);
+}
+
+export async function getSideConversationEvents(ticketId, sideConvId, { page, per_page = 100 } = {}) {
+  const qs = new URLSearchParams({ per_page: String(per_page) });
+  if (page) qs.set('page', String(page));
+  return zendeskFetch(`/tickets/${ticketId}/side_conversations/${sideConvId}/events.json?${qs.toString()}`);
+}
+
+// Create a new side conversation on a ticket. Body shape (Zendesk-native):
+//   { message: { subject, body, to: [{email}, ...] } }
+// We send the simplest viable payload — agents can elaborate via Zendesk's
+// own UI if they need attachments / cc / bcc / templates.
+export async function createSideConversation(ticketId, { subject, body, to }) {
+  return zendeskFetch(`/tickets/${ticketId}/side_conversations.json`, {
+    method: 'POST',
+    body: JSON.stringify({
+      message: {
+        subject: subject || '',
+        body: body || '',
+        to: Array.isArray(to) ? to.map(addr => ({ email: addr })) : [],
+      },
+    }),
+  });
+}
+
+export async function replyToSideConversation(ticketId, sideConvId, { body }) {
+  return zendeskFetch(`/tickets/${ticketId}/side_conversations/${sideConvId}/reply.json`, {
+    method: 'POST',
+    body: JSON.stringify({ message: { body: body || '' } }),
+  });
+}
+
+// Close a side conversation. ZD also supports state=open for re-opening,
+// but for Phase 4 we expose only close (re-open is a low-frequency action
+// that can be done from Zendesk directly).
+export async function closeSideConversation(ticketId, sideConvId) {
+  return zendeskFetch(`/tickets/${ticketId}/side_conversations/${sideConvId}.json`, {
+    method: 'PUT',
+    body: JSON.stringify({ side_conversation: { state: 'closed' } }),
+  });
+}

@@ -98,6 +98,10 @@ function normalizeQueueItem(item) {
       : [],
     receivedAt,
     status: item.status || 'new',
+    // Raw Zendesk status (new|open|pending|hold|solved|closed) — preserved
+    // so the Detail page's status changer can light up "On hold" distinctly
+    // from "Pending" even though both map to app-level 'waiting'.
+    zdStatus: item.zdStatus || null,
     type: item.type || 'Policy Query',
     priority: item.priority || 'medium',
     isAlert: item.priority === 'critical',
@@ -111,6 +115,10 @@ function normalizeQueueItem(item) {
     snoozedUntil: null,
     snoozeLabel: null,
     prevStatus: null,
+    // Forward-compat slot for Phase 2 (editable custom fields). Backend
+    // populates this when ticket-fields discovery lands; until then, the
+    // Detail page renders "—" for unknown fields.
+    customFields: item.customFields || null,
   };
 }
 
