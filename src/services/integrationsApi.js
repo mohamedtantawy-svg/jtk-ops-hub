@@ -222,6 +222,13 @@ export async function fetchZendeskTicketFields({ force } = {}) {
   return apiFetch(`/integrations/zendesk/ticket-fields${qs}`);
 }
 
+// Active Zendesk macros (cached server-side 5 min). Optional `search`
+// filters by title client-side to avoid burning a ZD call per keystroke.
+export async function fetchZendeskMacros({ search } = {}) {
+  const qs = search ? `?search=${encodeURIComponent(search)}` : '';
+  return apiFetch(`/integrations/zendesk/macros${qs}`);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Ticket Comments & Actions
 // ─────────────────────────────────────────────────────────────────────────────
@@ -244,5 +251,20 @@ export async function updateTicketCustomFields(ticketId, patch) {
   return apiFetch(`/queue/${ticketId}/custom-fields`, {
     method: 'PUT',
     body: JSON.stringify(patch),
+  });
+}
+
+// Macro preview — what would this macro change on this ticket?
+// Returns { changes: [{type, ...}, ...] } describing the diff.
+export async function previewTicketMacro(ticketId, macroId) {
+  return apiFetch(`/queue/${encodeURIComponent(ticketId)}/macros/${encodeURIComponent(macroId)}/preview`);
+}
+
+// Macro apply — commits the macro on the ticket via Zendesk's macro_ids[].
+// Queue cache is busted on success so the next sync reflects all the
+// changes the macro made (status, fields, comments, etc.).
+export async function applyTicketMacro(ticketId, macroId) {
+  return apiFetch(`/queue/${encodeURIComponent(ticketId)}/macros/${encodeURIComponent(macroId)}/apply`, {
+    method: 'POST',
   });
 }

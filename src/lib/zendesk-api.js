@@ -185,3 +185,25 @@ export async function showManyUsers(ids) {
 export async function getTicketFields() {
   return zendeskFetch('/ticket_fields.json');
 }
+
+// ── Macros ─────────────────────────────────────────────────────────────
+// Macros are pre-canned bundles of ticket changes (set field, add comment,
+// change status, etc.) that agents apply with one click. Phase 3 ships
+// preview-then-apply: list macros, fetch a per-ticket preview, then commit
+// via PUT /tickets/{id}.json with `macro_ids: [...]`.
+
+// Active macros, paginated. ZD returns up to 100 per page; with usage_24h
+// we can sort by recent popularity client-side.
+export async function listMacros({ page, per_page = 100, include } = {}) {
+  const qs = new URLSearchParams({ active: 'true', per_page: String(per_page) });
+  if (page) qs.set('page', String(page));
+  if (include) qs.set('include', include);
+  return zendeskFetch(`/macros.json?${qs.toString()}`);
+}
+
+// Preview the changes a macro would make to a SPECIFIC ticket. Returns the
+// would-be ticket — the macro is NOT committed. Apply via PUT /tickets/{id}
+// with macro_ids: [macroId].
+export async function previewMacroOnTicket(ticketId, macroId) {
+  return zendeskFetch(`/tickets/${ticketId}/macros/${macroId}/apply.json`);
+}

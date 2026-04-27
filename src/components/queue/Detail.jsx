@@ -19,7 +19,7 @@ import Avatar from '../ui/Avatar';
 import { ToolBadge } from '../ui/Badges';
 import NotesTab from './NotesTab';
 import TimelineTab from './TimelineTab';
-import { fetchTicketComments, postTicketAction, updateTicketCustomFields } from '../../services/integrationsApi';
+import { fetchTicketComments, postTicketAction, updateTicketCustomFields, fetchZendeskMacros, previewTicketMacro, applyTicketMacro } from '../../services/integrationsApi';
 import { useTicketFieldsMeta } from '../../hooks/useTicketFieldsMeta';
 
 // Visible status options (FE → app status). Maps to ZD via actions/route.js
@@ -143,6 +143,17 @@ const Detail = ({
   const [fieldSaving, setFieldSaving] = useState(null);     // same key while PUT is in flight
   const [editingAssignee, setEditingAssignee] = useState(false);
   const [assigneeSaving, setAssigneeSaving] = useState(false);
+  // Phase 3 — macros
+  const [showMacroPicker, setShowMacroPicker] = useState(false);
+  const [macroSearch, setMacroSearch] = useState('');
+  const [macros, setMacros] = useState(null);              // null = not loaded yet
+  const [macrosLoading, setMacrosLoading] = useState(false);
+  const [macrosError, setMacrosError] = useState(null);
+  const [previewingMacro, setPreviewingMacro] = useState(null); // {id, title} of macro being previewed
+  const [previewData, setPreviewData] = useState(null);    // { changes: [...] } from BE
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState(null);
+  const [applyingMacro, setApplyingMacro] = useState(false);
 
   // Reset transient state when the task changes (next/prev navigation).
   useEffect(() => {
@@ -158,6 +169,13 @@ const Detail = ({
     setFieldSaving(null);
     setEditingAssignee(false);
     setAssigneeSaving(false);
+    setShowMacroPicker(false);
+    setMacroSearch('');
+    setPreviewingMacro(null);
+    setPreviewData(null);
+    setPreviewLoading(false);
+    setPreviewError(null);
+    setApplyingMacro(false);
   }, [task?.id]);
 
   // Discover the 4 ZD custom fields once per session — shared cache so
@@ -377,6 +395,94 @@ const Detail = ({
     const fallback = String(m?.access || '').toLowerCase();
     return fallback === 'regional_manager' || fallback === 'team_lead';
   }, [currentUser]);
+
+  // ── Macros (Phase 3) ───────────────────────────────────────────────────
+  // Lazy: list loads only when the picker is first opened (the response
+  // can be 100s of entries; no point fetching for every Detail mount).
+  const ensureMacrosLoaded = useCallback(async () => {
+    if (macros !== null && !macrosError) return macros;
+    setMacrosLoading(true);
+    setMacrosError(null);
+    try {
+      const res = await fetchZendeskMacros();
+      const list = res?.macros || [];
+      if (!mountedRef.current) return list;
+      setMacros(list);
+      return list;
+    } catch (err) {
+      if (mountedRef.current) setMacrosError(err?.message || 'Failed to load macros');
+      return [];
+    } finally {
+      if (mountedRef.current) setMacrosLoading(false);
+    }
+  }, [macros, macrosError]);
+
+  const openMacroPicker = useCallback(() => {
+    setShowMacroPicker(true);
+    setMacroSearch('');
+    ensureMacrosLoaded();
+  }, [ensureMacrosLoaded]);
+
+  // Step 1 of the apply flow: fetch the preview, open the confirmation
+  // modal, close the picker so the modal isn't covered. The user reviews
+  // changes and clicks Apply (or Cancel).
+  const handleSelectMacro = useCallback(async (macroSummary) => {
+    if (!isZD) return;
+    setShowMacroPicker(false);
+    setPreviewingMacro({ id: macroSummary.id, title: macroSummary.title });
+    setPreviewData(null);
+    setPreviewError(null);
+    setPreviewLoading(true);
+    try {
+      const res = await previewTicketMacro(task.id, macroSummary.id);
+      if (!mountedRef.current) return;
+      setPreviewData(res);
+    } catch (err) {
+      if (mountedRef.current) setPreviewError(err?.message || 'Preview failed');
+    } finally {
+      if (mountedRef.current) setPreviewLoading(false);
+    }
+  }, [isZD, task?.id]);
+
+  const closeMacroPreview = useCallback(() => {
+    if (applyingMacro) return;
+    setPreviewingMacro(null);
+    setPreviewData(null);
+    setPreviewError(null);
+  }, [applyingMacro]);
+
+  // Step 2: commit the macro. Server bumps queue cache so the next sync
+  // picks up the new state; we eagerly refresh comments so the macro's
+  // appended comment shows up immediately. The rest of the ticket fields
+  // catch up on the next 2-min queue poll.
+  const handleApplyMacro = useCallback(async () => {
+    if (!previewingMacro?.id || applyingMacro) return;
+    setApplyingMacro(true);
+    try {
+      await applyTicketMacro(task.id, previewingMacro.id);
+      if (!mountedRef.current) return;
+      addToast?.('success', 'Macro applied', `"${previewingMacro.title}" was applied to the ticket.`);
+      // Refresh comments for the macro's auto-comment.
+      fetchInflightRef.current = null;
+      loadComments();
+      setPreviewingMacro(null);
+      setPreviewData(null);
+    } catch (err) {
+      if (mountedRef.current) addToast?.('error', 'Macro failed', err?.message || 'Please retry.');
+    } finally {
+      if (mountedRef.current) setApplyingMacro(false);
+    }
+  }, [previewingMacro, applyingMacro, task?.id, addToast, loadComments]);
+
+  const filteredMacros = useMemo(() => {
+    const list = macros || [];
+    const q = macroSearch.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter(m =>
+      m.title.toLowerCase().includes(q) ||
+      (m.description || '').toLowerCase().includes(q),
+    );
+  }, [macros, macroSearch]);
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────
   useEffect(() => {
@@ -739,6 +845,15 @@ const Detail = ({
               showTemplates={showTemplates}
               setShowTemplates={setShowTemplates}
               taskType={task.type}
+              showMacroPicker={showMacroPicker}
+              onOpenMacroPicker={openMacroPicker}
+              onCloseMacroPicker={() => setShowMacroPicker(false)}
+              macros={filteredMacros}
+              macrosLoading={macrosLoading}
+              macrosError={macrosError}
+              macroSearch={macroSearch}
+              setMacroSearch={setMacroSearch}
+              onSelectMacro={handleSelectMacro}
             />
           )}
         </section>
@@ -772,6 +887,20 @@ const Detail = ({
           </RailCard>
         </aside>
       </div>
+
+      {/* Macro preview modal — full-screen overlay (Phase 3) */}
+      {previewingMacro && (
+        <MacroPreviewModal
+          macroTitle={previewingMacro.title}
+          loading={previewLoading}
+          error={previewError}
+          changes={previewData?.changes}
+          fieldsMeta={fieldsMeta}
+          applying={applyingMacro}
+          onCancel={closeMacroPreview}
+          onApply={handleApplyMacro}
+        />
+      )}
     </div>
   );
 };
@@ -938,14 +1067,32 @@ const CommentBubble = memo(function CommentBubble({ comment, expanded, onToggleE
   );
 });
 
-function ReplyComposer({ isZD, replyText, setReplyText, replyPublic, setReplyPublic, replySending, onSend, showTemplates, setShowTemplates, taskType }) {
+function ReplyComposer({
+  isZD, replyText, setReplyText, replyPublic, setReplyPublic, replySending, onSend,
+  showTemplates, setShowTemplates, taskType,
+  // Phase 3 — macros
+  showMacroPicker, onOpenMacroPicker, onCloseMacroPicker, macros, macrosLoading, macrosError,
+  macroSearch, setMacroSearch, onSelectMacro,
+}) {
   const templatesRef = useRef(null);
+  const macrosRef = useRef(null);
   useEffect(() => {
     if (!showTemplates) return;
     const onDoc = (e) => { if (templatesRef.current && !templatesRef.current.contains(e.target)) setShowTemplates(false); };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, [showTemplates, setShowTemplates]);
+  useEffect(() => {
+    if (!showMacroPicker) return;
+    const onDoc = (e) => { if (macrosRef.current && !macrosRef.current.contains(e.target)) onCloseMacroPicker(); };
+    const onKey = (e) => { if (e.key === 'Escape') onCloseMacroPicker(); };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [showMacroPicker, onCloseMacroPicker]);
 
   const canSend = replyText.trim() && !replySending;
   const sendBg = !canSend ? '#e0e0e0' : (isZD && replyPublic) ? '#b91c1c' : '#1b1b1b';
@@ -970,14 +1117,97 @@ function ReplyComposer({ isZD, replyText, setReplyText, replyPublic, setReplyPub
           <span style={{ fontSize: 12, fontWeight: 700, color: '#1b1b1b' }}>Compose reply</span>
         </div>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <button
-            disabled
-            title="Macros — Phase 3"
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, height: 26, padding: '0 10px', borderRadius: 6, border: '1px dashed #e8e8e8', background: 'white', color: '#bebebe', fontSize: 11, fontWeight: 500, cursor: 'not-allowed' }}
-          >
-            <i className="bi-lightning" style={{ fontSize: 10 }} />
-            Macros
-          </button>
+          {isZD && (
+            <div ref={macrosRef} style={{ position: 'relative' }}>
+              <button
+                onClick={() => showMacroPicker ? onCloseMacroPicker() : onOpenMacroPicker()}
+                aria-haspopup="listbox"
+                aria-expanded={!!showMacroPicker}
+                title="Apply a Zendesk macro to this ticket"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  height: 26, padding: '0 10px', borderRadius: 6,
+                  border: `1px solid ${showMacroPicker ? '#7c3aed' : '#e8e8e8'}`,
+                  background: showMacroPicker ? '#f3eff8' : 'white',
+                  color: showMacroPicker ? '#7c3aed' : '#616161',
+                  fontSize: 11, fontWeight: 500, cursor: 'pointer',
+                  transition: 'all .12s', fontFamily: 'inherit',
+                }}
+              >
+                <i className="bi-lightning-charge-fill" style={{ fontSize: 10 }} />
+                Macros
+              </button>
+              {showMacroPicker && (
+                <div role="listbox" style={{
+                  position: 'absolute', right: 0, top: 30, zIndex: 100,
+                  width: 320, maxHeight: 380,
+                  background: 'white', border: '1px solid #e8e8e8', borderRadius: 10,
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                  display: 'flex', flexDirection: 'column', overflow: 'hidden',
+                }}>
+                  <div style={{ padding: '8px 10px', borderBottom: '1px solid #f0efed' }}>
+                    <input
+                      autoFocus
+                      placeholder="Search macros…"
+                      value={macroSearch}
+                      onChange={e => setMacroSearch(e.target.value)}
+                      style={{
+                        width: '100%', height: 30, padding: '0 8px',
+                        border: '1px solid #e8e8e8', borderRadius: 6,
+                        fontSize: 12, outline: 'none', boxSizing: 'border-box',
+                      }}
+                    />
+                  </div>
+                  <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
+                    {macrosLoading && (!macros || macros.length === 0) ? (
+                      <div style={{ padding: '20px 14px', textAlign: 'center', color: '#9e9e9e', fontSize: 12 }}>
+                        <i className="bi-arrow-clockwise spin" style={{ fontSize: 16, display: 'block', marginBottom: 6 }} />
+                        Loading macros…
+                      </div>
+                    ) : macrosError ? (
+                      <div style={{ padding: '12px 14px', fontSize: 12, color: '#991b1b' }}>
+                        <i className="bi-exclamation-triangle-fill" style={{ marginRight: 6 }} />
+                        {macrosError}
+                      </div>
+                    ) : (macros || []).length === 0 ? (
+                      <div style={{ padding: '20px 14px', textAlign: 'center', color: '#9e9e9e', fontSize: 12 }}>
+                        {macroSearch ? 'No matches' : 'No active macros'}
+                      </div>
+                    ) : (
+                      (macros || []).slice(0, 80).map(m => (
+                        <button
+                          key={m.id}
+                          role="option"
+                          onClick={() => onSelectMacro(m)}
+                          style={{
+                            display: 'block', width: '100%', textAlign: 'left',
+                            padding: '8px 14px', border: 'none', borderBottom: '1px solid #f7f5f2',
+                            background: 'white', cursor: 'pointer',
+                            fontSize: 12, color: '#1b1b1b', fontFamily: 'inherit',
+                            transition: 'background .1s',
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.background = '#f3eff8'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'white'}
+                        >
+                          <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</div>
+                          {m.description && (
+                            <div style={{ marginTop: 2, color: '#9e9e9e', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {m.description}
+                            </div>
+                          )}
+                        </button>
+                      ))
+                    )}
+                    {(macros || []).length > 80 && (
+                      <div style={{ padding: '8px 14px', fontSize: 11, color: '#9e9e9e', textAlign: 'center', borderTop: '1px solid #f0efed' }}>
+                        Showing first 80 of {macros.length}. Use search to narrow.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <div ref={templatesRef} style={{ position: 'relative' }}>
             <button
               onClick={() => setShowTemplates(v => !v)}
@@ -1387,3 +1617,219 @@ const iconBtnStyle = {
   color: '#616161', cursor: 'pointer',
   transition: 'all .15s',
 };
+
+// ── Macro preview modal (Phase 3) ─────────────────────────────────────────
+// Modal overlay shown after the user selects a macro from the picker. Lists
+// every change the macro will make to the ticket — comments, status, fields,
+// tags — so the agent confirms before committing. Apply hits ZD with
+// `macro_ids: [id]` so Zendesk performs the operation atomically.
+function MacroPreviewModal({ macroTitle, loading, error, changes, fieldsMeta, applying, onCancel, onApply }) {
+  const overlayRef = useRef(null);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape' && !applying) onCancel(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [applying, onCancel]);
+
+  const overlayStyle = {
+    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+    background: 'rgba(0,0,0,0.45)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    zIndex: 9000,
+    animation: 'fadeInOverlay 0.18s ease both',
+  };
+  const modalStyle = {
+    width: 'min(640px, 92vw)', maxHeight: '85vh',
+    background: 'white', borderRadius: 16,
+    display: 'flex', flexDirection: 'column', overflow: 'hidden',
+    boxShadow: '0 24px 80px rgba(0,0,0,0.25)',
+    animation: 'scaleInModal 0.2s cubic-bezier(0.16, 1, 0.3, 1) both',
+  };
+
+  const hasChanges = Array.isArray(changes) && changes.length > 0;
+
+  return (
+    <div ref={overlayRef} style={overlayStyle} role="dialog" aria-modal="true" aria-label="Macro preview"
+      onClick={e => { if (e.target === e.currentTarget && !applying) onCancel(); }}>
+      <div style={modalStyle}>
+        <style>{`
+          @keyframes fadeInOverlay { from { opacity:0; } to { opacity:1; } }
+          @keyframes scaleInModal { from { opacity:0; transform:scale(0.97) translateY(10px); } to { opacity:1; transform:scale(1) translateY(0); } }
+        `}</style>
+        {/* Header */}
+        <div style={{ padding: '14px 20px', borderBottom: '1px solid #e8e8e8', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: '2px 8px', borderRadius: 128,
+              background: '#f3eff8', color: '#7c3aed',
+              fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em',
+            }}>
+              <i className="bi-lightning-charge-fill" style={{ fontSize: 9 }} />
+              Macro
+            </span>
+            <span style={{ fontSize: 11, color: '#9e9e9e' }}>Review changes before applying</span>
+          </div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: '#1b1b1b' }}>{macroTitle}</div>
+        </div>
+
+        {/* Body */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '14px 20px' }}>
+          {loading ? (
+            <div style={{ padding: '40px 0', textAlign: 'center', color: '#616161', fontSize: 13 }}>
+              <i className="bi-arrow-clockwise spin" style={{ fontSize: 24, display: 'block', marginBottom: 8 }} />
+              Loading preview…
+            </div>
+          ) : error ? (
+            <div style={{ padding: '14px 16px', borderRadius: 10, background: '#fef2f2', border: '1px solid #fca5a5', color: '#991b1b', fontSize: 13 }}>
+              <i className="bi-exclamation-triangle-fill" style={{ marginRight: 8 }} />
+              Couldn't load preview: {error}
+            </div>
+          ) : !hasChanges ? (
+            <div style={{ padding: '40px 0', textAlign: 'center', color: '#9e9e9e', fontSize: 13 }}>
+              <i className="bi-info-circle" style={{ fontSize: 24, display: 'block', marginBottom: 8 }} />
+              This macro doesn't make any changes to the ticket.
+            </div>
+          ) : (
+            <ChangeList changes={changes} fieldsMeta={fieldsMeta} />
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{
+          padding: '12px 20px', borderTop: '1px solid #e8e8e8', flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8,
+        }}>
+          <button
+            onClick={onCancel}
+            disabled={applying}
+            style={{
+              height: 36, padding: '0 16px', borderRadius: 8,
+              border: '1px solid #e8e8e8', background: 'white', color: '#1b1b1b',
+              fontSize: 12, fontWeight: 600,
+              cursor: applying ? 'not-allowed' : 'pointer',
+              opacity: applying ? 0.6 : 1,
+              transition: 'all .15s', fontFamily: 'inherit',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onApply}
+            disabled={loading || !!error || !hasChanges || applying}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              height: 36, padding: '0 18px', borderRadius: 8,
+              border: 'none',
+              background: (loading || !!error || !hasChanges || applying) ? '#e0e0e0' : '#7c3aed',
+              color: (loading || !!error || !hasChanges || applying) ? '#9e9e9e' : 'white',
+              fontSize: 12, fontWeight: 700,
+              cursor: (loading || !!error || !hasChanges || applying) ? 'not-allowed' : 'pointer',
+              transition: 'all .15s', fontFamily: 'inherit',
+            }}
+          >
+            {applying
+              ? <><i className="bi-hourglass-split" style={{ fontSize: 11 }} />Applying…</>
+              : <><i className="bi-lightning-charge-fill" style={{ fontSize: 11 }} />Apply Macro</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Renders a structured change row per type returned by the preview endpoint.
+function ChangeList({ changes, fieldsMeta }) {
+  const STATUS_LABEL = { new: 'New', open: 'Open', pending: 'Pending', hold: 'On hold', solved: 'Solved', closed: 'Closed' };
+  const PRIORITY_LABEL = { urgent: 'Urgent', high: 'High', normal: 'Normal', low: 'Low' };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {changes.map((c, i) => {
+        if (c.type === 'comment') {
+          return (
+            <ChangeRow
+              key={`comment-${i}`}
+              icon={c.public ? 'bi-send-fill' : 'bi-journal-text'}
+              iconColor={c.public ? '#b91c1c' : '#92400E'}
+              iconBg={c.public ? '#fef2f2' : '#fef3c7'}
+              label={c.public ? 'Adds public reply' : 'Adds internal note'}
+            >
+              <div style={{
+                marginTop: 6, padding: '10px 12px',
+                borderRadius: 8, background: c.public ? '#fef2f2' : '#fef3c7',
+                border: `1px solid ${c.public ? '#fca5a5' : '#fde68a'}`,
+                fontSize: 13, color: '#1b1b1b', whiteSpace: 'pre-wrap',
+                maxHeight: 200, overflowY: 'auto', lineHeight: 1.5,
+              }}>{c.body || '(empty body)'}</div>
+            </ChangeRow>
+          );
+        }
+        if (c.type === 'status') {
+          return <ChangeRow key={`status-${i}`} icon="bi-arrow-repeat" iconColor="#1d4ed8" iconBg="#eff6ff"
+            label={`Sets status to`} value={STATUS_LABEL[c.value] || c.value} />;
+        }
+        if (c.type === 'priority') {
+          return <ChangeRow key={`pri-${i}`} icon="bi-exclamation-circle" iconColor="#92400E" iconBg="#fff8e6"
+            label="Sets priority to" value={PRIORITY_LABEL[c.value] || c.value} />;
+        }
+        if (c.type === 'ticketType') {
+          return <ChangeRow key={`type-${i}`} icon="bi-tag-fill" iconColor="#616161" iconBg="#f5f3ef"
+            label="Sets type to" value={c.value} />;
+        }
+        if (c.type === 'assignee') {
+          return <ChangeRow key={`asn-${i}`} icon="bi-person-fill" iconColor="#1d4ed8" iconBg="#eff6ff"
+            label="Reassigns to Zendesk user ID" value={String(c.value)}
+            note="Resolves to a name on the next sync." />;
+        }
+        if (c.type === 'group') {
+          return <ChangeRow key={`grp-${i}`} icon="bi-people-fill" iconColor="#616161" iconBg="#f5f3ef"
+            label="Moves to group ID" value={String(c.value)} />;
+        }
+        if (c.type === 'tags') {
+          return <ChangeRow key={`tags-${i}`} icon="bi-tags-fill" iconColor="#0369a1" iconBg="#e0f2fe"
+            label="Sets tags to">
+              <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {(c.value || []).length === 0
+                  ? <span style={{ fontSize: 11, color: '#9e9e9e', fontStyle: 'italic' }}>(no tags)</span>
+                  : c.value.map(t => (
+                    <span key={t} style={{ fontSize: 11, padding: '2px 8px', borderRadius: 128, background: '#e0f2fe', color: '#0369a1', fontWeight: 600 }}>{t}</span>
+                  ))}
+              </div>
+            </ChangeRow>;
+        }
+        if (c.type === 'customField') {
+          return <ChangeRow key={`cf-${c.id}-${i}`} icon="bi-input-cursor-text" iconColor="#7c3aed" iconBg="#f3eff8"
+            label={`Sets "${c.label}" to`} value={c.displayValue || '(none)'} />;
+        }
+        if (c.type === 'subject') {
+          return <ChangeRow key={`subj-${i}`} icon="bi-pencil-fill" iconColor="#1b1b1b" iconBg="#f5f4f2"
+            label="Updates subject to" value={c.value} />;
+        }
+        return null;
+      })}
+    </div>
+  );
+}
+
+function ChangeRow({ icon, iconColor, iconBg, label, value, children, note }) {
+  return (
+    <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+      <div style={{
+        width: 28, height: 28, borderRadius: 8, flexShrink: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: iconBg,
+      }}>
+        <i className={icon} style={{ fontSize: 13, color: iconColor }} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12, color: '#616161' }}>
+          {label}
+          {value && <span style={{ marginLeft: 6, color: '#1b1b1b', fontWeight: 700 }}>{value}</span>}
+        </div>
+        {note && <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 2 }}>{note}</div>}
+        {children}
+      </div>
+    </div>
+  );
+}
