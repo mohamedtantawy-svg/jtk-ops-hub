@@ -973,6 +973,11 @@ export async function listWorkbenchTasks(params = {}) {
                    || extractCountryFromCustomFields(t.taskConfiguration?.customFieldConfigurations)
                    || '',
     assignee:         t.assignee ? { id: t.assignee.id, email: t.assignee.email, name: t.assignee.name } : null,
+    // Flat alias so queue-scoping.js (which reads item.assigneeEmail) can
+    // match the assignee chain. Without this the workbench scope falls
+    // through to the country-owner path for every task — broader than the
+    // team spec, which calls for assignee-only on Workbench.
+    assigneeEmail:    t.assignee?.email || '',
     creator:          t.creator ? { id: t.creator.id, email: t.creator.email, name: t.creator.name } : null,
     createdAt:        t.createdAt || '',
     updatedAt:        t.updatedAt || '',

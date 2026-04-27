@@ -4,41 +4,45 @@
 // that returns Queue data (/api/v1/queue, /api/v1/integrations/deel/*). Both
 // sides must agree; this file is that agreement.
 //
-// Visibility matrix — uniform across every queue type now (was previously
-// split into "assignee-only" and "country-OR-assignee" buckets; the rule
-// below collapses both into a single split-by-assignment-status model).
+// Visibility matrix — two distinct rules per queue type (per team spec).
 // ──────────────────────────────────────────────────────────────────────────
-//                         Assigned to a known    Truly unassigned, or
-//                         directory member       assigned only to an orphan
-//                         (real employee)        email (departed, external,
-//                                                 service account, …)
+//                         Assignee-only chain     Country-OR-assignee union
+//                         (ZD / Jira / Workbench) (Onb / Paused Onb / Off /
+//                                                  Amendments / Redlines)
 // ──────────────────────────────────────────────────────────────────────────
-// admin                   all                    all
-// regional_manager        self + full subtree    country owners (self +
-//                         assignees                full subtree)
-// team_lead               self + direct-report   country owners (self +
-//                         assignees                direct reports)
-// agent                   assigned to self       country owners (countries
-//                                                  owned by the agent)
+// admin                   all                     all
+// regional_manager        assigned to self +      anything in countries
+//                         full subtree            owned by self + subtree
+//                                                 OR assigned to anyone in
+//                                                 the subtree
+// team_lead               assigned to self +      anything in countries
+//                         direct reports          owned by self + direct
+//                                                 reports OR assigned to
+//                                                 self + direct reports
+// agent                   assigned to self        anything in countries the
+//                                                 agent owns OR assigned
+//                                                 to the agent
 // ──────────────────────────────────────────────────────────────────────────
 //
 // Two key principles:
 //
-//   1. Assigned (to a real, in-directory member) → ONLY the assignee chain
-//      sees it. Country owners outside that chain do NOT have the row in
-//      their queue, so reassigning it actually hands it off cleanly.
+//   1. Ticket queues (ZD / Jira / Workbench) — ASSIGNEE-CHAIN ONLY.
+//      Show to the assignee, their TL, their RM, admin. Country owners
+//      outside the chain do NOT see assigned-to-other rows. To prevent
+//      task-stranding, rows whose primary assignee is empty OR resolves
+//      to an orphan email (departed user / service account / external
+//      address) fall back to the country-owner chain so SOMEONE actionable
+//      always sees them.
 //
-//   2. Unassigned OR orphan-assigned → FALLS BACK to country owners (and
-//      their TL/RM/admin chain). "Orphan" means the assignee email isn't
-//      in MEMBERS_BY_EMAIL — typically a departed employee, a service
-//      account, or an external address. Without this fallback, those rows
-//      would be invisible to every operational user (only Admin would see
-//      them) and silently rot. The fallback guarantees SOMEONE actionable
-//      always sees the row.
+//   2. Country queues (Onb / Paused Onb / Off / Amend / Redline) — UNION.
+//      Country owners see everything in their owned countries regardless
+//      of who's currently assigned. The assignee chain ALSO sees the row
+//      (so an out-of-country assignee still gets it). Reassigning a row
+//      adds a viewer; it doesn't remove the country owner.
 //
-// This implements the team rule: "if no one is assigned, show it per
-// country to the country owners" — and extends it sensibly to cover orphan
-// assignments, which are functionally the same problem.
+// The split mirrors how the team actually operates: tickets have a clear
+// owner (assignee), country queues are owned by the country owner who
+// triages and routes work into them.
 //
 // Notes
 //   • Country-OR-assignee queues (Onboarding / Paused Onb / Offboarding /
@@ -137,26 +141,21 @@ export function getVisibleCountries(user) {
 // ── Filter helpers ─────────────────────────────────────────────────────────
 
 /**
- * Core scoping rule — split by ASSIGNMENT STATUS.
+ * Assignee-only rule (with safety fallback) — used by ZD / Jira / Workbench.
  *
  *   • Assigned to a known directory member (primary or any secondary):
  *     only the assignee chain sees the row (assignee + their TL + their RM
  *     + admin). Country owners outside that chain do NOT get it.
  *   • Otherwise — truly unassigned OR all-assignees-orphan (departed,
- *     external, service account): falls back to country owners. The row
- *     is visible iff its country is in the user's visibleCountries.
- *
- * Treating orphan-assigned the same as unassigned is critical for
- * task-stranding prevention. A row pointed at e.g. a former employee's
- * email would otherwise be invisible to every operational user; the
- * country fallback guarantees the country owner (and their lead chain)
- * still sees it.
+ *     external, service account): falls back to country owners. Without
+ *     this, orphan-assigned tickets would be invisible to every
+ *     operational user.
  *
  * Secondary assignees (Jira only): items may carry
  * `secondaryAssigneeEmails` from custom fields like Country Owner /
  * Task Owner / Process Owner / Team Responsible. Any of those emails
  * that resolve in MEMBERS_BY_EMAIL count as "assigned to a real
- * member" for the purposes of this rule.
+ * member".
  */
 function _scopeByAssignedOrUnassigned(items, user) {
   if (!Array.isArray(items)) return [];
@@ -175,7 +174,6 @@ function _scopeByAssignedOrUnassigned(items, user) {
     const primaryIsKnown = !!(primary && MEMBERS_BY_EMAIL[primary]);
     const knownSecondaries = secondaries.filter(s => !!MEMBERS_BY_EMAIL[s]);
 
-    // Real assignment to an in-directory member: assignee chain only.
     if (primaryIsKnown || knownSecondaries.length > 0) {
       if (primaryIsKnown && visibleEmails.has(primary)) return true;
       for (const s of knownSecondaries) {
@@ -184,21 +182,56 @@ function _scopeByAssignedOrUnassigned(items, user) {
       return false;
     }
 
-    // Truly unassigned, or assigned only to orphan emails (departed
-    // employee, external address, service account, …): fall back to the
-    // country-owner chain. Without this, orphan-assigned rows would be
-    // invisible to every operational user.
     const cc = (item.country || item.countryCode || '').toUpperCase();
     return !!cc && visibleCountries.has(cc);
   });
 }
 
 /**
- * Assignee-mode filter — Zendesk, Jira, Offboarding, Workbench.
- * See _scopeByAssignedOrUnassigned for the actual rule.
+ * Country-OR-assignee rule (UNION) — used by Onboarding / Paused Onboarding /
+ * Offboarding / Amendments / Redlines.
  *
- * @param {Array}  items
- * @param {Object} user  — must have `email`; may have `role` set by JWT
+ * A row is visible if EITHER:
+ *   • the row's country is in the user's visibleCountries (country owner +
+ *     their lead chain), OR
+ *   • the row's primary or secondary assignee is in the user's
+ *     visibleEmails (assignee chain).
+ *
+ * This is the broader "country owners always see their region's queue work"
+ * model the team explicitly asked for on Onb/Off/Redlines: a country owner
+ * picks up everything in their country, even if it's already been routed to
+ * a specific person.
+ */
+function _scopeCountryOrAssignee(items, user) {
+  if (!Array.isArray(items)) return [];
+  if (!user) return [];
+  if (isAdminUser(user)) return items;
+
+  const visibleEmails = getVisibleEmails(user);
+  const visibleCountries = getVisibleCountries(user);
+
+  return items.filter(item => {
+    const cc = (item.country || item.countryCode || '').toUpperCase();
+    if (cc && visibleCountries.has(cc)) return true;
+
+    const primary = (item.assigneeEmail || '').toLowerCase();
+    if (primary && visibleEmails.has(primary)) return true;
+
+    const secondaries = Array.isArray(item.secondaryAssigneeEmails)
+      ? item.secondaryAssigneeEmails.map(e => (e || '').toLowerCase()).filter(Boolean)
+      : [];
+    for (const s of secondaries) {
+      if (visibleEmails.has(s)) return true;
+    }
+    return false;
+  });
+}
+
+/**
+ * Assignee-mode filter — Zendesk, Jira, Workbench.
+ * Strict assignee-chain visibility, with a country-fallback only when the
+ * primary assignee is empty or an orphan (so unowned tickets aren't
+ * stranded).
  */
 export function filterByAssignee(items, user) {
   return _scopeByAssignedOrUnassigned(items, user);
@@ -229,20 +262,23 @@ export function filterByCountry(items, user) {
 }
 
 /**
- * Combined filter — Onboarding, Paused Onboarding, Offboarding, Amendments,
- * Redlines. Same rule as filterByAssignee now (split by assignment status,
- * orphan-as-unassigned fallback). Kept as a separate symbol so future
- * divergence between queue types is a one-line change.
+ * Country-OR-assignee filter — Onboarding, Paused Onboarding, Offboarding,
+ * Amendments, Redlines. A row is visible if the user owns the row's country
+ * OR is in the row's assignee chain. Country owners see their region's
+ * queue regardless of who's currently assigned.
  */
 export function filterByCountryOrAssignee(items, user) {
-  return _scopeByAssignedOrUnassigned(items, user);
+  return _scopeCountryOrAssignee(items, user);
 }
 
 // ── Named wrappers so call sites read like the spec ────────────────────────
-// Every queue type uses the same split-by-assignment rule today
-// (assigned-to-real-member → assignee chain only; otherwise → country
-// owners). The two filter symbols stay separate so a single queue can
-// diverge later without touching all callers.
+// Two distinct visibility models:
+//   • Assignee-only chain (with orphan-fallback) — ZD / Jira / Workbench.
+//     Show to the assignee, their TL, their RM, and admin. Unowned /
+//     orphaned tickets fall to country owners so they aren't stranded.
+//   • Country-OR-assignee union — Onb / Paused Onb / Off / Amend / Redline.
+//     Show to country owners (plus their lead chain) AND the assignee chain.
+//     Country owners see their region's queue even when rows are pre-routed.
 export const scopeZendeskTickets   = (items, user) => filterByAssignee(items, user);
 export const scopeJiraIssues       = (items, user) => filterByAssignee(items, user);
 export const scopeWorkbenchTasks   = (items, user) => filterByAssignee(items, user);
