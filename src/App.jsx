@@ -148,8 +148,23 @@ const App=()=>{
           if (payload?.sub) tokenId = Number(payload.sub);
         }catch(e){ /* token unparseable — will fall through */ }
       }
+      // Per-user permission flags (e.g. isAnnouncementsAdmin) live ONLY on
+      // the team_member_overrides row, not in static MEMBERS. Read them from
+      // the localStorage snapshot (which /auth/callback writes from the
+      // login response, and /me revalidation refreshes) so the user state
+      // hydrates with the correct flags on the very first paint.
+      let snapshotPerms = {};
+      try {
+        const storedRaw = localStorage.getItem('ops_hub_user');
+        if (storedRaw) {
+          const stored = JSON.parse(storedRaw);
+          if (stored?.email?.toLowerCase() === loggedInEmail.toLowerCase()) {
+            snapshotPerms = { isAnnouncementsAdmin: stored.isAnnouncementsAdmin === true };
+          }
+        }
+      } catch {}
       const m=MEMBERS.find(mm=>mm.email.toLowerCase()===loggedInEmail.toLowerCase());
-      if(m) return tokenId ? { ...m, id: tokenId } : m;
+      if(m) return tokenId ? { ...m, ...snapshotPerms, id: tokenId } : { ...m, ...snapshotPerms };
       // User not in hardcoded MEMBERS but has a stored session. Prefer the
       // `ops_hub_user` snapshot (persisted by /auth/callback and refreshed on
       // every /me revalidation — it carries the real DB `team`, `role`, etc.)
@@ -404,18 +419,13 @@ const App=()=>{
       return;
     }
 
-    // Token is valid locally — determine if we should revalidate with the server
-    const tokenTs = Number(localStorage.getItem('ops_hub_token_ts') || 0);
-    const tokenAgeMs = tokenTs ? (Date.now() - tokenTs) : Infinity;
-    const ONE_HOUR = 60 * 60 * 1000;
-
-    if (tokenAgeMs < ONE_HOUR) {
-      // Token is less than 1 hour old — skip server revalidation.
-      // The user object was already restored from localStorage/MEMBERS in useState init.
-      return;
-    }
-
-    // Token is > 1 hour old — background revalidation (non-blocking, no logout on failure)
+    // Background revalidation (non-blocking, no logout on failure). Always
+    // run — the previous 1-hour skip prevented per-user permission grants
+    // (isAnnouncementsAdmin etc.) from reaching the FE state until the
+    // token aged, so a fresh grant didn't take effect until at least an
+    // hour later. The /me call is cheap (one DB read), already non-
+    // blocking, and only triggers a logout when the token is locally
+    // verifiable as expired — so running it on every mount is safe.
     const timer = setTimeout(() => {
       apiFetchMe()
         .then((serverUser) => {
@@ -423,10 +433,21 @@ const App=()=>{
             // Prefer the server's authoritative id (from members table) so the
             // frontend's user.id always matches what's stored in
             // announcement_acks.user_id. See the user-init comment above.
+            // ALSO carry per-user permission flags (isAnnouncementsAdmin and
+            // any future grants) from the server response — those live on
+            // team_member_overrides and aren't in the static MEMBERS array,
+            // so without this they'd be dropped on every revalidation.
             const staticMember = MEMBERS.find(m => m.email.toLowerCase() === serverUser.email.toLowerCase());
             const member = staticMember
-              ? { ...staticMember, id: serverUser.id || staticMember.id }
+              ? {
+                  ...staticMember,
+                  id: serverUser.id || staticMember.id,
+                  isAnnouncementsAdmin: serverUser.isAnnouncementsAdmin === true,
+                }
               : serverUser;
+            // Persist the freshest snapshot so the next mount's useState
+            // init paints with the right permissions instantly.
+            try { localStorage.setItem('ops_hub_user', JSON.stringify(member)); } catch {}
             // If the server promoted or demoted us since the cache was
             // written, any cached queue tasks were scoped to the old role.
             // mergeSourceIntoTasks would otherwise see the newly-scoped
