@@ -44,12 +44,6 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
   const [showTranslateDD,setShowTranslateDD]=useState(false);
   const [activeLang,setActiveLang]=useState(null);
   const [originalReplyText,setOriginalReplyText]=useState(null);
-  // Linked Systems state
-  const [linkedTickets,setLinkedTickets]=useState(task.linkedTickets||[]);
-  const [showLinkForm,setShowLinkForm]=useState(false);
-  const [linkSystem,setLinkSystem]=useState('Zendesk');
-  const [linkTicketId,setLinkTicketId]=useState('');
-  const [showSideConvTooltip,setShowSideConvTooltip]=useState(false);
   const [comments, setComments] = useState([]);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [commentsError, setCommentsError] = useState(null);
@@ -70,8 +64,6 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
     setTab('overview'); setReplyText(''); setReplyPublic(false);
     setCommentsError(null); setComments([]);
   },[task.id]);
-  // Sync linkedTickets when task changes
-  useEffect(()=>{ setLinkedTickets(task.linkedTickets||[]); },[task.id]);
   // Fetch comments when Messages tab is opened (supports Zendesk + Jira).
   // Dedup via inflightRef so rapid tab-toggles don't fire parallel fetches.
   // Surfaces a distinct error state so users can tell 403/500 from empty.
@@ -111,16 +103,6 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, [showTranslateDD]);
-
-  // Side-conversations tooltip also closes on outside click so the pop-up
-  // doesn't linger when the user clicks elsewhere in the modal.
-  const sideConvRef = useRef(null);
-  useEffect(() => {
-    if (!showSideConvTooltip) return;
-    const h = (e) => { if (sideConvRef.current && !sideConvRef.current.contains(e.target)) setShowSideConvTooltip(false); };
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
-  }, [showSideConvTooltip]);
 
   // ── Focus trap ─────────────────────────────────────────────────────────
   // Keeps keyboard focus inside the modal while it's open so screen-reader
@@ -361,91 +343,6 @@ const Detail=({task,onClose,onAction,tasks,setTasks,notes,setNotes,activity,setA
                 <div style={{fontSize:12,color:'#616161'}}><span style={{fontWeight:600}}>Reason:</span> {taskEscalation.reason}</div>
               </div>
             )}
-            {/* B: Linked Tickets — driven by local state so additions from
-                the Linked Systems editor below appear here immediately
-                instead of waiting for the parent to re-push the task prop. */}
-            {linkedTickets&&linkedTickets.length>0&&(
-              <div>
-                <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6}}>Linked Tickets</div>
-                <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
-                  {linkedTickets.map((lt,i)=>{
-                    const url=lt.type==='jira'?`https://deel.atlassian.net/browse/${lt.id}`:lt.type==='zendesk'?`https://deel.zendesk.com/agent/tickets/${lt.id.replace(/\D/g,'')}`:task.externalUrl||'#';
-                    return(
-                      <a key={i} href={url} target="_blank" rel="noreferrer" onClick={e=>e.stopPropagation()} style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 10px',borderRadius:128,background:'var(--border,#e8e4df)',color:'#1b1b1b',border:'1px solid #d6d0ca',fontSize:12,fontWeight:500,textDecoration:'none',transition:'all .12s'}}
-                        onMouseEnter={e=>{e.currentTarget.style.background='#ddd8d2';}} onMouseLeave={e=>{e.currentTarget.style.background='var(--border,#e8e4df)';}}>
-                        <i className="bi-link-45deg" style={{fontSize:11,color:'#616161'}}></i>
-                        <span style={{fontSize:10,color:'#616161',textTransform:'uppercase',fontWeight:700}}>{lt.type?.slice(0,2).toUpperCase()||'LN'}</span>
-                        {lt.id}
-                      </a>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-            {/* ── Linked Systems ──────────────────────────────────────── */}
-            <div>
-              <div style={{fontSize:11,fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'0.05em',marginBottom:6,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-                <span>Linked Systems</span>
-                {task.source==='zendesk'&&(
-                  <div ref={sideConvRef} style={{position:'relative',display:'inline-block'}}>
-                    <button onClick={()=>setShowSideConvTooltip(v=>!v)}
-                      style={{display:'inline-flex',alignItems:'center',gap:4,height:22,padding:'0 8px',borderRadius:6,border:'1px solid #e8e8e8',background:'white',color:'#9e9e9e',fontSize:10,fontWeight:500,cursor:'pointer',transition:'all .12s'}}
-                      onMouseEnter={e=>{e.currentTarget.style.borderColor='#1f74b3';e.currentTarget.style.color='#1f74b3';}} onMouseLeave={e=>{e.currentTarget.style.borderColor='#e8e8e8';e.currentTarget.style.color='#9e9e9e';}}>
-                      <i className="bi-chat-dots" style={{fontSize:10}}></i>Side Conversations (0)
-                    </button>
-                    {showSideConvTooltip&&(
-                      <div style={{position:'absolute',right:0,top:28,width:220,background:'#1b1b1b',color:'white',borderRadius:10,padding:'10px 14px',fontSize:12,zIndex:200,boxShadow:'0 4px 16px rgba(0,0,0,0.18)',animation:'fadeSlide .15s ease'}}>
-                        <i className="bi-info-circle" style={{marginRight:6,fontSize:11}}></i>
-                        Side conversation feature coming in V2
-                        <div style={{position:'absolute',right:12,top:-5,width:10,height:10,background:'#1b1b1b',transform:'rotate(45deg)',borderRadius:2}}></div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-              {/* Existing linked tickets as chips */}
-              <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:linkedTickets.length>0?8:0}}>
-                {linkedTickets.map((lt,i)=>(
-                  <span key={i} style={{display:'inline-flex',alignItems:'center',gap:5,background:'#f3eff8',color:'#7c3aed',border:'1px solid #c4b1f9',borderRadius:128,padding:'3px 10px',fontSize:12,fontWeight:600,cursor:'default'}}>
-                    <i className="bi-link-45deg" style={{fontSize:11}}></i>
-                    {lt.system}: {lt.ticketId}
-                    <button onClick={()=>setLinkedTickets(prev=>prev.filter((_,j)=>j!==i))}
-                      style={{background:'none',border:'none',color:'#9e9e9e',cursor:'pointer',padding:0,fontSize:12,lineHeight:1,display:'flex',alignItems:'center'}}
-                      aria-label="Remove linked ticket">x</button>
-                  </span>
-                ))}
-              </div>
-              {/* + Link Ticket button */}
-              {!showLinkForm&&(
-                <button onClick={()=>setShowLinkForm(true)}
-                  style={{display:'inline-flex',alignItems:'center',gap:5,height:28,padding:'0 12px',borderRadius:128,border:'1px dashed #c4b1f9',background:'transparent',color:'#7c3aed',fontSize:12,fontWeight:600,cursor:'pointer',transition:'all .12s'}}
-                  onMouseEnter={e=>{e.currentTarget.style.background='#f3eff8';}} onMouseLeave={e=>{e.currentTarget.style.background='transparent';}}>
-                  <i className="bi-plus-circle" style={{fontSize:11}}></i>Link Ticket
-                </button>
-              )}
-              {/* Inline link form */}
-              {showLinkForm&&(
-                <div style={{display:'flex',alignItems:'center',gap:6,marginTop:4,flexWrap:'wrap'}}>
-                  <select value={linkSystem} onChange={e=>setLinkSystem(e.target.value)}
-                    style={{height:32,padding:'0 8px',borderRadius:8,border:'1px solid #e8e8e8',background:'white',fontSize:12,color:'#1b1b1b',cursor:'pointer',outline:'none'}}>
-                    {['Zendesk','Jira','Workbench','Slack'].map(s=><option key={s} value={s}>{s}</option>)}
-                  </select>
-                  <input value={linkTicketId} onChange={e=>setLinkTicketId(e.target.value)}
-                    placeholder="Ticket ID..." onKeyDown={e=>{if(e.key==='Enter'&&linkTicketId.trim()){setLinkedTickets(prev=>[...prev,{system:linkSystem,ticketId:linkTicketId.trim()}]);addToast&&addToast('success','Ticket linked',`${linkSystem}: ${linkTicketId.trim()}`);setLinkTicketId('');setShowLinkForm(false);}}}
-                    style={{height:32,padding:'0 10px',borderRadius:8,border:'1px solid #e8e8e8',background:'white',fontSize:12,color:'#1b1b1b',outline:'none',width:110,transition:'border-color .12s'}}
-                    onFocus={e=>e.target.style.borderColor='#7c3aed'} onBlur={e=>e.target.style.borderColor='#e8e8e8'}/>
-                  <button
-                    onClick={()=>{if(linkTicketId.trim()){setLinkedTickets(prev=>[...prev,{system:linkSystem,ticketId:linkTicketId.trim()}]);addToast&&addToast('success','Ticket linked',`${linkSystem}: ${linkTicketId.trim()}`);setLinkTicketId('');setShowLinkForm(false);}}}
-                    style={{height:32,padding:'0 14px',borderRadius:128,border:'none',background:'#7c3aed',color:'white',fontSize:12,fontWeight:700,cursor:'pointer'}}>
-                    Link
-                  </button>
-                  <button onClick={()=>{setShowLinkForm(false);setLinkTicketId('');}}
-                    style={{height:32,padding:'0 10px',borderRadius:128,border:'1px solid #e8e8e8',background:'white',color:'#616161',fontSize:12,cursor:'pointer'}}>
-                    Cancel
-                  </button>
-                </div>
-              )}
-            </div>
             {/* Open in source link */}
             <a href={getUrl(task)} target="_blank" rel="noreferrer" style={{display:'flex',alignItems:'center',justifyContent:'center',gap:6,padding:'10px 16px',borderRadius:128,border:'1px solid #e8e8e8',background:'white',color:'#1f74b3',fontSize:13,fontWeight:600,textDecoration:'none',transition:'all .15s'}} onMouseEnter={e=>{e.currentTarget.style.background='#e8f0fe';}} onMouseLeave={e=>{e.currentTarget.style.background='white';}}>
               <i className={TOOLS[task.source]?.icon||'bi-box-arrow-up-right'} style={{fontSize:12}}></i>
