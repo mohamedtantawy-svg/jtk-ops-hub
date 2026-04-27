@@ -363,6 +363,13 @@ async function fetchZendeskQueue() {
         lastCustomerResponseAt: t.updated_at, // Zendesk updated_at tracks last activity; this is a reasonable proxy
         createdAt: t.created_at,
         updatedAt: t.updated_at,
+        // Pilar's 2026-04-27 spec: every Zendesk ticket has a flat 24h SLA
+        // measured from the latest requester reply (using `updated_at` as the
+        // proxy — slaInfo() falls back to it as `minutesSinceLastResponse ??
+        // minutesAgo`). slaInfo() already excludes 'pending'/'hold' (mapped
+        // to 'waiting') and 'solved'/'closed' ('resolved'), so this only
+        // counts when the ticket is in 'new' or 'in_progress'.
+        slaMinsOverride: 24 * 60,
         externalUrl: ZD_SUBDOMAIN
           ? `https://${ZD_SUBDOMAIN}.zendesk.com/agent/tickets/${t.id}`
           : '',
@@ -624,11 +631,11 @@ async function fetchJiraQueue() {
         lastCustomerResponseAt: f.updated, // Jira updated tracks last activity
         createdAt: f.created,
         updatedAt: f.updated,
-        // Jira SLA is fixed at 24h from the latest update regardless of the
-        // inferred task type (Pilar's 2026-04-22 rule). slaInfo() in
+        // Jira SLA is fixed at 48h from the latest update (Pilar's 2026-
+        // 04-27 spec — bumped from the previous 24h). slaInfo() in
         // src/utils/helpers.js reads this override before falling back to
         // SLA_MINS[type].
-        slaMinsOverride: 1440,
+        slaMinsOverride: 48 * 60,
         externalUrl: JIRA_BASE ? `${JIRA_BASE}/browse/${issue.key}` : '',
         tags: f.labels || [],
         jiraStatus: statusName,
