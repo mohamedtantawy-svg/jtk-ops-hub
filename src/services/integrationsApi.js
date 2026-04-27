@@ -268,3 +268,32 @@ export async function applyTicketMacro(ticketId, macroId) {
     method: 'POST',
   });
 }
+
+// ── Side conversations (Phase 4) ──────────────────────────────────────────
+export async function fetchSideConversations(ticketId) {
+  return apiFetch(`/queue/${encodeURIComponent(ticketId)}/side-conversations`);
+}
+
+export async function fetchSideConversation(ticketId, sideConvId) {
+  return apiFetch(`/queue/${encodeURIComponent(ticketId)}/side-conversations/${encodeURIComponent(sideConvId)}`);
+}
+
+export async function createSideConversation(ticketId, { subject, body, to }) {
+  return apiFetch(`/queue/${encodeURIComponent(ticketId)}/side-conversations`, {
+    method: 'POST',
+    body: JSON.stringify({ subject, body, to }),
+  });
+}
+
+export async function replySideConversation(ticketId, sideConvId, body) {
+  return apiFetch(`/queue/${encodeURIComponent(ticketId)}/side-conversations/${encodeURIComponent(sideConvId)}/reply`, {
+    method: 'POST',
+    body: JSON.stringify({ body }),
+  });
+}
+
+export async function closeSideConversation(ticketId, sideConvId) {
+  return apiFetch(`/queue/${encodeURIComponent(ticketId)}/side-conversations/${encodeURIComponent(sideConvId)}/close`, {
+    method: 'POST',
+  });
+}

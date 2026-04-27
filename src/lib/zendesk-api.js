@@ -207,3 +207,59 @@ export async function listMacros({ page, per_page = 100, include } = {}) {
 export async function previewMacroOnTicket(ticketId, macroId) {
   return zendeskFetch(`/tickets/${ticketId}/macros/${macroId}/apply.json`);
 }
+
+// ── Side Conversations ─────────────────────────────────────────────────
+// Side conversations are off-ticket threads (email / Slack / child ticket)
+// agents use to coordinate with internal teams or external parties without
+// looping the original requester. Phase 4 supports email side conversations:
+// list / create / read events / reply / close.
+
+export async function listSideConversations(ticketId, { page, per_page = 100 } = {}) {
+  const qs = new URLSearchParams({ per_page: String(per_page) });
+  if (page) qs.set('page', String(page));
+  return zendeskFetch(`/tickets/${ticketId}/side_conversations.json?${qs.toString()}`);
+}
+
+export async function getSideConversation(ticketId, sideConvId) {
+  return zendeskFetch(`/tickets/${ticketId}/side_conversations/${sideConvId}.json`);
+}
+
+export async function getSideConversationEvents(ticketId, sideConvId, { page, per_page = 100 } = {}) {
+  const qs = new URLSearchParams({ per_page: String(per_page) });
+  if (page) qs.set('page', String(page));
+  return zendeskFetch(`/tickets/${ticketId}/side_conversations/${sideConvId}/events.json?${qs.toString()}`);
+}
+
+// Create a new side conversation on a ticket. Body shape (Zendesk-native):
+//   { message: { subject, body, to: [{email}, ...] } }
+// We send the simplest viable payload — agents can elaborate via Zendesk's
+// own UI if they need attachments / cc / bcc / templates.
+export async function createSideConversation(ticketId, { subject, body, to }) {
+  return zendeskFetch(`/tickets/${ticketId}/side_conversations.json`, {
+    method: 'POST',
+    body: JSON.stringify({
+      message: {
+        subject: subject || '',
+        body: body || '',
+        to: Array.isArray(to) ? to.map(addr => ({ email: addr })) : [],
+      },
+    }),
+  });
+}
+
+export async function replyToSideConversation(ticketId, sideConvId, { body }) {
+  return zendeskFetch(`/tickets/${ticketId}/side_conversations/${sideConvId}/reply.json`, {
+    method: 'POST',
+    body: JSON.stringify({ message: { body: body || '' } }),
+  });
+}
+
+// Close a side conversation. ZD also supports state=open for re-opening,
+// but for Phase 4 we expose only close (re-open is a low-frequency action
+// that can be done from Zendesk directly).
+export async function closeSideConversation(ticketId, sideConvId) {
+  return zendeskFetch(`/tickets/${ticketId}/side_conversations/${sideConvId}.json`, {
+    method: 'PUT',
+    body: JSON.stringify({ side_conversation: { state: 'closed' } }),
+  });
+}

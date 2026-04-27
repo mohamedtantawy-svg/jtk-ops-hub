@@ -21,6 +21,7 @@ import NotesTab from './NotesTab';
 import TimelineTab from './TimelineTab';
 import { fetchTicketComments, postTicketAction, updateTicketCustomFields, fetchZendeskMacros, previewTicketMacro, applyTicketMacro } from '../../services/integrationsApi';
 import { useTicketFieldsMeta } from '../../hooks/useTicketFieldsMeta';
+import SideConversationsModal from './SideConversationsModal';
 
 // Visible status options (FE → app status). Maps to ZD via actions/route.js
 // statusMap. "On hold" requires actions/route.js to accept on_hold → hold.
@@ -143,6 +144,8 @@ const Detail = ({
   const [fieldSaving, setFieldSaving] = useState(null);     // same key while PUT is in flight
   const [editingAssignee, setEditingAssignee] = useState(false);
   const [assigneeSaving, setAssigneeSaving] = useState(false);
+  // Phase 4 — side conversations modal toggle
+  const [showSideConvModal, setShowSideConvModal] = useState(false);
   // Phase 3 — macros
   const [showMacroPicker, setShowMacroPicker] = useState(false);
   const [macroSearch, setMacroSearch] = useState('');
@@ -176,6 +179,7 @@ const Detail = ({
     setPreviewLoading(false);
     setPreviewError(null);
     setApplyingMacro(false);
+    setShowSideConvModal(false);
   }, [task?.id]);
 
   // Discover the 4 ZD custom fields once per session — shared cache so
@@ -741,7 +745,15 @@ const Detail = ({
             {employeeUrl && (
               <RailLink href={employeeUrl} icon="bi-person-badge" label="Employee profile" />
             )}
-            <RailLink disabled icon="bi-chat-dots" label="Side conversations (Phase 4)" />
+            {isZD ? (
+              <RailLink
+                onClick={() => setShowSideConvModal(true)}
+                icon="bi-chat-square-quote"
+                label="Side conversations"
+              />
+            ) : (
+              <RailLink disabled icon="bi-chat-dots" label="Side conversations (Zendesk-only)" />
+            )}
           </RailCard>
 
           {/* Escalation banner */}
@@ -901,6 +913,15 @@ const Detail = ({
           onApply={handleApplyMacro}
         />
       )}
+
+      {/* Side conversations modal — full CRUD (Phase 4) */}
+      {showSideConvModal && isZD && (
+        <SideConversationsModal
+          ticketId={task.id}
+          addToast={addToast}
+          onClose={() => setShowSideConvModal(false)}
+        />
+      )}
     </div>
   );
 };
@@ -948,7 +969,7 @@ function DetailRow({ label, value, hint }) {
   );
 }
 
-function RailLink({ href, icon, label, disabled = false }) {
+function RailLink({ href, onClick, icon, label, disabled = false }) {
   const baseStyle = {
     display: 'flex', alignItems: 'center', gap: 8,
     padding: '8px 10px', borderRadius: 8,
@@ -959,7 +980,12 @@ function RailLink({ href, icon, label, disabled = false }) {
     border: '1px solid transparent',
     cursor: disabled ? 'not-allowed' : 'pointer',
     transition: 'all .15s',
+    fontFamily: 'inherit',
+    width: '100%', textAlign: 'left',
   };
+  const hoverIn = (e) => { e.currentTarget.style.background = '#eff6ff'; e.currentTarget.style.borderColor = '#bddcf0'; };
+  const hoverOut = (e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; };
+
   if (disabled) {
     return (
       <div style={baseStyle} aria-disabled="true">
@@ -968,12 +994,31 @@ function RailLink({ href, icon, label, disabled = false }) {
       </div>
     );
   }
+
+  // Button form (in-app action) — used by Side conversations to open the
+  // modal. No external-link icon, no target=_blank.
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        style={{ ...baseStyle, border: '1px solid transparent' }}
+        onMouseEnter={hoverIn}
+        onMouseLeave={hoverOut}
+      >
+        <i className={icon} style={{ fontSize: 13 }} />
+        <span style={{ flex: 1 }}>{label}</span>
+      </button>
+    );
+  }
+
+  // Anchor form (external link) — Open in Source / Employee profile.
   return (
     <a
       href={href} target="_blank" rel="noopener noreferrer"
       style={baseStyle}
-      onMouseEnter={e => { e.currentTarget.style.background = '#eff6ff'; e.currentTarget.style.borderColor = '#bddcf0'; }}
-      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; }}
+      onMouseEnter={hoverIn}
+      onMouseLeave={hoverOut}
     >
       <i className={icon} style={{ fontSize: 13 }} />
       <span style={{ flex: 1 }}>{label}</span>
