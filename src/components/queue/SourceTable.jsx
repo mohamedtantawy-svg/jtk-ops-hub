@@ -124,7 +124,6 @@ export default function SourceTable({
   sortDefault = 'oldest',    // 'oldest' | 'newest' | 'sla' | 'startDate' | 'endDate'
   showPausedSla = false,     // use 48h countdown from pausedAt instead of age-based SLA
   hideStatusPills = false,   // hide the internal All/Action Needed/etc. pills
-  currentUser = null,        // for "Assign me" button on unassigned rows
   dateField = 'startDate',   // row field rendered in the date column
   dateLabel = 'Start Date',  // header label for the date column
   showClient = false,        // show "Organization" column (offboarding, etc.)
@@ -321,7 +320,7 @@ export default function SourceTable({
             </thead>
             <tbody>
               {sorted.map(row => (
-                <SourceRow key={`${row.source}-${row.id}`} row={row} showSource={showSourceColumn} showPausedSla={showPausedSla} currentUser={currentUser} dateField={dateField} showClient={showClient} showType={showType} hideUpdated={hideUpdated} hideContract={hideContract} />
+                <SourceRow key={`${row.source}-${row.id}`} row={row} showSource={showSourceColumn} showPausedSla={showPausedSla} dateField={dateField} showClient={showClient} showType={showType} hideUpdated={hideUpdated} hideContract={hideContract} />
               ))}
             </tbody>
           </table>
@@ -332,9 +331,8 @@ export default function SourceTable({
 }
 
 // ── Row component ──
-const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, currentUser = null, dateField = 'startDate', showClient = false, showType = false, hideUpdated = false, hideContract = false }) {
+const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, dateField = 'startDate', showClient = false, showType = false, hideUpdated = false, hideContract = false }) {
   const [hov, setHov] = useState(false);
-  const [localAssignee, setLocalAssignee] = useState(null);
   const sev = row.status?.severity || 'info';
   const isUrgent = sev === 'critical';
   const isWarning = sev === 'warning';
@@ -445,21 +443,19 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
         <span style={{ color: '#616161', fontWeight: 500 }}>{countryDisplay || '--'}</span>
       </td>
 
-      {/* Assignee */}
+      {/* Assignee — read-only mirror of the Deel-side HRX. The previous
+          "Assign me" button only set local state, didn't persist anywhere
+          (see Erwin/Celine feedback Apr 2026). Refer to the Deel-assigned
+          HRX; reassignment isn't supported on these queues. */}
       <td style={tdStyle}>
-        {(row.assignee || localAssignee) ? (
+        {row.assignee ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
-            <Avatar name={localAssignee || row.assignee} size="xs" />
+            <Avatar name={row.assignee} size="xs" />
             <span style={{ fontSize: 11, color: '#1b1b1b', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 80 }}>
-              {(localAssignee || row.assignee).split(' ')[0]}
+              {row.assignee.split(' ')[0]}
             </span>
           </div>
-        ) : currentUser?.name ? (
-          <button onClick={e => { e.stopPropagation(); setLocalAssignee(currentUser.name); }}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: 128, border: '1px solid #e8e8e8', background: hov ? '#f3eff8' : 'white', color: '#6b3fa0', fontSize: 10, fontWeight: 600, cursor: 'pointer', transition: 'all .15s', whiteSpace: 'nowrap' }}>
-            <i className="bi-person-plus" style={{ fontSize: 9 }} />Assign me
-          </button>
-        ) : <span style={{ fontSize: 11, color: '#d42d35', fontWeight: 500 }}>Unassigned</span>}
+        ) : <span style={{ fontSize: 11, color: '#9e9e9e', fontWeight: 500 }}>Unassigned</span>}
       </td>
 
       {/* Date column (Start Date for onboarding, End Date for offboarding, etc.) */}
