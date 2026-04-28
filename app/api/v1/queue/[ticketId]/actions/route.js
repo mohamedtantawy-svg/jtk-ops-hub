@@ -322,7 +322,15 @@ export async function POST(req, { params }) {
       if (!body.assigneeEmail) return NextResponse.json({ error: 'assigneeEmail required for assignee action' }, { status: 400 });
       if (isZD) {
         const zdId = ticketId.replace('ZD-', '');
-        await updateZdTicket(zdId, { assignee_email: body.assigneeEmail }, { actAsEmail: user.email });
+        // Zendesk's PUT /tickets API requires `assignee_id` (integer), not
+        // `assignee_email`. The previous `assignee_email` payload was
+        // silently dropped by ZD — the request returned 200, our local
+        // mutation window showed the new assignee for 5 min, then the
+        // server-authoritative state (unchanged) won and the assignee
+        // visibly reverted. Use the shared helper which does the
+        // email → user.id lookup before issuing the PUT (Bug 6 —
+        // Fernanda 2026-04-28).
+        await reassignZdTicket(zdId, body.assigneeEmail, { actAsEmail: user.email });
       } else {
         await assignJiraIssue(ticketId, body.assigneeEmail);
       }
