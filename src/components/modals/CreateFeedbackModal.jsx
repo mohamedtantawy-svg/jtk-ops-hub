@@ -55,13 +55,31 @@ export default function CreateFeedbackModal({ onClose, onSubmit, currentUser }) 
   const fileInputRef = useRef(null);
   const titleInputRef = useRef(null);
 
-  // ── Focus + Esc-to-close ────────────────────────────────────────────────
+  // ── Focus on mount ──────────────────────────────────────────────────────
+  // Bug fix 2026-04-28: this used to live in the same effect as the Esc
+  // handler with deps [onClose, submitting]. Every time the parent
+  // re-rendered (e.g. useFeedback's 30s poll, an optimistic vote landing
+  // elsewhere) the `onClose` arrow function reference changed, the effect
+  // re-ran, the setTimeout re-fired, and titleInputRef.focus() yanked
+  // focus away from whatever field the user was typing in. Split into a
+  // single mount-time autofocus + a separate Esc handler that uses a ref
+  // so onClose changes don't re-bind the listener.
   useEffect(() => {
     const t = setTimeout(() => titleInputRef.current?.focus(), 30);
-    const onKey = (e) => { if (e.key === 'Escape' && !submitting) onClose?.(); };
+    return () => clearTimeout(t);
+  }, []);
+
+  // ── Esc-to-close ────────────────────────────────────────────────────────
+  // Latest-onClose stays available via a ref so the keydown listener never
+  // needs to be torn down + rebound on parent re-renders.
+  const onCloseRef = useRef(onClose);
+  const submittingRef = useRef(submitting);
+  useEffect(() => { onCloseRef.current = onClose; submittingRef.current = submitting; });
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape' && !submittingRef.current) onCloseRef.current?.(); };
     document.addEventListener('keydown', onKey);
-    return () => { clearTimeout(t); document.removeEventListener('keydown', onKey); };
-  }, [onClose, submitting]);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
 
   // ── Paste image from clipboard ─────────────────────────────────────────
   // Listens at document level when the modal is open so the user can paste
@@ -148,6 +166,9 @@ export default function CreateFeedbackModal({ onClose, onSubmit, currentUser }) 
     }
   };
 
+  const typeMeta = TYPES.find(t => t.value === type) || TYPES[0];
+  const priorityMeta = PRIORITIES.find(p => p.value === priority) || PRIORITIES[1];
+
   return (
     <div
       role="dialog"
@@ -157,15 +178,39 @@ export default function CreateFeedbackModal({ onClose, onSubmit, currentUser }) 
       onMouseDown={(e) => { if (e.target === e.currentTarget && !submitting) onClose?.(); }}
     >
       <form onSubmit={handleSubmit} style={modal}>
-        {/* Header */}
+        {/* Inline responsive style — the side-by-side issue/proposed grid
+            collapses to a single column under 700px. */}
+        <style>{`
+          .feedback-grid-2 { display: grid; grid-template-columns: 1.05fr 1fr; gap: 14px; align-items: start; }
+          @media (max-width: 720px) { .feedback-grid-2 { grid-template-columns: 1fr; } }
+          .feedback-pill-row { display: flex; gap: 6px; flex-wrap: wrap; }
+          .feedback-input:focus { border-color: #7c3aed !important; box-shadow: 0 0 0 3px rgba(124,58,237,0.15); }
+          .feedback-textarea:focus { border-color: #7c3aed !important; box-shadow: 0 0 0 3px rgba(124,58,237,0.12); }
+          .feedback-pill-btn:hover:not(.active) { background: var(--surface-2) !important; }
+          .feedback-section-card { padding: 14px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border-light); }
+        `}</style>
+
+        {/* Header — gradient accent strip + denser pill row beneath */}
         <div style={header}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, background: '#f3eff8', color: '#7c3aed', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <i className="bi-megaphone-fill" style={{ fontSize: 17 }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+            <div style={{
+              width: 40, height: 40, borderRadius: 12,
+              background: 'linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%)',
+              color: '#7c3aed',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }}>
+              <i className="bi-lightbulb-fill" style={{ fontSize: 19 }} />
             </div>
-            <div>
-              <div id="feedback-modal-title" style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>Report an issue or idea</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Tell us what's broken or what would make ops-hub better</div>
+            <div style={{ minWidth: 0 }}>
+              <div id="feedback-modal-title" style={{ fontSize: 16, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.01em' }}>Report an issue or idea</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 1 }}>
+                <span style={{ color: typeMeta.color, fontWeight: 600 }}>{typeMeta.label}</span>
+                <span style={{ margin: '0 6px', color: 'var(--text-muted)' }}>·</span>
+                <span style={{ color: priorityMeta.color, fontWeight: 600 }}>{priorityMeta.label} priority</span>
+                <span style={{ margin: '0 6px', color: 'var(--text-muted)' }}>·</span>
+                <span style={{ color: 'var(--text)', fontWeight: 600 }}>{category}</span>
+              </div>
             </div>
           </div>
           <button type="button" onClick={() => !submitting && onClose?.()} aria-label="Close" style={iconBtn}>
@@ -173,63 +218,73 @@ export default function CreateFeedbackModal({ onClose, onSubmit, currentUser }) 
           </button>
         </div>
 
-        {/* Body — scrolls when content overflows */}
+        {/* Body */}
         <div style={body}>
-          {/* Type + priority + category — three pills inline */}
-          <div style={fieldRow}>
-            <div style={{ ...fieldCol, flex: '1 1 200px' }}>
-              <label style={fieldLabel}>Type</label>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {TYPES.map(t => {
-                  const active = type === t.value;
-                  return (
-                    <button key={t.value} type="button" onClick={() => setType(t.value)}
-                      style={{
-                        ...pillBtn,
-                        background: active ? t.bg : 'var(--surface)',
-                        color: active ? t.color : 'var(--text-muted)',
-                        borderColor: active ? t.color : 'var(--border)',
-                      }}
-                    >
-                      <i className={t.icon} style={{ fontSize: 11 }} /> {t.label}
-                    </button>
-                  );
-                })}
+          {/* Pill controls — tighter, single row when there's space */}
+          <div style={pillCard}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end' }}>
+              <div style={{ flex: '1 1 220px', minWidth: 200 }}>
+                <label style={fieldLabel}>Type</label>
+                <div className="feedback-pill-row" style={{ marginTop: 4 }}>
+                  {TYPES.map(t => {
+                    const active = type === t.value;
+                    return (
+                      <button key={t.value} type="button"
+                        className={`feedback-pill-btn${active ? ' active' : ''}`}
+                        onClick={() => setType(t.value)}
+                        style={{
+                          ...pillBtn,
+                          background: active ? t.bg : 'var(--surface)',
+                          color: active ? t.color : 'var(--text-muted)',
+                          borderColor: active ? t.color : 'var(--border)',
+                        }}
+                      >
+                        <i className={t.icon} style={{ fontSize: 11 }} /> {t.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-            <div style={{ ...fieldCol, flex: '1 1 200px' }}>
-              <label style={fieldLabel}>Priority</label>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {PRIORITIES.map(p => {
-                  const active = priority === p.value;
-                  return (
-                    <button key={p.value} type="button" onClick={() => setPriority(p.value)}
-                      style={{
-                        ...pillBtn,
-                        background: active ? p.bg : 'var(--surface)',
-                        color: active ? p.color : 'var(--text-muted)',
-                        borderColor: active ? p.color : 'var(--border)',
-                      }}
-                    >
-                      {p.label}
-                    </button>
-                  );
-                })}
+              <div style={{ flex: '1 1 230px', minWidth: 200 }}>
+                <label style={fieldLabel}>Priority</label>
+                <div className="feedback-pill-row" style={{ marginTop: 4 }}>
+                  {PRIORITIES.map(p => {
+                    const active = priority === p.value;
+                    return (
+                      <button key={p.value} type="button"
+                        className={`feedback-pill-btn${active ? ' active' : ''}`}
+                        onClick={() => setPriority(p.value)}
+                        style={{
+                          ...pillBtn,
+                          background: active ? p.bg : 'var(--surface)',
+                          color: active ? p.color : 'var(--text-muted)',
+                          borderColor: active ? p.color : 'var(--border)',
+                        }}
+                      >
+                        {p.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-            <div style={{ ...fieldCol, flex: '1 1 160px' }}>
-              <label style={fieldLabel}>Area</label>
-              <select value={category} onChange={e => setCategory(e.target.value)} style={selectInput}>
-                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
+              <div style={{ flex: '0 0 170px', minWidth: 160 }}>
+                <label style={fieldLabel}>Area</label>
+                <select value={category} onChange={e => setCategory(e.target.value)} style={{ ...selectInput, marginTop: 4 }}>
+                  {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
             </div>
           </div>
 
-          {/* Title */}
+          {/* Title — label + counter on the same line */}
           <div style={fieldCol}>
-            <label style={fieldLabel}>Title <span style={req}>*</span></label>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+              <label style={fieldLabel}>Title <span style={req}>*</span></label>
+              <span style={charCount}>{title.length} / 200</span>
+            </div>
             <input
               ref={titleInputRef}
+              className="feedback-input"
               value={title}
               onChange={e => setTitle(e.target.value.slice(0, 200))}
               placeholder="Short summary — e.g. 'Queue counts wrong on TL view'"
@@ -237,44 +292,55 @@ export default function CreateFeedbackModal({ onClose, onSubmit, currentUser }) 
               style={textInput}
               disabled={submitting}
             />
-            <div style={charCount}>{title.length} / 200</div>
           </div>
 
-          {/* Issue */}
-          <div style={fieldCol}>
-            <label style={fieldLabel}>What's the issue? <span style={req}>*</span></label>
-            <textarea
-              value={issue}
-              onChange={e => setIssue(e.target.value)}
-              placeholder="Describe what you saw, what you expected, and how to reproduce it."
-              rows={5}
-              style={textArea}
-              disabled={submitting}
-            />
+          {/* Issue + proposed resolution side by side at width >= 720px */}
+          <div className="feedback-grid-2">
+            <div style={fieldCol}>
+              <label style={fieldLabel}>What's the issue? <span style={req}>*</span></label>
+              <textarea
+                className="feedback-textarea"
+                value={issue}
+                onChange={e => setIssue(e.target.value)}
+                placeholder="What did you see, what did you expect, how do I reproduce it?"
+                rows={6}
+                style={textArea}
+                disabled={submitting}
+              />
+            </div>
+            <div style={fieldCol}>
+              <label style={fieldLabel}>
+                Proposed resolution{' '}
+                <span style={{ color: 'var(--text-muted)', fontWeight: 500, textTransform: 'none', letterSpacing: 0 }}>(optional)</span>
+              </label>
+              <textarea
+                className="feedback-textarea"
+                value={proposedResolution}
+                onChange={e => setProposedResolution(e.target.value)}
+                placeholder="If you've got an idea for the fix or improvement, share it here."
+                rows={6}
+                style={textArea}
+                disabled={submitting}
+              />
+            </div>
           </div>
 
-          {/* Proposed resolution */}
+          {/* Screenshot zone — same dropzone but with preview-or-empty
+              swap, gradient hover, and clearer copy. */}
           <div style={fieldCol}>
-            <label style={fieldLabel}>Proposed resolution <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional)</span></label>
-            <textarea
-              value={proposedResolution}
-              onChange={e => setProposedResolution(e.target.value)}
-              placeholder="If you have an idea for the fix or improvement, share it here."
-              rows={3}
-              style={textArea}
-              disabled={submitting}
-            />
-          </div>
-
-          {/* Screenshot */}
-          <div style={fieldCol}>
-            <label style={fieldLabel}>Screenshot <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional · paste, drop, or pick a file)</span></label>
+            <label style={fieldLabel}>
+              Screenshot{' '}
+              <span style={{ color: 'var(--text-muted)', fontWeight: 500, textTransform: 'none', letterSpacing: 0 }}>
+                — paste from clipboard, drag a file, or click to pick
+              </span>
+            </label>
             {screenshot ? (
               <div style={screenshotPreview}>
-                <img src={screenshot} alt={screenshotName || 'Screenshot'} style={{ maxWidth: '100%', maxHeight: 280, borderRadius: 8, border: '1px solid var(--border)' }}/>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 320 }}>
-                    {screenshotName || 'Pasted image'}
+                <img src={screenshot} alt={screenshotName || 'Screenshot'} style={{ display: 'block', maxWidth: '100%', maxHeight: 240, borderRadius: 8, border: '1px solid var(--border)' }}/>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, gap: 8 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-muted)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <i className="bi-image" style={{ fontSize: 12, flexShrink: 0 }} />
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{screenshotName || 'Pasted image'}</span>
                   </span>
                   <button type="button" onClick={removeScreenshot} disabled={submitting} style={removeBtn}>
                     <i className="bi-trash" style={{ fontSize: 11 }} /> Remove
@@ -292,15 +358,27 @@ export default function CreateFeedbackModal({ onClose, onSubmit, currentUser }) 
                 onDragLeave={onDragLeave}
                 style={{
                   ...dropZone,
-                  background: dropActive ? '#f3eff8' : 'var(--surface-2)',
+                  background: dropActive
+                    ? 'linear-gradient(135deg, #ede9fe 0%, #ddd6fe 100%)'
+                    : 'var(--surface-2)',
                   borderColor: dropActive ? '#7c3aed' : 'var(--border)',
+                  borderStyle: dropActive ? 'solid' : 'dashed',
                 }}
               >
-                <i className="bi-cloud-upload" style={{ fontSize: 24, color: 'var(--text-muted)' }} />
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
-                  Paste, drop, or click to attach a screenshot
+                <div style={{
+                  width: 40, height: 40, borderRadius: '50%',
+                  background: dropActive ? '#7c3aed' : 'var(--surface)',
+                  color: dropActive ? 'white' : '#7c3aed',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  border: dropActive ? 'none' : '1px solid var(--border)',
+                  transition: 'all .12s',
+                }}>
+                  <i className={dropActive ? 'bi-check-lg' : 'bi-clipboard-plus'} style={{ fontSize: 17 }} />
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>PNG, JPG, GIF · up to 2 MB</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginTop: 2 }}>
+                  {dropActive ? 'Drop to attach' : 'Paste, drop, or click to attach a screenshot'}
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>PNG · JPG · GIF — up to 2 MB</div>
               </div>
             )}
             <input ref={fileInputRef} type="file" accept="image/*" onChange={onFilePicked} style={{ display: 'none' }} />
@@ -315,8 +393,11 @@ export default function CreateFeedbackModal({ onClose, onSubmit, currentUser }) 
 
         {/* Footer */}
         <div style={footer}>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-            Submitted by <strong style={{ color: 'var(--text)' }}>{currentUser?.name || currentUser?.email || 'you'}</strong>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 }}>
+            <i className="bi-person" style={{ fontSize: 12 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              Submitting as{' '}<strong style={{ color: 'var(--text)' }}>{currentUser?.name || currentUser?.email || 'you'}</strong>
+            </span>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="button" onClick={() => !submitting && onClose?.()} disabled={submitting} style={ghostBtn}>Cancel</button>
@@ -340,31 +421,31 @@ export default function CreateFeedbackModal({ onClose, onSubmit, currentUser }) 
 const overlay = {
   position: 'fixed', inset: 0, background: 'rgba(28, 25, 23, 0.55)', zIndex: 1000,
   display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
-  backdropFilter: 'blur(2px)',
+  backdropFilter: 'blur(4px)',
 };
 const modal = {
-  width: 'min(720px, 100%)', maxHeight: '92vh',
+  width: 'min(820px, 100%)', maxHeight: '92vh',
   background: 'var(--surface)', color: 'var(--text)',
-  borderRadius: 16, boxShadow: '0 20px 50px rgba(0,0,0,0.18)',
+  borderRadius: 18, boxShadow: '0 24px 60px rgba(15, 23, 42, 0.22)',
   display: 'flex', flexDirection: 'column', overflow: 'hidden',
   border: '1px solid var(--border)',
 };
-const header = { padding: '14px 18px', borderBottom: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 };
-const body   = { padding: '18px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 14 };
-const footer = { padding: '12px 18px', borderTop: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: 'var(--surface-2)', flexShrink: 0 };
-const fieldRow = { display: 'flex', flexWrap: 'wrap', gap: 12 };
+const header = { padding: '14px 20px', borderBottom: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexShrink: 0, background: 'linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%)' };
+const body   = { padding: '18px 20px 22px', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 14 };
+const footer = { padding: '12px 20px', borderTop: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, background: 'var(--surface-2)', flexShrink: 0 };
 const fieldCol = { display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, flex: 1 };
-const fieldLabel = { fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' };
-const req = { color: '#dc2626', fontWeight: 700 };
-const charCount = { fontSize: 10, color: 'var(--text-muted)', alignSelf: 'flex-end' };
-const textInput = { padding: '9px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, background: 'var(--surface)', color: 'var(--text)', outline: 'none', transition: 'border-color .12s' };
-const textArea  = { ...textInput, resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.5, minHeight: 80 };
-const selectInput = { ...textInput, cursor: 'pointer', height: 36 };
-const pillBtn = { display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: 128, fontSize: 11, fontWeight: 700, cursor: 'pointer', border: '1px solid', transition: 'all .12s' };
-const dropZone = { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '22px 14px', border: '2px dashed', borderRadius: 12, cursor: 'pointer', textAlign: 'center', transition: 'all .12s' };
-const screenshotPreview = { padding: 10, border: '1px solid var(--border)', borderRadius: 12, background: 'var(--surface-2)' };
-const removeBtn = { display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: '#dc2626', fontSize: 11, fontWeight: 600, cursor: 'pointer' };
-const errorBanner = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 8, background: '#fef2f2', color: '#991b1b', fontSize: 12, fontWeight: 500, border: '1px solid #fca5a5' };
-const iconBtn = { width: 30, height: 30, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
-const ghostBtn = { padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, fontWeight: 600, cursor: 'pointer' };
-const primaryBtn = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 8, border: 'none', background: '#7c3aed', color: 'white', fontSize: 12, fontWeight: 700 };
+const fieldLabel = { fontSize: 10.5, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' };
+const req = { color: '#dc2626', fontWeight: 800 };
+const charCount = { fontSize: 10, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' };
+const textInput = { width: '100%', boxSizing: 'border-box', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', fontSize: 13, background: 'var(--surface)', color: 'var(--text)', outline: 'none', transition: 'border-color .12s, box-shadow .12s' };
+const textArea  = { ...textInput, resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.55, minHeight: 110 };
+const selectInput = { ...textInput, cursor: 'pointer', height: 38 };
+const pillBtn = { display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 128, fontSize: 11, fontWeight: 700, cursor: 'pointer', border: '1px solid', transition: 'all .12s', whiteSpace: 'nowrap' };
+const pillCard = { padding: '12px 14px', borderRadius: 12, background: 'var(--surface-2)', border: '1px solid var(--border-light)' };
+const dropZone = { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '20px 14px', border: '2px dashed', borderRadius: 12, cursor: 'pointer', textAlign: 'center', transition: 'all .12s' };
+const screenshotPreview = { padding: 12, border: '1px solid var(--border)', borderRadius: 12, background: 'var(--surface-2)' };
+const removeBtn = { display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: '#dc2626', fontSize: 11, fontWeight: 700, cursor: 'pointer', transition: 'all .12s' };
+const errorBanner = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 12px', borderRadius: 8, background: '#fef2f2', color: '#991b1b', fontSize: 12, fontWeight: 600, border: '1px solid #fca5a5' };
+const iconBtn = { width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0, transition: 'all .12s' };
+const ghostBtn = { padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, fontWeight: 700, cursor: 'pointer' };
+const primaryBtn = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 18px', borderRadius: 8, border: 'none', background: '#7c3aed', color: 'white', fontSize: 12, fontWeight: 800, boxShadow: '0 2px 8px rgba(124,58,237,0.25)' };
