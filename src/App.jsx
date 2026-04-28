@@ -27,16 +27,13 @@ import { useMeetingAlerts } from './hooks/useMeetingAlerts';
 
 // ── API services + normalizers ──────────────────────────────────────────────
 import { login as apiLogin, fetchMe as apiFetchMe } from './services/authApi';
-import { fetchTasks as apiFetchTasks, createTask as apiCreateTask, updateTaskStatus as apiUpdateStatus, assignTask as apiAssignTask, escalateTask as apiEscalateTask, snoozeTask as apiSnoozeTask } from './services/tasksApi';
+import { fetchTasks as apiFetchTasks, createTask as apiCreateTask } from './services/tasksApi';
 import { fetchMembers as apiFetchMembers } from './services/membersApi';
 import { fetchEscalations as apiFetchEscalations, createEscalation as apiCreateEscalation, respondToEscalation as apiRespondEscalation, resolveEscalation as apiResolveEscalation } from './services/escalationsApi';
 import { fetchProjects as apiFetchProjects, createProject as apiCreateProject, updateProject as apiUpdateProject } from './services/projectsApi';
 import { fetchRequests as apiFetchRequests, createRequest as apiCreateRequest, updateRequest as apiUpdateRequest } from './services/requestsApi';
 import { createNote as apiCreateNote } from './services/notesApi';
 import { apiFetch } from './services/api';
-import { reassignQueueTicket } from './services/integrationsApi';
-import { recordMutation, recordCreatedTask, clearMutation, clearAllMutationsEverywhere } from './services/queueMutationStore';
-import { recordOriginalAssignee, getOriginalAssignee, clearOriginalAssignee, clearAllOriginalAssigneesEverywhere } from './services/originalAssigneeStore';
 import { normalizeTask, normalizeEscalation, normalizeProject, normalizeRequest, normalizeMember, denormalizeTaskForCreate, feStatusToBe } from './services/normalize';
 
 // ── Keys we clear on logout so the next user on this browser starts fresh ──
@@ -60,22 +57,15 @@ const QUEUE_STORAGE_KEYS = [
 
 function clearQueueCaches() {
   try {
-    // Remove the legacy (unscoped) base keys first so a user upgrading from a
-    // pre-user-scoped build doesn't inherit their old contents.
     for (const k of QUEUE_STORAGE_KEYS) localStorage.removeItem(k);
-    // Remove all user-scoped per-source caches (format: `${base}:${email}`),
-    // any OOO keys, and any per-user mutation keys. Scans the whole
-    // localStorage once so we don't need to know which users were ever
-    // signed in on this browser.
     const toRemove = [];
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
       if (!k) continue;
-      if (k.startsWith('ops_hub_queuev2_ooo_') || k.startsWith('ops_hub_queue_mutations:')) {
+      if (k.startsWith('ops_hub_queuev2_ooo_') || k.startsWith('ops_hub_queue_mutations:') || k.startsWith('ops_hub_original_assignees:')) {
         toRemove.push(k);
         continue;
       }
-      // User-scoped cache variants of every base key in QUEUE_STORAGE_KEYS.
       for (const base of QUEUE_STORAGE_KEYS) {
         if (k.startsWith(`${base}:`)) {
           toRemove.push(k);
@@ -85,11 +75,6 @@ function clearQueueCaches() {
     }
     for (const k of toRemove) localStorage.removeItem(k);
   } catch {}
-  clearAllMutationsEverywhere();
-  // Original-assignee tracking is keyed per signed-in user. On logout we
-  // wipe every per-user bucket so the next user on this browser doesn't
-  // inherit somebody else's "tickets I took over" list (Bug 8).
-  clearAllOriginalAssigneesEverywhere();
 }
 
 import DeelTopNav from './components/nav/DeelTopNav';
@@ -112,9 +97,6 @@ import FeedbackView from './components/views/FeedbackView';
 import CreateProjectModal from './components/modals/CreateProjectModal';
 import CreateRequestModal from './components/modals/CreateRequestModal';
 import CreateEscalationModal from './components/modals/CreateEscalationModal';
-import EscalModal from './components/modals/EscalModal';
-import ReassignModal from './components/modals/ReassignModal';
-import SnoozeModal from './components/modals/SnoozeModal';
 import CreateTaskModal from './components/modals/CreateTaskModal';
 import GlobalSearch from './components/modals/GlobalSearch';
 import Onboarding from './components/modals/Onboarding';
@@ -301,7 +283,6 @@ const App=()=>{
   React.useEffect(() => {
     if (!isOwner && RESTRICTED_VIEWS.has(view)) setView('briefing');
   }, [isOwner, view, RESTRICTED_VIEWS]);
-  const [selTask,setSelTask]=useState(null);
   // ── Live queue sync (Zendesk + Jira) ─────────────────────────────────────
   const queueSync = useQueueSync({ enabled: !!user, userEmail: user?.email || null });
   const tasks = queueSync.tasks;
@@ -601,17 +582,12 @@ const App=()=>{
 
   const [announceCompose,setAnnounceCompose]=useState(false);
   const [feedbackCompose,setFeedbackCompose]=useState(false);
-  const [escalModal,setEscalModal]=useState(null);
   const [toasts,setToasts]=useState([]);
   const [showSearch,setShowSearch]=useState(false);
   const [showOnboard,setShowOnboard]=useState(()=>{ try{ return !localStorage.getItem('ops_hub_onboarded'); }catch(e){ return true; } });
   // Onboard overlay shows once; dismissible with Escape or click
   const [sidebarOpen,setSidebarOpen]=useState(true);
   const [subFilter,setSubFilter]=useState(null);
-  // queueCountry/queueSlaPriority removed — Queue manages its own filters
-  const [reassignModal,setReassignModal]=useState(null);
-  const [snoozeModal,setSnoozeModal]=useState(null);
-  const [bulkIds,setBulkIds]=useState(null);
   const [createModal,setCreateModal]=useState(false);
   const [notifs,setNotifs]=useState([]);
   const [activity,setActivity]=useState(INITIAL_ACTIVITY);
@@ -620,9 +596,6 @@ const App=()=>{
   const [requests,setRequests]=useState(INITIAL_REQUESTS);
   const [requestModal,setRequestModal]=useState(false);
   const [createEscalModal,setCreateEscalModal]=useState(false);
-  const [queueMode,setQueueMode]=useState('inbound');
-  // fAtRisk/fBreaching removed — Queue uses fSla dropdown internally
-  const [fUnassigned,setFUnassigned]=useState(false);
   const [backendOnline,setBackendOnline]=useState(false);
   const [managerOnCall, setManagerOnCall] = useState(() => {
     try { const m = localStorage.getItem('ops_hub_manager_on_call'); return m ? JSON.parse(m) : { name: 'Omar Khalil', initials: 'OK', avatarUrl: 'https://api.dicebear.com/7.x/initials/svg?seed=Omar%20Khalil&backgroundColor=6b3fa0&textColor=ffffff&fontSize=40' }; } catch(e) { return { name: 'Omar Khalil', initials: 'OK', avatarUrl: 'https://api.dicebear.com/7.x/initials/svg?seed=Omar%20Khalil&backgroundColor=6b3fa0&textColor=ffffff&fontSize=40' }; }
@@ -774,41 +747,6 @@ const App=()=>{
     setView,
   });
 
-  // ── Escalation handlers ────────────────────────────────────────────────────
-  // Close all action modals — prevents dual-modal state
-  const closeActionModals=useCallback(()=>{setEscalModal(null);setReassignModal(null);setSnoozeModal(null);setCreateModal(false);setBulkIds(null);},[]);
-  const openEscalModal=useCallback(task=>{
-    if(!perms?.canDo('can_escalate')){addToast('error','Access Denied','You do not have permission to escalate');return;}
-    closeActionModals();
-    setEscalModal(task);
-  },[perms,addToast,closeActionModals]);
-  const confirmEscal=useCallback((task,reason,mgrId)=>{
-    const mgr=mgrId?MEMBERS.find(m=>m.id===mgrId):null;
-    const now=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
-    const identity={escalatedBy:user.name,escalatedByEmail:(user.email||'').toLowerCase(),escalatedById:user.id||null};
-    if(bulkIds&&bulkIds.length>0){
-      const newEscals=bulkIds.map(id=>{const t=tasks.find(tt=>tt.id===id);return t?{id:`ESC-${Date.now()}-${id}`,task:t,taskId:id,reason,...identity,escalatedAt:now,managerId:mgr?.id||null,managerName:mgr?.name||'Team Lead',status:'pending',managerResponseStatus:'pending_response',managerResponse:null,managerRespondedAt:null,managerRespondedBy:null,escalationSource:'ticket',slackChannel:null,slackUser:null,slackMessageUrl:null,severity:'medium'}:null;}).filter(Boolean);
-      setEscalations(prev=>[...newEscals,...prev]);
-      const idSet=new Set(bulkIds);
-      setTasks(prev=>prev.map(t=>idSet.has(t.id)?{...t,status:'in_progress'}:t));
-      addToast('escalation','Bulk Escalation',`${bulkIds.length} tasks → ${mgr?.name||'Team Lead'}`);
-    } else {
-      setEscalations(prev=>[{id:`ESC-${Date.now()}-${task.id}`,task,taskId:task.id,reason,...identity,escalatedAt:now,managerId:mgr?.id||null,managerName:mgr?.name||'Team Lead',status:'pending',managerResponseStatus:'pending_response',managerResponse:null,managerRespondedAt:null,managerRespondedBy:null,escalationSource:'ticket',slackChannel:null,slackUser:null,slackMessageUrl:null,severity:'medium'},...prev]);
-      setTasks(prev=>prev.map(t=>t.id===task.id?{...t,status:'in_progress'}:t));
-      addToast('escalation','Escalated to Manager',`${mgr?.name||'Team Lead'} · ${task.id}`);
-      // BE sync
-      apiCreateEscalation({taskId:task._beId||task.id,subject:task.subject,reason,managerId:mgrId?String(mgrId):undefined,escalationSource:'ticket'}).catch(err=>{
-        console.warn('[escalation] BE sync failed:',err.message);
-        addToast('warning','Sync Warning','Escalation saved locally but backend sync failed');
-      });
-      apiUpdateStatus(task._beId||task.id,'escalated').catch(err=>{
-        console.warn('[escalation] Status sync failed:',err.message);
-      });
-    }
-    setEscalModal(null);
-    setBulkIds(null);
-  },[user,addToast,perms,bulkIds,tasks]);
-
   // ── Manual / Slack escalation handler (gated by can_create_escalation) ────
   const confirmManualEscal=useCallback((form)=>{
     if(!perms?.canDo('can_create_escalation'))return;
@@ -857,80 +795,6 @@ const App=()=>{
     });
   },[user,addToast,perms]);
 
-  // ── Reassign handler (email-based — pushes to Zendesk/Jira) ────────────────
-  // For live tickets (zendesk/jira) the push goes through /queue/reassign
-  // which also busts the server cache and logs activity. For manual tasks we
-  // fall back to the legacy /tasks/[id]/assign path. Local mutations are
-  // recorded in the mutation store so they survive a page reload (within the
-  // 5-minute window — after that the server value wins).
-  const confirmReassign=useCallback((task,newEmail,note)=>{
-    if(!perms?.canDo('can_reassign'))return;
-    const member=MEMBERS_BY_EMAIL[newEmail];
-    const newName=member?.name||newEmail;
-    const newMemberId=member?MEMBERS.findIndex(m=>m.email.toLowerCase()===newEmail.toLowerCase())+1:null;
-    const nowLabel=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
-    const nowMs=Date.now();
-
-    const applyOne=(t)=>({...t,assigneeId:newMemberId,assigneeEmail:newEmail,assigneeName:newName,_locallyReassignedAt:nowMs});
-    const recordOne=(taskId)=>recordMutation(user?.email,taskId,{
-      assigneeEmail:newEmail,assigneeId:newMemberId,assigneeName:newName,_locallyReassignedAt:nowMs,
-    });
-    // Track each ticket's original assignee so coverage handovers can be
-    // bulk-reverted later (Bug 8). First reassign wins — subsequent moves
-    // don't overwrite the original. If we're reassigning back to the
-    // recorded original, drop the entry instead.
-    const trackOriginalOne=(t)=>{
-      if(!t)return;
-      const prevAssignee={
-        email:t.assigneeEmail||(t.assigneeId?MEMBERS.find(m=>m.id===t.assigneeId)?.email:null)||null,
-        name:t.assigneeName||(t.assigneeId?MEMBERS.find(m=>m.id===t.assigneeId)?.name:null)||null,
-      };
-      const existing=getOriginalAssignee(user?.email,t.id);
-      if(existing&&newEmail&&newEmail.toLowerCase()===String(existing.originalAssigneeEmail).toLowerCase()){
-        clearOriginalAssignee(user?.email,t.id);
-      } else if(prevAssignee.email){
-        recordOriginalAssignee(user?.email,t.id,prevAssignee,newEmail);
-      }
-    };
-    const pushOne=(t)=>{
-      const source=t?.source;
-      if(source==='zendesk'||source==='jira'){
-        return reassignQueueTicket(t.id,newEmail);
-      }
-      // Manual / locally-created task — only the legacy Postgres endpoint makes sense.
-      return apiAssignTask(t._beId||t.id,String(newMemberId||''));
-    };
-
-    if(bulkIds&&bulkIds.length>0){
-      const idSet=new Set(bulkIds);
-      const targets=bulkIds.map(id=>tasks.find(t=>t.id===id)).filter(Boolean);
-      // Snapshot originals BEFORE the optimistic apply so each entry sees
-      // the previous (true-original) assignee, not the freshly-applied one.
-      targets.forEach(trackOriginalOne);
-      setTasks(prev=>prev.map(t=>idSet.has(t.id)?applyOne(t):t));
-      setActivity(prev=>{const next={...prev};bulkIds.forEach(id=>{next[id]=[...(next[id]||[]),{type:'assigned',text:`Bulk reassigned to ${newName}${note?` — ${note}`:''}`,user:user.name,time:nowLabel}];});return next;});
-      bulkIds.forEach(recordOne);
-      addToast('success','Bulk Reassign',`${bulkIds.length} tasks → ${newName.split(' ')[0]}`);
-      // Push each ticket to its source in the background, track failures
-      const failedIds=[];
-      Promise.allSettled(targets.map(t=>pushOne(t).catch(err=>{failedIds.push(t.id);throw err;}))).then(()=>{
-        if(failedIds.length>0) addToast('warning','Partial Sync Failure',`${failedIds.length}/${bulkIds.length} tasks failed to sync to source system`);
-      });
-    } else {
-      trackOriginalOne(task);
-      setTasks(prev=>prev.map(t=>t.id===task.id?applyOne(t):t));
-      setActivity(prev=>({...prev,[task.id]:[...(prev[task.id]||[]),{type:'assigned',text:`Reassigned to ${newName}${note?` — ${note}`:''}`,user:user.name,time:nowLabel}]}));
-      recordOne(task.id);
-      addToast('success','Task Reassigned',`→ ${newName.split(' ')[0]} · ${task.id}`);
-      pushOne(task).catch(err=>{
-        console.warn('[reassign] Push to source failed:',err.message);
-        addToast('warning','Sync Warning',`Local reassign ok, but source system update failed for ${task.id}`);
-      });
-    }
-    setReassignModal(null);
-    setBulkIds(null);
-  },[addToast,user,perms,bulkIds,tasks]);
-
   // ── SLA real-time ticking — increment minutesAgo every 60s ────────────────
   // Skipped while the tab is hidden (no one's looking — don't re-render every
   // task). When the tab becomes visible again, we bump once to catch up, then
@@ -960,97 +824,6 @@ const App=()=>{
     };
   },[]);
 
-  // ── Snooze handler (gated by can_snooze_task) ─────────────────────────────
-  const confirmSnooze=useCallback((task,duration)=>{
-    if(!perms?.canDo('can_snooze_task'))return;
-    const labels={'30m':'30 min','1h':'1 hour','2h':'2 hours','eod':'end of day','tmr':'tomorrow 9 AM'};
-    const durations={'30m':30,'1h':60,'2h':120,'eod':null,'tmr':null};
-    const label=labels[duration]||duration;
-    const mins=durations[duration];
-    let snoozedUntil;
-    if(duration==='eod'){
-      const eod=new Date();eod.setHours(17,0,0,0);
-      if(eod<=new Date())eod.setDate(eod.getDate()+1);
-      snoozedUntil=eod.getTime();
-    } else if(duration==='tmr'){
-      const tmr=new Date();tmr.setDate(tmr.getDate()+1);tmr.setHours(9,0,0,0);
-      snoozedUntil=tmr.getTime();
-    } else if(mins){
-      snoozedUntil=Date.now()+mins*60000;
-    } else {
-      snoozedUntil=Date.now()+60*60000;
-    }
-    const now=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
-    const nowMs=Date.now();
-    if(bulkIds&&bulkIds.length>0){
-      const idSet=new Set(bulkIds);
-      setTasks(prev=>prev.map(t=>{
-        if(!idSet.has(t.id))return t;
-        const prevStatus=t.status==='waiting'?t.prevStatus||'new':t.status;
-        return {...t,status:'waiting',snoozeLabel:label,snoozedUntil,prevStatus,_locallySnoozedAt:nowMs};
-      }));
-      setActivity(prev=>{const next={...prev};bulkIds.forEach(id=>{next[id]=[...(next[id]||[]),{type:'status',text:`Bulk snoozed until ${label}`,user:user.name,time:now}];});return next;});
-      // Persist each snooze + push to backend
-      bulkIds.forEach(id=>{
-        const t=tasks.find(tt=>tt.id===id);
-        const prevStatus=t?.status==='waiting'?t.prevStatus||'new':t?.status||'new';
-        recordMutation(user?.email,id,{snoozedUntil,snoozeLabel:label,prevStatus,_locallySnoozedAt:nowMs});
-        apiSnoozeTask(t?._beId||id,new Date(snoozedUntil).toISOString()).catch(err=>{
-          console.warn('[snooze] BE sync failed for',id,err.message);
-        });
-      });
-      addToast('info','Bulk Snooze',`${bulkIds.length} tasks · until ${label}`);
-    } else {
-      const prevStatus=task.status==='waiting'?task.prevStatus||'new':task.status;
-      setTasks(prev=>prev.map(t=>t.id===task.id?{...t,status:'waiting',snoozeLabel:label,snoozedUntil,prevStatus,_locallySnoozedAt:nowMs}:t));
-      setActivity(prev=>({...prev,[task.id]:[...(prev[task.id]||[]),{type:'status',text:`Snoozed until ${label}`,user:user.name,time:now}]}));
-      recordMutation(user?.email,task.id,{snoozedUntil,snoozeLabel:label,prevStatus,_locallySnoozedAt:nowMs});
-      addToast('info','Task Snoozed',`${task.id} · until ${label}`);
-      // BE sync — upserts a shadow row keyed by external_id so live tickets persist
-      apiSnoozeTask(task._beId||task.id,new Date(snoozedUntil).toISOString()).catch(err=>{
-        console.warn('[snooze] BE sync failed:',err.message);
-        addToast('warning','Sync Warning','Snooze saved locally but backend sync failed');
-      });
-    }
-    setSnoozeModal(null);
-    setBulkIds(null);
-  },[addToast,user,perms,bulkIds,tasks]);
-
-  // ── Auto-unsnooze — check every 30s for expired snoozes ─────────────────
-  useEffect(()=>{
-    const iv=setInterval(()=>{
-      const now=Date.now();
-      setTasks(prev=>{
-        let changed=false;
-        const next=prev.map(t=>{
-          if(t.status==='waiting'&&t.snoozedUntil&&t.snoozedUntil<=now){
-            changed=true;
-            // Drop the persisted mutation too so reload doesn't re-snooze
-            try { clearMutation(user?.email,t.id); } catch {}
-            return {...t, status:t.prevStatus||'new', snoozeLabel:null, snoozedUntil:null, prevStatus:null, _locallySnoozedAt:null};
-          }
-          return t;
-        });
-        return changed?next:prev;
-      });
-    },30000);
-    return()=>clearInterval(iv);
-  },[user?.email]);
-
-  // ── Bulk escalate handler (gated by can_bulk_action) ──────────────────────
-  const bulkEscalateHandler=useCallback((ids)=>{
-    if(!perms?.canDo('can_bulk_action'))return;
-    const now=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
-    ids.forEach(taskId=>{
-      const task=tasks.find(t=>t.id===taskId);
-      if(!task)return;
-      const asgn=MEMBERS.find(m=>m.id===task.assigneeId);
-      const mgr=MEMBERS.find(m=>m.id===asgn?.lead);
-      setEscalations(prev=>[{id:`ESC-${Date.now()}-${taskId}`,task,taskId,reason:'Bulk escalation',escalatedBy:user.name,escalatedAt:now,managerId:mgr?.id??null,managerName:mgr?.name||'Team Lead',status:'pending',managerResponseStatus:'pending_response',managerResponse:null,managerRespondedAt:null,managerRespondedBy:null,escalationSource:'ticket',slackChannel:null,slackUser:null,slackMessageUrl:null},...prev]);
-    });
-    addToast('escalation','Bulk Escalation',`${ids.length} task${ids.length>1?'s':''} escalated to managers`);
-  },[tasks,user,addToast,perms]);
-
   // ── Create task handler (gated by can_create_task) ────────────────────────
   const confirmCreate=useCallback((form)=>{
     if(!perms?.canDo('can_create_task'))return;
@@ -1063,8 +836,6 @@ const App=()=>{
     const newTask={id:newId,source:form.source,subject:form.subject,body:form.body||'',assigneeId:form.assigneeId,country:form.country,receivedAt:t,minutesAgo:0,updatedMinsAgo:0,minutesSinceLastResponse:0,status:'new',type:form.type,isAlert:false,suggestedReply:'',_locallyCreated:true,_createdAt:now.toISOString()};
     setTasks(prev=>[newTask,...prev]);
     setActivity(prev=>({...prev,[newId]:[{type:'created',text:'Task created manually',user:user.name,time:t},{type:'assigned',text:`Assigned to ${agentName}`,user:user.name,time:t}]}));
-    // Persist so reload keeps the task visible
-    recordCreatedTask(user?.email, newTask);
     setCreateModal(false);
     addToast('success','Task Created',`${newId} → ${agentName?.split(' ')[0]}`);
     // BE sync
@@ -1120,11 +891,11 @@ const App=()=>{
   useEffect(()=>{
     const h=e=>{
       if((e.metaKey||e.ctrlKey)&&e.key==='k'){e.preventDefault();setShowSearch(s=>!s);}
-      if(e.key==='Escape'&&!escalModal&&!reassignModal&&!snoozeModal&&!createModal){setShowSearch(false);}
+      if(e.key==='Escape'&&!createModal){setShowSearch(false);}
     };
     document.addEventListener('keydown',h);
     return()=>document.removeEventListener('keydown',h);
-  },[escalModal,reassignModal,snoozeModal,createModal]);
+  },[createModal]);
 
   // ── Session expiry listener — triggers when api.js gets 401 ─────────
   useEffect(()=>{
@@ -1299,9 +1070,6 @@ const App=()=>{
     [escalations,perms]
   );
   const pendingEscal=scopedEscalations.filter(e=>e.status==='pending').length;
-  // Always derive the LIVE task from tasks[] to avoid stale state in Detail
-  const liveSelTask=React.useMemo(()=>selTask?tasks.find(t=>t.id===selTask.id)||null:null,[selTask,tasks]);
-
   // ── Local dev: auto-login bypass (never deployed — checked at runtime) ─────
   const isLocalDev = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
   if(!user && isLocalDev) {
@@ -1358,14 +1126,14 @@ const App=()=>{
         onCreateRequest={()=>setRequestModal(true)}
         onCreateReport={()=>{setView('hr-reports');setCreateReportModal(true);}}
         onCreateFeedback={()=>{setView('feedback');setFeedbackCompose(true);}}
-        setSelTask={setSelTask} tasks={tasks}
+        setSelTask={()=>{}} tasks={tasks}
       />
       <div style={{height:(impersonating?104:68)+(versionHasUpdate?44:0),flexShrink:0}}/>
       <DeelSubNav view={view} subFilter={subFilter} setSubFilter={setSubFilter} tasks={tasks} user={effectiveUser}/>
       <div className="deel-content" data-region="main-content" aria-label="Main content" style={{display:'flex',overflowX:'hidden',overflowY:'auto',position:'relative',flex:1}}>
-          {view==='briefing'      &&perms?.canView('briefing')!==false     &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={setSelTask} comms={comms} escalations={scopedEscalations} setSubFilter={setSubFilter} requests={requests} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall}/></div>}
-          {view==='my-queue'      &&perms?.canView('my-queue')!==false     &&<div className="page-enter"><Queue user={effectiveUser} tasks={tasks} setTasks={setTasks} selTask={liveSelTask} setSelTask={setSelTask} notes={notes} setNotes={setNotes} activity={activity} setActivity={setActivity} addToast={addToast} onEscalMgr={openEscalModal} onReassign={(t)=>{closeActionModals();setReassignModal(t);}} onSnooze={(t)=>{closeActionModals();setSnoozeModal(t);}} onCreateTask={()=>{closeActionModals();setCreateModal(true);}} onBulkAction={(ids,action)=>{closeActionModals();setBulkIds(ids);if(action==='reassign'){setReassignModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}else if(action==='snooze'){setSnoozeModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}else if(action==='escalate'){setEscalModal(tasks.find(t=>t.id===ids[0])||{id:'bulk'});}}} subFilter={subFilter} escalations={scopedEscalations} requests={requests} setRequests={setRequests} onNewRequest={()=>setRequestModal(true)} queueMode={queueMode} setQueueMode={setQueueMode} fUnassigned={fUnassigned} setFUnassigned={setFUnassigned}/></div>}
-          {view==='team'          &&perms?.canView('team')!==false         &&<div className="page-enter"><Team user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setTask={setSelTask} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
+          {view==='briefing'      &&perms?.canView('briefing')!==false     &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={()=>{}} comms={comms} escalations={scopedEscalations} setSubFilter={setSubFilter} requests={requests} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall}/></div>}
+          {view==='my-queue'      &&perms?.canView('my-queue')!==false     &&<div className="page-enter"><Queue user={effectiveUser} tasks={tasks} subFilter={subFilter}/></div>}
+          {view==='team'          &&perms?.canView('team')!==false         &&<div className="page-enter"><Team user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setTask={()=>{}} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
           {view==='analytics'     &&isOwner&&perms?.canView('analytics')!==false    &&<div className="page-enter"><Analytics tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} currentUser={effectiveUser} subFilter={subFilter} escalations={scopedEscalations}/></div>}
           {view==='escalations'   &&isOwner&&perms?.canView('escalations')!==false  &&<div className="page-enter"><EscalationsView escalations={scopedEscalations} setEscalations={setEscalations} currentUser={effectiveUser} onNewEscalation={()=>setCreateEscalModal(true)}/></div>}
           {view==='announcements' &&perms?.canView('announcements')!==false&&<div className="page-enter"><AnnouncementsView user={effectiveUser} serverUserId={apiServerUserId} serverUserEmail={apiServerUserEmail} comms={comms} setComms={setComms} addToast={addToast} tasks={tasks} apiAcknowledge={apiAcknowledge} apiCreate={apiCreate} apiSend={apiSend} apiUpdate={apiUpdate} apiArchive={apiArchive} apiRemove={apiRemove} apiTogglePin={apiTogglePin} openCompose={announceCompose} onComposeOpened={()=>setAnnounceCompose(false)} apiUnarchive={apiUnarchive} apiComments={apiComments} apiSetComments={apiSetComments} apiLoadComments={apiLoadComments} apiAddComment={apiAddCommentFn} apiDeleteComment={apiDeleteCommentFn} apiLinks={apiLinks} apiLoadLinks={apiLoadLinks} apiLinkAnnouncement={apiLinkAnnouncementFn} apiUnlinkAnnouncement={apiUnlinkAnnouncementFn} apiReact={apiReactFn}/></div>}
@@ -1375,18 +1143,15 @@ const App=()=>{
           {view==='hr-reports'    &&isOwner&&perms?.canView('hr-reports')!==false   &&<div className="page-enter"><GMReportingView user={effectiveUser} addToast={addToast} createReportModal={createReportModal} setCreateReportModal={setCreateReportModal}/></div>}
           {view==='settings'      &&perms?.canView('settings')!==false     &&<div className="page-enter"><SettingsView settings={settings} setSettings={setSettings} user={user} addToast={addToast} tasks={tasks} setTasks={setTasks} subFilter={subFilter} accessTypes={accessTypes} setAccessTypes={setAccessTypes} userAccessMap={userAccessMap} setUserAccessMap={setUserAccessMap} perms={perms}/></div>}
           {view==='projects'      &&isOwner&&perms?.canView('projects')!==false     &&<div className="page-enter"><ProjectsView projects={projects} setProjects={setProjects} user={user} onNewProject={()=>setProjectModal('create')} onEditProject={(p)=>setProjectModal(p)}/></div>}
-          {view==='slack'         &&perms?.canView('slack')!==false        &&<div className="page-enter"><Slack tasks={tasks.filter(t=>t.source==='slack')} setTasks={setTasks} onEscalMgr={openEscalModal} addToast={addToast} user={effectiveUser}/></div>}
+          {view==='slack'         &&perms?.canView('slack')!==false        &&<div className="page-enter"><Slack tasks={tasks.filter(t=>t.source==='slack')} setTasks={setTasks} onEscalMgr={()=>{}} addToast={addToast} user={effectiveUser}/></div>}
           {view==='alerts'        &&perms?.canView('alerts')!==false       &&<div className="page-enter"><Alerts tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setTasks={setTasks}/></div>}
           {view==='feedback'      &&perms?.canView('feedback')!==false     &&<div className="page-enter"><FeedbackView user={effectiveUser} addToast={addToast} openCompose={feedbackCompose} onComposeOpened={()=>setFeedbackCompose(false)}/></div>}
       </div>
-      {escalModal    &&<EscalModal task={escalModal} bulkCount={bulkIds?.length||0} onConfirm={confirmEscal} onClose={()=>{setEscalModal(null);setBulkIds(null);}}/>}
-      {reassignModal &&<ReassignModal task={reassignModal} tasks={tasks} bulkCount={bulkIds?.length||0} onConfirm={confirmReassign} onClose={()=>{setReassignModal(null);setBulkIds(null);}}/>}
-      {snoozeModal   &&<SnoozeModal task={snoozeModal} bulkCount={bulkIds?.length||0} onConfirm={confirmSnooze} onClose={()=>{setSnoozeModal(null);setBulkIds(null);}}/>}
       {createModal   &&<CreateTaskModal onConfirm={confirmCreate} onClose={()=>setCreateModal(false)} currentUser={effectiveUser}/>}
       {projectModal  &&<CreateProjectModal onConfirm={confirmProject} onClose={()=>setProjectModal(null)} project={typeof projectModal==='object'?projectModal:null} currentUser={effectiveUser}/>}
       {requestModal  &&<CreateRequestModal onConfirm={confirmRequest} onClose={()=>setRequestModal(false)} currentUser={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks}/>}
       {createEscalModal&&<CreateEscalationModal onConfirm={confirmManualEscal} onClose={()=>setCreateEscalModal(false)} currentUser={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks}/>}
-      {showSearch    &&<GlobalSearch tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={setSelTask} onClose={()=>setShowSearch(false)}/>}
+      {showSearch    &&<GlobalSearch tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={()=>{}} onClose={()=>setShowSearch(false)}/>}
       {showOnboard   &&<Onboarding onDismiss={(dontShow)=>{setShowOnboard(false);if(dontShow){try{localStorage.setItem('ops_hub_onboarded','1');}catch(e){}}}}/>}
       {popupQueue.length>0&&<AnnouncementPopup key={popupQueue[0].id} comm={popupQueue[0]} onAcknowledge={handlePopupAcknowledge}/>}
       <Toasts toasts={toasts} dismiss={dismissToast}/>

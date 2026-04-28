@@ -23,35 +23,3 @@ export async function createTask(payload) {
     body: JSON.stringify(payload),
   });
 }
-
-export async function updateTaskStatus(id, status) {
-  return apiFetch(`/tasks/${id}/status`, {
-    method: 'PATCH',
-    body: JSON.stringify({ status }),
-  });
-}
-
-export async function assignTask(id, assigneeId) {
-  return apiFetch(`/tasks/${id}/assign`, {
-    method: 'PATCH',
-    body: JSON.stringify({ assigneeId }),
-  });
-}
-
-export async function escalateTask(id, managerId, reason) {
-  return apiFetch(`/tasks/${id}/escalate`, {
-    method: 'PATCH',
-    body: JSON.stringify({ managerId, reason }),
-  });
-}
-
-export async function snoozeTask(id, until) {
-  return apiFetch(`/tasks/${id}/snooze`, {
-    method: 'PATCH',
-    body: JSON.stringify({ until }),
-  });
-}
-
-export async function deleteTask(id) {
-  return apiFetch(`/tasks/${id}`, { method: 'DELETE' });
-}

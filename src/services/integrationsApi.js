@@ -179,14 +179,6 @@ export async function fetchQueueBySource(source, { bustCache, signal } = {}) {
   return apiFetch(`/queue?${params.toString()}`, { signal });
 }
 
-// Reassign a ticket in Zendesk/Jira via our backend
-export async function reassignQueueTicket(ticketId, assigneeEmail) {
-  return apiFetch('/queue/reassign', {
-    method: 'POST',
-    body: JSON.stringify({ ticketId, assigneeEmail }),
-  });
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Zendesk
 // ─────────────────────────────────────────────────────────────────────────────
@@ -210,97 +202,4 @@ export async function fetchZendeskGroups() {
 
 export async function fetchZendeskViews() {
   return apiFetch('/integrations/zendesk/views');
-}
-
-// Discover the 4 ops-hub-tracked Zendesk custom fields (employeeCountry /
-// form / rootCauseSupport / rootCauseSelector). Cached server-side for 1h;
-// the FE can call this once per Detail mount and rely on the result.
-// `force=true` busts the server cache (admin/dev workflow when fields were
-// reconfigured in Zendesk and we want them visible immediately).
-export async function fetchZendeskTicketFields({ force } = {}) {
-  const qs = force ? '?force=1' : '';
-  return apiFetch(`/integrations/zendesk/ticket-fields${qs}`);
-}
-
-// Active Zendesk macros (cached server-side 5 min). Optional `search`
-// filters by title client-side to avoid burning a ZD call per keystroke.
-export async function fetchZendeskMacros({ search } = {}) {
-  const qs = search ? `?search=${encodeURIComponent(search)}` : '';
-  return apiFetch(`/integrations/zendesk/macros${qs}`);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Ticket Comments & Actions
-// ─────────────────────────────────────────────────────────────────────────────
-export async function fetchTicketComments(ticketId) {
-  return apiFetch(`/queue/${ticketId}/comments`);
-}
-
-export async function postTicketAction(ticketId, actionPayload) {
-  return apiFetch(`/queue/${ticketId}/actions`, {
-    method: 'POST',
-    body: JSON.stringify(actionPayload),
-  });
-}
-
-// PUT one or more of the 4 ops-hub-tracked Zendesk custom fields.
-// patch shape: { employeeCountry?, form?, rootCauseSupport?, rootCauseSelector? }
-// Backend resolves FE keys → Zendesk field IDs and PUTs the ticket;
-// queue cache is busted on success so the next sync reflects the change.
-export async function updateTicketCustomFields(ticketId, patch) {
-  return apiFetch(`/queue/${ticketId}/custom-fields`, {
-    method: 'PUT',
-    body: JSON.stringify(patch),
-  });
-}
-
-// Macro preview — what would this macro change on this ticket?
-// Returns { changes: [{type, ...}, ...] } describing the diff.
-export async function previewTicketMacro(ticketId, macroId) {
-  return apiFetch(`/queue/${encodeURIComponent(ticketId)}/macros/${encodeURIComponent(macroId)}/preview`);
-}
-
-// Macro apply — commits the macro on the ticket via Zendesk's macro_ids[].
-// Queue cache is busted on success so the next sync reflects all the
-// changes the macro made (status, fields, comments, etc.).
-export async function applyTicketMacro(ticketId, macroId) {
-  return apiFetch(`/queue/${encodeURIComponent(ticketId)}/macros/${encodeURIComponent(macroId)}/apply`, {
-    method: 'POST',
-  });
-}
-
-// ── Side conversations (Phase 4) ──────────────────────────────────────────
-export async function fetchSideConversations(ticketId) {
-  return apiFetch(`/queue/${encodeURIComponent(ticketId)}/side-conversations`);
-}
-
-export async function fetchSideConversation(ticketId, sideConvId) {
-  return apiFetch(`/queue/${encodeURIComponent(ticketId)}/side-conversations/${encodeURIComponent(sideConvId)}`);
-}
-
-export async function createSideConversation(ticketId, { subject, body, to }) {
-  return apiFetch(`/queue/${encodeURIComponent(ticketId)}/side-conversations`, {
-    method: 'POST',
-    body: JSON.stringify({ subject, body, to }),
-  });
-}
-
-export async function replySideConversation(ticketId, sideConvId, body) {
-  return apiFetch(`/queue/${encodeURIComponent(ticketId)}/side-conversations/${encodeURIComponent(sideConvId)}/reply`, {
-    method: 'POST',
-    body: JSON.stringify({ body }),
-  });
-}
-
-export async function closeSideConversation(ticketId, sideConvId) {
-  return apiFetch(`/queue/${encodeURIComponent(ticketId)}/side-conversations/${encodeURIComponent(sideConvId)}/close`, {
-    method: 'POST',
-  });
-}
-
-// AI summary (Phase 5) — server-side cache keyed by ticketId + thread hash;
-// `force` busts the cache for the Regenerate button.
-export async function fetchTicketAISummary(ticketId, { force } = {}) {
-  const qs = force ? '?force=1' : '';
-  return apiFetch(`/queue/${encodeURIComponent(ticketId)}/ai-summary${qs}`);
 }
