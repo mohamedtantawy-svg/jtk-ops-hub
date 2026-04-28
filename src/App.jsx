@@ -36,6 +36,7 @@ import { createNote as apiCreateNote } from './services/notesApi';
 import { apiFetch } from './services/api';
 import { reassignQueueTicket } from './services/integrationsApi';
 import { recordMutation, recordCreatedTask, clearMutation, clearAllMutationsEverywhere } from './services/queueMutationStore';
+import { recordOriginalAssignee, getOriginalAssignee, clearOriginalAssignee, clearAllOriginalAssigneesEverywhere } from './services/originalAssigneeStore';
 import { normalizeTask, normalizeEscalation, normalizeProject, normalizeRequest, normalizeMember, denormalizeTaskForCreate, feStatusToBe } from './services/normalize';
 
 // ── Keys we clear on logout so the next user on this browser starts fresh ──
@@ -85,6 +86,10 @@ function clearQueueCaches() {
     for (const k of toRemove) localStorage.removeItem(k);
   } catch {}
   clearAllMutationsEverywhere();
+  // Original-assignee tracking is keyed per signed-in user. On logout we
+  // wipe every per-user bucket so the next user on this browser doesn't
+  // inherit somebody else's "tickets I took over" list (Bug 8).
+  clearAllOriginalAssigneesEverywhere();
 }
 
 import DeelTopNav from './components/nav/DeelTopNav';
@@ -840,6 +845,23 @@ const App=()=>{
     const recordOne=(taskId)=>recordMutation(user?.email,taskId,{
       assigneeEmail:newEmail,assigneeId:newMemberId,assigneeName:newName,_locallyReassignedAt:nowMs,
     });
+    // Track each ticket's original assignee so coverage handovers can be
+    // bulk-reverted later (Bug 8). First reassign wins — subsequent moves
+    // don't overwrite the original. If we're reassigning back to the
+    // recorded original, drop the entry instead.
+    const trackOriginalOne=(t)=>{
+      if(!t)return;
+      const prevAssignee={
+        email:t.assigneeEmail||(t.assigneeId?MEMBERS.find(m=>m.id===t.assigneeId)?.email:null)||null,
+        name:t.assigneeName||(t.assigneeId?MEMBERS.find(m=>m.id===t.assigneeId)?.name:null)||null,
+      };
+      const existing=getOriginalAssignee(user?.email,t.id);
+      if(existing&&newEmail&&newEmail.toLowerCase()===String(existing.originalAssigneeEmail).toLowerCase()){
+        clearOriginalAssignee(user?.email,t.id);
+      } else if(prevAssignee.email){
+        recordOriginalAssignee(user?.email,t.id,prevAssignee,newEmail);
+      }
+    };
     const pushOne=(t)=>{
       const source=t?.source;
       if(source==='zendesk'||source==='jira'){
@@ -851,17 +873,21 @@ const App=()=>{
 
     if(bulkIds&&bulkIds.length>0){
       const idSet=new Set(bulkIds);
+      const targets=bulkIds.map(id=>tasks.find(t=>t.id===id)).filter(Boolean);
+      // Snapshot originals BEFORE the optimistic apply so each entry sees
+      // the previous (true-original) assignee, not the freshly-applied one.
+      targets.forEach(trackOriginalOne);
       setTasks(prev=>prev.map(t=>idSet.has(t.id)?applyOne(t):t));
       setActivity(prev=>{const next={...prev};bulkIds.forEach(id=>{next[id]=[...(next[id]||[]),{type:'assigned',text:`Bulk reassigned to ${newName}${note?` — ${note}`:''}`,user:user.name,time:nowLabel}];});return next;});
       bulkIds.forEach(recordOne);
       addToast('success','Bulk Reassign',`${bulkIds.length} tasks → ${newName.split(' ')[0]}`);
       // Push each ticket to its source in the background, track failures
       const failedIds=[];
-      const targets=bulkIds.map(id=>tasks.find(t=>t.id===id)).filter(Boolean);
       Promise.allSettled(targets.map(t=>pushOne(t).catch(err=>{failedIds.push(t.id);throw err;}))).then(()=>{
         if(failedIds.length>0) addToast('warning','Partial Sync Failure',`${failedIds.length}/${bulkIds.length} tasks failed to sync to source system`);
       });
     } else {
+      trackOriginalOne(task);
       setTasks(prev=>prev.map(t=>t.id===task.id?applyOne(t):t));
       setActivity(prev=>({...prev,[task.id]:[...(prev[task.id]||[]),{type:'assigned',text:`Reassigned to ${newName}${note?` — ${note}`:''}`,user:user.name,time:nowLabel}]}));
       recordOne(task.id);
