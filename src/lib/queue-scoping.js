@@ -285,6 +285,15 @@ export const scopeWorkbenchTasks   = (items, user) => filterByAssignee(items, us
 
 export const scopeOnboardingPeople      = (items, user) => filterByCountryOrAssignee(items, user);
 export const scopePausedOnboarding      = (items, user) => filterByCountryOrAssignee(items, user);
-export const scopeOffboardingCases      = (items, user) => filterByCountryOrAssignee(items, user);
+// Offboarding: agents see ASSIGNEE-only (with country fallback for orphans),
+// while TL / Regional / Admin keep the broader country-OR-assignee union so
+// they retain visibility into their team's / region's full pipeline.
+// Raised by Raquel 2026-04-28 — agents were seeing the entire UK team's
+// offboarding because the union model surfaced every country-owned row
+// regardless of assignment. (Bug 4)
+export const scopeOffboardingCases = (items, user) => {
+  if (normalizeRole(user) === 'agent') return filterByAssignee(items, user);
+  return filterByCountryOrAssignee(items, user);
+};
 export const scopeAmendmentRequests     = (items, user) => filterByCountryOrAssignee(items, user);
 export const scopeRedlineRequests       = (items, user) => filterByCountryOrAssignee(items, user);
