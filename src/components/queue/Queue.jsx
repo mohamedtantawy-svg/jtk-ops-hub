@@ -117,24 +117,10 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
   // Work source — which panel to show (null = normal queue)
   const [workSource,setWorkSource]=useState(null);
 
-  // ── Quota banner — fired by useQueueSync when localStorage writes fail ──
-  // This is a UI signal that offline resilience is degraded (cache write
-  // failed, so on next reload we won't hydrate from cache and the user will
-  // see a blank list for a beat before the network comes back).
-  const [quotaWarning, setQuotaWarning] = useState(null);
-  useEffect(() => {
-    const handler = (e) => {
-      const detail = e?.detail || {};
-      setQuotaWarning({
-        source: detail.source || 'unknown',
-        message: detail.message || 'Cache write failed',
-        ts: Date.now(),
-      });
-    };
-    window.addEventListener('ops-hub-cache-quota', handler);
-    return () => window.removeEventListener('ops-hub-cache-quota', handler);
-  }, []);
   // searchRef removed — search handled by global nav
+  // Cache quota banner removed: useQueueSync now persists to IndexedDB
+  // (multi-GB quota), so the localStorage 5–10 MB cap that used to trigger
+  // the "Offline cache is full" notice can no longer happen.
   const perms = useContext(PermissionsContext);
 
   // Wire subFilter from parent (BriefingView "View resolved" etc.) to internal filter
@@ -683,17 +669,6 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
 
   return(
     <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
-
-      {/* Offline-cache degraded banner — surfaces the quota failure from useQueueSync
-          so users understand why reload won't restore their view instantly. */}
-      {quotaWarning && (
-        <div role="status" aria-live="polite"
-          style={{padding:'8px 32px',background:'#fff8e6',borderBottom:'1px solid #ffe27c',color:'#92400E',fontSize:12,display:'flex',alignItems:'center',gap:8}}>
-          <i className="bi-exclamation-triangle-fill" aria-hidden="true" style={{fontSize:12,color:'#ed8d00'}}/>
-          <span>Offline cache is full — data is still live, but your last view won’t be restored on reload{quotaWarning.source ? ` (source: ${quotaWarning.source})` : ''}.</span>
-          <button onClick={()=>setQuotaWarning(null)} aria-label="Dismiss offline-cache warning" style={{marginLeft:'auto',background:'transparent',border:'none',color:'#92400E',cursor:'pointer',fontSize:12,fontWeight:600}}>Dismiss</button>
-        </div>
-      )}
 
       {/* When a ticket is open, the full-page Detail (below) takes over the
           flex space — header + filters + table all hide. workMode keeps its

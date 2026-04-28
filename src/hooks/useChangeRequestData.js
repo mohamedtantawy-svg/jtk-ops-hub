@@ -1,6 +1,6 @@
 // ── useChangeRequestData hook ────────────────────────────────────────────────
 // Fetches amendments + redlines from the Deel Admin API.
-// Groups by country. Caches in localStorage.
+// Groups by country. Caches in IndexedDB (per-user).
 // Stale-while-revalidate: always shows previous data until fresh data arrives.
 // De-dupes concurrent refresh() calls and adopts cross-tab broadcasts.
 // Amendments and redlines track their own lastFetchRef so an out-of-order
@@ -10,6 +10,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { fetchDeelAmendments, fetchDeelRedlines } from '../services/integrationsApi';
 import { getQueueChannel, broadcastSync } from './queueSyncChannel';
+import { idbGetWithMigration, idbSet } from '../lib/idb-cache';
 
 const SOURCE_AMENDMENTS = 'amendments';
 const SOURCE_REDLINES = 'redlines';
@@ -19,36 +20,23 @@ const CACHE_KEY_REDLINES_BASE = 'ops_hub_redlines_cache';
 const cacheKeyFor = (base, userEmail) =>
   userEmail ? `${base}:${String(userEmail).toLowerCase()}` : base;
 
-function loadCache(key) {
-  try {
-    const cached = localStorage.getItem(key);
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (parsed.items?.length > 0) return { items: parsed.items, ts: parsed.ts || 0 };
-    }
-  } catch (e) {}
-  return { items: [], ts: 0 };
-}
-
 export function useChangeRequestData(enabled = true, userEmail = null) {
-  const cachedA = useMemo(() => loadCache(cacheKeyFor(CACHE_KEY_AMENDMENTS_BASE, userEmail)), [userEmail]);
-  const cachedR = useMemo(() => loadCache(cacheKeyFor(CACHE_KEY_REDLINES_BASE, userEmail)), [userEmail]);
-  const [amendments, setAmendments] = useState(cachedA.items);
-  const [redlines, setRedlines] = useState(cachedR.items);
+  // IDB cache (was localStorage). Empty initial state; the hydration effect
+  // below fills both legs ~10–50 ms after mount, gated per-leg so a late
+  // amendments cache can't overwrite fresh redlines (or vice versa).
+  const [amendments, setAmendments] = useState([]);
+  const [redlines, setRedlines] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState(null);
-  const [lastSyncAt, setLastSyncAt] = useState(() => {
-    if (cachedA.ts && cachedR.ts) return Math.max(cachedA.ts, cachedR.ts);
-    return cachedA.ts || cachedR.ts || null;
-  });
-  const lastFetchAmendmentsRef = useRef(
-    cachedA.ts > 0 && Date.now() - cachedA.ts < CACHE_TTL ? cachedA.ts : 0
-  );
-  const lastFetchRedlinesRef = useRef(
-    cachedR.ts > 0 && Date.now() - cachedR.ts < CACHE_TTL ? cachedR.ts : 0
-  );
+  const [lastSyncAt, setLastSyncAt] = useState(null);
+  const lastFetchAmendmentsRef = useRef(0);
+  const lastFetchRedlinesRef = useRef(0);
   const inFlightRef = useRef(null);
+  // Per-leg gates so an out-of-order IDB read can't clobber fresh data on
+  // either side independently.
+  const liveAmendmentsRef = useRef(false);
+  const liveRedlinesRef = useRef(false);
 
   const refresh = useCallback(async (force = false) => {
     if (!enabled) return null;
@@ -78,15 +66,17 @@ export function useChangeRequestData(enabled = true, userEmail = null) {
         const now = Date.now();
         if (amendResult.status === 'fulfilled' && (fetchedAmendments.length > 0 || amendments.length === 0)) {
           setAmendments(fetchedAmendments);
-          try { localStorage.setItem(cacheKeyFor(CACHE_KEY_AMENDMENTS_BASE, userEmail), JSON.stringify({ items: fetchedAmendments, ts: now })); } catch (e) {}
+          idbSet(cacheKeyFor(CACHE_KEY_AMENDMENTS_BASE, userEmail), { items: fetchedAmendments, ts: now }).catch(() => {});
           broadcastSync(SOURCE_AMENDMENTS, fetchedAmendments, null, userEmail);
           lastFetchAmendmentsRef.current = now;
+          liveAmendmentsRef.current = true;
         }
         if (redlineResult.status === 'fulfilled' && (fetchedRedlines.length > 0 || redlines.length === 0)) {
           setRedlines(fetchedRedlines);
-          try { localStorage.setItem(cacheKeyFor(CACHE_KEY_REDLINES_BASE, userEmail), JSON.stringify({ items: fetchedRedlines, ts: now })); } catch (e) {}
+          idbSet(cacheKeyFor(CACHE_KEY_REDLINES_BASE, userEmail), { items: fetchedRedlines, ts: now }).catch(() => {});
           broadcastSync(SOURCE_REDLINES, fetchedRedlines, null, userEmail);
           lastFetchRedlinesRef.current = now;
+          liveRedlinesRef.current = true;
         }
         setLastSyncAt(Math.max(lastFetchAmendmentsRef.current, lastFetchRedlinesRef.current) || null);
 
@@ -110,6 +100,33 @@ export function useChangeRequestData(enabled = true, userEmail = null) {
   }, [enabled, amendments.length, redlines.length, userEmail]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // ── IDB cache hydration ───────────────────────────────────────────────────
+  // Two parallel IDB reads (amendments + redlines), each gated independently
+  // by liveAmendmentsRef / liveRedlinesRef so a late-arriving cache for one
+  // leg can't overwrite fresh network data for the other. One-shot legacy
+  // localStorage migration is wrapped inside idbGetWithMigration.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [cachedA, cachedR] = await Promise.all([
+        idbGetWithMigration(cacheKeyFor(CACHE_KEY_AMENDMENTS_BASE, userEmail)),
+        idbGetWithMigration(cacheKeyFor(CACHE_KEY_REDLINES_BASE, userEmail)),
+      ]);
+      if (cancelled) return;
+      if (!liveAmendmentsRef.current && cachedA?.items?.length) {
+        setAmendments(cachedA.items);
+        lastFetchAmendmentsRef.current = cachedA.ts || 0;
+      }
+      if (!liveRedlinesRef.current && cachedR?.items?.length) {
+        setRedlines(cachedR.items);
+        lastFetchRedlinesRef.current = cachedR.ts || 0;
+      }
+      const newest = Math.max(lastFetchAmendmentsRef.current, lastFetchRedlinesRef.current);
+      if (newest > 0) setLastSyncAt(newest);
+    })();
+    return () => { cancelled = true; };
+  }, [userEmail]);
 
   // Auto-refresh while the tab is visible so the unified sync indicator
   // doesn't age into the "stale" state while the user is working.

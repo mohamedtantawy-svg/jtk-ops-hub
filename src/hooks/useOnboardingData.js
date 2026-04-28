@@ -1,6 +1,6 @@
 // ── useOnboardingData hook ──────────────────────────────────────────────────
 // Fetches onboarding actionable queue from the Deel Admin API.
-// Groups by country. Caches in localStorage.
+// Groups by country. Caches in IndexedDB (per-user).
 // Stale-while-revalidate: always shows previous data until fresh data arrives.
 // De-dupes concurrent refresh() calls and adopts cross-tab broadcasts.
 // Auto-refreshes every CACHE_TTL while the tab is visible so long-lived tabs
@@ -10,6 +10,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { fetchDeelOnboarding } from '../services/integrationsApi';
 import { getQueueChannel, broadcastSync } from './queueSyncChannel';
+import { idbGetWithMigration, idbSet } from '../lib/idb-cache';
 
 const SOURCE_ID = 'onboarding';
 const CACHE_TTL = 5 * 60 * 1000;
@@ -17,27 +18,22 @@ const CACHE_KEY_BASE = 'ops_hub_onboarding_cache';
 const cacheKeyFor = (userEmail) =>
   userEmail ? `${CACHE_KEY_BASE}:${String(userEmail).toLowerCase()}` : CACHE_KEY_BASE;
 
-function loadCache(userEmail) {
-  try {
-    const cached = localStorage.getItem(cacheKeyFor(userEmail));
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      // Return cached data regardless of TTL — stale data is better than empty
-      if (parsed.items?.length > 0) return { items: parsed.items, ts: parsed.ts || 0 };
-    }
-  } catch (e) {}
-  return { items: [], ts: 0 };
-}
-
 export function useOnboardingData(enabled = true, userEmail = null) {
-  const cached = useMemo(() => loadCache(userEmail), [userEmail]);
-  const [items, setItems] = useState(cached.items);
+  // IDB cache is async so initial state is empty; the hydration effect
+  // below fills it ~10–50 ms after mount. Was localStorage (5–10 MB cap);
+  // moved to IDB after the cap caused spurious "Offline cache is full"
+  // banners under a heavy localStorage workload.
+  const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState(null);
-  const [lastSyncAt, setLastSyncAt] = useState(cached.ts || null);
-  const lastFetchRef = useRef(cached.ts > 0 && Date.now() - cached.ts < CACHE_TTL ? cached.ts : 0);
+  const [lastSyncAt, setLastSyncAt] = useState(null);
+  const lastFetchRef = useRef(0);
   const inFlightRef = useRef(null);
+  // Set to true the moment the first live fetch lands. Used by the IDB
+  // hydration effect — if the network beat IDB to it, the cached payload
+  // is stale and must NOT overwrite the fresh data.
+  const liveReceivedRef = useRef(false);
 
   const refresh = useCallback(async (force = false) => {
     if (!enabled) return null;
@@ -55,12 +51,12 @@ export function useOnboardingData(enabled = true, userEmail = null) {
         const now = Date.now();
         if (fetched.length > 0 || items.length === 0) {
           setItems(fetched);
-          try {
-            localStorage.setItem(cacheKeyFor(userEmail), JSON.stringify({ items: fetched, ts: now }));
-          } catch (e) {}
+          // Fire-and-forget IDB write — doesn't block the data path.
+          idbSet(cacheKeyFor(userEmail), { items: fetched, ts: now }).catch(() => {});
           broadcastSync(SOURCE_ID, fetched, null, userEmail);
         }
         lastFetchRef.current = now;
+        liveReceivedRef.current = true;
         setLastSyncAt(now);
         return fetched;
       } catch (err) {
@@ -78,6 +74,24 @@ export function useOnboardingData(enabled = true, userEmail = null) {
   }, [enabled, items.length, userEmail]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // ── IDB cache hydration ───────────────────────────────────────────────────
+  // Async-loads the cached payload after mount and merges into state if the
+  // live fetch hasn't arrived yet. Includes legacy-localStorage migration
+  // (one-shot copy from old key, then cleanup).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const cached = await idbGetWithMigration(cacheKeyFor(userEmail));
+      if (cancelled) return;
+      if (liveReceivedRef.current) return;        // sync beat us — don't overwrite
+      if (!cached?.items?.length) return;
+      setItems(cached.items);
+      lastFetchRef.current = cached.ts || 0;
+      setLastSyncAt(cached.ts || null);
+    })();
+    return () => { cancelled = true; };
+  }, [userEmail]);
 
   // ── Auto-refresh while visible ─────────────────────────────────────────────
   // Previously the hook only fetched on mount, which meant a tab left open for
