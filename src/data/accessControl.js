@@ -25,6 +25,7 @@ export const ALL_VIEWS = [
   'approval-queue',
   'slack',
   'team',
+  'feedback',
   'settings',
 ];
 
@@ -87,6 +88,7 @@ export const VIEW_LABELS = {
   'approval-queue':'Approval Queue',
   'slack':         'Slack',
   'team':          'Team',
+  'feedback':      'Feedback',
   'settings':      'Settings',
 };
 

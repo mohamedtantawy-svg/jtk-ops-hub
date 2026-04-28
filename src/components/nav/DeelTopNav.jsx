@@ -24,6 +24,9 @@ const PRIMARY_TABS = [
   // nav to avoid the double-entry confusion. The `approval-queue` view route
   // in App.jsx remains for deep-links / notifications / programmatic nav.
   { id: 'team',          icon: 'bi-people',           label: 'Team' },
+  // Feedback board — open to every authenticated user so the whole team
+  // can submit bugs + improvement ideas and vote on what matters.
+  { id: 'feedback',      icon: 'bi-lightbulb',        label: 'Feedback' },
 ];
 
 /* Secondary tabs under More — all owner-only for now, so for non-owners
@@ -41,6 +44,8 @@ const CREATE_ACTIONS = [
   { icon: 'bi-kanban',            label: 'New Project',      action: 'project',       desc: 'Start a project',             perm: 'can_create_project',          restrictToEmail: OWNER_EMAIL },
   { icon: 'bi-megaphone',         label: 'New Announcement', action: 'announcement',  desc: 'Post to the team' },
   { icon: 'bi-clipboard-data',    label: 'New Report',       action: 'report',        desc: 'Submit an HR report',         viewReq: 'hr-reports',               restrictToEmail: OWNER_EMAIL },
+  // No `perm` gate — every authenticated user can submit a bug / idea.
+  { icon: 'bi-lightbulb',         label: 'New Feedback',     action: 'feedback',      desc: 'Report a bug or improvement' },
 ];
 
 const DeelTopNav = ({
@@ -48,7 +53,7 @@ const DeelTopNav = ({
   onSearch, notifs, markAllRead,
   escalCount, onLogout,
   onCreateTask, onCreateEscalation, onCreateProject,
-  onCreateAnnouncement, onCreateRequest, onCreateReport,
+  onCreateAnnouncement, onCreateRequest, onCreateReport, onCreateFeedback,
   setSelTask, tasks,
 }) => {
   // Manager on Call was previously rendered here as a pill in the right-side
@@ -97,6 +102,7 @@ const DeelTopNav = ({
     else if (action === 'announcement') { onCreateAnnouncement?.(); setView('announcements'); }
     else if (action === 'request')    { onCreateRequest?.(); setView('my-queue'); }
     else if (action === 'report')     { onCreateReport?.(); setView('hr-reports'); }
+    else if (action === 'feedback')   { setView('feedback'); onCreateFeedback?.(); }
   };
 
   const unread = notifs ? notifs.filter(n => !n.read).length : 0;
