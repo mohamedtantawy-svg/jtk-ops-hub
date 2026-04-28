@@ -25,7 +25,7 @@ import {
   buildCustomFieldsPatch,
   ZD_CUSTOM_FIELD_KEYS,
 } from '../../../../../../src/lib/zendesk-fields';
-import { isZendeskConfigured } from '../../../../../../src/lib/zendesk-api';
+import { isZendeskConfigured, updateTicket as updateZdTicket } from '../../../../../../src/lib/zendesk-api';
 
 const STALE_TTL_MS = 30 * 60_000;
 const ZD_SUBDOMAIN = process.env.ZENDESK_SUBDOMAIN || '';
@@ -68,20 +68,9 @@ async function checkTicketScope(ticketId, user) {
   return { allowed: false, reason: 'unknown_ticket' };
 }
 
-async function updateZendeskTicket(ticketId, update) {
-  const url = `https://${ZD_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}`;
-  const auth = Buffer.from(`${ZD_EMAIL}/token:${ZD_TOKEN}`).toString('base64');
-  const res = await fetch(url, {
-    method: 'PUT',
-    headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ticket: update }),
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Zendesk API ${res.status}: ${body.substring(0, 200)}`);
-  }
-  return res.json();
-}
+// Inline updateZendeskTicket() removed in favor of the shared lib helper
+// (updateZdTicket from src/lib/zendesk-api), which supports X-On-Behalf-Of
+// via opts.actAsEmail so custom-field edits attribute to the team member.
 
 export async function PUT(req, { params }) {
   const user = getAuthUser(req);
@@ -134,7 +123,7 @@ export async function PUT(req, { params }) {
 
   try {
     const zdId = ticketId.replace('ZD-', '');
-    await updateZendeskTicket(zdId, { custom_fields: cfPayload });
+    await updateZdTicket(zdId, { custom_fields: cfPayload }, { actAsEmail: user.email });
     // Bust the queue cache so the next poll picks up the new values.
     cacheDelMany(['queue', 'queue_zendesk']);
     return NextResponse.json({

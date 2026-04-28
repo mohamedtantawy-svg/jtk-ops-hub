@@ -94,7 +94,9 @@ export async function POST(req) {
     if (isZendesk) {
       // Strip the "ZD-" prefix to get the numeric Zendesk ticket ID
       const numericId = ticketId.replace('ZD-', '');
-      await reassignTicket(numericId, assigneeEmail);
+      // actAsEmail impersonates the team member so the ticket's audit
+      // log records them as the updater instead of the API token owner.
+      await reassignTicket(numericId, assigneeEmail, { actAsEmail: user.email });
     } else {
       // Jira issue keys are used as-is (e.g. "PROJ-123")
       await reassignIssue(ticketId, assigneeEmail);

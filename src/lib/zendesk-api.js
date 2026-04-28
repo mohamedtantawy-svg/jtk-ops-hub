@@ -20,6 +20,13 @@ export function isZendeskConfigured() {
 
 /**
  * Raw fetch wrapper — no retry.
+ *
+ * `options.actAsEmail` adds the `X-On-Behalf-Of` header so Zendesk attributes
+ * the call to that user instead of the API token's owner. Affects everything
+ * Zendesk records about the request: comment author, ticket updater, audit
+ * log entries, side-conversation message author, etc. The API token's owner
+ * must be a Zendesk admin AND the impersonated user must be an active ZD
+ * user. Reads (GET) don't need impersonation; pass it only on mutations.
  */
 async function _zendeskFetch(endpoint, options = {}) {
   if (!isZendeskConfigured()) {
@@ -29,14 +36,19 @@ async function _zendeskFetch(endpoint, options = {}) {
   const auth = Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_API_TOKEN}`).toString('base64');
   const url = `${ZENDESK_BASE}${endpoint}`;
 
+  const headers = {
+    Authorization: `Basic ${auth}`,
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    ...options.headers,
+  };
+  if (options.actAsEmail) {
+    headers['X-On-Behalf-Of'] = options.actAsEmail;
+  }
+
   const res = await fetch(url, {
     ...options,
-    headers: {
-      Authorization: `Basic ${auth}`,
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      ...options.headers,
-    },
+    headers,
     signal: options.signal || AbortSignal.timeout(20000),
   });
 
@@ -135,34 +147,39 @@ export async function listGroups() {
 
 // ── Ticket Update ───────────────────────────────────────────────────────────
 
-export async function updateTicket(ticketId, data) {
+// `opts.actAsEmail` impersonates that user via X-On-Behalf-Of (see _zendeskFetch).
+export async function updateTicket(ticketId, data, opts = {}) {
   return zendeskFetch(`/tickets/${ticketId}.json`, {
     method: 'PUT',
     body: JSON.stringify({ ticket: data }),
+    actAsEmail: opts.actAsEmail,
   });
 }
 
 // ── Ticket Create ───────────────────────────────────────────────────────────
 
-export async function createTicket(data) {
+export async function createTicket(data, opts = {}) {
   return zendeskFetch('/tickets.json', {
     method: 'POST',
     body: JSON.stringify({ ticket: data }),
+    actAsEmail: opts.actAsEmail,
   });
 }
 
 // ── Reassign Ticket ─────────────────────────────────────────────────────
 
-export async function reassignTicket(ticketId, assigneeEmail) {
-  // First look up the Zendesk user by email
+export async function reassignTicket(ticketId, assigneeEmail, opts = {}) {
+  // The user lookup is a read — leave it under the API token's identity.
   const searchRes = await zendeskFetch(`/users/search.json?query=email:${encodeURIComponent(assigneeEmail)}`);
   const user = searchRes?.users?.[0];
   if (!user) throw new Error(`Zendesk user not found for email: ${assigneeEmail}`);
 
-  // Update the ticket's assignee
+  // The actual reassignment IS impersonated when actAsEmail is set, so the
+  // ticket's audit log records the team member as the updater.
   return zendeskFetch(`/tickets/${ticketId}.json`, {
     method: 'PUT',
     body: JSON.stringify({ ticket: { assignee_id: user.id } }),
+    actAsEmail: opts.actAsEmail,
   });
 }
 
@@ -173,6 +190,38 @@ export async function showManyUsers(ids) {
   // Zendesk allows up to 100 IDs per call
   const batch = ids.slice(0, 100);
   return zendeskFetch(`/users/show_many.json?ids=${batch.join(',')}`);
+}
+
+// ── Resolve email → Zendesk user ID (cached 1h) ───────────────────────
+// Used by the reply path to set comment.author_id so the team member's
+// name appears on the ticket, not the API token owner's. ZD honours
+// author_id only when the API token belongs to an admin user; if the
+// lookup misses, callers should fall back to no override (current
+// behaviour) and log a warning so the missing user surfaces in ops logs.
+//
+// Negative results (no ZD user with that email) are NOT cached — that way
+// a freshly-onboarded teammate works as soon as their ZD account exists,
+// without waiting for the cache to expire or restarting the server.
+const ZD_USER_ID_TTL_MS = 60 * 60 * 1000;
+const _zdUserIdCache = new Map();
+
+export async function resolveZendeskUserIdByEmail(email) {
+  if (!email) return null;
+  const key = String(email).toLowerCase();
+  const hit = _zdUserIdCache.get(key);
+  if (hit && Date.now() - hit.ts < ZD_USER_ID_TTL_MS) return hit.id;
+  try {
+    const res = await zendeskFetch(`/users/search.json?query=email:${encodeURIComponent(email)}`);
+    // ZD returns the most-recently-active matching user first; if there are
+    // duplicates we take that one. Inactive/suspended users are filtered out.
+    const user = (res?.users || []).find(u => u && !u.suspended) || null;
+    if (!user) return null;
+    _zdUserIdCache.set(key, { id: user.id, ts: Date.now() });
+    return user.id;
+  } catch (err) {
+    console.warn(`[zendesk-api] user lookup failed for ${email}:`, err.message);
+    return null;
+  }
 }
 
 // ── Ticket Fields (custom field metadata) ──────────────────────────────
@@ -234,7 +283,7 @@ export async function getSideConversationEvents(ticketId, sideConvId, { page, pe
 //   { message: { subject, body, to: [{email}, ...] } }
 // We send the simplest viable payload — agents can elaborate via Zendesk's
 // own UI if they need attachments / cc / bcc / templates.
-export async function createSideConversation(ticketId, { subject, body, to }) {
+export async function createSideConversation(ticketId, { subject, body, to }, opts = {}) {
   return zendeskFetch(`/tickets/${ticketId}/side_conversations.json`, {
     method: 'POST',
     body: JSON.stringify({
@@ -244,22 +293,25 @@ export async function createSideConversation(ticketId, { subject, body, to }) {
         to: Array.isArray(to) ? to.map(addr => ({ email: addr })) : [],
       },
     }),
+    actAsEmail: opts.actAsEmail,
   });
 }
 
-export async function replyToSideConversation(ticketId, sideConvId, { body }) {
+export async function replyToSideConversation(ticketId, sideConvId, { body }, opts = {}) {
   return zendeskFetch(`/tickets/${ticketId}/side_conversations/${sideConvId}/reply.json`, {
     method: 'POST',
     body: JSON.stringify({ message: { body: body || '' } }),
+    actAsEmail: opts.actAsEmail,
   });
 }
 
 // Close a side conversation. ZD also supports state=open for re-opening,
 // but for Phase 4 we expose only close (re-open is a low-frequency action
 // that can be done from Zendesk directly).
-export async function closeSideConversation(ticketId, sideConvId) {
+export async function closeSideConversation(ticketId, sideConvId, opts = {}) {
   return zendeskFetch(`/tickets/${ticketId}/side_conversations/${sideConvId}.json`, {
     method: 'PUT',
     body: JSON.stringify({ side_conversation: { state: 'closed' } }),
+    actAsEmail: opts.actAsEmail,
   });
 }

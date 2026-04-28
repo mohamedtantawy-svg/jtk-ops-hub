@@ -35,7 +35,14 @@ export async function POST(req, { params }) {
 
   try {
     const numericId = ticketId.replace('ZD-', '');
-    await replyToSideConversation(numericId, sideConvId, { body: text });
+    // actAsEmail impersonates the team member so the side-conv reply
+    // shows them as the author, not the API token's owner.
+    await replyToSideConversation(
+      numericId,
+      sideConvId,
+      { body: text },
+      { actAsEmail: user.email },
+    );
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error('[queue/side-conversations/reply]', err.message);

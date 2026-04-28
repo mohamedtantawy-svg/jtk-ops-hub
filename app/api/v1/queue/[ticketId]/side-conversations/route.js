@@ -95,7 +95,13 @@ export async function POST(req, { params }) {
 
   try {
     const numericId = ticketId.replace('ZD-', '');
-    const res = await createSideConversation(numericId, { subject, body: messageBody, to });
+    // actAsEmail impersonates the team member so the side conversation's
+    // creator + first-message author are recorded under their name.
+    const res = await createSideConversation(
+      numericId,
+      { subject, body: messageBody, to },
+      { actAsEmail: user.email },
+    );
     return NextResponse.json({ ok: true, sideConversation: slimSideConv(res?.side_conversation || {}) });
   } catch (err) {
     console.error('[queue/side-conversations] create:', err.message);

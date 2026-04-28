@@ -13,7 +13,7 @@ import { cacheDelMany, cacheGet } from '../../../../../../../../src/lib/server-c
 import { getVisibleMemberEmails, isAdmin } from '../../../../../../../../src/lib/scope-helpers';
 import { getVisibleCountries } from '../../../../../../../../src/lib/queue-scoping';
 import { ensureRosterHydrated } from '../../../../../../../../src/lib/roster-server';
-import { isZendeskConfigured } from '../../../../../../../../src/lib/zendesk-api';
+import { isZendeskConfigured, updateTicket as updateZdTicket } from '../../../../../../../../src/lib/zendesk-api';
 import { query } from '../../../../../../../../src/lib/db';
 
 const STALE_TTL_MS = 30 * 60_000;
@@ -49,20 +49,9 @@ async function checkTicketScope(ticketId, user) {
   return false;
 }
 
-async function applyMacroOnZendesk(ticketId, macroId) {
-  const url = `https://${ZD_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}.json`;
-  const auth = Buffer.from(`${ZD_EMAIL}/token:${ZD_TOKEN}`).toString('base64');
-  const res = await fetch(url, {
-    method: 'PUT',
-    headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ticket: { macro_ids: [Number(macroId)] } }),
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Zendesk API ${res.status}: ${body.substring(0, 200)}`);
-  }
-  return res.json();
-}
+// Inline applyMacroOnZendesk() removed in favor of the shared lib helper
+// (updateZdTicket from src/lib/zendesk-api), which supports X-On-Behalf-Of
+// via opts.actAsEmail so macro applies attribute to the team member.
 
 export async function POST(req, { params }) {
   const user = getAuthUser(req);
@@ -84,7 +73,7 @@ export async function POST(req, { params }) {
 
   const numericId = ticketId.replace('ZD-', '');
   try {
-    await applyMacroOnZendesk(numericId, macroId);
+    await updateZdTicket(numericId, { macro_ids: [Number(macroId)] }, { actAsEmail: user.email });
     cacheDelMany(['queue', 'queue_zendesk']);
 
     // Best-effort audit log so the activity feed reflects who applied
