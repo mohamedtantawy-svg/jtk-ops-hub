@@ -3,9 +3,11 @@
 // helpers that persist to the DB. Falls back to the static TEAM_MEMBERS
 // baseline if the API is unreachable so the view never renders empty.
 //
-// Exposes the same helper shape the rest of the codebase expects
-// (membersByEmail, getDirectReports, getAllReports) so Team.jsx can drop in
-// without rewiring its rendering logic.
+// Performance: the previous fetch is cached in localStorage so subsequent
+// mounts paint with the real "last login" timestamps instantly instead of
+// flashing "Never logged in" for every row until the network round-trip
+// returns. Cache is user-scoped so different signed-in users on the same
+// machine don't see each other's snapshot.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../services/api';
@@ -24,9 +26,42 @@ function baselineAsMerged() {
   }));
 }
 
+// ── localStorage SWR cache ─────────────────────────────────────────────────
+const CACHE_KEY_BASE = 'ops_hub_team_members_cache';
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+
+function cacheKey() {
+  if (typeof localStorage === 'undefined') return null;
+  try { return `${CACHE_KEY_BASE}:${(localStorage.getItem('ops_hub_logged_in_email') || '').toLowerCase()}`; }
+  catch { return CACHE_KEY_BASE; }
+}
+
+function readCache() {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(cacheKey());
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.items)) return null;
+    if (parsed.ts && Date.now() - parsed.ts > CACHE_TTL_MS) return null;
+    return parsed.items;
+  } catch { return null; }
+}
+
+function writeCache(items) {
+  if (typeof localStorage === 'undefined') return;
+  try { localStorage.setItem(cacheKey(), JSON.stringify({ items, ts: Date.now() })); } catch {}
+}
+
 export function useTeamMembers() {
-  const [members, setMembers] = useState(() => baselineAsMerged());
-  const [loading, setLoading] = useState(true);
+  // Initial state: cached items if present (instant paint with real
+  // lastLoginAt values), otherwise the static baseline. The fetch in the
+  // mount effect below revalidates either way.
+  const [members, setMembers] = useState(() => readCache() || baselineAsMerged());
+  // `loading` is true only when we don't have cached data — the first paint
+  // from cache is treated as "ready" so the Team view doesn't flash a
+  // spinner over real data.
+  const [loading, setLoading] = useState(() => !readCache());
   const [error, setError] = useState(null);
   const mountedRef = useRef(true);
 
@@ -41,6 +76,7 @@ export function useTeamMembers() {
       if (!mountedRef.current) return;
       if (Array.isArray(data?.items)) {
         setMembers(data.items);
+        writeCache(data.items);
         setError(null);
       }
     } catch (err) {

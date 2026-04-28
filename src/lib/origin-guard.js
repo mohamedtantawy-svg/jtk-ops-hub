@@ -36,6 +36,20 @@ function allowList(req) {
     const reqUrl = req.url ? new URL(req.url) : null;
     if (reqUrl) set.add(reqUrl.origin);
   } catch {}
+  // Behind an ingress / reverse proxy, req.url carries the in-pod origin
+  // (http://localhost:3000) instead of the public-facing one. Recover the
+  // public origin from x-forwarded-* (+ Host) and trust it as same-origin.
+  try {
+    const get = (h) => (typeof req.headers?.get === 'function'
+      ? req.headers.get(h)
+      : req.headers?.[h] || null);
+    const fwdProto = (get('x-forwarded-proto') || '').split(',')[0].trim();
+    const fwdHost  = (get('x-forwarded-host')  || '').split(',')[0].trim();
+    const host     = get('host') || '';
+    const proto    = fwdProto || 'https';
+    if (fwdHost) { const o = originFromUrl(`${proto}://${fwdHost}`); if (o) set.add(o); }
+    if (host)    { const o = originFromUrl(`${proto}://${host}`);    if (o) set.add(o); }
+  } catch {}
   return set;
 }
 
