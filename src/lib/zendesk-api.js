@@ -42,8 +42,24 @@ async function _zendeskFetch(endpoint, options = {}) {
     Accept: 'application/json',
     ...options.headers,
   };
+  // X-On-Behalf-Of needs the impersonated address to resolve to an active
+  // Zendesk user — if it doesn't (no ZD account, suspended, email mismatch
+  // between ops-hub and ZD) Zendesk rejects the whole request and the agent
+  // sees an opaque "Internal server error" toast on actions like Send
+  // Public Reply. Validate up front; if the lookup misses, drop the header
+  // and let the call attribute to the API token owner with a console
+  // warning. Reads (no `actAsEmail`) skip this entirely. The lookup itself
+  // caches positive hits for an hour, so the cost is paid once per agent.
   if (options.actAsEmail) {
-    headers['X-On-Behalf-Of'] = options.actAsEmail;
+    const id = await resolveZendeskUserIdByEmail(options.actAsEmail);
+    if (id) {
+      headers['X-On-Behalf-Of'] = options.actAsEmail;
+    } else {
+      console.warn(
+        `[zendesk] X-On-Behalf-Of dropped — no active ZD user for ${options.actAsEmail}; ` +
+        `request will attribute to the API token owner instead`,
+      );
+    }
   }
 
   const res = await fetch(url, {
