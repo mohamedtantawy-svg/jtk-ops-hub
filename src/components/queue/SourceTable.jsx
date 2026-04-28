@@ -358,26 +358,15 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
     ? { ...baseCfg, color: statusColor, bg: statusColor + '12', border: statusColor + '40' }
     : baseCfg;
 
-  // Row-body click opens the primary task URL in a new tab. Inner interactive
-  // elements (checkbox, action buttons, source links, assignee pill) already
-  // stopPropagation(), so only clicks on cell whitespace trigger this.
-  const primaryUrl = row.taskUrl || row.jiraUrl || row.zendeskUrl || row.contractUrl;
-  const openPrimary = () => {
-    if (!primaryUrl) return;
-    try { window.open(primaryUrl, '_blank', 'noopener,noreferrer'); } catch {}
-  };
   return (
     <tr
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
-      onClick={primaryUrl ? openPrimary : undefined}
-      title={primaryUrl ? 'Open task (click row)' : undefined}
       style={{
         borderBottom: '1px solid #f0efed',
         background: hov ? '#faf8ff' : rowBg,
         transition: 'background .1s',
         borderLeft: isUrgent ? '3px solid #d42d35' : isWarning ? '3px solid #ed8d00' : '3px solid transparent',
-        cursor: primaryUrl ? 'pointer' : 'default',
       }}
     >
       {/* Source */}
