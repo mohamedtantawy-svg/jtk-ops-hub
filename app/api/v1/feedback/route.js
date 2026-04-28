@@ -46,6 +46,12 @@ function rowToShape(row) {
     submitterEmail: row.submitter_email,
     submitterName: row.submitter_name,
     assigneeId: row.assignee_id,
+    // Drift-proof identifiers — the FE prefers email matching over the
+    // numeric id (the static MEMBERS array's array-position ids can drift
+    // from the DB members.id values). Server JOINs members to surface
+    // these so the FE never has to guess.
+    assigneeEmail: row.assignee_email || null,
+    assigneeName:  row.assignee_name  || null,
     resolutionNote: row.resolution_note,
     duplicateOf: row.duplicate_of,
     resolvedAt: row.resolved_at,
@@ -92,12 +98,15 @@ export async function GET(req) {
 
   const sql = `
     SELECT r.*,
+           a.email                     AS assignee_email,
+           a.name                      AS assignee_name,
            COALESCE(v.up, 0)           AS upvotes,
            COALESCE(v.down, 0)         AS downvotes,
            COALESCE(v.up, 0) - COALESCE(v.down, 0) AS score,
            COALESCE(c.cnt, 0)          AS comment_count,
            mv.vote                     AS my_vote
       FROM feedback_requests r
+      LEFT JOIN members a ON a.id = r.assignee_id
       LEFT JOIN (
         SELECT request_id,
                SUM(CASE WHEN vote =  1 THEN 1 ELSE 0 END) AS up,

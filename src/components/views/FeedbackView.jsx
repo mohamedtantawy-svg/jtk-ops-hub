@@ -359,7 +359,20 @@ function FeedbackRow({ item, expanded, onToggle, onVote, onStatusChange, onPrior
   const priority = PRIORITY_CONFIG[item.priority] || PRIORITY_CONFIG.medium;
   const type = TYPE_CONFIG[item.type] || TYPE_CONFIG.bug;
   const submitter = item.submitterEmail ? MEMBERS_BY_EMAIL[item.submitterEmail.toLowerCase()] : null;
-  const assignee = item.assigneeId ? MEMBERS.find(m => m.id === item.assigneeId) : null;
+  // Email-first lookup so the assignee survives MEMBERS-array drift
+  // (array-position ids vs DB members.id). The server returns
+  // assigneeEmail+assigneeName via JOIN; we fall back to the numeric id
+  // only if email is somehow missing.
+  const assigneeFromCtx = item.assigneeEmail
+    ? MEMBERS_BY_EMAIL[item.assigneeEmail.toLowerCase()]
+    : null;
+  const assignee = assigneeFromCtx
+    ? assigneeFromCtx
+    : (item.assigneeName
+        ? { name: item.assigneeName, initials: item.assigneeName.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase() }
+        : item.assigneeId
+          ? MEMBERS.find(m => m.id === item.assigneeId)
+          : null);
   const isMine = user?.id && item.submitterId === user.id;
   const isResolved = TERMINAL.has(item.status);
 
@@ -583,8 +596,8 @@ function ExpandedDetail({ item, isPriv, onStatusChange, onPriorityChange, onAssi
             </select>
           ) : (
             <span style={{ fontSize: 12, color: 'var(--text)' }}>
-              {item.assigneeId
-                ? (MEMBERS.find(m => m.id === item.assigneeId)?.name || 'Unknown')
+              {item.assigneeName || item.assigneeEmail
+                ? (item.assigneeName || item.assigneeEmail)
                 : <span style={{ color: 'var(--text-muted)' }}>Unassigned</span>}
             </span>
           )}
