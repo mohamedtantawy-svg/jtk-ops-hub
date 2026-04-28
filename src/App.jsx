@@ -108,6 +108,7 @@ import SettingsView from './components/views/SettingsView';
 import ProjectsView from './components/views/ProjectsView';
 import Slack from './components/views/Slack';
 import Alerts from './components/views/Alerts';
+import FeedbackView from './components/views/FeedbackView';
 import CreateProjectModal from './components/modals/CreateProjectModal';
 import CreateRequestModal from './components/modals/CreateRequestModal';
 import CreateEscalationModal from './components/modals/CreateEscalationModal';
@@ -571,6 +572,7 @@ const App=()=>{
   }, [user, liveMembersByEmail, liveGetAllReports]);
 
   const [announceCompose,setAnnounceCompose]=useState(false);
+  const [feedbackCompose,setFeedbackCompose]=useState(false);
   const [escalModal,setEscalModal]=useState(null);
   const [toasts,setToasts]=useState([]);
   const [showSearch,setShowSearch]=useState(false);
@@ -1327,6 +1329,7 @@ const App=()=>{
         onCreateAnnouncement={()=>{setView('announcements');setAnnounceCompose(true);}}
         onCreateRequest={()=>setRequestModal(true)}
         onCreateReport={()=>{setView('hr-reports');setCreateReportModal(true);}}
+        onCreateFeedback={()=>{setView('feedback');setFeedbackCompose(true);}}
         setSelTask={setSelTask} tasks={tasks}
       />
       <div style={{height:(impersonating?104:68)+(versionHasUpdate?44:0),flexShrink:0}}/>
@@ -1346,6 +1349,7 @@ const App=()=>{
           {view==='projects'      &&isOwner&&perms?.canView('projects')!==false     &&<div className="page-enter"><ProjectsView projects={projects} setProjects={setProjects} user={user} onNewProject={()=>setProjectModal('create')} onEditProject={(p)=>setProjectModal(p)}/></div>}
           {view==='slack'         &&perms?.canView('slack')!==false        &&<div className="page-enter"><Slack tasks={tasks.filter(t=>t.source==='slack')} setTasks={setTasks} onEscalMgr={openEscalModal} addToast={addToast} user={effectiveUser}/></div>}
           {view==='alerts'        &&perms?.canView('alerts')!==false       &&<div className="page-enter"><Alerts tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setTasks={setTasks}/></div>}
+          {view==='feedback'      &&perms?.canView('feedback')!==false     &&<div className="page-enter"><FeedbackView user={effectiveUser} addToast={addToast} openCompose={feedbackCompose} onComposeOpened={()=>setFeedbackCompose(false)}/></div>}
       </div>
       {escalModal    &&<EscalModal task={escalModal} bulkCount={bulkIds?.length||0} onConfirm={confirmEscal} onClose={()=>{setEscalModal(null);setBulkIds(null);}}/>}
       {reassignModal &&<ReassignModal task={reassignModal} tasks={tasks} bulkCount={bulkIds?.length||0} onConfirm={confirmReassign} onClose={()=>{setReassignModal(null);setBulkIds(null);}}/>}
