@@ -23,6 +23,7 @@ import { fetchQueueBySource } from '../services/integrationsApi';
 import { MEMBERS } from '../data/members';
 import { getQueueChannel, broadcastSync } from './queueSyncChannel';
 import { loadMutations, applyMutationsToTasks, clearMutation, clearCreatedTask } from '../services/queueMutationStore';
+import { idbGet, idbSet, idbDelete } from '../lib/idb-cache';
 
 // How long a local mutation (reassign / resolve) wins over a diverging server
 // value. After this window, the server wins so external changes become visible.
@@ -122,42 +123,44 @@ function normalizeQueueItem(item) {
   };
 }
 
-// ── Read/write per-source localStorage cache ────────────────────────────────
-function readSourceCache(source, userEmail) {
+// ── Read/write per-source IndexedDB cache ───────────────────────────────────
+// Moved off localStorage (~5–10 MB cap, was triggering "Offline cache is full"
+// on heavy Jira queues) onto IndexedDB (~50% of free disk space, multi-GB in
+// practice). Same per-source per-user keys. Async — see the hydration effect
+// below for how the queue table renders before the read resolves.
+async function readSourceCache(source, userEmail) {
   const cfg = SOURCE_CONFIG[source];
   if (!cfg) return null;
+  const key = cacheKeyFor(source, userEmail);
+  // Migration: a previous version stored the cache in localStorage. On the
+  // first read after this PR ships, copy any matching entry into IDB and
+  // delete the localStorage copy so reads stay fast and the old data isn't
+  // wasted. Best-effort; if anything throws we just fall through.
   try {
-    const key = cacheKeyFor(source, userEmail);
-    const raw = localStorage.getItem(key);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      // Always return the parsed payload — cache hydrates instantly on reload
-      // even when TTL has expired. The freshness check is done separately.
-      if (parsed.items) return parsed;
+    const idbHit = await idbGet(key);
+    if (idbHit?.items) return idbHit;
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.items) {
+          await idbSet(key, parsed);
+          try { localStorage.removeItem(key); } catch {}
+          return parsed;
+        }
+      }
     }
   } catch {}
   return null;
 }
 
-// Cross-module signal so a Queue banner can render when the cache silently
-// failed to persist (private-browsing, quota exceeded, disabled storage).
-// Consumed by Queue.jsx — listens via `window.addEventListener('ops-hub-cache-quota')`.
-function emitQuotaFailed(source, err) {
-  try {
-    if (typeof window === 'undefined') return;
-    window.dispatchEvent(new CustomEvent('ops-hub-cache-quota', {
-      detail: { source, message: err?.message || 'Cache write failed' },
-    }));
-  } catch {}
-}
-
 // Fields that are large but not needed to restore the queue view on reload.
-// `body` is the raw ticket description (can be several KB per item — the main
-// cause of QuotaExceededError on large Jira queues). `aiSummary` and
-// `suggestedReply` are always empty strings at persist time (generated lazily
-// on demand) so they're pure wasted bytes in localStorage.
-// These fields are re-fetched from the live API the next time data is synced,
-// so dropping them from the cache has zero visible effect on the user.
+// `body` is the raw ticket description (can be several KB per item).
+// `aiSummary` and `suggestedReply` are always empty strings at persist time
+// (generated lazily on demand) so they're pure wasted bytes. These fields
+// are re-fetched from the live API the next time data is synced, so dropping
+// them from the cache has zero visible effect on the user. Kept even after
+// the IDB switch — smaller payloads write + read faster.
 const CACHE_STRIP_FIELDS = ['body', 'aiSummary', 'suggestedReply'];
 
 function slimForCache(items) {
@@ -169,31 +172,12 @@ function slimForCache(items) {
   });
 }
 
-function writeSourceCache(source, items, meta, userEmail) {
+async function writeSourceCache(source, items, meta, userEmail) {
   const cfg = SOURCE_CONFIG[source];
   if (!cfg) return;
   const key = cacheKeyFor(source, userEmail);
-  // Strip large per-item text fields before persisting. Ticket descriptions
-  // (body) are the primary cause of QuotaExceededError — they can be several
-  // KB each and accumulate to well over 5 MB for a large Jira queue.
   const slim = slimForCache(items);
-  try {
-    localStorage.setItem(key, JSON.stringify({ items: slim, meta, ts: Date.now() }));
-  } catch (err) {
-    // QuotaExceededError — try evicting the other source's cache as a last-
-    // ditch attempt before giving up + notifying the UI. No silent drops.
-    try {
-      for (const other of Object.keys(SOURCE_CONFIG)) {
-        if (other !== source) {
-          const otherKey = cacheKeyFor(other, userEmail);
-          if (otherKey) localStorage.removeItem(otherKey);
-        }
-      }
-      localStorage.setItem(key, JSON.stringify({ items: slim, meta, ts: Date.now() }));
-    } catch (retryErr) {
-      emitQuotaFailed(source, retryErr);
-    }
-  }
+  await idbSet(key, { items: slim, meta, ts: Date.now() });
 }
 
 // ── Merge source sync into combined tasks (preserves local mutations) ───────
@@ -276,13 +260,28 @@ function mergeSourceIntoTasks(currentTasks, syncedItems, source, callbacks = {})
   return result;
 }
 
-// ── Load initial tasks: hydrate from cache + layer mutation store on top ─────
-function loadInitialTasks(userEmail) {
+// ── Initial in-memory state ─────────────────────────────────────────────────
+// Mutations live in localStorage and are tiny, so they're loaded sync at hook
+// init. The big queue cache (IDB now, formerly localStorage) is loaded async
+// in a useEffect below — see "IDB cache hydration" — so we never block first
+// paint waiting for storage. The window between init and IDB resolving is
+// ~10–50 ms in practice.
+function loadInitialMutationsOnly(userEmail) {
+  const { mutations, created } = loadMutations(userEmail);
+  return applyMutationsToTasks([], mutations, created, {
+    localReassignWindowMs: LOCAL_MUTATION_WINDOW_MS,
+  });
+}
+
+// Async cache load — read every source from IDB (with localStorage migration
+// inside readSourceCache) and assemble the same shape loadInitialTasks used
+// to return. Called from the hydration effect; never blocks render.
+async function loadCachedTasksAsync(userEmail) {
   const all = [];
   const seen = new Set();
   const meta = {};
   for (const source of Object.keys(SOURCE_CONFIG)) {
-    const cached = readSourceCache(source, userEmail);
+    const cached = await readSourceCache(source, userEmail);
     if (cached?.items?.length) {
       for (const item of cached.items) {
         const normalized = normalizeQueueItem(item);
@@ -295,13 +294,7 @@ function loadInitialTasks(userEmail) {
     if (cached?.meta) meta[source] = cached.meta;
     if (cached?.ts) meta[`${source}_ts`] = cached.ts;
   }
-  // Layer local mutations (snooze / local-resolve / local-reassign) and
-  // locally-created tasks on top so the user sees the state they left in.
-  const { mutations, created } = loadMutations(userEmail);
-  const withMutations = applyMutationsToTasks(all, mutations, created, {
-    localReassignWindowMs: LOCAL_MUTATION_WINDOW_MS,
-  });
-  return { tasks: withMutations, meta };
+  return { tasks: all, meta };
 }
 
 // ── Hook ────────────────────────────────────────────────────────────────────
@@ -312,26 +305,14 @@ export function useQueueSync(arg = true) {
     ? { enabled: arg.enabled ?? true, userEmail: arg.userEmail || null }
     : { enabled: !!arg, userEmail: null };
 
-  const initial = useMemo(() => loadInitialTasks(userEmail), [userEmail]);
-  const [tasks, setTasks] = useState(initial.tasks);
-  const [sourceMeta, setSourceMeta] = useState(() => {
-    const m = {};
-    if (initial.meta.zendesk) m.zendesk = initial.meta.zendesk;
-    if (initial.meta.jira) m.jira = initial.meta.jira;
-    return m;
-  });
+  // Initial state: just the local mutation store (small, sync). The IDB
+  // cache hydrates a few ms later via the effect below.
+  const initialMutationTasks = useMemo(() => loadInitialMutationsOnly(userEmail), [userEmail]);
+  const [tasks, setTasks] = useState(initialMutationTasks);
+  const [sourceMeta, setSourceMeta] = useState({});
   const [sourceErrors, setSourceErrors] = useState({});
-  const [sourceLastSync, setSourceLastSync] = useState(() => {
-    const s = {};
-    if (initial.meta.zendesk_ts) s.zendesk = new Date(initial.meta.zendesk_ts).toISOString();
-    if (initial.meta.jira_ts) s.jira = new Date(initial.meta.jira_ts).toISOString();
-    return s;
-  });
-  const [sourceLoading, setSourceLoading] = useState(() => {
-    const zdCount = initial.tasks.filter(t => t.source === 'zendesk').length;
-    const jrCount = initial.tasks.filter(t => t.source === 'jira').length;
-    return { zendesk: zdCount === 0, jira: jrCount === 0 };
-  });
+  const [sourceLastSync, setSourceLastSync] = useState({});
+  const [sourceLoading, setSourceLoading] = useState({ zendesk: true, jira: true });
   const [sourceRefreshing, setSourceRefreshing] = useState({ zendesk: false, jira: false });
   const syncCounts = useRef({ zendesk: 0, jira: 0 });
   const intervalRefs = useRef({});
@@ -341,12 +322,70 @@ export function useQueueSync(arg = true) {
   // resolve after the component is gone and still mutate (stale) state.
   const abortControllersRef = useRef({ zendesk: null, jira: null });
   const mountedRef = useRef(true);
-  const lastFetchTsRefs = useRef({
-    zendesk: initial.meta.zendesk_ts || 0,
-    jira: initial.meta.jira_ts || 0,
-  });
+  const lastFetchTsRefs = useRef({ zendesk: 0, jira: 0 });
+  // Tracks whether the very first sync for each source has completed.
+  // Used by the IDB hydration effect: if a sync arrives BEFORE the IDB read
+  // resolves (rare but possible on a fast network + slow IDB), the IDB data
+  // is treated as already-superseded and discarded for that source.
+  const firstSyncDoneRef = useRef({ zendesk: false, jira: false });
   const userEmailRef = useRef(userEmail);
   useEffect(() => { userEmailRef.current = userEmail; }, [userEmail]);
+
+  // ── IDB cache hydration ────────────────────────────────────────────────
+  // Reads the per-source cache from IndexedDB on mount and merges it into
+  // state. Skipped per-source when a sync has already filled that source —
+  // we never overwrite fresh server data with stale cache.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { tasks: cachedTasks, meta: cachedMeta } = await loadCachedTasksAsync(userEmail);
+      if (cancelled || !mountedRef.current) return;
+      if (cachedTasks.length === 0) return;
+
+      const filteredTasks = cachedTasks.filter(t => !firstSyncDoneRef.current[t.source]);
+      if (filteredTasks.length === 0) return;
+
+      const { mutations, created } = loadMutations(userEmail);
+
+      setTasks(prev => {
+        // Merge cached items into whatever's already in state, dedup by id,
+        // then re-apply the mutation store so user-local actions persist.
+        const byId = new Map();
+        for (const t of prev) byId.set(t.id, t);
+        for (const t of filteredTasks) if (!byId.has(t.id)) byId.set(t.id, t);
+        return applyMutationsToTasks([...byId.values()], mutations, created, {
+          localReassignWindowMs: LOCAL_MUTATION_WINDOW_MS,
+        });
+      });
+
+      // Surface meta + lastSync only for sources that haven't synced yet.
+      setSourceMeta(prev => {
+        const next = { ...prev };
+        if (!firstSyncDoneRef.current.zendesk && cachedMeta.zendesk) next.zendesk = cachedMeta.zendesk;
+        if (!firstSyncDoneRef.current.jira && cachedMeta.jira) next.jira = cachedMeta.jira;
+        return next;
+      });
+      setSourceLastSync(prev => {
+        const next = { ...prev };
+        if (!firstSyncDoneRef.current.zendesk && cachedMeta.zendesk_ts) next.zendesk = new Date(cachedMeta.zendesk_ts).toISOString();
+        if (!firstSyncDoneRef.current.jira && cachedMeta.jira_ts) next.jira = new Date(cachedMeta.jira_ts).toISOString();
+        return next;
+      });
+      setSourceLoading(prev => {
+        const next = { ...prev };
+        if (filteredTasks.some(t => t.source === 'zendesk')) next.zendesk = false;
+        if (filteredTasks.some(t => t.source === 'jira')) next.jira = false;
+        return next;
+      });
+      if (!firstSyncDoneRef.current.zendesk && cachedMeta.zendesk_ts) {
+        lastFetchTsRefs.current.zendesk = cachedMeta.zendesk_ts;
+      }
+      if (!firstSyncDoneRef.current.jira && cachedMeta.jira_ts) {
+        lastFetchTsRefs.current.jira = cachedMeta.jira_ts;
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [userEmail]);
 
   // Shared callbacks so mergeSourceIntoTasks can signal back when the server
   // caught up with a local mutation — we clear the stored entry so it doesn't
@@ -412,15 +451,20 @@ export function useQueueSync(arg = true) {
         setSourceLastSync(prev => ({ ...prev, [source]: new Date(now).toISOString() }));
         syncCounts.current[source] = (syncCounts.current[source] || 0) + 1;
         lastFetchTsRefs.current[source] = now;
+        // Mark the first sync done so the IDB hydration effect knows to skip
+        // this source if it lands later — never overwrite fresh data with cache.
+        firstSyncDoneRef.current[source] = true;
 
         // Only persist & broadcast non-empty responses so a transient empty
-        // payload never wipes the cache or other tabs.
+        // payload never wipes the cache or other tabs. writeSourceCache is
+        // async (IDB) but we don't await — fire-and-forget keeps the sync
+        // path snappy; failures log but never block UI.
         if (rawItems.length > 0) {
-          writeSourceCache(source, rawItems, meta, userEmailRef.current);
+          writeSourceCache(source, rawItems, meta, userEmailRef.current).catch(() => {});
           broadcastSync(source, rawItems, meta, userEmailRef.current);
         } else {
           // Still refresh the cache timestamp so TTL checks work.
-          writeSourceCache(source, rawItems, meta, userEmailRef.current);
+          writeSourceCache(source, rawItems, meta, userEmailRef.current).catch(() => {});
         }
         return synced;
       } catch (err) {
@@ -555,7 +599,9 @@ export function useQueueSync(arg = true) {
       setSourceLoading(prev => ({ ...prev, [msg.source]: false }));
       lastFetchTsRefs.current[msg.source] = msg.ts;
       syncCounts.current[msg.source] = (syncCounts.current[msg.source] || 0) + 1;
-      writeSourceCache(msg.source, items, msg.meta || null, userEmailRef.current);
+      firstSyncDoneRef.current[msg.source] = true;
+      // Persist async — don't block the broadcast handler.
+      writeSourceCache(msg.source, items, msg.meta || null, userEmailRef.current).catch(() => {});
     };
     ch.addEventListener('message', handler);
     return () => ch.removeEventListener('message', handler);

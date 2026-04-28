@@ -1,6 +1,6 @@
 // ── useWorkbenchData hook ─────────────────────────────────────────────────────
 // Fetches OpsWorkbench tasks from the Deel Admin API.
-// Groups by task type, then by country. Caches in localStorage.
+// Groups by task type, then by country. Caches in IndexedDB (per-user).
 // Stale-while-revalidate: always shows previous data until fresh data arrives.
 // De-dupes concurrent refresh() calls and adopts cross-tab broadcasts.
 // Auto-refreshes while visible and user-scopes the cache so signed-in users
@@ -8,6 +8,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { fetchDeelWorkbench } from '../services/integrationsApi';
 import { getQueueChannel, broadcastSync } from './queueSyncChannel';
+import { idbGetWithMigration, idbSet } from '../lib/idb-cache';
 
 const SOURCE_ID = 'workbench';
 const CACHE_TTL = 3 * 60 * 1000;
@@ -15,26 +16,18 @@ const CACHE_KEY_BASE = 'ops_hub_workbench_cache';
 const cacheKeyFor = (userEmail) =>
   userEmail ? `${CACHE_KEY_BASE}:${String(userEmail).toLowerCase()}` : CACHE_KEY_BASE;
 
-function loadCache(userEmail) {
-  try {
-    const cached = localStorage.getItem(cacheKeyFor(userEmail));
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (parsed.items?.length > 0) return { items: parsed.items, ts: parsed.ts || 0 };
-    }
-  } catch (e) {}
-  return { items: [], ts: 0 };
-}
-
 export function useWorkbenchData(enabled = true, userEmail = null) {
-  const cached = useMemo(() => loadCache(userEmail), [userEmail]);
-  const [tasks, setTasks] = useState(cached.items);
+  // IDB cache (was localStorage). Empty initial state; the hydration effect
+  // below fills it ~10–50 ms after mount, gated by liveReceivedRef so a late-
+  // arriving cached payload can't overwrite fresher network data.
+  const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState(null);
-  const [lastSyncAt, setLastSyncAt] = useState(cached.ts || null);
-  const lastFetchRef = useRef(cached.ts > 0 && Date.now() - cached.ts < CACHE_TTL ? cached.ts : 0);
+  const [lastSyncAt, setLastSyncAt] = useState(null);
+  const lastFetchRef = useRef(0);
   const inFlightRef = useRef(null);
+  const liveReceivedRef = useRef(false);
 
   const refresh = useCallback(async (force = false) => {
     if (!enabled) return null;
@@ -52,12 +45,11 @@ export function useWorkbenchData(enabled = true, userEmail = null) {
         const now = Date.now();
         if (fetched.length > 0 || tasks.length === 0) {
           setTasks(fetched);
-          try {
-            localStorage.setItem(cacheKeyFor(userEmail), JSON.stringify({ items: fetched, ts: now }));
-          } catch (e) {}
+          idbSet(cacheKeyFor(userEmail), { items: fetched, ts: now }).catch(() => {});
           broadcastSync(SOURCE_ID, fetched, null, userEmail);
         }
         lastFetchRef.current = now;
+        liveReceivedRef.current = true;
         setLastSyncAt(now);
         return fetched;
       } catch (err) {
@@ -75,6 +67,23 @@ export function useWorkbenchData(enabled = true, userEmail = null) {
   }, [enabled, tasks.length, userEmail]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // ── IDB cache hydration ───────────────────────────────────────────────────
+  // Async fill from IDB after mount, with one-shot legacy localStorage
+  // migration. Skipped if the live fetch already returned.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const cached = await idbGetWithMigration(cacheKeyFor(userEmail));
+      if (cancelled) return;
+      if (liveReceivedRef.current) return;
+      if (!cached?.items?.length) return;
+      setTasks(cached.items);
+      lastFetchRef.current = cached.ts || 0;
+      setLastSyncAt(cached.ts || null);
+    })();
+    return () => { cancelled = true; };
+  }, [userEmail]);
 
   // Auto-refresh while visible so long-open tabs don't show a stale indicator.
   useEffect(() => {
