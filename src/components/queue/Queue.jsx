@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useContext, memo } from 'react';
 import { TOOLS, FUNCTIONS, getFlag } from '../../data/constants';
-import { MEMBERS } from '../../data/members';
+import { MEMBERS_BY_EMAIL } from '../../data/members';
 import { slaInfo, rel, getUrl } from '../../utils/helpers';
 import {
   scopeZendeskTickets,
@@ -15,9 +15,27 @@ import {
   isAdminUser,
 } from '../../lib/queue-scoping';
 
-// ── O(1) member lookups (avoid MEMBERS.find in hot paths) ──
-const MEMBERS_BY_ID = new Map(MEMBERS.map(m => [m.id, m]));
-const MEMBERS_BY_EMAIL_LC = new Map(MEMBERS.map(m => [m.email.toLowerCase(), m]));
+// ── Live assignee lookup ──
+// Use the live `MEMBERS_BY_EMAIL` binding from data/members so hydrateRoster()
+// updates are visible without recomputing a snapshot. The previous module-
+// level Map<id, member> went stale the moment the Team-tab roster shifted
+// indexes (any soft-delete reassigns every later member's id), so a ticket
+// whose freshly-computed `assigneeId` happened to land on a now-vacated slot
+// would render the previous occupant's name (e.g. Trish → Tania, Sonal →
+// Ziyaad/Sayli). Email is stable across hydrations, so we drop the id path
+// and key off `assigneeEmail`, falling back to the source-provided
+// `assigneeName` only when the email isn't in our roster (external Zendesk
+// agents).
+function resolveAssignee(task, fallbackInitials = false) {
+  const email = task?.assigneeEmail ? task.assigneeEmail.toLowerCase() : null;
+  const fromRoster = email ? MEMBERS_BY_EMAIL[email] : null;
+  if (fromRoster) return fromRoster;
+  const name = task?.assigneeName || 'Unassigned';
+  if (!fallbackInitials) return { name };
+  const initials = (name === 'Unassigned' ? 'U' : name)
+    .split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+  return { name, initials };
+}
 import { SLA_MINS } from '../../data/constants';
 import Detail from './Detail';
 import { ToolBadge, StatusBadge, SlaBadge } from '../ui/Badges';
@@ -1161,7 +1179,7 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
 // ── Table row component (replaces TaskRow for table layout) ──
 const QueueRow=memo(({task,selected,checked,onCheck,onClick,onAction,onEscalMgr,currentUser,slaAgeClass,settings,perms,compact,onSnooze})=>{
   const [hov,setHov]=useState(false);
-  const assignee=MEMBERS_BY_ID.get(task.assigneeId)||(task.assigneeEmail?MEMBERS_BY_EMAIL_LC.get(task.assigneeEmail.toLowerCase()):null)||{name:task.assigneeName||'Unassigned'};
+  const assignee=resolveAssignee(task);
   const sla=slaInfo(task);
   const isActive=task.status!=='resolved'&&task.status!=='waiting';
   const fn=FUNCTIONS[task.type];
@@ -1259,7 +1277,7 @@ const WorkModeOverlay=memo(({task,remaining,totalOpen,skipped,onResolve,onEscala
     );
   }
 
-  const assignee=MEMBERS_BY_ID.get(task.assigneeId)||(task.assigneeEmail?MEMBERS_BY_EMAIL_LC.get(task.assigneeEmail.toLowerCase()):null)||{name:task.assigneeName||'Unassigned',initials:(task.assigneeName||'U').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()};
+  const assignee=resolveAssignee(task,true);
   const sla=slaInfo(task);
   const fn=FUNCTIONS[task.type];
   const tool=TOOLS[task.source];

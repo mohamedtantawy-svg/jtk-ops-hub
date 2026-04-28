@@ -225,15 +225,21 @@ const Detail = ({
   useEffect(() => { loadComments(); }, [loadComments]);
 
   // ── Derived data ───────────────────────────────────────────────────────
+  // Prefer email over assigneeId. `assigneeId` is derived from the array
+  // index in MEMBERS (`id: i + 1` in `_buildMembers`), so any roster shift
+  // — soft-delete on the Team tab, override insert — silently reassigns
+  // every later member's id. A cached or pre-hydrate task can hold an id
+  // that now points at a different person, which is how the Queue rendered
+  // Trish's tickets as Tania. Email is stable across hydrations.
   const assignee = useMemo(() => {
-    if (task?.assigneeId) {
-      const m = MEMBERS.find(x => x.id === task.assigneeId);
-      if (m) return m;
-    }
     if (task?.assigneeEmail) {
       const m = MEMBERS.find(x => x.email.toLowerCase() === task.assigneeEmail.toLowerCase());
       if (m) return m;
       return { id: null, name: task.assigneeName || task.assigneeEmail, email: task.assigneeEmail };
+    }
+    if (task?.assigneeId) {
+      const m = MEMBERS.find(x => x.id === task.assigneeId);
+      if (m) return m;
     }
     return null;
   }, [task?.assigneeId, task?.assigneeEmail, task?.assigneeName]);
