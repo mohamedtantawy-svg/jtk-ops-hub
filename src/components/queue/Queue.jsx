@@ -48,8 +48,9 @@ import UnifiedSyncButton from './UnifiedSyncButton';
 import SourceTable from './SourceTable';
 import ErrorBoundary from '../ui/ErrorBoundary';
 import { updateTaskStatus as apiUpdateStatus } from '../../services/tasksApi';
-import { postTicketAction } from '../../services/integrationsApi';
+import { postTicketAction, reassignQueueTicket } from '../../services/integrationsApi';
 import { recordMutation, clearCreatedTask } from '../../services/queueMutationStore';
+import { getOriginalAssignee, clearOriginalAssignee, getAllOriginals } from '../../services/originalAssigneeStore';
 import {
   normalizeOnboarding,
   normalizeOffboarding,
@@ -394,6 +395,64 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
     }
     if(onBulkAction){ onBulkAction(ids,action); setCheckedIds(new Set()); }
   };
+
+  // ── Bulk "Reassign back to original" (Bug 8 — Trish 2026-04-28) ────────
+  // Reverts each selected ticket to its individually tracked original
+  // assignee. Useful when a teammate returns from leave and the cover
+  // user wants to hand back ALL their tickets in one click.
+  const bulkBackTargets=useMemo(()=>{
+    if(checkedIds.size===0)return [];
+    const originals=getAllOriginals(user?.email);
+    const out=[];
+    for(const id of checkedIds){
+      const orig=originals[id];
+      if(!orig?.originalAssigneeEmail)continue;
+      const t=tasks.find(tt=>tt.id===id);
+      if(!t)continue;
+      // Skip rows already assigned to the original (no-op).
+      if((t.assigneeEmail||'').toLowerCase()===orig.originalAssigneeEmail.toLowerCase())continue;
+      out.push({ task:t, orig });
+    }
+    return out;
+  },[checkedIds,tasks,user?.email]);
+
+  const doBulkReassignBack=useCallback(async ()=>{
+    if(bulkBackTargets.length===0)return;
+    const nowMs=Date.now();
+    setTasks(prev=>prev.map(t=>{
+      const hit=bulkBackTargets.find(b=>b.task.id===t.id);
+      if(!hit)return t;
+      return {
+        ...t,
+        assigneeEmail:hit.orig.originalAssigneeEmail,
+        assigneeName:hit.orig.originalAssigneeName||hit.orig.originalAssigneeEmail,
+        _locallyReassignedAt:nowMs,
+      };
+    }));
+    bulkBackTargets.forEach(({task,orig})=>{
+      recordMutation(user?.email,task.id,{
+        assigneeEmail:orig.originalAssigneeEmail,
+        assigneeName:orig.originalAssigneeName||orig.originalAssigneeEmail,
+        _locallyReassignedAt:nowMs,
+      });
+      clearOriginalAssignee(user?.email,task.id);
+    });
+    addToast&&addToast('success',`Reassigning ${bulkBackTargets.length} ticket${bulkBackTargets.length>1?'s':''} back`,'Pushing to source system…');
+    const failures=[];
+    await Promise.allSettled(bulkBackTargets.map(({task,orig})=>{
+      if(task.source==='zendesk'||task.source==='jira'){
+        return reassignQueueTicket(task.id,orig.originalAssigneeEmail).catch(err=>{
+          failures.push(task.id);
+          throw err;
+        });
+      }
+      return Promise.resolve();
+    }));
+    if(failures.length>0){
+      addToast&&addToast('warning','Partial Sync Failure',`${failures.length}/${bulkBackTargets.length} ticket${failures.length>1?'s':''} failed to push to the source system`);
+    }
+    setCheckedIds(new Set());
+  },[bulkBackTargets,setTasks,addToast,user?.email]);
   const visibleIds=new Set(vis.map(t=>t.id));
   const compact=!!selTask;
   const recentTasks=recentIds.map(id=>tasks.find(t=>t.id===id)).filter(Boolean);
@@ -956,7 +1015,6 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           showPausedSla
           hideStatusPills
           showClient
-          currentUser={user}
         />
         </ErrorBoundary>
       )}
@@ -976,7 +1034,6 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           showClient
           showType
           hideFilterBar
-          currentUser={user}
         />
         </ErrorBoundary>
       )}
@@ -1001,7 +1058,6 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           hideUpdated
           dateField="createdAt"
           dateLabel="Requested Date"
-          currentUser={user}
         />
         </ErrorBoundary>
       )}
@@ -1022,7 +1078,6 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           hideContract
           dateField="createdAt"
           dateLabel="Requested Date"
-          currentUser={user}
         />
         </ErrorBoundary>
       )}
@@ -1043,7 +1098,6 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
           hideStatusPills
           dateField="createdAt"
           dateLabel="Created"
-          currentUser={user}
         />
         </ErrorBoundary>
       )}
@@ -1147,6 +1201,15 @@ const Queue=({user,tasks,setTasks,selTask,setSelTask,notes,setNotes,activity,set
         <div style={{position:'fixed',bottom:0,left:0,right:0,zIndex:500,background:'var(--surface, #fff)',color:'#1b1b1b',padding:'12px 24px',borderTop:'1px solid #e8e8e8',display:'flex',alignItems:'center',gap:10,boxShadow:'0 -2px 8px rgba(0,0,0,0.06)'}} role="toolbar">
           <span style={{fontWeight:600,fontSize:13}}>{checkedIds.size} task{checkedIds.size>1?'s':''} selected</span>
           <div style={{flex:1}}/>
+          {bulkBackTargets.length>0&&(
+            <button
+              onClick={doBulkReassignBack}
+              title={`Reassign ${bulkBackTargets.length} selected ticket${bulkBackTargets.length>1?'s':''} back to ${bulkBackTargets.length>1?'their original assignees':bulkBackTargets[0].orig.originalAssigneeName||bulkBackTargets[0].orig.originalAssigneeEmail}`}
+              style={{...bulkBtnStyle,borderColor:'#c7d2fe',background:'#eef2ff',color:'#4338ca'}}
+            >
+              <i className="bi-arrow-counterclockwise" style={{fontSize:12}}></i>Reassign back ({bulkBackTargets.length})
+            </button>
+          )}
           <button onClick={()=>doBulk('reassign')} style={bulkBtnStyle}><i className="bi-person-up" style={{fontSize:12}}></i>Reassign</button>
           <button onClick={()=>doBulk('escalate')} style={bulkBtnStyle}><i className="bi-arrow-up-circle" style={{fontSize:12}}></i>Escalate</button>
           <button onClick={()=>doBulk('snooze')} style={bulkBtnStyle}><i className="bi-pause-circle" style={{fontSize:12}}></i>Snooze</button>

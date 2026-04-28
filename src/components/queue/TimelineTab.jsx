@@ -29,8 +29,19 @@ const TimelineTab=({taskId,task,activity,escalation})=>{
             {i<events.length-1&&<div style={{width:1,flex:1,background:'#e8e8e8',marginTop:4,marginBottom:-4}}></div>}
           </div>
           <div style={{flex:1,paddingTop:2}}>
-            <div style={{fontSize:13,color:'#1b1b1b',lineHeight:1.5}}>{e.text}</div>
-            <div style={{fontSize:'var(--font-xs, 11px)',color:'#9e9e9e',marginTop:2}}>{e.user&&e.user!=='System'?<><span style={{fontWeight:500,color:'#616161'}}>{e.user}</span> · </>:''}{e.time}</div>
+            <div style={{fontSize:13,color:'#1b1b1b',lineHeight:1.5}}>
+              {e.text}
+              {/* Reassign / assignment events surface the actor inline so
+                  the recipient can see at a glance WHO handed the ticket
+                  to them (Bug 5 — Fernanda 2026-04-28). */}
+              {(e.type==='assigned'||e.type==='reassigned')&&e.user&&e.user!=='System'&&(
+                <span style={{color:'#616161',fontWeight:400}}> by <span style={{color:'#1b1b1b',fontWeight:600}}>{e.user}</span></span>
+              )}
+            </div>
+            <div style={{fontSize:'var(--font-xs, 11px)',color:'#9e9e9e',marginTop:2}}>
+              {e.user&&e.user!=='System'&&!(e.type==='assigned'||e.type==='reassigned')?<><span style={{fontWeight:500,color:'#616161'}}>{e.user}</span> · </>:''}
+              {e.time}
+            </div>
           </div>
         </div>
       ))}

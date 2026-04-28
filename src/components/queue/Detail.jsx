@@ -22,6 +22,7 @@ import TimelineTab from './TimelineTab';
 import { fetchTicketComments, postTicketAction, updateTicketCustomFields, fetchZendeskMacros, previewTicketMacro, applyTicketMacro, fetchTicketAISummary } from '../../services/integrationsApi';
 import { useTicketFieldsMeta } from '../../hooks/useTicketFieldsMeta';
 import SideConversationsModal from './SideConversationsModal';
+import { recordOriginalAssignee, getOriginalAssignee, clearOriginalAssignee } from '../../services/originalAssigneeStore';
 
 // Visible status options (FE → app status). Maps to ZD via actions/route.js
 // statusMap. "On hold" requires actions/route.js to accept on_hold → hold.
@@ -185,6 +186,19 @@ const Detail = ({
   // Discover the 4 ZD custom fields once per session — shared cache so
   // navigating between tickets doesn't refetch the metadata.
   const { meta: fieldsMeta, loading: fieldsLoading } = useTicketFieldsMeta();
+
+  // ── Original-assignee tracking (Bug 8 — Trish 2026-04-28) ──────────────
+  // Per-user, per-ticket record of who the previous assignee was when the
+  // current user took over. Survives reload + the 5-min mutation window so
+  // multi-week leave coverage is reversible. Stored client-side keyed on
+  // the actor's email; see src/services/originalAssigneeStore.js.
+  // The local `version` counter forces a re-read after we record/clear so
+  // the rail row appears immediately.
+  const [originalRev, setOriginalRev] = useState(0);
+  const original = useMemo(
+    () => getOriginalAssignee(currentUser?.email, task?.id),
+    [currentUser?.email, task?.id, originalRev],
+  );
 
   // ── Comment fetching (lazy, deduped) ───────────────────────────────────
   const mountedRef = useRef(true);
@@ -357,6 +371,9 @@ const Detail = ({
   // Reuses the existing /actions endpoint (`action: 'assignee'`) which
   // already gates on admin/regional_manager/team_lead and applies
   // canAssignTo() scope checks. Optimistic update + rollback on error.
+  // Records the actor in the FE activity log (Bug 5 — Fernanda) so the
+  // Timeline shows "Reassigned to X · by Y" instead of just "Assigned to X"
+  // with no attribution.
   const handleAssigneeChange = useCallback(async (newEmail) => {
     if (assigneeSaving) return;
     const prev = { id: task.assigneeId, email: task.assigneeEmail, name: task.assigneeName };
@@ -373,6 +390,34 @@ const Detail = ({
     try {
       await postTicketAction(task.id, { action: 'assignee', assigneeEmail: newEmail });
       addToast?.('success', 'Assignee updated', newMember ? `Reassigned to ${newMember.name}.` : 'Unassigned.');
+      // Track or clear the "original assignee" record so coverage handovers
+      // can be reverted weeks later (Bug 8 — Trish 2026-04-28). The store
+      // is keyed on the actor's email so each user's records stay private
+      // to their own browser.
+      const existing = getOriginalAssignee(currentUser?.email, task.id);
+      if (existing && newEmail && newEmail.toLowerCase() === String(existing.originalAssigneeEmail).toLowerCase()) {
+        // Reassigning back to the original — close the loop.
+        clearOriginalAssignee(currentUser?.email, task.id);
+      } else if (prev.email) {
+        recordOriginalAssignee(currentUser?.email, task.id, { email: prev.email, name: prev.name }, newEmail);
+      }
+      setOriginalRev(v => v + 1);
+      // Append timeline entry attributed to the actor so the next viewer can
+      // see WHO did the reassignment (previously only the destination was
+      // shown — Fernanda couldn't tell who'd handed her the ticket).
+      const actorName = currentUser?.name || (currentUser?.email ? currentUser.email.split('@')[0] : null);
+      const fromLabel = prev.name || prev.email || 'Unassigned';
+      const toLabel = newMember?.name || newEmail || 'Unassigned';
+      const timeLabel = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+      setActivity?.(p => ({
+        ...(p || {}),
+        [task.id]: [...((p && p[task.id]) || []), {
+          type: 'assigned',
+          text: `Reassigned ${fromLabel} → ${toLabel}`,
+          user: actorName || 'System',
+          time: timeLabel,
+        }],
+      }));
     } catch (err) {
       setTasks?.(p => p.map(t => t.id === task.id ? {
         ...t, assigneeId: prev.id, assigneeEmail: prev.email, assigneeName: prev.name, _locallyReassignedAt: null,
@@ -381,7 +426,7 @@ const Detail = ({
     } finally {
       if (mountedRef.current) setAssigneeSaving(false);
     }
-  }, [assigneeSaving, task, setTasks, addToast]);
+  }, [assigneeSaving, task, setTasks, setActivity, addToast, currentUser]);
 
   // Visible reassign targets: admin sees everyone; non-admin sees their
   // hierarchy chain (self + reports/subtree). Matches the BE's canAssignTo.
@@ -673,6 +718,36 @@ const Detail = ({
                 onSelect={handleAssigneeChange}
               />
             } />
+            {/* Original-assignee row appears only when the current user has
+                a tracked handover for this ticket. Click "↩ Reassign back"
+                to one-shot revert to the recorded original — handles the
+                Trish/Fernanda OOO-coverage scenario weeks after the fact. */}
+            {original?.originalAssigneeEmail && (
+              <DetailRow label="Originally assigned to" value={
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12, color: '#1b1b1b', fontWeight: 500 }}>{original.originalAssigneeName || original.originalAssigneeEmail}</span>
+                  {canChangeAssignee && (
+                    <button
+                      onClick={() => handleAssigneeChange(original.originalAssigneeEmail)}
+                      disabled={assigneeSaving}
+                      title={`Reassign back to ${original.originalAssigneeName || original.originalAssigneeEmail}`}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                        padding: '2px 9px', borderRadius: 128,
+                        border: '1px solid #c7d2fe', background: '#eef2ff',
+                        color: '#4338ca', fontSize: 10, fontWeight: 700,
+                        cursor: assigneeSaving ? 'not-allowed' : 'pointer',
+                        opacity: assigneeSaving ? 0.6 : 1,
+                        transition: 'all .12s',
+                      }}
+                    >
+                      <i className="bi-arrow-counterclockwise" style={{ fontSize: 9 }} />
+                      Reassign back
+                    </button>
+                  )}
+                </span>
+              } />
+            )}
             {/* Country: heuristic (detected from tags/subject) — kept
                 visible because the queue still uses it for filtering /
                 routing. The editable "Employee Country" custom field
@@ -1300,25 +1375,64 @@ function ReplyComposer({
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, gap: 8 }}>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           {isZD && (
-            <label
-              title={replyPublic ? 'This reply will be sent to the requester.' : 'Internal notes are only visible to your team in Zendesk.'}
+            // Reply-mode toggle (Bug 8b — Fernanda 2026-04-28). Replaces the
+            // single ambiguous checkbox whose label flipped between
+            // "Internal note" (unchecked) and "Public — visible to
+            // requester" (checked) — risk of a misclick sending an
+            // internal note publicly. The segmented control makes the
+            // active mode unmistakable: highlighted segment = what the
+            // Send button will do. Default is Internal note, matching
+            // Zendesk's own default.
+            <div
+              role="radiogroup"
+              aria-label="Reply visibility"
               style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                padding: '4px 10px', borderRadius: 128,
-                fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                background: replyPublic ? '#fef2f2' : '#fef3c7',
-                color: replyPublic ? '#991b1b' : '#92400E',
-                border: `1px solid ${replyPublic ? '#fca5a5' : '#fde68a'}`,
+                display: 'inline-flex', alignItems: 'center',
+                background: '#f7f5f2', border: '1px solid #e8e8e8',
+                borderRadius: 128, padding: 2, gap: 0,
               }}
             >
-              <input
-                type="checkbox"
-                checked={replyPublic}
-                onChange={e => setReplyPublic(e.target.checked)}
-                style={{ accentColor: replyPublic ? '#d42d35' : '#92400E' }}
-              />
-              {replyPublic ? 'Public — visible to requester' : 'Internal note'}
-            </label>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={!replyPublic}
+                onClick={() => setReplyPublic(false)}
+                title="Internal notes are only visible to your team in Zendesk."
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '5px 12px', borderRadius: 128,
+                  border: 'none', cursor: 'pointer',
+                  fontSize: 11, fontWeight: 700,
+                  background: !replyPublic ? '#fef3c7' : 'transparent',
+                  color: !replyPublic ? '#92400E' : '#9e9e9e',
+                  boxShadow: !replyPublic ? 'inset 0 0 0 1px #fde68a' : 'none',
+                  transition: 'all .12s',
+                }}
+              >
+                <i className="bi-journal-text" style={{ fontSize: 11 }} />
+                Internal note
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={replyPublic}
+                onClick={() => setReplyPublic(true)}
+                title="Public replies are sent to the requester."
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '5px 12px', borderRadius: 128,
+                  border: 'none', cursor: 'pointer',
+                  fontSize: 11, fontWeight: 700,
+                  background: replyPublic ? '#fef2f2' : 'transparent',
+                  color: replyPublic ? '#991b1b' : '#9e9e9e',
+                  boxShadow: replyPublic ? 'inset 0 0 0 1px #fca5a5' : 'none',
+                  transition: 'all .12s',
+                }}
+              >
+                <i className="bi-send-fill" style={{ fontSize: 11 }} />
+                Public reply
+              </button>
+            </div>
           )}
         </div>
         <button
