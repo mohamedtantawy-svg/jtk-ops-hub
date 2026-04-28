@@ -12,6 +12,23 @@ export async function POST(req, { params }) {
 
     const { id } = await params;
 
+    // Existence check up front. The INSERT below has a foreign key on
+    // announcement_id that fires a 23503 violation when the row is gone,
+    // which surfaces as a 500 in our logs even though the user-facing
+    // outcome is "this announcement no longer exists". Returning 410 lets
+    // the FE drop the popup from its dismissed-popups state and stop
+    // retrying.
+    const exists = await query(
+      'SELECT 1 FROM announcements WHERE id = $1 LIMIT 1',
+      [id]
+    );
+    if (exists.rowCount === 0) {
+      return NextResponse.json(
+        { error: 'Announcement not found', code: 'gone' },
+        { status: 410 }
+      );
+    }
+
     // Resolve the caller's members.id best-effort — it's a nice-to-have for
     // historical reporting, but user_email is the canonical identity for
     // acks (see the migration comment in migrate.js). If we can't resolve an

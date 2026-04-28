@@ -328,6 +328,14 @@ export function useAnnouncements({ toastRef } = {}) {
         }
         removePendingAck(id);
       } catch (e) {
+        // 410 Gone (announcement deleted server-side) or 404 Not Found:
+        // drop the pending ack so we stop retrying and prune the dead row
+        // from local state so its popup doesn't keep reappearing.
+        if (e?.status === 410 || e?.status === 404) {
+          removePendingAck(id);
+          setComms(prev => prev.filter(c => c.id !== id));
+          return;
+        }
         console.warn('[announcements] acknowledge failed — queued for retry:', e.message);
       }
     }
@@ -362,8 +370,15 @@ export function useAnnouncements({ toastRef } = {}) {
           }
           removePendingAck(id);
         } catch (e) {
-          // Keep it in the queue for the next drain — break early if the
-          // server is clearly unreachable so we don't spin on the rest.
+          // 410 Gone / 404 Not Found: announcement is deleted server-side.
+          // Drop the queued ack and prune the row so the popup stops reappearing.
+          if (e?.status === 410 || e?.status === 404) {
+            removePendingAck(id);
+            setComms(prev => prev.filter(c => c.id !== id));
+            continue;
+          }
+          // Otherwise — keep it in the queue for the next drain; break early
+          // so we don't spin on the rest if the server is unreachable.
           break;
         }
       }

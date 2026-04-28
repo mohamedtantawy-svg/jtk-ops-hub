@@ -97,7 +97,6 @@ function isOriginAllowed(request) {
   }
 
   if (!candidate) {
-    // Allow only via explicit opt-in (server-to-server cron, etc.).
     return process.env.ORIGIN_CHECK_ALLOW_MISSING === '1';
   }
 
@@ -111,6 +110,19 @@ function isOriginAllowed(request) {
     try { allowed.add(new URL(process.env.NEXT_PUBLIC_APP_URL).origin); } catch {}
   }
   try { allowed.add(new URL(request.url).origin); } catch {}
+
+  // Behind an ingress / reverse proxy, request.url carries the in-pod origin
+  // (http://localhost:3000) rather than the public-facing origin. The proxy
+  // forwards the real host via x-forwarded-host (+ x-forwarded-proto), and
+  // the same value lands in the Host header. Treat both as authoritative
+  // so same-origin POSTs from the public URL pass without forcing every
+  // deployment to wire up ALLOWED_ORIGINS / NEXT_PUBLIC_APP_URL.
+  const fwdProto = (request.headers.get('x-forwarded-proto') || '').split(',')[0].trim();
+  const fwdHost  = (request.headers.get('x-forwarded-host')  || '').split(',')[0].trim();
+  const host     = request.headers.get('host') || '';
+  const proto    = fwdProto || 'https';
+  if (fwdHost) { try { allowed.add(new URL(`${proto}://${fwdHost}`).origin); } catch {} }
+  if (host)    { try { allowed.add(new URL(`${proto}://${host}`).origin); } catch {} }
 
   return allowed.has(candidate);
 }

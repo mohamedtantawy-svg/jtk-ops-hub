@@ -124,6 +124,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
     membersByEmail: localMembersByEmail,
     getDirectReports: localGetDirectReports,
     getAllReports: localGetAllReports,
+    loading: rosterLoading,
     addMember,
     updateMember,
     removeMember,
@@ -454,24 +455,49 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
               <div style={{ fontSize: 13, fontWeight: isManager ? 700 : 500, color: '#1b1b1b', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                 {member.name}
                 <span style={{ background: badge.bg, color: badge.color, fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 128 }}>{badge.label}</span>
-                <span
-                  title={lastLogin.iso ? `Last login: ${new Date(lastLogin.iso).toLocaleString()}` : 'This user has never signed in to Ops Hub'}
-                  style={{
-                    background: lastLoginTone.bg,
-                    color: lastLoginTone.color,
-                    fontSize: 10,
-                    fontWeight: 700,
-                    padding: '2px 8px',
-                    borderRadius: 128,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  <i className={lastLogin.tone === 'never' ? 'bi-person-slash' : 'bi-clock-history'} style={{ fontSize: 9 }} />
-                  {lastLogin.tone === 'never' ? 'Never logged in' : lastLogin.label}
-                </span>
+                {/* Last-login pill. While the roster is still loading and we
+                    have no cached value for this row, render a shimmer so
+                    we don't flash a misleading "Never logged in" badge on
+                    every member during the initial fetch. */}
+                {rosterLoading && !member.lastLoginAt ? (
+                  <span
+                    title="Loading last login…"
+                    style={{
+                      background: '#f5f4f2',
+                      color: '#9e9e9e',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: 128,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <i className="bi-arrow-clockwise spin" style={{ fontSize: 9 }} />
+                    Loading…
+                  </span>
+                ) : (
+                  <span
+                    title={lastLogin.iso ? `Last login: ${new Date(lastLogin.iso).toLocaleString()}` : 'This user has never signed in to Ops Hub'}
+                    style={{
+                      background: lastLoginTone.bg,
+                      color: lastLoginTone.color,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: 128,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <i className={lastLogin.tone === 'never' ? 'bi-person-slash' : 'bi-clock-history'} style={{ fontSize: 9 }} />
+                    {lastLogin.tone === 'never' ? 'Never logged in' : lastLogin.label}
+                  </span>
+                )}
                 {member.isAnnouncementsAdmin && (
                   <span
                     title="This user has the Announcements Admin permission — full control over the announcement workflow (compose, approve, archive, override, send acknowledgements)."
