@@ -3,7 +3,7 @@ app:
   port: 3000
   image:
     repository: 211125331032.dkr.ecr.eu-west-1.amazonaws.com/jtk-ops-hub-v2
-    tag: 7a92b714fb663e97cd5d77c434e89ce26302e7b7
+    tag: 3dd38b69d08c93d3aa9e7f7633a941761e612d1d
     pullPolicy: IfNotPresent
 
 service:
