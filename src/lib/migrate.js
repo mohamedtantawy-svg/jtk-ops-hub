@@ -631,6 +631,67 @@ CREATE TABLE IF NOT EXISTS personal_checklist_snapshots (
   items      JSONB NOT NULL DEFAULT '[]'::jsonb,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- ── Feedback / improvement board ────────────────────────────────────────────
+-- The team posts bugs and improvement requests here. Anyone authenticated
+-- can submit + vote; only admin / regional_manager can change status,
+-- priority, and assignee. Screenshots are stored as base64 data URIs in
+-- the column directly — pragmatic for the small expected volume (a few
+-- hundred attachments). Switch to S3 if it ever outgrows this.
+CREATE TABLE IF NOT EXISTS feedback_requests (
+  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title                VARCHAR(200) NOT NULL,
+  issue                TEXT NOT NULL,
+  proposed_resolution  TEXT,
+  screenshot           TEXT,                     -- base64 data URI (data:image/png;base64,...)
+  status               VARCHAR(30) DEFAULT 'new' NOT NULL,        -- new | triaged | in_progress | done | wont_do | duplicate
+  priority             VARCHAR(20) DEFAULT 'medium' NOT NULL,      -- low | medium | high | critical
+  category             VARCHAR(50),               -- 'queue' | 'briefing' | 'announcements' | 'team' | 'auth' | 'perf' | 'other' (free-form, not constrained)
+  type                 VARCHAR(20) DEFAULT 'bug' NOT NULL,         -- bug | improvement | question
+  submitter_id         INTEGER REFERENCES members(id) ON DELETE SET NULL,
+  submitter_email      VARCHAR(255),
+  submitter_name       VARCHAR(255),
+  assignee_id          INTEGER REFERENCES members(id) ON DELETE SET NULL,
+  resolution_note      TEXT,                      -- explanation when status -> done | wont_do | duplicate
+  duplicate_of         UUID REFERENCES feedback_requests(id) ON DELETE SET NULL,
+  resolved_at          TIMESTAMPTZ,
+  created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_status        ON feedback_requests(status);
+CREATE INDEX IF NOT EXISTS idx_feedback_priority      ON feedback_requests(priority);
+CREATE INDEX IF NOT EXISTS idx_feedback_submitter     ON feedback_requests(submitter_id);
+CREATE INDEX IF NOT EXISTS idx_feedback_assignee      ON feedback_requests(assignee_id);
+CREATE INDEX IF NOT EXISTS idx_feedback_category      ON feedback_requests(category);
+CREATE INDEX IF NOT EXISTS idx_feedback_created       ON feedback_requests(created_at DESC);
+
+-- One vote per user per request, value ∈ {-1, +1}. The composite primary
+-- key enforces uniqueness so we never have to dedupe in app code; updating
+-- a vote uses ON CONFLICT (request_id, user_id) DO UPDATE.
+CREATE TABLE IF NOT EXISTS feedback_votes (
+  request_id  UUID NOT NULL REFERENCES feedback_requests(id) ON DELETE CASCADE,
+  user_id     INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+  user_email  VARCHAR(255),
+  vote        SMALLINT NOT NULL CHECK (vote IN (-1, 1)),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (request_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_votes_request ON feedback_votes(request_id);
+CREATE INDEX IF NOT EXISTS idx_feedback_votes_user    ON feedback_votes(user_id);
+
+-- Discussion thread on each request — keep the design open even if the
+-- first FE only renders a count badge. Devs / triagers / requesters can
+-- ask follow-up questions without leaving the board.
+CREATE TABLE IF NOT EXISTS feedback_comments (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  request_id    UUID NOT NULL REFERENCES feedback_requests(id) ON DELETE CASCADE,
+  author_id     INTEGER REFERENCES members(id) ON DELETE SET NULL,
+  author_email  VARCHAR(255),
+  author_name   VARCHAR(255),
+  body          TEXT NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_comments_request ON feedback_comments(request_id, created_at);
 `;
 
 export async function runMigrations() {
