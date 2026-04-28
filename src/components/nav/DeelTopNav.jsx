@@ -320,13 +320,19 @@ const DeelTopNav = ({
                 </div>
               </div>
               <div style={{ padding: '4px 0' }}>
-                <div role="button" tabIndex={0}
-                  onClick={() => { setView('settings'); setShowUser(false); }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                  style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 500, color: 'var(--text)', transition: 'background .12s' }}>
-                  <i className="bi bi-gear" style={{ fontSize: 14 }} /> Settings
-                </div>
+                {/* Settings is admin/regional/team-lead only — Agents don't
+                    have access (`canView('settings')` is false for them), so
+                    the link previously did nothing on click and just looked
+                    broken. Hide it entirely for those users. */}
+                {perms?.canView('settings') !== false && (
+                  <div role="button" tabIndex={0}
+                    onClick={() => { setView('settings'); setShowUser(false); }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 500, color: 'var(--text)', transition: 'background .12s' }}>
+                    <i className="bi bi-gear" style={{ fontSize: 14 }} /> Settings
+                  </div>
+                )}
                 <div role="button" tabIndex={0}
                   onClick={toggleDark}
                   onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
