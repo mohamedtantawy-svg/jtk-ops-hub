@@ -330,7 +330,35 @@ const App=()=>{
   // provider directly — AnnouncementsView reads it via useAnnouncementRequests().
   const [dismissedPopups,setDismissedPopups]=useState(()=>{try{const d=localStorage.getItem('ops_hub_dismissed_popups');return d?JSON.parse(d):[];}catch(e){return[];}});
   const [settings,setSettings]=useState(()=>{try{const s=localStorage.getItem('ops_hub_settings');return s?{...DEFAULT_SETTINGS,...JSON.parse(s)}:DEFAULT_SETTINGS;}catch(e){return DEFAULT_SETTINGS;}});
-  const [accessTypes,setAccessTypes]=useState(()=>{try{const s=localStorage.getItem('ops_hub_access_types');return s?JSON.parse(s):DEFAULT_ACCESS_TYPES;}catch(e){return DEFAULT_ACCESS_TYPES;}});
+  // Forward-compat merge of the cached `ops_hub_access_types` snapshot.
+  // Without this, when a new view / action / admin power is shipped (most
+  // recently 'feedback' on 2026-04-28), every user with a stale localStorage
+  // entry from before the deploy keeps the OLD `views` list — so
+  // canView('feedback') returns false, the nav tab is hidden, and the
+  // route guard in App.jsx silently redirects them to /briefing whenever
+  // they try to land on the new view. Union-merge each canonical access
+  // type's lists with the latest defaults so newly-added entries
+  // propagate automatically. Custom (non-default) access types are left
+  // untouched so admin-defined tiers don't get overwritten.
+  const [accessTypes,setAccessTypes]=useState(()=>{
+    try{
+      const s=localStorage.getItem('ops_hub_access_types');
+      if(!s) return DEFAULT_ACCESS_TYPES;
+      const stored=JSON.parse(s);
+      if(!Array.isArray(stored)) return DEFAULT_ACCESS_TYPES;
+      const union=(a,b)=>Array.from(new Set([...(a||[]),...(b||[])]));
+      return stored.map(at=>{
+        const def=DEFAULT_ACCESS_TYPES.find(d=>d.id===at.id);
+        if(!def) return at;
+        return {
+          ...at,
+          views: union(at.views, def.views),
+          actions: union(at.actions, def.actions),
+          adminPowers: union(at.adminPowers, def.adminPowers),
+        };
+      });
+    }catch(e){return DEFAULT_ACCESS_TYPES;}
+  });
   const [userAccessMap,setUserAccessMap]=useState(()=>{try{const ver=localStorage.getItem('ops_hub_uam_ver');if(ver!==ADMIN_LIST_VERSION){localStorage.removeItem('ops_hub_user_access_map');localStorage.setItem('ops_hub_uam_ver',ADMIN_LIST_VERSION);return{...DEFAULT_USER_ACCESS_MAP};}const s=localStorage.getItem('ops_hub_user_access_map');return s?JSON.parse(s):{...DEFAULT_USER_ACCESS_MAP};}catch(e){return DEFAULT_USER_ACCESS_MAP;}});
 
   // ── Roster-version bridge ────────────────────────────────────────────────
