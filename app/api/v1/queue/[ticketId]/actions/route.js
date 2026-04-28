@@ -17,6 +17,7 @@ import { getVisibleMemberEmails, isAdmin } from '../../../../../../src/lib/scope
 import { getVisibleCountries } from '../../../../../../src/lib/queue-scoping';
 import { canAssignTo } from '../../../../../../src/lib/task-scope-guard';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
+import { resolveZendeskUserIdByEmail, updateTicket as updateZdTicket, reassignTicket as reassignZdTicket } from '../../../../../../src/lib/zendesk-api';
 
 const STALE_TTL_MS = 30 * 60_000;
 
@@ -95,20 +96,10 @@ function isZendeskTicket(ticketId) {
   return ticketId.startsWith('ZD-');
 }
 
-async function updateZendeskTicket(ticketId, update) {
-  const url = `https://${ZD_SUBDOMAIN}.zendesk.com/api/v2/tickets/${ticketId}`;
-  const auth = Buffer.from(`${ZD_EMAIL}/token:${ZD_TOKEN}`).toString('base64');
-  const res = await fetch(url, {
-    method: 'PUT',
-    headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ticket: update }),
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Zendesk API ${res.status}: ${body.substring(0, 200)}`);
-  }
-  return res.json();
-}
+// Inline updateZendeskTicket() removed in favor of the shared lib helper
+// (updateZdTicket from src/lib/zendesk-api). The lib helper supports
+// X-On-Behalf-Of via opts.actAsEmail so every Zendesk write attributes
+// to the authenticated team member, not the API token's owner.
 
 async function addJiraComment(issueKey, message) {
   if (!JIRA_BASE || !JIRA_TOKEN) throw new Error('Jira API not configured');
@@ -274,9 +265,23 @@ export async function POST(req, { params }) {
       if (!body.message) return NextResponse.json({ error: 'message required for reply action' }, { status: 400 });
       if (isZD) {
         const zdId = ticketId.replace('ZD-', '');
-        await updateZendeskTicket(zdId, {
-          comment: { body: body.message, public: body.public !== false },
-        });
+        const comment = { body: body.message, public: body.public !== false };
+        // Belt-and-suspenders attribution:
+        //   1. comment.author_id  → admin-token + ZD user lookup; works on
+        //                            every plan, attributes the comment.
+        //   2. X-On-Behalf-Of via actAsEmail → impersonates the entire
+        //                            request, so the ticket's audit log
+        //                            also shows the team member as updater.
+        // If both succeed, attribution is complete. If author_id misses
+        // (no ZD user for that email) we still try the impersonation; the
+        // worst-case is the existing fallback to token owner with a warning.
+        const authorZdId = await resolveZendeskUserIdByEmail(user.email);
+        if (authorZdId) {
+          comment.author_id = authorZdId;
+        } else {
+          console.warn(`[queue/actions/reply] no ZD user for ${user.email} — comment author may fall back to API token owner`);
+        }
+        await updateZdTicket(zdId, { comment }, { actAsEmail: user.email });
       } else {
         await addJiraComment(ticketId, body.message);
       }
@@ -299,7 +304,7 @@ export async function POST(req, { params }) {
         // app-level 'waiting' bucket but mean different things in Zendesk.
         const statusMap = { new: 'new', in_progress: 'open', waiting: 'pending', on_hold: 'hold', resolved: 'solved' };
         const zdStatus = statusMap[body.status] || body.status;
-        await updateZendeskTicket(zdId, { status: zdStatus });
+        await updateZdTicket(zdId, { status: zdStatus }, { actAsEmail: user.email });
       } else {
         await transitionJiraIssue(ticketId, body.status);
       }
@@ -317,7 +322,7 @@ export async function POST(req, { params }) {
       if (!body.assigneeEmail) return NextResponse.json({ error: 'assigneeEmail required for assignee action' }, { status: 400 });
       if (isZD) {
         const zdId = ticketId.replace('ZD-', '');
-        await updateZendeskTicket(zdId, { assignee_email: body.assigneeEmail });
+        await updateZdTicket(zdId, { assignee_email: body.assigneeEmail }, { actAsEmail: user.email });
       } else {
         await assignJiraIssue(ticketId, body.assigneeEmail);
       }

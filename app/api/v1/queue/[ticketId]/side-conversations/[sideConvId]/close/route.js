@@ -31,7 +31,9 @@ export async function POST(req, { params }) {
 
   try {
     const numericId = ticketId.replace('ZD-', '');
-    await closeSideConversation(numericId, sideConvId);
+    // actAsEmail impersonates the team member so the close action is
+    // recorded under their name in the side-conv audit trail.
+    await closeSideConversation(numericId, sideConvId, { actAsEmail: user.email });
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error('[queue/side-conversations/close]', err.message);
