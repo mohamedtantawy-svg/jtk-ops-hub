@@ -60,6 +60,10 @@ spec:
                   name: {{ .Values.sandboxName }}-pg-app
                   key: uri
             {{- end }}
+            {{- if .Values.redis.enabled }}
+            - name: REDIS_URL
+              value: "redis://{{ .Values.sandboxName }}-redis:6379"
+            {{- end }}
             {{- if .Values.app.env }}
             {{- toYaml .Values.app.env | nindent 12 }}
             {{- end }}

@@ -21,9 +21,24 @@ spec:
       cpu: 100m
 
   bootstrap:
+    {{- if and .Values.database.recovery .Values.database.recovery.enabled }}
+    recovery:
+      source: {{ .Values.database.recovery.source }}
+    {{- else }}
     initdb:
       database: {{ .Values.database.bootstrapDatabase }}
       owner: {{ .Values.database.bootstrapOwner }}
+    {{- end }}
+
+  {{- if and .Values.database.recovery .Values.database.recovery.enabled }}
+  externalClusters:
+  - name: {{ .Values.database.recovery.source }}
+    plugin:
+      name: barman-cloud.cloudnative-pg.io
+      parameters:
+        barmanObjectName: recovery-store
+        serverName: {{ .Values.database.recovery.source }}
+  {{- end }}
 
   storage:
     size: {{ .Values.database.storage.size }}
@@ -48,11 +63,17 @@ spec:
   serviceAccountTemplate:
     metadata:
       annotations:
+        {{- if and .Values.database.recovery .Values.database.recovery.enabled }}
+        eks.amazonaws.com/role-arn: arn:aws:iam::{{ .Values.s3.accountId }}:role/{{ .Values.sandboxName }}-recovery
+        {{- else }}
         eks.amazonaws.com/role-arn: arn:aws:iam::{{ .Values.s3.accountId }}:role/{{ .Values.sandboxName }}-backup-s3
+        {{- end }}
 
+  {{- if .Values.database.backup }}
   plugins:
   - name: barman-cloud.cloudnative-pg.io
     isWALArchiver: true
     parameters:
       barmanObjectName: s3-store
+  {{- end }}
 {{- end }}

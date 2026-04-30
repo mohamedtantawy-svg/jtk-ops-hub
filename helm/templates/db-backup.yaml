@@ -1,4 +1,4 @@
-{{- if .Values.database.enabled }}
+{{- if .Values.database.backup }}
 apiVersion: iam.services.k8s.aws/v1alpha1
 kind: Policy
 metadata:
