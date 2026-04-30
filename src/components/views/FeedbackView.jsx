@@ -50,17 +50,27 @@ const SORTS = [
   { value: 'oldest', label: 'Oldest' },
 ];
 
+// Four large status filter buttons — replaces the old flat row of seven
+// pills. New + Triaged are folded into "Open" (anything that hasn't moved
+// to one of the other three buckets), per Pilar's revamp brief.
 const STATUS_FILTERS = [
-  { value: null,           label: 'All' },
-  { value: 'open',         label: 'Open' },           // pseudo-filter (not new+done+wont_do+dup)
-  { value: 'new',          label: 'New' },
-  { value: 'triaged',      label: 'Triaged' },
-  { value: 'in_progress',  label: 'In progress' },
-  { value: 'done',         label: 'Done' },
-  { value: 'wont_do',      label: "Won't do" },
+  { value: 'open',         label: 'Open',         icon: 'bi-circle-fill',           color: '#0369a1', bg: '#e0f2fe', tint: '#bae6fd' },
+  { value: 'in_progress',  label: 'In progress',  icon: 'bi-arrow-repeat',          color: '#d97706', bg: '#fff8e6', tint: '#fde68a' },
+  { value: 'done',         label: 'Done',         icon: 'bi-check-circle-fill',     color: '#15803d', bg: '#e8f5e9', tint: '#bbf7d0' },
+  { value: 'wont_do',      label: "Won't do",     icon: 'bi-slash-circle',          color: '#737373', bg: '#f5f5f4', tint: '#e7e5e4' },
 ];
 
+// Statuses that are NOT considered "Open" — used by the Open filter and the
+// open-count badge. Anything not in this set (new / triaged / duplicate) is
+// shown when the Open button is active.
+const NOT_OPEN = new Set(['in_progress', 'done', 'wont_do']);
 const TERMINAL = new Set(['done', 'wont_do', 'duplicate']);
+
+// Activity indicator threshold: how recently the row was last touched, and
+// the minimum gap between created_at and updated_at to avoid false
+// positives on freshly-submitted items.
+const RECENT_ACTIVITY_MS = 7 * 24 * 60 * 60 * 1000;     // 7d
+const ACTIVITY_GAP_MS    = 30 * 60 * 1000;               // 30min
 
 // Relative-time helper
 function relTime(iso) {
@@ -110,7 +120,12 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
   const perms = useContext(PermissionsContext);
   const isPriv = perms?.isAdmin || perms?.dataScope === 'regional_tasks' || false;
 
-  const [statusFilter, setStatusFilter] = useState(null);
+  // Default filter set per the revamp brief: scope=All, status=Open. The
+  // Open bucket is the most important first impression (everything that
+  // still needs attention) — single-selecting Open by default keeps the
+  // board scannable.
+  const [scopeFilter, setScopeFilter] = useState('all'); // 'all' | 'mine'
+  const [statusFilter, setStatusFilter] = useState('open'); // always one of the four
   const [typeFilter, setTypeFilter] = useState(null);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('top');
@@ -133,13 +148,31 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
     sort,
   });
 
+  // Identity match for the "My requests" toggle. Email is preferred (the
+  // canonical submitter id since the JOIN added in /api/v1/feedback);
+  // numeric submitterId is the fallback for legacy rows.
+  const userEmailLc = (user?.email || '').toLowerCase();
+  const isMineFn = useMemo(() => (item) => {
+    if (!user) return false;
+    if (userEmailLc && (item.submitterEmail || '').toLowerCase() === userEmailLc) return true;
+    if (user.id && item.submitterId === user.id) return true;
+    return false;
+  }, [user, userEmailLc]);
+
   // ── Derived: filtered + searched list ──────────────────────────────────
+  // Scope (mine vs all) → status bucket → type → text search. Status counts
+  // below are computed after scope so the four big buttons reflect the
+  // numbers you'd actually see when you click them.
+  const scopedItems = useMemo(() => (
+    scopeFilter === 'mine' ? items.filter(isMineFn) : items
+  ), [items, scopeFilter, isMineFn]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return items.filter(item => {
+    return scopedItems.filter(item => {
       if (statusFilter === 'open') {
-        if (TERMINAL.has(item.status)) return false;
-      } else if (statusFilter && item.status !== statusFilter) return false;
+        if (NOT_OPEN.has(item.status)) return false;
+      } else if (item.status !== statusFilter) return false;
       if (typeFilter && item.type !== typeFilter) return false;
       if (q) {
         const hay = `${item.title} ${item.issue} ${item.proposedResolution || ''} ${item.category || ''} ${item.submitterName || ''} ${item.submitterEmail || ''}`.toLowerCase();
@@ -147,18 +180,22 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
       }
       return true;
     });
-  }, [items, statusFilter, typeFilter, search]);
+  }, [scopedItems, statusFilter, typeFilter, search]);
 
-  // ── Status counts (drive the filter pill badges) ───────────────────────
+  // ── Status counts (drive the four large filter buttons) ───────────────
+  // Counts respect the scope toggle so "My requests · Open (3)" reads
+  // accurately. Type / search are NOT applied here so the user can see how
+  // many would land in each bucket regardless of the secondary filter.
   const counts = useMemo(() => {
-    const c = { all: items.length, open: 0 };
-    STATUS_ORDER.forEach(s => { c[s] = 0; });
-    for (const i of items) {
-      c[i.status] = (c[i.status] || 0) + 1;
-      if (!TERMINAL.has(i.status)) c.open += 1;
+    const c = { open: 0, in_progress: 0, done: 0, wont_do: 0 };
+    for (const i of scopedItems) {
+      if (i.status === 'in_progress') c.in_progress += 1;
+      else if (i.status === 'done') c.done += 1;
+      else if (i.status === 'wont_do') c.wont_do += 1;
+      else c.open += 1; // new / triaged / duplicate / anything else
     }
     return c;
-  }, [items]);
+  }, [scopedItems]);
 
   // ── Actions ─────────────────────────────────────────────────────────────
   const handleSubmit = async (payload) => {
@@ -222,6 +259,12 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
   // ── Render ─────────────────────────────────────────────────────────────
   return (
     <div style={page}>
+      {/* Inline responsive style — the four big status buttons collapse to
+          a 2x2 grid on narrow viewports so the labels never truncate. */}
+      <style>{`
+        .feedback-status-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+        @media (max-width: 900px) { .feedback-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+      `}</style>
       {/* Header */}
       <div style={pageHead}>
         <div style={{ minWidth: 0 }}>
@@ -243,23 +286,80 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
         </button>
       </div>
 
-      {/* Filter / sort bar */}
-      <div style={filterBar}>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {STATUS_FILTERS.map(f => {
-            const active = statusFilter === f.value;
-            const cnt = f.value == null ? counts.all : (counts[f.value] || 0);
+      {/* Scope toggle (My requests | All requests) — primary nav. Count
+          ticked beside each segment so the user can pre-empt how busy
+          either view is before clicking. */}
+      <div style={scopeRow}>
+        <div role="tablist" aria-label="Request scope" style={segmentedControl}>
+          {[
+            { value: 'all',  label: 'All requests', count: items.length },
+            { value: 'mine', label: 'My requests',  count: items.filter(isMineFn).length },
+          ].map(seg => {
+            const active = scopeFilter === seg.value;
             return (
-              <button key={String(f.value)} onClick={() => setStatusFilter(f.value)}
-                style={{ ...filterPill, ...(active ? filterPillActive : null) }}
-                aria-pressed={active}
+              <button
+                key={seg.value}
+                role="tab"
+                aria-selected={active}
+                onClick={() => setScopeFilter(seg.value)}
+                style={{ ...segmentBtn, ...(active ? segmentBtnActive : null) }}
               >
-                {f.label}
-                {cnt > 0 && <span style={{ ...countBadge, ...(active ? countBadgeActive : null) }}>{cnt}</span>}
+                {seg.label}
+                <span style={{ ...segmentCount, ...(active ? segmentCountActive : null) }}>{seg.count}</span>
               </button>
             );
           })}
-          <span style={{ width: 1, height: 22, background: 'var(--border)', alignSelf: 'center', margin: '0 4px' }} />
+        </div>
+      </div>
+
+      {/* Big status filter buttons — single-select, default Open */}
+      <div className="feedback-status-grid" style={{ marginBottom: 14 }}>
+        {STATUS_FILTERS.map(f => {
+          const active = statusFilter === f.value;
+          const cnt = counts[f.value] || 0;
+          return (
+            <button
+              key={f.value}
+              onClick={() => setStatusFilter(f.value)}
+              aria-pressed={active}
+              style={{
+                ...statusFilterBtn,
+                background: active ? f.bg : 'var(--surface)',
+                borderColor: active ? f.tint : 'var(--border)',
+                boxShadow: active ? `0 0 0 1px ${f.tint} inset, 0 1px 0 rgba(15,23,42,0.02)` : '0 1px 0 rgba(15,23,42,0.02)',
+              }}
+              onMouseEnter={e => { if (!active) { e.currentTarget.style.background = f.bg; e.currentTarget.style.borderColor = f.tint; } }}
+              onMouseLeave={e => { if (!active) { e.currentTarget.style.background = 'var(--surface)'; e.currentTarget.style.borderColor = 'var(--border)'; } }}
+            >
+              <span style={{
+                width: 28, height: 28, borderRadius: 8,
+                background: active ? f.color : f.bg,
+                color: active ? 'white' : f.color,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                transition: 'background .12s, color .12s',
+              }}>
+                <i className={f.icon} style={{ fontSize: 13 }} />
+              </span>
+              <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0, flex: 1 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: active ? f.color : 'var(--text)', whiteSpace: 'nowrap' }}>{f.label}</span>
+                <span style={{ fontSize: 10.5, fontWeight: 500, color: 'var(--text-muted)' }}>
+                  {cnt} {cnt === 1 ? 'request' : 'requests'}
+                </span>
+              </span>
+              <span style={{
+                fontSize: 16, fontWeight: 800,
+                color: active ? f.color : 'var(--text-muted)',
+                fontVariantNumeric: 'tabular-nums',
+                marginLeft: 'auto',
+              }}>{cnt}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Secondary filter row — type pills + search + sort + refresh */}
+      <div style={filterBar}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {Object.entries(TYPE_CONFIG).map(([k, t]) => {
             const active = typeFilter === k;
             return (
@@ -312,11 +412,11 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
               <button
                 onClick={items.length === 0
                   ? () => setComposeOpen(true)
-                  : () => { setStatusFilter(null); setTypeFilter(null); setSearch(''); }}
+                  : () => { setStatusFilter('open'); setScopeFilter('all'); setTypeFilter(null); setSearch(''); }}
                 style={primaryBtn}
               >
                 <i className={items.length === 0 ? 'bi-plus-circle-fill' : 'bi-x-circle'} style={{ fontSize: 13 }} />
-                {items.length === 0 ? 'Submit the first request' : 'Clear filters'}
+                {items.length === 0 ? 'Submit the first request' : 'Reset filters'}
               </button>
             }
           />
@@ -377,6 +477,20 @@ function FeedbackRow({ item, expanded, onToggle, onVote, onStatusChange, onPrior
   const isMine = user?.id && item.submitterId === user.id;
   const isResolved = TERMINAL.has(item.status);
 
+  // Activity indicator: row was meaningfully updated (status change, edit,
+  // resolution note) within the last week. We require a 30-min gap between
+  // createdAt and updatedAt so freshly-submitted rows don't get flagged as
+  // "recently moved" out of the gate.
+  const activity = (() => {
+    if (!item.updatedAt || !item.createdAt) return null;
+    const updated = new Date(item.updatedAt).getTime();
+    const created = new Date(item.createdAt).getTime();
+    if (!Number.isFinite(updated) || !Number.isFinite(created)) return null;
+    if (updated - created < ACTIVITY_GAP_MS) return null;
+    if (Date.now() - updated > RECENT_ACTIVITY_MS) return null;
+    return { label: `${status.label} · ${relTime(item.updatedAt)}`, color: status.color, bg: status.bg, icon: status.icon };
+  })();
+
   const [hov, setHov] = useState(false);
 
   return (
@@ -385,8 +499,15 @@ function FeedbackRow({ item, expanded, onToggle, onVote, onStatusChange, onPrior
       onMouseLeave={() => setHov(false)}
       style={{
         ...rowCard,
-        borderColor: hov || expanded ? '#7c3aed40' : 'var(--border)',
-        boxShadow: hov || expanded ? '0 4px 14px rgba(124,58,237,0.08)' : 'none',
+        // Recent-activity rows get a soft tint matching the new status so
+        // the board signals what's been pushed at a glance. Hover / expanded
+        // still wins so the user always sees feedback on interaction.
+        borderColor: hov || expanded
+          ? '#7c3aed40'
+          : (activity ? `${status.color}33` : 'var(--border)'),
+        boxShadow: hov || expanded
+          ? '0 4px 14px rgba(124,58,237,0.08)'
+          : (activity ? `0 1px 0 ${status.color}10, 0 2px 8px ${status.color}10` : '0 1px 0 rgba(15,23,42,0.02)'),
         opacity: isResolved ? 0.86 : 1,
       }}
     >
@@ -482,6 +603,21 @@ function FeedbackRow({ item, expanded, onToggle, onVote, onStatusChange, onPrior
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                 <i className="bi-chat-text" style={{ fontSize: 11 }} />
                 {item.commentCount}
+              </span>
+            )}
+            {activity && (
+              <span
+                title={`Last updated ${new Date(item.updatedAt).toLocaleString('en-GB')}`}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '2px 8px', borderRadius: 128,
+                  background: activity.bg, color: activity.color,
+                  border: `1px solid ${activity.color}30`,
+                  fontSize: 10, fontWeight: 700, letterSpacing: '.01em',
+                }}
+              >
+                <i className={activity.icon} style={{ fontSize: 9 }} />
+                {activity.label}
               </span>
             )}
             <span style={{ flex: 1 }} />
@@ -702,14 +838,22 @@ function SkeletonList() {
 
 // ── Styles ─────────────────────────────────────────────────────────────
 const page = { flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, padding: '0 24px 24px', background: 'var(--bg)' };
-const pageHead = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, padding: '20px 0' };
+const pageHead = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, padding: '20px 0 14px' };
+const scopeRow = { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 };
+const segmentedControl = { display: 'inline-flex', padding: 3, borderRadius: 128, background: 'var(--surface-2)', border: '1px solid var(--border-light)', gap: 2 };
+const segmentBtn = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 16px', borderRadius: 128, border: 'none', background: 'transparent', color: 'var(--text-muted)', fontSize: 13, fontWeight: 600, cursor: 'pointer', transition: 'all .12s' };
+const segmentBtnActive = { background: 'var(--surface)', color: 'var(--text)', boxShadow: '0 1px 3px rgba(15,23,42,0.08)', fontWeight: 700 };
+const segmentCount = { padding: '0 7px', borderRadius: 128, fontSize: 10, fontWeight: 700, background: 'rgba(15,23,42,0.06)', color: 'var(--text-muted)', minWidth: 18, textAlign: 'center', lineHeight: '16px' };
+const segmentCountActive = { background: '#7c3aed', color: 'white' };
+const statusFilterBtn = { display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 14, border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer', transition: 'all .15s', textAlign: 'left', minWidth: 0 };
 const filterBar = { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 12, background: 'var(--surface)', border: '1px solid var(--border-light)', marginBottom: 14, flexWrap: 'wrap' };
 const filterPill = { display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 128, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-muted)', fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all .12s' };
 const filterPillActive = { background: '#1b1b1b', color: 'white', borderColor: '#1b1b1b' };
 const countBadge = { padding: '0 6px', borderRadius: 128, fontSize: 10, fontWeight: 700, background: '#f2f2f2', color: 'var(--text-muted)', minWidth: 18, textAlign: 'center' };
 const countBadgeActive = { background: 'rgba(255,255,255,0.2)', color: 'white' };
 const listWrap = { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 };
-const list = { listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 10 };
+// Slightly more breathing room between cards (10 → 12) per the revamp brief.
+const list = { listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 12 };
 const rowCard = { padding: '14px 16px', borderRadius: 14, background: 'var(--surface)', border: '1px solid var(--border)', transition: 'all .12s' };
 const voteBtn = { width: 30, height: 26, borderRadius: 6, border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'all .12s' };
 const pill = { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 9px', borderRadius: 128, fontSize: 10, fontWeight: 700, border: '1px solid', whiteSpace: 'nowrap' };
