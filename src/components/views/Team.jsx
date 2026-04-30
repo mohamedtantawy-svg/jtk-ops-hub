@@ -8,6 +8,14 @@ import { useQueueSlaSettings, broadcastQueueSlaUpdate } from '../../hooks/useQue
 import { putQueueSlaSettings } from '../../services/queueSlaSettingsApi';
 import { useCapacitySettings, broadcastCapacityUpdate } from '../../hooks/useCapacitySettings';
 import { putCapacitySettings } from '../../services/capacityApi';
+import { useOnboardingData } from '../../hooks/useOnboardingData';
+import { useOffboardingData } from '../../hooks/useOffboardingData';
+import { useWorkbenchData } from '../../hooks/useWorkbenchData';
+import {
+  normalizeOnboarding,
+  normalizeOffboarding,
+  normalizeWorkbench,
+} from '../../utils/normalizeSourceRows';
 import Avatar from '../ui/Avatar';
 import PageHeader from '../ui/PageHeader';
 
@@ -134,6 +142,20 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
     toggleOnLeave,
     setCountries,
   } = useTeamMembers();
+
+  // ── Deel-source breach inputs for the per-agent SLA dot ──────────────────
+  // Mounting these hooks here lets `slaHealth(email)` cover Onboarding,
+  // Offboarding and Workbench breaches in addition to ticket breaches —
+  // matching what the agent sees in the Queue. Amendments/Redlines have
+  // no per-agent assignee on the upstream payload, so they're not
+  // attributable to a single agent and stay out of this calc.
+  const teamOnbData = useOnboardingData(true);
+  const teamOffData = useOffboardingData(true);
+  const teamWbData = useWorkbenchData(true);
+  const { sla: teamQueueSla } = useQueueSlaSettings();
+  const onbAgentRows = useMemo(() => normalizeOnboarding(teamOnbData.items, teamQueueSla), [teamOnbData.items, teamQueueSla]);
+  const offAgentRows = useMemo(() => normalizeOffboarding(teamOffData.items, teamQueueSla), [teamOffData.items, teamQueueSla]);
+  const wbAgentRows  = useMemo(() => normalizeWorkbench(teamWbData.tasks, teamQueueSla), [teamWbData.tasks, teamQueueSla]);
 
   // UI state
   const [showAddModal, setShowAddModal] = useState(false);
@@ -335,15 +357,30 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
     };
   };
 
-  // SLA health for an agent email
+  // SLA health for an agent email — combines tickets (ZD/Jira via slaInfo)
+  // with the agent's onboarding / offboarding / workbench Deel rows
+  // (slaBreachStatus from normalizeSourceRows). Amendments + Redlines have
+  // no per-agent assignee on the upstream so they're not included here —
+  // a footer note in the SLA card explains that.
   const slaHealth = (email) => {
     const e = email.toLowerCase();
     const agentTasks = ns.filter(t => (t.assigneeEmail || '').toLowerCase() === e && t.status !== 'resolved');
-    if (agentTasks.length === 0) return 'green';
-    const breached = agentTasks.some(t => { const s = slaInfo(t); return (s && s.breach) || t.isAlert; });
-    if (breached) return 'red';
-    const atRisk = agentTasks.some(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; });
-    if (atRisk) return 'yellow';
+    const agentOnb = onbAgentRows.filter(r => (r.assigneeEmail || '').toLowerCase() === e);
+    const agentOff = offAgentRows.filter(r => (r.assigneeEmail || '').toLowerCase() === e);
+    const agentWb  = wbAgentRows.filter(r => (r.assigneeEmail || '').toLowerCase() === e);
+    if (agentTasks.length === 0 && agentOnb.length === 0 && agentOff.length === 0 && agentWb.length === 0) {
+      return 'green';
+    }
+    const ticketBreached = agentTasks.some(t => { const s = slaInfo(t); return (s && s.breach) || t.isAlert; });
+    const deelBreached = [...agentOnb, ...agentOff, ...agentWb].some(r => r.slaBreachStatus === 'SLA_BREACHED');
+    if (ticketBreached || deelBreached) return 'red';
+    const ticketAtRisk = agentTasks.some(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; });
+    const deelAtRisk = [...agentOnb, ...agentOff, ...agentWb].some(r => {
+      if (r.slaBreachStatus === 'SLA_BREACHED' || typeof r.slaRemaining !== 'number' || r.slaRemaining <= 0) return false;
+      const windowSec = Number.isFinite(r.slaWindowMs) && r.slaWindowMs > 0 ? r.slaWindowMs / 1000 : 24*60*60;
+      return r.slaRemaining < windowSec / 4;
+    });
+    if (ticketAtRisk || deelAtRisk) return 'yellow';
     return 'green';
   };
 

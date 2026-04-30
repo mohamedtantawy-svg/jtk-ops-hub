@@ -63,10 +63,18 @@ const WORK_SOURCES = [
 
 const PRIORITY_DOT = { critical: '#dc2626', high: '#d97706', medium: '#0369a1', low: '#9b928a' };
 
-// Load saved filters from localStorage
-const loadFilters = () => {
+// Load saved filters from localStorage. Key is suffixed with the signed-in
+// user's email so two people on the same browser don't inherit each other's
+// filter state — a regression caught during the 2026-05-01 Queue review.
+const QUEUE_FILTERS_KEY_BASE = 'ops_hub_queue_filters';
+const queueFiltersKey = (email) => {
+  const lc = (email || '').toLowerCase();
+  return lc ? `${QUEUE_FILTERS_KEY_BASE}:${lc}` : QUEUE_FILTERS_KEY_BASE;
+};
+const loadFilters = (email) => {
   try {
-    const raw = localStorage.getItem('ops_hub_queue_filters');
+    const raw = localStorage.getItem(queueFiltersKey(email))
+      || (!email ? localStorage.getItem(QUEUE_FILTERS_KEY_BASE) : null);
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
@@ -74,7 +82,7 @@ const loadFilters = () => {
 };
 
 const Queue = ({ user, tasks, subFilter }) => {
-  const saved = useMemo(() => loadFilters(), []);
+  const saved = useMemo(() => loadFilters(user?.email), [user?.email]);
   const [fTool, setFTool] = useState(saved?.fTool || null);
   const [fStatus, setFStatus] = useState(() => {
     const s = saved?.fStatus;
@@ -379,12 +387,16 @@ const Queue = ({ user, tasks, subFilter }) => {
   }, [workSource, fTool, baseVis, allSourceRows, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows]);
   const hiddenByFilters = Math.max(0, rawCounts.open - headerCounts.open);
 
-  // Persist filters to localStorage
+  // Persist filters to localStorage — user-scoped so two people on the
+  // same browser keep their own filter state.
   useEffect(() => {
     try {
-      localStorage.setItem('ops_hub_queue_filters', JSON.stringify({ fTool, fStatus, fSla, fUnassigned, fJiraActionable, fJiraRaised }));
+      localStorage.setItem(
+        queueFiltersKey(user?.email),
+        JSON.stringify({ fTool, fStatus, fSla, fUnassigned, fJiraActionable, fJiraRaised }),
+      );
     } catch {}
-  }, [fTool, fStatus, fSla, fUnassigned, fJiraActionable, fJiraRaised]);
+  }, [user?.email, fTool, fStatus, fSla, fUnassigned, fJiraActionable, fJiraRaised]);
 
   // SLA-based row color
   const slaAgeClass = (task) => {

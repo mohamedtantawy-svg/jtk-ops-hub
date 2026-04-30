@@ -1,8 +1,12 @@
 export const DEFAULT_SETTINGS = {
 
   // ── SLA Configuration ──
+  // Per-queue SLA windows live in `app_settings.queue_sla_thresholds`
+  // (Team-tab editable, biz-day clock). The legacy `sla_thresholds`
+  // per-function map was retired 2026-05-01 — it was never read at
+  // runtime. `sla_enabled` still gates the Queue's SLA column / breach
+  // alerts.
   sla_enabled: true,
-  sla_thresholds: { 'Access Issue': 240, 'Document Request': 240, 'Offboarding': 1440, 'Anomaly Alert': 120, 'Payment Issue': 480, 'Benefits': 1440, 'Leave Request': 720, 'Leave Query': 1440, 'Scheduling': 1440, 'Compensation': 2880, 'Promotion': 1440, 'Recruitment': 1440, 'Record Update': 1440, 'Equipment': 2880, 'Policy Query': 1440, 'Onboarding': 2880, 'Immigration': 1440, 'Expenses': 480, 'Amendment': 1440, 'Compliance': 2880 },
   sla_breach_notify_lead: true,
   sla_breach_notify_admin: true,
   sla_warning_pct: 75,
