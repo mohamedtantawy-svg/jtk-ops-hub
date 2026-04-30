@@ -64,7 +64,15 @@ export async function GET(req) {
 }
 
 async function buildOffboardingResult() {
-  const raw = await listOffboardingCases();
+  const fetched = await listOffboardingCases();
+  // listOffboardingCases now returns { items, statusCounts, ... } — keep
+  // back-compat with the array-only shape just in case a stale build
+  // still wraps the call.
+  const raw = Array.isArray(fetched) ? fetched : (fetched?.items || []);
+  const upstreamStatusCounts = Array.isArray(fetched) ? null : (fetched?.statusCounts || null);
+  const upstreamServerTotal = Array.isArray(fetched) ? null : (fetched?.serverTotal ?? null);
+  const upstreamScanned = Array.isArray(fetched) ? null : (fetched?.scanned ?? null);
+  const upstreamPages = Array.isArray(fetched) ? null : (fetched?.pages ?? null);
   const now = new Date();
 
   // Dedupe defensively by id (listOffboardingCases already dedupes, but be safe)
@@ -159,7 +167,18 @@ async function buildOffboardingResult() {
     console.log(`[offboarding] Unknown sample id=${unknownSample.id} adminStatus=${unknownSample.adminStatus} clientSO=${unknownSample.clientSignOffStatus} employeeSO=${unknownSample.employeeSignOffStatus} flows=${JSON.stringify(unknownSample.terminationFlowStatuses).slice(0, 400)}`);
   }
 
-  return { items, total: items.length, byBucket, byType };
+  return {
+    items,
+    total: items.length,
+    byBucket,
+    byType,
+    // Surface the raw upstream counts so the panel can show
+    // "X actionable / Y open in Deel admin" without an extra fetch.
+    upstreamStatusCounts,
+    upstreamServerTotal,
+    upstreamScanned,
+    upstreamPages,
+  };
 }
 
 // ── Zendesk URL enrichment ──────────────────────────────────────────────────
