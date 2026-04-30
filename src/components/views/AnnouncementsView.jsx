@@ -3,14 +3,53 @@ import { PermissionsContext, SettingsContext } from '../../App';
 import { COMMS_TYPES, matchesAudience } from '../../data/comms';
 import { MEMBERS } from '../../data/members';
 import { scopeAckMembers } from '../../utils/permissions';
+import { renderRichText } from '../../utils/renderRichText';
 import Avatar from '../ui/Avatar';
 import EmptyState from '../ui/EmptyState';
 import ComposeModal from '../modals/ComposeModal';
 import AnnouncementPopup from '../modals/AnnouncementPopup';
+import MentionTextarea from '../ui/MentionTextarea';
 import { isApprover } from '../../data/approvers';
 import { createRequest as apiCreateRequest } from '../../services/announcementRequestsApi';
 import { useAnnouncementRequests } from '../../hooks/useAnnouncementRequests';
 import ApprovalQueueView from './ApprovalQueueView';
+
+// ── Mention chip rendering ──────────────────────────────────────────────────
+// Splits a text line on @firstname.lastname tokens, returning JSX with each
+// recognised handle wrapped in a styled chip. Unknown handles fall through
+// as plain text. Used by both top-level comments and replies so chips look
+// consistent everywhere.
+function renderTextWithMentions(line, mentionByPrefix) {
+  if (!line) return null;
+  const parts = [];
+  const re = /(^|\s)@([a-z0-9._-]+)/gi;
+  let lastIndex = 0;
+  let m;
+  let key = 0;
+  while ((m = re.exec(line)) !== null) {
+    const before = line.slice(lastIndex, m.index + m[1].length);
+    if (before) parts.push(<span key={`t-${key++}`}>{before}</span>);
+    const handle = String(m[2] || '').toLowerCase();
+    const member = mentionByPrefix.get(handle);
+    if (member) {
+      parts.push(
+        <span key={`m-${key++}`} title={member.email}
+          style={{
+            display: 'inline-flex', alignItems: 'center',
+            background: 'var(--purple-mid, #ede9fe)',
+            color: 'var(--purple, #6b3fa0)',
+            borderRadius: 6, padding: '0 5px', fontWeight: 600,
+          }}>@{handle}</span>
+      );
+    } else {
+      parts.push(<span key={`u-${key++}`}>@{handle}</span>);
+    }
+    lastIndex = m.index + m[1].length + 1 + m[2].length;
+  }
+  const tail = line.slice(lastIndex);
+  if (tail) parts.push(<span key={`t-${key++}`}>{tail}</span>);
+  return parts;
+}
 
 /*
   Announcements — clean table view.
@@ -62,12 +101,20 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
   const [walkthrough,setWalkthrough]=useState(false); // popup walkthrough mode
   const [walkthroughDismissed,setWalkthroughDismissed]=useState([]); // dismissed during this walkthrough
   const [detailId,setDetailId]=useState(null); // single item detail popup
+  // Optional comment to scroll into view once the detail opens — used by
+  // notification deep-links so a tagged user lands on the exact comment.
+  const [detailCommentId,setDetailCommentId]=useState(null);
 
-  // Allow other views (e.g. the home "Review & acknowledge" CTA) to open the
-  // detail overlay programmatically without coupling them to this view's
-  // internal state. Listeners are cheap and scoped to mount.
+  // Allow other views (e.g. the home "Review & acknowledge" CTA, the
+  // notification bell deep-link) to open the detail overlay programmatically
+  // without coupling them to this view's internal state. Listeners are
+  // cheap and scoped to mount.
   useEffect(()=>{
-    const handler=(ev)=>{ const id=ev?.detail?.id; if(id) setDetailId(id); };
+    const handler=(ev)=>{
+      const id=ev?.detail?.id;
+      const commentId=ev?.detail?.commentId||null;
+      if(id){ setDetailId(id); setDetailCommentId(commentId); }
+    };
     window.addEventListener('announcements:openDetail', handler);
     return ()=>window.removeEventListener('announcements:openDetail', handler);
   },[]);
@@ -693,7 +740,7 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
           user={user}
           isLA={isLA}
           onAcknowledge={acknowledge}
-          onClose={() => setDetailId(null)}
+          onClose={() => { setDetailId(null); setDetailCommentId(null); }}
           comms={comms}
           setComms={setComms}
           apiComments={apiComments}
@@ -706,6 +753,7 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
           apiLinkAnnouncement={apiLinkAnnouncement}
           apiUnlinkAnnouncement={apiUnlinkAnnouncement}
           setDetailId={setDetailId}
+          highlightCommentId={detailCommentId}
           onReact={(commId, emoji) => {
             if (apiReact) { apiReact(commId, emoji); }
             else {
@@ -859,8 +907,8 @@ function WalkthroughOverlay({ comm, remaining, onAcknowledge, onSkip, onExit, on
                 line.trim() === ''
                   ? <div key={i} style={{ height: 8 }}></div>
                   : (line.trim().startsWith('\u2022') || line.trim().startsWith('-'))
-                    ? <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 4, paddingLeft: 4 }}><span style={{ color: t.color, fontWeight: 700 }}>{'\u2022'}</span><span>{line.trim().replace(/^[\u2022\-]\s*/, '')}</span></div>
-                    : <div key={i} style={{ marginBottom: 3 }}>{line}</div>
+                    ? <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 4, paddingLeft: 4 }}><span style={{ color: t.color, fontWeight: 700 }}>{'\u2022'}</span><span>{renderRichText(line.trim().replace(/^[\u2022\-]\s*/, ''), { color: t.color, keyPrefix: `wb-${i}` })}</span></div>
+                    : <div key={i} style={{ marginBottom: 3 }}>{renderRichText(line, { color: t.color, keyPrefix: `wb-${i}` })}</div>
               ))}
             </div>
             )}
@@ -907,7 +955,7 @@ function WalkthroughOverlay({ comm, remaining, onAcknowledge, onSkip, onExit, on
 }
 
 // ── Detail overlay — view single announcement ──
-function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setComms, apiComments, apiSetComments, apiLoadComments, apiAddComment, apiDeleteComment, apiLinks, apiLoadLinks, apiLinkAnnouncement, apiUnlinkAnnouncement, setDetailId, onReact }) {
+function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setComms, apiComments, apiSetComments, apiLoadComments, apiAddComment, apiDeleteComment, apiLinks, apiLoadLinks, apiLinkAnnouncement, apiUnlinkAnnouncement, setDetailId, onReact, highlightCommentId }) {
   const t = COMMS_TYPES[comm.type] || COMMS_TYPES.update;
   // Email-only ack check to match the rest of the UI. We do NOT OR in an
   // id-axis fallback here — MEMBERS.id collides with DB members.id values,
@@ -964,8 +1012,23 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
   // ── Comments state ──
   const [localComments, setLocalComments] = useState(comm.comments || []);
   const [newComment, setNewComment] = useState('');
+  const [newCommentMentions, setNewCommentMentions] = useState([]);
   const [replyTo, setReplyTo] = useState(null);
   const [replyText, setReplyText] = useState('');
+  const [replyMentions, setReplyMentions] = useState([]);
+
+  // Roster-side lookup table for mention chips so the comment-body renderer
+  // can resolve @prefix → member without re-walking MEMBERS each line.
+  const mentionByPrefix = useMemo(() => {
+    const map = new Map();
+    for (const m of MEMBERS) {
+      const e = String(m?.email || '');
+      const at = e.indexOf('@');
+      const prefix = (at > 0 ? e.slice(0, at) : e).toLowerCase();
+      if (prefix) map.set(prefix, m);
+    }
+    return map;
+  }, []);
 
   // Load comments on mount
   useEffect(() => {
@@ -979,14 +1042,34 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
     }
   }, [apiComments, comm.id]);
 
-  const handleAddComment = (body, parentId) => {
+  // Scroll the highlighted comment into view once it's rendered. Re-runs when
+  // the comments hydrate so the scroll lands AFTER the row exists in the DOM.
+  useEffect(() => {
+    if (!highlightCommentId) return;
+    const found = localComments.some(c => String(c.id) === String(highlightCommentId));
+    if (!found) return;
+    // Defer one frame so layout is settled.
+    const t = setTimeout(() => {
+      try {
+        const el = document.querySelector(`[data-comment-id="${CSS.escape(String(highlightCommentId))}"]`);
+        if (el && typeof el.scrollIntoView === 'function') {
+          el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }
+      } catch {}
+    }, 50);
+    return () => clearTimeout(t);
+  }, [highlightCommentId, localComments]);
+
+  const handleAddComment = (body, parentId, mentions) => {
     if (!body.trim()) return;
+    const safeMentions = Array.isArray(mentions) ? mentions : [];
     const cmt = {
       id: `cmt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       body: body.trim(),
       parentId: parentId || null,
       authorId: user.id,
       authorName: user.name,
+      mentionEmails: safeMentions,
       createdAt: new Date().toISOString(),
     };
     const updated = [...localComments, cmt];
@@ -994,10 +1077,12 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
     // Persist to comms state
     setComms(prev => prev.map(c => c.id === comm.id ? { ...c, comments: updated } : c));
     if (apiSetComments) apiSetComments(prev => ({ ...prev, [comm.id]: updated }));
-    if (apiAddComment) apiAddComment(comm.id, body.trim(), parentId || null);
+    if (apiAddComment) apiAddComment(comm.id, body.trim(), parentId || null, safeMentions);
     setNewComment('');
+    setNewCommentMentions([]);
     setReplyTo(null);
     setReplyText('');
+    setReplyMentions([]);
   };
 
   const handleDeleteComment = (commentId) => {
@@ -1056,24 +1141,40 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
     return `${Math.floor(diff / 86400)}d ago`;
   };
 
-  // Render comment body with bullet point + emoji support
+  // Render comment body with bullet point + emoji support + @mention chips.
   const renderCommentBody = (body) => {
     return body.split('\n').map((line, i) => {
       if (line.trim() === '') return null;
       if (line.trim().startsWith('\u2022') || line.trim().startsWith('-')) {
         const text = line.trim().replace(/^[\u2022\-]\s*/, '');
-        return <div key={i} style={{ display: 'flex', gap: 5, paddingLeft: 2 }}><span style={{ color: '#6b3fa0', fontWeight: 700 }}>{'\u2022'}</span><span>{text}</span></div>;
+        return (
+          <div key={i} style={{ display: 'flex', gap: 5, paddingLeft: 2 }}>
+            <span style={{ color: '#6b3fa0', fontWeight: 700 }}>{'\u2022'}</span>
+            <span>{renderTextWithMentions(text, mentionByPrefix)}</span>
+          </div>
+        );
       }
-      return <div key={i}>{line}</div>;
+      return <div key={i}>{renderTextWithMentions(line, mentionByPrefix)}</div>;
     });
   };
 
   const CommentItem = ({ cmt, depth = 0 }) => {
     const replies = getReplies(cmt.id);
     const isOwn = cmt.authorId === user.id;
+    // Highlight the row a notification deep-linked to so the user lands on
+    // the exact comment that mentioned them.
+    const isHighlighted = highlightCommentId && String(cmt.id) === String(highlightCommentId);
     return (
       <div style={{ marginLeft: depth > 0 ? 20 : 0 }}>
-        <div style={{ display: 'flex', gap: 6, padding: '5px 0' }}>
+        <div
+          data-comment-id={String(cmt.id)}
+          style={{
+            display: 'flex', gap: 6, padding: '5px 0',
+            background: isHighlighted ? 'var(--purple-mid, #ede9fe)' : 'transparent',
+            borderRadius: isHighlighted ? 8 : 0,
+            transition: 'background .8s',
+          }}
+        >
           <div style={{ width: 22, height: 22, borderRadius: '50%', background: depth > 0 ? '#f2f2f2' : '#f3eff8', color: depth > 0 ? '#616161' : '#6b3fa0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, flexShrink: 0, marginTop: 1 }}>
             {(cmt.authorName || 'U').charAt(0).toUpperCase()}
           </div>
@@ -1082,7 +1183,7 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
               <span style={{ fontSize: 11, fontWeight: 600, color: '#1b1b1b' }}>{cmt.authorName || 'User'}</span>
               <span style={{ fontSize: 9, color: '#b5b5b5' }}>{timeAgo(cmt.createdAt)}</span>
               <span style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 'auto' }}>
-                <button onClick={() => { setReplyTo(replyTo === cmt.id ? null : cmt.id); setReplyText(''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9e9e9e', fontSize: 9, padding: '0 3px' }} title="Reply">
+                <button onClick={() => { setReplyTo(replyTo === cmt.id ? null : cmt.id); setReplyText(''); setReplyMentions([]); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9e9e9e', fontSize: 9, padding: '0 3px' }} title="Reply">
                   <i className="bi-reply" style={{ fontSize: 10 }}></i>
                 </button>
                 {isOwn && (
@@ -1094,13 +1195,20 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
             </div>
             <div style={{ fontSize: 12, color: '#4b5563', lineHeight: 1.4, marginTop: 1 }}>{renderCommentBody(cmt.body)}</div>
             {replyTo === cmt.id && (
-              <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-                <textarea value={replyText} onChange={e => setReplyText(e.target.value)} placeholder="Write a reply… (supports emojis & bullet points)"
-                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && replyText.trim()) { e.preventDefault(); handleAddComment(replyText, cmt.id); } }}
+              <div style={{ display: 'flex', gap: 4, marginTop: 4, alignItems: 'flex-end' }}>
+                <MentionTextarea
+                  value={replyText}
+                  onChange={e => setReplyText(e.target.value)}
+                  onMentionsChange={setReplyMentions}
+                  members={MEMBERS}
+                  placeholder="Write a reply… (type @ to mention)"
                   rows={1}
-                  style={{ flex: 1, minHeight: 28, maxHeight: 80, borderRadius: 8, border: '1px solid #e8e8e8', padding: '5px 8px', fontSize: 11, outline: 'none', resize: 'vertical', fontFamily: 'inherit' }}
+                  minHeight={28}
+                  maxHeight={80}
+                  style={{ borderRadius: 8, padding: '5px 8px' }}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && replyText.trim()) { e.preventDefault(); handleAddComment(replyText, cmt.id, replyMentions); } }}
                 />
-                <button onClick={() => { if (replyText.trim()) handleAddComment(replyText, cmt.id); }}
+                <button onClick={() => { if (replyText.trim()) handleAddComment(replyText, cmt.id, replyMentions); }}
                   style={{ height: 28, padding: '0 8px', borderRadius: 8, border: 'none', background: '#6b3fa0', color: 'white', fontSize: 10, fontWeight: 600, cursor: 'pointer', alignSelf: 'flex-end' }}>
                   Send
                 </button>
@@ -1157,8 +1265,8 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
               line.trim() === ''
                 ? <div key={i} style={{ height: 8 }}></div>
                 : (line.trim().startsWith('\u2022') || line.trim().startsWith('-'))
-                  ? <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 4, paddingLeft: 4 }}><span style={{ color: t.color, fontWeight: 700 }}>{'\u2022'}</span><span>{line.trim().replace(/^[\u2022\-]\s*/, '')}</span></div>
-                  : <div key={i} style={{ marginBottom: 3 }}>{line}</div>
+                  ? <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 4, paddingLeft: 4 }}><span style={{ color: t.color, fontWeight: 700 }}>{'\u2022'}</span><span>{renderRichText(line.trim().replace(/^[\u2022\-]\s*/, ''), { color: t.color, keyPrefix: `db-${i}` })}</span></div>
+                  : <div key={i} style={{ marginBottom: 3 }}>{renderRichText(line, { color: t.color, keyPrefix: `db-${i}` })}</div>
             ))}
           </div>
           )}
@@ -1236,17 +1344,23 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
             <div style={{ maxHeight: 220, overflowY: 'auto' }}>
               {topLevelComments.map(cmt => <CommentItem key={cmt.id} cmt={cmt} />)}
             </div>
-            {/* Add new comment — textarea for multi-line, emojis, bullet points */}
+            {/* Add new comment — supports @-mentions; tagged users get a notification. */}
             <div style={{ display: 'flex', gap: 6, marginTop: 8, alignItems: 'flex-end' }}>
               <div style={{ width: 22, height: 22, borderRadius: '50%', background: '#f3eff8', color: '#6b3fa0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, flexShrink: 0 }}>
                 {(user.name || 'U').charAt(0).toUpperCase()}
               </div>
-              <textarea value={newComment} onChange={e => setNewComment(e.target.value)} placeholder="Add a comment… (Shift+Enter for new line, supports emojis & bullet points)"
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && newComment.trim()) { e.preventDefault(); handleAddComment(newComment, null); } }}
+              <MentionTextarea
+                value={newComment}
+                onChange={e => setNewComment(e.target.value)}
+                onMentionsChange={setNewCommentMentions}
+                members={MEMBERS}
+                placeholder="Add a comment… (type @ to mention someone, Shift+Enter for new line)"
                 rows={1}
-                style={{ flex: 1, minHeight: 30, maxHeight: 80, borderRadius: 10, border: '1px solid #e8e8e8', padding: '6px 10px', fontSize: 11, outline: 'none', resize: 'vertical', fontFamily: 'inherit', lineHeight: 1.4 }}
+                minHeight={30}
+                maxHeight={80}
+                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && newComment.trim()) { e.preventDefault(); handleAddComment(newComment, null, newCommentMentions); } }}
               />
-              <button onClick={() => { if (newComment.trim()) handleAddComment(newComment, null); }} disabled={!newComment.trim()}
+              <button onClick={() => { if (newComment.trim()) handleAddComment(newComment, null, newCommentMentions); }} disabled={!newComment.trim()}
                 style={{ height: 30, padding: '0 10px', borderRadius: 10, border: 'none', background: newComment.trim() ? '#6b3fa0' : '#e8e8e8', color: newComment.trim() ? 'white' : '#9e9e9e', fontSize: 11, fontWeight: 600, cursor: newComment.trim() ? 'pointer' : 'default', flexShrink: 0 }}>
                 <i className="bi-send" style={{ fontSize: 10 }}></i>
               </button>

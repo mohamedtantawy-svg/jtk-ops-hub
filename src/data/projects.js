@@ -16,90 +16,11 @@ export const PROJECT_STATUSES = [
   { id:'cancelled',  label:'Cancelled',  color:'#616161', bg:'#f2f2f2' },
 ];
 
-export const INITIAL_PROJECTS = [
-  {
-    id: 'PRJ-001',
-    name: 'Q2 EMEA Onboarding Process Revamp',
-    type: 'onboarding',
-    status: 'active',
-    priority: 'high',
-    leadId: 11,
-    assigneeIds: [1, 2, 5, 7, 10],
-    assignScope: 'individuals',   // 'individuals' | 'team' | 'everyone'
-    assignTeam: null,
-    deadline: '2026-05-15',
-    description: 'Revamp the EMEA onboarding workflow to reduce time-to-productivity from 45 days to 30 days. Includes updating runbooks, automating Day 1 checklists, and coordinating with IT on equipment provisioning.',
-    progress: 42,
-    createdBy: 14,
-    createdAt: '2026-03-01',
-    updatedAt: '2026-03-22',
-  },
-  {
-    id: 'PRJ-002',
-    name: 'Global HR Compliance Audit 2026',
-    type: 'compliance',
-    status: 'planning',
-    priority: 'critical',
-    leadId: 15,
-    assigneeIds: [11, 12, 13],
-    assignScope: 'individuals',
-    assignTeam: null,
-    deadline: '2026-06-30',
-    description: 'Annual compliance audit covering all entities across EMEA, APAC, and AMER. Focus on local labour law changes, data retention policies, and Deel contract templates.',
-    progress: 10,
-    createdBy: 14,
-    createdAt: '2026-03-10',
-    updatedAt: '2026-03-10',
-  },
-  {
-    id: 'PRJ-003',
-    name: 'APAC Offboarding Standardisation',
-    type: 'offboarding',
-    status: 'active',
-    priority: 'medium',
-    leadId: 12,
-    assigneeIds: [4, 6],
-    assignScope: 'team',
-    assignTeam: 'APAC',
-    deadline: '2026-04-30',
-    description: 'Standardise offboarding checklist and exit interview process across all APAC entities. Reduce average offboarding duration from 14 days to 7 days.',
-    progress: 67,
-    createdBy: 14,
-    createdAt: '2026-02-15',
-    updatedAt: '2026-03-20',
-  },
-  {
-    id: 'PRJ-004',
-    name: 'Monthly GM Reporting Automation',
-    type: 'reporting',
-    status: 'completed',
-    priority: 'medium',
-    leadId: 14,
-    assigneeIds: [],
-    assignScope: 'everyone',
-    assignTeam: null,
-    deadline: '2026-03-01',
-    description: 'Automate the monthly GM report generation to save 8 hours per month. Connects Looker dashboards directly to the ops-hub reporting view.',
-    progress: 100,
-    createdBy: 14,
-    createdAt: '2026-01-20',
-    updatedAt: '2026-03-01',
-  },
-  {
-    id: 'PRJ-005',
-    name: 'AMER SLA Improvement Initiative',
-    type: 'process_improvement',
-    status: 'active',
-    priority: 'high',
-    leadId: 13,
-    assigneeIds: [3, 8, 9],
-    assignScope: 'team',
-    assignTeam: 'AMER',
-    deadline: '2026-05-31',
-    description: 'Reduce average SLA breach rate in AMER from 18% to under 5% by Q2. Includes workload rebalancing, escalation path redesign, and agent training.',
-    progress: 28,
-    createdBy: 15,
-    createdAt: '2026-03-05',
-    updatedAt: '2026-03-18',
-  },
-];
+// Live projects come from /api/v1/projects via App.jsx — this used to seed
+// five demo rows ("Q2 EMEA Onboarding", "Global Compliance Audit 2026", etc.)
+// so the project page wasn't empty in screenshots, but they leaked into the
+// Briefing tile count and into anything that imported INITIAL_PROJECTS
+// directly. Result: a fresh tenant saw "1 project assigned" but the projects
+// view (which reads from the API state) was empty — the tile pointed at a
+// row that wasn't there. Empty seed = no demo bleed.
+export const INITIAL_PROJECTS = [];

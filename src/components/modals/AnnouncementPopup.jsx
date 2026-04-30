@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { SOUND_PRESETS } from '../../data/comms';
+import { renderRichText } from '../../utils/renderRichText';
 
 const TYPE_CONFIG = {
   alert:    { label: 'Alert',        icon: 'bi-exclamation-triangle-fill', color: '#d42d35', bg: '#ffe2de', border: '#FCA5A5' },
@@ -51,7 +52,7 @@ function formatBody(body) {
       return (
         <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 4, paddingLeft: 8 }}>
           <span style={{ color: '#6b7280', flexShrink: 0 }}>{'\u2022'}</span>
-          <span>{trimmed.slice(1).trim()}</span>
+          <span>{renderRichText(trimmed.slice(1).trim(), { keyPrefix: `pop-${i}` })}</span>
         </div>
       );
     }
@@ -60,7 +61,7 @@ function formatBody(body) {
     }
     return (
       <div key={i} style={{ marginBottom: 4 }}>
-        {line}
+        {renderRichText(line, { keyPrefix: `pop-${i}` })}
       </div>
     );
   });

@@ -50,7 +50,7 @@ const CREATE_ACTIONS = [
 
 const DeelTopNav = ({
   view, setView, user,
-  onSearch, notifs, markAllRead,
+  onSearch, notifs, markAllRead, onNotifClick,
   escalCount, onLogout,
   onCreateTask, onCreateEscalation, onCreateProject,
   onCreateAnnouncement, onCreateRequest, onCreateReport, onCreateFeedback,
@@ -266,7 +266,15 @@ const DeelTopNav = ({
               </div>
               {notifs && notifs.length > 0 ? notifs.slice(0, 15).map(n => {
                 const handleNotifClick = () => {
-                  setShowNotifs(false); markAllRead?.();
+                  setShowNotifs(false);
+                  // App-level handler owns routing for server-persisted notifs
+                  // (mentions, etc) — those carry richer link metadata than the
+                  // legacy in-memory popups can express.
+                  if (typeof onNotifClick === 'function') {
+                    onNotifClick(n);
+                    return;
+                  }
+                  markAllRead?.();
                   const navType = n.navType || n.type;
                   if (navType === 'task' || navType === 'new_task' || navType === 'sla') { if (n.taskId && setSelTask && tasks) { const t = tasks.find(tk => tk.id === n.taskId); if (t) setSelTask(t); } setView('my-queue'); }
                   else if (navType === 'escalation') { setView('escalations'); }

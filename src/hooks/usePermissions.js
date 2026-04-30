@@ -15,6 +15,13 @@ export const usePermissions = (user, accessTypes, userAccessMap) => {
     const isAnnouncementsAdmin = user?.isAnnouncementsAdmin === true
       || hasAdminPower(accessType, 'can_manage_settings');
 
+    // Per-user access-admin grant — same shape as announcements-admin but
+    // for the Team roster (add/edit/remove members, grant other per-user
+    // permissions). Admins and regional managers always qualify; the flag
+    // promotes specific Team Leads / agents who actually run their teams.
+    const accessRoleAllowsRoster = accessType?.id === 'at_admin' || accessType?.id === 'at_regional_mgr';
+    const canManageRoster = user?.isAccessAdmin === true || accessRoleAllowsRoster;
+
     return {
       raw: accessType,
       canView: (viewId) => canAccessView(accessType, viewId),
@@ -28,6 +35,11 @@ export const usePermissions = (user, accessTypes, userAccessMap) => {
       // override, send-acknowledgements. Combines the four-tier admin gate
       // with per-user grants from the Team tab.
       canManageAnnouncements: isAnnouncementsAdmin,
+      // Access-admin: add / edit / remove team members + grant other per-
+      // user permissions from the Team tab. Admins and regional managers
+      // always qualify by role; the per-user flag delegates to specific
+      // people without escalating their main access tier.
+      canManageRoster,
       accessTypeName: accessType?.name || 'Agent',
       accessTypeId: accessType?.id || 'at_agent',
       scopeTasks: (tasks, allMembers) => scopeTasks(tasks, user, accessType, allMembers),

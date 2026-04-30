@@ -1,10 +1,12 @@
 import { COMMS_TYPES } from '../../data/comms';
+import { renderRichText } from '../../utils/renderRichText';
 
 const PreviewPopup = ({ draft, onClose, onConfirmSend }) => {
   const typeInfo = COMMS_TYPES[draft.type] || COMMS_TYPES.announce;
   const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 
-  // Render body text with bullet point support
+  // Render body text with bullet point + inline-link support so the preview
+  // matches what recipients will actually see in the published popup.
   const renderBody = (text) => {
     if (!text) return null;
     const lines = text.split('\n');
@@ -14,12 +16,12 @@ const PreviewPopup = ({ draft, onClose, onConfirmSend }) => {
         return (
           <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 3 }}>
             <span style={{ color: typeInfo.color, flexShrink: 0, lineHeight: '20px' }}>&bull;</span>
-            <span style={{ lineHeight: '20px' }}>{trimmed.replace(/^[•\-\*]\s*/, '')}</span>
+            <span style={{ lineHeight: '20px' }}>{renderRichText(trimmed.replace(/^[•\-\*]\s*/, ''), { color: typeInfo.color, keyPrefix: `pv-${i}` })}</span>
           </div>
         );
       }
       if (trimmed === '') return <div key={i} style={{ height: 8 }} />;
-      return <div key={i} style={{ marginBottom: 3, lineHeight: '20px' }}>{line}</div>;
+      return <div key={i} style={{ marginBottom: 3, lineHeight: '20px' }}>{renderRichText(line, { color: typeInfo.color, keyPrefix: `pv-${i}` })}</div>;
     });
   };
 

@@ -209,6 +209,9 @@ const Queue = ({ user, tasks, subFilter }) => {
   const hasActiveFilters = useMemo(() => !!(fTool || fStatus.length > 0 || fSla || fUnassigned || search || jiraRoleFilterActive), [fTool, fStatus, fSla, fUnassigned, search, jiraRoleFilterActive]);
 
   // ── Source-panel filter (status severity + unassigned) ──
+  // SLA filter is applied SEPARATELY (below) so the SLA pill counts stay
+  // total — clicking the "At Risk" pill should narrow the table without
+  // collapsing the pill counts to "0 / N / 0".
   const applyPanelFilter = useCallback((rows) => {
     let r = Array.isArray(rows) ? rows : [];
     if (fStatus.length) r = r.filter(row => fStatus.includes(row?.status?.severity));
@@ -216,12 +219,46 @@ const Queue = ({ user, tasks, subFilter }) => {
     return r;
   }, [fStatus, fUnassigned]);
 
-  // Pre-computed post-filter row sets — used by both SLA counts and tables
+  // Pre-computed post-status/unassigned row sets. Drive the SLA pill counts.
   const visOnboardingRows  = useMemo(() => applyPanelFilter(onboardingRows),  [onboardingRows, applyPanelFilter]);
   const visOffboardingRows = useMemo(() => applyPanelFilter(offboardingRows), [offboardingRows, applyPanelFilter]);
   const visAmendmentRows   = useMemo(() => applyPanelFilter(amendmentRows),   [amendmentRows, applyPanelFilter]);
   const visRedlineRows     = useMemo(() => applyPanelFilter(redlineRows),     [redlineRows, applyPanelFilter]);
   const visWorkbenchRows   = useMemo(() => applyPanelFilter(workbenchRows),   [workbenchRows, applyPanelFilter]);
+
+  // Per-source SLA severity classifier — mirrors the count math below so the
+  // pills, the count badges, and the row filter all agree on what each row
+  // is. Onboarding / Offboarding / Workbench expose `slaBreachStatus` +
+  // `slaRemaining`; Amendments / Redlines only expose `slaRemaining`. Anything
+  // without recognisable SLA data is treated as "ok" so it lines up with how
+  // `onTrackCount` is computed (total minus at-risk minus breached).
+  const rowSlaSeverity = useCallback((row, source) => {
+    if (!row) return 'ok';
+    if (source === 'amendments' || source === 'redlines') {
+      if (typeof row.slaRemaining !== 'number') return 'ok';
+      if (row.slaRemaining <= 0) return 'breached';
+      if (row.slaRemaining < 21600) return 'at_risk';
+      return 'ok';
+    }
+    // onboarding / offboarding / workbench
+    if (row.slaBreachStatus === 'SLA_BREACHED') return 'breached';
+    if (typeof row.slaRemaining === 'number' && row.slaRemaining > 0 && row.slaRemaining < 24 * 60 * 60) return 'at_risk';
+    return 'ok';
+  }, []);
+
+  // Apply the SLA pill on top of the post-status/unassigned row set. These
+  // are what the SourceTable actually renders, while the `vis*` arrays above
+  // remain available for total counts.
+  const applySlaFilter = useCallback((rows, source) => {
+    if (!fSla) return rows;
+    return rows.filter(r => rowSlaSeverity(r, source) === fSla);
+  }, [fSla, rowSlaSeverity]);
+
+  const tblOnboardingRows  = useMemo(() => applySlaFilter(visOnboardingRows,  'onboarding'),  [visOnboardingRows,  applySlaFilter]);
+  const tblOffboardingRows = useMemo(() => applySlaFilter(visOffboardingRows, 'offboarding'), [visOffboardingRows, applySlaFilter]);
+  const tblAmendmentRows   = useMemo(() => applySlaFilter(visAmendmentRows,   'amendments'),  [visAmendmentRows,   applySlaFilter]);
+  const tblRedlineRows     = useMemo(() => applySlaFilter(visRedlineRows,     'redlines'),    [visRedlineRows,     applySlaFilter]);
+  const tblWorkbenchRows   = useMemo(() => applySlaFilter(visWorkbenchRows,   'workbench'),   [visWorkbenchRows,   applySlaFilter]);
 
   // ── SLA pills counts — reflect post-filter row sets per active tab ──
   const { atRiskCount, breachedCount, onTrackCount } = useMemo(() => {
@@ -278,22 +315,25 @@ const Queue = ({ user, tasks, subFilter }) => {
   }, [workSource, visPreSla, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows]);
 
   // ── View-aware header counts ──
+  // For each Deel source we read the SLA-filtered row set so the "N open"
+  // badge tracks what the user actually sees in the table, and the existing
+  // `hiddenByFilters` indicator can show how many rows the SLA pill hid.
   const headerCounts = useMemo(() => {
-    if (workSource === 'onboarding')  return { open: visOnboardingRows.length,  paused: 0, resolved: 0 };
-    if (workSource === 'offboarding') return { open: visOffboardingRows.length, paused: 0, resolved: 0 };
-    if (workSource === 'amendments')  return { open: visAmendmentRows.length,   paused: 0, resolved: 0 };
-    if (workSource === 'redlines')    return { open: visRedlineRows.length,     paused: 0, resolved: 0 };
-    if (workSource === 'workbench')   return { open: visWorkbenchRows.length,   paused: 0, resolved: 0 };
+    if (workSource === 'onboarding')  return { open: tblOnboardingRows.length,  paused: 0, resolved: 0 };
+    if (workSource === 'offboarding') return { open: tblOffboardingRows.length, paused: 0, resolved: 0 };
+    if (workSource === 'amendments')  return { open: tblAmendmentRows.length,   paused: 0, resolved: 0 };
+    if (workSource === 'redlines')    return { open: tblRedlineRows.length,     paused: 0, resolved: 0 };
+    if (workSource === 'workbench')   return { open: tblWorkbenchRows.length,   paused: 0, resolved: 0 };
     const sourceOpen = fTool ? 0 : (
-      visOnboardingRows.length + visOffboardingRows.length + visAmendmentRows.length
-      + visRedlineRows.length + visWorkbenchRows.length
+      tblOnboardingRows.length + tblOffboardingRows.length + tblAmendmentRows.length
+      + tblRedlineRows.length + tblWorkbenchRows.length
     );
     return {
       open: active.length + sourceOpen,
       paused: snoozed.length,
       resolved: done.length,
     };
-  }, [workSource, fTool, active, snoozed, done, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows]);
+  }, [workSource, fTool, active, snoozed, done, tblOnboardingRows, tblOffboardingRows, tblAmendmentRows, tblRedlineRows, tblWorkbenchRows]);
 
   const rawCounts = useMemo(() => {
     if (workSource === 'onboarding')  return { open: onboardingRows.length };
@@ -530,7 +570,7 @@ const Queue = ({ user, tasks, subFilter }) => {
       {workSource === 'onboarding' && (
         <ErrorBoundary>
           <SourceTable
-            rows={visOnboardingRows}
+            rows={tblOnboardingRows}
             loading={onboardingData.loading || pausedOnboardingData.loading}
             error={onboardingData.error || pausedOnboardingData.error}
             onRefresh={() => { onboardingData.refresh && onboardingData.refresh(); pausedOnboardingData.refresh && pausedOnboardingData.refresh(); }}
@@ -547,7 +587,7 @@ const Queue = ({ user, tasks, subFilter }) => {
       {workSource === 'offboarding' && (
         <ErrorBoundary>
           <SourceTable
-            rows={visOffboardingRows}
+            rows={tblOffboardingRows}
             loading={offboardingData.loading}
             error={offboardingData.error}
             onRefresh={offboardingData.refresh}
@@ -566,7 +606,7 @@ const Queue = ({ user, tasks, subFilter }) => {
       {workSource === 'amendments' && (
         <ErrorBoundary>
           <SourceTable
-            rows={visAmendmentRows}
+            rows={tblAmendmentRows}
             loading={changeRequestData.loading}
             error={changeRequestData.error}
             onRefresh={changeRequestData.refresh}
@@ -586,7 +626,7 @@ const Queue = ({ user, tasks, subFilter }) => {
       {workSource === 'redlines' && (
         <ErrorBoundary>
           <SourceTable
-            rows={visRedlineRows}
+            rows={tblRedlineRows}
             loading={changeRequestData.loading}
             error={changeRequestData.error}
             onRefresh={changeRequestData.refresh}
@@ -606,7 +646,7 @@ const Queue = ({ user, tasks, subFilter }) => {
       {workSource === 'workbench' && (
         <ErrorBoundary>
           <SourceTable
-            rows={visWorkbenchRows}
+            rows={tblWorkbenchRows}
             loading={workbenchData.loading}
             error={workbenchData.error}
             onRefresh={workbenchData.refresh}

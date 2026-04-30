@@ -107,6 +107,50 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
   const [submitting,setSubmitting]=useState(false);
   const [errorMsg,setErrorMsg]=useState('');
   const fileInputRef=useRef(null);
+  // Body textarea ref + popover state for inline-link insertion. Inserts a
+  // `[label](url)` markdown token at the caret so the renderer (see
+  // src/utils/renderRichText.jsx) shows it as a real <a> tag in the published
+  // announcement.
+  const bodyRef=useRef(null);
+  const [showLinkInsert,setShowLinkInsert]=useState(false);
+  const [linkInsertLabel,setLinkInsertLabel]=useState('');
+  const [linkInsertUrl,setLinkInsertUrl]=useState('');
+  const insertBodyLink=()=>{
+    const label=(linkInsertLabel||'').trim();
+    const rawUrl=(linkInsertUrl||'').trim();
+    if(!rawUrl)return;
+    let url=rawUrl;
+    // Make the link safe: require http/https. Reject anything else (incl.
+    // `javascript:` and `data:` payloads) so a malicious composer can't
+    // craft a clickable XSS vector for every recipient.
+    if(!/^https?:\/\//i.test(url))url=`https://${url}`;
+    try{
+      const parsed=new URL(url);
+      if(parsed.protocol!=='http:'&&parsed.protocol!=='https:')return;
+    }catch{return;}
+    const visible=label||url;
+    const token=`[${visible}](${url})`;
+    const ta=bodyRef.current;
+    if(ta&&typeof ta.selectionStart==='number'){
+      const start=ta.selectionStart;
+      const end=ta.selectionEnd||start;
+      const before=body.slice(0,start);
+      const after=body.slice(end);
+      // If the user had selected text, treat it as the label so they can
+      // turn an existing word into a link without retyping.
+      const inserted=(end>start&&!label)?`[${body.slice(start,end)}](${url})`:token;
+      const next=`${before}${inserted}${after}`;
+      setBody(next);
+      requestAnimationFrame(()=>{
+        try{ta.focus();const caret=before.length+inserted.length;ta.setSelectionRange(caret,caret);}catch{}
+      });
+    }else{
+      setBody(prev=>prev?`${prev}${prev.endsWith(' ')?'':' '}${token}`:token);
+    }
+    setShowLinkInsert(false);
+    setLinkInsertLabel('');
+    setLinkInsertUrl('');
+  };
 
   // Scheduling + approval controls
   const [scheduleLater,setScheduleLater]=useState(!!draft?.scheduledFor);
@@ -233,8 +277,54 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
 
           {/* Body */}
           <div style={{marginBottom:12}}>
-            <div style={{fontSize:11,fontWeight:700,color:'#616161',letterSpacing:'.05em',marginBottom:5}}>MESSAGE {imageUrl&&<span style={{fontWeight:400,color:'#9e9e9e'}}>(optional if image attached)</span>}</div>
-            <textarea value={body} onChange={e=>setBody(e.target.value)} rows={5} placeholder={imageUrl?"Add a caption or message (optional)...":"Write your announcement, update, or guidance here..."} style={{width:'100%',border:'1px solid #e8e8e8',borderRadius:8,padding:'9px 12px',fontSize:13,outline:'none',boxSizing:'border-box',resize:'vertical',fontFamily:'inherit',color:'#1b1b1b',lineHeight:1.6}}/>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:5}}>
+              <div style={{fontSize:11,fontWeight:700,color:'#616161',letterSpacing:'.05em'}}>MESSAGE {imageUrl&&<span style={{fontWeight:400,color:'#9e9e9e'}}>(optional if image attached)</span>}</div>
+              <span style={{flex:1}} />
+              <button
+                type="button"
+                onClick={()=>setShowLinkInsert(v=>!v)}
+                title="Insert a link inside the message — recipients see the label as a clickable hyperlink"
+                style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 10px',borderRadius:128,border:'1px solid #e8e8e8',background:showLinkInsert?'#f3eff8':'white',color:showLinkInsert?'#6b3fa0':'#616161',fontSize:11,fontWeight:600,cursor:'pointer',transition:'all .12s'}}
+              >
+                <i className="bi-link-45deg" style={{fontSize:12}} />
+                Insert link
+              </button>
+            </div>
+            <textarea ref={bodyRef} value={body} onChange={e=>setBody(e.target.value)} rows={5} placeholder={imageUrl?"Add a caption or message (optional)...":"Write your announcement, update, or guidance here..."} style={{width:'100%',border:'1px solid #e8e8e8',borderRadius:8,padding:'9px 12px',fontSize:13,outline:'none',boxSizing:'border-box',resize:'vertical',fontFamily:'inherit',color:'#1b1b1b',lineHeight:1.6}}/>
+            {showLinkInsert && (
+              <div style={{marginTop:8,padding:'10px 12px',background:'#fbfafc',border:'1px solid #ebe5f4',borderRadius:10}}>
+                <div style={{fontSize:11,fontWeight:700,color:'#6b3fa0',letterSpacing:'.05em',marginBottom:6,display:'flex',alignItems:'center',gap:6}}>
+                  <i className="bi-link-45deg" style={{fontSize:11}} />
+                  Insert hyperlink
+                </div>
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1.4fr auto',gap:8,alignItems:'center'}}>
+                  <input
+                    value={linkInsertLabel}
+                    onChange={e=>setLinkInsertLabel(e.target.value)}
+                    placeholder="Visible text (e.g. Open SOP)"
+                    style={{border:'1px solid #e8e8e8',borderRadius:8,padding:'7px 10px',fontSize:12,outline:'none',boxSizing:'border-box',fontFamily:'inherit',color:'#1b1b1b'}}
+                  />
+                  <input
+                    value={linkInsertUrl}
+                    onChange={e=>setLinkInsertUrl(e.target.value)}
+                    onKeyDown={e=>{ if(e.key==='Enter'){ e.preventDefault(); insertBodyLink(); } }}
+                    placeholder="https://..."
+                    style={{border:'1px solid #e8e8e8',borderRadius:8,padding:'7px 10px',fontSize:12,outline:'none',boxSizing:'border-box',fontFamily:'inherit',color:'#1b1b1b'}}
+                  />
+                  <button
+                    type="button"
+                    onClick={insertBodyLink}
+                    disabled={!linkInsertUrl.trim()}
+                    style={{padding:'7px 14px',borderRadius:8,border:'none',background:linkInsertUrl.trim()?'#6b3fa0':'#e8e8e8',color:linkInsertUrl.trim()?'white':'#9e9e9e',fontSize:12,fontWeight:700,cursor:linkInsertUrl.trim()?'pointer':'default',whiteSpace:'nowrap'}}
+                  >
+                    Insert
+                  </button>
+                </div>
+                <div style={{fontSize:10,color:'#9e9e9e',marginTop:6,lineHeight:1.5}}>
+                  Tip: select text first to turn it into a link, or paste a bare URL — recipients can click it directly. Use <code style={{background:'#fff',padding:'1px 5px',borderRadius:4,border:'1px solid #ebe5f4',fontSize:10}}>[label](https://…)</code> syntax to type one inline.
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Image (upload or URL) */}

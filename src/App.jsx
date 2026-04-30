@@ -9,6 +9,7 @@ import { INITIAL_ACTIVITY, INITIAL_NOTES } from './data/tasks';
 import { FEED_EVENTS } from './data/feed';
 import { ALL_AGENT_IDS, matchesAudience } from './data/comms';
 import { useAnnouncements } from './hooks/useAnnouncements';
+import { useNotifications } from './hooks/useNotifications';
 import { useVersionCheck } from './hooks/useVersionCheck';
 import UpdateBanner from './components/ui/UpdateBanner';
 import { AnnouncementRequestsProvider } from './hooks/useAnnouncementRequests';
@@ -136,18 +137,21 @@ const App=()=>{
           if (payload?.sub) tokenId = Number(payload.sub);
         }catch(e){ /* token unparseable — will fall through */ }
       }
-      // Per-user permission flags (e.g. isAnnouncementsAdmin) live ONLY on
-      // the team_member_overrides row, not in static MEMBERS. Read them from
-      // the localStorage snapshot (which /auth/callback writes from the
-      // login response, and /me revalidation refreshes) so the user state
-      // hydrates with the correct flags on the very first paint.
+      // Per-user permission flags (e.g. isAnnouncementsAdmin, isAccessAdmin)
+      // live ONLY on the team_member_overrides row, not in static MEMBERS.
+      // Read them from the localStorage snapshot (which /auth/callback writes
+      // from the login response, and /me revalidation refreshes) so the
+      // user state hydrates with the correct flags on the very first paint.
       let snapshotPerms = {};
       try {
         const storedRaw = localStorage.getItem('ops_hub_user');
         if (storedRaw) {
           const stored = JSON.parse(storedRaw);
           if (stored?.email?.toLowerCase() === loggedInEmail.toLowerCase()) {
-            snapshotPerms = { isAnnouncementsAdmin: stored.isAnnouncementsAdmin === true };
+            snapshotPerms = {
+              isAnnouncementsAdmin: stored.isAnnouncementsAdmin === true,
+              isAccessAdmin: stored.isAccessAdmin === true,
+            };
           }
         }
       } catch {}
@@ -458,6 +462,7 @@ const App=()=>{
                   ...staticMember,
                   id: serverUser.id || staticMember.id,
                   isAnnouncementsAdmin: serverUser.isAnnouncementsAdmin === true,
+                  isAccessAdmin: serverUser.isAccessAdmin === true,
                 }
               : serverUser;
             // Persist the freshest snapshot so the next mount's useState
@@ -663,7 +668,74 @@ const App=()=>{
     const now=new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
     setNotifs(prev=>[{id:Date.now()+(Math.random()*10|0),type,title,body,time:now,read:false},...prev.slice(0,49)]);
   },[]);
-  const markAllRead=useCallback(()=>setNotifs(prev=>prev.map(n=>({...n,read:true}))),[]);
+
+  // Server-persisted feed (mentions, etc). The hook polls every 30s and
+  // hydrates from a user-scoped localStorage cache for instant paint.
+  const serverNotifs = useNotifications(user?.email || null);
+
+  // Combine the in-memory popup feed (announcements arrival, toasts) with
+  // the server feed for a single bell. Server rows go first so a fresh
+  // mention is at the top of the list. Capped at 50 to match addNotif().
+  const mergedNotifs = React.useMemo(() => {
+    const fromServer = (serverNotifs.items || []).map(n => {
+      const ts = n.createdAt ? new Date(n.createdAt) : null;
+      const time = ts && !Number.isNaN(ts.getTime())
+        ? ts.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+        : '';
+      return {
+        id: `srv-${n.id}`,
+        _source: 'server',
+        serverId: n.id,
+        type: n.type || 'mention',
+        title: n.title,
+        body: n.body || '',
+        time,
+        read: !!n.readAt,
+        linkView: n.linkView,
+        linkId: n.linkId,
+        sourceType: n.sourceType,
+        sourceId: n.sourceId,
+        actorEmail: n.actorEmail,
+        actorName: n.actorName,
+      };
+    });
+    return [...fromServer, ...notifs].slice(0, 50);
+  }, [serverNotifs.items, notifs]);
+
+  const markAllRead = useCallback(() => {
+    setNotifs(prev => prev.map(n => ({ ...n, read: true })));
+    serverNotifs.markAllRead();
+  }, [serverNotifs]);
+
+  // Click handler for the bell. Server rows route to their linked surface
+  // and open the relevant detail (with the originating comment scrolled
+  // into view via the announcements:openDetail event). In-memory rows keep
+  // the legacy "mark all + go to my-queue/escalations/briefing" behaviour
+  // since they don't carry link metadata.
+  const handleNotifClick = useCallback((n) => {
+    if (n && n._source === 'server') {
+      if (n.serverId && !n.read) serverNotifs.markRead(n.serverId);
+      if (n.linkView === 'announcements' && n.linkId) {
+        setView('announcements');
+        const detail = {
+          id: n.linkId,
+          commentId: n.sourceType === 'announcement_comment' ? n.sourceId : null,
+        };
+        // Defer one tick so the announcements view has mounted before the
+        // openDetail listener fires.
+        setTimeout(() => {
+          try { window.dispatchEvent(new CustomEvent('announcements:openDetail', { detail })); }
+          catch {}
+        }, 60);
+      }
+      return;
+    }
+    // Legacy in-memory notif: existing nav-type routing handled by DeelTopNav
+    // when no onNotifClick is provided. We mark the local row read so it
+    // doesn't keep highlighting after acknowledgement.
+    if (n && n.id) setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
+    markAllRead();
+  }, [serverNotifs, markAllRead]);
 
   // ── Cross-user announcement sync (15 s poll) ───────────────────────────────
   // Keeps the Home banner, top-nav notification list, popup queue, and the
@@ -1117,7 +1189,7 @@ const App=()=>{
       {impersonating && <style>{`.deel-topnav{top:36px!important;}`}</style>}
       <DeelTopNav
         view={view} setView={setView} user={effectiveUser} setUser={setUser}
-        onSearch={()=>setShowSearch(true)} notifs={notifs} markAllRead={markAllRead}
+        onSearch={()=>setShowSearch(true)} notifs={mergedNotifs} markAllRead={markAllRead} onNotifClick={handleNotifClick}
         escalCount={pendingEscal||0} onLogout={handleLogout}
         onCreateTask={()=>setCreateModal(true)}
         onCreateEscalation={()=>setCreateEscalModal(true)}
@@ -1131,7 +1203,7 @@ const App=()=>{
       <div style={{height:(impersonating?104:68)+(versionHasUpdate?44:0),flexShrink:0}}/>
       <DeelSubNav view={view} subFilter={subFilter} setSubFilter={setSubFilter} tasks={tasks} user={effectiveUser}/>
       <div className="deel-content" data-region="main-content" aria-label="Main content" style={{display:'flex',overflowX:'hidden',overflowY:'auto',position:'relative',flex:1}}>
-          {view==='briefing'      &&perms?.canView('briefing')!==false     &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={()=>{}} comms={comms} escalations={scopedEscalations} setSubFilter={setSubFilter} requests={requests} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall}/></div>}
+          {view==='briefing'      &&perms?.canView('briefing')!==false     &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={()=>{}} comms={comms} escalations={scopedEscalations} setSubFilter={setSubFilter} requests={requests} projects={projects} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall}/></div>}
           {view==='my-queue'      &&perms?.canView('my-queue')!==false     &&<div className="page-enter"><Queue user={effectiveUser} tasks={tasks} subFilter={subFilter}/></div>}
           {view==='team'          &&perms?.canView('team')!==false         &&<div className="page-enter"><Team user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setTask={()=>{}} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
           {view==='analytics'     &&isOwner&&perms?.canView('analytics')!==false    &&<div className="page-enter"><Analytics tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} currentUser={effectiveUser} subFilter={subFilter} escalations={scopedEscalations}/></div>}

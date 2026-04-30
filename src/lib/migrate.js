@@ -610,6 +610,18 @@ ALTER TABLE team_member_overrides ADD COLUMN IF NOT EXISTS is_announcements_admi
 CREATE INDEX IF NOT EXISTS idx_tmo_is_announcements_admin
   ON team_member_overrides(is_announcements_admin) WHERE is_announcements_admin = true;
 
+-- ── Access Admin grant (2026-04-30) ────────────────────────────────────────
+-- Per-user grant for managing the Team roster — add / edit / remove members,
+-- toggle on-leave, edit allocations, grant other per-user permissions. Mirrors
+-- the announcements-admin pattern: orthogonal to the four-tier access model
+-- so a Director can delegate roster maintenance without giving someone full
+-- admin. Until now this was implicitly gated to admin/regional_manager which
+-- forced Team Leads who actually manage their teams (e.g. Olga) to bounce
+-- requests off Mohamed for every new hire.
+ALTER TABLE team_member_overrides ADD COLUMN IF NOT EXISTS is_access_admin BOOLEAN DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS idx_tmo_is_access_admin
+  ON team_member_overrides(is_access_admin) WHERE is_access_admin = true;
+
 -- ── Personal Checklist (My To-Do) snapshots (2026-04-27) ───────────────────
 -- The My To-Do list lives in PersonalChecklist.jsx and historically stored
 -- items only in localStorage + IndexedDB on the client. That covers refresh
@@ -692,6 +704,55 @@ CREATE TABLE IF NOT EXISTS feedback_comments (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_feedback_comments_request ON feedback_comments(request_id, created_at);
+
+-- ── @-mentions on announcement comments (2026-04-30) ───────────────────────
+-- mention_emails captures every user tagged in a comment body. The comment
+-- POST handler resolves typed @firstname.lastname tokens against the live
+-- roster, lowercases each email, and persists the array on the row. The GET
+-- echoes the array back so the FE can render mention chips. Rows seen by
+-- earlier client builds default to '{}' so legacy comments stay valid.
+ALTER TABLE announcement_comments
+  ADD COLUMN IF NOT EXISTS mention_emails TEXT[] DEFAULT '{}'::text[];
+
+-- ── Per-user notifications (2026-04-30) ────────────────────────────────────
+-- Server-persisted notification feed so mentions reach the recipient even
+-- if their app wasn't open at the time of mention, and so read-state is
+-- consistent across tabs / devices. Indexed for the two hot reads:
+--   • unread count + recent list per recipient (top of bell)
+--   • lookup by source (so the FE can dedupe "this comment already
+--     produced a notification for me" if a comment is re-broadcast).
+CREATE TABLE IF NOT EXISTS user_notifications (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  recipient_email VARCHAR(255) NOT NULL,
+  type            VARCHAR(40)  NOT NULL,      -- 'mention' (extensible)
+  title           VARCHAR(500) NOT NULL,
+  body            TEXT         DEFAULT '',
+  link_view       VARCHAR(40)  NOT NULL,      -- which client view to open ('announcements')
+  link_id         VARCHAR(255) NOT NULL,      -- announcement id (string for portability)
+  source_type     VARCHAR(40)  NOT NULL,      -- 'announcement_comment'
+  source_id       VARCHAR(255) NOT NULL,      -- comment id
+  actor_email     VARCHAR(255),
+  actor_name      VARCHAR(255),
+  created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  read_at         TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_user_notifications_recipient_created
+  ON user_notifications (recipient_email, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_user_notifications_unread
+  ON user_notifications (recipient_email, created_at DESC) WHERE read_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_user_notifications_source
+  ON user_notifications (source_type, source_id);
+
+-- ── Feedback multi-attachment column (2026-04-30) ───────────────────────────
+-- The original feedback_requests.screenshot was a single TEXT column holding
+-- one base64 data URI. Submitters needed to paste multiple screenshots OR a
+-- short video clip to explain repro steps that span more than one frame.
+-- attachments is a JSONB array of { kind, dataUri, name } where kind is
+-- either image or video. Legacy rows (screenshot column populated,
+-- attachments empty) are normalised to a single-image attachment on read so
+-- the FE only consults the attachments column.
+ALTER TABLE feedback_requests
+  ADD COLUMN IF NOT EXISTS attachments JSONB NOT NULL DEFAULT '[]'::jsonb;
 `;
 
 export async function runMigrations() {
