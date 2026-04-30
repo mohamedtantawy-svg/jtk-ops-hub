@@ -6,6 +6,8 @@ import { useTeamMembers } from '../../hooks/useTeamMembers';
 import MultiCountryPicker from '../team/MultiCountryPicker';
 import { useQueueSlaSettings, broadcastQueueSlaUpdate } from '../../hooks/useQueueSlaSettings';
 import { putQueueSlaSettings } from '../../services/queueSlaSettingsApi';
+import { useCapacitySettings, broadcastCapacityUpdate } from '../../hooks/useCapacitySettings';
+import { putCapacitySettings } from '../../services/capacityApi';
 import Avatar from '../ui/Avatar';
 import PageHeader from '../ui/PageHeader';
 
@@ -1627,6 +1629,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
 
       {/* ── Queue SLA settings ─ editable threshold table at the bottom ── */}
       <QueueSlaSettingsCard />
+      <CapacitySettingsCard />
     </div>
   );
 };
@@ -1887,6 +1890,197 @@ const SlaInput = ({ value, disabled, onCommit }) => {
       }}
       onFocusCapture={e => { if (!disabled) e.target.style.borderColor = '#7c3aed'; }}
       onBlurCapture={e => { e.target.style.borderColor = bad ? '#d42d35' : '#e8e8e8'; }}
+    />
+  );
+};
+
+// ── CapacitySettingsCard ───────────────────────────────────────────────────
+// Director / RM / TL editable thresholds that classify each agent's total
+// open + paused workload as Low / Good / High. Persisted via
+// /api/v1/settings/capacity. Mirrors the QueueSlaSettingsCard pattern —
+// instant LS paint, BroadcastChannel notification on save, fallback to the
+// route's defaults when the fetch hasn't resolved yet.
+const CapacitySettingsCard = () => {
+  const perms = useContext(PermissionsContext);
+  const canEdit = !!(perms?.isAdmin || perms?.canDo?.('can_manage_team') || perms?.canDo?.('can_manage_settings'));
+  const { capacity, updatedBy, updatedAt, isLoading } = useCapacitySettings();
+
+  const [lowMaxDraft, setLowMaxDraft] = useState(capacity?.lowMax ?? 40);
+  const [highMinDraft, setHighMinDraft] = useState(capacity?.highMin ?? 100);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (Number.isFinite(capacity?.lowMax)) setLowMaxDraft(capacity.lowMax);
+    if (Number.isFinite(capacity?.highMin)) setHighMinDraft(capacity.highMin);
+  }, [capacity?.lowMax, capacity?.highMin]);
+
+  async function handleSave() {
+    setError('');
+    if (!Number.isFinite(lowMaxDraft) || !Number.isFinite(highMinDraft)) {
+      setError('Both thresholds must be numbers'); return;
+    }
+    if (lowMaxDraft <= 0 || highMinDraft <= 0) {
+      setError('Thresholds must be positive integers'); return;
+    }
+    if (lowMaxDraft >= highMinDraft) {
+      setError('Low threshold must be less than High threshold'); return;
+    }
+    setSaving(true);
+    try {
+      const res = await putCapacitySettings({ lowMax: lowMaxDraft, highMin: highMinDraft });
+      if (res && res.capacity) broadcastCapacityUpdate(res);
+      setSavedAt(new Date());
+    } catch (e) {
+      setError(e?.message || 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 24, background: 'white', border: '1px solid #e8e8e8', borderRadius: 16, overflow: 'hidden' }}>
+      <div style={{ padding: '16px 22px 12px', borderBottom: '1px solid #f0eeec', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ width: 32, height: 32, borderRadius: 10, background: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <i className="bi-speedometer2" style={{ fontSize: 14, color: '#1f74b3' }} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: '#1b1b1b' }}>Workload capacity thresholds</div>
+          <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 1 }}>
+            {canEdit
+              ? 'Set the workload bands used by Briefing health score and the Team workload pills.'
+              : 'Read-only — only Directors / Regional Managers / Team Leads can edit.'}
+            {updatedBy && updatedAt && (
+              <span> · Last updated by <strong>{updatedBy}</strong> · {new Date(updatedAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ padding: '4px 22px 18px' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid #f0eeec' }}>
+              <th style={{ textAlign: 'left',  padding: '10px 8px', fontSize: 11, fontWeight: 700, color: '#9e9e9e', letterSpacing: '.04em', textTransform: 'uppercase' }}>Band</th>
+              <th style={{ textAlign: 'left',  padding: '10px 8px', fontSize: 11, fontWeight: 700, color: '#9e9e9e', letterSpacing: '.04em', textTransform: 'uppercase' }}>Range (open + paused tasks)</th>
+              <th style={{ textAlign: 'right', padding: '10px 8px', fontSize: 11, fontWeight: 700, color: '#9e9e9e', letterSpacing: '.04em', textTransform: 'uppercase' }}>Threshold</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style={{ borderBottom: '1px solid #f7f5f2' }}>
+              <td style={{ padding: '10px 8px', fontWeight: 600, color: '#1f74b3' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#1f74b3' }} />
+                  Low (under-utilised)
+                </span>
+              </td>
+              <td style={{ padding: '10px 8px', color: '#616161' }}>{`< ${lowMaxDraft}`}</td>
+              <td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                <CapacityInput value={lowMaxDraft} disabled={!canEdit || saving || isLoading} onCommit={setLowMaxDraft} />
+              </td>
+            </tr>
+            <tr style={{ borderBottom: '1px solid #f7f5f2' }}>
+              <td style={{ padding: '10px 8px', fontWeight: 600, color: '#29811e' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: '50%', background: 'linear-gradient(90deg, #29811e 0%, #ed8d00 100%)' }} />
+                  Good (green near low → yellow near high)
+                </span>
+              </td>
+              <td style={{ padding: '10px 8px', color: '#616161' }}>{`${lowMaxDraft} – ${highMinDraft}`}</td>
+              <td style={{ padding: '6px 8px', textAlign: 'right', color: '#9e9e9e', fontSize: 11 }}>—</td>
+            </tr>
+            <tr style={{ borderBottom: '1px solid #f7f5f2' }}>
+              <td style={{ padding: '10px 8px', fontWeight: 600, color: '#d42d35' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: '50%', background: '#d42d35' }} />
+                  High (burnout risk)
+                </span>
+              </td>
+              <td style={{ padding: '10px 8px', color: '#616161' }}>{`> ${highMinDraft}`}</td>
+              <td style={{ padding: '6px 8px', textAlign: 'right' }}>
+                <CapacityInput value={highMinDraft} disabled={!canEdit || saving || isLoading} onCommit={setHighMinDraft} />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'flex-end' }}>
+          {error && <span style={{ fontSize: 12, color: '#d42d35', fontWeight: 600 }}>{error}</span>}
+          {savedAt && !error && (
+            <span style={{ fontSize: 12, color: '#15803d', fontWeight: 600 }}>
+              Saved at {savedAt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
+          {canEdit && (
+            <button
+              onClick={handleSave}
+              disabled={saving || isLoading}
+              style={{
+                padding: '8px 18px', borderRadius: 128, border: 'none',
+                background: saving ? '#e8e8e8' : '#1f74b3',
+                fontSize: 13, fontWeight: 700,
+                color: saving ? '#9e9e9e' : 'white',
+                cursor: saving ? 'not-allowed' : 'pointer',
+                transition: 'all .15s',
+              }}
+            >
+              {saving ? 'Saving…' : 'Save capacity thresholds'}
+            </button>
+          )}
+        </div>
+        <div style={{ marginTop: 10, fontSize: 11, color: '#9e9e9e' }}>
+          Workload count = each agent's open + paused tasks across Zendesk, Jira, Workbench,
+          Onboarding, Offboarding (Amendments / Redlines have no per-agent assignee, so they
+          aren't counted here). The Briefing health score's Capacity factor (default 20%) reads
+          these thresholds directly.
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const CapacityInput = ({ value, disabled, onCommit }) => {
+  const [draft, setDraft] = useState(String(value ?? ''));
+  const [focused, setFocused] = useState(false);
+  const [bad, setBad] = useState(false);
+
+  useEffect(() => { if (!focused) setDraft(String(value ?? '')); }, [value, focused]);
+
+  const commit = () => {
+    setFocused(false);
+    const n = Number(draft);
+    if (!Number.isFinite(n) || n <= 0 || n > 1000) {
+      setBad(true);
+      setDraft(String(value ?? ''));
+      setTimeout(() => setBad(false), 1500);
+      return;
+    }
+    setBad(false);
+    if (Math.round(n) !== value) onCommit(Math.round(n));
+  };
+
+  return (
+    <input
+      type="number"
+      min={1}
+      max={1000}
+      value={draft}
+      disabled={disabled}
+      onChange={e => setDraft(e.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={commit}
+      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } }}
+      style={{
+        width: 90, textAlign: 'right',
+        padding: '6px 10px',
+        borderRadius: 8,
+        border: `1px solid ${bad ? '#d42d35' : '#e8e8e8'}`,
+        fontSize: 13, fontFamily: 'inherit', color: disabled ? '#9e9e9e' : '#1b1b1b',
+        background: disabled ? '#fafafa' : 'white',
+        outline: 'none',
+        transition: 'border-color .15s',
+      }}
     />
   );
 };

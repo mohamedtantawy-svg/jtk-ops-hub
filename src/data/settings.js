@@ -89,10 +89,14 @@ export const DEFAULT_SETTINGS = {
   // ── Briefing Dashboard ──
   briefing_show_digest_banner: true,
   briefing_show_health_score: true,
-  briefing_health_sla_weight: 40,
-  briefing_health_resolution_weight: 30,
+  // Health-score weights (sum to 100). 2026-05-01 spec: SLA dominates,
+  // response time + capacity equal-weight, resolution rate the smallest
+  // input — the team rarely "resolves" a Deel queue row in the same sense
+  // as a ticket, so it shouldn't dominate.
+  briefing_health_sla_weight: 50,
+  briefing_health_resolution_weight: 10,
   briefing_health_response_weight: 20,
-  briefing_health_capacity_weight: 10,
+  briefing_health_capacity_weight: 20,
   briefing_show_kpi_cards: true,
   briefing_show_admin_actions: true,
   briefing_show_executive_grid: true,

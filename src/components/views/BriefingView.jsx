@@ -12,6 +12,8 @@ import { useOffboardingData } from '../../hooks/useOffboardingData';
 import { useChangeRequestData } from '../../hooks/useChangeRequestData';
 import { useWorkbenchData } from '../../hooks/useWorkbenchData';
 import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
+import { useCapacitySettings } from '../../hooks/useCapacitySettings';
+import { elapsedBizMinutes } from '../../utils/bizTime';
 import {
   normalizeOnboarding,
   normalizePausedOnboarding,
@@ -379,7 +381,13 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   //     so per-row pill and aggregate stay in lockstep with Pilar's spec
   //     (Onb 7d, Paused 48h-from-pausedAt, Off 21d, Wb 48h, Redline 72h,
   //     Amend 24h, paused 48h universal).
-  const BASELINE_CAPACITY = 30;
+  // Capacity thresholds — Director-tunable via the Team-tab capacity editor.
+  // Default { lowMax: 40, highMin: 100 }. Anything in [lowMax, highMin] is
+  // "Good", below is "Low" (under-utilised), above is "High" (burnout risk).
+  const { capacity: capacitySettings } = useCapacitySettings();
+  const capLowMax  = Number.isFinite(capacitySettings?.lowMax)  ? capacitySettings.lowMax  : 40;
+  const capHighMin = Number.isFinite(capacitySettings?.highMin) ? capacitySettings.highMin : 100;
+  const BASELINE_CAPACITY = capHighMin; // 100% on the workload bar = highMin (burnout)
 
   const allAgents = MEMBERS.filter(m => m.role === 'agent' && scopeIds.includes(m.id)).map(m => {
     const memEmail = (m.email || '').toLowerCase();
@@ -430,42 +438,101 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                     : allAgents;
   const teamAvg = scopeAgents.length > 0 ? scopeAgents.reduce((s, a) => s + a.tc, 0) / scopeAgents.length : 0;
 
-  // Viewer's own workload — now anchored on the same absolute baseline so
-  // the "My Workload" tile and the Team Summary row agree by construction.
+  // Workload band classifier — director-tunable thresholds. The "Good"
+  // colour gradient runs green near `lowMax` to yellow as the count
+  // approaches `highMin`, so the team can spot agents trending toward
+  // burnout before they cross into red.
+  const classifyWorkload = (count) => {
+    if (count > capHighMin) {
+      return { wl: 'High',   wc: '#d42d35' };
+    }
+    if (count < capLowMax) {
+      return { wl: 'Low',    wc: '#1f74b3' };
+    }
+    // Inside [lowMax, highMin] — interpolate green → yellow.
+    const span = Math.max(1, capHighMin - capLowMax);
+    const t = Math.min(1, Math.max(0, (count - capLowMax) / span));
+    // Green (#29811e) at t=0, yellow (#ed8d00) at t=1.
+    const lerp = (a, b) => Math.round(a + (b - a) * t);
+    const r = lerp(0x29, 0xed), g = lerp(0x81, 0x8d), b = lerp(0x1e, 0x00);
+    return { wl: 'Good', wc: `rgb(${r}, ${g}, ${b})` };
+  };
+
+  // Viewer's own workload — anchored on `capHighMin` so 100% on the
+  // workload bar is the configured burnout threshold.
   const myCount = isOwnScope ? personal.length : total;
-  const wl = myCount > 50 ? 'High' : myCount < 20 ? 'Low' : 'Medium';
-  const wc = wl === 'High' ? '#d42d35' : wl === 'Medium' ? '#ed8d00' : '#29811e';
+  const myWlBand = classifyWorkload(myCount);
+  const wl = myWlBand.wl;
+  const wc = myWlBand.wc;
   const capPct = Math.min(100, Math.round((myCount / BASELINE_CAPACITY) * 100));
 
-  // Team-summary workload + capacity % (absolute baseline).
+  // Team-summary workload + capacity % using the same configured bands.
   const allAgentsWL = allAgents.map(m => {
-    const awl = m.tc > 50 ? 'High' : m.tc < 20 ? 'Low' : 'Medium';
-    const awc = awl === 'High' ? '#d42d35' : awl === 'Medium' ? '#ed8d00' : '#29811e';
+    const band = classifyWorkload(m.tc);
     const mCapPct = Math.min(200, Math.round((m.tc / BASELINE_CAPACITY) * 100));
-    return { ...m, wl: awl, wc: awc, capPct: mCapPct };
+    return { ...m, wl: band.wl, wc: band.wc, capPct: mCapPct };
   });
 
-  // ── Health Score (composite 0-100) — uses the 4 weights configured in Settings ─────────────────
-  // Each factor is scored 0-100, then combined using weights that together sum to 100:
-  //   • SLA Compliance ─ % of in-scope tasks that are NOT breached (higher is better)
-  //   • Resolution Rate ─ resolved / (resolved + open)
-  //   • Response Time ─ derived from avg ticket age (≤30m→100, ≤60m→80, ≤120m→60, ≤240m→40, else 20)
-  //   • Team Capacity ─ Low workload→100, Medium→60, High→25
-  // Defaults (SLA 40 · Res 30 · Resp 20 · Cap 10) are defined in data/settings.js and user-configurable.
-  const slaTotal=slaScope.length+onboardingRows.length;
-  const slaCompRate=slaTotal>0?Math.round(((slaTotal-breached.length)/slaTotal)*100):100;
-  const resRate=resolved+total>0?Math.round((resolved/(resolved+total))*100):0;
-  const avgResponseTime=scope.length>0?Math.round(scope.reduce((s,t)=>s+t.minutesAgo,0)/scope.length):0;
-  const respScore=avgResponseTime<=30?100:avgResponseTime<=60?80:avgResponseTime<=120?60:avgResponseTime<=240?40:20;
-  const wlScore=wl==='Low'?100:wl==='Medium'?60:25;
-  const wSLA=Number.isFinite(settings.briefing_health_sla_weight)?settings.briefing_health_sla_weight:40;
-  const wRes=Number.isFinite(settings.briefing_health_resolution_weight)?settings.briefing_health_resolution_weight:30;
-  const wResp=Number.isFinite(settings.briefing_health_response_weight)?settings.briefing_health_response_weight:20;
-  const wCap=Number.isFinite(settings.briefing_health_capacity_weight)?settings.briefing_health_capacity_weight:10;
-  const wSum=(wSLA+wRes+wResp+wCap)||100;
-  const healthScore=Math.round((slaCompRate*wSLA+resRate*wRes+respScore*wResp+wlScore*wCap)/wSum)||0;
-  const hColor=healthScore>=80?'#29811e':healthScore>=60?'#ed8d00':'#d42d35';
-  const hLabel=healthScore>=80?'Healthy':healthScore>=60?'Attention':'Critical';
+  // ── Health Score (composite 0-100) — 2026-05-01 spec ─────────────────────
+  // Default weights total 100 (SLA 50 · Resp 20 · Cap 20 · Res 10), all
+  // four configurable. Component math:
+  //   • SLA Compliance — % of NON-Jira tasks that are NOT breached, across
+  //     ZD + Onb + Off + Amend + Redline + Workbench. Spec: "exclude Jira
+  //     from the SLA calculation only and the breach count on home page".
+  //   • Response Time — Zendesk-only, biz-day elapsed since
+  //     `lastCustomerResponseAt`. Gradient: <24h biz → 100, <36h → 70,
+  //     <48h → 40, ≥48h → 20.
+  //   • Resolution Rate — Zendesk-only resolved / (resolved + open).
+  //   • Team Capacity — Low → 100, Good → 60, High → 25 using the
+  //     configured lowMax/highMin thresholds.
+  const slaPoolNonJira = slaScope.filter(t => t.source !== 'jira');
+  const breachedNonJira = breached.filter(t => t.source !== 'jira');
+  const slaPoolDeel = onboardingRows.length + offboardingRows.length
+    + amendmentRows.length + redlineRows.length + workbenchRows.length;
+  const breachedDeel = onboardingRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
+    + offboardingRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
+    + amendmentRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
+    + redlineRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
+    + workbenchRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length;
+  const slaTotal = slaPoolNonJira.length + slaPoolDeel;
+  const slaBreachTotal = breachedNonJira.length + breachedDeel;
+  const slaCompRate = slaTotal > 0 ? Math.round(((slaTotal - slaBreachTotal) / slaTotal) * 100) : 100;
+
+  // Zendesk-only resolution rate.
+  const zdScope = scope.filter(t => t.source === 'zendesk');
+  const zdResolved = tasks.filter(t => t.source === 'zendesk' && inScope(t) && t.status === 'resolved').length;
+  const zdResRate = (zdResolved + zdScope.length) > 0
+    ? Math.round((zdResolved / (zdResolved + zdScope.length)) * 100)
+    : 0;
+  const resRate = zdResRate;
+
+  // Zendesk-only response time, biz-day from last requester reply (falls
+  // back to updatedAt → createdAt). Skip 'waiting'/'resolved'.
+  const zdActive = zdScope.filter(t => t.status !== 'waiting' && t.status !== 'resolved');
+  const zdRespMins = zdActive.length > 0
+    ? Math.round(zdActive.reduce((sum, t) => {
+        const anchor = t.lastCustomerResponseAt || t.updatedAt || t.createdAt;
+        if (!anchor) return sum;
+        const ms = new Date(anchor).getTime();
+        if (!Number.isFinite(ms)) return sum;
+        return sum + elapsedBizMinutes(ms, Date.now());
+      }, 0) / zdActive.length)
+    : 0;
+  const avgResponseTime = zdRespMins;
+  const respScore = avgResponseTime < 24 * 60 ? 100
+    : avgResponseTime < 36 * 60 ? 70
+    : avgResponseTime < 48 * 60 ? 40
+    : 20;
+
+  const wlScore = wl === 'Low' ? 100 : wl === 'Good' ? 60 : 25;
+  const wSLA = Number.isFinite(settings.briefing_health_sla_weight) ? settings.briefing_health_sla_weight : 50;
+  const wRes = Number.isFinite(settings.briefing_health_resolution_weight) ? settings.briefing_health_resolution_weight : 10;
+  const wResp = Number.isFinite(settings.briefing_health_response_weight) ? settings.briefing_health_response_weight : 20;
+  const wCap = Number.isFinite(settings.briefing_health_capacity_weight) ? settings.briefing_health_capacity_weight : 20;
+  const wSum = (wSLA + wRes + wResp + wCap) || 100;
+  const healthScore = Math.round((slaCompRate*wSLA + resRate*wRes + respScore*wResp + wlScore*wCap) / wSum) || 0;
+  const hColor = healthScore >= 80 ? '#29811e' : healthScore >= 60 ? '#ed8d00' : '#d42d35';
+  const hLabel = healthScore >= 80 ? 'Healthy' : healthScore >= 60 ? 'Attention' : 'Critical';
 
   // ── Trends (static until historical data endpoint exists) ──────────
   const trend=()=>({dir:'\u2192',pct:0,c:'#bebebe'});;
@@ -487,10 +554,33 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const orgNew=orgOpen.filter(t=>t.status==='new').length;
   const orgIP=orgOpen.filter(t=>t.status==='in_progress').length;
   const orgWait=orgOpen.filter(t=>t.status==='waiting').length;
-  const orgSlaPool=orgOpen.filter(t=>t.status!=='waiting');
-  const orgBreach=orgSlaPool.filter(t=>{const s=slaInfo(t);return s&&s.breach;}).length+onbBreached.length;
-  const orgAtRisk=orgSlaPool.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;}).length+onbAtRisk.length;
-  const orgSlaComp=(orgSlaPool.length+onboardingRows.length)>0?Math.round((((orgSlaPool.length+onboardingRows.length)-(orgBreach))/(orgSlaPool.length+onboardingRows.length))*100):100;
+  // 2026-05-01 spec: exclude Jira from the SLA calculation and the breach
+  // count on the home page, but keep it counted everywhere else (Queue,
+  // Team, Analytics). orgSlaPool drops Jira tickets and any Q's paused
+  // tickets (slaInfo() already returns null for `waiting`).
+  const orgSlaPool = orgOpen.filter(t => t.status !== 'waiting' && t.source !== 'jira');
+  // Proportional at-risk band — same rule as the per-row pill.
+  const deelAtRisk = (rows) => rows.filter(r => {
+    if (r.slaBreachStatus === 'SLA_BREACHED') return false;
+    if (typeof r.slaRemaining !== 'number' || r.slaRemaining <= 0) return false;
+    const windowSec = Number.isFinite(r.slaWindowMs) && r.slaWindowMs > 0 ? r.slaWindowMs / 1000 : 24*60*60;
+    return r.slaRemaining < windowSec / 4;
+  });
+  const offBreached  = offboardingRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED');
+  const offAtRisk    = deelAtRisk(offboardingRows);
+  const amendBreach  = amendmentRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED');
+  const amendAtRisk  = deelAtRisk(amendmentRows);
+  const redBreach    = redlineRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED');
+  const redAtRisk    = deelAtRisk(redlineRows);
+  const wbBreach     = workbenchRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED');
+  const wbAtRisk     = deelAtRisk(workbenchRows);
+  const orgBreach = orgSlaPool.filter(t => { const s = slaInfo(t); return s && s.breach; }).length
+    + onbBreached.length + offBreached.length + amendBreach.length + redBreach.length + wbBreach.length;
+  const orgAtRisk = orgSlaPool.filter(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; }).length
+    + onbAtRisk.length + offAtRisk.length + amendAtRisk.length + redAtRisk.length + wbAtRisk.length;
+  const orgSlaTotal = orgSlaPool.length + onboardingRows.length + offboardingRows.length
+    + amendmentRows.length + redlineRows.length + workbenchRows.length;
+  const orgSlaComp = orgSlaTotal > 0 ? Math.round(((orgSlaTotal - orgBreach) / orgSlaTotal) * 100) : 100;
 
   // ── Sparkline (flat until historical data endpoint exists) ──────────
   const sparkData=Array.from({length:10},()=>total);
@@ -565,9 +655,19 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   );
 
   // ── SLA filter helpers for expandable SLA panels ──────────────────────
-  const orgBreachedTasks=[...orgSlaPool.filter(t=>{const s=slaInfo(t);return s&&s.breach;}),...onbBreached];
-  const orgAtRiskTasks=[...orgSlaPool.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;}),...onbAtRisk];
-  const orgWithinSlaTasks=orgSlaPool.filter(t=>{const s=slaInfo(t);return !s||(s&&s.ok);});
+  // SLA filter helpers — match the orgBreach / orgAtRisk math above so the
+  // expandable lists agree with the ring count. Jira is excluded from the
+  // pool per spec; Deel-source breaches/at-risk join in via the per-row
+  // `slaBreachStatus` and proportional band.
+  const orgBreachedTasks = [
+    ...orgSlaPool.filter(t => { const s = slaInfo(t); return s && s.breach; }),
+    ...onbBreached, ...offBreached, ...amendBreach, ...redBreach, ...wbBreach,
+  ];
+  const orgAtRiskTasks = [
+    ...orgSlaPool.filter(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; }),
+    ...onbAtRisk, ...offAtRisk, ...amendAtRisk, ...redAtRisk, ...wbAtRisk,
+  ];
+  const orgWithinSlaTasks = orgSlaPool.filter(t => { const s = slaInfo(t); return !s || (s && s.ok); });
 
   // ── Deel-style card wrapper ──────────────────────────────────────────
   const DeelCard=({children,style,...props})=>(
@@ -727,10 +827,10 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   How your {scopeLabel.toLowerCase()} is performing right now. Each factor is scored 0-100 and weighted below.
                 </div>
                 {[
-                  {label:'SLA Compliance',weight:wSLA,value:`${slaCompRate}%`,score:slaCompRate,sub:`${slaTotal-breached.length}/${slaTotal} on-time`,icon:'bi-shield-check'},
-                  {label:'Resolution Rate',weight:wRes,value:`${resRate}%`,score:resRate,sub:`${resolved} resolved · ${total} open`,icon:'bi-check2-all'},
-                  {label:'Avg Response Time',weight:wResp,value:avgResponseTime>=60?`${Math.round(avgResponseTime/60)}h ${avgResponseTime%60}m`:`${avgResponseTime}m`,score:respScore,sub:respScore>=80?'Fast':respScore>=60?'Normal':respScore>=40?'Slow':'Very slow',icon:'bi-clock-history'},
-                  {label:'Team Capacity',weight:wCap,value:wl,score:wlScore,sub:`${Math.round(capPct)}% of team avg`,icon:'bi-speedometer2'},
+                  {label:'SLA Compliance',weight:wSLA,value:`${slaCompRate}%`,score:slaCompRate,sub:`${Math.max(0, slaTotal - slaBreachTotal)}/${slaTotal} on-time (excl. Jira)`,icon:'bi-shield-check'},
+                  {label:'Resolution Rate',weight:wRes,value:`${resRate}%`,score:resRate,sub:`${zdResolved} resolved · ${zdScope.length} open · Zendesk`,icon:'bi-check2-all'},
+                  {label:'Avg Response Time',weight:wResp,value:avgResponseTime>=60?`${Math.round(avgResponseTime/60)}h ${avgResponseTime%60}m`:`${avgResponseTime}m`,score:respScore,sub:`Zendesk biz-day · ${respScore>=80?'Fast':respScore>=60?'Normal':respScore>=40?'Slow':'Very slow'}`,icon:'bi-clock-history'},
+                  {label:'Team Capacity',weight:wCap,value:wl,score:wlScore,sub:`${myCount} tasks · ${Math.round(capPct)}% of ${capHighMin}`,icon:'bi-speedometer2'},
                 ].map(row=>{
                   const rc=row.score>=80?'#29811e':row.score>=60?'#ed8d00':'#d42d35';
                   return(
@@ -763,7 +863,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
 
             {/* KPI Summary Cards */}
             {settings.briefing_show_kpi_cards!==false&&<div style={{display:'flex',alignItems:'center',gap:'var(--space-4, 16px)',flexShrink:0}}>
-              <KpiCard label="Workload" value={wl==='Medium'?'Good':wl} color={wc} icon="bi-speedometer2" clickable onClick={()=>setView('my-queue')}/>
+              <KpiCard label="Workload" value={wl} color={wc} icon="bi-speedometer2" clickable onClick={()=>setView('my-queue')}/>
               <KpiCard label="SLA Comp %" value={`${slaCompRate}%`} color={slaCompRate>=80?'#29811e':slaCompRate>=60?'#ed8d00':'#d42d35'} icon="bi-shield-check" clickable onClick={()=>setView('analytics')}/>
               <KpiCard label="Resolved" value={resolved} color="#29811e" icon="bi-check-circle-fill" clickable onClick={()=>setView('my-queue')}/>
             </div>}
@@ -974,7 +1074,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 </div>
                 <div style={{flex:1}}>
                   {[
-                    {key:'within',label:'Within SLA',count:orgOpen.length-orgBreach,color:'#29811e',items:orgWithinSlaTasks},
+                    {key:'within',label:'Within SLA',count:Math.max(0, orgSlaTotal - orgBreach - orgAtRisk),color:'#29811e',items:orgWithinSlaTasks},
                     {key:'breached',label:'Breached',count:orgBreach,color:orgBreach>0?'#d42d35':'#29811e',items:orgBreachedTasks},
                     {key:'atrisk',label:'At Risk',count:orgAtRisk,color:orgAtRisk>0?'#ed5e2a':'#29811e',items:orgAtRiskTasks},
                   ].map((row,ri)=>{
@@ -999,12 +1099,16 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               <div style={{borderTop:'1px solid #f0f0f0',paddingTop:14}}>
                 <div style={{fontSize:13,fontWeight:600,color:'#9e9e9e',textTransform:'none',letterSpacing:'normal',marginBottom:8}}>Overall Capacity</div>
                 <div style={{display:'flex',gap:8}}>
-                  {['Low','Medium','High'].map(lv=>{
-                    const cnt=allAgentsWL.filter(a=>a.wl===lv).length;
-                    const clr=lv==='High'?'#d42d35':lv==='Medium'?'#ed8d00':'#29811e';
+                  {[
+                    { lv: 'Low',  clr: '#1f74b3', desc: `< ${capLowMax}` },
+                    { lv: 'Good', clr: '#29811e', desc: `${capLowMax}–${capHighMin}` },
+                    { lv: 'High', clr: '#d42d35', desc: `> ${capHighMin}` },
+                  ].map(({ lv, clr, desc })=>{
+                    const cnt = allAgentsWL.filter(a => a.wl === lv).length;
                     return(<div key={lv} style={{flex:1,textAlign:'center',padding:'8px 4px',borderRadius:10,background:clr+'08',border:`1px solid ${clr}15`}}>
                       <div style={{fontSize:24,fontWeight:700,color:clr,fontVariantNumeric:'tabular-nums'}}>{cnt}</div>
                       <div style={{fontSize:10,color:clr,fontWeight:600}}>{lv}</div>
+                      <div style={{fontSize:9,color:'#9e9e9e',marginTop:1}}>{desc}</div>
                     </div>);
                   })}
                 </div>
