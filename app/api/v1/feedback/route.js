@@ -23,12 +23,71 @@ const ALLOWED_TYPE = new Set(['bug', 'improvement', 'question']);
 // typically paste ~50–500 KB images, so 3 MB of base64 (~2.2 MB raw) is
 // plenty.
 const MAX_SCREENSHOT_BYTES = 3 * 1024 * 1024;
+// Per-attachment cap. Images are usually well under this thanks to client-
+// side compression; videos (short clips) are larger so we allow more headroom.
+const MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024;
+const MAX_ATTACHMENTS = 5;
+const MAX_TOTAL_PAYLOAD_BYTES = 30 * 1024 * 1024;
+const ATTACHMENT_KINDS = new Set(['image', 'video']);
+
+// Normalise + sanity-check the `attachments` payload before INSERT. Drops any
+// entry that doesn't carry the bare minimum (kind + dataUri starting with the
+// matching MIME prefix). Throws when an entry is too large or the array would
+// exceed the per-row cap.
+function sanitiseAttachments(raw) {
+  if (raw == null) return [];
+  if (!Array.isArray(raw)) throw new Error('attachments must be an array');
+  if (raw.length > MAX_ATTACHMENTS) {
+    throw Object.assign(new Error(`Too many attachments (max ${MAX_ATTACHMENTS})`), { status: 413 });
+  }
+  let total = 0;
+  const out = [];
+  for (const a of raw) {
+    if (!a || typeof a !== 'object') continue;
+    const kind = ATTACHMENT_KINDS.has(a.kind) ? a.kind : null;
+    const dataUri = typeof a.dataUri === 'string' ? a.dataUri : null;
+    if (!kind || !dataUri) continue;
+    const expectedPrefix = kind === 'image' ? 'data:image/' : 'data:video/';
+    if (!dataUri.startsWith(expectedPrefix)) continue;
+    if (dataUri.length > MAX_ATTACHMENT_BYTES) {
+      throw Object.assign(
+        new Error(`Attachment "${a.name || kind}" too large (max ${Math.round(MAX_ATTACHMENT_BYTES / 1024 / 1024)} MB)`),
+        { status: 413 },
+      );
+    }
+    total += dataUri.length;
+    if (total > MAX_TOTAL_PAYLOAD_BYTES) {
+      throw Object.assign(
+        new Error(`Total attachment payload too large (max ${Math.round(MAX_TOTAL_PAYLOAD_BYTES / 1024 / 1024)} MB)`),
+        { status: 413 },
+      );
+    }
+    out.push({
+      kind,
+      dataUri,
+      name: typeof a.name === 'string' ? a.name.slice(0, 200) : null,
+    });
+  }
+  return out;
+}
 
 function clean(str, max) {
   if (typeof str !== 'string') return null;
   const t = str.trim();
   if (!t) return null;
   return max && t.length > max ? t.slice(0, max) : t;
+}
+
+// Read-side compat: legacy rows have `screenshot` populated and `attachments`
+// empty. Surface the screenshot as a synthetic image attachment so the client
+// only ever consults the `attachments` array.
+function buildAttachments(row) {
+  const stored = Array.isArray(row.attachments) ? row.attachments : [];
+  if (stored.length > 0) return stored;
+  if (row.screenshot) {
+    return [{ kind: 'image', dataUri: row.screenshot, name: 'screenshot' }];
+  }
+  return [];
 }
 
 function rowToShape(row) {
@@ -38,6 +97,7 @@ function rowToShape(row) {
     issue: row.issue,
     proposedResolution: row.proposed_resolution,
     screenshot: row.screenshot,
+    attachments: buildAttachments(row),
     status: row.status,
     priority: row.priority,
     category: row.category,
@@ -152,6 +212,9 @@ export async function POST(req) {
       { status: 413 },
     );
   }
+  let attachments;
+  try { attachments = sanitiseAttachments(body.attachments); }
+  catch (e) { return NextResponse.json({ error: e.message }, { status: e.status || 400 }); }
   // Whitelist enums; default to safe values.
   const priority = ALLOWED_PRIORITY.has(body.priority) ? body.priority : 'medium';
   const type = ALLOWED_TYPE.has(body.type) ? body.type : 'bug';
@@ -161,11 +224,11 @@ export async function POST(req) {
   try {
     const { rows } = await query(
       `INSERT INTO feedback_requests
-         (title, issue, proposed_resolution, screenshot, priority, type, category,
+         (title, issue, proposed_resolution, screenshot, attachments, priority, type, category,
           submitter_id, submitter_email, submitter_name)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
-      [title, issue, proposedResolution, screenshot, priority, type, category,
+      [title, issue, proposedResolution, screenshot, JSON.stringify(attachments), priority, type, category,
        submitterId, user.email, user.name || null],
     );
     const created = rows[0];

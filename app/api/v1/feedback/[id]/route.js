@@ -19,6 +19,18 @@ const ALLOWED_PRIORITY = new Set(['low', 'medium', 'high', 'critical']);
 const ALLOWED_TYPE = new Set(['bug', 'improvement', 'question']);
 const TERMINAL_STATUS = new Set(['done', 'wont_do', 'duplicate']);
 
+// Mirror buildAttachments from /feedback/route.js — legacy rows fall back to
+// the single `screenshot` column so old submissions render alongside new
+// multi-attachment ones.
+function buildAttachments(row) {
+  const stored = Array.isArray(row.attachments) ? row.attachments : [];
+  if (stored.length > 0) return stored;
+  if (row.screenshot) {
+    return [{ kind: 'image', dataUri: row.screenshot, name: 'screenshot' }];
+  }
+  return [];
+}
+
 function rowToShape(row) {
   return {
     id: row.id,
@@ -26,6 +38,7 @@ function rowToShape(row) {
     issue: row.issue,
     proposedResolution: row.proposed_resolution,
     screenshot: row.screenshot,
+    attachments: buildAttachments(row),
     status: row.status,
     priority: row.priority,
     category: row.category,

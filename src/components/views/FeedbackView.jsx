@@ -93,9 +93,10 @@ function toMarkdown(item) {
     lines.push('### Proposed resolution');
     lines.push(item.proposedResolution);
   }
-  if (item.screenshot) {
+  const attCount = Array.isArray(item.attachments) ? item.attachments.length : (item.screenshot ? 1 : 0);
+  if (attCount > 0) {
     lines.push('');
-    lines.push('_(Screenshot attached — open the request to view.)_');
+    lines.push(`_(${attCount} attachment${attCount === 1 ? '' : 's'} — open the request to view.)_`);
   }
   if (item.resolutionNote) {
     lines.push('');
@@ -501,14 +502,40 @@ function FeedbackRow({ item, expanded, onToggle, onVote, onStatusChange, onPrior
           </div>
         </div>
 
-        {/* Screenshot thumb (right rail) */}
-        {item.screenshot && !expanded && (
-          <div style={{ flexShrink: 0, alignSelf: 'flex-start' }}>
-            <button onClick={onToggle} style={thumbBtn} aria-label="View screenshot">
-              <img src={item.screenshot} alt="Screenshot" style={{ width: 92, height: 64, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border)' }} />
-            </button>
-          </div>
-        )}
+        {/* Attachment thumb (right rail) — first image if any, else first
+            video frame placeholder. "+N" badge appears when more than one
+            attachment is present so the row signals there's more inside. */}
+        {(() => {
+          if (expanded) return null;
+          const atts = Array.isArray(item.attachments) && item.attachments.length > 0
+            ? item.attachments
+            : (item.screenshot ? [{ kind: 'image', dataUri: item.screenshot, name: 'screenshot' }] : []);
+          if (atts.length === 0) return null;
+          const first = atts.find(a => a.kind === 'image') || atts[0];
+          const moreCount = atts.length - 1;
+          return (
+            <div style={{ flexShrink: 0, alignSelf: 'flex-start', position: 'relative' }}>
+              <button onClick={onToggle} style={thumbBtn} aria-label={`View ${atts.length} attachment${atts.length === 1 ? '' : 's'}`}>
+                {first.kind === 'image' ? (
+                  <img src={first.dataUri} alt={first.name || 'Attachment'} style={{ width: 92, height: 64, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border)' }} />
+                ) : (
+                  <div style={{ width: 92, height: 64, borderRadius: 8, border: '1px solid var(--border)', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white' }}>
+                    <i className="bi-camera-video-fill" style={{ fontSize: 18 }} />
+                  </div>
+                )}
+              </button>
+              {moreCount > 0 && (
+                <span style={{
+                  position: 'absolute', top: 4, right: 4,
+                  background: 'rgba(0,0,0,0.7)', color: 'white',
+                  borderRadius: 128, padding: '1px 7px',
+                  fontSize: 10, fontWeight: 700,
+                  pointerEvents: 'none',
+                }}>+{moreCount}</span>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {/* Expanded detail panel */}
@@ -550,14 +577,40 @@ function ExpandedDetail({ item, isPriv, onStatusChange, onPriorityChange, onAssi
           </>
         )}
 
-        {item.screenshot && (
-          <div style={{ marginTop: 14 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>Screenshot</div>
-            <a href={item.screenshot} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-block', maxWidth: '100%' }}>
-              <img src={item.screenshot} alt="Screenshot" style={{ maxWidth: '100%', borderRadius: 10, border: '1px solid var(--border)' }} />
-            </a>
-          </div>
-        )}
+        {(() => {
+          // Prefer the multi-attachment array; fall back to the legacy
+          // single-screenshot column for rows submitted before this feature.
+          const atts = Array.isArray(item.attachments) && item.attachments.length > 0
+            ? item.attachments
+            : (item.screenshot ? [{ kind: 'image', dataUri: item.screenshot, name: 'screenshot' }] : []);
+          if (atts.length === 0) return null;
+          const label = atts.length === 1
+            ? (atts[0].kind === 'video' ? 'Clip' : 'Screenshot')
+            : `Attachments (${atts.length})`;
+          return (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>{label}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
+                {atts.map((a, idx) => (
+                  <div key={idx} style={{ minWidth: 0 }}>
+                    {a.kind === 'video' ? (
+                      <video src={a.dataUri} controls preload="metadata"
+                        style={{ display: 'block', width: '100%', maxHeight: 320, borderRadius: 10, border: '1px solid var(--border)', background: '#000' }} />
+                    ) : (
+                      <a href={a.dataUri} target="_blank" rel="noopener noreferrer" style={{ display: 'block' }}>
+                        <img src={a.dataUri} alt={a.name || `Attachment ${idx + 1}`}
+                          style={{ display: 'block', width: '100%', maxHeight: 320, objectFit: 'contain', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface-2)' }} />
+                      </a>
+                    )}
+                    {a.name && (
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Right: action panel */}
