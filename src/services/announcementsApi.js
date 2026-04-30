@@ -71,10 +71,14 @@ export async function fetchComments(announcementId) {
   return apiFetch(`/announcements/${announcementId}/comments`);
 }
 
-export async function addComment(announcementId, { body, parentId }) {
+export async function addComment(announcementId, { body, parentId, mentionEmails } = {}) {
   return apiFetch(`/announcements/${announcementId}/comments`, {
     method: 'POST',
-    body: JSON.stringify({ body, parentId: parentId || null }),
+    body: JSON.stringify({
+      body,
+      parentId: parentId || null,
+      mentionEmails: Array.isArray(mentionEmails) ? mentionEmails : [],
+    }),
   });
 }
 

@@ -489,19 +489,24 @@ export function useAnnouncements({ toastRef } = {}) {
     }
   }, [isOnline, comms]);
 
-  const addCommentFn = useCallback(async (id, body, parentId) => {
+  const addCommentFn = useCallback(async (id, body, parentId, mentionEmails) => {
+    const safeMentions = Array.isArray(mentionEmails) ? mentionEmails : [];
     const newComment = {
       id: `cmt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       body,
       parentId: parentId || null,
       authorId: null, // caller will set user info
       authorName: '',
+      mentionEmails: safeMentions,
       createdAt: new Date().toISOString(),
     };
     if (isOnline) {
       try {
-        const created = await apiAddComment(id, { body, parentId });
-        if (created) { newComment.id = created.id || newComment.id; }
+        const created = await apiAddComment(id, { body, parentId, mentionEmails: safeMentions });
+        if (created) {
+          newComment.id = created.id || newComment.id;
+          if (Array.isArray(created.mentionEmails)) newComment.mentionEmails = created.mentionEmails;
+        }
       } catch (e) { console.warn('[announcements] API error:', e.message); }
     }
     // Return the comment so the caller can enrich it with user info
