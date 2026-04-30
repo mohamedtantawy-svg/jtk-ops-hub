@@ -88,6 +88,17 @@ const Queue = ({ user, tasks, subFilter }) => {
   const [fJiraRaised, setFJiraRaised] = useState(saved?.fJiraRaised !== undefined ? !!saved.fJiraRaised : false);
   const [fUnassigned, setFUnassigned] = useState(saved?.fUnassigned || false);
   const [workSource, setWorkSource] = useState(null);
+  // ── Column sort for the ZD/Jira table ─────────────────────────────────────
+  // Default = SLA tier (Breached → At-Risk → On Track), oldest-first within
+  // each tier. Clicking a column header switches primary sort to that column;
+  // the SLA tier+age comparator stays as a tie-break so a "by Country" view
+  // still surfaces the most-urgent rows first inside each country bucket.
+  const [sortCol, setSortCol] = useState('sla');
+  const [sortDir, setSortDir] = useState('asc');
+  const toggleSort = useCallback((col) => {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('asc'); }
+  }, [sortCol]);
 
   const perms = useContext(PermissionsContext);
   const settings = useContext(SettingsContext);
@@ -186,16 +197,61 @@ const Queue = ({ user, tasks, subFilter }) => {
     if (fSla === 'breached') _vis = _vis.filter(t => { const s = slaInfo(t); return s && s.breach; });
     _vis = _vis.filter(t => !t.isCalendarBooking);
     if (search) { const sl = search.toLowerCase(); _vis = _vis.filter(t => t.subject.toLowerCase().includes(sl) || t.id.toLowerCase().includes(sl) || t.type.toLowerCase().includes(sl)); }
-    // Fixed sort: SLA-urgency-first (most urgent at top, breached before at-risk
-    // before ok), newest-first as tiebreaker.
+
+    // SLA tier for tickets — 0=breached, 1=at-risk, 2=on-track. Mirrors the
+    // SLA pill counts so this sort and the pill counts agree on which row
+    // is in which tier.
+    const tier = (t) => {
+      const s = slaInfo(t);
+      if (!s) return 2;
+      if (s.breach) return 0;
+      if (!s.ok && !s.breach) return 1;
+      return 2;
+    };
+    const ticketCreatedMs = (t) => {
+      if (t.createdAt) {
+        const ms = new Date(t.createdAt).getTime();
+        if (Number.isFinite(ms)) return ms;
+      }
+      // Fallback: derive a creation timestamp from minutesAgo so rows without
+      // an explicit createdAt still slot into the oldest-first secondary sort.
+      if (Number.isFinite(t.minutesAgo)) return Date.now() - t.minutesAgo * 60000;
+      return Number.POSITIVE_INFINITY;
+    };
+    // Tier (asc) → oldest first within tier. Used both as the SLA-column sort
+    // and as the universal tie-break so a non-SLA primary still surfaces the
+    // most-urgent row first inside each group.
+    const compareTierThenAge = (a, b) => {
+      const ta = tier(a), tb = tier(b);
+      if (ta !== tb) return ta - tb;
+      return ticketCreatedMs(a) - ticketCreatedMs(b);
+    };
+    const getColVal = (t) => {
+      switch (sortCol) {
+        case 'source':   return (t.source || '').toLowerCase();
+        case 'subject':  return (t.subject || '').toLowerCase();
+        case 'function': return (FUNCTIONS[t.type]?.label || t.type || '').toLowerCase();
+        case 'country':  return (t.country || '').toLowerCase();
+        case 'assignee': return ((resolveAssignee(t).name) || '').toLowerCase();
+        case 'received': return ticketCreatedMs(t);
+        case 'status':   return (t.status || '').toLowerCase();
+        default: return 0; // 'sla' handled separately
+      }
+    };
+
     const sortArr = (arr) => {
-      if (settings.sla_enabled === false) return [...arr].sort((a, b) => a.minutesAgo - b.minutesAgo);
+      if (settings.sla_enabled === false) {
+        return [...arr].sort((a, b) => ticketCreatedMs(a) - ticketCreatedMs(b));
+      }
+      const dir = sortDir === 'desc' ? -1 : 1;
+      if (sortCol === 'sla') {
+        return [...arr].sort((a, b) => compareTierThenAge(a, b) * dir);
+      }
       return [...arr].sort((a, b) => {
-        const sa = slaInfo(a), sb = slaInfo(b);
-        if (sa?.breach && !sb?.breach) return -1; if (!sa?.breach && sb?.breach) return 1;
-        if (sa && !sb) return -1; if (!sa && sb) return 1;
-        if (sa && sb) { const limA = SLA_MINS[a.type] || 1440, limB = SLA_MINS[b.type] || 1440; return (limA - (a.minutesSinceLastResponse ?? a.minutesAgo)) - (limB - (b.minutesSinceLastResponse ?? b.minutesAgo)); }
-        return (b.minutesSinceLastResponse ?? b.minutesAgo) - (a.minutesSinceLastResponse ?? a.minutesAgo);
+        const av = getColVal(a), bv = getColVal(b);
+        if (av < bv) return -1 * dir;
+        if (av > bv) return 1 * dir;
+        return compareTierThenAge(a, b);
       });
     };
     const _sorted = sortArr(_vis.filter(t => t.status !== 'resolved' && t.status !== 'waiting'));
@@ -203,7 +259,7 @@ const Queue = ({ user, tasks, subFilter }) => {
     const _done = _vis.filter(t => t.status === 'resolved');
     const _all = [..._sorted, ..._snoozed, ..._done];
     return { baseVis: _baseVis, visPreSla: _visPreSla, active: _sorted, snoozed: _snoozed, done: _done, all: _all };
-  }, [ns, user, fTool, fStatus, fUnassigned, fSla, search, settings.sla_enabled, passesJiraRoleFilter]);
+  }, [ns, user, fTool, fStatus, fUnassigned, fSla, search, settings.sla_enabled, passesJiraRoleFilter, sortCol, sortDir]);
 
   const jiraRoleFilterActive = fJiraActionable !== true || fJiraRaised !== false;
   const hasActiveFilters = useMemo(() => !!(fTool || fStatus.length > 0 || fSla || fUnassigned || search || jiraRoleFilterActive), [fTool, fStatus, fSla, fUnassigned, search, jiraRoleFilterActive]);
@@ -551,7 +607,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             emptyIcon="bi-person-plus"
             emptyLabel="No onboarding tasks"
             emptySubLabel="Nothing action-needed or paused"
-            sortDefault="oldest"
+            sortDefault="sla"
             showPausedSla
             hideStatusPills
             showClient
@@ -587,7 +643,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             emptyIcon="bi-pencil-square"
             emptyLabel="No amendments"
             emptySubLabel="Nothing action-needed or paused"
-            sortDefault="oldest"
+            sortDefault="sla"
             showPausedSla
             showClient
             hideStatusPills
@@ -607,7 +663,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             emptyIcon="bi-file-earmark-diff"
             emptyLabel="No actionable redlines"
             emptySubLabel="All redlines are handled"
-            sortDefault="oldest"
+            sortDefault="sla"
             showClient
             hideStatusPills
             hideUpdated
@@ -627,7 +683,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             emptyIcon="bi-grid-3x3-gap"
             emptyLabel="No workbench tasks"
             emptySubLabel="All HRX Operations tasks are processed"
-            sortDefault="oldest"
+            sortDefault="sla"
             showType
             hideUpdated
             hideContract
@@ -673,14 +729,16 @@ const Queue = ({ user, tasks, subFilter }) => {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }} role="grid" aria-label="Task queue">
               <thead>
                 <tr style={{ background: '#f5f4f2', position: 'sticky', top: 0, zIndex: 2 }}>
-                  <th scope="col" style={{ ...thStyle, width: 80 }}>Source</th>
-                  <th scope="col" style={{ ...thStyle, textAlign: 'left', minWidth: 200 }}>Subject</th>
-                  <th scope="col" style={{ ...thStyle, width: 90 }}>Function</th>
-                  <th scope="col" style={{ ...thStyle, width: 50 }}>Country</th>
-                  <th scope="col" style={{ ...thStyle, width: 80 }}>Assignee</th>
-                  <th scope="col" style={{ ...thStyle, width: 68 }}>Received</th>
-                  {settings.sla_enabled !== false && <th scope="col" style={{ ...thStyle, width: 60 }}>SLA</th>}
-                  <th scope="col" style={{ ...thStyle, width: 90 }}>Status</th>
+                  <SortableTh col="source"   label="Source"   width={80}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableTh col="subject"  label="Subject"  minWidth={200} align="left" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableTh col="function" label="Function" width={90}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableTh col="country"  label="Country"  width={50}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableTh col="assignee" label="Assignee" width={80}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableTh col="received" label="Received" width={68}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  {settings.sla_enabled !== false && (
+                    <SortableTh col="sla" label="SLA" width={60} sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  )}
+                  <SortableTh col="status"   label="Status"   width={90}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <th scope="col" style={{ ...thStyle, width: 60 }}>Link</th>
                 </tr>
               </thead>
@@ -771,6 +829,47 @@ const QueueRow = memo(({ task, slaAgeClass, settings }) => {
   );
 });
 QueueRow.displayName = 'QueueRow';
+
+// ── Sortable table header — used by the ZD/Jira table to give every column
+// a click-to-sort affordance. Pairs with the `sortCol` / `sortDir` state in
+// the parent: clicking the same column toggles asc/desc, clicking a fresh
+// column resets to asc. The chevron pair indicates the active column +
+// direction; both stay light grey on inactive headers so users can see
+// every column is sortable without the row turning into a row of arrows.
+const SortableTh = memo(function SortableTh({ col, label, width, minWidth, align, sortCol, sortDir, onSort }) {
+  const active = sortCol === col;
+  const sortState = active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
+  const onKey = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSort(col); }
+  };
+  return (
+    <th
+      scope="col"
+      role="columnheader"
+      aria-sort={sortState}
+      onClick={() => onSort(col)}
+      onKeyDown={onKey}
+      tabIndex={0}
+      style={{
+        ...thStyle,
+        ...(width ? { width } : null),
+        ...(minWidth ? { minWidth } : null),
+        ...(align ? { textAlign: align } : null),
+        cursor: 'pointer',
+        userSelect: 'none',
+      }}
+      aria-label={`Sort by ${label}${active ? `, currently ${sortState}` : ''}`}
+    >
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        {label}
+        <span aria-hidden="true" style={{ display: 'inline-flex', flexDirection: 'column', lineHeight: 1, gap: 0, fontSize: 7, marginTop: -1 }}>
+          <i className="bi-caret-up-fill" style={{ color: active && sortDir === 'asc' ? '#1b1b1b' : '#ccc' }} />
+          <i className="bi-caret-down-fill" style={{ color: active && sortDir === 'desc' ? '#1b1b1b' : '#ccc', marginTop: -3 }} />
+        </span>
+      </span>
+    </th>
+  );
+});
 
 // ── Multi-select filter dropdown (Status) ──
 const MultiFilterDropdown = memo(({ icon, label, selected = [], options, onChange, activeColor = '#1f74b3', searchable }) => {

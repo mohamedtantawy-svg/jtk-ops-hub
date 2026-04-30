@@ -92,6 +92,35 @@ function offboardingUrgency(row) {
   return                              { tier: 6, rank: -(endDays ?? 999) }; // normal: earliest end date first
 }
 
+// ── Generic SLA tier ────────────────────────────────────────────────────────
+// 0 = breached, 1 = at-risk, 2 = on-track. Uses the same proportional band
+// Queue.jsx applies (slaWindowMs / 4) so the per-row pill, the SLA pill
+// counts, and this sort tie-break never disagree about which row is in
+// which tier. Rows without slaRemaining fall into "on-track" so a sparse
+// upstream payload sorts to the bottom rather than the top.
+function slaTier(row) {
+  if (row?.slaBreachStatus === 'SLA_BREACHED') return 0;
+  if (typeof row?.slaRemaining === 'number' && row.slaRemaining <= 0) return 0;
+  if (typeof row?.slaRemaining === 'number' && row.slaRemaining > 0) {
+    const windowSec = Number.isFinite(row.slaWindowMs) && row.slaWindowMs > 0
+      ? row.slaWindowMs / 1000
+      : 24 * 60 * 60;
+    if (row.slaRemaining < windowSec / 4) return 1;
+  }
+  return 2;
+}
+function createdMs(row) {
+  return row?.createdAt ? new Date(row.createdAt).getTime() : Number.POSITIVE_INFINITY;
+}
+// Default tie-break used by every non-SLA column sort: same SLA tier groups
+// together, oldest within each tier. Spec: "Sort by country first, then
+// organize the tasks based on SLA old to new."
+function compareTierThenAge(a, b) {
+  const ta = slaTier(a), tb = slaTier(b);
+  if (ta !== tb) return ta - tb;
+  return createdMs(a) - createdMs(b);
+}
+
 /**
  * SourceTable renders a flat table of normalized rows.
  *
@@ -133,8 +162,13 @@ export default function SourceTable({
   hideContract = false,      // hide the "Contract" column (redlines don't always have one)
 }) {
   const [searchTerm, setSearchTerm] = useState('');
-  // Column-based sorting: col name + direction
-  const defaultCol = sortDefault === 'endDate' ? 'endDate' : sortDefault === 'startDate' ? 'startDate' : sortDefault === 'sla' ? 'sla' : 'createdAt';
+  // Default sort = SLA tier oldest-first across every panel — the per-PR-2
+  // spec ("All Qs default sort should be by SLA old to new"). Callers can
+  // still override via sortDefault prop, but this keeps the unified default.
+  const defaultCol = sortDefault === 'endDate' ? 'endDate'
+    : sortDefault === 'startDate' ? 'startDate'
+    : sortDefault === 'createdAt' ? 'createdAt'
+    : 'sla';
   const defaultDir = sortDefault === 'newest' ? 'desc' : 'asc';
   const [sortCol, setSortCol] = useState(defaultCol);
   const [sortDir, setSortDir] = useState(defaultDir); // 'asc' | 'desc'
@@ -166,24 +200,30 @@ export default function SourceTable({
     return r;
   }, [rows, searchTerm, statusFilter]);
 
-  // Sort by column + direction
+  // Sort by column + direction.
+  // Spec rule: when the user picks a non-SLA column, primary sort is that
+  // column; secondary sort is SLA tier (Breached → At-Risk → On Track) with
+  // the oldest row first inside each tier. Default SLA sort is the same
+  // tier+oldest rule. For offboarding the SLA column keeps the smart end-
+  // date weighting (offboardingUrgency) since end-date proximity is part
+  // of the queue's idiomatic SLA. asc click flips to desc on second click.
   const sorted = useMemo(() => {
     const arr = [...filtered];
     const dir = sortDir === 'desc' ? -1 : 1;
 
-    // Smart offboarding SLA sort: combines SLA age (type-aware) + end-date
-    // proximity via tiered urgency. When the user clicks the SLA column on
-    // offboarding rows, we use this instead of simple age sorting.
-    const isOffboardingSla = sortCol === 'sla' && arr.some(r => r.source === 'offboarding');
-    if (isOffboardingSla) {
-      // Most urgent first by default (asc click → most urgent; desc → least).
-      const mult = dir;
-      return arr.sort((a, b) => {
-        const au = a.source === 'offboarding' ? offboardingUrgency(a) : { tier: 99, rank: 0 };
-        const bu = b.source === 'offboarding' ? offboardingUrgency(b) : { tier: 99, rank: 0 };
-        if (au.tier !== bu.tier) return (au.tier - bu.tier) * mult;
-        return (bu.rank - au.rank) * mult; // higher rank = more urgent
-      });
+    // SLA column sort
+    if (sortCol === 'sla') {
+      const isOffboardingSla = arr.some(r => r.source === 'offboarding');
+      if (isOffboardingSla) {
+        return arr.sort((a, b) => {
+          const au = a.source === 'offboarding' ? offboardingUrgency(a) : { tier: 99, rank: 0 };
+          const bu = b.source === 'offboarding' ? offboardingUrgency(b) : { tier: 99, rank: 0 };
+          if (au.tier !== bu.tier) return (au.tier - bu.tier) * dir;
+          return (bu.rank - au.rank) * dir; // higher rank = more urgent
+        });
+      }
+      // Generic queues — tier + oldest, flipped by direction.
+      return arr.sort((a, b) => compareTierThenAge(a, b) * dir);
     }
 
     const getVal = (row) => {
@@ -198,11 +238,6 @@ export default function SourceTable({
         case 'createdAt': return row.createdAt ? new Date(row.createdAt).getTime() : Infinity;
         case 'updatedAt': return row.updatedAt ? new Date(row.updatedAt).getTime() : 0;
         case 'status':    return (row.status?.label || '').toLowerCase();
-        case 'sla': {
-          if (row.slaRemaining != null) return row.slaRemaining;
-          if (row.createdAt) return -(Date.now() - new Date(row.createdAt).getTime());
-          return 0;
-        }
         default: return 0;
       }
     };
@@ -212,7 +247,11 @@ export default function SourceTable({
       const bVal = getVal(b);
       if (aVal < bVal) return -1 * dir;
       if (aVal > bVal) return 1 * dir;
-      return 0;
+      // Tie-break on the SLA tier + age — keeps grouped sorts (Country,
+      // Status, Assignee, etc.) ordered by urgency within each group so a
+      // "by country" view still surfaces the oldest breached rows first
+      // inside each country bucket.
+      return compareTierThenAge(a, b);
     });
   }, [filtered, sortCol, sortDir]);
 
