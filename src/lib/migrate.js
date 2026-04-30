@@ -747,9 +747,10 @@ CREATE INDEX IF NOT EXISTS idx_user_notifications_source
 -- The original feedback_requests.screenshot was a single TEXT column holding
 -- one base64 data URI. Submitters needed to paste multiple screenshots OR a
 -- short video clip to explain repro steps that span more than one frame.
--- attachments is a JSONB array of { kind: 'image' | 'video', dataUri, name }.
--- Legacy rows (screenshot column populated, attachments empty) are normalised
--- to a single-image attachment on read so the FE only consults `attachments`.
+-- attachments is a JSONB array of { kind, dataUri, name } where kind is
+-- either image or video. Legacy rows (screenshot column populated,
+-- attachments empty) are normalised to a single-image attachment on read so
+-- the FE only consults the attachments column.
 ALTER TABLE feedback_requests
   ADD COLUMN IF NOT EXISTS attachments JSONB NOT NULL DEFAULT '[]'::jsonb;
 `;
