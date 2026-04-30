@@ -1,152 +1,120 @@
 // ── Country-ownership seed ──────────────────────────────────────────────────
-// One-shot seeder for team_member_countries. Reads the parsed CSV
-// (src/data/csv_country_owners_seed.json — generated from the
-// "Countries by Person Role" Deel spreadsheet) and inserts a row for every
-// (countryCode, ownerEmail) pair where the owner name resolves to an HRX
-// team member we know about. Only fires when the table is empty so manual
-// edits via the Team-tab UI are never overwritten.
+// Source-of-truth seeder for team_member_countries. Reads
+// src/data/csv_country_owners_seed.json — an email-keyed map produced by
+// auditing the Deel "Countries by Person Role" spreadsheet against the
+// HRX roster — and reconciles the DB to match.
 //
-// Name resolution mirrors normalizeSourceRows.js — accent-stripped, lower-
-// cased, whitespace-collapsed, with a "first|last" fallback for rows that
-// include a middle name in the spreadsheet (e.g. "Jessica Sabrina Czech").
-// Names that don't resolve to a current HRX member are skipped silently
-// — the export endpoint surfaces those gaps so admins can backfill manually.
+// Versioned re-seed:
+//   • A copy of the seed version is stored in app_settings.
+//   • On boot, if the stored version is below the current SEED_VERSION, we
+//     wipe team_member_countries and re-insert from the JSON. This is the
+//     ONLY codepath that re-seeds — manual edits via the Team-tab picker
+//     between deploys are preserved as long as SEED_VERSION isn't bumped.
+//   • To roll out a corrected ownership map: bump SEED_VERSION and ship.
+//
+// Earlier versions seeded by fuzzy-matching CSV "Country Owner" names
+// against members. v2 onwards is email-keyed so there's no ambiguity
+// about which person owns a country.
 
 import { query } from './db';
-import { TEAM_MEMBERS } from '../data/members';
-import { mergeTeamMembers } from './team-members-merge';
 import seed from '../data/csv_country_owners_seed.json' with { type: 'json' };
 
-function stripAccents(s) {
-  return (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
+// Bump this when the seed JSON is materially updated (added owners,
+// removed owners, fixed wrong assignments). The next deploy will detect
+// the bump, wipe team_member_countries, and re-insert from the JSON.
+const SEED_VERSION = 2;
+const VERSION_KEY = 'country_owners_seed_version';
+
+function isEmail(s) {
+  return typeof s === 'string' && /@/.test(s);
 }
 
-function normalizeName(s) {
-  return stripAccents(s).toLowerCase().replace(/\s+/g, ' ').trim();
-}
-
-function tokenize(name) {
-  return normalizeName(name).replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean);
-}
-
-// Build the lookup maps from the merged roster (baseline TEAM_MEMBERS +
-// active overrides). Soft-deleted rows are skipped — we don't want to
-// re-seed a country onto someone who left.
-async function buildNameLookup() {
-  let overrideRows = [];
-  try {
-    const { rows } = await query(
-      `SELECT email, name, initials, title, access, manager_email, team, region,
-              service, country, avatar_url, start_date, is_new, is_deleted,
-              on_leave, last_login_at, login_count, is_announcements_admin,
-              is_access_admin, created_at, updated_at
-         FROM team_member_overrides`,
-    );
-    overrideRows = rows;
-  } catch (err) {
-    // If overrides aren't queryable yet (cold DB on first migration run),
-    // fall back to baseline TEAM_MEMBERS only — the seed still hits the
-    // most common HRX names.
-    console.warn('[country-owners-seed] overrides query failed, using baseline only:', err?.message);
-  }
-
-  const merged = mergeTeamMembers(overrideRows).filter(m => !m.isDeleted);
-  // exact, accent-stripped, whitespace-collapsed, "first|last" — same
-  // hierarchy as resolveEmailByName in normalizeSourceRows.js.
-  const exact = new Map();
-  const stripped = new Map();
-  const collapsed = new Map();
-  const firstLast = new Map();
-  for (const m of merged) {
-    if (!m.email || !m.name) continue;
-    const email = m.email.toLowerCase();
-    const lower = m.name.toLowerCase();
-    const stripLower = stripAccents(lower);
-    const collapsedKey = stripLower.replace(/\s+/g, '');
-    if (!exact.has(lower)) exact.set(lower, email);
-    if (!stripped.has(stripLower)) stripped.set(stripLower, email);
-    if (!collapsed.has(collapsedKey)) collapsed.set(collapsedKey, email);
-    const tokens = tokenize(m.name);
-    if (tokens.length >= 2) {
-      const flKey = `${tokens[0]}|${tokens[tokens.length - 1]}`;
-      if (!firstLast.has(flKey)) firstLast.set(flKey, email);
+function normalizeRows(seedJson) {
+  // Accept the email-keyed shape: { "AT": ["pilvi.pirhonen@deel.com", ...] }.
+  // Reject the legacy name-keyed shape (v1) — pre-v2 seeds carried lower-
+  // cased display names and can't be reconciled to emails without the
+  // fuzzy-matcher we deliberately removed. If we see one, log + skip so
+  // the deploy still boots cleanly.
+  const rows = [];
+  for (const [cc, owners] of Object.entries(seedJson || {})) {
+    if (!cc || !Array.isArray(owners)) continue;
+    const upperCc = cc.toUpperCase();
+    for (const owner of owners) {
+      if (!isEmail(owner)) {
+        console.warn(`[country-owners-seed] non-email owner in seed for ${upperCc}: ${owner}`);
+        continue;
+      }
+      rows.push({ email: owner.toLowerCase(), cc: upperCc });
     }
   }
-  return { exact, stripped, collapsed, firstLast };
+  return rows;
 }
 
-function resolveEmailFromSeedName(seedName, lookup) {
-  if (!seedName) return '';
-  const lower = seedName.toLowerCase();
-  const stripLower = stripAccents(lower);
-  let hit = lookup.exact.get(lower);
-  if (hit) return hit;
-  hit = lookup.stripped.get(stripLower);
-  if (hit) return hit;
-  hit = lookup.collapsed.get(stripLower.replace(/\s+/g, ''));
-  if (hit) return hit;
-  const tokens = tokenize(seedName);
-  if (tokens.length >= 2) {
-    hit = lookup.firstLast.get(`${tokens[0]}|${tokens[tokens.length - 1]}`);
-    if (hit) return hit;
+async function getStoredVersion() {
+  try {
+    const { rows } = await query(
+      `SELECT value FROM app_settings WHERE key = $1`,
+      [VERSION_KEY],
+    );
+    const v = rows[0]?.value?.version;
+    return Number.isFinite(v) ? v : 0;
+  } catch (err) {
+    console.warn('[country-owners-seed] version read failed:', err?.message);
+    return 0;
   }
-  return '';
+}
+
+async function setStoredVersion(version) {
+  await query(
+    `INSERT INTO app_settings (key, value, updated_by, updated_at)
+       VALUES ($1, $2::jsonb, $3, NOW())
+       ON CONFLICT (key) DO UPDATE
+         SET value = EXCLUDED.value,
+             updated_by = EXCLUDED.updated_by,
+             updated_at = NOW()`,
+    [VERSION_KEY, JSON.stringify({ version }), 'country-owners-seed'],
+  );
 }
 
 /**
- * Seed team_member_countries from the CSV, but ONLY when the table is empty.
- * Returns { seeded: number, missingOwners: string[], totalCountries: number }.
- * Idempotent: subsequent runs find a non-empty table and no-op.
+ * Reconcile team_member_countries with the seed JSON whenever the stored
+ * seed version is below the current SEED_VERSION. Idempotent within a
+ * single version: a second boot at the same version no-ops.
+ *
+ * Returns { reseeded: boolean, inserted?: number, version: number }.
  */
 export async function seedCountryOwnersIfEmpty() {
-  let existing;
+  const currentVersion = await getStoredVersion();
+  if (currentVersion >= SEED_VERSION) {
+    return { reseeded: false, version: SEED_VERSION };
+  }
+
+  const rows = normalizeRows(seed);
+  if (rows.length === 0) {
+    console.warn('[country-owners-seed] seed JSON is empty or malformed; skipping');
+    return { reseeded: false, version: SEED_VERSION };
+  }
+
+  // Single transaction: wipe existing rows then re-insert from the seed.
+  // Lock the table to prevent racing with a Team-tab PUT mid-reseed.
+  await query('BEGIN');
   try {
-    existing = await query('SELECT COUNT(*)::int AS n FROM team_member_countries');
-  } catch (err) {
-    console.warn('[country-owners-seed] count query failed:', err?.message);
-    return { seeded: 0, skipped: true };
-  }
-  if ((existing?.rows?.[0]?.n || 0) > 0) {
-    return { seeded: 0, skipped: true };
-  }
-
-  const lookup = await buildNameLookup();
-  const missingOwners = new Set();
-  const inserts = [];
-  for (const [cc, names] of Object.entries(seed)) {
-    for (const name of names) {
-      const email = resolveEmailFromSeedName(name, lookup);
-      if (email) {
-        inserts.push({ email, cc: cc.toUpperCase() });
-      } else {
-        missingOwners.add(name);
-      }
-    }
-  }
-
-  if (inserts.length === 0) {
-    console.log(`[country-owners-seed] nothing to seed (no resolvable owner names)`);
-    return { seeded: 0, missingOwners: [...missingOwners], totalCountries: Object.keys(seed).length };
-  }
-
-  // Bulk insert via parameterised values; ON CONFLICT DO NOTHING so a
-  // CSV row with a duplicate (email, country) pair just dedupes silently.
-  const valuesSql = inserts.map((_, i) => `($${i * 2 + 1}, $${i * 2 + 2})`).join(', ');
-  const params = inserts.flatMap(r => [r.email, r.cc]);
-  try {
+    await query('LOCK TABLE team_member_countries IN ACCESS EXCLUSIVE MODE');
+    await query('DELETE FROM team_member_countries');
+    const valuesSql = rows.map((_, i) => `($${i * 2 + 1}, $${i * 2 + 2})`).join(', ');
+    const params = rows.flatMap(r => [r.email, r.cc]);
     await query(
       `INSERT INTO team_member_countries (email, country_code) VALUES ${valuesSql}
-         ON CONFLICT (email, country_code) DO NOTHING`,
+        ON CONFLICT (email, country_code) DO NOTHING`,
       params,
     );
-    console.log(`[country-owners-seed] inserted ${inserts.length} (email, country) pairs across ${Object.keys(seed).length} countries; ${missingOwners.size} CSV names unresolved`);
-    return {
-      seeded: inserts.length,
-      missingOwners: [...missingOwners],
-      totalCountries: Object.keys(seed).length,
-    };
+    await setStoredVersion(SEED_VERSION);
+    await query('COMMIT');
+    console.log(`[country-owners-seed] re-seeded to v${SEED_VERSION}: ${rows.length} (email, country) pairs across ${Object.keys(seed).length} countries (was v${currentVersion})`);
+    return { reseeded: true, inserted: rows.length, version: SEED_VERSION };
   } catch (err) {
-    console.error('[country-owners-seed] insert failed:', err?.message);
-    return { seeded: 0, error: err?.message, totalCountries: Object.keys(seed).length };
+    try { await query('ROLLBACK'); } catch {}
+    console.error('[country-owners-seed] re-seed failed:', err?.message);
+    return { reseeded: false, error: err?.message, version: SEED_VERSION };
   }
 }
