@@ -123,6 +123,13 @@ async function buildOffboardingResult() {
       organizationName: c.organizationName || '',
       exAssignee: c.exAssignee || '',
       exAssigneeEmail: c.exAssigneeEmail || '',
+      // Aliases under the canonical names queue-scoping reads. Without these,
+      // _scopeByAssignedOrUnassigned/_scopeCountryOrAssignee see undefined for
+      // assigneeEmail and fall through to the country check — non-admin users
+      // get an empty queue unless they own a matching country. Admins are
+      // unaffected because isAdminUser bypasses the filter entirely.
+      assignee: c.exAssignee || '',
+      assigneeEmail: (c.exAssigneeEmail || '').toLowerCase(),
       reason: c.reason || '',
       isResignation: c.isResignation || false,
       jiraUrl: c.jiraUrl || '',
