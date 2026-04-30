@@ -210,11 +210,20 @@ export function normalizeOnboarding(items = [], slaConfig = null) {
     const flowDisplay = flowParts.map(part => part.replace(/([A-Z])/g, ' $1').trim()).join(' · ');
     const startStr = fmtShortDate(p.startDate);
 
-    // Task URL: admin dashboard with contract OID + flow step
-    // e.g. https://admin.deel.network/dashboards/employees/GLOBAL/status/Onboarding.ActionableQueue/contract/3kzqg4j/step/Onboarding.ComplianceDocs.AwaitingReview
+    // Task URL: admin dashboard deep-link. The admin UI's path is shaped:
+    //   /dashboards/employees/{COUNTRY}/status/{FULL_FLOW_STEP}/contract/{OID}/step/{LAST_STEP_SEGMENT}
+    // e.g.
+    //   /dashboards/employees/JP/status/Onboarding.ComplianceDocs.AwaitingReview/contract/3g764v7/step/AwaitingReview
+    //   /dashboards/employees/DE/status/Onboarding.EA.EAAdditionalDetails.AwaitingReview/contract/36pgxxq/step/AwaitingReview
+    // We previously hardcoded country=GLOBAL + status=Onboarding.ActionableQueue
+    // which landed on the wrong tab; the admin UI then ignored the step
+    // segment because it didn't match the bucket.
+    const taskCountry = p.country || 'GLOBAL';
+    const flowSegments = (p.flowStep || '').split('.').filter(Boolean);
+    const lastStep = flowSegments[flowSegments.length - 1] || '';
     const taskUrl = (p.oid && p.flowStep)
-      ? `${DEEL_ADMIN_BASE}/dashboards/employees/GLOBAL/status/Onboarding.ActionableQueue/contract/${p.oid}/step/${p.flowStep}`
-      : (p.oid ? `${DEEL_ADMIN_BASE}/dashboards/employees/GLOBAL/status/Onboarding.ActionableQueue/contract/${p.oid}` : '');
+      ? `${DEEL_ADMIN_BASE}/dashboards/employees/${taskCountry}/status/${p.flowStep}/contract/${p.oid}/step/${lastStep}`
+      : (p.oid ? `${DEEL_ADMIN_BASE}/dashboards/employees/${taskCountry}/status/Onboarding.ActionableQueue/contract/${p.oid}` : '');
 
     const createdAt = p.taskCreatedAt || p.createdAt || '';
     const sla = computeSlaWindow(activeMs, createdAt);
