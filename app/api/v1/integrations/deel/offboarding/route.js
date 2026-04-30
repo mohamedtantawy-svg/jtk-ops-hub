@@ -257,6 +257,10 @@ const BUCKET_PRIORITY = {
   'HRX Review — Legal Input':                     4,
   'HRX Review — CSM Input':                       5,
   'HRX Review':                                   6,
+  // AWAITING_HRX_ACTION — resignation-only state where HRX is the blocker
+  'Awaiting HRX Action — Resignation Letter':     7,
+  'Awaiting HRX Action — Legal Input':            8,
+  'Awaiting HRX Action':                          9,
   // Step 2 — Client sign off
   'Client Sign Off — Changes Requested':         10,
   'Client Sign Off — Feedback Provided':         11,
@@ -314,6 +318,24 @@ function derivePrimaryBucket(c) {
   // Unassigned is always the top priority — nobody is working this yet.
   if (!c.exAssigneeId && !c.exAssignee) {
     return { label: 'Awaiting Assignee', severity: 'critical', color: '#d42d35' };
+  }
+
+  // ── AWAITING_HRX_ACTION (resignation-only top-level state) ─────────────
+  // When the upstream lifecycle parks a resignation in AWAITING_HRX_ACTION,
+  // the queue should surface that as a clear "HRX has work to do here" pill,
+  // distinct from PROCESSING (which is mid-workflow but not specifically on
+  // HRX). Try to enrich with the in-flight sub-step where possible — a
+  // resignation in this state is often awaiting the legal review or
+  // resignation-letter signature; falling back to the generic label keeps
+  // the row out of "Unknown".
+  if (status === 'AWAITING_HRX_ACTION') {
+    if (flow.has('AwaitingResignationLetterSignature')) {
+      return { label: 'Awaiting HRX Action — Resignation Letter', severity: 'warning', color: '#ed8d00' };
+    }
+    if (flow.has('AwaitingLegalReview') && !isSubPhaseDone(flow, 'LegalReview.LegalReview')) {
+      return { label: 'Awaiting HRX Action — Legal Input', severity: 'warning', color: '#ed8d00' };
+    }
+    return { label: 'Awaiting HRX Action', severity: 'warning', color: '#ed8d00' };
   }
 
   // ── Step 1: HRX review (top-level status AWAITING_TRIAGE) ───────────────
