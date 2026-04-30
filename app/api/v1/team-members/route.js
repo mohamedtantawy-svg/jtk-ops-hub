@@ -29,17 +29,44 @@ export async function GET(req) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { rows } = await query(
-      `SELECT email, name, initials, title, access, manager_email, team, region,
-              service, country, avatar_url, start_date, is_new, is_deleted,
-              on_leave, last_login_at, login_count, is_announcements_admin,
-              is_access_admin,
-              created_at, updated_at
-         FROM team_member_overrides`
-    );
+    const [overridesRes, countriesRes] = await Promise.all([
+      query(
+        `SELECT email, name, initials, title, access, manager_email, team, region,
+                service, country, avatar_url, start_date, is_new, is_deleted,
+                on_leave, last_login_at, login_count, is_announcements_admin,
+                is_access_admin,
+                created_at, updated_at
+           FROM team_member_overrides`,
+      ),
+      query(
+        `SELECT email, country_code FROM team_member_countries ORDER BY country_code`,
+      ).catch(err => {
+        // Table won't exist on a brand-new env until the migration runs;
+        // empty list is the safe default so the rest of the response still
+        // serves.
+        console.warn('[team-members GET] countries query failed:', err?.message);
+        return { rows: [] };
+      }),
+    ]);
 
-    const merged = mergeTeamMembers(rows);
-    return NextResponse.json({ items: merged, total: merged.length });
+    const merged = mergeTeamMembers(overridesRes.rows);
+
+    // Group countries by lowercase email so the UI can render every member
+    // with their owned set inline. Junction rows that don't match a current
+    // member (e.g. a soft-deleted person) are simply not surfaced.
+    const byEmail = new Map();
+    for (const r of countriesRes.rows) {
+      const e = (r.email || '').toLowerCase();
+      if (!e) continue;
+      if (!byEmail.has(e)) byEmail.set(e, []);
+      byEmail.get(e).push((r.country_code || '').toUpperCase());
+    }
+    const enriched = merged.map(m => ({
+      ...m,
+      countries: byEmail.get((m.email || '').toLowerCase()) || [],
+    }));
+
+    return NextResponse.json({ items: enriched, total: enriched.length });
   } catch (err) {
     console.error('[team-members GET]', err.message);
     // If DB is down, fall back to the baseline so the UI still renders

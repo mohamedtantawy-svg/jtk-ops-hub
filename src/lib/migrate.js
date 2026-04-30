@@ -1,4 +1,5 @@
 import { query } from './db';
+import { seedCountryOwnersIfEmpty } from './country-owners-seed';
 
 const SCHEMA_SQL = `
 -- Members
@@ -753,6 +754,27 @@ CREATE INDEX IF NOT EXISTS idx_user_notifications_source
 -- the FE only consults the attachments column.
 ALTER TABLE feedback_requests
   ADD COLUMN IF NOT EXISTS attachments JSONB NOT NULL DEFAULT '[]'::jsonb;
+
+-- ── Country-ownership junction (2026-04-30) ─────────────────────────────────
+-- Replaces the static src/data/countryOwners.js map with a DB-backed source
+-- of truth. Each row says "this email owns this country" — the Queue's
+-- country-OR-assignee scoping reads the resulting Map<email, Set<CC>> when
+-- deciding what an Agent / TL / Regional / Admin can see.
+--
+-- Edits flow through PUT /api/v1/team-members/:email/countries (TL,
+-- Regional, Admin, or anyone with is_access_admin = true). On every write
+-- we invalidate the roster cache so the next scoped Queue request reflects
+-- the new map immediately. The same junction also feeds the export route
+-- so admins can audit "who owns what" against the Deel HRX spreadsheet.
+CREATE TABLE IF NOT EXISTS team_member_countries (
+  email        VARCHAR(255) NOT NULL,
+  country_code VARCHAR(10)  NOT NULL,
+  created_at   TIMESTAMPTZ DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (email, country_code)
+);
+CREATE INDEX IF NOT EXISTS idx_tmc_country ON team_member_countries(country_code);
+CREATE INDEX IF NOT EXISTS idx_tmc_email   ON team_member_countries(email);
 `;
 
 export async function runMigrations() {
@@ -763,5 +785,20 @@ export async function runMigrations() {
   } catch (err) {
     console.error('[db] Migration error:', err.message);
     throw err;
+  }
+
+  // One-shot seed: populate team_member_countries from the parsed
+  // "Countries by Person Role" CSV the first time the table is empty. On
+  // subsequent boots the table has rows (either from a prior seed or a
+  // manual edit) and the seeder no-ops, so a Director's Team-tab edits
+  // are never silently overwritten by a re-seed.
+  try {
+    const seedResult = await seedCountryOwnersIfEmpty();
+    if (seedResult?.seeded > 0) {
+      console.log(`[db] Country-ownership seed: inserted ${seedResult.seeded} rows; ${seedResult.missingOwners?.length || 0} CSV names did not match an HRX member`);
+    }
+  } catch (err) {
+    // Don't throw — the rest of the app should boot even if the seed fails.
+    console.warn('[db] Country-ownership seed failed:', err?.message);
   }
 }
