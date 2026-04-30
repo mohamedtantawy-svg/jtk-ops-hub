@@ -745,7 +745,7 @@ const Queue = ({ user, tasks, subFilter }) => {
               <tbody>
                 {active.map(task => <QueueRow key={task.id} task={task} slaAgeClass={slaAgeClass} settings={settings}/>)}
                 {snoozed.length > 0 && (
-                  <tr><td colSpan={settings.sla_enabled !== false ? 9 : 8} style={{ padding: '12px 16px', fontSize: 11, fontWeight: 700, color: '#6b6560', letterSpacing: '.04em', background: '#faf9f7', borderTop: '1px solid #e8e8e8', borderBottom: '1px solid #e8e8e8' }}><i className="bi-pause-circle-fill" style={{ fontSize: 11, marginRight: 6 }}></i>SNOOZED ({snoozed.length})</td></tr>
+                  <tr><td colSpan={settings.sla_enabled !== false ? 9 : 8} style={{ padding: '12px 16px', fontSize: 11, fontWeight: 700, color: '#6b6560', letterSpacing: '.04em', background: '#faf9f7', borderTop: '1px solid #e8e8e8', borderBottom: '1px solid #e8e8e8' }}><i className="bi-pause-circle-fill" style={{ fontSize: 11, marginRight: 6 }}></i>PAUSED ({snoozed.length})</td></tr>
                 )}
                 {snoozed.map(task => <QueueRow key={task.id} task={task} slaAgeClass={slaAgeClass} settings={settings}/>)}
                 {done.length > 0 && (

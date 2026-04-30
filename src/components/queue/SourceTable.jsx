@@ -265,6 +265,34 @@ export default function SourceTable({
     return c;
   }, [rows]);
 
+  // Partition the sorted list into Active (top) and Paused (bottom). Spec:
+  // every Q gets a "Paused" section when applicable, no separate filter.
+  // Paused rows still go through the same column sort + tier+age tie-break,
+  // so within each section the most-urgent paused row floats to the top of
+  // its bucket.
+  const { activeSorted, pausedSorted } = useMemo(() => {
+    const active = [];
+    const paused = [];
+    for (const r of sorted) {
+      if (r?.isPaused) paused.push(r);
+      else active.push(r);
+    }
+    return { activeSorted: active, pausedSorted: paused };
+  }, [sorted]);
+
+  // Column count for the "PAUSED" section header — needs to match the
+  // active <thead> exactly so the band spans the table width regardless of
+  // which optional columns the panel toggles on/off.
+  const sectionColSpan = 1 // Subject (always)
+    + (showSourceColumn ? 1 : 0)
+    + (showClient ? 1 : 0)
+    + (showType ? 1 : 0)
+    + 4 // Country + Assignee + dateField + SLA
+    + (hideUpdated ? 0 : 1)
+    + 1 // Status
+    + 1 // Task
+    + (hideContract ? 0 : 1);
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#fafaf9', overflow: 'hidden' }}>
       {/* ── Filter bar ── */}
@@ -358,7 +386,18 @@ export default function SourceTable({
               </tr>
             </thead>
             <tbody>
-              {sorted.map(row => (
+              {activeSorted.map(row => (
+                <SourceRow key={`${row.source}-${row.id}`} row={row} showSource={showSourceColumn} showPausedSla={showPausedSla} dateField={dateField} showClient={showClient} showType={showType} hideUpdated={hideUpdated} hideContract={hideContract} />
+              ))}
+              {pausedSorted.length > 0 && (
+                <tr>
+                  <td colSpan={sectionColSpan} style={{ padding: '12px 16px', fontSize: 11, fontWeight: 700, color: '#6b6560', letterSpacing: '.04em', background: '#faf9f7', borderTop: '1px solid #e8e8e8', borderBottom: '1px solid #e8e8e8' }}>
+                    <i className="bi-pause-circle-fill" style={{ fontSize: 11, marginRight: 6 }} />
+                    PAUSED ({pausedSorted.length})
+                  </td>
+                </tr>
+              )}
+              {pausedSorted.map(row => (
                 <SourceRow key={`${row.source}-${row.id}`} row={row} showSource={showSourceColumn} showPausedSla={showPausedSla} dateField={dateField} showClient={showClient} showType={showType} hideUpdated={hideUpdated} hideContract={hideContract} />
               ))}
             </tbody>

@@ -464,9 +464,11 @@ export function normalizeWorkbench(items = [], slaConfig = null) {
     // policy. The upstream `t.slaTime`/`t.slaRemaining` vary arbitrarily per
     // task config and don't match the team's operating model. Paused branch
     // (configurable) applies when upstream flags a pause state.
+    const isPaused = !!t.isPaused || t.status === 'ON_HOLD';
+    const pausedAt = t.pausedAt || (t.status === 'ON_HOLD' ? t.updatedAt : null);
     const sla = computeSlaWindow(activeMs, t.createdAt, {
-      pausedMs: t.isPaused || t.status === 'ON_HOLD' ? pausedMs : null,
-      pausedAt: t.pausedAt || (t.status === 'ON_HOLD' ? t.updatedAt : null),
+      pausedMs: isPaused ? pausedMs : null,
+      pausedAt,
     });
     return {
       id: String(t.id || ''),
@@ -486,6 +488,11 @@ export function normalizeWorkbench(items = [], slaConfig = null) {
       // a different UI that doesn't recognise these IDs).
       taskUrl: DEEL_OPS_WORKBENCH_URL(t.id),
       contractUrl: DEEL_CONTRACT_URL(t.contractOid),
+      // Surfaces the paused state to SourceTable so the Paused section
+      // partition picks up workbench `ON_HOLD` rows alongside the upstream
+      // `isPaused` flag.
+      isPaused,
+      pausedAt,
       slaRemaining: sla.slaRemaining,
       slaBreachStatus: sla.slaBreachStatus,
       slaWindowMs: sla.slaWindowMs,
