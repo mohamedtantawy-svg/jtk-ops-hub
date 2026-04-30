@@ -207,16 +207,19 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const slaScope=scope.filter(t=>t.status!=='waiting');
   const breached=slaScope.filter(t=>{const s=slaInfo(t);return s&&s.breach;});
   const atRisk=slaScope.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;});
-  // Per-row SLA fields are now populated by normalizeSourceRows.js
-  // (Pilar's 2026-04-27 spec): Onboarding 7d, Paused Onboarding 48h-from-
-  // pausedAt, Offboarding 21d, Workbench 48h, Redlines 72h, Amendments 24h.
-  // The aggregate consumes those fields instead of recomputing — keeps the
-  // Briefing total in sync with what the per-row pill shows on each tab.
+  // Per-row SLA fields are populated by normalizeSourceRows.js — windows
+  // are sourced from the Team-tab queue-sla settings, ticking on the
+  // business-day clock (2026-05-01 spec). At-risk = "less than 25% of the
+  // SLA window remaining" so the band scales with whatever the queue's
+  // configured active/paused window is. The aggregate consumes those
+  // fields instead of recomputing — keeps the Briefing total in sync with
+  // what the per-row pill shows on each tab.
   const onbBreached=onboardingRows.filter(r=>r.slaBreachStatus==='SLA_BREACHED');
   const onbAtRisk=onboardingRows.filter(r=>{
-    if (r.slaBreachStatus==='SLA_BREACHED' || r.slaRemaining==null) return false;
-    // Within 24h of breach — same "at risk" band as the per-row pill.
-    return r.slaRemaining > 0 && r.slaRemaining <= 24*60*60;
+    if (r.slaBreachStatus==='SLA_BREACHED' || typeof r.slaRemaining !== 'number') return false;
+    if (r.slaRemaining <= 0) return false;
+    const windowSec = Number.isFinite(r.slaWindowMs) && r.slaWindowMs > 0 ? r.slaWindowMs/1000 : 24*60*60;
+    return r.slaRemaining < windowSec/4;
   });
   breached.push(...onbBreached);
   atRisk.push(...onbAtRisk);

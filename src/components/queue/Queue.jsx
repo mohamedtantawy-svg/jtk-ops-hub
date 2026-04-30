@@ -226,85 +226,59 @@ const Queue = ({ user, tasks, subFilter }) => {
   const visRedlineRows     = useMemo(() => applyPanelFilter(redlineRows),     [redlineRows, applyPanelFilter]);
   const visWorkbenchRows   = useMemo(() => applyPanelFilter(workbenchRows),   [workbenchRows, applyPanelFilter]);
 
-  // Per-source SLA severity classifier — mirrors the count math below so the
-  // pills, the count badges, and the row filter all agree on what each row
-  // is. Onboarding / Offboarding / Workbench expose `slaBreachStatus` +
-  // `slaRemaining`; Amendments / Redlines only expose `slaRemaining`. Anything
-  // without recognisable SLA data is treated as "ok" so it lines up with how
-  // `onTrackCount` is computed (total minus at-risk minus breached).
-  const rowSlaSeverity = useCallback((row, source) => {
+  // Per-source SLA severity classifier. At-risk = "less than 25% of the SLA
+  // window remaining" — proportional to whatever active/paused window the
+  // row is ticking against, so the band scales naturally when the Team-tab
+  // SLA settings change. `slaWindowMs` is populated by normalizeSourceRows
+  // for every Deel row; if it's missing for any reason we fall back to a
+  // 6-hour static threshold (legacy behavior) so a sparse upstream payload
+  // never silently turns at-risk classification off.
+  const rowSlaSeverity = useCallback((row) => {
     if (!row) return 'ok';
-    if (source === 'amendments' || source === 'redlines') {
-      if (typeof row.slaRemaining !== 'number') return 'ok';
-      if (row.slaRemaining <= 0) return 'breached';
-      if (row.slaRemaining < 21600) return 'at_risk';
-      return 'ok';
-    }
-    // onboarding / offboarding / workbench
-    if (row.slaBreachStatus === 'SLA_BREACHED') return 'breached';
-    if (typeof row.slaRemaining === 'number' && row.slaRemaining > 0 && row.slaRemaining < 24 * 60 * 60) return 'at_risk';
-    return 'ok';
+    if (row.slaBreachStatus === 'SLA_BREACHED' || (typeof row.slaRemaining === 'number' && row.slaRemaining <= 0)) return 'breached';
+    if (typeof row.slaRemaining !== 'number') return 'ok';
+    const windowSeconds = Number.isFinite(row.slaWindowMs) && row.slaWindowMs > 0
+      ? row.slaWindowMs / 1000
+      : 24 * 60 * 60;
+    const atRiskCutoff = windowSeconds / 4;
+    return row.slaRemaining > 0 && row.slaRemaining < atRiskCutoff ? 'at_risk' : 'ok';
   }, []);
 
   // Apply the SLA pill on top of the post-status/unassigned row set. These
   // are what the SourceTable actually renders, while the `vis*` arrays above
   // remain available for total counts.
-  const applySlaFilter = useCallback((rows, source) => {
+  const applySlaFilter = useCallback((rows) => {
     if (!fSla) return rows;
-    return rows.filter(r => rowSlaSeverity(r, source) === fSla);
+    return rows.filter(r => rowSlaSeverity(r) === fSla);
   }, [fSla, rowSlaSeverity]);
 
-  const tblOnboardingRows  = useMemo(() => applySlaFilter(visOnboardingRows,  'onboarding'),  [visOnboardingRows,  applySlaFilter]);
-  const tblOffboardingRows = useMemo(() => applySlaFilter(visOffboardingRows, 'offboarding'), [visOffboardingRows, applySlaFilter]);
-  const tblAmendmentRows   = useMemo(() => applySlaFilter(visAmendmentRows,   'amendments'),  [visAmendmentRows,   applySlaFilter]);
-  const tblRedlineRows     = useMemo(() => applySlaFilter(visRedlineRows,     'redlines'),    [visRedlineRows,     applySlaFilter]);
-  const tblWorkbenchRows   = useMemo(() => applySlaFilter(visWorkbenchRows,   'workbench'),   [visWorkbenchRows,   applySlaFilter]);
+  const tblOnboardingRows  = useMemo(() => applySlaFilter(visOnboardingRows),  [visOnboardingRows,  applySlaFilter]);
+  const tblOffboardingRows = useMemo(() => applySlaFilter(visOffboardingRows), [visOffboardingRows, applySlaFilter]);
+  const tblAmendmentRows   = useMemo(() => applySlaFilter(visAmendmentRows),   [visAmendmentRows,   applySlaFilter]);
+  const tblRedlineRows     = useMemo(() => applySlaFilter(visRedlineRows),     [visRedlineRows,     applySlaFilter]);
+  const tblWorkbenchRows   = useMemo(() => applySlaFilter(visWorkbenchRows),   [visWorkbenchRows,   applySlaFilter]);
+
+  // Tally a row set into { atRisk, breached, onTrack } using the proportional
+  // at-risk band (windowMs/4). Mirrors rowSlaSeverity exactly so pill counts,
+  // table filtering, and the per-row pill tier never disagree.
+  const tallyDeelSla = useCallback((rows) => {
+    let atRisk = 0, breached = 0;
+    for (const r of rows) {
+      const sev = rowSlaSeverity(r);
+      if (sev === 'breached') breached++;
+      else if (sev === 'at_risk') atRisk++;
+    }
+    return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: rows.length - atRisk - breached };
+  }, [rowSlaSeverity]);
 
   // ── SLA pills counts — reflect post-filter row sets per active tab ──
   const { atRiskCount, breachedCount, onTrackCount } = useMemo(() => {
+    if (workSource === 'onboarding')  return tallyDeelSla(visOnboardingRows);
+    if (workSource === 'offboarding') return tallyDeelSla(visOffboardingRows);
+    if (workSource === 'amendments')  return tallyDeelSla(visAmendmentRows);
+    if (workSource === 'redlines')    return tallyDeelSla(visRedlineRows);
+    if (workSource === 'workbench')   return tallyDeelSla(visWorkbenchRows);
     let slaBase;
-    if (workSource === 'onboarding') {
-      let atRisk = 0, breached = 0;
-      for (const r of visOnboardingRows) {
-        if (r.slaBreachStatus === 'SLA_BREACHED') { breached++; continue; }
-        if (typeof r.slaRemaining === 'number' && r.slaRemaining > 0 && r.slaRemaining < 24 * 60 * 60) atRisk++;
-      }
-      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: visOnboardingRows.length - atRisk - breached };
-    }
-    if (workSource === 'offboarding') {
-      let atRisk = 0, breached = 0;
-      for (const r of visOffboardingRows) {
-        if (r.slaBreachStatus === 'SLA_BREACHED') { breached++; continue; }
-        if (typeof r.slaRemaining === 'number' && r.slaRemaining > 0 && r.slaRemaining < 24 * 60 * 60) atRisk++;
-      }
-      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: visOffboardingRows.length - atRisk - breached };
-    }
-    if (workSource === 'amendments') {
-      let atRisk = 0, breached = 0;
-      for (const r of visAmendmentRows) {
-        if (typeof r.slaRemaining !== 'number') continue;
-        if (r.slaRemaining <= 0) breached++;
-        else if (r.slaRemaining < 21600) atRisk++;
-      }
-      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: visAmendmentRows.length - atRisk - breached };
-    }
-    if (workSource === 'redlines') {
-      let atRisk = 0, breached = 0;
-      for (const r of visRedlineRows) {
-        if (typeof r.slaRemaining !== 'number') continue;
-        if (r.slaRemaining <= 0) breached++;
-        else if (r.slaRemaining < 21600) atRisk++;
-      }
-      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: visRedlineRows.length - atRisk - breached };
-    }
-    if (workSource === 'workbench') {
-      let atRisk = 0, breached = 0;
-      for (const r of visWorkbenchRows) {
-        if (r.slaBreachStatus === 'SLA_BREACHED') { breached++; continue; }
-        if (typeof r.slaRemaining === 'number' && r.slaRemaining > 0 && r.slaRemaining < 24 * 60 * 60) atRisk++;
-      }
-      return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: visWorkbenchRows.length - atRisk - breached };
-    }
     if (workSource === 'jira') slaBase = visPreSla.filter(t => t.source === 'jira');
     else if (workSource === 'zendesk') slaBase = visPreSla.filter(t => t.source === 'zendesk');
     else slaBase = visPreSla;
@@ -312,7 +286,7 @@ const Queue = ({ user, tasks, subFilter }) => {
     const atRisk = slaBase.filter(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; }).length;
     const breached = slaBase.filter(t => { const s = slaInfo(t); return s && s.breach; }).length;
     return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: slaBase.length - atRisk - breached };
-  }, [workSource, visPreSla, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows]);
+  }, [workSource, visPreSla, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows, tallyDeelSla]);
 
   // ── View-aware header counts ──
   // For each Deel source we read the SLA-filtered row set so the "N open"

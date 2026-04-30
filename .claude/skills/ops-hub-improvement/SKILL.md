@@ -271,6 +271,73 @@ All data hooks follow this shape — match it:
 
 **Never create new files (especially .md) unless explicitly requested.** Edit existing files. The only exception is when the user asks for a new component/view or when a brand new hook is structurally the right answer.
 
+### 3.6 Deel admin API — pagination + filter quirks
+
+The `api-prod-admin.letsdeel.com` admin endpoints have non-obvious behaviour that's bitten us multiple times. Read this before adding or modifying any scan:
+
+**Cursor pagination**: every paginated admin endpoint (`/admin/eor/terminations_v3`, `/admin/eor/employee-manager/list/...`, etc.) returns a `cursor` token. The cursor encodes the FILTER + SORT state from the first request. Subsequent calls must send ONLY `cursor=...` — sending `limit` or any filter param alongside an existing cursor returns 400.
+
+**Server-side filter rejection (Joi)**: the terminations_v3 endpoint rejects `status[]=` as a query param with a Joi error like:
+```
+"value does not match any of the allowed types"
+"cursor required (alt 1) | limit not allowed (alt 2) | status not allowed (alt 3) | status[2] must... (alt 4)"
+```
+Read every alternative — alt N+1 with a value-level constraint hint (e.g. `status[2] must be one of [...]`) often reveals which alternative the request was CLOSEST to matching. Don't blindly retry with random param names; if status[] is rejected, filter client-side and use a smart sort.
+
+**Smart sort for huge upstreams**: when the upstream queue dwarfs the actionable subset (e.g. terminations_v3 returns ~30k records of which ~1.1k are actionable), pass `sortBy=createdAt&sort=DESC` on the FIRST request. The cursor preserves it, so the entire walk is newest-first. Actionable records cluster in recent createdAt; closed records dominate the long tail. An empty-page early-stop at ~200 pages reliably catches the actionable set without walking all 600 pages.
+
+**Sort vs early-stop interaction** — never early-stop against the default `endDate ASC nulls first` sort: actionable PROCESSING / AWAITING_HRX_ACTION rows interleave with closed rows across the entire walk and a 50-page heuristic loses two-thirds of them (Mohamed reported 327 visible vs ~1100 expected). Always pair early-stop with a sort that front-loads the kept set.
+
+**Track raw status counts** as you scan and surface them in the route response (`upstreamStatusCounts: { AWAITING_TRIAGE: ..., COMPLETED: ..., ... }`). Without this you can't debug "why isn't the count what I expect" — you have no visibility into what the upstream actually contains.
+
+**Parent-bucket endpoints can be incomplete**: `/admin/eor/employee-manager/list/Onboarding.ActionableQueue` does NOT consistently surface every sub-status (we explicitly fan out to `Onboarding.ComplianceDocs.AwaitingReview`, `Onboarding.EA.EASigning.AwaitingToSendEA`, `Onboarding.EA.EAAdditionalDetails.AwaitingReview`, `Onboarding.PayrollComplianceDetails.AwaitingReview`). When in doubt, fan out per-status and merge by `onboardingId || oid`.
+
+**Per-country fan-out for paged sub-statuses**: most sub-status list endpoints return ~50 rows per call without a country filter. To pull every actionable row, hit `/admin/eor/employee-manager/countries/list/<status>` first to get country totals, then call `/admin/eor/employee-manager/list/<status>?countries[]=<CC>` per country. Mirror the Paused-onboarding pattern in `_scanOnboardingByStatus` for any new sub-status scan.
+
+### 3.7 Country ownership is DB-backed (not static)
+
+`OWNER_COUNTRIES` and `COUNTRY_OWNERS` in `src/data/countryOwners.js` are **live-binding `let` exports**, populated on every roster hydration from the `team_member_countries` junction table. Changes:
+
+- Server: `roster-server.js` calls `hydrateOwnerCountries(rows)` after each cache miss.
+- Client: `useTeamMembers` calls the same hydrator from the API response (`countries: string[]` per member). Hydration is gated on at least one member carrying countries so a baseline cold paint can't wipe a known-good map.
+- Queue scoping (`queue-scoping.js`) reads the live bindings via lazy `getAllCountries()` so admin-scope reflects the current map.
+- The picker (`MultiCountryPicker.jsx`) is the only edit surface; it lives on the Team-tab Countries column.
+
+When you change country-ownership semantics, walk this whole chain — server hydration, client hydration, queue scoping, picker UI, and the export/audit endpoints. The static fallback in `countryOwners.js` exists ONLY for cold-boot before the first hydration.
+
+### 3.8 Versioned re-seed pattern (data correction deploys)
+
+When you need to overwrite seeded DB data on a specific deploy without wiping manual edits made between deploys, use the `app_settings.<feature>_seed_version` pattern (see `src/lib/country-owners-seed.js`):
+
+```js
+const SEED_VERSION = 2; // bump per deploy that re-seeds
+
+// On boot:
+const stored = await getStoredVersion();
+if (stored < SEED_VERSION) {
+  await query('BEGIN');
+  await query('LOCK TABLE <target> IN ACCESS EXCLUSIVE MODE'); // lock against PUTs
+  await query('DELETE FROM <target>');
+  // INSERT new rows
+  await setStoredVersion(SEED_VERSION);
+  await query('COMMIT');
+}
+```
+
+Three things to get right:
+1. **Lock the target table** during the wipe-and-reseed so a concurrent PUT can't lose its write.
+2. **Always include the deploy's data file** (e.g. JSON) in the same commit as the version bump — they ship together.
+3. **Use email or a stable UUID as the seed key, not a fuzzy name match.** Name-matching seeds cause display-name vs email-localpart drift bugs; the v1 country seed had this and we re-seeded as v2 to correct it.
+
+### 3.9 CSV export format hardening
+
+Any new CSV download route must:
+- **Prefix the body with `﻿`** (UTF-8 BOM) so Excel on Windows recognises encoding and doesn't mojibake accented HRX names.
+- **Use `\r\n` line endings** per RFC 4180. LF-only breaks Numbers' import wizard and a few CSV parsers.
+- **Always-quote every field** (`"value"`) including numbers and codes — handles leading-zero ISO codes, comma-bearing names, and embedded quotes uniformly.
+- **ASCII-safe filename** in `Content-Disposition` (Safari drops the header on non-ASCII).
+- **`.catch()` on optional secondary queries** in `Promise.all` so a missing table on a brand-new env serves with empty counts instead of 500ing the whole download.
+
 ---
 
 ## Phase 4 — Post-implementation audit
@@ -543,6 +610,13 @@ Before telling the user "deploy broken, regressions everywhere":
 13. **Don't create docs/README/markdown files unless asked.** Edit existing files.
 14. **Don't fabricate CI/lint results** when tooling isn't available. Say "I could not run a parse check" and rely on careful diff review.
 15. **Don't ship without re-reading the diff as if you were the reviewer.** If you can't explain every line, you're not done.
+16. **Don't blanket `git checkout --ours`/`--theirs` on source files during conflict resolution.** It silently overwrites whichever side it skipped — including legitimate dev-branch work you'd want to keep. The user has explicitly denied this once. Resolve source-file conflicts by editing the markers manually; only use `--theirs` for ops files (`values.yaml`, `.test-trigger`).
+17. **Don't trust upstream parent-bucket endpoints to include every sub-state.** `Onboarding.ActionableQueue` and `terminations_v3` (default sort + early-stop) both had bugs where the parent didn't surface every actionable row. When in doubt, fan out per-sub-status and merge.
+18. **Don't pair an empty-page early-stop with the wrong sort.** With `endDate ASC nulls first` (the default), actionable rows are interleaved with closed rows — any early-stop loses data. Always pair early-stop with a sort that front-loads the kept set (e.g. `createdAt DESC`).
+19. **Don't ship a CSV export without UTF-8 BOM, CRLF, and always-quote.** Excel mojibakes accented names without `﻿`; some parsers reject LF-only; leading-zero codes drift without quotes. See section 3.9.
+20. **Don't fuzzy-match names when an email or stable ID is available.** Display-name vs email-localpart drift (e.g. "André Martins" → andre.maia@deel.com, "Suzy Santos" → susana.santos@deel.com) silently loses rows. Use email-keyed seeds and a versioned re-seed when the upstream reference is name-only.
+21. **Don't skip `LOCK TABLE` during a destructive re-seed.** A concurrent PUT during a `DELETE` + bulk `INSERT` will lose its write. Wrap re-seeds in `BEGIN; LOCK TABLE <target> IN ACCESS EXCLUSIVE MODE; ... COMMIT;`.
+22. **Don't omit `.catch()` on optional secondary queries in `Promise.all`.** A missing table on a brand-new env (migration hasn't run yet) or transient DB blip will 500 the whole route. Wrap with `.catch(err => { console.warn(...); return { rows: [] }; })` so the primary query still serves.
 
 ---
 

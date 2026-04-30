@@ -15,14 +15,18 @@ const CHANNEL_NAME = 'ops_hub_queue_sla_sync';
 // Mirrors the DEFAULT_SLA in app/api/v1/settings/queue-sla/route.js. Keeping
 // a copy here so the hook can paint instantly even before the first fetch
 // resolves; the route's response always overrides this once it lands.
+// All values are BUSINESS-DAY minutes (Sat/Sun excluded) per the 2026-05-01
+// spec. Offboarding splits by row type so Termination (14d) and Resignation
+// (5d) can be tuned independently.
 const DEFAULT_SLA = {
-  zendesk:    { activeMins: 1440 },
-  jira:       { activeMins: 2880 },
-  workbench:  { activeMins: 2880, pausedMins: 2880 },
-  amendments: { activeMins: 1440, pausedMins: 2880 },
-  redlines:   { activeMins: 4320, pausedMins: 2880 },
-  onboarding: { activeMins: 10080, pausedMins: 2880 },
-  offboarding:{ activeMins: 30240, pausedMins: 2880 },
+  zendesk:                 { activeMins: 1440,  pausedMins: 2880 },
+  jira:                    { activeMins: 2880 },
+  workbench:               { activeMins: 2880,  pausedMins: 2880 },
+  amendments:              { activeMins: 1440,  pausedMins: 2880 },
+  redlines:                { activeMins: 7200,  pausedMins: 2880 },
+  onboarding:              { activeMins: 1440,  pausedMins: 2880 },
+  offboarding_termination: { activeMins: 20160, pausedMins: 2880 },
+  offboarding_resignation: { activeMins: 7200,  pausedMins: 2880 },
 };
 
 function readFromLs() {
