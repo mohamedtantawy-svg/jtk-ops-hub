@@ -199,11 +199,11 @@ The whole SLA model (as of 2026-05-01) ticks on the **business-day clock** (`src
 | Data type | Where the SLA window comes from | Where the elapsed time is computed |
 |---|---|---|
 | Tickets (ZD/Jira) | `task.slaMinsOverride` (server-stamped from `app_settings.queue_sla_thresholds.zendesk\|jira`) → fallback `SLA_MINS[task.type]` | `slaInfo()` in `src/utils/helpers.js` — uses `elapsedBizMinutes(anchor, now)` |
-| Deel sources (Onb / Off / Amend / Redline / Workbench) | `useQueueSlaSettings()` config keyed per queue (incl. `offboarding_termination` / `offboarding_resignation`) → fallback constants in `normalizeSourceRows.js` | `computeSlaWindow()` in `src/utils/normalizeSourceRows.js` — uses `elapsedBizMs(anchor, now)`. Each row carries `slaWindowMs` so consumers can derive proportional bands |
+| Deel sources (Onb / Off / Amend / Redline / Workbench / Incentive Plans) | `useQueueSlaSettings()` config keyed per queue (incl. `offboarding_termination` / `offboarding_resignation` / `incentive_plans`) → fallback constants in `normalizeSourceRows.js` | `computeSlaWindow()` in `src/utils/normalizeSourceRows.js` — uses `elapsedBizMs(anchor, now)`. Each row carries `slaWindowMs` so consumers can derive proportional bands |
 | Capacity bands (Low/Good/High) | `useCapacitySettings()` → `app_settings.queue_capacity_thresholds` → fallback `{ lowMax: 40, highMin: 100 }` | classified inside BriefingView (`classifyWorkload`) and Team |
 
 **Settings tables (FE editable):**
-- **Team tab → Queue SLA settings card** (`Team.jsx::QueueSlaSettingsCard`) — edits `app_settings.queue_sla_thresholds`. 8 queue rows (incl. `offboarding_termination` + `offboarding_resignation` + `zendesk` paused). Save broadcasts on `ops_hub_queue_sla_sync`.
+- **Team tab → Queue SLA settings card** (`Team.jsx::QueueSlaSettingsCard`) — edits `app_settings.queue_sla_thresholds`. 9 queue rows (incl. `offboarding_termination` + `offboarding_resignation` + `zendesk` paused + `incentive_plans`). Save broadcasts on `ops_hub_queue_sla_sync`.
 - **Team tab → Workload capacity card** (`Team.jsx::CapacitySettingsCard`) — edits `app_settings.queue_capacity_thresholds`. Save broadcasts on `ops_hub_queue_capacity_sync`.
 - **Settings → SLA Configuration** — only the global toggles (`sla_enabled`, breach notifications, warning %). The legacy per-function `sla_thresholds` editor was deleted on 2026-05-01 (unused at runtime; queue-sla settings are the single source of truth).
 

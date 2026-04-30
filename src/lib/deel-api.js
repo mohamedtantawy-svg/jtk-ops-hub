@@ -640,6 +640,182 @@ export async function listInvoices(params = {}) {
   return deelFetch(`/rest/v2/invoices${q ? `?${q}` : ''}`);
 }
 
+// ── Incentive Plans (Admin API) ─────────────────────────────────────────────
+// /admin/eor-experience/incentive-plans — pending IP preparation feed.
+// List endpoint payload is sparse (id, createdAt, employeeLegalName,
+// startDate, isWhiteLabeled). To fill the Country / Organization columns
+// the FE Queue needs, we fan out per-row to the detail endpoint
+// /admin/eor-experience/incentive-plans/{id} which carries `country`,
+// `eorContractId`, and an organization reference. Detail responses are
+// cached aggressively (1h) since the IP id never changes shape.
+//
+// Same SLA semantics as redlines per the 2026-05-01 spec — 5 biz-days
+// active from createdAt, 48h biz from pausedAt when paused. Country is
+// load-bearing for the country-OR-assignee scope (incentive plans have
+// no upstream assignee), so a row missing country is invisible to non-
+// admin users; the enrichment best-effort fills it.
+
+const INCENTIVE_PLAN_PAGE_SIZE = 50;
+const INCENTIVE_PLAN_MAX_PAGES = 40;
+
+async function fetchIncentivePlanPage(status, cursor) {
+  const qs = new URLSearchParams();
+  qs.set('status', status);
+  if (cursor) {
+    // The admin API's cursor token already carries the filter+sort state —
+    // sending limit/status alongside an existing cursor returns 400 (same
+    // pattern as terminations_v3).
+    qs.set('cursor', cursor);
+  } else {
+    qs.set('limit', String(INCENTIVE_PLAN_PAGE_SIZE));
+  }
+  const res = await deelFetch(`/admin/eor-experience/incentive-plans?${qs.toString()}`);
+  return { items: res?.data || [], cursor: res?.cursor || null };
+}
+
+async function fetchAllIncentivePlansForStatus(status) {
+  const all = [];
+  let cursor = null;
+  for (let page = 0; page < INCENTIVE_PLAN_MAX_PAGES; page++) {
+    const res = await fetchIncentivePlanPage(status, cursor);
+    all.push(...res.items);
+    cursor = res.cursor;
+    if (!cursor || res.items.length === 0) break;
+  }
+  return all;
+}
+
+// Per-row detail enrichment — list endpoint doesn't carry country/org.
+// Fetches /admin/eor-experience/incentive-plans/{id} and mines:
+//   - country / countryCode (from the upstream record or its eorContract)
+//   - eorContractId (so we can chain into /admin/api/contract/{oid}
+//     for org name + Deeler-tag drop)
+//   - status (in case the upstream surfaces a paused/triaged sub-status)
+const INCENTIVE_PLAN_DETAIL_CACHE = new Map();
+const INCENTIVE_PLAN_DETAIL_TTL_MS = 60 * 60 * 1000;
+const INCENTIVE_PLAN_DETAIL_CONCURRENCY = 5;
+
+async function fetchIncentivePlanDetail(planId) {
+  if (!planId) return null;
+  const key = String(planId);
+  const hit = INCENTIVE_PLAN_DETAIL_CACHE.get(key);
+  if (hit && Date.now() - hit.ts < INCENTIVE_PLAN_DETAIL_TTL_MS) return hit.detail;
+  try {
+    const r = await deelFetch(`/admin/eor-experience/incentive-plans/${encodeURIComponent(key)}`);
+    const detail = {
+      country:        r?.country
+                   || r?.countryCode
+                   || r?.eorContract?.country
+                   || r?.eorContract?.countryCode
+                   || '',
+      eorContractId:  r?.eorContractId
+                   || r?.eorContract?.id
+                   || r?.eorContract?.oid
+                   || '',
+      // Some payloads carry the org inline; fall back to the contract
+      // detail enrichment below for the rest.
+      orgName:        r?.eorContract?.organization?.name
+                   || r?.organization?.name
+                   || '',
+      status:         r?.status || '',
+      pausedAt:       r?.pausedAt || null,
+      isPaused:       r?.isPaused === true,
+    };
+    INCENTIVE_PLAN_DETAIL_CACHE.set(key, { detail, ts: Date.now() });
+    return detail;
+  } catch (e) {
+    return hit?.detail || null;
+  }
+}
+
+async function resolveIncentivePlanDetails(planIds) {
+  const unique = [...new Set(planIds.filter(Boolean).map(String))];
+  const resolved = new Map();
+  for (let i = 0; i < unique.length; i += INCENTIVE_PLAN_DETAIL_CONCURRENCY) {
+    const batch = unique.slice(i, i + INCENTIVE_PLAN_DETAIL_CONCURRENCY);
+    const results = await Promise.all(batch.map(fetchIncentivePlanDetail));
+    batch.forEach((id, idx) => { if (results[idx]) resolved.set(id, results[idx]); });
+  }
+  return resolved;
+}
+
+/**
+ * Fetches incentive-plan rows for one or more upstream statuses.
+ * Default = ['PENDING_IP_PREPARATION'] (the only actionable bucket today).
+ * Returns rows with the list-endpoint fields PLUS the detail-enriched
+ * country / eorContractId / orgName when available.
+ */
+export async function listIncentivePlans(params = {}) {
+  const statusList = Array.isArray(params.status)
+    ? params.status
+    : [params.status || 'PENDING_IP_PREPARATION'];
+
+  const batches = await Promise.all(statusList.map(fetchAllIncentivePlansForStatus));
+
+  const seen = new Set();
+  const rawItems = [];
+  for (let i = 0; i < batches.length; i++) {
+    for (const r of batches[i]) {
+      if (!r?.id || seen.has(r.id)) continue;
+      seen.add(r.id);
+      rawItems.push({ __status: statusList[i], ...r });
+    }
+  }
+  if (rawItems.length === 0) return { items: [], total: 0 };
+
+  // Per-row detail fetch to fill country / contract / org. The first
+  // refresh is the slow path (~N requests with concurrency 5); subsequent
+  // refreshes hit the 1-hour cache.
+  const detailMap = await resolveIncentivePlanDetails(rawItems.map(r => r.id));
+
+  // Use eorContractId (when present) to drop Deel-internal contracts and
+  // pick up the canonical org name via /admin/api/contract/{oid}.
+  const oidsForContract = [];
+  for (const r of rawItems) {
+    const d = detailMap.get(r.id);
+    if (d?.eorContractId) oidsForContract.push(d.eorContractId);
+  }
+  const contractDetails = oidsForContract.length > 0
+    ? await resolveContractDetails(oidsForContract)
+    : new Map();
+
+  let droppedDeelers = 0;
+  const items = [];
+  for (const r of rawItems) {
+    const d = detailMap.get(r.id) || {};
+    const cd = d.eorContractId ? contractDetails.get(String(d.eorContractId)) : null;
+    if (cd && hasDeelerTag(cd.tags)) {
+      droppedDeelers++;
+      continue;
+    }
+    items.push({
+      id:                r.id || '',
+      __status:          r.__status,
+      status:            d.status || r.__status || 'PENDING_IP_PREPARATION',
+      employeeName:      r.employeeLegalName || cd?.employeeName || '',
+      startDate:         r.startDate || '',
+      createdAt:         r.createdAt || '',
+      // Country lookup chain — direct field, then detail, then contract.
+      country:           cd?.country || d.country || '',
+      // Organization — prefer the contract's team/org name (canonical),
+      // fall back to whatever the IP detail surfaced.
+      orgName:           cd?.orgName || d.orgName || '',
+      eorContractId:     d.eorContractId || '',
+      contractOid:       cd?.contractOid || d.eorContractId || '',
+      isWhiteLabeled:    !!r.isWhiteLabeled,
+      // Pause hooks — most rows aren't paused, but if the detail call
+      // returns one, normalizeIncentivePlans will tick the SLA from
+      // pausedAt instead of createdAt.
+      isPaused:          !!d.isPaused,
+      pausedAt:          d.pausedAt || null,
+    });
+  }
+  if (droppedDeelers > 0) {
+    console.info(`[incentive-plans] filtered ${droppedDeelers} Deeler contract(s) of ${rawItems.length}`);
+  }
+  return { items, total: items.length };
+}
+
 // ── Redline Requests (Admin API) ────────────────────────────────────────────
 
 // Pagination config: REDLINE_PAGE_SIZE items per call, follow cursor up to

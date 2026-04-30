@@ -92,6 +92,14 @@ export async function fetchDeelWorkbench({ limit, bustCache } = {}) {
   return apiFetch(`/integrations/deel/workbench${qs ? `?${qs}` : ''}`);
 }
 
+export async function fetchDeelIncentivePlans({ status, bustCache } = {}) {
+  const params = new URLSearchParams();
+  if (status) params.set('status', status);
+  if (bustCache) params.set('bust', '1');
+  const qs = params.toString();
+  return apiFetch(`/integrations/deel/incentive-plans${qs ? `?${qs}` : ''}`);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Jira
 // ─────────────────────────────────────────────────────────────────────────────

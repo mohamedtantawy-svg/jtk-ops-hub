@@ -302,3 +302,7 @@ export const scopeOffboardingCases = (items, user) => {
 };
 export const scopeAmendmentRequests     = (items, user) => filterByCountryOrAssignee(items, user);
 export const scopeRedlineRequests       = (items, user) => filterByCountryOrAssignee(items, user);
+// Incentive plans have no upstream assignee, so they ride the country path
+// only — country owners (and their TL/RM chain) see every PENDING_IP_PREP
+// row in their owned countries; admin sees all.
+export const scopeIncentivePlans        = (items, user) => filterByCountryOrAssignee(items, user);

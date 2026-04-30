@@ -9,6 +9,7 @@ import {
   scopePausedOnboarding,
   scopeAmendmentRequests,
   scopeRedlineRequests,
+  scopeIncentivePlans,
   filterByAssignee as scopeTicketsByAssignee,
   getVisibleEmails,
   isAdminUser,
@@ -28,6 +29,7 @@ import {
   normalizeRedlines,
   normalizeWorkbench,
   normalizePausedOnboarding,
+  normalizeIncentivePlans,
 } from '../../utils/normalizeSourceRows';
 
 // ── Live assignee lookup ───────────────────────────────────────────────────
@@ -52,13 +54,14 @@ const relTime = (m) => {
 
 // ── Work Source Button config ──
 const WORK_SOURCES = [
-  { id: 'onboarding',  label: 'Onboarding',  icon: 'bi-person-plus-fill', color: '#7c3aed', bg: '#f3eff8' },
-  { id: 'offboarding', label: 'Offboarding', icon: 'bi-person-dash-fill', color: '#d42d35', bg: '#fef2f2' },
-  { id: 'amendments',  label: 'Amendments',  icon: 'bi-pencil-square',    color: '#ed8d00', bg: '#fff8e6' },
-  { id: 'redlines',    label: 'Redlines',    icon: 'bi-file-earmark-diff',color: '#7c3aed', bg: '#f3eff8' },
-  { id: 'workbench',   label: 'Workbench',   icon: 'bi-grid-3x3-gap-fill',color: '#0369a1', bg: '#eff6ff' },
-  { id: 'jira',        label: 'Jira',        icon: 'bi-kanban-fill',      color: '#1f74b3', bg: '#e8f0fe' },
-  { id: 'zendesk',     label: 'Zendesk',     icon: 'bi-headset',          color: '#29811e', bg: '#e8f5e9' },
+  { id: 'onboarding',     label: 'Onboarding',     icon: 'bi-person-plus-fill',   color: '#7c3aed', bg: '#f3eff8' },
+  { id: 'offboarding',    label: 'Offboarding',    icon: 'bi-person-dash-fill',   color: '#d42d35', bg: '#fef2f2' },
+  { id: 'amendments',     label: 'Amendments',     icon: 'bi-pencil-square',      color: '#ed8d00', bg: '#fff8e6' },
+  { id: 'redlines',       label: 'Redlines',       icon: 'bi-file-earmark-diff',  color: '#7c3aed', bg: '#f3eff8' },
+  { id: 'incentive_plans',label: 'Incentive Plans',icon: 'bi-cash-coin',          color: '#0e7490', bg: '#ecfeff' },
+  { id: 'workbench',      label: 'Workbench',      icon: 'bi-grid-3x3-gap-fill',  color: '#0369a1', bg: '#eff6ff' },
+  { id: 'jira',           label: 'Jira',           icon: 'bi-kanban-fill',        color: '#1f74b3', bg: '#e8f0fe' },
+  { id: 'zendesk',        label: 'Zendesk',        icon: 'bi-headset',            color: '#29811e', bg: '#e8f5e9' },
 ];
 
 const PRIORITY_DOT = { critical: '#dc2626', high: '#d97706', medium: '#0369a1', low: '#9b928a' };
@@ -125,7 +128,7 @@ const Queue = ({ user, tasks, subFilter }) => {
   const unified = useQueueUnifiedSync({ queueSync, enabled: !!user, userEmail: user?.email || null });
   const {
     onboardingData, pausedOnboardingData, offboardingData,
-    changeRequestData, workbenchData,
+    changeRequestData, workbenchData, incentivePlansData,
     meta: syncMeta, sources: syncSources, refreshAll: syncRefreshAll, nowTick: syncNowTick,
   } = unified;
 
@@ -137,6 +140,7 @@ const Queue = ({ user, tasks, subFilter }) => {
   const amendmentRowsAll        = useMemo(() => normalizeAmendments(changeRequestData.amendments, queueSla), [changeRequestData.amendments, queueSla]);
   const redlineRowsAll          = useMemo(() => normalizeRedlines(changeRequestData.redlines, queueSla), [changeRequestData.redlines, queueSla]);
   const workbenchRowsAll        = useMemo(() => normalizeWorkbench(workbenchData.tasks, queueSla), [workbenchData.tasks, queueSla]);
+  const incentivePlanRowsAll    = useMemo(() => normalizeIncentivePlans(incentivePlansData.items, queueSla), [incentivePlansData.items, queueSla]);
 
   const isAdmin = isAdminUser(user);
   const isLead = perms?.dataScope === 'team_tasks';
@@ -188,9 +192,10 @@ const Queue = ({ user, tasks, subFilter }) => {
   const amendmentRows   = useMemo(() => scopeAmendmentRequests(amendmentRowsAll, user), [amendmentRowsAll, user]);
   const redlineRows     = useMemo(() => scopeRedlineRequests(redlineRowsAll, user), [redlineRowsAll, user]);
   const workbenchRows   = useMemo(() => scopeWorkbenchTasks(workbenchRowsAll, user), [workbenchRowsAll, user]);
+  const incentivePlanRows = useMemo(() => scopeIncentivePlans(incentivePlanRowsAll, user), [incentivePlanRowsAll, user]);
   const allSourceRows   = useMemo(() => [
-    ...onboardingRows, ...offboardingRows, ...amendmentRows, ...redlineRows, ...workbenchRows,
-  ], [onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows]);
+    ...onboardingRows, ...offboardingRows, ...amendmentRows, ...redlineRows, ...workbenchRows, ...incentivePlanRows,
+  ], [onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, incentivePlanRows]);
 
   // ── Memoized filter chain — only recomputes when inputs change ──
   const { baseVis, visPreSla, active, snoozed, done, all } = useMemo(() => {
@@ -289,6 +294,7 @@ const Queue = ({ user, tasks, subFilter }) => {
   const visAmendmentRows   = useMemo(() => applyPanelFilter(amendmentRows),   [amendmentRows, applyPanelFilter]);
   const visRedlineRows     = useMemo(() => applyPanelFilter(redlineRows),     [redlineRows, applyPanelFilter]);
   const visWorkbenchRows   = useMemo(() => applyPanelFilter(workbenchRows),   [workbenchRows, applyPanelFilter]);
+  const visIncentivePlanRows = useMemo(() => applyPanelFilter(incentivePlanRows), [incentivePlanRows, applyPanelFilter]);
 
   // Per-source SLA severity classifier. At-risk = "less than 25% of the SLA
   // window remaining" — proportional to whatever active/paused window the
@@ -321,6 +327,7 @@ const Queue = ({ user, tasks, subFilter }) => {
   const tblAmendmentRows   = useMemo(() => applySlaFilter(visAmendmentRows),   [visAmendmentRows,   applySlaFilter]);
   const tblRedlineRows     = useMemo(() => applySlaFilter(visRedlineRows),     [visRedlineRows,     applySlaFilter]);
   const tblWorkbenchRows   = useMemo(() => applySlaFilter(visWorkbenchRows),   [visWorkbenchRows,   applySlaFilter]);
+  const tblIncentivePlanRows = useMemo(() => applySlaFilter(visIncentivePlanRows), [visIncentivePlanRows, applySlaFilter]);
 
   // Tally a row set into { atRisk, breached, onTrack } using the proportional
   // at-risk band (windowMs/4). Mirrors rowSlaSeverity exactly so pill counts,
@@ -337,11 +344,12 @@ const Queue = ({ user, tasks, subFilter }) => {
 
   // ── SLA pills counts — reflect post-filter row sets per active tab ──
   const { atRiskCount, breachedCount, onTrackCount } = useMemo(() => {
-    if (workSource === 'onboarding')  return tallyDeelSla(visOnboardingRows);
-    if (workSource === 'offboarding') return tallyDeelSla(visOffboardingRows);
-    if (workSource === 'amendments')  return tallyDeelSla(visAmendmentRows);
-    if (workSource === 'redlines')    return tallyDeelSla(visRedlineRows);
-    if (workSource === 'workbench')   return tallyDeelSla(visWorkbenchRows);
+    if (workSource === 'onboarding')      return tallyDeelSla(visOnboardingRows);
+    if (workSource === 'offboarding')     return tallyDeelSla(visOffboardingRows);
+    if (workSource === 'amendments')      return tallyDeelSla(visAmendmentRows);
+    if (workSource === 'redlines')        return tallyDeelSla(visRedlineRows);
+    if (workSource === 'workbench')       return tallyDeelSla(visWorkbenchRows);
+    if (workSource === 'incentive_plans') return tallyDeelSla(visIncentivePlanRows);
     let slaBase;
     if (workSource === 'jira') slaBase = visPreSla.filter(t => t.source === 'jira');
     else if (workSource === 'zendesk') slaBase = visPreSla.filter(t => t.source === 'zendesk');
@@ -350,41 +358,43 @@ const Queue = ({ user, tasks, subFilter }) => {
     const atRisk = slaBase.filter(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; }).length;
     const breached = slaBase.filter(t => { const s = slaInfo(t); return s && s.breach; }).length;
     return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: slaBase.length - atRisk - breached };
-  }, [workSource, visPreSla, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows, tallyDeelSla]);
+  }, [workSource, visPreSla, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows, visIncentivePlanRows, tallyDeelSla]);
 
   // ── View-aware header counts ──
   // For each Deel source we read the SLA-filtered row set so the "N open"
   // badge tracks what the user actually sees in the table, and the existing
   // `hiddenByFilters` indicator can show how many rows the SLA pill hid.
   const headerCounts = useMemo(() => {
-    if (workSource === 'onboarding')  return { open: tblOnboardingRows.length,  paused: 0, resolved: 0 };
-    if (workSource === 'offboarding') return { open: tblOffboardingRows.length, paused: 0, resolved: 0 };
-    if (workSource === 'amendments')  return { open: tblAmendmentRows.length,   paused: 0, resolved: 0 };
-    if (workSource === 'redlines')    return { open: tblRedlineRows.length,     paused: 0, resolved: 0 };
-    if (workSource === 'workbench')   return { open: tblWorkbenchRows.length,   paused: 0, resolved: 0 };
+    if (workSource === 'onboarding')      return { open: tblOnboardingRows.length,    paused: 0, resolved: 0 };
+    if (workSource === 'offboarding')     return { open: tblOffboardingRows.length,   paused: 0, resolved: 0 };
+    if (workSource === 'amendments')      return { open: tblAmendmentRows.length,     paused: 0, resolved: 0 };
+    if (workSource === 'redlines')        return { open: tblRedlineRows.length,       paused: 0, resolved: 0 };
+    if (workSource === 'workbench')       return { open: tblWorkbenchRows.length,     paused: 0, resolved: 0 };
+    if (workSource === 'incentive_plans') return { open: tblIncentivePlanRows.length, paused: 0, resolved: 0 };
     const sourceOpen = fTool ? 0 : (
       tblOnboardingRows.length + tblOffboardingRows.length + tblAmendmentRows.length
-      + tblRedlineRows.length + tblWorkbenchRows.length
+      + tblRedlineRows.length + tblWorkbenchRows.length + tblIncentivePlanRows.length
     );
     return {
       open: active.length + sourceOpen,
       paused: snoozed.length,
       resolved: done.length,
     };
-  }, [workSource, fTool, active, snoozed, done, tblOnboardingRows, tblOffboardingRows, tblAmendmentRows, tblRedlineRows, tblWorkbenchRows]);
+  }, [workSource, fTool, active, snoozed, done, tblOnboardingRows, tblOffboardingRows, tblAmendmentRows, tblRedlineRows, tblWorkbenchRows, tblIncentivePlanRows]);
 
   const rawCounts = useMemo(() => {
-    if (workSource === 'onboarding')  return { open: onboardingRows.length };
-    if (workSource === 'offboarding') return { open: offboardingRows.length };
-    if (workSource === 'amendments')  return { open: amendmentRows.length };
-    if (workSource === 'redlines')    return { open: redlineRows.length };
-    if (workSource === 'workbench')   return { open: workbenchRows.length };
+    if (workSource === 'onboarding')      return { open: onboardingRows.length };
+    if (workSource === 'offboarding')     return { open: offboardingRows.length };
+    if (workSource === 'amendments')      return { open: amendmentRows.length };
+    if (workSource === 'redlines')        return { open: redlineRows.length };
+    if (workSource === 'workbench')       return { open: workbenchRows.length };
+    if (workSource === 'incentive_plans') return { open: incentivePlanRows.length };
     const base = fTool ? baseVis.filter(t => t.source === fTool) : baseVis;
     const srcExtra = fTool ? 0 : allSourceRows.length;
     return {
       open: base.filter(t => t.status !== 'resolved' && t.status !== 'waiting').length + srcExtra,
     };
-  }, [workSource, fTool, baseVis, allSourceRows, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows]);
+  }, [workSource, fTool, baseVis, allSourceRows, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, incentivePlanRows]);
   const hiddenByFilters = Math.max(0, rawCounts.open - headerCounts.open);
 
   // Persist filters to localStorage — user-scoped so two people on the
@@ -480,6 +490,7 @@ const Queue = ({ user, tasks, subFilter }) => {
               : workSource === 'amendments' ? amendmentRows
               : workSource === 'redlines' ? redlineRows
               : workSource === 'workbench' ? workbenchRows
+              : workSource === 'incentive_plans' ? incentivePlanRows
               : [];
             const present = new Set(rowsForPanel.map(r => r?.status?.severity).filter(Boolean));
             statusOptions = ['critical', 'warning', 'active', 'info']
@@ -504,6 +515,7 @@ const Queue = ({ user, tasks, subFilter }) => {
                   : ws.id === 'amendments' ? visAmendmentRows.length
                   : ws.id === 'redlines' ? visRedlineRows.length
                   : ws.id === 'workbench' ? visWorkbenchRows.length
+                  : ws.id === 'incentive_plans' ? visIncentivePlanRows.length
                   : ws.id === 'jira' ? jiraCount
                   : ws.id === 'zendesk' ? zdCount
                   : 0;
@@ -702,6 +714,25 @@ const Queue = ({ user, tasks, subFilter }) => {
             hideStatusPills
             dateField="createdAt"
             dateLabel="Created"
+          />
+        </ErrorBoundary>
+      )}
+      {workSource === 'incentive_plans' && (
+        <ErrorBoundary>
+          <SourceTable
+            rows={tblIncentivePlanRows}
+            loading={incentivePlansData.loading}
+            error={incentivePlansData.error}
+            onRefresh={incentivePlansData.refresh}
+            emptyIcon="bi-cash-coin"
+            emptyLabel="No incentive plans"
+            emptySubLabel="Nothing pending IP preparation"
+            sortDefault="sla"
+            showClient
+            hideStatusPills
+            hideUpdated
+            dateField="createdAt"
+            dateLabel="Requested Date"
           />
         </ErrorBoundary>
       )}

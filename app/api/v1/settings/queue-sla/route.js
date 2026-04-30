@@ -18,6 +18,7 @@ const CACHE_TTL = 30_000; // 30s — balances UX speed vs DB load
 const VALID_QUEUES = new Set([
   'zendesk', 'jira', 'workbench', 'amendments', 'redlines', 'onboarding',
   'offboarding_termination', 'offboarding_resignation',
+  'incentive_plans',
 ]);
 
 const DEFAULT_SLA = {
@@ -30,6 +31,7 @@ const DEFAULT_SLA = {
   onboarding:              { activeMins: 1440,  pausedMins: 2880 },  // 24h from task initiated / 48h paused
   offboarding_termination: { activeMins: 20160, pausedMins: 2880 },  // 14d active / 48h paused
   offboarding_resignation: { activeMins: 7200,  pausedMins: 2880 },  // 5d active / 48h paused
+  incentive_plans:         { activeMins: 7200,  pausedMins: 2880 },  // 5d active / 48h paused (mirrors redlines)
 };
 
 async function getDb() {

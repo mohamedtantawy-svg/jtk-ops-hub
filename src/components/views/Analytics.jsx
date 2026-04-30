@@ -9,6 +9,7 @@ import { usePausedOnboardingData } from '../../hooks/usePausedOnboardingData';
 import { useOffboardingData } from '../../hooks/useOffboardingData';
 import { useChangeRequestData } from '../../hooks/useChangeRequestData';
 import { useWorkbenchData } from '../../hooks/useWorkbenchData';
+import { useIncentivePlansData } from '../../hooks/useIncentivePlansData';
 import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
 import {
   normalizeOnboarding,
@@ -17,6 +18,7 @@ import {
   normalizeAmendments,
   normalizeRedlines,
   normalizeWorkbench,
+  normalizeIncentivePlans,
 } from '../../utils/normalizeSourceRows';
 import Avatar from '../ui/Avatar';
 import MultiFilter from '../analytics/MultiFilter';
@@ -166,6 +168,7 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
   const offboardingDataA = useOffboardingData(true);
   const changeRequestDataA = useChangeRequestData(true);
   const workbenchDataA = useWorkbenchData(true);
+  const incentivePlansDataA = useIncentivePlansData(true);
   const { sla: queueSlaA } = useQueueSlaSettings();
   const onbRowsA = useMemo(() => normalizeOnboarding(onboardingDataA.items, queueSlaA), [onboardingDataA.items, queueSlaA]);
   const pausedOnbRowsA = useMemo(() => normalizePausedOnboarding(pausedOnboardingDataA.items, queueSlaA), [pausedOnboardingDataA.items, queueSlaA]);
@@ -173,6 +176,7 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
   const amendRowsA = useMemo(() => normalizeAmendments(changeRequestDataA.amendments, queueSlaA), [changeRequestDataA.amendments, queueSlaA]);
   const redlineRowsA = useMemo(() => normalizeRedlines(changeRequestDataA.redlines, queueSlaA), [changeRequestDataA.redlines, queueSlaA]);
   const wbRowsA = useMemo(() => normalizeWorkbench(workbenchDataA.tasks, queueSlaA), [workbenchDataA.tasks, queueSlaA]);
+  const ipRowsA = useMemo(() => normalizeIncentivePlans(incentivePlansDataA.items, queueSlaA), [incentivePlansDataA.items, queueSlaA]);
 
   const slaCompliance = useMemo(() => {
     // Tickets — slaInfo() returns null for resolved/waiting (excludes
@@ -196,14 +200,14 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
       if (elapsed > limitMins) breached++;
     }
     // Deel sources — slaBreachStatus is the per-row biz-day computation.
-    const deelRows = [...onbRowsA, ...pausedOnbRowsA, ...offRowsA, ...amendRowsA, ...redlineRowsA, ...wbRowsA];
+    const deelRows = [...onbRowsA, ...pausedOnbRowsA, ...offRowsA, ...amendRowsA, ...redlineRowsA, ...wbRowsA, ...ipRowsA];
     for (const r of deelRows) {
       pool++;
       if (r.slaBreachStatus === 'SLA_BREACHED') breached++;
     }
     if (pool === 0) return 100;
     return Math.round(((pool - breached) / pool) * 100);
-  }, [all, resolved, onbRowsA, pausedOnbRowsA, offRowsA, amendRowsA, redlineRowsA, wbRowsA]);
+  }, [all, resolved, onbRowsA, pausedOnbRowsA, offRowsA, amendRowsA, redlineRowsA, wbRowsA, ipRowsA]);
 
   // ── Escalation rate KPI (real data) ───────────────────────────────────
   const escalatedTasks = all.filter(t => t.status === 'escalated');
