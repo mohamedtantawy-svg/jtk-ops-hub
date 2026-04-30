@@ -1,13 +1,25 @@
 // ── GET /api/v1/team-members/countries/export ──────────────────────────────
-// CSV export of the live country-ownership map. Surfaces every active
-// HRX member with the comma-separated list of country codes they own,
-// plus a final section that flags members with no countries assigned.
+// CSV export of the live country-ownership map. One row per active HRX
+// member with the comma-separated list of ISO codes they own. Members
+// with zero assignments still appear (Country Count = 0) so a glance at
+// the column reveals every gap.
+//
 // Used to audit the dashboard's allocation against the Deel "Countries by
-// Person Role" spreadsheet — drop the export next to the spreadsheet,
-// diff, fill any gaps via the Team-tab UI.
+// Person Role" spreadsheet — sort the export by Country Count ascending
+// and the unassigned bubble to the top.
+//
+// Format hardening (2026-04-30):
+//   • UTF-8 BOM prefix so Excel on Windows recognises the encoding and
+//     doesn't mangle accented names ("María" → "MarÃ­a").
+//   • CRLF line endings per RFC 4180 — the older LF-only output broke
+//     a couple of older CSV parsers and Numbers' import wizard.
+//   • Always-quoted fields so leading-zero codes ("AT", "AU") and
+//     comma-bearing names round-trip cleanly.
+//   • ASCII-safe filename in Content-Disposition so Safari doesn't drop
+//     the header when the date contains characters its parser dislikes.
 //
 // Auth: any authenticated @deel.com user can download (~104-person tool;
-// the data is otherwise visible on the Team tab).
+// the same data is otherwise visible on the Team tab).
 
 import { NextResponse } from 'next/server';
 import { query } from '../../../../../../src/lib/db';
@@ -15,12 +27,16 @@ import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { mergeTeamMembers } from '../../../../../../src/lib/team-members-merge';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
 
-// Minimal CSV escape: wrap in quotes if the field contains comma / quote /
-// newline; double any embedded quotes per RFC 4180.
+// Always quote per RFC 4180. Doubles any embedded quotes.
 function csvEscape(value) {
   const s = value == null ? '' : String(value);
-  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
-  return s;
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+// Strip everything that isn't safe in a Content-Disposition filename
+// param. Browsers vary in tolerance; ASCII alnum + . _ - is universal.
+function safeFilename(s) {
+  return s.replace(/[^A-Za-z0-9._-]+/g, '_');
 }
 
 export async function GET(req) {
@@ -57,23 +73,50 @@ export async function GET(req) {
       byEmail.get(e).push((r.country_code || '').toUpperCase());
     }
 
-    const lines = ['Name,Email,Access,Team,Region,Country Count,Countries'];
-    for (const m of merged) {
+    // Build rows; sort by ascending count so unassigned members surface at
+    // the top of the spreadsheet — that's the audit signal the user is
+    // looking for ("who's missing countries?").
+    const rows = merged.map(m => {
       const lc = (m.email || '').toLowerCase();
-      const countries = (byEmail.get(lc) || []).sort();
-      lines.push([
-        csvEscape(m.name || ''),
-        csvEscape(m.email || ''),
-        csvEscape(m.access || ''),
-        csvEscape(m.team || ''),
-        csvEscape(m.region || ''),
-        countries.length,
-        csvEscape(countries.join(', ')),
+      const countries = (byEmail.get(lc) || []).slice().sort();
+      return {
+        name: m.name || '',
+        email: m.email || '',
+        access: m.access || '',
+        team: m.team || '',
+        region: m.region || '',
+        countryCount: countries.length,
+        countries: countries.join(', '),
+      };
+    });
+    rows.sort((a, b) => {
+      // Unassigned first; within the same count, alphabetical by name so
+      // diffs against the Deel spreadsheet are stable.
+      if (a.countryCount !== b.countryCount) return a.countryCount - b.countryCount;
+      return a.name.localeCompare(b.name);
+    });
+
+    const HEADER = ['Name', 'Email', 'Access', 'Team', 'Region', 'Country Count', 'Countries'];
+    const csvLines = [HEADER.map(csvEscape).join(',')];
+    for (const r of rows) {
+      csvLines.push([
+        csvEscape(r.name),
+        csvEscape(r.email),
+        csvEscape(r.access),
+        csvEscape(r.team),
+        csvEscape(r.region),
+        csvEscape(String(r.countryCount)),
+        csvEscape(r.countries),
       ].join(','));
     }
 
-    const filename = `team-country-ownership-${new Date().toISOString().slice(0, 10)}.csv`;
-    return new NextResponse(lines.join('\n') + '\n', {
+    // ﻿ is the UTF-8 BOM. Excel needs it; everything else ignores it.
+    // CRLF line endings per RFC 4180.
+    const body = '﻿' + csvLines.join('\r\n') + '\r\n';
+    const date = new Date().toISOString().slice(0, 10);
+    const filename = safeFilename(`team-country-ownership-${date}.csv`);
+
+    return new NextResponse(body, {
       status: 200,
       headers: {
         'Content-Type': 'text/csv; charset=utf-8',
