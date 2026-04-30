@@ -3,6 +3,7 @@ import { PermissionsContext, IntegrationsContext } from '../../App';
 import { FLAGS } from '../../data/constants';
 import { slaInfo } from '../../utils/helpers';
 import { useTeamMembers } from '../../hooks/useTeamMembers';
+import MultiCountryPicker from '../team/MultiCountryPicker';
 import { useQueueSlaSettings, broadcastQueueSlaUpdate } from '../../hooks/useQueueSlaSettings';
 import { putQueueSlaSettings } from '../../services/queueSlaSettingsApi';
 import Avatar from '../ui/Avatar';
@@ -129,6 +130,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
     updateMember,
     removeMember,
     toggleOnLeave,
+    setCountries,
   } = useTeamMembers();
 
   // UI state
@@ -305,6 +307,16 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
   // When false we hide the Add Member button + the per-row actions menu so
   // we don't bait Team Leads into clicks that the server would just 403.
   const canManageRoster = perms?.canManageRoster === true;
+  // Country-ownership editing is broader than roster mutations: TLs are
+  // expected to maintain their team's country coverage themselves, even
+  // though they can't add or remove members. Mirrors the server-side
+  // canEditCountries() in app/api/v1/team-members/[email]/countries/route.js.
+  const canEditCountries = (
+    perms?.dataScope === 'all_tasks'
+    || perms?.dataScope === 'regional_tasks'
+    || perms?.dataScope === 'team_tasks'
+    || canManageRoster
+  );
 
   // Non-slack tasks for stats
   const ns = useMemo(() => tasks.filter(t => t.source !== 'slack'), [tasks]);
@@ -450,7 +462,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
             minHeight: 48,
             borderBottom: '1px solid #f2f2f2',
             display: 'grid',
-            gridTemplateColumns: '1fr 56px 64px 64px 64px 64px 80px 32px',
+            gridTemplateColumns: '1fr 56px 150px 64px 64px 64px 64px 80px 32px',
             gap: 8,
             alignItems: 'center',
             cursor: isManager ? 'pointer' : 'default',
@@ -585,6 +597,20 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
           <span style={{ textAlign: 'center', fontSize: 11, color: '#616161', background: '#f7f5f2', borderRadius: 128, padding: '2px 8px', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {member.team || '—'}
           </span>
+          {/* Countries — multi-select picker. Saves immediately on Save
+              click; Queue scoping picks up the change on the next refresh
+              because hydrateOwnerCountries fires from useTeamMembers. */}
+          <div
+            style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minWidth: 0 }}
+            onClick={e => e.stopPropagation()}
+          >
+            <MultiCountryPicker
+              selected={member.countries || []}
+              canEdit={canEditCountries}
+              size="sm"
+              onSave={async (next) => setCountries(email, next)}
+            />
+          </div>
           <span style={{ textAlign: 'center', fontSize: isManager ? 15 : 14, fontWeight: isManager ? 700 : 600, color: '#1b1b1b', fontVariantNumeric: 'tabular-nums' }}>{s.total}</span>
           <span style={{ textAlign: 'center', fontSize: isManager ? 14 : 13, fontWeight: isManager ? 600 : 500, color: '#1f74b3', fontVariantNumeric: 'tabular-nums' }}>{s.n}</span>
           <span style={{ textAlign: 'center', fontSize: isManager ? 14 : 13, fontWeight: isManager ? 600 : 500, color: '#ed8d00', fontVariantNumeric: 'tabular-nums' }}>{s.ip}</span>
@@ -817,6 +843,34 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
               Add Member
             </button>
           )}
+          {/* Country-ownership audit export. Lets anyone with read access
+              download a CSV of the current allocation so they can compare
+              it against the Deel "Countries by Person Role" spreadsheet
+              and spot members with no countries (or duplicate ownership).
+              The endpoint is HTTP-cookie-authed so a regular <a> works
+              and the browser handles the download correctly. */}
+          <a
+            href="/api/v1/team-members/countries/export"
+            download
+            title="Download a CSV of every team member with the countries they own — useful for comparing against the Deel Countries by Person Role sheet."
+            style={{
+              padding: '5px 14px', borderRadius: 128,
+              border: '1px solid #e8e8e8',
+              background: 'white',
+              color: '#1b1b1b',
+              fontSize: 12, fontWeight: 600,
+              cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              transition: 'all .15s',
+              textDecoration: 'none',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = '#f9f8f6'; e.currentTarget.style.borderColor = '#d0d0d0'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'white'; e.currentTarget.style.borderColor = '#e8e8e8'; }}
+          >
+            <i className="bi-download" style={{ fontSize: 12 }} />
+            Export Country Ownership
+          </a>
         </div>
 
         {/* KPI cards */}
@@ -851,8 +905,8 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
 
         {/* Team table */}
         <div style={{ background: 'white', borderRadius: 16, border: '1px solid #e8e8e8', overflow: 'hidden', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
-          <div role="row" style={{ padding: '12px 16px', borderBottom: '1px solid #f2f2f2', display: 'grid', gridTemplateColumns: '1fr 56px 64px 64px 64px 64px 80px 32px', gap: 8, background: '#fafaf9' }}>
-            {['Manager / Agent', 'Team', 'Open', 'New', 'In prog', 'Pause', 'Health', ''].map((h, i) => (
+          <div role="row" style={{ padding: '12px 16px', borderBottom: '1px solid #f2f2f2', display: 'grid', gridTemplateColumns: '1fr 56px 150px 64px 64px 64px 64px 80px 32px', gap: 8, background: '#fafaf9' }}>
+            {['Manager / Agent', 'Team', 'Countries', 'Open', 'New', 'In prog', 'Pause', 'Health', ''].map((h, i) => (
               <span
                 key={h || `col-${i}`}
                 role="columnheader"

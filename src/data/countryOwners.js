@@ -1,11 +1,14 @@
 // ── Country → Owner email mapping ─────────────────────────────────────────
-// Extracted from Deel admin 'Countries by Person Role' export (2026-04-17)
-// Maps ISO country code → array of owner emails
-//
-// Used to scope onboarding tasks: each user sees only tasks for their owned countries.
-// Admin/director/regional_manager roles bypass this filter and see everything.
+// Original source: Deel admin 'Countries by Person Role' export (2026-04-17).
+// Live source of truth (2026-04-30): the team_member_countries table,
+// hydrated into these maps via hydrateOwnerCountries() — server-side from
+// roster-server.js, client-side from useTeamCountryOwnership(). The static
+// values below remain as a cold-boot baseline so a server starting before
+// the first DB query (or a client running without a network round-trip)
+// still has a reasonable scoping map; once hydration runs it fully
+// replaces this baseline.
 
-export const COUNTRY_OWNERS = {
+let _countryOwners = {
   'AD': ['julia.mateos@deel.com'],
   'AE': ['ewa.kotowska@deel.com'],
   'AL': ['anna.esipova@deel.com'],
@@ -130,13 +133,49 @@ export const COUNTRY_OWNERS = {
   'ZM': ['raquel.sanchez@deel.com'],
 };
 
-// ── Reverse lookup: email → Set of country codes ──
-export const OWNER_COUNTRIES = new Map();
-for (const [cc, emails] of Object.entries(COUNTRY_OWNERS)) {
-  for (const email of emails) {
-    if (!OWNER_COUNTRIES.has(email)) OWNER_COUNTRIES.set(email, new Set());
-    OWNER_COUNTRIES.get(email).add(cc);
+// ── Public bindings ────────────────────────────────────────────────────────
+// Live bindings (let exports are tracked across modules per the ES spec, so
+// hydrateOwnerCountries() updates here are visible to every importing file
+// without a re-import). Consumers read these as if they were const maps.
+export let COUNTRY_OWNERS = _countryOwners;
+export let OWNER_COUNTRIES = _buildReverseMap(_countryOwners);
+
+function _buildReverseMap(owners) {
+  const map = new Map();
+  for (const [cc, emails] of Object.entries(owners || {})) {
+    for (const email of emails) {
+      const e = (email || '').toLowerCase();
+      if (!e) continue;
+      if (!map.has(e)) map.set(e, new Set());
+      map.get(e).add(cc.toUpperCase());
+    }
   }
+  return map;
+}
+
+/**
+ * Replace the live country-ownership maps with rows from the DB.
+ *
+ * @param {Array<{email:string, country_code:string}>} rows — junction-table
+ *        rows from team_member_countries. Whitespace-tolerant; rows with
+ *        missing email or country are skipped.
+ *
+ * Both COUNTRY_OWNERS (cc → emails[]) and OWNER_COUNTRIES (email → Set<cc>)
+ * are rebuilt from scratch so a row that disappears from the DB also
+ * disappears from the in-memory map. No-op if `rows` is missing.
+ */
+export function hydrateOwnerCountries(rows) {
+  if (!Array.isArray(rows)) return;
+  const owners = {};
+  for (const r of rows) {
+    const email = (r?.email || '').toLowerCase();
+    const cc = (r?.country_code || r?.countryCode || '').toUpperCase();
+    if (!email || !cc) continue;
+    if (!owners[cc]) owners[cc] = [];
+    if (!owners[cc].includes(email)) owners[cc].push(email);
+  }
+  COUNTRY_OWNERS = owners;
+  OWNER_COUNTRIES = _buildReverseMap(owners);
 }
 
 // ── Helper: get country codes owned by a given email ──

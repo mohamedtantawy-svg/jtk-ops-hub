@@ -71,7 +71,12 @@ import {
 import { OWNER_COUNTRIES, COUNTRY_OWNERS } from '../data/countryOwners.js';
 
 // Every country anyone owns — admin baseline + fallback when data is sparse.
-const ALL_COUNTRIES = new Set(Object.keys(COUNTRY_OWNERS));
+// Computed lazily so a hydrateOwnerCountries() update from
+// roster-server.js or useTeamCountryOwnership is reflected on the next
+// scoping call without a redeploy.
+function getAllCountries() {
+  return new Set(Object.keys(COUNTRY_OWNERS || {}));
+}
 
 // ── Role resolution ─────────────────────────────────────────────────────────
 // On the backend, JWT payload gives us `user.role`. On the frontend the same
@@ -118,7 +123,7 @@ export function getVisibleEmails(user) {
 export function getVisibleCountries(user) {
   if (!user || !user.email) return new Set();
   const role = normalizeRole(user);
-  if (role === 'admin') return ALL_COUNTRIES;
+  if (role === 'admin') return getAllCountries();
 
   const email = user.email.toLowerCase();
   let emails;

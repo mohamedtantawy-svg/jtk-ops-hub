@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../services/api';
 import { TEAM_MEMBERS, hydrateRoster } from '../data/members';
+import { hydrateOwnerCountries } from '../data/countryOwners';
 
 // Shape-compat fallback: baseline TEAM_MEMBERS with defaulted metadata fields
 // so consumers can read every property regardless of whether the API returned.
@@ -99,6 +100,22 @@ export function useTeamMembers() {
   // don't trigger unnecessary re-renders downstream.
   useEffect(() => {
     hydrateRoster(members);
+    // Same bridge for country ownership: the API response ships
+    // `countries: string[]` per member. Only hydrate when at least one
+    // member carries a non-empty `countries` array — otherwise we'd clobber
+    // the static fallback (or a previously-hydrated map) with an empty
+    // one during a network failure or a baseline cold paint, leaving Queue
+    // scoping with no country ownership at all.
+    const junction = [];
+    let anyCountries = false;
+    for (const m of members) {
+      if (!Array.isArray(m?.countries) || m.countries.length === 0) continue;
+      anyCountries = true;
+      for (const cc of m.countries) {
+        junction.push({ email: m.email, country_code: cc });
+      }
+    }
+    if (anyCountries) hydrateOwnerCountries(junction);
   }, [members]);
 
   // ── Derived lookups (memoised) ────────────────────────────────────────
@@ -219,6 +236,36 @@ export function useTeamMembers() {
     return updateMember(lc, { onLeave: !member.onLeave });
   }, [members, updateMember]);
 
+  // Replace the country-ownership set for a member. Validates locally,
+  // posts the full set, then syncs the optimistic update with the server's
+  // canonical reply. Roll back on error so the UI doesn't drift.
+  const setCountries = useCallback(async (email, countries) => {
+    const lc = email.toLowerCase();
+    const previous = members.find(m => m.email.toLowerCase() === lc);
+    if (!previous) return { ok: false, error: 'Member not found' };
+
+    const cleaned = Array.from(new Set(
+      (Array.isArray(countries) ? countries : [])
+        .map(c => (typeof c === 'string' ? c.trim().toUpperCase() : ''))
+        .filter(c => /^[A-Z]{2}$/.test(c)),
+    )).sort();
+
+    setMembers(prev => prev.map(m => m.email.toLowerCase() === lc ? { ...m, countries: cleaned } : m));
+
+    try {
+      const saved = await apiFetch(`/team-members/${encodeURIComponent(lc)}/countries`, {
+        method: 'PUT',
+        body: JSON.stringify({ countries: cleaned }),
+      });
+      const finalCountries = Array.isArray(saved?.countries) ? saved.countries : cleaned;
+      setMembers(prev => prev.map(m => m.email.toLowerCase() === lc ? { ...m, countries: finalCountries } : m));
+      return { ok: true, countries: finalCountries };
+    } catch (err) {
+      setMembers(prev => prev.map(m => m.email.toLowerCase() === lc ? previous : m));
+      return { ok: false, error: err.message || 'Failed to save countries' };
+    }
+  }, [members]);
+
   return {
     members,
     membersByEmail,
@@ -230,6 +277,7 @@ export function useTeamMembers() {
     updateMember,
     removeMember,
     toggleOnLeave,
+    setCountries,
     refetch: fetchMembers,
   };
 }
