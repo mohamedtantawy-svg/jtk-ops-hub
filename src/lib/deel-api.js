@@ -402,29 +402,37 @@ export async function listPausedOnboarding() {
 
 // ── Offboarding / Terminations (Admin API) ──────────────────────────────────
 
-// Mirrors the internal BI filter EXACTLY:
-//   EOR Contracts Termination Status         IS NOT (COMPLETED, AWAITING_REFUND)
-//   EOR Contracts Is Duplicate               IS NO
-//   EOR Contracts Active Termination Step    IS NOT (Deposit refund step,
-//                                                    Fee and adjustments step,
-//                                                    Off cycle step,
-//                                                    Cancelled)
-// Plus top-level status not in (CANCELLED, DONE). Applied client-side so we
-// don't depend on the admin API's bucket-name vocabulary, which diverges
-// between the record-level `terminationFlowStatuses` array and the count
-// object's bucket labels.
-
-// Top-level statuses treated as closed / not actionable.
-// User directive: exclude COMPLETED, DONE, CANCELLED.
-const OFFBOARDING_CLOSED_STATUSES = new Set([
-  'COMPLETED',
-  'DONE',
-  'CANCELLED',
-  'CANCELED',
+// Type+status matrix the team operates on (Pilar/Raquel spec, 2026-04-30):
+//   Termination          → AWAITING_TRIAGE, PROCESSING
+//   Resignation (Client) → AWAITING_TRIAGE, PROCESSING, AWAITING_HRX_ACTION
+//   Resignation (Employee) → AWAITING_TRIAGE, PROCESSING, AWAITING_HRX_ACTION
+//
+// These are the ONLY statuses HRX needs to action; the upstream queue
+// includes ~29k records spanning closed, payment, refund, and other-team
+// states that we don't surface. Filtering is applied both server-side
+// (`status[]=` query param so we don't paginate through the unrelated 25k+
+// items) and client-side (matrix per type, in case the server filter is
+// ignored — graceful degradation).
+const OFFBOARDING_ACTIONABLE_STATUSES = [
+  'AWAITING_TRIAGE',
+  'PROCESSING',
+  'AWAITING_HRX_ACTION',
+];
+const OFFBOARDING_TERMINATION_STATUSES = new Set([
+  'AWAITING_TRIAGE',
+  'PROCESSING',
+]);
+const OFFBOARDING_RESIGNATION_STATUSES = new Set([
+  'AWAITING_TRIAGE',
+  'PROCESSING',
+  'AWAITING_HRX_ACTION',
 ]);
 
 // Flow states treated as "past the actionable phase" — records dropped
-// at ingestion so they don't land in the queue at all.
+// at ingestion so they don't land in the queue at all. Even if the upstream
+// status is one of the actionable values above, a record that has already
+// reached one of these flow steps is post-actionable for HRX (e.g. a
+// PROCESSING termination already in the deposit-refund step).
 const OFFBOARDING_EXCLUDED_STEPS = new Set([
   'AwaitingDepositConfirmation',   // "Deposit refund step"
   'AwaitingToAttachClientMethod',  // "Awaiting Payment Method"
@@ -433,19 +441,25 @@ const OFFBOARDING_EXCLUDED_STEPS = new Set([
   'OffcycleInvoice',               // "Off-Cycle Invoice"
 ]);
 
-// Scan cap — the admin endpoint returns 50/page sorted by endDate ASC (nulls
-// first), so ~200 pages covers every open record well past the ~900 expected.
-const OFFBOARDING_MAX_PAGES = 200;
-
-// Stop early once we've seen this many consecutive pages yielding 0 new
-// matches. The sort front-loads actionable records, so once the BI filter
-// stops producing keeps we've effectively exhausted the actionable set.
-const OFFBOARDING_EMPTY_PAGE_STOP = 5;
+// Pagination cap. With server-side `status[]` filtering active, the
+// actionable subset is small (~few thousand at most). We keep a defensive
+// cap so a runaway loop can't lock the request.
+const OFFBOARDING_MAX_PAGES = 600;
 
 function isOffboardingActionable(t) {
+  if (t?.isDuplicate === true) return false;
+
   const status = (t?.status || '').toUpperCase();
-  if (OFFBOARDING_CLOSED_STATUSES.has(status)) return false;
-  if (t.isDuplicate === true) return false;
+  const isResignation = !!(t?.requestData?.isEmployeeResignation === true
+    || (t?.type || '').toUpperCase().includes('RESIGNATION'));
+
+  // Type+status matrix: Terminations are dropped from the AWAITING_HRX_ACTION
+  // bucket per spec; Resignations keep all three statuses.
+  if (isResignation) {
+    if (!OFFBOARDING_RESIGNATION_STATUSES.has(status)) return false;
+  } else {
+    if (!OFFBOARDING_TERMINATION_STATUSES.has(status)) return false;
+  }
 
   const flows = Array.isArray(t.terminationFlowStatuses) ? t.terminationFlowStatuses : [];
   if (flows.some(f => OFFBOARDING_EXCLUDED_STEPS.has(f))) return false;
@@ -456,17 +470,17 @@ function isOffboardingActionable(t) {
 /**
  * Fetches all actionable EOR termination cases from the admin API.
  *
- * Strategy: paginate /admin/eor/terminations_v3 unfiltered (cursor loop),
- * apply the BI filter client-side for every record, dedupe by id.
- * The admin default sort is endDate ASC (nulls first) which front-loads
- * pre-finalized records; we early-stop after
- * OFFBOARDING_EMPTY_PAGE_STOP consecutive pages with 0 new keeps.
+ * Strategy: ask the upstream `/admin/eor/terminations_v3` endpoint to scope
+ * down server-side via `status[]=AWAITING_TRIAGE&status[]=PROCESSING&status[]=AWAITING_HRX_ACTION`.
+ * The cursor preserves filter state across pages, so subsequent calls only
+ * need the cursor token. Then dedupe by id and apply the type+status matrix
+ * + flow-step exclusions client-side as a safety net (in case the upstream
+ * ignores or partially honours the filter).
  *
- * BI filter applied here (see isOffboardingActionable):
- *   status NOT IN (COMPLETED, DONE, CANCELLED, AWAITING_REFUND)
- *   AND isDuplicate = false
- *   AND terminationFlowStatuses contains none of
- *       (FeeAndAdjustments, OffcycleInvoice, AwaitingDepositConfirmation)
+ * Per-type rules applied via isOffboardingActionable:
+ *   Termination          → status in (AWAITING_TRIAGE, PROCESSING)
+ *   Resignation (any)    → status in (AWAITING_TRIAGE, PROCESSING, AWAITING_HRX_ACTION)
+ *   Plus: isDuplicate=false AND no excluded flow step.
  */
 export async function listOffboardingCases() {
   const kept = [];
@@ -474,14 +488,20 @@ export async function listOffboardingCases() {
   let serverTotal = null;
   let page = 0;
   let scanned = 0;
-  let emptyRun = 0;
   let mode = 'admin-scan';
+
+  // Build the initial query string with status[] filters. The cursor
+  // returned by the API encodes the filter state, so subsequent calls only
+  // pass `cursor=...` and the upstream replays our filters.
+  const initialQs = new URLSearchParams();
+  initialQs.set('limit', '50');
+  for (const s of OFFBOARDING_ACTIONABLE_STATUSES) initialQs.append('status[]', s);
 
   if (!DEEL_ADMIN_TOKEN) {
     // No admin JWT: the REST v2 token can't paginate /admin/* endpoints.
-    // Fall back to single default page and apply the BI filter client-side.
+    // Fall back to single default page and apply the matrix client-side.
     mode = 'rest-v2-fallback';
-    const res = await deelFetch('/admin/eor/terminations_v3');
+    const res = await deelFetch(`/admin/eor/terminations_v3?${initialQs.toString()}`);
     serverTotal = res?.count?.total ?? null;
     for (const t of res?.terminations || []) {
       scanned++;
@@ -492,35 +512,30 @@ export async function listOffboardingCases() {
     }
     console.log(`[offboarding] mode=${mode}, scanned ${scanned}, kept ${kept.length} (server reports ${serverTotal} total)`);
   } else {
-    // Admin JWT present: scan pages unfiltered, applying BI filter client-side.
-    // The admin endpoint sorts by endDate ASC (nulls first), which front-loads
-    // pre-finalized records — exactly what we care about. Stop when we've
-    // seen OFFBOARDING_EMPTY_PAGE_STOP consecutive pages with zero new keeps.
+    // Admin JWT present: scan pages with the status[] filter active. No
+    // early-stop — scan to natural cursor exhaustion or the defensive page
+    // cap, whichever comes first.
     let cursor = null;
     for (; page < OFFBOARDING_MAX_PAGES; page++) {
-      const qs = cursor ? `cursor=${encodeURIComponent(cursor)}` : 'limit=50';
+      const qs = cursor ? `cursor=${encodeURIComponent(cursor)}` : initialQs.toString();
       const res = await deelFetch(`/admin/eor/terminations_v3?${qs}`);
       if (serverTotal === null) serverTotal = res?.count?.total ?? null;
 
-      let keptThisPage = 0;
       for (const t of res?.terminations || []) {
         scanned++;
         if (seen.has(t.id)) continue;
         if (!isOffboardingActionable(t)) continue;
         seen.add(t.id);
         kept.push(t);
-        keptThisPage++;
       }
 
-      if (keptThisPage === 0) emptyRun++; else emptyRun = 0;
       cursor = res?.cursor || null;
       if (!cursor) break;
-      if (emptyRun >= OFFBOARDING_EMPTY_PAGE_STOP) {
-        console.log(`[offboarding] early-stop: ${OFFBOARDING_EMPTY_PAGE_STOP} empty pages in a row at page ${page + 1}`);
-        break;
-      }
     }
-    console.log(`[offboarding] mode=${mode}, pages=${page + 1}, scanned=${scanned}, kept=${kept.length} (server reports ${serverTotal} total open)`);
+    if (page >= OFFBOARDING_MAX_PAGES) {
+      console.warn(`[offboarding] hit OFFBOARDING_MAX_PAGES (${OFFBOARDING_MAX_PAGES}) — may be missing records`);
+    }
+    console.log(`[offboarding] mode=${mode}, pages=${page + 1}, scanned=${scanned}, kept=${kept.length} (server reports ${serverTotal} total)`);
   }
 
   const mapped = kept.map(c => ({
