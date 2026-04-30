@@ -3,6 +3,7 @@ import { PermissionsContext, SettingsContext } from '../../App';
 import { COMMS_TYPES, matchesAudience } from '../../data/comms';
 import { MEMBERS } from '../../data/members';
 import { scopeAckMembers } from '../../utils/permissions';
+import { renderRichText } from '../../utils/renderRichText';
 import Avatar from '../ui/Avatar';
 import EmptyState from '../ui/EmptyState';
 import ComposeModal from '../modals/ComposeModal';
@@ -906,8 +907,8 @@ function WalkthroughOverlay({ comm, remaining, onAcknowledge, onSkip, onExit, on
                 line.trim() === ''
                   ? <div key={i} style={{ height: 8 }}></div>
                   : (line.trim().startsWith('\u2022') || line.trim().startsWith('-'))
-                    ? <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 4, paddingLeft: 4 }}><span style={{ color: t.color, fontWeight: 700 }}>{'\u2022'}</span><span>{line.trim().replace(/^[\u2022\-]\s*/, '')}</span></div>
-                    : <div key={i} style={{ marginBottom: 3 }}>{line}</div>
+                    ? <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 4, paddingLeft: 4 }}><span style={{ color: t.color, fontWeight: 700 }}>{'\u2022'}</span><span>{renderRichText(line.trim().replace(/^[\u2022\-]\s*/, ''), { color: t.color, keyPrefix: `wb-${i}` })}</span></div>
+                    : <div key={i} style={{ marginBottom: 3 }}>{renderRichText(line, { color: t.color, keyPrefix: `wb-${i}` })}</div>
               ))}
             </div>
             )}
@@ -1264,8 +1265,8 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
               line.trim() === ''
                 ? <div key={i} style={{ height: 8 }}></div>
                 : (line.trim().startsWith('\u2022') || line.trim().startsWith('-'))
-                  ? <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 4, paddingLeft: 4 }}><span style={{ color: t.color, fontWeight: 700 }}>{'\u2022'}</span><span>{line.trim().replace(/^[\u2022\-]\s*/, '')}</span></div>
-                  : <div key={i} style={{ marginBottom: 3 }}>{line}</div>
+                  ? <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 4, paddingLeft: 4 }}><span style={{ color: t.color, fontWeight: 700 }}>{'\u2022'}</span><span>{renderRichText(line.trim().replace(/^[\u2022\-]\s*/, ''), { color: t.color, keyPrefix: `db-${i}` })}</span></div>
+                  : <div key={i} style={{ marginBottom: 3 }}>{renderRichText(line, { color: t.color, keyPrefix: `db-${i}` })}</div>
             ))}
           </div>
           )}

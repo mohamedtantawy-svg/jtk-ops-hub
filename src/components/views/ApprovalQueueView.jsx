@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useAnnouncementRequests } from '../../hooks/useAnnouncementRequests';
 import { isApprover } from '../../data/approvers';
 import { AUDIENCE_LABELS, AUDIENCES, SOUND_PRESETS, COMMS_TYPES } from '../../data/comms';
+import { renderRichText } from '../../utils/renderRichText';
 import EmptyState from '../ui/EmptyState';
 
 // Convert an ISO timestamp to the local-time value expected by <input type="datetime-local">.
@@ -353,7 +354,13 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
                   </div>
                 )}
                 <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6, color: 'var(--text)', marginBottom: 12, fontSize: 13 }}>
-                  {detail.item.body || <em style={{ color: 'var(--text-muted)' }}>(no body)</em>}
+                  {detail.item.body
+                    ? detail.item.body.split('\n').map((ln, i) => (
+                        <div key={i}>
+                          {ln === '' ? ' ' : renderRichText(ln, { color: 'var(--accent)', keyPrefix: `aq-${i}` })}
+                        </div>
+                      ))
+                    : <em style={{ color: 'var(--text-muted)' }}>(no body)</em>}
                 </div>
                 {detail.item.link && (
                   <div style={{ marginBottom: 12 }}>
