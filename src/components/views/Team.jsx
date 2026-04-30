@@ -1691,6 +1691,7 @@ const QUEUE_META = [
   { id: 'onboarding',              label: 'Onboarding',              anchor: 'task initiated',       hasPaused: true  },
   { id: 'offboarding_termination', label: 'Offboarding · Termination', anchor: 'creation',           hasPaused: true  },
   { id: 'offboarding_resignation', label: 'Offboarding · Resignation', anchor: 'creation',           hasPaused: true  },
+  { id: 'incentive_plans',         label: 'Incentive Plans',         anchor: 'creation',             hasPaused: true  },
 ];
 
 // Display every duration in HOURS so the editor reads consistently across

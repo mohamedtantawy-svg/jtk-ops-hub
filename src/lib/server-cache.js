@@ -122,7 +122,10 @@ export function cacheSet(key, data) {
   // Persist to filesystem asynchronously (non-blocking)
   const filePath = join(CACHE_DIR, `${key}.json`);
   writeFile(filePath, JSON.stringify({ data, ts }), 'utf-8').catch(err => {
-    console.warn(`[server-cache] Failed to write ${key}:`, err.message);
+    // Use printf-style format with %s so CodeQL doesn't flag `key` as an
+    // externally-controlled format string (cwe-134 in `js/tainted-format-
+    // string`). Functionally identical to the previous template literal.
+    console.warn('[server-cache] Failed to write %s:', key, err.message);
   });
 }
 

@@ -18,6 +18,7 @@ import { usePausedOnboardingData } from './usePausedOnboardingData';
 import { useOffboardingData } from './useOffboardingData';
 import { useChangeRequestData } from './useChangeRequestData';
 import { useWorkbenchData } from './useWorkbenchData';
+import { useIncentivePlansData } from './useIncentivePlansData';
 
 const TICK_MS = 30_000;
 
@@ -37,6 +38,7 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
   const offboardingData = useOffboardingData(enabled, userEmail);
   const changeRequestData = useChangeRequestData(enabled, userEmail);
   const workbenchData = useWorkbenchData(enabled, userEmail);
+  const incentivePlansData = useIncentivePlansData(enabled, userEmail);
 
   // ── Shared "now" tick — one 30s timer powers every "X min ago" label ─────
   // Pauses while the tab is hidden so we don't wake the CPU for nothing;
@@ -167,6 +169,16 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
         lastSyncAt: workbenchData.lastSyncAt ?? null,
         retry: workbenchData.refresh,
       },
+      incentivePlans: {
+        id: 'incentivePlans',
+        label: 'Incentive Plans',
+        count: incentivePlansData.items?.length ?? 0,
+        loading: !!incentivePlansData.loading,
+        isRefreshing: !!incentivePlansData.isRefreshing,
+        error: incentivePlansData.error || null,
+        lastSyncAt: incentivePlansData.lastSyncAt ?? null,
+        retry: incentivePlansData.refresh,
+      },
     };
   }, [
     queueSync?.sources?.zendesk, queueSync?.sources?.jira, queueSync?.refresh,
@@ -181,6 +193,8 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
     changeRequestData.refresh,
     workbenchData.tasks, workbenchData.loading, workbenchData.isRefreshing,
     workbenchData.error, workbenchData.lastSyncAt, workbenchData.refresh,
+    incentivePlansData.items, incentivePlansData.loading, incentivePlansData.isRefreshing,
+    incentivePlansData.error, incentivePlansData.lastSyncAt, incentivePlansData.refresh,
   ]);
 
   // ── Aggregated meta for the UnifiedSyncButton ────────────────────────────
@@ -235,7 +249,8 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
     try { offboardingData.refresh(); } catch {}
     try { changeRequestData.refresh(); } catch {}
     try { workbenchData.refresh(); } catch {}
-  }, [queueSync, onboardingData, pausedOnboardingData, offboardingData, changeRequestData, workbenchData]);
+    try { incentivePlansData.refresh(); } catch {}
+  }, [queueSync, onboardingData, pausedOnboardingData, offboardingData, changeRequestData, workbenchData, incentivePlansData]);
 
   return {
     onboardingData,
@@ -243,6 +258,7 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
     offboardingData,
     changeRequestData,
     workbenchData,
+    incentivePlansData,
     sources,
     meta,
     refreshAll,

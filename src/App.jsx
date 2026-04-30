@@ -48,6 +48,7 @@ const QUEUE_STORAGE_KEYS = [
   'ops_hub_amendments_cache',
   'ops_hub_redlines_cache',
   'ops_hub_workbench_cache',
+  'ops_hub_incentive_plans_cache',
   'ops_hub_queue_filters',
   // Legacy v2 leftovers — harmless once v2 is gone, but no reason to keep them.
   'ops_hub_queuev2_filters',

@@ -39,6 +39,15 @@ const DEEL_REDLINE_URL = (id, isExecution, redlineType) => {
   return `${DEEL_ADMIN_BASE}/eor/change-requests?redlineType=${encodeURIComponent(rt)}&requestId=${encodeURIComponent(id)}&requestType=redlines&sortBy=createdAt&sortOrder=desc&status=preparingDocuments&subStatus=${encodeURIComponent(sub)}`;
 };
 
+// Admin incentive plan page. Deep-links to the IP detail hub for the row.
+// Status param is required for the hub's filter pill to highlight the right
+// bucket — defaults to PENDING_IP_PREPARATION (the only actionable status).
+const DEEL_INCENTIVE_PLAN_URL = (id, status) => {
+  if (!id) return '';
+  const s = status || 'PENDING_IP_PREPARATION';
+  return `${DEEL_ADMIN_BASE}/incentive-plans/hub/details/${encodeURIComponent(id)}?status=${encodeURIComponent(s)}`;
+};
+
 // SLA windows (Mohamed's 2026-05-01 spec):
 //   - Zendesk:      24h biz from latest requester reply (active);
 //                   48h biz from pausedAt for `pending`/`hold` rows.
@@ -69,6 +78,9 @@ const AMENDMENT_SLA_ACTIVE_MS  = 24 * HOUR_MS;
 const AMENDMENT_SLA_PAUSED_MS  = PAUSED_SLA_MS;
 const REDLINE_SLA_ACTIVE_MS    = 5  * DAY_MS;
 const REDLINE_SLA_PAUSED_MS    = PAUSED_SLA_MS;
+// Incentive plans share the redline cadence per Mohamed's 2026-05-01 spec.
+const INCENTIVE_PLAN_SLA_ACTIVE_MS = 5 * DAY_MS;
+const INCENTIVE_PLAN_SLA_PAUSED_MS = PAUSED_SLA_MS;
 const ONBOARDING_SLA_ACTIVE_MS = 24 * HOUR_MS;
 const ONBOARDING_SLA_PAUSED_MS = PAUSED_SLA_MS;
 // Offboarding splits by row type (typeLabel). Both share the same paused window.
@@ -452,6 +464,46 @@ export function normalizeRedlines(items = [], slaConfig = null) {
       slaRemaining,
       slaBreachStatus,
       slaWindowMs,
+    };
+  });
+}
+
+// ── Incentive Plans → normalized rows ──
+// Same SLA cadence as redlines (5 biz-days active, 48h biz from pausedAt
+// when paused). No upstream assignee — country-OR-assignee scoping in the
+// FE means country owners + their TL/RM chain see the row regardless of
+// who's editing it.
+export function normalizeIncentivePlans(items = [], slaConfig = null) {
+  const { activeMs, pausedMs } = slaMsFor(slaConfig, 'incentive_plans', INCENTIVE_PLAN_SLA_ACTIVE_MS, INCENTIVE_PLAN_SLA_PAUSED_MS);
+  return items.map(p => {
+    const sla = computeSlaWindow(activeMs, p.createdAt, {
+      pausedMs: p.isPaused ? pausedMs : null,
+      pausedAt: p.pausedAt || null,
+    });
+    return {
+      id: String(p.id || ''),
+      source: 'incentive_plans',
+      // Employee column — IP rows are always tied to a single employee.
+      subject: p.employeeName || 'Incentive Plan',
+      // Function column — fixed for now since the only actionable status
+      // is PENDING_IP_PREPARATION; SourceTable users rarely sort by it.
+      function: 'Incentive Plan Preparation',
+      country: p.country || '',
+      clientName: p.orgName || '',
+      assignee: '',         // upstream has none — country-based scope
+      assigneeEmail: '',
+      startDate: p.startDate || '',
+      createdAt: p.createdAt || '',
+      updatedAt: p.updatedAt || p.createdAt || '',
+      status: p.displayStatus || { label: 'Pending IP Preparation', severity: 'warning', color: '#ed8d00' },
+      taskUrl: DEEL_INCENTIVE_PLAN_URL(p.id, p.status),
+      contractUrl: DEEL_CONTRACT_URL(p.contractOid || p.eorContractId),
+      isPaused: !!p.isPaused,
+      pausedAt: p.pausedAt || null,
+      isWhiteLabeled: !!p.isWhiteLabeled,
+      slaRemaining: sla.slaRemaining,
+      slaBreachStatus: sla.slaBreachStatus,
+      slaWindowMs: sla.slaWindowMs,
     };
   });
 }

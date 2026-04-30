@@ -11,6 +11,7 @@ import { usePausedOnboardingData } from '../../hooks/usePausedOnboardingData';
 import { useOffboardingData } from '../../hooks/useOffboardingData';
 import { useChangeRequestData } from '../../hooks/useChangeRequestData';
 import { useWorkbenchData } from '../../hooks/useWorkbenchData';
+import { useIncentivePlansData } from '../../hooks/useIncentivePlansData';
 import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
 import { useCapacitySettings } from '../../hooks/useCapacitySettings';
 import { elapsedBizMinutes } from '../../utils/bizTime';
@@ -21,6 +22,7 @@ import {
   normalizeAmendments,
   normalizeRedlines,
   normalizeWorkbench,
+  normalizeIncentivePlans,
 } from '../../utils/normalizeSourceRows';
 // Authoritative Queue scoping — same functions Queue.jsx uses so Briefing counts
 // match what the user actually sees in each source table (incl. country-owner
@@ -31,6 +33,7 @@ import {
   scopeAmendmentRequests,
   scopeRedlineRequests,
   scopeWorkbenchTasks,
+  scopeIncentivePlans,
 } from '../../lib/queue-scoping';
 import Avatar from '../ui/Avatar';
 import { ToolBadge, FnBadge } from '../ui/Badges';
@@ -140,6 +143,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const offboardingData = useOffboardingData(true);
   const changeRequestData = useChangeRequestData(true);
   const workbenchData = useWorkbenchData(true);
+  const incentivePlansData = useIncentivePlansData(true);
 
   const ds=perms?.dataScope||'own_tasks_only';
   const isOwnScope=ds==='own_tasks_only';
@@ -172,6 +176,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const amendmentRowsAll = useMemo(() => normalizeAmendments(changeRequestData.amendments, queueSla), [changeRequestData.amendments, queueSla]);
   const redlineRowsAll = useMemo(() => normalizeRedlines(changeRequestData.redlines, queueSla), [changeRequestData.redlines, queueSla]);
   const workbenchRowsAll = useMemo(() => normalizeWorkbench(workbenchData.tasks, queueSla), [workbenchData.tasks, queueSla]);
+  const incentivePlanRowsAll = useMemo(() => normalizeIncentivePlans(incentivePlansData.items, queueSla), [incentivePlansData.items, queueSla]);
 
   // Source-row scoping — delegate to the Queue's single source of truth so
   // "Active Requests" here always matches what the user sees in each tab.
@@ -185,6 +190,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const amendmentRows = useMemo(() => scopeAmendmentRequests(amendmentRowsAll, user), [amendmentRowsAll, user]);
   const redlineRows = useMemo(() => scopeRedlineRequests(redlineRowsAll, user), [redlineRowsAll, user]);
   const workbenchRows = useMemo(() => scopeWorkbenchTasks(workbenchRowsAll, user), [workbenchRowsAll, user]);
+  const incentivePlanRows = useMemo(() => scopeIncentivePlans(incentivePlanRowsAll, user), [incentivePlanRowsAll, user]);
 
   const inScope = useCallback(t => {
     if (scopeIds.includes(t.assigneeId)) return true;
@@ -245,13 +251,14 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // back from the actionable-queue endpoints — so no status filter needed.
   const deelSourceRowsLen =
     onboardingRows.length + offboardingRows.length + amendmentRows.length +
-    redlineRows.length + workbenchRows.length;
+    redlineRows.length + workbenchRows.length + incentivePlanRows.length;
   const activeRequestsCount = isOwnScope
     ? personal.length + deelSourceRowsLen
     : isTeamScope
       ? scope.length + deelSourceRowsLen
       : orgOpen.length + onboardingRowsAll.length + offboardingRowsAll.length +
-        amendmentRowsAll.length + redlineRowsAll.length + workbenchRowsAll.length;
+        amendmentRowsAll.length + redlineRowsAll.length + workbenchRowsAll.length +
+        incentivePlanRowsAll.length;
 
   // ── Today's meetings ───────────────────────────────────────────────────
   // Calendar events carry a type — we only count real meetings, not deadlines
@@ -488,12 +495,13 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const slaPoolNonJira = slaScope.filter(t => t.source !== 'jira');
   const breachedNonJira = breached.filter(t => t.source !== 'jira');
   const slaPoolDeel = onboardingRows.length + offboardingRows.length
-    + amendmentRows.length + redlineRows.length + workbenchRows.length;
+    + amendmentRows.length + redlineRows.length + workbenchRows.length + incentivePlanRows.length;
   const breachedDeel = onboardingRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
     + offboardingRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
     + amendmentRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
     + redlineRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
-    + workbenchRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length;
+    + workbenchRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
+    + incentivePlanRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length;
   const slaTotal = slaPoolNonJira.length + slaPoolDeel;
   const slaBreachTotal = breachedNonJira.length + breachedDeel;
   const slaCompRate = slaTotal > 0 ? Math.round(((slaTotal - slaBreachTotal) / slaTotal) * 100) : 100;
@@ -546,6 +554,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   if (amendmentRows.length)   srcCounts['amendments']  = (srcCounts['amendments']  || 0) + amendmentRows.length;
   if (redlineRows.length)     srcCounts['redlines']    = (srcCounts['redlines']    || 0) + redlineRows.length;
   if (workbenchRows.length)   srcCounts['workbench']   = (srcCounts['workbench']   || 0) + workbenchRows.length;
+  if (incentivePlanRows.length) srcCounts['incentive_plans'] = (srcCounts['incentive_plans'] || 0) + incentivePlanRows.length;
   const srcEntries=Object.entries(srcCounts).sort((a,b)=>b[1]-a[1]);
   // Total across all sources (for percentage calculation)
   const srcTotal = srcEntries.reduce((sum, [, cnt]) => sum + cnt, 0);
@@ -574,12 +583,14 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const redAtRisk    = deelAtRisk(redlineRows);
   const wbBreach     = workbenchRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED');
   const wbAtRisk     = deelAtRisk(workbenchRows);
+  const ipBreach     = incentivePlanRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED');
+  const ipAtRisk     = deelAtRisk(incentivePlanRows);
   const orgBreach = orgSlaPool.filter(t => { const s = slaInfo(t); return s && s.breach; }).length
-    + onbBreached.length + offBreached.length + amendBreach.length + redBreach.length + wbBreach.length;
+    + onbBreached.length + offBreached.length + amendBreach.length + redBreach.length + wbBreach.length + ipBreach.length;
   const orgAtRisk = orgSlaPool.filter(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; }).length
-    + onbAtRisk.length + offAtRisk.length + amendAtRisk.length + redAtRisk.length + wbAtRisk.length;
+    + onbAtRisk.length + offAtRisk.length + amendAtRisk.length + redAtRisk.length + wbAtRisk.length + ipAtRisk.length;
   const orgSlaTotal = orgSlaPool.length + onboardingRows.length + offboardingRows.length
-    + amendmentRows.length + redlineRows.length + workbenchRows.length;
+    + amendmentRows.length + redlineRows.length + workbenchRows.length + incentivePlanRows.length;
   const orgSlaComp = orgSlaTotal > 0 ? Math.round(((orgSlaTotal - orgBreach) / orgSlaTotal) * 100) : 100;
 
   // ── Sparkline (flat until historical data endpoint exists) ──────────
@@ -661,11 +672,11 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // `slaBreachStatus` and proportional band.
   const orgBreachedTasks = [
     ...orgSlaPool.filter(t => { const s = slaInfo(t); return s && s.breach; }),
-    ...onbBreached, ...offBreached, ...amendBreach, ...redBreach, ...wbBreach,
+    ...onbBreached, ...offBreached, ...amendBreach, ...redBreach, ...wbBreach, ...ipBreach,
   ];
   const orgAtRiskTasks = [
     ...orgSlaPool.filter(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; }),
-    ...onbAtRisk, ...offAtRisk, ...amendAtRisk, ...redAtRisk, ...wbAtRisk,
+    ...onbAtRisk, ...offAtRisk, ...amendAtRisk, ...redAtRisk, ...wbAtRisk, ...ipAtRisk,
   ];
   const orgWithinSlaTasks = orgSlaPool.filter(t => { const s = slaInfo(t); return !s || (s && s.ok); });
 
