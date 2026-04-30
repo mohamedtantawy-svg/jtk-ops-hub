@@ -19,6 +19,10 @@ database:
   enabled: false
   instances: 1
   postgresVersion: "16"
+  backup: true
+  recovery:
+    enabled: false
+    source: ""
   pgadmin:
     email: "admin@deel.tools"
   storage:
@@ -51,31 +55,22 @@ ingress:
   pathType: Prefix
   annotations: {}
   tls: []
+  aliasHost: ""
+
 
 publicIngress:
   enabled: false
-
-argocd:
-  enabled: false
-  namespace: "argocd"
-  project: "default"
-  repoURL: ""
-  targetRevision: "main"
-  path: "."
-  helm:
-    valueFiles: []
-    values: ""
-  autoSync:
-    enabled: true
-    prune: true
-    selfHeal: true
-    allowEmpty: false
+  host: ""
+  whitelistSourceRange: ""
 
 service:
   port: 80
 
 externalSecret:
   refreshInterval: 1h
+  storeKind: ClusterSecretStore
+  storeName: aws-secrets-manager
+  secretPath: ""
 
 nodeSelector:
   karpenter.sh/nodepool: playgrounds-v1

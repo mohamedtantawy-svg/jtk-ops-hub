@@ -19,6 +19,10 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: {{ .Values.sandboxName }}-redis
+      {{- with .Values.redis.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
       containers:
         - name: redis
