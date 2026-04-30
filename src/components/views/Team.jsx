@@ -139,7 +139,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
   const [actionMenuOpen, setActionMenuOpen] = useState(null); // email of member whose menu is open
   const [editAllocEmail, setEditAllocEmail] = useState(null); // email of member being re-allocated (modal)
   const [permsModalEmail, setPermsModalEmail] = useState(null); // email of member whose permissions modal is open
-  const [permsDraft, setPermsDraft] = useState({ isAnnouncementsAdmin: false });
+  const [permsDraft, setPermsDraft] = useState({ isAnnouncementsAdmin: false, isAccessAdmin: false });
   const [permsSaving, setPermsSaving] = useState(false);
   const [permsError, setPermsError] = useState(null);
   const [allocForm, setAllocForm] = useState({ ...EMPTY_ALLOC });
@@ -245,20 +245,27 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
   };
 
   // ── Manage per-user permissions ────────────────────────────────────────
-  // Currently exposes one capability — Announcements Admin — which grants
-  // the user full access to the announcement workflow (compose, approve,
-  // archive, override, send acknowledgements). Saved via the same
-  // /api/v1/team-members/:email PATCH that handles allocation edits.
+  // Two additive capabilities, each orthogonal to the four-tier access model:
+  //   • Announcements Admin — full announcement workflow (compose / approve /
+  //     archive / override / send-reminder).
+  //   • Access Admin — add / edit / remove team members + grant other per-
+  //     user permissions. Lets a Director delegate roster maintenance
+  //     without escalating someone's primary tier to regional_manager.
+  // Both saved via the same /api/v1/team-members/:email PATCH that handles
+  // allocation edits.
   const openPermissionsModal = (email) => {
     const member = localMembersByEmail[email];
-    setPermsDraft({ isAnnouncementsAdmin: member?.isAnnouncementsAdmin === true });
+    setPermsDraft({
+      isAnnouncementsAdmin: member?.isAnnouncementsAdmin === true,
+      isAccessAdmin: member?.isAccessAdmin === true,
+    });
     setPermsError(null);
     setPermsModalEmail(email);
     setActionMenuOpen(null);
   };
   const closePermissionsModal = () => {
     setPermsModalEmail(null);
-    setPermsDraft({ isAnnouncementsAdmin: false });
+    setPermsDraft({ isAnnouncementsAdmin: false, isAccessAdmin: false });
     setPermsError(null);
   };
   const handleSavePermissions = async () => {
@@ -266,7 +273,10 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
     setPermsSaving(true);
     setPermsError(null);
     try {
-      const ok = await updateMember(permsModalEmail, { isAnnouncementsAdmin: !!permsDraft.isAnnouncementsAdmin });
+      const ok = await updateMember(permsModalEmail, {
+        isAnnouncementsAdmin: !!permsDraft.isAnnouncementsAdmin,
+        isAccessAdmin: !!permsDraft.isAccessAdmin,
+      });
       if (ok && ok.ok !== false) closePermissionsModal();
       else setPermsError(ok?.error || 'Save failed');
     } catch (e) {
@@ -290,6 +300,11 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
   const perms = useContext(PermissionsContext);
   const { deelData } = useContext(IntegrationsContext);
   const isAdmin = perms?.dataScope === 'all_tasks';
+  // Roster mutation gate — admin / regional_manager / per-user Access Admin
+  // grant. Mirrors the server-side canManageRoster() in src/lib/access-admin.
+  // When false we hide the Add Member button + the per-row actions menu so
+  // we don't bait Team Leads into clicks that the server would just 403.
+  const canManageRoster = perms?.canManageRoster === true;
 
   // Non-slack tasks for stats
   const ns = useMemo(() => tasks.filter(t => t.source !== 'slack'), [tasks]);
@@ -513,6 +528,21 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                     Announcements Admin
                   </span>
                 )}
+                {member.isAccessAdmin && (
+                  <span
+                    title="This user has the Access Admin permission — can add / edit / remove team members and grant other per-user permissions."
+                    style={{
+                      background: '#e8f0fe', color: '#0369a1',
+                      fontSize: 10, fontWeight: 700,
+                      padding: '2px 8px', borderRadius: 128,
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <i className="bi-shield-lock-fill" style={{ fontSize: 9 }} />
+                    Access Admin
+                  </span>
+                )}
                 {isOnLeave && (
                   <span style={{ background: '#fff8e6', color: '#ed8d00', fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 128 }}>On Leave</span>
                 )}
@@ -566,8 +596,10 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
             </span>
           </div>
 
-          {/* Action menu (three dots) */}
+          {/* Action menu (three dots) — visible only to roster managers so
+              users without permission don't get baited into 403-ing clicks. */}
           <div style={{ position: 'relative', display: 'flex', justifyContent: 'center' }} onClick={e => e.stopPropagation()}>
+            {canManageRoster && (
             <button
               onClick={() => setActionMenuOpen(isMenuOpen ? null : email)}
               style={{
@@ -581,7 +613,8 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
             >
               <i className="bi-three-dots-vertical" />
             </button>
-            {isMenuOpen && (
+            )}
+            {canManageRoster && isMenuOpen && (
               <div
                 ref={actionMenuRef}
                 style={{
@@ -617,10 +650,10 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                   <i className={isOnLeave ? 'bi-person-check' : 'bi-calendar-x'} style={{ fontSize: 12, color: '#ed8d00' }} />
                   {isOnLeave ? 'End Leave' : 'Set On Leave'}
                 </button>
-                {/* Manage permissions — gated on the same edit gate as the
-                    PATCH route (admin / regional_manager). Hidden for everyone
-                    else so the menu item doesn't bait a 403. */}
-                {(isAdmin || (userMember && userMember.access === 'regional_manager')) && (
+                {/* Manage permissions — gated on the same canManageRoster
+                    flag as the PATCH route (admin / regional_manager / per-
+                    user Access Admin). Hidden for everyone else. */}
+                {canManageRoster && (
                   <button
                     onClick={() => openPermissionsModal(email)}
                     style={{
@@ -763,25 +796,27 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
               })}
             </div>
           )}
-          <button
-            onClick={() => setShowAddModal(true)}
-            style={{
-              padding: '5px 14px', borderRadius: 128,
-              border: '1px solid #e8e8e8',
-              background: 'white',
-              color: '#1b1b1b',
-              fontSize: 12, fontWeight: 600,
-              cursor: 'pointer',
-              display: 'flex', alignItems: 'center', gap: 5,
-              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-              transition: 'all .15s',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = '#f9f8f6'; e.currentTarget.style.borderColor = '#d0d0d0'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'white'; e.currentTarget.style.borderColor = '#e8e8e8'; }}
-          >
-            <i className="bi-plus" style={{ fontSize: 13, fontWeight: 700 }} />
-            Add Member
-          </button>
+          {canManageRoster && (
+            <button
+              onClick={() => setShowAddModal(true)}
+              style={{
+                padding: '5px 14px', borderRadius: 128,
+                border: '1px solid #e8e8e8',
+                background: 'white',
+                color: '#1b1b1b',
+                fontSize: 12, fontWeight: 600,
+                cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 5,
+                boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+                transition: 'all .15s',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#f9f8f6'; e.currentTarget.style.borderColor = '#d0d0d0'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'white'; e.currentTarget.style.borderColor = '#e8e8e8'; }}
+            >
+              <i className="bi-plus" style={{ fontSize: 13, fontWeight: 700 }} />
+              Add Member
+            </button>
+          )}
         </div>
 
         {/* KPI cards */}
@@ -1473,6 +1508,33 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                     </div>
                     <div style={{ fontSize: 11, color: '#616161', marginTop: 4, lineHeight: 1.5 }}>
                       Full control over the announcement workflow — compose, approve / reject pending requests, archive &amp; unarchive, override draft fields before publishing, and send acknowledgement reminders. Treats this user as an admin for the announcements domain only; other permissions stay tied to their normal access tier.
+                    </div>
+                  </div>
+                </label>
+                <label
+                  style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 10,
+                    padding: '12px 14px',
+                    border: `1.5px solid ${permsDraft.isAccessAdmin ? '#0369a1' : '#e8e8e8'}`,
+                    borderRadius: 12,
+                    background: permsDraft.isAccessAdmin ? '#f5fafd' : 'white',
+                    cursor: 'pointer',
+                    transition: 'all .15s',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={permsDraft.isAccessAdmin}
+                    onChange={(e) => setPermsDraft({ ...permsDraft, isAccessAdmin: e.target.checked })}
+                    style={{ marginTop: 2, accentColor: '#0369a1' }}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#1b1b1b', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <i className="bi-shield-lock-fill" style={{ fontSize: 12, color: '#0369a1' }} />
+                      Access Admin
+                    </div>
+                    <div style={{ fontSize: 11, color: '#616161', marginTop: 4, lineHeight: 1.5 }}>
+                      Manage the team roster — add / edit / remove members, edit allocations, set on-leave, and grant other per-user permissions. Use this to delegate roster maintenance without escalating someone's primary access tier to regional manager.
                     </div>
                   </div>
                 </label>

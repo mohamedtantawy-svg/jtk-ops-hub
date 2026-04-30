@@ -10,18 +10,11 @@ import { query } from '../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { TEAM_MEMBERS } from '../../../../../src/data/members';
 import { invalidateRosterCache, ensureRosterHydrated } from '../../../../../src/lib/roster-server';
+import { canManageRoster, bustAccessAdminCache } from '../../../../../src/lib/access-admin';
 
 const VALID_ACCESS = ['admin', 'regional_manager', 'team_lead', 'agent'];
 const VALID_SERVICES = ['EOR', 'LifeCycle', 'New Services', 'All'];
 const VALID_TEAMS = ['All', 'EMEA', 'APAC', 'LATAM', 'NAM', 'LATAM + NAM'];
-
-function canMutateRoster(user) {
-  if (!user?.email) return false;
-  if (user.role === 'admin') return true;
-  const baseline = TEAM_MEMBERS.find(m => m.email.toLowerCase() === user.email.toLowerCase());
-  if (!baseline) return false;
-  return baseline.access === 'admin' || baseline.access === 'regional_manager';
-}
 
 // Resolve a subject email from URL params. Next.js 16 makes params a promise.
 async function resolveEmail(params) {
@@ -37,8 +30,8 @@ export async function PATCH(req, { params }) {
   try {
     const user = getAuthUser(req);
     if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!canMutateRoster(user)) {
-      return NextResponse.json({ error: 'Only admins or regional managers can edit allocations' }, { status: 403 });
+    if (!(await canManageRoster(user))) {
+      return NextResponse.json({ error: 'Only admins, regional managers, or designated Access Admins can edit allocations' }, { status: 403 });
     }
 
     const email = await resolveEmail(params);
@@ -63,6 +56,7 @@ export async function PATCH(req, { params }) {
       onLeave: 'on_leave',
       // Per-user permission grants (Director-managed). Booleans, no enum.
       isAnnouncementsAdmin: 'is_announcements_admin',
+      isAccessAdmin: 'is_access_admin',
     };
 
     // Enum guards
@@ -86,7 +80,7 @@ export async function PATCH(req, { params }) {
         if (clientKey === 'managerEmail' && typeof val === 'string') val = val.toLowerCase();
         // Coerce boolean permission flags so JSON `true`/`false` strings or
         // numbers become real booleans for the JSONB write.
-        if (clientKey === 'isAnnouncementsAdmin') val = !!val;
+        if (clientKey === 'isAnnouncementsAdmin' || clientKey === 'isAccessAdmin') val = !!val;
         updates.push(dbCol);
         values.push(val);
       }
@@ -112,6 +106,7 @@ export async function PATCH(req, { params }) {
       RETURNING email, name, initials, title, access, manager_email, team, region,
                 service, country, avatar_url, start_date, is_new, is_deleted,
                 on_leave, last_login_at, login_count, is_announcements_admin,
+                is_access_admin,
                 created_at, updated_at
     `;
 
@@ -163,6 +158,11 @@ export async function PATCH(req, { params }) {
         bustAnnouncementsAdminCache(email);
       } catch {}
     }
+    // Same for access-admin: a grant/revoke needs to take effect on the
+    // very next /team-members write rather than waiting for the 30s TTL.
+    if (Object.prototype.hasOwnProperty.call(body, 'isAccessAdmin')) {
+      bustAccessAdminCache(email);
+    }
 
     return NextResponse.json({
       email: row.email,
@@ -183,6 +183,7 @@ export async function PATCH(req, { params }) {
       lastLoginAt: row.last_login_at ? (typeof row.last_login_at === 'string' ? row.last_login_at : row.last_login_at.toISOString()) : null,
       loginCount: row.login_count || 0,
       isAnnouncementsAdmin: row.is_announcements_admin === true,
+      isAccessAdmin: row.is_access_admin === true,
     });
   } catch (err) {
     console.error('[team-members PATCH]', err.message);
@@ -194,8 +195,8 @@ export async function DELETE(req, { params }) {
   try {
     const user = getAuthUser(req);
     if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    if (!canMutateRoster(user)) {
-      return NextResponse.json({ error: 'Only admins or regional managers can remove members' }, { status: 403 });
+    if (!(await canManageRoster(user))) {
+      return NextResponse.json({ error: 'Only admins, regional managers, or designated Access Admins can remove members' }, { status: 403 });
     }
 
     const email = await resolveEmail(params);

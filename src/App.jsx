@@ -137,18 +137,21 @@ const App=()=>{
           if (payload?.sub) tokenId = Number(payload.sub);
         }catch(e){ /* token unparseable — will fall through */ }
       }
-      // Per-user permission flags (e.g. isAnnouncementsAdmin) live ONLY on
-      // the team_member_overrides row, not in static MEMBERS. Read them from
-      // the localStorage snapshot (which /auth/callback writes from the
-      // login response, and /me revalidation refreshes) so the user state
-      // hydrates with the correct flags on the very first paint.
+      // Per-user permission flags (e.g. isAnnouncementsAdmin, isAccessAdmin)
+      // live ONLY on the team_member_overrides row, not in static MEMBERS.
+      // Read them from the localStorage snapshot (which /auth/callback writes
+      // from the login response, and /me revalidation refreshes) so the
+      // user state hydrates with the correct flags on the very first paint.
       let snapshotPerms = {};
       try {
         const storedRaw = localStorage.getItem('ops_hub_user');
         if (storedRaw) {
           const stored = JSON.parse(storedRaw);
           if (stored?.email?.toLowerCase() === loggedInEmail.toLowerCase()) {
-            snapshotPerms = { isAnnouncementsAdmin: stored.isAnnouncementsAdmin === true };
+            snapshotPerms = {
+              isAnnouncementsAdmin: stored.isAnnouncementsAdmin === true,
+              isAccessAdmin: stored.isAccessAdmin === true,
+            };
           }
         }
       } catch {}
@@ -459,6 +462,7 @@ const App=()=>{
                   ...staticMember,
                   id: serverUser.id || staticMember.id,
                   isAnnouncementsAdmin: serverUser.isAnnouncementsAdmin === true,
+                  isAccessAdmin: serverUser.isAccessAdmin === true,
                 }
               : serverUser;
             // Persist the freshest snapshot so the next mount's useState

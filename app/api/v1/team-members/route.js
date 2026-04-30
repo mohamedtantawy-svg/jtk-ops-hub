@@ -16,19 +16,11 @@ import { getAuthUser } from '../../../../src/lib/auth-helpers';
 import { mergeTeamMembers } from '../../../../src/lib/team-members-merge';
 import { TEAM_MEMBERS } from '../../../../src/data/members';
 import { invalidateRosterCache, ensureRosterHydrated } from '../../../../src/lib/roster-server';
+import { canManageRoster } from '../../../../src/lib/access-admin';
 
 const VALID_ACCESS = ['admin', 'regional_manager', 'team_lead', 'agent'];
 const VALID_SERVICES = ['EOR', 'LifeCycle', 'New Services', 'All'];
 const VALID_TEAMS = ['All', 'EMEA', 'APAC', 'LATAM', 'NAM', 'LATAM + NAM'];
-
-// Admins + regional managers may mutate the roster. Others are read-only.
-function canMutateRoster(user) {
-  if (!user?.email) return false;
-  if (user.role === 'admin') return true;
-  const baseline = TEAM_MEMBERS.find(m => m.email.toLowerCase() === user.email.toLowerCase());
-  if (!baseline) return false;
-  return baseline.access === 'admin' || baseline.access === 'regional_manager';
-}
 
 export async function GET(req) {
   try {
@@ -41,6 +33,7 @@ export async function GET(req) {
       `SELECT email, name, initials, title, access, manager_email, team, region,
               service, country, avatar_url, start_date, is_new, is_deleted,
               on_leave, last_login_at, login_count, is_announcements_admin,
+              is_access_admin,
               created_at, updated_at
          FROM team_member_overrides`
     );
@@ -62,8 +55,8 @@ export async function POST(req) {
     if (!user.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    if (!canMutateRoster(user)) {
-      return NextResponse.json({ error: 'Only admins or regional managers can add members' }, { status: 403 });
+    if (!(await canManageRoster(user))) {
+      return NextResponse.json({ error: 'Only admins, regional managers, or designated Access Admins can add members' }, { status: 403 });
     }
 
     const body = await req.json();

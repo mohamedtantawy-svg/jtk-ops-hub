@@ -610,6 +610,18 @@ ALTER TABLE team_member_overrides ADD COLUMN IF NOT EXISTS is_announcements_admi
 CREATE INDEX IF NOT EXISTS idx_tmo_is_announcements_admin
   ON team_member_overrides(is_announcements_admin) WHERE is_announcements_admin = true;
 
+-- ── Access Admin grant (2026-04-30) ────────────────────────────────────────
+-- Per-user grant for managing the Team roster — add / edit / remove members,
+-- toggle on-leave, edit allocations, grant other per-user permissions. Mirrors
+-- the announcements-admin pattern: orthogonal to the four-tier access model
+-- so a Director can delegate roster maintenance without giving someone full
+-- admin. Until now this was implicitly gated to admin/regional_manager which
+-- forced Team Leads who actually manage their teams (e.g. Olga) to bounce
+-- requests off Mohamed for every new hire.
+ALTER TABLE team_member_overrides ADD COLUMN IF NOT EXISTS is_access_admin BOOLEAN DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS idx_tmo_is_access_admin
+  ON team_member_overrides(is_access_admin) WHERE is_access_admin = true;
+
 -- ── Personal Checklist (My To-Do) snapshots (2026-04-27) ───────────────────
 -- The My To-Do list lives in PersonalChecklist.jsx and historically stored
 -- items only in localStorage + IndexedDB on the client. That covers refresh
