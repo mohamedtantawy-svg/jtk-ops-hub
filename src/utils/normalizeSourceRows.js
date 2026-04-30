@@ -39,20 +39,23 @@ const DEEL_REDLINE_URL = (id, isExecution, redlineType) => {
   return `${DEEL_ADMIN_BASE}/eor/change-requests?redlineType=${encodeURIComponent(rt)}&requestId=${encodeURIComponent(id)}&requestType=redlines&sortBy=createdAt&sortOrder=desc&status=preparingDocuments&subStatus=${encodeURIComponent(sub)}`;
 };
 
-// SLA windows (per Ops policy — Pilar's 2026-04-27 spec):
-//   - Zendesk:      24h from latest requester reply (open/new only — pending /
-//                   hold map to 'waiting' in queue-scoping, slaInfo() ignores
-//                   those statuses entirely). Configured via slaMinsOverride
-//                   in queue/route.js, not here.
-//   - Jira:         48h from latest update. Same path as Zendesk.
-//   - Workbench:    48h from creation. Overrides upstream Deel slaTime so
-//                   every workbench task lands on the same policy.
-//   - Amendments:   24h from createdAt active, 48h from pausedAt paused.
-//   - Redlines:     72h from createdAt active, 48h from pausedAt paused.
-//   - Onboarding:   7 days from createdAt active, 48h from pausedAt paused
-//                   (Paused Onboarding rows expose `pausedAt`).
-//   - Offboarding:  21 days from createdAt active, 48h from pausedAt paused.
+// SLA windows (Mohamed's 2026-05-01 spec):
+//   - Zendesk:      24h biz from latest requester reply (active);
+//                   48h biz from pausedAt for `pending`/`hold` rows.
+//                   Configured via slaMinsOverride in queue/route.js.
+//   - Jira:         48h biz from latest update. Same path as Zendesk.
+//   - Workbench:    48h biz from creation; 48h biz from pausedAt.
+//   - Amendments:   24h biz from createdAt active, 48h biz from pausedAt paused.
+//   - Redlines:     5 biz days from createdAt active, 48h biz from pausedAt paused.
+//   - Onboarding:   24h biz from taskCreatedAt active, 48h biz from pausedAt paused.
+//   - Offboarding:  type-aware — Termination 14 biz days, Resignation 5 biz days
+//                   from createdAt; 48h biz from pausedAt when `isPaused`.
 // Universal pause rule: 48h to unpause and continue, regardless of which Q.
+// All windows tick on the BUSINESS DAY clock (see ./bizTime.js) — Saturday
+// and Sunday don't elapse, so a Friday-4pm ticket doesn't bleed weekend
+// hours into its SLA.
+import { elapsedBizMs } from './bizTime';
+
 const HOUR_MS                  = 60 * 60 * 1000;
 const DAY_MS                   = 24 * HOUR_MS;
 const PAUSED_SLA_MS            = 48 * HOUR_MS;
@@ -60,17 +63,20 @@ const PAUSED_SLA_MS            = 48 * HOUR_MS;
 // These constants are the FALLBACKS used when the runtime SLA settings
 // (Team-tab editable table, persisted in app_settings.queue_sla_thresholds)
 // haven't loaded yet, or when a normalizer is called without a slaConfig
-// argument. Pilar's spec values per 2026-04-27. Once the hook delivers a
-// config, slaMsFor() resolves to those values instead.
+// argument. Once the hook delivers a config, slaMsFor() resolves to those
+// values instead.
 const AMENDMENT_SLA_ACTIVE_MS  = 24 * HOUR_MS;
 const AMENDMENT_SLA_PAUSED_MS  = PAUSED_SLA_MS;
-const REDLINE_SLA_ACTIVE_MS    = 72 * HOUR_MS;
+const REDLINE_SLA_ACTIVE_MS    = 5  * DAY_MS;
 const REDLINE_SLA_PAUSED_MS    = PAUSED_SLA_MS;
-const ONBOARDING_SLA_ACTIVE_MS = 7  * DAY_MS;
+const ONBOARDING_SLA_ACTIVE_MS = 24 * HOUR_MS;
 const ONBOARDING_SLA_PAUSED_MS = PAUSED_SLA_MS;
-const OFFBOARDING_SLA_ACTIVE_MS= 21 * DAY_MS;
-const OFFBOARDING_SLA_PAUSED_MS= PAUSED_SLA_MS;
+// Offboarding splits by row type (typeLabel). Both share the same paused window.
+const OFFBOARDING_TERM_ACTIVE_MS  = 14 * DAY_MS;
+const OFFBOARDING_RESIG_ACTIVE_MS = 5  * DAY_MS;
+const OFFBOARDING_SLA_PAUSED_MS   = PAUSED_SLA_MS;
 const WORKBENCH_SLA_ACTIVE_MS  = 48 * HOUR_MS;
+const WORKBENCH_SLA_PAUSED_MS  = PAUSED_SLA_MS;
 
 // Resolve the active/paused window for a given queue. Reads slaConfig
 // (the per-queue { activeMins, pausedMins? } object delivered by
@@ -92,25 +98,36 @@ function slaMsFor(slaConfig, queueId, fallbackActiveMs, fallbackPausedMs) {
 // shaped exactly like the Workbench upstream so the SourceTable badge renders
 // uniformly. When `pausedMs`/`pausedAt` are provided AND truthy, the paused
 // branch wins (the pause clock is what the team actually races against).
-// Falls back gracefully when timestamps are missing — never crashes the row.
+// Elapsed time is measured on the BUSINESS DAY clock (Sat/Sun excluded) so
+// a row created Friday afternoon doesn't accumulate weekend ms against its
+// window. Falls back gracefully when timestamps are missing — never crashes
+// the row.
 function computeSlaWindow(activeMs, createdAt, opts = {}) {
   const { pausedMs, pausedAt } = opts;
   const now = Date.now();
   if (pausedMs && pausedAt) {
     const ts = new Date(pausedAt).getTime();
     if (Number.isFinite(ts) && ts > 0) {
-      const slaRemaining = Math.round((ts + pausedMs - now) / 1000);
-      return { slaRemaining, slaBreachStatus: slaRemaining < 0 ? 'SLA_BREACHED' : 'SLA_NOT_BREACHED' };
+      const slaRemaining = Math.round((pausedMs - elapsedBizMs(ts, now)) / 1000);
+      return {
+        slaRemaining,
+        slaBreachStatus: slaRemaining < 0 ? 'SLA_BREACHED' : 'SLA_NOT_BREACHED',
+        slaWindowMs: pausedMs,
+      };
     }
   }
   if (createdAt) {
     const ts = new Date(createdAt).getTime();
     if (Number.isFinite(ts) && ts > 0) {
-      const slaRemaining = Math.round((ts + activeMs - now) / 1000);
-      return { slaRemaining, slaBreachStatus: slaRemaining < 0 ? 'SLA_BREACHED' : 'SLA_NOT_BREACHED' };
+      const slaRemaining = Math.round((activeMs - elapsedBizMs(ts, now)) / 1000);
+      return {
+        slaRemaining,
+        slaBreachStatus: slaRemaining < 0 ? 'SLA_BREACHED' : 'SLA_NOT_BREACHED',
+        slaWindowMs: activeMs,
+      };
     }
   }
-  return { slaRemaining: null, slaBreachStatus: null };
+  return { slaRemaining: null, slaBreachStatus: null, slaWindowMs: null };
 }
 
 // ── Name → email lookup for sources that only provide assignee name ──
@@ -245,6 +262,7 @@ export function normalizeOnboarding(items = [], slaConfig = null) {
       contractUrl: DEEL_CONTRACT_URL(p.oid),
       slaRemaining: sla.slaRemaining,
       slaBreachStatus: sla.slaBreachStatus,
+      slaWindowMs: sla.slaWindowMs,
     };
   });
 }
@@ -285,15 +303,23 @@ export function normalizePausedOnboarding(items = [], slaConfig = null) {
       pauseType: p.pauseType || '',
       slaRemaining: sla.slaRemaining,
       slaBreachStatus: sla.slaBreachStatus,
+      slaWindowMs: sla.slaWindowMs,
     };
   });
 }
 
 // ── Offboarding → normalized rows ──
+// Type-aware SLA: Termination uses `offboarding_termination` (default 14
+// biz-days), Resignation uses `offboarding_resignation` (default 5 biz-days).
+// The Team-tab editor exposes both as separately tunable rows so leadership
+// can dial each path independently. Paused window is the universal 48h.
 export function normalizeOffboarding(items = [], slaConfig = null) {
-  const { activeMs, pausedMs } = slaMsFor(slaConfig, 'offboarding', OFFBOARDING_SLA_ACTIVE_MS, OFFBOARDING_SLA_PAUSED_MS);
+  const term = slaMsFor(slaConfig, 'offboarding_termination', OFFBOARDING_TERM_ACTIVE_MS, OFFBOARDING_SLA_PAUSED_MS);
+  const resig = slaMsFor(slaConfig, 'offboarding_resignation', OFFBOARDING_RESIG_ACTIVE_MS, OFFBOARDING_SLA_PAUSED_MS);
   return items.map(c => {
     const createdAt = c.requestedDate || c.createdAt || '';
+    const isResignation = (c.typeLabel || '').startsWith('Resignation');
+    const { activeMs, pausedMs } = isResignation ? resig : term;
     // Offboarding has no native paused state in the upstream payload, but
     // honour `c.isPaused` / `c.pausedAt` if either ever surfaces — keeps the
     // 48h paused rule applicable here too.
@@ -327,6 +353,7 @@ export function normalizeOffboarding(items = [], slaConfig = null) {
       zendeskUrl: c.zendeskUrl || '',
       slaRemaining: sla.slaRemaining,
       slaBreachStatus: sla.slaBreachStatus,
+      slaWindowMs: sla.slaWindowMs,
     };
   });
 }
@@ -346,6 +373,7 @@ export function normalizeAmendments(items = [], slaConfig = null) {
     });
     const slaRemaining = sla.slaRemaining;
     const slaBreachStatus = sla.slaBreachStatus;
+    const slaWindowMs = sla.slaWindowMs;
 
     return {
       id: String(a.id || ''),
@@ -365,6 +393,7 @@ export function normalizeAmendments(items = [], slaConfig = null) {
       isPaused: !!a.isPaused,
       slaRemaining,
       slaBreachStatus,
+      slaWindowMs,
     };
   });
 }
@@ -393,6 +422,7 @@ export function normalizeRedlines(items = [], slaConfig = null) {
     });
     const slaRemaining = sla.slaRemaining;
     const slaBreachStatus = sla.slaBreachStatus;
+    const slaWindowMs = sla.slaWindowMs;
 
     return {
       id: String(r.id || ''),
@@ -421,13 +451,14 @@ export function normalizeRedlines(items = [], slaConfig = null) {
       isExecution: !!r.isExecution,
       slaRemaining,
       slaBreachStatus,
+      slaWindowMs,
     };
   });
 }
 
 // ── Workbench → normalized rows ──
 export function normalizeWorkbench(items = [], slaConfig = null) {
-  const { activeMs, pausedMs } = slaMsFor(slaConfig, 'workbench', WORKBENCH_SLA_ACTIVE_MS, PAUSED_SLA_MS);
+  const { activeMs, pausedMs } = slaMsFor(slaConfig, 'workbench', WORKBENCH_SLA_ACTIVE_MS, WORKBENCH_SLA_PAUSED_MS);
   return items.map(t => {
     // Override upstream Deel-side SLA with the configured flat-from-creation
     // policy. The upstream `t.slaTime`/`t.slaRemaining` vary arbitrarily per
@@ -457,6 +488,7 @@ export function normalizeWorkbench(items = [], slaConfig = null) {
       contractUrl: DEEL_CONTRACT_URL(t.contractOid),
       slaRemaining: sla.slaRemaining,
       slaBreachStatus: sla.slaBreachStatus,
+      slaWindowMs: sla.slaWindowMs,
     };
   });
 }

@@ -52,9 +52,14 @@ const STALE_TTL = 30 * 60_000;      // serve stale up to 30 minutes while refres
 // ── Runtime SLA settings (Team-tab editable) ────────────────────────────────
 // Reads app_settings.queue_sla_thresholds — same row the
 // /api/v1/settings/queue-sla route writes. Cached 30s in-process so the
-// per-request hop is one SELECT at most. Defaults to spec values when no
-// row exists yet (24h ZD / 48h Jira).
-const SLA_DEFAULTS = { zendeskMins: 24 * 60, jiraMins: 48 * 60 };
+// per-request hop is one SELECT at most. Defaults to the 2026-05-01 spec
+// values when no row exists yet (ZD 24h active / 48h paused, Jira 48h).
+// All values are BUSINESS-DAY minutes.
+const SLA_DEFAULTS = {
+  zendeskActiveMins: 24 * 60,
+  zendeskPausedMins: 48 * 60,
+  jiraMins:          48 * 60,
+};
 let _slaCache = { value: null, ts: 0 };
 async function getSlaOverrides() {
   const now = Date.now();
@@ -68,7 +73,8 @@ async function getSlaOverrides() {
       );
       const v = rows[0]?.value;
       if (v) {
-        if (Number.isFinite(v.zendesk?.activeMins) && v.zendesk.activeMins > 0) result.zendeskMins = v.zendesk.activeMins;
+        if (Number.isFinite(v.zendesk?.activeMins) && v.zendesk.activeMins > 0) result.zendeskActiveMins = v.zendesk.activeMins;
+        if (Number.isFinite(v.zendesk?.pausedMins) && v.zendesk.pausedMins > 0) result.zendeskPausedMins = v.zendesk.pausedMins;
         if (Number.isFinite(v.jira?.activeMins) && v.jira.activeMins > 0) result.jiraMins = v.jira.activeMins;
       }
     } catch (err) {
@@ -374,7 +380,7 @@ async function fetchZendeskQueue() {
 
     // Resolve runtime SLA settings (Team-tab editable). Cached 30s so the
     // per-request hop is one SELECT at most.
-    const { zendeskMins } = await getSlaOverrides();
+    const { zendeskActiveMins, zendeskPausedMins } = await getSlaOverrides();
 
     // Resolve our 4 named custom-field IDs once per request (cached 1h
     // server-side). If discovery fails we silently fall back to null
@@ -388,6 +394,12 @@ async function fetchZendeskQueue() {
       const requester = userMap[t.requester_id] || {};
       // Read the per-ticket values for our 4 fields from t.custom_fields.
       const customFields = extractCustomFieldValues(t, customFieldMeta);
+      const appStatus = ZD_STATUS_MAP[t.status] || 'new';
+      // Paused buckets (`pending`/`hold`) get the paused SLA window;
+      // active buckets (`new`/`open`) get the active window. The FE
+      // renders a separate Paused section for waiting tickets, with its
+      // own SLA pill ticking against the paused window.
+      const isPausedStatus = appStatus === 'waiting';
 
       return {
         id: `ZD-${t.id}`,
@@ -395,7 +407,7 @@ async function fetchZendeskQueue() {
         externalId: String(t.id),
         subject: t.subject || '(no subject)',
         description: (t.description || '').substring(0, 200),
-        status: ZD_STATUS_MAP[t.status] || 'new',
+        status: appStatus,
         // Preserve the raw Zendesk status so the Detail page can distinguish
         // `pending` (waiting on requester) from `hold` (waiting on internal)
         // even though both collapse to our app-level 'waiting' bucket.
@@ -410,12 +422,18 @@ async function fetchZendeskQueue() {
         lastCustomerResponseAt: t.updated_at, // Zendesk updated_at tracks last activity; this is a reasonable proxy
         createdAt: t.created_at,
         updatedAt: t.updated_at,
+        // Best-available pausedAt anchor for waiting tickets. Zendesk
+        // doesn't surface the precise pending-transition timestamp, so
+        // `updated_at` is the closest proxy (last activity that flipped
+        // status or replied). Only populated when the ticket is currently
+        // paused — keeps the FE's paused-SLA pill anchored to the right
+        // event.
+        pausedAt: isPausedStatus ? t.updated_at : null,
         // Per-ticket SLA window from app_settings.queue_sla_thresholds.zendesk
-        // (default 24h, configurable via the Team-tab SLA settings table).
-        // slaInfo() reads this override before falling back to type-based
-        // SLA_MINS, and already excludes 'waiting'/'resolved' from the
-        // breach calc.
-        slaMinsOverride: zendeskMins,
+        // (default 24h active / 48h paused, configurable via the Team-tab
+        // SLA settings table). slaInfo() reads this override before falling
+        // back to type-based SLA_MINS.
+        slaMinsOverride: isPausedStatus ? zendeskPausedMins : zendeskActiveMins,
         // Phase 2 — values for the 4 ops-hub-tracked Zendesk custom fields.
         // Detail.jsx renders these as editable selects; PUT through
         // /queue/[id]/custom-fields persists changes back to Zendesk.

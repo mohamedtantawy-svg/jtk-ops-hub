@@ -10,16 +10,26 @@ import { cacheGet, cacheSet, cacheDel } from '../../../../../src/lib/server-cach
 // can pass them directly into slaMinsOverride.
 const CACHE_KEY = 'queue_sla_thresholds';
 const CACHE_TTL = 30_000; // 30s — balances UX speed vs DB load
-const VALID_QUEUES = new Set(['zendesk', 'jira', 'workbench', 'amendments', 'redlines', 'onboarding', 'offboarding']);
+// Split offboarding into termination + resignation per Mohamed's 2026-05-01
+// spec — the two paths have different operating windows (14d vs 5d) so they
+// need to be tunable independently. Legacy `offboarding` is no longer a
+// valid key; mergeWithDefaults seeds the new split keys with the spec
+// defaults if no override exists yet.
+const VALID_QUEUES = new Set([
+  'zendesk', 'jira', 'workbench', 'amendments', 'redlines', 'onboarding',
+  'offboarding_termination', 'offboarding_resignation',
+]);
 
 const DEFAULT_SLA = {
-  zendesk:    { activeMins: 1440 },                       // 24h from latest requester reply (open/new)
-  jira:       { activeMins: 2880 },                       // 48h from latest update
-  workbench:  { activeMins: 2880, pausedMins: 2880 },     // 48h from creation
-  amendments: { activeMins: 1440, pausedMins: 2880 },     // 24h active / 48h paused
-  redlines:   { activeMins: 4320, pausedMins: 2880 },     // 72h active / 48h paused
-  onboarding: { activeMins: 10080, pausedMins: 2880 },    // 7d active / 48h paused
-  offboarding:{ activeMins: 30240, pausedMins: 2880 },    // 21d active / 48h paused
+  // All windows below are BUSINESS-DAY minutes (Sat/Sun excluded).
+  zendesk:                 { activeMins: 1440,  pausedMins: 2880 },  // 24h active / 48h paused (pending/hold)
+  jira:                    { activeMins: 2880 },                     // 48h from latest update
+  workbench:               { activeMins: 2880,  pausedMins: 2880 },  // 48h from creation / 48h paused
+  amendments:              { activeMins: 1440,  pausedMins: 2880 },  // 24h active / 48h paused
+  redlines:                { activeMins: 7200,  pausedMins: 2880 },  // 5d active / 48h paused
+  onboarding:              { activeMins: 1440,  pausedMins: 2880 },  // 24h from task initiated / 48h paused
+  offboarding_termination: { activeMins: 20160, pausedMins: 2880 },  // 14d active / 48h paused
+  offboarding_resignation: { activeMins: 7200,  pausedMins: 2880 },  // 5d active / 48h paused
 };
 
 async function getDb() {

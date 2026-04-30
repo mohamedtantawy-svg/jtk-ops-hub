@@ -1637,27 +1637,34 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
 // Offboarding) plus the universal paused window. Persisted in app_settings.
 // Anyone below TL sees read-only values. Saving triggers a BroadcastChannel
 // ping so every open tab adopts the new thresholds without a refresh.
+// Queue list controls the order + labels in the editor. All windows tick on
+// the BUSINESS-DAY clock (Sat/Sun excluded) — the table header reminds the
+// user. ZD now has a paused row (pending/hold tickets); Offboarding is
+// split by row type (Termination / Resignation) so each path is tunable
+// independently. Jira has no paused state.
 const QUEUE_META = [
-  { id: 'zendesk',     label: 'Zendesk',     anchor: 'last requester reply',  hasPaused: false },
-  { id: 'jira',        label: 'Jira',        anchor: 'last update',           hasPaused: false },
-  { id: 'workbench',   label: 'Workbench',   anchor: 'creation',              hasPaused: true  },
-  { id: 'amendments',  label: 'Amendments',  anchor: 'creation',              hasPaused: true  },
-  { id: 'redlines',    label: 'Redlines',    anchor: 'creation',              hasPaused: true  },
-  { id: 'onboarding',  label: 'Onboarding',  anchor: 'creation',              hasPaused: true  },
-  { id: 'offboarding', label: 'Offboarding', anchor: 'creation',              hasPaused: true  },
+  { id: 'zendesk',                 label: 'Zendesk',                 anchor: 'last requester reply', hasPaused: true  },
+  { id: 'jira',                    label: 'Jira',                    anchor: 'last update',          hasPaused: false },
+  { id: 'workbench',               label: 'Workbench',               anchor: 'creation',             hasPaused: true  },
+  { id: 'amendments',              label: 'Amendments',              anchor: 'creation',             hasPaused: true  },
+  { id: 'redlines',                label: 'Redlines',                anchor: 'creation',             hasPaused: true  },
+  { id: 'onboarding',              label: 'Onboarding',              anchor: 'task initiated',       hasPaused: true  },
+  { id: 'offboarding_termination', label: 'Offboarding · Termination', anchor: 'creation',           hasPaused: true  },
+  { id: 'offboarding_resignation', label: 'Offboarding · Resignation', anchor: 'creation',           hasPaused: true  },
 ];
 
-// Render `mins` as the most natural unit for the queue's spec (days when
-// ≥ 24h, hours otherwise). Edit input uses the raw minutes so saves are
-// lossless. The unit suffix is for display only.
+// Display every duration in HOURS so the editor reads consistently across
+// queues whose SLAs span 24h → 14d. Saves are lossless — the parser still
+// accepts "h" / "d" / bare minutes inputs but the display always rounds to
+// the nearest hour.
 function formatMins(mins) {
   if (!Number.isFinite(mins) || mins <= 0) return '—';
-  if (mins % (24 * 60) === 0) {
-    const days = mins / (24 * 60);
-    return `${days}d`;
-  }
-  if (mins % 60 === 0) return `${mins / 60}h`;
-  return `${mins}m`;
+  // Show whole-hour results without decimals; otherwise keep one decimal so a
+  // 90-minute value reads as "1.5h" rather than "1h" (which would round-trip
+  // wrong). 0–59 min stays in minutes for tiny windows.
+  if (mins < 60) return `${Math.round(mins)}m`;
+  const hours = mins / 60;
+  return Number.isInteger(hours) ? `${hours}h` : `${hours.toFixed(1)}h`;
 }
 // Parse a user input like "24h" / "7d" / "1440" → minutes. Returns null on
 // a value we can't interpret so the form can show an inline error.
@@ -1669,7 +1676,7 @@ function parseDurationToMins(input) {
   if (!m) return null;
   const n = Number(m[1]);
   if (!Number.isFinite(n) || n <= 0) return null;
-  const unit = m[2] || 'm';   // bare number → minutes
+  const unit = m[2] || 'h';   // bare number → hours (display unit)
   if (unit === 'm') return Math.round(n);
   if (unit === 'h') return Math.round(n * 60);
   if (unit === 'd') return Math.round(n * 24 * 60);
@@ -1827,7 +1834,10 @@ const QueueSlaSettingsCard = () => {
           )}
         </div>
         <div style={{ marginTop: 10, fontSize: 11, color: '#9e9e9e' }}>
-          Tip: enter values like <code style={{ background: '#f5f5f5', padding: '1px 5px', borderRadius: 4 }}>24h</code>, <code style={{ background: '#f5f5f5', padding: '1px 5px', borderRadius: 4 }}>7d</code>, or <code style={{ background: '#f5f5f5', padding: '1px 5px', borderRadius: 4 }}>2880</code> (raw minutes). Per-row SLA pills and the Briefing aggregate update on next sync.
+          All SLAs tick on the <strong>business-day clock</strong> — Saturday and Sunday do not elapse.
+          Enter values as hours (<code style={{ background: '#f5f5f5', padding: '1px 5px', borderRadius: 4 }}>48</code> = 48h),
+          or with an explicit unit (<code style={{ background: '#f5f5f5', padding: '1px 5px', borderRadius: 4 }}>5d</code>, <code style={{ background: '#f5f5f5', padding: '1px 5px', borderRadius: 4 }}>30m</code>).
+          Per-row SLA pills and the Briefing aggregate update on next sync.
         </div>
       </div>
     </div>
