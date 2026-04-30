@@ -434,18 +434,18 @@ const OFFBOARDING_EXCLUDED_STEPS = new Set([
   'OffcycleInvoice',               // "Off-Cycle Invoice"
 ]);
 
-// Pagination cap — sized to cover the full ~29k upstream record set
-// (29k / 50 = ~590 pages). We keep a defensive ceiling so a runaway loop
-// can't lock the request.
-const OFFBOARDING_MAX_PAGES = 700;
-
-// Stop early once we've seen this many consecutive pages yielding 0 new
-// matches. The default sort is endDate ASC (nulls first) which front-loads
-// AWAITING_TRIAGE records (no endDate); PROCESSING/AWAITING_HRX_ACTION rows
-// are interleaved by endDate. A generous threshold (50) avoids quitting
-// too early during a sparse stretch while still bailing on the long tail
-// of post-actionable / closed records that dominate the back of the list.
-const OFFBOARDING_EMPTY_PAGE_STOP = 50;
+// Pagination cap — sized to cover the full ~30k upstream record set
+// (30k / 50 = ~600 pages) plus growth headroom. We keep a defensive
+// ceiling so a runaway loop can't lock the request.
+//
+// Early-stop on N consecutive empty pages was REMOVED on 2026-04-30:
+// AWAITING_TRIAGE rows (no endDate) cluster at the front of the default
+// sort, but PROCESSING and AWAITING_HRX_ACTION rows are interleaved with
+// closed records by endDate ASC across the entire walk. A 50-empty
+// threshold quit ~70 pages in and missed roughly two-thirds of the
+// actionable set (Mohamed reported 327 visible vs ~1100 expected). The
+// cap below + natural cursor exhaustion is the only honest stop.
+const OFFBOARDING_MAX_PAGES = 800;
 
 function isOffboardingActionable(t) {
   if (t?.isDuplicate === true) return false;
@@ -473,13 +473,13 @@ function isOffboardingActionable(t) {
  *
  * Strategy: scan `/admin/eor/terminations_v3` unfiltered (the upstream
  * Joi schema rejects `status[]=`, so server-side filtering isn't an option)
- * and apply the type+status matrix + flow-step exclusions client-side. The
- * default sort is endDate ASC (nulls first), so AWAITING_TRIAGE records
- * (which lack endDate) are front-loaded. Stop early after
- * OFFBOARDING_EMPTY_PAGE_STOP consecutive empty pages so we don't burn
- * round-trips on the long tail of closed / post-actionable records, while
- * still scanning deep enough to capture interleaved PROCESSING and
- * AWAITING_HRX_ACTION rows.
+ * and apply the type+status matrix + flow-step exclusions client-side.
+ * Walks the cursor to natural exhaustion or the OFFBOARDING_MAX_PAGES cap
+ * — whichever comes first. The default sort (endDate ASC nulls first)
+ * interleaves actionable rows with closed records throughout the walk,
+ * so an early-stop heuristic isn't safe; the route is gated by a 5-min
+ * cache + 60-min stale-while-revalidate so the per-request wall time
+ * only matters once per cache window.
  *
  * Per-type rules applied via isOffboardingActionable:
  *   Termination          → status in (AWAITING_TRIAGE, PROCESSING)
@@ -492,8 +492,8 @@ export async function listOffboardingCases() {
   let serverTotal = null;
   let page = 0;
   let scanned = 0;
-  let emptyRun = 0;
   let mode = 'admin-scan';
+  const startedAt = Date.now();
 
   if (!DEEL_ADMIN_TOKEN) {
     // No admin JWT: the REST v2 token can't paginate /admin/* endpoints.
@@ -511,34 +511,31 @@ export async function listOffboardingCases() {
     console.log(`[offboarding] mode=${mode}, scanned ${scanned}, kept ${kept.length} (server reports ${serverTotal} total)`);
   } else {
     // Admin JWT present: scan pages unfiltered, apply matrix client-side.
+    // No early-stop — walk to natural cursor exhaustion (or cap) so we
+    // never miss an actionable row sitting behind a long stretch of
+    // closed records.
     let cursor = null;
     for (; page < OFFBOARDING_MAX_PAGES; page++) {
       const qs = cursor ? `cursor=${encodeURIComponent(cursor)}` : 'limit=50';
       const res = await deelFetch(`/admin/eor/terminations_v3?${qs}`);
       if (serverTotal === null) serverTotal = res?.count?.total ?? null;
 
-      let keptThisPage = 0;
       for (const t of res?.terminations || []) {
         scanned++;
         if (seen.has(t.id)) continue;
         if (!isOffboardingActionable(t)) continue;
         seen.add(t.id);
         kept.push(t);
-        keptThisPage++;
       }
 
-      if (keptThisPage === 0) emptyRun++; else emptyRun = 0;
       cursor = res?.cursor || null;
       if (!cursor) break;
-      if (emptyRun >= OFFBOARDING_EMPTY_PAGE_STOP) {
-        console.log(`[offboarding] early-stop: ${OFFBOARDING_EMPTY_PAGE_STOP} empty pages in a row at page ${page + 1}`);
-        break;
-      }
     }
     if (page >= OFFBOARDING_MAX_PAGES) {
       console.warn(`[offboarding] hit OFFBOARDING_MAX_PAGES (${OFFBOARDING_MAX_PAGES}) — may be missing records`);
     }
-    console.log(`[offboarding] mode=${mode}, pages=${page + 1}, scanned=${scanned}, kept=${kept.length} (server reports ${serverTotal} total)`);
+    const elapsed = Math.round((Date.now() - startedAt) / 1000);
+    console.log(`[offboarding] mode=${mode}, pages=${page + 1}, scanned=${scanned}, kept=${kept.length}, elapsed=${elapsed}s (server reports ${serverTotal} total)`);
   }
 
   const mapped = kept.map(c => ({
