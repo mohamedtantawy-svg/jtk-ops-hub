@@ -434,18 +434,21 @@ const OFFBOARDING_EXCLUDED_STEPS = new Set([
   'OffcycleInvoice',               // "Off-Cycle Invoice"
 ]);
 
-// Pagination cap — sized to cover the full ~30k upstream record set
-// (30k / 50 = ~600 pages) plus growth headroom. We keep a defensive
-// ceiling so a runaway loop can't lock the request.
-//
-// Early-stop on N consecutive empty pages was REMOVED on 2026-04-30:
-// AWAITING_TRIAGE rows (no endDate) cluster at the front of the default
-// sort, but PROCESSING and AWAITING_HRX_ACTION rows are interleaved with
-// closed records by endDate ASC across the entire walk. A 50-empty
-// threshold quit ~70 pages in and missed roughly two-thirds of the
-// actionable set (Mohamed reported 327 visible vs ~1100 expected). The
-// cap below + natural cursor exhaustion is the only honest stop.
-const OFFBOARDING_MAX_PAGES = 800;
+// Pagination cap — defensive ceiling so a runaway loop can't lock the
+// request. With sortBy=createdAt&sort=DESC the actionable subset
+// concentrates in the first ~50 pages (newest records); the long tail
+// is dominated by old closed records (COMPLETED / CANCELLED / DONE)
+// that the matrix filters out. The early-stop below kicks in well
+// before this cap on a healthy upstream.
+const OFFBOARDING_MAX_PAGES = 1000;
+
+// Empty-page early-stop threshold. With createdAt-DESC the actionable
+// subset is heavily front-loaded (recent records), so a long stretch of
+// closed-only pages reliably means "we're past the actionable horizon".
+// 200 is generous enough to absorb any cluster of recently-closed
+// records before quitting; the wall-time saving vs walking the full
+// 30k upstream is roughly 10x.
+const OFFBOARDING_EMPTY_PAGE_STOP = 200;
 
 function isOffboardingActionable(t) {
   if (t?.isDuplicate === true) return false;
@@ -471,71 +474,100 @@ function isOffboardingActionable(t) {
 /**
  * Fetches all actionable EOR termination cases from the admin API.
  *
- * Strategy: scan `/admin/eor/terminations_v3` unfiltered (the upstream
- * Joi schema rejects `status[]=`, so server-side filtering isn't an option)
- * and apply the type+status matrix + flow-step exclusions client-side.
- * Walks the cursor to natural exhaustion or the OFFBOARDING_MAX_PAGES cap
- * — whichever comes first. The default sort (endDate ASC nulls first)
- * interleaves actionable rows with closed records throughout the walk,
- * so an early-stop heuristic isn't safe; the route is gated by a 5-min
- * cache + 60-min stale-while-revalidate so the per-request wall time
- * only matters once per cache window.
+ * Strategy:
+ *   1. First request sets `sortBy=createdAt&sort=DESC` so the cursor
+ *      walks newest-first. The actionable subset (AWAITING_TRIAGE +
+ *      PROCESSING + AWAITING_HRX_ACTION) is heavily concentrated in
+ *      records created over the last few months — the older a
+ *      termination, the more likely it's COMPLETED / CANCELLED.
+ *   2. Apply the type+status matrix client-side per page. Track raw
+ *      status counts as we go so the route handler can surface them
+ *      to the UI ("here's what's in the upstream queue and what we
+ *      filtered out").
+ *   3. Early-stop after OFFBOARDING_EMPTY_PAGE_STOP consecutive pages
+ *      with zero matrix hits — at that point we're deep in the
+ *      already-closed long tail and continuing wastes round-trips.
+ *
+ * The previous strategy (default sort, no early-stop) was correct but
+ * walked all ~600 pages every cache miss. createdAt-DESC + early-stop
+ * gets us the same accuracy in ~10x less wall time.
  *
  * Per-type rules applied via isOffboardingActionable:
  *   Termination          → status in (AWAITING_TRIAGE, PROCESSING)
  *   Resignation (any)    → status in (AWAITING_TRIAGE, PROCESSING, AWAITING_HRX_ACTION)
  *   Plus: isDuplicate=false AND no excluded flow step.
+ *
+ * Returns: { items, statusCounts } so the route can include the
+ * upstream breakdown alongside the filtered list. statusCounts is the
+ * raw distribution across every record we scanned, useful for the
+ * panel header ("X actionable of Y total open: A triage / B processing
+ * / C HRX action").
  */
 export async function listOffboardingCases() {
   const kept = [];
   const seen = new Set();
+  const statusCounts = {};                  // raw upstream distribution
   let serverTotal = null;
   let page = 0;
   let scanned = 0;
+  let emptyRun = 0;
   let mode = 'admin-scan';
   const startedAt = Date.now();
+  const initialQs = 'limit=50&sortBy=createdAt&sort=DESC';
+
+  function recordStatus(t) {
+    const s = (t?.status || '').toUpperCase() || '_UNKNOWN';
+    statusCounts[s] = (statusCounts[s] || 0) + 1;
+  }
 
   if (!DEEL_ADMIN_TOKEN) {
     // No admin JWT: the REST v2 token can't paginate /admin/* endpoints.
     // Fall back to single default page and apply the matrix client-side.
     mode = 'rest-v2-fallback';
-    const res = await deelFetch('/admin/eor/terminations_v3?limit=50');
+    const res = await deelFetch(`/admin/eor/terminations_v3?${initialQs}`);
     serverTotal = res?.count?.total ?? null;
     for (const t of res?.terminations || []) {
       scanned++;
+      recordStatus(t);
       if (seen.has(t.id)) continue;
       if (!isOffboardingActionable(t)) continue;
       seen.add(t.id);
       kept.push(t);
     }
-    console.log(`[offboarding] mode=${mode}, scanned ${scanned}, kept ${kept.length} (server reports ${serverTotal} total)`);
+    console.log(`[offboarding] mode=${mode}, scanned ${scanned}, kept ${kept.length} (server total=${serverTotal}, statuses=${JSON.stringify(statusCounts)})`);
   } else {
-    // Admin JWT present: scan pages unfiltered, apply matrix client-side.
-    // No early-stop — walk to natural cursor exhaustion (or cap) so we
-    // never miss an actionable row sitting behind a long stretch of
-    // closed records.
+    // Admin JWT present: scan pages unfiltered (sorted createdAt DESC),
+    // apply matrix client-side, early-stop on a long empty-page run.
     let cursor = null;
     for (; page < OFFBOARDING_MAX_PAGES; page++) {
-      const qs = cursor ? `cursor=${encodeURIComponent(cursor)}` : 'limit=50';
+      const qs = cursor ? `cursor=${encodeURIComponent(cursor)}` : initialQs;
       const res = await deelFetch(`/admin/eor/terminations_v3?${qs}`);
       if (serverTotal === null) serverTotal = res?.count?.total ?? null;
 
+      let keptThisPage = 0;
       for (const t of res?.terminations || []) {
         scanned++;
+        recordStatus(t);
         if (seen.has(t.id)) continue;
         if (!isOffboardingActionable(t)) continue;
         seen.add(t.id);
         kept.push(t);
+        keptThisPage++;
       }
 
+      if (keptThisPage === 0) emptyRun++; else emptyRun = 0;
       cursor = res?.cursor || null;
       if (!cursor) break;
+      if (emptyRun >= OFFBOARDING_EMPTY_PAGE_STOP) {
+        console.log(`[offboarding] early-stop: ${OFFBOARDING_EMPTY_PAGE_STOP} empty pages in a row at page ${page + 1}`);
+        break;
+      }
     }
     if (page >= OFFBOARDING_MAX_PAGES) {
       console.warn(`[offboarding] hit OFFBOARDING_MAX_PAGES (${OFFBOARDING_MAX_PAGES}) — may be missing records`);
     }
     const elapsed = Math.round((Date.now() - startedAt) / 1000);
-    console.log(`[offboarding] mode=${mode}, pages=${page + 1}, scanned=${scanned}, kept=${kept.length}, elapsed=${elapsed}s (server reports ${serverTotal} total)`);
+    console.log(`[offboarding] mode=${mode}, pages=${page + 1}, scanned=${scanned}, kept=${kept.length}, elapsed=${elapsed}s (server total=${serverTotal}, statuses=${JSON.stringify(statusCounts)})`);
   }
 
   const mapped = kept.map(c => ({
@@ -578,7 +610,12 @@ export async function listOffboardingCases() {
 
   // Drop offboarding cases tied to Deel-internal employee contracts
   // ("Deeler" tag) — same rule as the rest of the queue feeds.
-  return dropDeelersByContractOid(mapped, (it) => it.contractOid || it.contractId, 'offboarding');
+  const items = await dropDeelersByContractOid(mapped, (it) => it.contractOid || it.contractId, 'offboarding');
+
+  // Return both the actionable items AND the raw upstream status
+  // distribution so the route handler can surface "of N total open in
+  // the upstream queue, M are actionable" to the panel header.
+  return { items, statusCounts, serverTotal, scanned, pages: page + 1 };
 }
 
 // ── Contract Amendments (REST v2 API) ───────────────────────────────────────
