@@ -3,6 +3,21 @@ import { TOOLS, FUNCTIONS, FLAGS, SLA_MINS } from '../../data/constants';
 import { MEMBERS } from '../../data/members';
 import { HOURLY_VOLUME } from '../../data/feed';
 import { SettingsContext, PermissionsContext } from '../../App';
+import { slaInfo } from '../../utils/helpers';
+import { useOnboardingData } from '../../hooks/useOnboardingData';
+import { usePausedOnboardingData } from '../../hooks/usePausedOnboardingData';
+import { useOffboardingData } from '../../hooks/useOffboardingData';
+import { useChangeRequestData } from '../../hooks/useChangeRequestData';
+import { useWorkbenchData } from '../../hooks/useWorkbenchData';
+import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
+import {
+  normalizeOnboarding,
+  normalizePausedOnboarding,
+  normalizeOffboarding,
+  normalizeAmendments,
+  normalizeRedlines,
+  normalizeWorkbench,
+} from '../../utils/normalizeSourceRows';
 import Avatar from '../ui/Avatar';
 import MultiFilter from '../analytics/MultiFilter';
 import PeakTimesHeatmap from '../analytics/PeakTimesHeatmap';
@@ -140,15 +155,55 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
     return `${Math.floor(myResponseTimes / 60)}h ${myResponseTimes % 60}m`;
   }, [myResponseTimes]);
 
+  // Mount the same Deel queue hooks Briefing / Queue use so the SLA
+  // compliance KPI here covers all 7 work streams instead of just the
+  // ZD/Jira tickets in `tasks`. Honours the per-row `slaMinsOverride`
+  // (server-stamped from app_settings.queue_sla_thresholds) AND the
+  // business-day clock automatically because we use the canonical
+  // helpers (slaInfo + slaBreachStatus from normalizeSourceRows).
+  const onboardingDataA = useOnboardingData(true);
+  const pausedOnboardingDataA = usePausedOnboardingData(true);
+  const offboardingDataA = useOffboardingData(true);
+  const changeRequestDataA = useChangeRequestData(true);
+  const workbenchDataA = useWorkbenchData(true);
+  const { sla: queueSlaA } = useQueueSlaSettings();
+  const onbRowsA = useMemo(() => normalizeOnboarding(onboardingDataA.items, queueSlaA), [onboardingDataA.items, queueSlaA]);
+  const pausedOnbRowsA = useMemo(() => normalizePausedOnboarding(pausedOnboardingDataA.items, queueSlaA), [pausedOnboardingDataA.items, queueSlaA]);
+  const offRowsA = useMemo(() => normalizeOffboarding(offboardingDataA.items, queueSlaA), [offboardingDataA.items, queueSlaA]);
+  const amendRowsA = useMemo(() => normalizeAmendments(changeRequestDataA.amendments, queueSlaA), [changeRequestDataA.amendments, queueSlaA]);
+  const redlineRowsA = useMemo(() => normalizeRedlines(changeRequestDataA.redlines, queueSlaA), [changeRequestDataA.redlines, queueSlaA]);
+  const wbRowsA = useMemo(() => normalizeWorkbench(workbenchDataA.tasks, queueSlaA), [workbenchDataA.tasks, queueSlaA]);
+
   const slaCompliance = useMemo(() => {
-    if (resolved.length === 0) return 100;
-    const withinSla = resolved.filter(t => {
-      const limit = SLA_MINS[t.type] || 1440;
+    // Tickets — slaInfo() returns null for resolved/waiting (excludes
+    // them from the calc) and reads task.slaMinsOverride before falling
+    // back to SLA_MINS, so the per-queue Team-tab settings flow through.
+    let pool = 0, breached = 0;
+    for (const t of all) {
+      const s = slaInfo(t);
+      if (!s) continue;
+      pool++;
+      if (s.breach) breached++;
+    }
+    // Resolved tickets still count toward compliance — once resolved the
+    // SLA evaluation is final (in-window or breached at resolution time).
+    for (const t of resolved) {
+      const limitMins = Number.isFinite(t.slaMinsOverride) && t.slaMinsOverride > 0
+        ? t.slaMinsOverride
+        : (SLA_MINS[t.type] || 1440);
       const elapsed = t.minutesSinceLastResponse ?? t.minutesAgo ?? 0;
-      return elapsed <= limit;
-    }).length;
-    return Math.round((withinSla / resolved.length) * 100);
-  }, [resolved]);
+      pool++;
+      if (elapsed > limitMins) breached++;
+    }
+    // Deel sources — slaBreachStatus is the per-row biz-day computation.
+    const deelRows = [...onbRowsA, ...pausedOnbRowsA, ...offRowsA, ...amendRowsA, ...redlineRowsA, ...wbRowsA];
+    for (const r of deelRows) {
+      pool++;
+      if (r.slaBreachStatus === 'SLA_BREACHED') breached++;
+    }
+    if (pool === 0) return 100;
+    return Math.round(((pool - breached) / pool) * 100);
+  }, [all, resolved, onbRowsA, pausedOnbRowsA, offRowsA, amendRowsA, redlineRowsA, wbRowsA]);
 
   // ── Escalation rate KPI (real data) ───────────────────────────────────
   const escalatedTasks = all.filter(t => t.status === 'escalated');
@@ -201,12 +256,17 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
         ? (avgT < 60 ? `${avgT}m` : `${Math.floor(avgT / 60)}h ${avgT % 60}m`)
         : '--';
 
-      // Real SLA compliance
+      // Real SLA compliance — honours per-task slaMinsOverride
+      // (server-stamped from queue_sla_thresholds) before falling back
+      // to type-based SLA_MINS, so the agent-level number agrees with
+      // the per-row pill in the Queue.
       const slaComp = resolvedCount > 0
         ? Math.round((resolvedTasks.filter(t => {
-            const limit = SLA_MINS[t.type] || 1440;
+            const limitMins = Number.isFinite(t.slaMinsOverride) && t.slaMinsOverride > 0
+              ? t.slaMinsOverride
+              : (SLA_MINS[t.type] || 1440);
             const elapsed = t.minutesSinceLastResponse ?? t.minutesAgo ?? 0;
-            return elapsed <= limit;
+            return elapsed <= limitMins;
           }).length / resolvedCount) * 100)
         : 100;
 

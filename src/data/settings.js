@@ -1,8 +1,12 @@
 export const DEFAULT_SETTINGS = {
 
   // ── SLA Configuration ──
+  // Per-queue SLA windows live in `app_settings.queue_sla_thresholds`
+  // (Team-tab editable, biz-day clock). The legacy `sla_thresholds`
+  // per-function map was retired 2026-05-01 — it was never read at
+  // runtime. `sla_enabled` still gates the Queue's SLA column / breach
+  // alerts.
   sla_enabled: true,
-  sla_thresholds: { 'Access Issue': 240, 'Document Request': 240, 'Offboarding': 1440, 'Anomaly Alert': 120, 'Payment Issue': 480, 'Benefits': 1440, 'Leave Request': 720, 'Leave Query': 1440, 'Scheduling': 1440, 'Compensation': 2880, 'Promotion': 1440, 'Recruitment': 1440, 'Record Update': 1440, 'Equipment': 2880, 'Policy Query': 1440, 'Onboarding': 2880, 'Immigration': 1440, 'Expenses': 480, 'Amendment': 1440, 'Compliance': 2880 },
   sla_breach_notify_lead: true,
   sla_breach_notify_admin: true,
   sla_warning_pct: 75,
@@ -89,10 +93,14 @@ export const DEFAULT_SETTINGS = {
   // ── Briefing Dashboard ──
   briefing_show_digest_banner: true,
   briefing_show_health_score: true,
-  briefing_health_sla_weight: 40,
-  briefing_health_resolution_weight: 30,
+  // Health-score weights (sum to 100). 2026-05-01 spec: SLA dominates,
+  // response time + capacity equal-weight, resolution rate the smallest
+  // input — the team rarely "resolves" a Deel queue row in the same sense
+  // as a ticket, so it shouldn't dominate.
+  briefing_health_sla_weight: 50,
+  briefing_health_resolution_weight: 10,
   briefing_health_response_weight: 20,
-  briefing_health_capacity_weight: 10,
+  briefing_health_capacity_weight: 20,
   briefing_show_kpi_cards: true,
   briefing_show_admin_actions: true,
   briefing_show_executive_grid: true,

@@ -84,7 +84,6 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
   const [cat,setCat]=useState(subFilter?catMap[subFilter]||'sla':'sla');
   useEffect(()=>{if(subFilter&&catMap[subFilter])setCat(catMap[subFilter]);},[subFilter]);
   const [saved,setSaved]=useState(false);
-  const [editSla,setEditSla]=useState(null);
   const [newMember,setNewMember]=useState(null);
   const [searchTerm,setSearchTerm]=useState('');
 
@@ -276,32 +275,14 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
   const renderSection=()=>{
     switch(cat){
       case 'sla': return(<div>
-        <SectionHeader icon="bi-clock-history" title="SLA Configuration" desc="Set response time targets per function type. Agents see countdown timers and breach alerts."/>
+        <SectionHeader icon="bi-clock-history" title="SLA Configuration" desc="Toggle SLA tracking and notifications. Per-queue thresholds (Zendesk / Jira / Onboarding / Offboarding / Amendments / Redlines / Workbench) live on the Team tab so leads can tune them directly."/>
         <Toggle label="Enable SLA tracking" desc="Show SLA countdown on tasks and trigger breach alerts" value={s.sla_enabled} onChange={v=>set('sla_enabled',v)}/>
         <Toggle label="Notify lead on SLA breach" desc="Automatically alert the team lead when a task breaches its SLA" value={s.sla_breach_notify_lead} onChange={v=>set('sla_breach_notify_lead',v)}/>
         <Toggle label="Notify admin on SLA breach" desc="Send a notification to the admin when any SLA is breached" value={s.sla_breach_notify_admin} onChange={v=>set('sla_breach_notify_admin',v)}/>
         <NumberInput label="SLA warning threshold" desc="Show warning when this % of SLA time has elapsed" value={s.sla_warning_pct} onChange={v=>set('sla_warning_pct',v)} min={50} max={95} suffix="%"/>
-        <div style={{marginTop:16,marginBottom:8}}>
-          <div style={{fontSize:13,fontWeight:600,color:'#9e9e9e',letterSpacing:'normal',marginBottom:8}}>SLA TARGETS BY FUNCTION</div>
-          <div style={{border:'1px solid #e8e8e8',borderRadius:16,overflow:'hidden'}}>
-            <div style={{display:'flex',padding:'10px 16px',background:'#fafaf9',borderBottom:'1px solid #e8e8e8',fontSize:13,fontWeight:500,color:'#9e9e9e',letterSpacing:'normal'}}>
-              <span style={{flex:1}}>Function</span><span style={{width:90,textAlign:'right'}}>Target</span><span style={{width:60,textAlign:'right'}}>Hours</span>
-            </div>
-            {Object.entries(s.sla_thresholds).map(([fn,mins])=>(
-              <div key={fn} style={{display:'flex',alignItems:'center',padding:'7px 12px',borderBottom:'1px solid #f7f5f2',fontSize:12.5}}>
-                <span style={{flex:1,color:'#616161',fontWeight:500}}>{fn}</span>
-                {editSla===fn?(
-                  <div style={{display:'flex',alignItems:'center',gap:8}}>
-                    <input autoFocus type="number" defaultValue={mins} onBlur={e=>{setNested('sla_thresholds',fn,Number(e.target.value));setEditSla(null);}} onKeyDown={e=>{if(e.key==='Enter'){setNested('sla_thresholds',fn,Number(e.target.value));setEditSla(null);}}} style={{width:70,border:'1px solid var(--g)',borderRadius:5,padding:'3px 6px',fontSize:12,outline:'none',textAlign:'right'}} min={30}/>
-                    <span style={{fontSize:'var(--font-sm)',color:'var(--text-muted)'}}>minutes</span>
-                  </div>
-                ):(
-                  <button onClick={()=>setEditSla(fn)} style={{width:90,textAlign:'right',background:'none',border:'none',color:'#1f74b3',cursor:'pointer',fontWeight:600,fontSize:12}}>{mins} min</button>
-                )}
-                <span style={{width:60,textAlign:'right',color:'#9e9e9e',fontSize:11}}>{(mins/60).toFixed(1)}h</span>
-              </div>
-            ))}
-          </div>
+        <div style={{marginTop:16,marginBottom:8,padding:'12px 14px',borderRadius:12,background:'#fbfafc',border:'1px solid #efeaf5',fontSize:12,color:'#616161',lineHeight:1.5}}>
+          <i className="bi-info-circle" style={{marginRight:6,color:'#7c3aed'}}/>
+          Per-queue SLA windows are configured in <strong>Team → Queue SLA settings</strong> (business-day clock, Sat/Sun excluded). The legacy per-function table here was retired on 2026-05-01 — its values were never read at runtime.
         </div>
       </div>);
 

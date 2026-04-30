@@ -190,6 +190,49 @@ If the change adds a new action, route, or view:
 - Does it need `perms.canView` / `perms.canDo` gating?
 - Does it need `restrictToEmail` owner-only gating (the `OWNER_EMAIL = 'mohamed.tantawy@deel.com'` pattern)?
 
+### 1.9 Queue ↔ SLA cross-tab connections (load-bearing — read every time)
+
+**Anything that touches an SLA window, capacity threshold, or per-row pill semantics MUST update every consumer in this list, otherwise the four surfaces drift and per-row pills disagree with aggregate counts.**
+
+The whole SLA model (as of 2026-05-01) ticks on the **business-day clock** (`src/utils/bizTime.js`) — Saturday and Sunday don't elapse. There is one source of truth per data type:
+
+| Data type | Where the SLA window comes from | Where the elapsed time is computed |
+|---|---|---|
+| Tickets (ZD/Jira) | `task.slaMinsOverride` (server-stamped from `app_settings.queue_sla_thresholds.zendesk\|jira`) → fallback `SLA_MINS[task.type]` | `slaInfo()` in `src/utils/helpers.js` — uses `elapsedBizMinutes(anchor, now)` |
+| Deel sources (Onb / Off / Amend / Redline / Workbench) | `useQueueSlaSettings()` config keyed per queue (incl. `offboarding_termination` / `offboarding_resignation`) → fallback constants in `normalizeSourceRows.js` | `computeSlaWindow()` in `src/utils/normalizeSourceRows.js` — uses `elapsedBizMs(anchor, now)`. Each row carries `slaWindowMs` so consumers can derive proportional bands |
+| Capacity bands (Low/Good/High) | `useCapacitySettings()` → `app_settings.queue_capacity_thresholds` → fallback `{ lowMax: 40, highMin: 100 }` | classified inside BriefingView (`classifyWorkload`) and Team |
+
+**Settings tables (FE editable):**
+- **Team tab → Queue SLA settings card** (`Team.jsx::QueueSlaSettingsCard`) — edits `app_settings.queue_sla_thresholds`. 8 queue rows (incl. `offboarding_termination` + `offboarding_resignation` + `zendesk` paused). Save broadcasts on `ops_hub_queue_sla_sync`.
+- **Team tab → Workload capacity card** (`Team.jsx::CapacitySettingsCard`) — edits `app_settings.queue_capacity_thresholds`. Save broadcasts on `ops_hub_queue_capacity_sync`.
+- **Settings → SLA Configuration** — only the global toggles (`sla_enabled`, breach notifications, warning %). The legacy per-function `sla_thresholds` editor was deleted on 2026-05-01 (unused at runtime; queue-sla settings are the single source of truth).
+
+**SLA pill / count consumers — when you change a window or the at-risk band, AUDIT EACH AND VERIFY:**
+
+1. **`src/components/queue/Queue.jsx` (header SLA pills)** — counts per-source via `rowSlaSeverity(row)` using the proportional band `slaRemaining < slaWindowMs / 4 / 1000`. Default sort is `(SLA tier ASC, createdAt ASC)`; sortable columns + tie-break per PR #326.
+2. **`src/components/queue/SourceTable.jsx` (per-row pills + Paused section)** — splits sorted rows into `activeSorted`/`pausedSorted` via `row.isPaused`. Generic SLA tier helper `slaTier(row)` mirrors the Queue's pill math. Offboarding's SLA column uses the smart `offboardingUrgency(row)` (tier + end-date proximity).
+3. **`src/components/views/BriefingView.jsx` (home health + org breach card)** —
+   - Health Score: SLA Compliance % across **all queues except Jira** (50% default weight); Avg Response Time = ZD-only biz-day (20%); Capacity (20%); Resolution Rate ZD-only (10%).
+   - Capacity bands use `useCapacitySettings()` thresholds.
+   - Org breach ring (`orgBreach` / `orgAtRisk` / `orgSlaComp`) excludes Jira and includes all Deel breaches + proportional at-risk.
+4. **`src/components/views/Team.jsx` (per-agent SLA dot)** — combines ticket breaches via `slaInfo()` with onb/off/wb breaches via `slaBreachStatus`. Amend/Redline have no per-agent assignee so they're excluded.
+5. **`src/components/views/Analytics.jsx` (SLA Compliance KPI + agent stats)** — honours per-row `slaMinsOverride`; total compliance covers tickets + all Deel sources.
+6. **`src/components/home/ApproachingBreach.jsx`, `DailySummary.jsx`** — consume `slaInfo` for tickets only.
+
+**Critical "must update together" edges** (when you change A, also touch B):
+
+| Change | Must also update |
+|---|---|
+| New SLA window for a queue | `app/api/v1/settings/queue-sla/route.js` DEFAULT_SLA + VALID_QUEUES; `src/hooks/useQueueSlaSettings.js` mirror; `src/utils/normalizeSourceRows.js` fallback constant; `Team.jsx` QUEUE_META row |
+| New per-row SLA field | `normalizeSourceRows.js` (every normalizer's return); `Queue.jsx` `rowSlaSeverity`; `SourceTable.jsx` `slaTier`; BriefingView aggregates |
+| New capacity band rule | `Briefing.jsx::classifyWorkload`; `Team.jsx::CapacitySettingsCard` (if user-tunable); home capacity legend |
+| Change biz-day math | `bizTime.js` is the only site — all callers (`slaInfo`, `computeSlaWindow`, BriefingView response-time) inherit |
+| Add a server-side `slaMinsOverride` rule | `app/api/v1/queue/route.js::getSlaOverrides` + the per-source builder (Zendesk vs Jira); FE `slaInfo` automatically picks it up |
+
+**LocalStorage / IDB keys** — every queue cache is user-scoped (`<base>:<email>` suffix). `clearQueueCaches()` in `App.jsx` walks the prefix on logout to wipe both old global keys and new per-user keys.
+
+If you can't trace a change through every row above, the audit is incomplete. Bet on this list staying current — when you ship, update it.
+
 ---
 
 ## Phase 2 — Pre-flight checks
