@@ -787,15 +787,16 @@ export async function runMigrations() {
     throw err;
   }
 
-  // One-shot seed: populate team_member_countries from the parsed
-  // "Countries by Person Role" CSV the first time the table is empty. On
-  // subsequent boots the table has rows (either from a prior seed or a
-  // manual edit) and the seeder no-ops, so a Director's Team-tab edits
-  // are never silently overwritten by a re-seed.
+  // Versioned re-seed: when SEED_VERSION (in country-owners-seed.js) is
+  // bumped, the next boot wipes team_member_countries and re-inserts from
+  // the email-keyed JSON. The version marker lives in app_settings so
+  // multiple pods don't double-write — every boot reads the marker first
+  // and no-ops if the deploy already reseeded. Manual Team-tab edits are
+  // preserved across deploys that don't bump SEED_VERSION.
   try {
     const seedResult = await seedCountryOwnersIfEmpty();
-    if (seedResult?.seeded > 0) {
-      console.log(`[db] Country-ownership seed: inserted ${seedResult.seeded} rows; ${seedResult.missingOwners?.length || 0} CSV names did not match an HRX member`);
+    if (seedResult?.reseeded) {
+      console.log(`[db] Country-ownership re-seeded to v${seedResult.version}: ${seedResult.inserted} rows`);
     }
   } catch (err) {
     // Don't throw — the rest of the app should boot even if the seed fails.

@@ -58,7 +58,13 @@ export async function GET(req) {
       ),
       query(
         `SELECT email, country_code FROM team_member_countries ORDER BY email, country_code`,
-      ),
+      ).catch(err => {
+        // Table missing on a brand-new env (migration hasn't completed)
+        // OR a transient DB error. Either way we serve the export with
+        // empty country counts rather than 500-ing the entire download.
+        console.warn('[team-members/countries/export] countries query failed:', err?.message);
+        return { rows: [] };
+      }),
     ]);
 
     const merged = mergeTeamMembers(overridesRes.rows).filter(m => !m.isDeleted);
