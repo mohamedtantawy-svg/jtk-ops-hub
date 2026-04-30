@@ -407,17 +407,10 @@ export async function listPausedOnboarding() {
 //   Resignation (Client) → AWAITING_TRIAGE, PROCESSING, AWAITING_HRX_ACTION
 //   Resignation (Employee) → AWAITING_TRIAGE, PROCESSING, AWAITING_HRX_ACTION
 //
-// These are the ONLY statuses HRX needs to action; the upstream queue
-// includes ~29k records spanning closed, payment, refund, and other-team
-// states that we don't surface. Filtering is applied both server-side
-// (`status[]=` query param so we don't paginate through the unrelated 25k+
-// items) and client-side (matrix per type, in case the server filter is
-// ignored — graceful degradation).
-const OFFBOARDING_ACTIONABLE_STATUSES = [
-  'AWAITING_TRIAGE',
-  'PROCESSING',
-  'AWAITING_HRX_ACTION',
-];
+// We attempted server-side filtering via `status[]=` but the Deel admin
+// endpoint rejects that param shape with a Joi validation error
+// (`"status" is not allowed`), so the filter MUST run client-side. We
+// scan unfiltered and apply the matrix on each page.
 const OFFBOARDING_TERMINATION_STATUSES = new Set([
   'AWAITING_TRIAGE',
   'PROCESSING',
@@ -441,10 +434,18 @@ const OFFBOARDING_EXCLUDED_STEPS = new Set([
   'OffcycleInvoice',               // "Off-Cycle Invoice"
 ]);
 
-// Pagination cap. With server-side `status[]` filtering active, the
-// actionable subset is small (~few thousand at most). We keep a defensive
-// cap so a runaway loop can't lock the request.
-const OFFBOARDING_MAX_PAGES = 600;
+// Pagination cap — sized to cover the full ~29k upstream record set
+// (29k / 50 = ~590 pages). We keep a defensive ceiling so a runaway loop
+// can't lock the request.
+const OFFBOARDING_MAX_PAGES = 700;
+
+// Stop early once we've seen this many consecutive pages yielding 0 new
+// matches. The default sort is endDate ASC (nulls first) which front-loads
+// AWAITING_TRIAGE records (no endDate); PROCESSING/AWAITING_HRX_ACTION rows
+// are interleaved by endDate. A generous threshold (50) avoids quitting
+// too early during a sparse stretch while still bailing on the long tail
+// of post-actionable / closed records that dominate the back of the list.
+const OFFBOARDING_EMPTY_PAGE_STOP = 50;
 
 function isOffboardingActionable(t) {
   if (t?.isDuplicate === true) return false;
@@ -470,12 +471,15 @@ function isOffboardingActionable(t) {
 /**
  * Fetches all actionable EOR termination cases from the admin API.
  *
- * Strategy: ask the upstream `/admin/eor/terminations_v3` endpoint to scope
- * down server-side via `status[]=AWAITING_TRIAGE&status[]=PROCESSING&status[]=AWAITING_HRX_ACTION`.
- * The cursor preserves filter state across pages, so subsequent calls only
- * need the cursor token. Then dedupe by id and apply the type+status matrix
- * + flow-step exclusions client-side as a safety net (in case the upstream
- * ignores or partially honours the filter).
+ * Strategy: scan `/admin/eor/terminations_v3` unfiltered (the upstream
+ * Joi schema rejects `status[]=`, so server-side filtering isn't an option)
+ * and apply the type+status matrix + flow-step exclusions client-side. The
+ * default sort is endDate ASC (nulls first), so AWAITING_TRIAGE records
+ * (which lack endDate) are front-loaded. Stop early after
+ * OFFBOARDING_EMPTY_PAGE_STOP consecutive empty pages so we don't burn
+ * round-trips on the long tail of closed / post-actionable records, while
+ * still scanning deep enough to capture interleaved PROCESSING and
+ * AWAITING_HRX_ACTION rows.
  *
  * Per-type rules applied via isOffboardingActionable:
  *   Termination          → status in (AWAITING_TRIAGE, PROCESSING)
@@ -488,20 +492,14 @@ export async function listOffboardingCases() {
   let serverTotal = null;
   let page = 0;
   let scanned = 0;
+  let emptyRun = 0;
   let mode = 'admin-scan';
-
-  // Build the initial query string with status[] filters. The cursor
-  // returned by the API encodes the filter state, so subsequent calls only
-  // pass `cursor=...` and the upstream replays our filters.
-  const initialQs = new URLSearchParams();
-  initialQs.set('limit', '50');
-  for (const s of OFFBOARDING_ACTIONABLE_STATUSES) initialQs.append('status[]', s);
 
   if (!DEEL_ADMIN_TOKEN) {
     // No admin JWT: the REST v2 token can't paginate /admin/* endpoints.
     // Fall back to single default page and apply the matrix client-side.
     mode = 'rest-v2-fallback';
-    const res = await deelFetch(`/admin/eor/terminations_v3?${initialQs.toString()}`);
+    const res = await deelFetch('/admin/eor/terminations_v3?limit=50');
     serverTotal = res?.count?.total ?? null;
     for (const t of res?.terminations || []) {
       scanned++;
@@ -512,25 +510,30 @@ export async function listOffboardingCases() {
     }
     console.log(`[offboarding] mode=${mode}, scanned ${scanned}, kept ${kept.length} (server reports ${serverTotal} total)`);
   } else {
-    // Admin JWT present: scan pages with the status[] filter active. No
-    // early-stop — scan to natural cursor exhaustion or the defensive page
-    // cap, whichever comes first.
+    // Admin JWT present: scan pages unfiltered, apply matrix client-side.
     let cursor = null;
     for (; page < OFFBOARDING_MAX_PAGES; page++) {
-      const qs = cursor ? `cursor=${encodeURIComponent(cursor)}` : initialQs.toString();
+      const qs = cursor ? `cursor=${encodeURIComponent(cursor)}` : 'limit=50';
       const res = await deelFetch(`/admin/eor/terminations_v3?${qs}`);
       if (serverTotal === null) serverTotal = res?.count?.total ?? null;
 
+      let keptThisPage = 0;
       for (const t of res?.terminations || []) {
         scanned++;
         if (seen.has(t.id)) continue;
         if (!isOffboardingActionable(t)) continue;
         seen.add(t.id);
         kept.push(t);
+        keptThisPage++;
       }
 
+      if (keptThisPage === 0) emptyRun++; else emptyRun = 0;
       cursor = res?.cursor || null;
       if (!cursor) break;
+      if (emptyRun >= OFFBOARDING_EMPTY_PAGE_STOP) {
+        console.log(`[offboarding] early-stop: ${OFFBOARDING_EMPTY_PAGE_STOP} empty pages in a row at page ${page + 1}`);
+        break;
+      }
     }
     if (page >= OFFBOARDING_MAX_PAGES) {
       console.warn(`[offboarding] hit OFFBOARDING_MAX_PAGES (${OFFBOARDING_MAX_PAGES}) — may be missing records`);
