@@ -3,7 +3,6 @@ import { TOOLS, STATUSES, FUNCTIONS, FLAGS } from '../../data/constants';
 import { MEMBERS, TEAM_MEMBERS } from '../../data/members';
 import { useTeamMembers } from '../../hooks/useTeamMembers';
 import { matchesAudience } from '../../data/comms';
-import { INITIAL_PROJECTS } from '../../data/projects';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import { CALENDAR_EVENTS } from '../../data/calendar';
 import { slaInfo, rel, getVisibleEmails } from '../../utils/helpers';
@@ -48,7 +47,7 @@ const SOURCE_COLOURS = {
   amendments: '#ed8d00', redlines: '#7c3aed',
 };
 
-const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSubFilter,requests=[],managerOnCall=null,onChangeManagerOnCall})=>{
+const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSubFilter,requests=[],projects=[],managerOnCall=null,onChangeManagerOnCall})=>{
   // Live roster for the Manager-on-call picker so admins see managers added
   // via the Team tab (not just the baked-in baseline). Filter out
   // soft-deleted rows so we don't offer to impersonate a disabled account.
@@ -265,8 +264,13 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   //                 (isAllScope) sees all active projects.
   // Completed/cancelled are excluded — Pilar asked for "only projects assigned
   // to them" which implies active work, not archived records.
+  // Reads from the LIVE `projects` state passed from App.jsx (sourced from
+  // /api/v1/projects), not from a hardcoded seed. Previously this counted
+  // INITIAL_PROJECTS directly which leaked five demo rows into the tile and
+  // produced "1 assigned" on a fresh tenant whose API returned zero — the
+  // tile then deep-linked to a row that didn't exist in the projects view.
   const projectsAssignedCount = useMemo(() => {
-    const active = INITIAL_PROJECTS.filter(p => p.status !== 'completed' && p.status !== 'cancelled');
+    const active = (Array.isArray(projects) ? projects : []).filter(p => p.status !== 'completed' && p.status !== 'cancelled');
     if (isAllScope) return active.length;
     const scopeIdSet = new Set(scopeIds);
     return active.filter(p => {
@@ -276,7 +280,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
       if (Array.isArray(p.assigneeIds) && p.assigneeIds.some(id => scopeIdSet.has(id))) return true;
       return false;
     }).length;
-  }, [isAllScope, scopeIds, user.team]);
+  }, [projects, isAllScope, scopeIds, user.team]);
 
   // ── Escalations assigned to the viewer ────────────────────────────────
   // Previous behaviour counted every pending escalation in scope — that over-
