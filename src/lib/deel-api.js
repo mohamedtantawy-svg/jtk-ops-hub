@@ -163,10 +163,89 @@ export async function getOrganization() {
 
 // ── Onboarding (Admin API) ───────────────────────────────────────────────────
 
+// Map a raw upstream onboarding row to the shape the rest of the app expects.
+// Used by both the actionable-queue path and every per-status / per-country
+// supplemental scan so every onboarding source emits the same fields.
+function _mapOnboardingRow(p, flowStepOverride = null) {
+  return {
+    id:                p.onboardingId || p.oid || '',
+    oid:               p.oid || '',                              // contract OID
+    name:              p.employeeName || '',
+    country:           p.employmentCountry || '',
+    nationality:       p.employeeNationality || '',
+    startDate:         p.desiredStartDate || '',
+    createdAt:         p.createdAt || '',
+    taskCreatedAt:     p.taskCreatedAt || '',
+    flowStep:          flowStepOverride || p.onboardingFlowStep || '',
+    tag:               p.tag || '',
+    avatarUrl:         p.avatarUrl || '',
+    assignee:          p.assignee?.name || '',
+    assigneeEmail:     p.assignee?.email || '',
+    assigneeId:        p.assigneeId || null,
+    isHourly:          p.timeTracking?.isHourly || false,
+    clientName:        p.organizationName || p.clientLegalEntityName || p.clientName || p.client?.name || '',
+  };
+}
+
+// Per-country fan-out for an onboarding sub-status. The Deel admin API returns
+// only ~50 rows per call without a country filter; the country-summary endpoint
+// gives us the per-country totals so we can scope the follow-ups and pull
+// every actionable row regardless of country. Mirrors the Paused onboarding
+// pattern below.
+async function _scanOnboardingByStatus(statusName, label) {
+  let countrySummary;
+  try {
+    countrySummary = await deelFetch(
+      `/admin/eor/employee-manager/countries/list/${encodeURIComponent(statusName)}`,
+    );
+  } catch (err) {
+    console.warn(`[onboarding/${label}] countries summary failed:`, err.message);
+    return [];
+  }
+
+  const countries = (Array.isArray(countrySummary) ? countrySummary : [])
+    .filter(c => c && c.total > 0 && c.country)
+    .map(c => c.country);
+
+  if (countries.length === 0) return [];
+
+  const BATCH_SIZE = 5;
+  const collected = [];
+  for (let i = 0; i < countries.length; i += BATCH_SIZE) {
+    const batch = countries.slice(i, i + BATCH_SIZE);
+    const results = await Promise.all(batch.map(async (ctry) => {
+      try {
+        const res = await deelFetch(
+          `/admin/eor/employee-manager/list/${encodeURIComponent(statusName)}?countries%5B%5D=${ctry}`,
+        );
+        return res?.result || [];
+      } catch (err) {
+        console.warn(`[onboarding/${label}] ${ctry} failed:`, err.message);
+        return [];
+      }
+    }));
+    for (const items of results) collected.push(...items);
+  }
+  return collected;
+}
+
+// Onboarding sub-statuses we ALSO need to scan explicitly. These are
+// actionable for HRX but historically did NOT all surface inside the
+// `Onboarding.ActionableQueue` parent bucket — the team was missing real
+// work. We scan them per-country and merge with the actionable-queue
+// payload below; dedup happens on `onboardingId || oid`.
+const SUPPLEMENTAL_ONBOARDING_STATUSES = [
+  'Onboarding.EA.EAAdditionalDetails.AwaitingReview',
+  'Onboarding.EA.EASigning.AwaitingToSendEA',
+  'Onboarding.PayrollComplianceDetails.AwaitingReview',
+  'Onboarding.ComplianceDocs.AwaitingReview',
+];
+
 /**
- * Fetches onboarding actionable queue from the admin API.
- * Uses /admin/eor/employee-manager/list/Onboarding.ActionableQueue
- * — the same endpoint as admin.deel.network's onboarding dashboard.
+ * Fetches onboarding actionable queue from the admin API and supplements it
+ * with per-status scans for the sub-statuses that the actionable-queue parent
+ * bucket does not consistently surface (EA additional details review,
+ * EA awaiting-to-send, payroll compliance review, compliance docs review).
  *
  * Response shape: { statuses: [...], result: [...tasks...], cursor: "..." }
  * Data is at res.result. Each task has: oid, employeeName, employmentCountry,
@@ -178,13 +257,23 @@ export async function getOrganization() {
 export async function listOnboardingPeople(params = {}) {
   const offset = params.offset || '0';
   const qs = `actionableQueueFilters%5Boffset%5D=${offset}`;
-  const res = await deelFetch(`/admin/eor/employee-manager/list/Onboarding.ActionableQueue?${qs}`);
 
-  const rawItems = res?.result || [];
+  // Fan out the actionable-queue scan and the supplemental-status scans in
+  // parallel so total wall time is bounded by the slowest of the two paths,
+  // not their sum. Each branch self-handles failure; a flaky supplemental
+  // status doesn't block the primary feed.
+  const [actionableRes, supplementalRaw] = await Promise.all([
+    deelFetch(`/admin/eor/employee-manager/list/Onboarding.ActionableQueue?${qs}`),
+    Promise.all(SUPPLEMENTAL_ONBOARDING_STATUSES.map(name =>
+      _scanOnboardingByStatus(name, name.split('.').slice(-2).join('.')),
+    )),
+  ]);
 
-  // Paginate through all pages using offset — cap at 300 items / 6 iterations
+  const rawItems = actionableRes?.result || [];
+
+  // Paginate through actionable-queue pages using offset — cap at 300 items / 6 iterations.
   let allItems = [...rawItems];
-  let currentCursor = res?.cursor;
+  let currentCursor = actionableRes?.cursor;
   let iterations = 0;
   while (currentCursor && iterations < 6 && allItems.length < 300) {
     iterations++;
@@ -196,34 +285,43 @@ export async function listOnboardingPeople(params = {}) {
   }
 
   // Get the actionable queue total from the statuses tree
-  const onboardingStatus = res?.statuses?.find(s => s.name === 'Onboarding');
+  const onboardingStatus = actionableRes?.statuses?.find(s => s.name === 'Onboarding');
   const actionableTotal = onboardingStatus?.actionableTasksTotal || allItems.length;
 
-  const mapped = allItems.map(p => ({
-    id:                p.onboardingId || p.oid || '',
-    oid:               p.oid || '',                              // contract OID
-    name:              p.employeeName || '',
-    country:           p.employmentCountry || '',
-    nationality:       p.employeeNationality || '',
-    startDate:         p.desiredStartDate || '',
-    createdAt:         p.createdAt || '',
-    taskCreatedAt:     p.taskCreatedAt || '',
-    flowStep:          p.onboardingFlowStep || '',               // e.g. "Onboarding.ComplianceDocs.AwaitingReview"
-    tag:               p.tag || '',                              // e.g. "VIP EOR" — display tag, NOT the Deeler tag
-    avatarUrl:         p.avatarUrl || '',
-    assignee:          p.assignee?.name || '',
-    assigneeEmail:     p.assignee?.email || '',
-    assigneeId:        p.assigneeId || null,
-    isHourly:          p.timeTracking?.isHourly || false,
-    clientName:        p.organizationName || p.clientLegalEntityName || p.clientName || p.client?.name || '',
-  }));
+  // Map + dedup. Keep the actionable-queue version when both return the same
+  // row, since its `onboardingFlowStep` is the canonical step the upstream
+  // admin UI surfaces. Supplemental rows fill in only what was missing.
+  const seen = new Set();
+  const merged = [];
+  for (const p of allItems) {
+    const key = p.onboardingId || p.oid;
+    if (!key) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(_mapOnboardingRow(p));
+  }
+  for (let i = 0; i < SUPPLEMENTAL_ONBOARDING_STATUSES.length; i++) {
+    const statusName = SUPPLEMENTAL_ONBOARDING_STATUSES[i];
+    const rows = supplementalRaw[i] || [];
+    for (const p of rows) {
+      const key = p.onboardingId || p.oid;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      // Stamp the flowStep when upstream omits it so the UI's per-status
+      // labelling (deriveAction in route.js, function display in
+      // normalizeSourceRows.js) still routes the row to the right copy.
+      merged.push(_mapOnboardingRow(p, p.onboardingFlowStep || statusName));
+    }
+  }
 
   // Drop Deel-internal employees ("Deeler" tag on the contract). The upstream
   // onboarding row does NOT include contract.tags — we have to fetch the
   // contract by OID. Cached per OID for an hour and shared across feeds.
-  const items = await dropDeelersByContractOid(mapped, (it) => it.oid, 'onboarding');
+  const items = await dropDeelersByContractOid(merged, (it) => it.oid, 'onboarding');
 
-  return { items, total: actionableTotal, cursor: currentCursor || null };
+  // Total now reflects the merged count, since the actionable-queue header
+  // total only knows about its own bucket.
+  return { items, total: Math.max(actionableTotal, items.length), cursor: currentCursor || null };
 }
 
 // ── Paused Onboarding (Admin API) ─────────────────────────────────────────────

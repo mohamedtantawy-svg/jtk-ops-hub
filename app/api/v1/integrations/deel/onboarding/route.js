@@ -127,6 +127,11 @@ function deriveAction(flowStep) {
   if (sectionLower === 'payroll' || sectionLower === 'payrollsetup') {
     return { label: 'Payroll Setup', severity: 'info', color: '#0369a1', step: flowStep };
   }
+  if (sectionLower === 'payrollcompliancedetails') {
+    if (s.includes('awaitingreview'))
+      return { label: 'Payroll Compliance Review', severity: 'warning', color: '#ed8d00', step: flowStep };
+    return { label: 'Payroll Compliance', severity: 'warning', color: '#ed8d00', step: flowStep };
+  }
 
   // ── Generic awaiting states ──
   if (s.includes('awaitingreview'))
