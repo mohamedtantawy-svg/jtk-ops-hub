@@ -50,6 +50,7 @@ function normaliseOverrideRow(row) {
     // Additive per-user permissions (Director can grant from the Team tab).
     isAnnouncementsAdmin: row.is_announcements_admin === true,
     isAccessAdmin: row.is_access_admin === true,
+    isHrHubAdmin: row.is_hr_hub_admin === true,
   };
 }
 
@@ -60,6 +61,7 @@ function applyOverride(base, override) {
     isNew: false, isDeleted: false, onLeave: false, lastLoginAt: null, loginCount: 0,
     isAnnouncementsAdmin: false,
     isAccessAdmin: false,
+    isHrHubAdmin: false,
   };
   const merged = { ...base };
   // Only overwrite when the override has a non-null value for the field.
@@ -77,6 +79,7 @@ function applyOverride(base, override) {
   merged.loginCount = override.loginCount;
   merged.isAnnouncementsAdmin = override.isAnnouncementsAdmin === true;
   merged.isAccessAdmin = override.isAccessAdmin === true;
+  merged.isHrHubAdmin = override.isHrHubAdmin === true;
   return merged;
 }
 

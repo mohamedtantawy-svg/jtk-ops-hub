@@ -889,6 +889,17 @@ CREATE TABLE IF NOT EXISTS hr_hub_settings_history (
   created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_hr_hub_settings_history ON hr_hub_settings_history(flow, key, created_at DESC);
+
+-- ── HR Hub: traceability columns for the Stage 5 Feedback merge.
+--   external_id stores the source row's id (e.g. feedback_requests.id)
+--   so a future migration can copy old Feedback rows into hr_hub_request
+--   idempotently via ON CONFLICT (flow, external_id) DO NOTHING.
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS external_id VARCHAR(100);
+ALTER TABLE hr_hub_comment ADD COLUMN IF NOT EXISTS external_id VARCHAR(100);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_hr_hub_request_flow_external
+  ON hr_hub_request(flow, external_id) WHERE external_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_hr_hub_comment_external
+  ON hr_hub_comment(external_id) WHERE external_id IS NOT NULL;
 `;
 
 export async function runMigrations() {

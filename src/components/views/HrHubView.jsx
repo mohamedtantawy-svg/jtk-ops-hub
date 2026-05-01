@@ -11,12 +11,14 @@
 // `feedback` flow in the same chassis. Until then the existing /feedback
 // tab continues to read from feedback_requests untouched.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   listHrHubRequests,
   getHrHubRequest,
 } from '../../services/hrHubApi';
 import HrHubDetailPanel from '../hr-hub/HrHubDetailPanel';
+import HrHubSettingsPanel from '../hr-hub/HrHubSettingsPanel';
+import { PermissionsContext } from '../../App';
 
 const FLOW_TABS = [
   { id: 'all',              label: 'All flows',        flow: null },
@@ -67,6 +69,8 @@ function isManagerRole(user) {
 }
 
 export default function HrHubView({ user }) {
+  const perms = useContext(PermissionsContext);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   // ── URL deep-link support ─────────────────────────────────────────────────
   const initialReqId = (() => {
     try {
@@ -205,8 +209,22 @@ export default function HrHubView({ user }) {
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
           {/* Scope toggle: 2 buttons (mine/all) for everyone, 3 for managers */}
           <ScopeToggle scope={scope} setScope={setScope} isManager={isManager} />
+          {perms?.canManageHrHub && (
+            <button
+              onClick={() => setSettingsOpen(true)}
+              aria-label="HR Hub settings"
+              title="HR Hub Settings"
+              style={{
+                padding: '8px 10px', borderRadius: 999,
+                border: '1px solid #e8e8e8', background: 'white',
+                cursor: 'pointer', color: '#1b1b1b', fontSize: 13,
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+              }}
+            ><i className="bi bi-gear" /> Settings</button>
+          )}
         </div>
       </div>
+      {settingsOpen && <HrHubSettingsPanel onClose={() => setSettingsOpen(false)} />}
 
       {/* Flow tabs */}
       <div style={{
