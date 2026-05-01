@@ -48,6 +48,14 @@ export function useWorkbenchData(enabled = true, userEmail = null) {
         const res = await fetchDeelWorkbench({ limit: 50, bustCache: force });
         const fetched = res?.items || [];
         const now = Date.now();
+        // Server returns { _warming: true } on cold-cache scan timeout. That's
+        // an expected, transient state — not an error. Don't blow away cached
+        // items, don't surface as a failure, just keep the spinner ticking
+        // until the next poll picks up real data.
+        if (res?._warming) {
+          lastFetchRef.current = now;
+          return tasksRef.current;
+        }
         if (fetched.length > 0 || tasksRef.current.length === 0) {
           setTasks(fetched);
           idbSet(cacheKeyFor(userEmail), { items: fetched, ts: now }).catch(() => {});

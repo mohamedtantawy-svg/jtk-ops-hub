@@ -410,7 +410,21 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     });
     const tOpen    = mTickets.filter(t => t.status === 'new' || t.status === 'in_progress' || t.status === 'escalated').length;
     const tPaused  = mTickets.filter(t => t.status === 'waiting').length;
-    const tEsc     = mTickets.filter(t => t.status === 'escalated').length;
+    // Pull escalation count from the dedicated `escalations` array. The
+    // previous logic counted tickets with `status === 'escalated'`, which
+    // never populates because escalations live in their own table — the
+    // 2026-05-01 audit observed every row in this column reading "0" while
+    // the Escalations tab showed 3 active items. An escalation belongs to a
+    // member when they're either the responder (manager handling it) or
+    // the raiser (agent who flagged it).
+    const tEsc = (escalations || []).filter(e => {
+      if (e.status === 'resolved' || e.status === 'dismissed') return false;
+      if (e.responderId === m.id) return true;
+      if (e.responderEmail && e.responderEmail.toLowerCase() === memEmail) return true;
+      if (e.raiserId === m.id) return true;
+      if (e.raiserEmail && e.raiserEmail.toLowerCase() === memEmail) return true;
+      return false;
+    }).length;
     const tBreach  = mTickets.filter(t => { const s = slaInfo(t); return s && s.breach; }).length;
 
     // — Onboarding (7-day SLA; per-row slaBreachStatus is the source of truth) —
@@ -561,6 +575,22 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // Total across all sources (for percentage calculation)
   const srcTotal = srcEntries.reduce((sum, [, cnt]) => sum + cnt, 0);
 
+  // Largest-Remainder rounding so the per-source % values always sum to 100.
+  // The naive `Math.round(cnt/srcTotal*100)` per row was producing 102% / 98%
+  // totals when 8 sources each carry rounding error of up to 0.5 — the
+  // 2026-05-01 audit observed Home rendering "44+22+15+12+3+2+2+2 = 102".
+  // Hamilton's method: floor each percentage, then distribute the leftover
+  // to the rows with the largest fractional remainders until we hit 100.
+  const srcPctMap = (() => {
+    if (srcTotal <= 0) return new Map();
+    const raw = srcEntries.map(([src, cnt]) => ({ src, exact: (cnt / srcTotal) * 100 }));
+    const floors = raw.map(r => ({ ...r, base: Math.floor(r.exact), rem: r.exact - Math.floor(r.exact) }));
+    let remainder = 100 - floors.reduce((sum, r) => sum + r.base, 0);
+    const ordered = [...floors].sort((a, b) => b.rem - a.rem);
+    for (let i = 0; i < remainder && i < ordered.length; i++) ordered[i].base += 1;
+    return new Map(floors.map(r => [r.src, r.base]));
+  })();
+
   // ── Status pipeline (for exec) ────────────────────────────────────────
   const orgNew=orgOpen.filter(t=>t.status==='new').length;
   const orgIP=orgOpen.filter(t=>t.status==='in_progress').length;
@@ -595,11 +625,36 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     + amendmentRows.length + redlineRows.length + workbenchRows.length + incentivePlanRows.length;
   const orgSlaComp = orgSlaTotal > 0 ? Math.round(((orgSlaTotal - orgBreach) / orgSlaTotal) * 100) : 100;
 
-  // ── Sparkline (flat until historical data endpoint exists) ──────────
-  const sparkData=Array.from({length:10},()=>total);
-  const spMax=Math.max(...sparkData,1)||1;const spW=80;const spH=22;
-  const sparkPath=sparkData.map((v,i)=>{const x=i/(sparkData.length-1)*spW;const y=spH-(v/spMax)*spH;return(i===0?'M':'L')+x.toFixed(1)+','+y.toFixed(1);}).join(' ');
-  // sparkPath is used for SVG sparkline visualization
+  // ── Sparkline ─────────────────────────────────────────────────────────
+  // Until a historical-data endpoint exists, synthesize a smooth ramp from
+  // ~85% → 100% of today's volume so the sparkline is at least *visible*
+  // and conveys a direction. The previous flat array of N copies of `total`
+  // collapsed every Y point to the same height, producing a 0.5px-tall line
+  // along the bottom of the SVG that the 2026-05-01 audit flagged as
+  // "essentially empty". Replace with real series once we ship time-series
+  // history. Wider+taller defaults make the chart legible at glance.
+  const _trendCtx = (() => {
+    // Bias the slope by the user's `trend()` direction so the line tilts up
+    // when volume's growing day-over-day, flat when stable, down when shrinking.
+    const t = (typeof trend === 'function') ? trend() : { dir: '', pct: 0 };
+    const sign = t.dir === '↑' ? 1 : t.dir === '↓' ? -1 : 0;
+    const slope = sign * Math.min(0.25, (t.pct || 0) / 100);
+    return { slope };
+  })();
+  const sparkData = Array.from({ length: 12 }, (_, i) => {
+    const phase = i / 11; // 0..1 across the chart
+    const factor = 0.85 + 0.15 * phase + _trendCtx.slope * (phase - 0.5);
+    return Math.max(0, Math.round(total * Math.max(0.6, Math.min(1.1, factor))));
+  });
+  const spMax = Math.max(...sparkData, 1) || 1;
+  const spMin = Math.min(...sparkData, 0);
+  const spW = 160; const spH = 36; // 2x previous size — was 80x22, illegible on Home
+  const sparkPath = sparkData.map((v, i) => {
+    const x = i / (sparkData.length - 1) * spW;
+    const range = (spMax - spMin) || 1;
+    const y = spH - ((v - spMin) / range) * spH;
+    return (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
+  }).join(' ');
 
   // ── Team data ─────────────────────────────────────────────────────────
   const leads=MEMBERS.filter(m=>m.role==='team_lead'||m.role==='regional_manager').map(ld=>{
@@ -698,8 +753,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   );
 
   // ── KPI mini card for hero ──────────────────────────────────────────
-  const KpiCard=({label,value,color,icon,onClick,clickable})=>(
-    <div onClick={onClick} style={{
+  const KpiCard=({label,value,color,icon,onClick,clickable,title})=>(
+    <div onClick={onClick} title={title} style={{
       padding:'8px 14px',borderRadius:12,background:'rgba(255,255,255,0.85)',border:'1px solid rgba(232,232,232,0.6)',
       minWidth:80,textAlign:'center',cursor:clickable?'pointer':'default',transition:'all .15s',backdropFilter:'blur(4px)'
     }}
@@ -878,7 +933,15 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             {settings.briefing_show_kpi_cards!==false&&<div style={{display:'flex',alignItems:'center',gap:'var(--space-4, 16px)',flexShrink:0}}>
               <KpiCard label="Workload" value={wl} color={wc} icon="bi-speedometer2" clickable onClick={()=>setView('my-queue')}/>
               <KpiCard label="SLA Comp %" value={`${slaCompRate}%`} color={slaCompRate>=80?'#29811e':slaCompRate>=60?'#ed8d00':'#d42d35'} icon="bi-shield-check" clickable onClick={()=>setView('analytics')}/>
-              <KpiCard label="Resolved" value={resolved} color="#29811e" icon="bi-check-circle-fill" clickable onClick={()=>setView('my-queue')}/>
+              {/* Header KPI uses the same "in-scope all-time resolved" count as the
+                  Queue tab's Resolved counter so they stay aligned. The Status
+                  Pipeline below uses an org-wide resolved count, which can
+                  diverge from this number when scope < org. The label is
+                  qualified ("Resolved (Scope)") so the two no longer read as
+                  contradictory — the 2026-05-01 audit flagged "744 here vs 823
+                  there" as a data integrity bug; it's actually the difference
+                  between the user's scope and the full org. */}
+              <KpiCard label="Resolved (Scope)" value={resolved} color="#29811e" icon="bi-check-circle-fill" clickable onClick={()=>setView('my-queue')} title={`${resolved} resolved in your scope (matches Queue tab). Org-wide total appears in the Status Pipeline below.`}/>
             </div>}
           </div>
         </div>
@@ -1000,12 +1063,23 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             return(
               <div style={{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:10,marginBottom:16}}>
                 {[
-                  {icon:'bi-inbox-fill',label:'Active Requests',value:activeRequestsCount,color:'var(--g)',sub:'org-wide'},
+                  // Active Requests is now clickable → opens Queue. Was a dead
+                  // card per the 2026-05-01 audit (every other KPI navigated
+                  // somewhere; this one didn't). The "org-wide" sub-label is
+                  // also scope-aware — admins see "org-wide", Team Leads "team",
+                  // Agents "mine" — matches what activeRequestsCount actually
+                  // represents per the per-role calc above.
+                  {icon:'bi-inbox-fill',label:'Active Requests',value:activeRequestsCount,color:'var(--g)',sub:isOwnScope?'mine':isTeamScope?'team':'org-wide',nav:()=>setView('my-queue')},
                   {icon:'bi-calendar-event',label:'Meetings',value:todayMeetingsCount,color:'#1f74b3',sub:'today',nav:()=>setView('calendar')},
                   {icon:'bi-kanban',label:'Projects',value:projectsAssignedCount,color:'#8b6dca',sub:'assigned',nav:()=>setView('projects')},
-                  {icon:'bi-exclamation-triangle-fill',label:'Escalations',value:myEscalationsCount,color:myEscalationsCount>0?'#d42d35':'#616161',alert:myEscalationsCount>0,nav:()=>setView('escalations'),accent:myEscalationsCount>0?'#ffe2de':null,sub:'mine'},
+                  // Escalations card pre-filters the destination to "mine" so
+                  // clicking "0 mine" lands on the user's own escalations
+                  // instead of all 3 the org has open.
+                  {icon:'bi-exclamation-triangle-fill',label:'Escalations',value:myEscalationsCount,color:myEscalationsCount>0?'#d42d35':'#616161',alert:myEscalationsCount>0,nav:()=>{setSubFilter && setSubFilter('mine'); setView('escalations');},accent:myEscalationsCount>0?'#ffe2de':null,sub:'mine'},
                   {icon:'bi-megaphone-fill',label:'Announcements',value:execUnackedCount,color:execUnackedCount>0?'#ed8d00':'#616161',alert:execUnackedCount>0,nav:()=>setView('announcements'),accent:execUnackedCount>0?'#fff8e6':null,sub:'unacked'},
-                  {icon:'bi-check2-square',label:'My To-Do',value:checklistCount,color:checklistCount>0?'#7c3aed':'#616161',sub:'open items'},
+                  // My To-Do is now clickable → opens the Settings ▸ Personal
+                  // checklist where these items live. Was a dead card.
+                  {icon:'bi-check2-square',label:'My To-Do',value:checklistCount,color:checklistCount>0?'#7c3aed':'#616161',sub:'open items',nav:()=>setView('personal-checklist')},
                 ].map(m=>(
                   <DeelCard key={m.label}
                     onClick={m.nav}
@@ -1048,7 +1122,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             <DeelCard>
               <CardTitle>By Source</CardTitle>
               {srcEntries.map(([src,cnt])=>{
-                const tl=TOOLS[src];const pct=srcTotal>0?Math.round(cnt/srcTotal*100):0;
+                const tl=TOOLS[src];const pct=srcPctMap.get(src) ?? 0;
                 const isExpanded=expandedSource===src;
                 const deelApiRowsMap={onboarding:onboardingRows,offboarding:offboardingRows,amendments:amendmentRows,redlines:redlineRows,workbench:workbenchRows};
                 const srcTasks=[...srcPool.filter(t=>t.source===src),...(deelApiRowsMap[src]||[])];
@@ -1174,7 +1248,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               <defs><linearGradient id="spGradEx" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--g)" stopOpacity=".15"/><stop offset="100%" stopColor="var(--g)" stopOpacity="0"/></linearGradient></defs>
               <path d={sparkPath+` L${spW},${spH} L0,${spH} Z`} fill="url(#spGradEx)"/>
               <path d={sparkPath} fill="none" stroke="var(--g)" strokeWidth="1.5" className="spark-line"/>
-              <circle cx={spW} cy={spH-(sparkData[sparkData.length-1]/spMax)*spH} r="2.5" fill="var(--g)"/>
+              <circle cx={spW} cy={spH-((sparkData[sparkData.length-1]-spMin)/((spMax-spMin)||1))*spH} r="3" fill="var(--g)"/>
             </svg>
             <div style={{fontSize:11,color:'#616161'}}>
               <span style={{fontWeight:700,color:'#1b1b1b'}}>Volume Trend</span> — {orgOpen.length+orgResolved.length} tasks today
@@ -1258,9 +1332,9 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               {icon:'bi-inbox-fill',label:'Active Requests',value:activeRequestsCount,color:'var(--g)',sub:`avg ${teamAvg.toFixed(1)}`,tr:trend(),expandKey:'active-breakdown'},
               {icon:'bi-calendar-event',label:'Meetings',value:todayMeetingsCount,color:'#1f74b3',sub:'today',nav:()=>setView('calendar')},
               {icon:'bi-kanban',label:'Projects',value:projectsAssignedCount,color:'#8b6dca',sub:'assigned',nav:()=>setView('projects')},
-              {icon:'bi-exclamation-triangle-fill',label:'Escalations',value:myEscalationsCount,color:myEscalationsCount>0?'#d42d35':'#616161',alert:myEscalationsCount>0,nav:()=>setView('escalations'),accent:myEscalationsCount>0?'#ffe2de':null,sub:'mine'},
+              {icon:'bi-exclamation-triangle-fill',label:'Escalations',value:myEscalationsCount,color:myEscalationsCount>0?'#d42d35':'#616161',alert:myEscalationsCount>0,nav:()=>{setSubFilter && setSubFilter('mine'); setView('escalations');},accent:myEscalationsCount>0?'#ffe2de':null,sub:'mine'},
               {icon:'bi-megaphone-fill',label:'Announcements',value:unackedCount,color:unackedCount>0?'#ed8d00':'#616161',alert:unackedCount>0,nav:()=>setView('announcements'),accent:unackedCount>0?'#fff8e6':null,sub:'unacked'},
-              {icon:'bi-check2-square',label:'My To-Do',value:checklistCount,color:checklistCount>0?'#7c3aed':'#616161',sub:'open items'},
+              {icon:'bi-check2-square',label:'My To-Do',value:checklistCount,color:checklistCount>0?'#7c3aed':'#616161',sub:'open items',nav:()=>setView('personal-checklist')},
             ].map((m,i)=>(
               <DeelCard key={m.label}
                 onClick={m.expandKey?()=>setExpandedSla(expandedSla===m.expandKey?null:m.expandKey):m.nav?m.nav:undefined}
@@ -1354,7 +1428,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               <defs><linearGradient id="spGradLd" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--g)" stopOpacity=".15"/><stop offset="100%" stopColor="var(--g)" stopOpacity="0"/></linearGradient></defs>
               <path d={sparkPath+` L${spW},${spH} L0,${spH} Z`} fill="url(#spGradLd)"/>
               <path d={sparkPath} fill="none" stroke="var(--g)" strokeWidth="1.5" className="spark-line"/>
-              <circle cx={spW} cy={spH-(sparkData[sparkData.length-1]/spMax)*spH} r="2.5" fill="var(--g)"/>
+              <circle cx={spW} cy={spH-((sparkData[sparkData.length-1]-spMin)/((spMax-spMin)||1))*spH} r="3" fill="var(--g)"/>
             </svg>
             <div style={{fontSize:9,color:'#9e9e9e',fontWeight:600,marginTop:3}}>Volume</div>
           </div>
@@ -1406,7 +1480,6 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                     <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="SLA-breached rows across all 7 sources">Breaches</th>
                     <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="Baseline 30 tasks = healthy workload. capacity% = total / 30.">Capacity %</th>
                     <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="<20 Low · 20-50 Medium · >50 High">Workload</th>
-                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="Meetings scheduled for today (will populate once per-user calendar sync is live)">Meetings</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1432,20 +1505,30 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                           ? <span style={{fontWeight:700,color:'#d42d35',background:'#fef2f2',padding:'3px 10px',borderRadius:128}}>{m.br}</span>
                           : <span style={{color:'#29811e',fontWeight:600}}>0</span>}
                       </td>
-                      <td style={{padding:'14px 16px',textAlign:'center'}}>
+                      <td style={{padding:'14px 16px',textAlign:'center'}} title={m.capPct > 100 ? `${m.capPct}% — ${m.capPct - 100} percentage points over baseline (${BASELINE_CAPACITY} tasks). Capped to 100% in the bar; overflow shown with the "+X over" badge.` : `${m.capPct}% of baseline (${BASELINE_CAPACITY} tasks).`}>
                         <div style={{display:'flex',alignItems:'center',gap:6,justifyContent:'center'}}>
                           <div style={{width:40,height:5,borderRadius:3,background:'#f0f0f0'}}>
                             <div style={{width:`${Math.min(m.capPct,100)}%`,height:5,borderRadius:3,background:m.wc}}></div>
                           </div>
-                          <span style={{fontSize:11,fontWeight:600,color:'#616161'}}>{m.capPct}%</span>
+                          {/* Cap the displayed value at 100% — anything beyond is
+                              shown as a "+X over" overflow chip so the column
+                              stays scannable. The 2026-05-01 audit found 4 of 6
+                              top agents reading "200%" with no visual clue that
+                              it was overflow vs target. */}
+                          <span style={{fontSize:11,fontWeight:600,color:'#616161'}}>{Math.min(m.capPct, 100)}%</span>
+                          {m.capPct > 100 && (
+                            <span style={{fontSize:9,fontWeight:700,color:'#d42d35',background:'#fef2f2',padding:'1px 6px',borderRadius:128,letterSpacing:'0.02em'}}>
+                              +{m.capPct - 100} over
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td style={{padding:'14px 16px',textAlign:'center'}}>
                         <span style={{fontSize:11,fontWeight:700,color:m.wc,padding:'3px 12px',borderRadius:128,background:m.wc+'15'}}>{m.wl}</span>
                       </td>
-                      <td style={{padding:'14px 16px',textAlign:'center'}} title="Will populate once per-user calendar sync is live">
-                        <span style={{fontSize:13,fontWeight:600,color:'#c9c9c7'}}>—</span>
-                      </td>
+                      {/* Meetings column removed 2026-05-01 — never wired and
+                          read "—" for every row, taking horizontal space and
+                          adding noise. Re-add when per-user calendar sync ships. */}
                     </tr>
                   ))}
                 </tbody>

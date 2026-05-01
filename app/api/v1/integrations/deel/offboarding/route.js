@@ -56,11 +56,21 @@ export async function GET(req) {
         staleTtl: STALE_TTL,
       });
       if (r.result == null) {
-        // Cold cache + timeout — surface a clean error so the FE shows a
-        // retry button instead of an infinite spinner.
+        // Cold cache + timeout — return an empty-but-successful payload with
+        // a `_warming` flag so the FE renders an empty queue + "warming up,
+        // refreshing soon" hint instead of the previous 504 that triggered
+        // the loud "Sync stalled" indicator and hid the rest of the queue
+        // behind a retry button. The in-flight scan keeps running in the
+        // background; the next poll picks up real data once it completes.
         return NextResponse.json(
-          { error: 'Offboarding scan timed out and no cached data available — please retry', _timeout: true },
-          { status: 504 },
+          {
+            items: [],
+            statusCounts: {},
+            total: 0,
+            _warming: true,
+            _warming_reason: 'cold-cache-scan-in-progress',
+            _warming_message: 'Offboarding data is warming up — auto-refreshes when ready.',
+          },
         );
       }
       if (r.timedOut) {

@@ -56,6 +56,16 @@ export function useOffboardingData(enabled = true, userEmail = null) {
         const res = await fetchDeelOffboarding({ bustCache: force });
         const fetched = res?.items || [];
         const now = Date.now();
+        // Server returns { _warming: true } on cold-cache scan timeout. Don't
+        // treat that as failure — terminations_v3 takes a few minutes to
+        // populate on cold cache. The spinner stays, the next poll lands on
+        // fresh data. Was previously firing the
+        // "[useOffboardingData] Failed: ... timed out and no cached data" warn
+        // every 30s during the warm-up window, which was misleading.
+        if (res?._warming) {
+          lastFetchRef.current = now;
+          return itemsRef.current;
+        }
         if (fetched.length > 0 || itemsRef.current.length === 0) {
           setItems(fetched);
           idbSet(cacheKeyFor(userEmail), { items: fetched, ts: now }).catch(() => {});
