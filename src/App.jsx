@@ -614,6 +614,7 @@ const App=()=>{
   const [notifs,setNotifs]=useState([]);
   const [activity,setActivity]=useState(INITIAL_ACTIVITY);
   const [projects,setProjects]=useState(INITIAL_PROJECTS);
+  const [projectsLoaded,setProjectsLoaded]=useState(false);
   const [projectModal,setProjectModal]=useState(null);
   const [requests,setRequests]=useState(INITIAL_REQUESTS);
   const [requestModal,setRequestModal]=useState(false);
@@ -639,7 +640,17 @@ const App=()=>{
         if(cancelled) return;
         setBackendOnline(true);
         if(escalRes?.items) setEscalations(escalRes.items.map(normalizeEscalation).filter(Boolean));
-        if(projRes?.items) setProjects(projRes.items.map(normalizeProject).filter(Boolean));
+        // Only replace projects when the API response is well-formed AND
+        // contains rows. The 2026-05-01 audit observed the Home Projects
+        // KPI flipping `5 → 0 → 5` on every page load — root cause was a
+        // transient empty {items: []} response stomping over INITIAL_PROJECTS
+        // before the real fetch settled. Holding onto the previous value
+        // until a non-empty payload arrives eliminates the flicker.
+        if (projRes?.items) {
+          const next = projRes.items.map(normalizeProject).filter(Boolean);
+          if (next.length > 0) setProjects(next);
+          setProjectsLoaded(true);
+        }
         if(reqRes?.items) setRequests(reqRes.items.map(normalizeRequest).filter(Boolean));
       }catch(e){
         // Backend unreachable — keep using local data

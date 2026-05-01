@@ -80,6 +80,22 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
     refreshStartedAtRef.current = null;
     setRefreshRunningMs(0);
   }, [isAnyRefreshing]);
+  // Reset the running counter whenever a source successfully syncs — without
+  // this, `isAnyRefreshing` aggregating 8 sources stays true for the whole
+  // window of the slowest one, and `refreshRunningMs` climbs past
+  // STALL_AFTER_MS even when 7/8 sources just succeeded. The 2026-05-01
+  // audit observed the indicator stuck on "Sync stalled (1m 31s)" while the
+  // page counters were still updating in real time — i.e., not actually
+  // stalled. Re-stamp the start time when any source resolves so the
+  // counter tracks the *currently slowest* refresh, not the aggregate.
+  useEffect(() => {
+    if (!isAnyRefreshing) return;
+    if (!lastSyncAt) return;
+    if (refreshStartedAtRef.current && lastSyncAt > refreshStartedAtRef.current) {
+      refreshStartedAtRef.current = Date.now();
+      setRefreshRunningMs(0);
+    }
+  }, [lastSyncAt, isAnyRefreshing]);
   const isStalled = isAnyRefreshing && refreshRunningMs > STALL_AFTER_MS;
 
   let state = 'live';
