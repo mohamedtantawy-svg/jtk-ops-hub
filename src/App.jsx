@@ -91,7 +91,9 @@ import AnnouncementsView from './components/views/AnnouncementsView';
 import ApprovalQueueView from './components/views/ApprovalQueueView';
 import CalendarView from './components/views/CalendarView';
 import KnowledgeHub from './components/views/KnowledgeHub';
-import GMReportingView from './components/views/GMReportingView';
+// GMReportingView retired 2026-05-02 — superseded by HR Hub's
+// hr_reporting flow. The component file + src/data/reports.js have
+// been deleted; the route view hr-reports is no longer mounted.
 import SettingsView from './components/views/SettingsView';
 import ProjectsView from './components/views/ProjectsView';
 import Slack from './components/views/Slack';
@@ -155,6 +157,7 @@ const App=()=>{
             snapshotPerms = {
               isAnnouncementsAdmin: stored.isAnnouncementsAdmin === true,
               isAccessAdmin: stored.isAccessAdmin === true,
+              isHrHubAdmin: stored.isHrHubAdmin === true,
             };
           }
         }
@@ -281,7 +284,7 @@ const App=()=>{
   // Remove this + the `restrictToEmail` props in DeelTopNav when the app ships.
   const OWNER_EMAIL = 'mohamed.tantawy@deel.com';
   const RESTRICTED_VIEWS = React.useMemo(() => new Set([
-    'projects', 'hr-reports',
+    'projects',
     'calendar', 'knowledge-hub', 'analytics',
     'escalations',
   ]), []);
@@ -482,6 +485,7 @@ const App=()=>{
                   id: serverUser.id || staticMember.id,
                   isAnnouncementsAdmin: serverUser.isAnnouncementsAdmin === true,
                   isAccessAdmin: serverUser.isAccessAdmin === true,
+                  isHrHubAdmin: serverUser.isHrHubAdmin === true,
                 }
               : serverUser;
             // Persist the freshest snapshot so the next mount's useState
@@ -630,7 +634,7 @@ const App=()=>{
   const [managerOnCall, setManagerOnCall] = useState(() => {
     try { const m = localStorage.getItem('ops_hub_manager_on_call'); return m ? JSON.parse(m) : { name: 'Omar Khalil', initials: 'OK', avatarUrl: 'https://api.dicebear.com/7.x/initials/svg?seed=Omar%20Khalil&backgroundColor=6b3fa0&textColor=ffffff&fontSize=40' }; } catch(e) { return { name: 'Omar Khalil', initials: 'OK', avatarUrl: 'https://api.dicebear.com/7.x/initials/svg?seed=Omar%20Khalil&backgroundColor=6b3fa0&textColor=ffffff&fontSize=40' }; }
   });
-  const [createReportModal, setCreateReportModal] = useState(false);
+  // createReportModal removed 2026-05-02 with the GMReportingView retirement.
 
   // ── Fetch supplementary data from BE on mount (escalations, projects, requests) ──
   // Tasks are now handled by useQueueSync (live from Zendesk + Jira)
@@ -1153,7 +1157,7 @@ const App=()=>{
     if(!perms)return;
     if(view&&!perms.canView(view)){
       // Find first allowed view
-      const fallback=['briefing','my-queue','calendar','projects','escalations','hr-reports','knowledge-hub','analytics','announcements','slack','team','settings'].find(v=>perms.canView(v));
+      const fallback=['briefing','my-queue','calendar','projects','escalations','knowledge-hub','analytics','announcements','slack','team','hr-hub','settings'].find(v=>perms.canView(v));
       setView(fallback||'briefing');
     }
   },[view,perms]);
@@ -1242,7 +1246,6 @@ const App=()=>{
         onCreateProject={()=>setProjectModal('create')}
         onCreateAnnouncement={()=>{setView('announcements');setAnnounceCompose(true);}}
         onCreateRequest={()=>setRequestModal(true)}
-        onCreateReport={()=>{setView('hr-reports');setCreateReportModal(true);}}
         onCreateFeedback={()=>{setView('feedback');setFeedbackCompose(true);}}
         onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}
         setSelTask={()=>{}} tasks={tasks}
@@ -1259,7 +1262,7 @@ const App=()=>{
           {view==='approval-queue' &&<div className="page-enter"><ApprovalQueueView user={effectiveUser} addToast={addToast}/></div>}
           {view==='calendar'      &&isOwner&&perms?.canView('calendar')!==false     &&<div className="page-enter"><CalendarView user={effectiveUser} addToast={addToast} setView={setView}/></div>}
           {view==='knowledge-hub' &&isOwner&&perms?.canView('knowledge-hub')!==false&&<div className="page-enter"><KnowledgeHub subFilter={subFilter} user={effectiveUser}/></div>}
-          {view==='hr-reports'    &&isOwner&&perms?.canView('hr-reports')!==false   &&<div className="page-enter"><GMReportingView user={effectiveUser} addToast={addToast} createReportModal={createReportModal} setCreateReportModal={setCreateReportModal}/></div>}
+          {/* hr-reports view retired 2026-05-02 — reach the hr_reporting flow via the HR Hub tab. */}
           {view==='settings'      &&perms?.canView('settings')!==false     &&<div className="page-enter"><SettingsView settings={settings} setSettings={setSettings} user={user} addToast={addToast} tasks={tasks} setTasks={setTasks} subFilter={subFilter} accessTypes={accessTypes} setAccessTypes={setAccessTypes} userAccessMap={userAccessMap} setUserAccessMap={setUserAccessMap} perms={perms}/></div>}
           {view==='projects'      &&isOwner&&perms?.canView('projects')!==false     &&<div className="page-enter"><ProjectsView projects={projects} setProjects={setProjects} user={user} onNewProject={()=>setProjectModal('create')} onEditProject={(p)=>setProjectModal(p)}/></div>}
           {view==='slack'         &&perms?.canView('slack')!==false        &&<div className="page-enter"><Slack tasks={tasks.filter(t=>t.source==='slack')} setTasks={setTasks} onEscalMgr={()=>{}} addToast={addToast} user={effectiveUser}/></div>}

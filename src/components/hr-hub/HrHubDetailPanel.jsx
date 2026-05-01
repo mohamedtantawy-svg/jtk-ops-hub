@@ -65,19 +65,24 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
   const log = detail?.log || [];
 
   // Local comments state — seeded from initialComments and grown by the
-  // polling effect. On detail-id change we reset.
+  // polling effect. We seed only when the parent's initialComments array
+  // identity changes (e.g. detail re-fetch from refresh) so we don't
+  // clobber polling-fetched comments on every render.
   const [comments, setComments] = useState(initialComments);
-  useEffect(() => { setComments(initialComments); }, [requestId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setComments(initialComments); }, [initialComments]);
 
-  // Polling for new comments while the panel is open. Uses the most
-  // recent comment's createdAt as the cursor — server returns rows
-  // strictly after that timestamp.
+  // Polling for new comments while the panel is open. The deps must NOT
+  // include `comments` — that would tear down + rebuild the interval on
+  // every poll, leaking timers. Use a ref to read the latest tail
+  // timestamp from inside the tick.
+  const commentsRef = useRef(comments);
+  useEffect(() => { commentsRef.current = comments; }, [comments]);
   useEffect(() => {
     if (!requestId) return;
     let cancelled = false;
     const tick = async () => {
-      const latest = comments.length ? comments[comments.length - 1].createdAt : null;
+      const list = commentsRef.current;
+      const latest = list.length ? list[list.length - 1].createdAt : null;
       try {
         const res = await listHrHubComments(requestId, { since: latest });
         if (cancelled) return;
@@ -92,7 +97,7 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
     };
     const id = setInterval(tick, 5000);
     return () => { cancelled = true; clearInterval(id); };
-  }, [requestId, comments]);
+  }, [requestId]);
 
   const isFollowing = useMemo(() => {
     const e = (user?.email || '').toLowerCase();

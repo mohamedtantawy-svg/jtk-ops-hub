@@ -17,7 +17,10 @@ const PRIMARY_TABS = [
   { id: 'my-queue',      icon: 'bi-inbox',            label: 'Queue' },
   { id: 'projects',      icon: 'bi-kanban',           label: 'Projects',      restrictToEmail: OWNER_EMAIL },
   { id: 'escalations',   icon: 'bi-arrow-up-circle',  label: 'Escalations',   badge: true,                       restrictToEmail: OWNER_EMAIL },
-  { id: 'hr-reports',    icon: 'bi-clipboard-data',   label: 'Reports',       restrictToEmail: OWNER_EMAIL },
+  // The 'Reports' (hr-reports) tab was retired 2026-05-02 — its scope
+  // (HR reporting / bugs / quality issues) is now part of the HR Hub
+  // tab as the `hr_reporting` flow. The view component, the
+  // CREATE_ACTIONS entry, and the data source have all been removed.
   { id: 'announcements', icon: 'bi-megaphone',        label: 'Announcements' },
   // Approval queue and "My Requests" are surfaced inside the Announcements
   // view (as filter tabs) — we intentionally do not repeat them in the top
@@ -46,7 +49,8 @@ const CREATE_ACTIONS = [
   { icon: 'bi-arrow-up-circle',   label: 'New Escalation',   action: 'escalation',   desc: 'Raise an escalation',         perm: 'can_create_escalation' },
   { icon: 'bi-kanban',            label: 'New Project',      action: 'project',       desc: 'Start a project',             perm: 'can_create_project',          restrictToEmail: OWNER_EMAIL },
   { icon: 'bi-megaphone',         label: 'New Announcement', action: 'announcement',  desc: 'Post to the team' },
-  { icon: 'bi-clipboard-data',    label: 'New Report',       action: 'report',        desc: 'Submit an HR report',         viewReq: 'hr-reports',               restrictToEmail: OWNER_EMAIL },
+  // 'New Report' moved to HR Hub: use 'Submit to HR Hub' below and
+  // pick `HR Reporting` from the picker.
   // No `perm` gate — every authenticated user can submit a bug / idea.
   { icon: 'bi-lightbulb',         label: 'New Feedback',     action: 'feedback',      desc: 'Report a bug or improvement' },
   // HR Hub intake — opens the 4-card picker. Every authenticated user
@@ -60,7 +64,7 @@ const DeelTopNav = ({
   onSearch, notifs, markAllRead, onNotifClick,
   escalCount, onLogout,
   onCreateTask, onCreateEscalation, onCreateProject,
-  onCreateAnnouncement, onCreateRequest, onCreateReport, onCreateFeedback,
+  onCreateAnnouncement, onCreateRequest, onCreateFeedback,
   onCreateHrHub,
   setSelTask, tasks,
 }) => {
@@ -109,7 +113,6 @@ const DeelTopNav = ({
     else if (action === 'project')    { onCreateProject?.(); }
     else if (action === 'announcement') { onCreateAnnouncement?.(); setView('announcements'); }
     else if (action === 'request')    { onCreateRequest?.(); setView('my-queue'); }
-    else if (action === 'report')     { onCreateReport?.(); setView('hr-reports'); }
     else if (action === 'feedback')   { setView('feedback'); onCreateFeedback?.(); }
     else if (action === 'hr-hub')     { onCreateHrHub?.(); }
   };

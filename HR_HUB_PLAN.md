@@ -131,6 +131,7 @@ backwards. (Specific role model finalized in Stage 1.)
 | 2026-05-02 | Plan doc lives at `HR_HUB_PLAN.md` in the repo root and must be auto-updated whenever new rules or cross-tab connections are introduced. | Single source of truth that survives across sessions and contributors. |
 | 2026-05-02 | Cross-tab connections (e.g. "Raise HR Request from this offboarding row") deferred to Stage 7. | Stage 1–6 prove the chassis first; deep links bolt on cleanly afterwards. |
 | 2026-05-01 | Entry point is the header `+` button → modal picker with 4 cards. Direct creation from queue rows comes later. | User wants one consistent intake before adding source-specific shortcuts. |
+| 2026-05-02 | Existing `Reports` tab (`hr-reports` view, `GMReportingView`, `src/data/reports.js`) retired. Its scope is fully covered by HR Hub's `hr_reporting` flow. | Avoid two parallel surfaces with the same purpose. The component file + mock data file are deleted; the nav entry, BriefingView tile, accessControl `ALL_VIEWS` entry, and `onCreateReport` callbacks all removed. Existing access types in DB still listing `hr-reports` in their `views` array are harmless dead data — no migration needed. |
 
 ---
 
@@ -161,6 +162,27 @@ Future (Stage 7+):
   **Amendments**, **Redlines**, **Incentive Plans**, **Jira/Zendesk
   ingest** — no shared code paths touched.
 - **Authentication / roster** — reuse, do not fork.
+
+## Audit log (2026-05-02 pre-launch sweep)
+
+- Code-review pass on every HR Hub file shipped in Stages 1–7.
+- **Bug fixed** — `HrHubDetailPanel` polling effect listed `comments`
+  in its dep array, which would tear down + rebuild the 5 s interval
+  on every poll → leaked timers and silent DOM listener growth on
+  long-lived sessions. Switched to a ref pattern; effect now depends
+  only on `requestId`.
+- **Bug fixed** — `isHrHubAdmin` was wired through `usePermissions`
+  but the per-user grant never reached the client because `/api/v1/me`
+  didn't include `is_hr_hub_admin` in its SELECT or response, and
+  `App.jsx`'s user hydration didn't carry the field across reloads.
+  All three plumbing points patched (route SELECT + JSON, snapshot
+  init, post-`/me` merge). HR Hub Admin grants now flip the gear
+  button on within ≤ 30 s of being assigned from the Team tab.
+- **Reports tab retirement** — see Decisions log entry above. Removed
+  cleanly; no orphaned imports or dead code.
+- **Verified untouched** — Feedback tab, Offboarding queue, Sync badge,
+  notification bell hook, all other queue feeds. None of their files
+  appear in the HR Hub diff.
 
 ---
 

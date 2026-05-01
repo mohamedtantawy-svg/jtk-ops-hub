@@ -18,7 +18,7 @@ export const ALL_VIEWS = [
   'projects',
   'escalations',
   'alerts',
-  'hr-reports',
+  // 'hr-reports' retired 2026-05-02 — superseded by 'hr-hub' / hr_reporting flow.
   'knowledge-hub',
   'analytics',
   'announcements',
@@ -88,7 +88,7 @@ export const VIEW_LABELS = {
   'projects':      'Projects',
   'escalations':   'Escalations',
   'alerts':        'Alerts',
-  'hr-reports':    'HR Reports',
+  // 'hr-reports' retired 2026-05-02 — see ALL_VIEWS comment.
   'knowledge-hub': 'Knowledge Hub',
   'analytics':     'Analytics',
   'announcements': 'Announcements',
