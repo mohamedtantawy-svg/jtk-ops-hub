@@ -1,5 +1,6 @@
 import { query } from './db';
 import { seedCountryOwnersIfEmpty } from './country-owners-seed';
+import { seedHrHubSettingsIfNeeded } from './hr-hub-seed';
 
 const SCHEMA_SQL = `
 -- Members
@@ -623,6 +624,16 @@ ALTER TABLE team_member_overrides ADD COLUMN IF NOT EXISTS is_access_admin BOOLE
 CREATE INDEX IF NOT EXISTS idx_tmo_is_access_admin
   ON team_member_overrides(is_access_admin) WHERE is_access_admin = true;
 
+-- ── HR Hub Admin per-user grant (2026-05-02) ───────────────────────────────
+-- Stackable on any base access type. Mirrors the is_access_admin /
+-- is_announcements_admin pattern: a Director assigns the grant from the
+-- Team-tab access modal; server-side helpers (src/lib/hr-hub-admin.js)
+-- read it with a 30 s in-memory cache. Carries the entitlements listed
+-- in HR_HUB_PLAN.md → "HR Hub Admin access type — spec".
+ALTER TABLE team_member_overrides ADD COLUMN IF NOT EXISTS is_hr_hub_admin BOOLEAN DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS idx_tmo_is_hr_hub_admin
+  ON team_member_overrides(is_hr_hub_admin) WHERE is_hr_hub_admin = true;
+
 -- ── Personal Checklist (My To-Do) snapshots (2026-04-27) ───────────────────
 -- The My To-Do list lives in PersonalChecklist.jsx and historically stored
 -- items only in localStorage + IndexedDB on the client. That covers refresh
@@ -775,6 +786,120 @@ CREATE TABLE IF NOT EXISTS team_member_countries (
 );
 CREATE INDEX IF NOT EXISTS idx_tmc_country ON team_member_countries(country_code);
 CREATE INDEX IF NOT EXISTS idx_tmc_email   ON team_member_countries(email);
+
+-- ── HR Hub: unified intake for HR Request / HR Reporting / Escalation Zero
+--    / Ops Hub Feedback (2026-05-02). See HR_HUB_PLAN.md for the full spec
+--    and any rule changes — this schema is the storage layer for that plan.
+--
+-- Status lifecycle is uniform across all flows: new → in_progress →
+-- on_hold → resolved (decision 2026-05-02). Any future status additions
+-- update both this CHECK constraint and HR_HUB_PLAN.md.
+--
+-- Attachments use the same JSONB-of-data-URIs shape as feedback_requests
+-- (kind, dataUri, name) so the Stage 5 Feedback merge is a straight
+-- INSERT … SELECT, no shape conversion.
+CREATE TABLE IF NOT EXISTS hr_hub_request (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  flow              VARCHAR(32)  NOT NULL CHECK (flow IN ('hr_request','hr_reporting','escalation_zero','feedback')),
+  status            VARCHAR(20)  NOT NULL DEFAULT 'new'      CHECK (status IN ('new','in_progress','on_hold','resolved')),
+  priority          VARCHAR(20)  NOT NULL DEFAULT 'medium'   CHECK (priority IN ('low','medium','high','critical')),
+  function_area     VARCHAR(80),                              -- "Onboarding" / "Amendments" / …
+  request_type      VARCHAR(80),                              -- HR Request: "Countersign EA" / "Deposit Increase" / …
+  report_type       VARCHAR(80),                              -- HR Reporting: "Bug" / "Escalation" / …
+  title             VARCHAR(300),
+  summary           TEXT NOT NULL,
+  ideal_solution    TEXT,                                     -- Escalation Zero only
+  resolution_note   TEXT,
+  links             JSONB NOT NULL DEFAULT '[]'::jsonb,       -- [string, string, …]
+  attachments       JSONB NOT NULL DEFAULT '[]'::jsonb,       -- [{kind,dataUri,name}, …] — same as feedback_requests.attachments
+  created_by_email  VARCHAR(255) NOT NULL,
+  created_by_name   VARCHAR(255),
+  assignee_email    VARCHAR(255),
+  assignee_name     VARCHAR(255),
+  team_lead_email   VARCHAR(255),                             -- denormalized at create-time so the Team toggle can index-scan
+  cc_email          VARCHAR(255),                             -- HR Reporting auto-cc (submitter's manager)
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  resolved_at       TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_hr_hub_request_flow_status ON hr_hub_request(flow, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_hr_hub_request_assignee   ON hr_hub_request(assignee_email, status);
+CREATE INDEX IF NOT EXISTS idx_hr_hub_request_creator    ON hr_hub_request(created_by_email, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_hr_hub_request_team_lead  ON hr_hub_request(team_lead_email, status);
+
+CREATE TABLE IF NOT EXISTS hr_hub_comment (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  request_id         UUID NOT NULL REFERENCES hr_hub_request(id) ON DELETE CASCADE,
+  parent_comment_id  UUID REFERENCES hr_hub_comment(id) ON DELETE SET NULL,   -- nullable for top-level
+  author_email       VARCHAR(255) NOT NULL,
+  author_name        VARCHAR(255),
+  body               TEXT NOT NULL,
+  mention_emails     TEXT[] NOT NULL DEFAULT '{}'::text[],
+  attachments        JSONB  NOT NULL DEFAULT '[]'::jsonb,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  edited_at          TIMESTAMPTZ,
+  deleted_at         TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_hr_hub_comment_request ON hr_hub_comment(request_id, created_at);
+
+CREATE TABLE IF NOT EXISTS hr_hub_follower (
+  request_id  UUID         NOT NULL REFERENCES hr_hub_request(id) ON DELETE CASCADE,
+  email       VARCHAR(255) NOT NULL,
+  source      VARCHAR(20)  NOT NULL DEFAULT 'manual' CHECK (source IN ('creator','assignee','tagged','manual')),
+  created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (request_id, email)
+);
+CREATE INDEX IF NOT EXISTS idx_hr_hub_follower_email ON hr_hub_follower(email);
+
+CREATE TABLE IF NOT EXISTS hr_hub_log (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  request_id   UUID NOT NULL REFERENCES hr_hub_request(id) ON DELETE CASCADE,
+  actor_email  VARCHAR(255),
+  actor_name   VARCHAR(255),
+  event_type   VARCHAR(40) NOT NULL,
+    -- created | status_change | assignee_change | priority_change | field_edit
+    -- | comment_added | comment_edited | comment_deleted
+    -- | attachment_added | follower_added | follower_removed
+  before_json  JSONB,
+  after_json   JSONB,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_hub_log_request ON hr_hub_log(request_id, created_at);
+
+-- Per-flow, per-key configuration so HR Hub Admins can tweak statuses,
+-- field labels, dropdown options and auto-assign rules without a code
+-- deploy. Every write also lands in hr_hub_settings_history with the
+-- actor + a JSON diff, per rule 9 (proper audit trail).
+CREATE TABLE IF NOT EXISTS hr_hub_settings (
+  flow              VARCHAR(32)  NOT NULL,
+  key               VARCHAR(60)  NOT NULL,    -- statuses | fields | dropdowns | auto_assign
+  value_json        JSONB        NOT NULL,
+  updated_by_email  VARCHAR(255),
+  updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (flow, key)
+);
+CREATE TABLE IF NOT EXISTS hr_hub_settings_history (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  flow         VARCHAR(32)  NOT NULL,
+  key          VARCHAR(60)  NOT NULL,
+  before_json  JSONB,
+  after_json   JSONB,
+  actor_email  VARCHAR(255),
+  actor_name   VARCHAR(255),
+  created_at   TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_hr_hub_settings_history ON hr_hub_settings_history(flow, key, created_at DESC);
+
+-- ── HR Hub: traceability columns for the Stage 5 Feedback merge.
+--   external_id stores the source row's id (e.g. feedback_requests.id)
+--   so a future migration can copy old Feedback rows into hr_hub_request
+--   idempotently via ON CONFLICT (flow, external_id) DO NOTHING.
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS external_id VARCHAR(100);
+ALTER TABLE hr_hub_comment ADD COLUMN IF NOT EXISTS external_id VARCHAR(100);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_hr_hub_request_flow_external
+  ON hr_hub_request(flow, external_id) WHERE external_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_hr_hub_comment_external
+  ON hr_hub_comment(external_id) WHERE external_id IS NOT NULL;
 `;
 
 export async function runMigrations() {
@@ -801,5 +926,18 @@ export async function runMigrations() {
   } catch (err) {
     // Don't throw — the rest of the app should boot even if the seed fails.
     console.warn('[db] Country-ownership seed failed:', err?.message);
+  }
+
+  // HR Hub: insert per-flow defaults (statuses / fields / dropdowns /
+  // auto_assign rules) for the 4 flows on first boot. Idempotent — see
+  // hr-hub-seed.js for the version-marker mechanism. Manual edits via
+  // Settings panel are preserved across deploys.
+  try {
+    const seedResult = await seedHrHubSettingsIfNeeded();
+    if (!seedResult?.skipped) {
+      console.log(`[db] HR Hub settings seeded to v${seedResult.version}: ${seedResult.inserted} rows`);
+    }
+  } catch (err) {
+    console.warn('[db] HR Hub settings seed failed:', err?.message);
   }
 }

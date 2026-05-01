@@ -1812,7 +1812,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 // render for the owner today. Keep this list in sync if
                 // App.jsx changes; ideally these constants live in one
                 // module long-term.
-                const OWNER_ONLY = new Set(['projects', 'hr-reports', 'analytics', 'escalations', 'calendar', 'knowledge-hub']);
+                const OWNER_ONLY = new Set(['projects', 'analytics', 'escalations', 'calendar', 'knowledge-hub']);
                 const canSeeView = (v) => {
                   if (OWNER_ONLY.has(v) && !isOwner) return false;
                   if (perms && typeof perms.canView === 'function' && perms.canView(v) === false) return false;
@@ -1821,7 +1821,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 const allLinks = [
                   {v:'my-queue',icon:'bi-inbox-fill',l:'Queue',c:'var(--g)',bg:'#e8f0fe'},
                   {v:'escalations',icon:'bi-arrow-up-circle-fill',l:'Escalations',c:'#1f74b3',bg:'#e8f0fe'},
-                  {v:'hr-reports',icon:'bi-flag-fill',l:'Reports',c:'#8b6dca',bg:'#f3eff8'},
+                  // 'Reports' (hr-reports) tile retired 2026-05-02 — replaced by HR Hub.
+                  {v:'hr-hub',icon:'bi-broadcast-pin',l:'HR Hub',c:'#8b6dca',bg:'#f3eff8'},
                   {v:'team',icon:'bi-people-fill',l:'Team',c:'#ed8d00',bg:'#fff8e6'},
                   {v:'analytics',icon:'bi-bar-chart-line-fill',l:'Analytics',c:'#1f74b3',bg:'#e8f0fe'},
                 ];

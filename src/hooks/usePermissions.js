@@ -22,6 +22,14 @@ export const usePermissions = (user, accessTypes, userAccessMap) => {
     const accessRoleAllowsRoster = accessType?.id === 'at_admin' || accessType?.id === 'at_regional_mgr';
     const canManageRoster = user?.isAccessAdmin === true || accessRoleAllowsRoster;
 
+    // Per-user HR Hub admin grant — read from team_member_overrides.is_hr_hub_admin
+    // by the server, surfaced on the user object as `isHrHubAdmin`. Full
+    // app admins also qualify; the flag stacks on top of any base access
+    // type so a TL or agent can edit HR Hub config without escalating.
+    const canManageHrHub = user?.isHrHubAdmin === true
+      || hasAdminPower(accessType, 'can_manage_hr_hub')
+      || hasAdminPower(accessType, 'can_manage_settings');
+
     return {
       raw: accessType,
       canView: (viewId) => canAccessView(accessType, viewId),
@@ -40,6 +48,9 @@ export const usePermissions = (user, accessTypes, userAccessMap) => {
       // always qualify by role; the per-user flag delegates to specific
       // people without escalating their main access tier.
       canManageRoster,
+      // HR Hub admin — schema/dropdowns/auto-assign editing in the HR Hub
+      // Settings panel; bypass scope on lists; edit any request/comment.
+      canManageHrHub,
       accessTypeName: accessType?.name || 'Agent',
       accessTypeId: accessType?.id || 'at_agent',
       scopeTasks: (tasks, allMembers) => scopeTasks(tasks, user, accessType, allMembers),
