@@ -14,6 +14,7 @@ import { useVersionCheck } from './hooks/useVersionCheck';
 import UpdateBanner from './components/ui/UpdateBanner';
 import { AnnouncementRequestsProvider } from './hooks/useAnnouncementRequests';
 import { useQueueSync } from './hooks/useQueueSync';
+import { useQueueUnifiedSync } from './hooks/useQueueUnifiedSync';
 import { DEFAULT_SETTINGS } from './data/settings';
 import { DEFAULT_ACCESS_TYPES } from './data/accessControl';
 import { ADMIN_LIST_VERSION } from './data/adminEmails';
@@ -292,6 +293,21 @@ const App=()=>{
   const queueSync = useQueueSync({ enabled: !!user, userEmail: user?.email || null });
   const tasks = queueSync.tasks;
   const setTasks = queueSync.setTasks;
+  // ── Pre-warm every Deel queue at the auth boundary ───────────────────────
+  // Mounting useQueueUnifiedSync at App.jsx (instead of inside Queue.jsx)
+  // means all 7 Deel queues start fetching the moment the user is signed
+  // in, regardless of where they land first (Briefing, Team, Analytics).
+  // By the time they click any tab, IDB is already warm + the in-memory
+  // arrays are populated. The previous arrangement mounted the same hooks
+  // 4× across Queue/Briefing/Analytics/Team, firing 4× the network
+  // requests; now there's a single shared instance threaded through
+  // IntegrationsContext. Per Mohamed's 2026-05-01 spec: "load everything"
+  // on login.
+  const queueUnified = useQueueUnifiedSync({
+    queueSync,
+    enabled: !!user,
+    userEmail: user?.email || null,
+  });
   const [feed,setFeed]=useState(FEED_EVENTS);
   const [notes,setNotes]=useState(INITIAL_NOTES);
   const [escalations,setEscalations]=useState([
@@ -794,7 +810,7 @@ const App=()=>{
   const deelData = useDeelData(integrations.isConfigured('deel'));
   const jiraData = useJiraData(integrations.isConfigured('jira'));
   const slackData = useSlackData(integrations.isConfigured('slack'));
-  const integrationsCtx = { integrations, deelData, jiraData, slackData, queueSync };
+  const integrationsCtx = { integrations, deelData, jiraData, slackData, queueSync, queueUnified };
 
   // ── Toast helpers ──────────────────────────────────────────────────────────
   const addToast=useCallback((type,title,body,onUndo)=>{

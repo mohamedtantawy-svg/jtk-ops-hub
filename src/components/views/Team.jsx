@@ -8,9 +8,7 @@ import { useQueueSlaSettings, broadcastQueueSlaUpdate } from '../../hooks/useQue
 import { putQueueSlaSettings } from '../../services/queueSlaSettingsApi';
 import { useCapacitySettings, broadcastCapacityUpdate } from '../../hooks/useCapacitySettings';
 import { putCapacitySettings } from '../../services/capacityApi';
-import { useOnboardingData } from '../../hooks/useOnboardingData';
-import { useOffboardingData } from '../../hooks/useOffboardingData';
-import { useWorkbenchData } from '../../hooks/useWorkbenchData';
+// Queue data hooks are mounted in App.jsx — read via IntegrationsContext.
 import {
   normalizeOnboarding,
   normalizeOffboarding,
@@ -149,9 +147,10 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
   // matching what the agent sees in the Queue. Amendments/Redlines have
   // no per-agent assignee on the upstream payload, so they're not
   // attributable to a single agent and stay out of this calc.
-  const teamOnbData = useOnboardingData(true);
-  const teamOffData = useOffboardingData(true);
-  const teamWbData = useWorkbenchData(true);
+  const { queueUnified: teamQueueUnified } = useContext(IntegrationsContext);
+  const teamOnbData = teamQueueUnified?.onboardingData || { items: [] };
+  const teamOffData = teamQueueUnified?.offboardingData || { items: [] };
+  const teamWbData = teamQueueUnified?.workbenchData || { tasks: [] };
   const { sla: teamQueueSla } = useQueueSlaSettings();
   const onbAgentRows = useMemo(() => normalizeOnboarding(teamOnbData.items, teamQueueSla), [teamOnbData.items, teamQueueSla]);
   const offAgentRows = useMemo(() => normalizeOffboarding(teamOffData.items, teamQueueSla), [teamOffData.items, teamQueueSla]);

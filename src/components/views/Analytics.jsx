@@ -2,14 +2,9 @@ import { useState, useMemo, useContext, useCallback } from 'react';
 import { TOOLS, FUNCTIONS, FLAGS, SLA_MINS } from '../../data/constants';
 import { MEMBERS } from '../../data/members';
 import { HOURLY_VOLUME } from '../../data/feed';
-import { SettingsContext, PermissionsContext } from '../../App';
+import { SettingsContext, PermissionsContext, IntegrationsContext } from '../../App';
 import { slaInfo } from '../../utils/helpers';
-import { useOnboardingData } from '../../hooks/useOnboardingData';
-import { usePausedOnboardingData } from '../../hooks/usePausedOnboardingData';
-import { useOffboardingData } from '../../hooks/useOffboardingData';
-import { useChangeRequestData } from '../../hooks/useChangeRequestData';
-import { useWorkbenchData } from '../../hooks/useWorkbenchData';
-import { useIncentivePlansData } from '../../hooks/useIncentivePlansData';
+// Queue data hooks are mounted in App.jsx — read via IntegrationsContext.
 import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
 import {
   normalizeOnboarding,
@@ -163,12 +158,13 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
   // (server-stamped from app_settings.queue_sla_thresholds) AND the
   // business-day clock automatically because we use the canonical
   // helpers (slaInfo + slaBreachStatus from normalizeSourceRows).
-  const onboardingDataA = useOnboardingData(true);
-  const pausedOnboardingDataA = usePausedOnboardingData(true);
-  const offboardingDataA = useOffboardingData(true);
-  const changeRequestDataA = useChangeRequestData(true);
-  const workbenchDataA = useWorkbenchData(true);
-  const incentivePlansDataA = useIncentivePlansData(true);
+  const { queueUnified: queueUnifiedA } = useContext(IntegrationsContext);
+  const onboardingDataA = queueUnifiedA?.onboardingData || { items: [] };
+  const pausedOnboardingDataA = queueUnifiedA?.pausedOnboardingData || { items: [] };
+  const offboardingDataA = queueUnifiedA?.offboardingData || { items: [] };
+  const changeRequestDataA = queueUnifiedA?.changeRequestData || { amendments: [], redlines: [] };
+  const workbenchDataA = queueUnifiedA?.workbenchData || { tasks: [] };
+  const incentivePlansDataA = queueUnifiedA?.incentivePlansData || { items: [] };
   const { sla: queueSlaA } = useQueueSlaSettings();
   const onbRowsA = useMemo(() => normalizeOnboarding(onboardingDataA.items, queueSlaA), [onboardingDataA.items, queueSlaA]);
   const pausedOnbRowsA = useMemo(() => normalizePausedOnboarding(pausedOnboardingDataA.items, queueSlaA), [pausedOnboardingDataA.items, queueSlaA]);

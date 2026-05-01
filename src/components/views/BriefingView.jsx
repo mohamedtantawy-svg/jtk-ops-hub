@@ -6,12 +6,9 @@ import { matchesAudience } from '../../data/comms';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import { CALENDAR_EVENTS } from '../../data/calendar';
 import { slaInfo, rel, getVisibleEmails } from '../../utils/helpers';
-import { useOnboardingData } from '../../hooks/useOnboardingData';
-import { usePausedOnboardingData } from '../../hooks/usePausedOnboardingData';
-import { useOffboardingData } from '../../hooks/useOffboardingData';
-import { useChangeRequestData } from '../../hooks/useChangeRequestData';
-import { useWorkbenchData } from '../../hooks/useWorkbenchData';
-import { useIncentivePlansData } from '../../hooks/useIncentivePlansData';
+// Queue data hooks are now mounted once in App.jsx and threaded through
+// IntegrationsContext — see queueUnified destructure below. Removing the
+// per-view mounts collapses 4× initial requests into 1×.
 import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
 import { useCapacitySettings } from '../../hooks/useCapacitySettings';
 import { elapsedBizMinutes } from '../../utils/bizTime';
@@ -135,15 +132,20 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // ── PERMISSIONS-BASED SCOPE ──────────────────────────────────────────
   const perms=useContext(PermissionsContext);
   const settings=useContext(SettingsContext);
-  const { deelData, jiraData, slackData } = useContext(IntegrationsContext);
+  const { deelData, jiraData, slackData, queueUnified } = useContext(IntegrationsContext);
 
-  // ── Deel API hooks (onboarding, offboarding, amendments/redlines, workbench) ──
-  const onboardingData = useOnboardingData(true);
-  const pausedOnboardingData = usePausedOnboardingData(true);
-  const offboardingData = useOffboardingData(true);
-  const changeRequestData = useChangeRequestData(true);
-  const workbenchData = useWorkbenchData(true);
-  const incentivePlansData = useIncentivePlansData(true);
+  // ── Deel API hooks — read the shared, App.jsx-mounted instance ──────────
+  // Mounting our own hooks here used to fire 4× initial requests across
+  // Queue/Briefing/Analytics/Team. Now they all read from the single
+  // App.jsx instance threaded through IntegrationsContext, so first-paint
+  // hits IDB cache + the in-flight network request is shared. Empty
+  // fallbacks so SSR / signed-out paths don't crash.
+  const onboardingData = queueUnified?.onboardingData || { items: [], loading: false, error: null };
+  const pausedOnboardingData = queueUnified?.pausedOnboardingData || { items: [], loading: false, error: null };
+  const offboardingData = queueUnified?.offboardingData || { items: [], loading: false, error: null };
+  const changeRequestData = queueUnified?.changeRequestData || { amendments: [], redlines: [], loading: false, error: null };
+  const workbenchData = queueUnified?.workbenchData || { tasks: [], loading: false, error: null };
+  const incentivePlansData = queueUnified?.incentivePlansData || { items: [], loading: false, error: null };
 
   const ds=perms?.dataScope||'own_tasks_only';
   const isOwnScope=ds==='own_tasks_only';
