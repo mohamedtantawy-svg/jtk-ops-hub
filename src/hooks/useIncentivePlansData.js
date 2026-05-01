@@ -23,14 +23,19 @@ export function useIncentivePlansData(enabled = true, userEmail = null) {
   const lastFetchRef = useRef(0);
   const inFlightRef = useRef(null);
   const liveReceivedRef = useRef(false);
+  // Mirror items via ref so refresh() can read the current count without
+  // listing items.length in its deps. See useOnboardingData for the
+  // detailed rationale.
+  const itemsRef = useRef(items);
+  useEffect(() => { itemsRef.current = items; }, [items]);
 
   const refresh = useCallback(async (force = false) => {
     if (!enabled) return null;
     if (!force && Date.now() - lastFetchRef.current < CACHE_TTL) return null;
-    if (inFlightRef.current) return inFlightRef.current;
+    if (!force && inFlightRef.current) return inFlightRef.current;
 
     setIsRefreshing(true);
-    setLoading(prev => items.length === 0 ? true : prev);
+    setLoading(prev => itemsRef.current.length === 0 ? true : prev);
     setError(null);
 
     const run = (async () => {
@@ -38,7 +43,7 @@ export function useIncentivePlansData(enabled = true, userEmail = null) {
         const res = await fetchDeelIncentivePlans({ bustCache: force });
         const fetched = res?.items || [];
         const now = Date.now();
-        if (fetched.length > 0 || items.length === 0) {
+        if (fetched.length > 0 || itemsRef.current.length === 0) {
           setItems(fetched);
           idbSet(cacheKeyFor(userEmail), { items: fetched, ts: now }).catch(() => {});
           broadcastSync(SOURCE_ID, fetched, null, userEmail);
@@ -59,7 +64,7 @@ export function useIncentivePlansData(enabled = true, userEmail = null) {
     })();
     inFlightRef.current = run;
     return run;
-  }, [enabled, items.length, userEmail]);
+  }, [enabled, userEmail]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -105,7 +110,11 @@ export function useIncentivePlansData(enabled = true, userEmail = null) {
       if (!msg || msg.source !== SOURCE_ID) return;
       const myKey = (userEmail || '').toLowerCase();
       const theirKey = (msg.userKey || '').toLowerCase();
-      if (myKey && theirKey && myKey !== theirKey) return;
+      // Tighter than the previous `myKey && theirKey && ...` — that
+      // accepted a scoped message from another user when our own email
+      // hadn't loaded yet (logged-out tab, hydration race). Reject
+      // whenever EITHER side has a key that doesn't match the other.
+      if ((myKey || theirKey) && myKey !== theirKey) return;
       if (msg.ts && msg.ts > lastFetchRef.current) {
         setItems(msg.items || []);
         lastFetchRef.current = msg.ts;

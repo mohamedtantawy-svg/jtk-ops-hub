@@ -272,7 +272,12 @@ export function useQueueSync(arg = true) {
   // Per-source sync function (with in-flight dedup).
   const syncSource = useCallback(async (source, opts = {}) => {
     if (!enabled) return null;
-    if (inFlightRefs.current[source]) return inFlightRefs.current[source];
+    // opts.force=true bypasses the in-flight guard so Force resync can
+    // recover from a hung Promise instead of attaching to it. Mirrors the
+    // per-Deel-hook fix from PR #341 — Zendesk / Jira were missed there.
+    // The old in-flight Promise keeps running until apiFetch's 90s timeout
+    // resolves it; we just don't attach to it.
+    if (!opts.force && inFlightRefs.current[source]) return inFlightRefs.current[source];
 
     if (abortControllersRef.current[source]) {
       try { abortControllersRef.current[source].abort(); } catch {}
@@ -422,7 +427,11 @@ export function useQueueSync(arg = true) {
       if (msg.source !== 'zendesk' && msg.source !== 'jira') return;
       const myEmail = (userEmailRef.current || '').toLowerCase();
       const theirEmail = (msg.userKey || '').toLowerCase();
-      if (myEmail && theirEmail && myEmail !== theirEmail) return;
+      // Tighter than the previous `myEmail && theirEmail && ...` — that
+      // accepted a scoped message from another user when our own email
+      // hadn't loaded yet (logged-out tab, hydration race). Reject
+      // whenever EITHER side has a key that doesn't match the other.
+      if ((myEmail || theirEmail) && myEmail !== theirEmail) return;
       if (!msg.ts || msg.ts <= (lastFetchTsRefs.current[msg.source] || 0)) return;
 
       const items = msg.items || [];
@@ -449,10 +458,11 @@ export function useQueueSync(arg = true) {
     return () => ch.removeEventListener('message', handler);
   }, []);
 
-  // Manual refresh (all sources) — dedups internally.
+  // Manual refresh (all sources) — bypasses in-flight so a hung sync can be
+  // recovered via Force resync.
   const refresh = useCallback(() => {
     for (const source of Object.keys(SOURCE_CONFIG)) {
-      syncSource(source, { bustCache: true });
+      syncSource(source, { bustCache: true, force: true });
     }
   }, [syncSource]);
 
@@ -503,7 +513,7 @@ export function useQueueSync(arg = true) {
         lastSync: sourceLastSync.zendesk,
         lastSyncAt: lastFetchTsRefs.current.zendesk || null,
         count: tasks.filter(t => t.source === 'zendesk').length,
-        retry: () => syncSource('zendesk', { bustCache: true }),
+        retry: () => syncSource('zendesk', { bustCache: true, force: true }),
       },
       jira: {
         loading: sourceLoading.jira,
@@ -512,7 +522,7 @@ export function useQueueSync(arg = true) {
         lastSync: sourceLastSync.jira,
         lastSyncAt: lastFetchTsRefs.current.jira || null,
         count: tasks.filter(t => t.source === 'jira').length,
-        retry: () => syncSource('jira', { bustCache: true }),
+        retry: () => syncSource('jira', { bustCache: true, force: true }),
       },
     },
   };

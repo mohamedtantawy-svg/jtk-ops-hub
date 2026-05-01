@@ -113,7 +113,14 @@ export async function apiFetch(path, options = {}) {
         // Don't retry 4xx (client errors)
         if (res.status >= 400 && res.status < 500) throw err;
 
-        // 5xx — retry
+        // Don't retry gateway timeouts — a 504 from us already means the
+        // server tried, hit its scan timeout, and gave up. A retry just
+        // makes the user wait the full 45s server window again with the
+        // same upstream that's already failing. (Pre-fix: 504 × 3 retries
+        // = 2m+ wait before the queue indicator could surface "Failed".)
+        if (res.status === 504) throw err;
+
+        // 5xx (other than 504) — retry
         lastError = err;
         if (attempt < MAX_RETRIES) {
           const delay = BASE_DELAY * Math.pow(2, attempt) * (0.5 + Math.random() * 0.5);

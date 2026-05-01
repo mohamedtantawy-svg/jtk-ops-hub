@@ -37,6 +37,13 @@ export function useChangeRequestData(enabled = true, userEmail = null) {
   // either side independently.
   const liveAmendmentsRef = useRef(false);
   const liveRedlinesRef = useRef(false);
+  // Mirror amendments/redlines via refs so refresh() can read the current
+  // counts without listing them in its deps. See useOnboardingData for the
+  // detailed rationale.
+  const amendmentsRef = useRef(amendments);
+  const redlinesRef = useRef(redlines);
+  useEffect(() => { amendmentsRef.current = amendments; }, [amendments]);
+  useEffect(() => { redlinesRef.current = redlines; }, [redlines]);
 
   const refresh = useCallback(async (force = false) => {
     if (!enabled) return null;
@@ -44,10 +51,10 @@ export function useChangeRequestData(enabled = true, userEmail = null) {
       && Date.now() - lastFetchAmendmentsRef.current < CACHE_TTL
       && Date.now() - lastFetchRedlinesRef.current < CACHE_TTL;
     if (bothFresh) return null;
-    if (inFlightRef.current) return inFlightRef.current;
+    if (!force && inFlightRef.current) return inFlightRef.current;
 
     setIsRefreshing(true);
-    setLoading(prev => (amendments.length === 0 && redlines.length === 0) ? true : prev);
+    setLoading(prev => (amendmentsRef.current.length === 0 && redlinesRef.current.length === 0) ? true : prev);
     setError(null);
 
     const run = (async () => {
@@ -64,14 +71,14 @@ export function useChangeRequestData(enabled = true, userEmail = null) {
         if (redlineResult.status === 'rejected') console.warn('[useChangeRequestData] Redlines fetch failed:', redlineResult.reason?.message);
 
         const now = Date.now();
-        if (amendResult.status === 'fulfilled' && (fetchedAmendments.length > 0 || amendments.length === 0)) {
+        if (amendResult.status === 'fulfilled' && (fetchedAmendments.length > 0 || amendmentsRef.current.length === 0)) {
           setAmendments(fetchedAmendments);
           idbSet(cacheKeyFor(CACHE_KEY_AMENDMENTS_BASE, userEmail), { items: fetchedAmendments, ts: now }).catch(() => {});
           broadcastSync(SOURCE_AMENDMENTS, fetchedAmendments, null, userEmail);
           lastFetchAmendmentsRef.current = now;
           liveAmendmentsRef.current = true;
         }
-        if (redlineResult.status === 'fulfilled' && (fetchedRedlines.length > 0 || redlines.length === 0)) {
+        if (redlineResult.status === 'fulfilled' && (fetchedRedlines.length > 0 || redlinesRef.current.length === 0)) {
           setRedlines(fetchedRedlines);
           idbSet(cacheKeyFor(CACHE_KEY_REDLINES_BASE, userEmail), { items: fetchedRedlines, ts: now }).catch(() => {});
           broadcastSync(SOURCE_REDLINES, fetchedRedlines, null, userEmail);
@@ -97,7 +104,7 @@ export function useChangeRequestData(enabled = true, userEmail = null) {
     })();
     inFlightRef.current = run;
     return run;
-  }, [enabled, amendments.length, redlines.length, userEmail]);
+  }, [enabled, userEmail]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -158,7 +165,11 @@ export function useChangeRequestData(enabled = true, userEmail = null) {
       if (!msg) return;
       const myKey = (userEmail || '').toLowerCase();
       const theirKey = (msg.userKey || '').toLowerCase();
-      if (myKey && theirKey && myKey !== theirKey) return;
+      // Tighter than the previous `myKey && theirKey && ...` — that
+      // accepted a scoped message from another user when our own email
+      // hadn't loaded yet (logged-out tab, hydration race). Reject
+      // whenever EITHER side has a key that doesn't match the other.
+      if ((myKey || theirKey) && myKey !== theirKey) return;
       if (msg.source === SOURCE_AMENDMENTS && msg.ts && msg.ts > lastFetchAmendmentsRef.current) {
         setAmendments(msg.items || []);
         lastFetchAmendmentsRef.current = msg.ts;
