@@ -10,6 +10,7 @@ import { cacheGet, cacheSet } from '../../../../../../src/lib/server-cache';
 import { scopeOffboardingCases } from '../../../../../../src/lib/queue-scoping';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
 import { buildWithTimeout } from '../../../../../../src/lib/scan-timeout';
+import { resolveEmailByName } from '../../../../../../src/utils/normalizeSourceRows';
 
 const CACHE_KEY = 'deel_offboarding';
 const CACHE_TTL = 5 * 60 * 1000;    // fresh for 5 minutes
@@ -174,14 +175,21 @@ async function buildOffboardingResult() {
       noticePeriod: c.noticePeriod || 0,
       organizationName: c.organizationName || '',
       exAssignee: c.exAssignee || '',
-      exAssigneeEmail: c.exAssigneeEmail || '',
+      // Upstream Deel returns the assignee NAME on terminations_v3 but
+      // never the email — verified live 2026-05-01: 1,042 of 1,046 rows
+      // had a name, 0 had an email. Resolve the name against the team
+      // directory so scoping and the Unassigned filter both work. Without
+      // this every row looked unassigned to the queue, which collapsed
+      // TL/RM views to country-only matches (Megan saw 43 of ~1k+) and
+      // made the Unassigned filter return everything.
+      exAssigneeEmail: (c.exAssigneeEmail || resolveEmailByName(c.exAssignee) || '').toLowerCase(),
       // Aliases under the canonical names queue-scoping reads. Without these,
       // _scopeByAssignedOrUnassigned/_scopeCountryOrAssignee see undefined for
       // assigneeEmail and fall through to the country check — non-admin users
       // get an empty queue unless they own a matching country. Admins are
       // unaffected because isAdminUser bypasses the filter entirely.
       assignee: c.exAssignee || '',
-      assigneeEmail: (c.exAssigneeEmail || '').toLowerCase(),
+      assigneeEmail: (c.exAssigneeEmail || resolveEmailByName(c.exAssignee) || '').toLowerCase(),
       reason: c.reason || '',
       isResignation: c.isResignation || false,
       jiraUrl: c.jiraUrl || '',
