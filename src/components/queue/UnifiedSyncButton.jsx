@@ -80,12 +80,6 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
   } = meta;
   const now = nowTick || Date.now();
   const someFailing = (sourceErrors?.length || 0) > 0 && !allFailing;
-  // Pick the right "synced N min ago" timestamp for the badge label —
-  // when only some sources are stale, the freshest source's timestamp
-  // is what's actually on screen for the user. If everything is in the
-  // window, fall back to the oldest so the label is honest about drift.
-  const staleMixed = anyStale || anyAging;
-  const labelTs = staleMixed ? lastSyncAt : oldestSyncAt;
 
   // ── Refresh-running heartbeat ──────────────────────────────────────────
   // Track when the current refresh started so the indicator can show
@@ -263,11 +257,22 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
   } else {
     // ✨ Default green path. Every source either fresh or stale-but-
     // refreshing. Background polls (even slow ones) live here.
+    //
+    // Quiet by default: when nothing has crossed its per-source stale
+    // threshold (10 min for most, 15 min for offboarding), the badge
+    // is just "Live" — no timestamp. The "synced N min ago" line is
+    // noise when the data is comfortably fresh and only adds value
+    // when something *has* drifted past its threshold but the system
+    // is currently catching up (refreshingStaleSourceCount > 0). In
+    // that case we surface the last-success time so the user can
+    // judge how stale the on-screen data is while the refresh runs.
     state = 'live';
     label = 'Live';
-    sublabel = refreshingStaleSourceCount > 0
-      ? `${refreshingStaleSourceCount} refreshing in background`
-      : `synced ${formatAgo(labelTs, now)}`;
+    if (refreshingStaleSourceCount > 0) {
+      sublabel = `synced ${formatAgo(lastSyncAt, now)} · ${refreshingStaleSourceCount} refreshing`;
+    } else {
+      sublabel = '';
+    }
     dotColor = '#29811e';
     bg = '#e8f5e9';
     border = '#bbf7d0';

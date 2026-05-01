@@ -216,8 +216,20 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
   //   • failing  → last sync errored (regardless of timestamp).
   // The button renders a state machine on top of those counts.
   const RECENT_SYNC_MS = 2 * 60 * 1000;     // 2 minutes — offline corroboration window
-  const WARN_AFTER_MS  = 7  * 60 * 1000;    // soft threshold per source
-  const STALE_AFTER_MS = 10 * 60 * 1000;    // hard threshold per source
+  const WARN_AFTER_MS  = 7  * 60 * 1000;    // default soft threshold per source
+  const STALE_AFTER_MS = 10 * 60 * 1000;    // default hard threshold per source
+  // Per-source overrides — sources whose natural cycle is longer than the
+  // default 5-min cache TTL deserve a wider tolerance before the badge
+  // surfaces them. Offboarding's parallel-by-status scan takes ~52s and
+  // the cache TTL is 5 min, so 2 missed cycles + slack ≈ 15 min before
+  // it counts as stale (and 12 min before it counts as aging — keeps the
+  // warn/stale ratio at the same 4:5 the defaults use).
+  const STALE_AFTER_BY_SOURCE = {
+    offboarding: 15 * 60 * 1000,
+  };
+  const WARN_AFTER_BY_SOURCE = {
+    offboarding: 12 * 60 * 1000,
+  };
   const meta = useMemo(() => {
     const list = Object.values(sources);
     const timestamps = list.map(s => s.lastSyncAt).filter(t => typeof t === 'number' && t > 0);
@@ -242,9 +254,11 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
       const ts = typeof s.lastSyncAt === 'number' ? s.lastSyncAt : null;
       const ageMs = ts ? now - ts : Infinity;
       const isRefreshing = !!s.isRefreshing;
-      if (ageMs <= WARN_AFTER_MS) {
+      const warnMs = WARN_AFTER_BY_SOURCE[s.id] ?? WARN_AFTER_MS;
+      const staleMs = STALE_AFTER_BY_SOURCE[s.id] ?? STALE_AFTER_MS;
+      if (ageMs <= warnMs) {
         freshSourceCount++;
-      } else if (ageMs <= STALE_AFTER_MS) {
+      } else if (ageMs <= staleMs) {
         if (isRefreshing) {
           // Aging but the system is already on it — count as fresh.
           freshSourceCount++;
