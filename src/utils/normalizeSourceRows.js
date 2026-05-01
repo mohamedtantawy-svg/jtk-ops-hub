@@ -9,7 +9,44 @@
 //   taskUrl, slaRemaining, slaBreachStatus
 // }
 
-import { TEAM_MEMBERS } from '../data/members';
+import { TEAM_MEMBERS, MEMBERS_BY_EMAIL } from '../data/members';
+import { COUNTRY_OWNERS } from '../data/countryOwners';
+
+// ── Synthetic assignee from country owners ─────────────────────────────────
+// For queues with no upstream assignee (Amendments, Redlines, Incentive
+// Plans) we synthesize one from COUNTRY_OWNERS so the row attributes
+// somewhere — country owners SEE these via scope today but they don't
+// COUNT toward their workload anywhere (Briefing capacity, Team SLA dot,
+// Analytics agent stats), since attribution is keyed off `assigneeEmail`.
+//
+// Onboarding has an upstream assignee in most cases; we only fall back to
+// the synthetic owner when that's missing — never override a real HRX
+// person actively working a row.
+//
+// Multi-owner countries → deterministic round-robin via DJB2 hash of the
+// row id, modulo owner count. Stable across renders (same row → same
+// owner) and self-rebalances when the Team-tab country picker writes new
+// owners.
+
+// DJB2 string hash — small, stable, no deps.
+function _hashId(id) {
+  let h = 5381;
+  const s = String(id || '');
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return h >>> 0;
+}
+
+function syntheticOwnerForCountry(country, rowId) {
+  if (!country) return null;
+  const cc = String(country).toUpperCase();
+  const owners = COUNTRY_OWNERS[cc];
+  if (!Array.isArray(owners) || owners.length === 0) return null;
+  const email = owners[_hashId(rowId) % owners.length];
+  if (!email) return null;
+  const lc = email.toLowerCase();
+  const member = MEMBERS_BY_EMAIL[lc];
+  return { email: lc, name: member?.name || email, isSynthetic: true };
+}
 
 const DEEL_ADMIN_BASE = 'https://admin.deel.network';
 const DEEL_CONTRACT_URL = (oid) => oid ? `${DEEL_ADMIN_BASE}/contracts/${oid}/details` : '';
@@ -257,6 +294,20 @@ export function normalizeOnboarding(items = [], slaConfig = null) {
     const createdAt = p.taskCreatedAt || p.createdAt || '';
     const sla = computeSlaWindow(activeMs, createdAt);
 
+    // Onboarding HAS an upstream HRX assignee in most cases — fall back to
+    // a synthetic country-owner only when it's missing, never override.
+    let assigneeName = p.assignee || '';
+    let assigneeEmail = (p.assigneeEmail || resolveEmailByName(p.assignee) || '').toLowerCase();
+    let assigneeIsSynthetic = false;
+    if (!assigneeEmail) {
+      const synth = syntheticOwnerForCountry(p.country, p.id || p.oid);
+      if (synth) {
+        assigneeName = synth.name;
+        assigneeEmail = synth.email;
+        assigneeIsSynthetic = true;
+      }
+    }
+
     return {
       id: p.id || p.oid || '',
       source: 'onboarding',
@@ -265,8 +316,9 @@ export function normalizeOnboarding(items = [], slaConfig = null) {
       startDate: p.startDate || '',
       function: flowDisplay || 'Onboarding',
       country: p.country || '',
-      assignee: p.assignee || '',
-      assigneeEmail: (p.assigneeEmail || resolveEmailByName(p.assignee) || '').toLowerCase(),
+      assignee: assigneeName,
+      assigneeEmail,
+      assigneeIsSynthetic,
       createdAt,
       updatedAt: p.taskCreatedAt || '',
       status: p.action || { label: 'In Progress', severity: 'active', color: '#1d4ed8' },
@@ -293,6 +345,20 @@ export function normalizePausedOnboarding(items = [], slaConfig = null) {
     const pausedAt = p.updatedAt || p.taskCreatedAt || '';   // best proxy for when it was paused
     const sla = computeSlaWindow(activeMs, createdAt, { pausedMs, pausedAt });
 
+    // Same fallback pattern as actionable onboarding — only synthesize
+    // when upstream is missing.
+    let assigneeName = p.assignee || '';
+    let assigneeEmail = (p.assigneeEmail || resolveEmailByName(p.assignee) || '').toLowerCase();
+    let assigneeIsSynthetic = false;
+    if (!assigneeEmail) {
+      const synth = syntheticOwnerForCountry(p.country, p.id || p.oid);
+      if (synth) {
+        assigneeName = synth.name;
+        assigneeEmail = synth.email;
+        assigneeIsSynthetic = true;
+      }
+    }
+
     return {
       id: p.id || p.oid || '',
       source: 'onboarding',
@@ -301,8 +367,9 @@ export function normalizePausedOnboarding(items = [], slaConfig = null) {
       startDate: p.startDate || '',
       function: `Paused · ${pauseLabel}`,
       country: p.country || '',
-      assignee: p.assignee || '',
-      assigneeEmail: (p.assigneeEmail || resolveEmailByName(p.assignee) || '').toLowerCase(),
+      assignee: assigneeName,
+      assigneeEmail,
+      assigneeIsSynthetic,
       createdAt,
       updatedAt: pausedAt,
       pausedAt,
@@ -387,6 +454,11 @@ export function normalizeAmendments(items = [], slaConfig = null) {
     const slaBreachStatus = sla.slaBreachStatus;
     const slaWindowMs = sla.slaWindowMs;
 
+    // No upstream assignee — synthesize from country owners so the row
+    // attributes to a specific person in Briefing capacity / Team SLA dot /
+    // Analytics. Multi-owner countries split deterministically by row id.
+    const synth = syntheticOwnerForCountry(a.country, a.id);
+
     return {
       id: String(a.id || ''),
       source: 'amendments',
@@ -394,8 +466,9 @@ export function normalizeAmendments(items = [], slaConfig = null) {
       function: changesSummary || `${a.type || 'Amendment'} Amendment`,
       country: a.country || '',
       clientName: a.clientName || '',
-      assignee: '',  // no server-side assignee — SourceTable renders "Assign me"
-      assigneeEmail: '',
+      assignee: synth?.name || '',
+      assigneeEmail: synth?.email || '',
+      assigneeIsSynthetic: !!synth,
       createdAt: a.createdAt || '',
       updatedAt: a.updatedAt || a.createdAt || '',
       status: a.displayStatus || { label: 'Amendment', severity: 'active', color: '#1d4ed8' },
@@ -436,17 +509,24 @@ export function normalizeRedlines(items = [], slaConfig = null) {
     const slaBreachStatus = sla.slaBreachStatus;
     const slaWindowMs = sla.slaWindowMs;
 
+    // Same synthetic-owner pattern as amendments. Country comes from
+    // r.countryCode first; falls back to the first listed country for
+    // template redlines that span several.
+    const country = r.countryCode || (r.countries?.[0] || '');
+    const synth = syntheticOwnerForCountry(country, r.id);
+
     return {
       id: String(r.id || ''),
       source: 'redlines',
       subject,
       function: `${typeLabel} Redline${r.countries?.length ? ' · ' + r.countries.join(', ') : ''}`,
-      country: r.countryCode || (r.countries?.[0] || ''),
+      country,
       // Client Name column: always the creating org (template redlines) or
       // the employee's employer org if available.
       clientName: r.orgName || '',
-      assignee: '',  // no server-side assignee — SourceTable renders "Assign me"
-      assigneeEmail: '',
+      assignee: synth?.name || '',
+      assigneeEmail: synth?.email || '',
+      assigneeIsSynthetic: !!synth,
       createdAt: r.createdAt || '',
       updatedAt: r.updatedAt || r.createdAt || '',
       status: r.displayStatus || { label: 'Redline Review', severity: 'warning', color: '#ed8d00' },
@@ -480,6 +560,10 @@ export function normalizeIncentivePlans(items = [], slaConfig = null) {
       pausedMs: p.isPaused ? pausedMs : null,
       pausedAt: p.pausedAt || null,
     });
+    // No upstream assignee — synthesize from country owners (mirrors
+    // amendments / redlines).
+    const synth = syntheticOwnerForCountry(p.country, p.id);
+
     return {
       id: String(p.id || ''),
       source: 'incentive_plans',
@@ -490,8 +574,9 @@ export function normalizeIncentivePlans(items = [], slaConfig = null) {
       function: 'Incentive Plan Preparation',
       country: p.country || '',
       clientName: p.orgName || '',
-      assignee: '',         // upstream has none — country-based scope
-      assigneeEmail: '',
+      assignee: synth?.name || '',
+      assigneeEmail: synth?.email || '',
+      assigneeIsSynthetic: !!synth,
       startDate: p.startDate || '',
       createdAt: p.createdAt || '',
       updatedAt: p.updatedAt || p.createdAt || '',
