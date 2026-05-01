@@ -523,23 +523,32 @@ function isOffboardingActionable(t) {
  * Fetches all actionable EOR termination cases from the admin API.
  *
  * Strategy:
- *   1. First request sets `sortBy=createdAt&sort=DESC` AND filters to
- *      the upstream-actionable status values (status[]=AWAITING_TRIAGE
- *      &status[]=PROCESSING). Cursor pages inherit the filter from the
- *      initial request — confirmed by the same convention sortBy uses.
+ *   1. Run one cursor stream PER actionable status (TRIAGE, PROCESSING)
+ *      in parallel via Promise.all. Each stream pins the filter on the
+ *      initial request (?status[]=X&sortBy=createdAt&sort=DESC) and
+ *      walks its own cursor. The upstream cursor inherits the filter
+ *      from the initial request — same convention sortBy uses.
  *   2. Apply the flow-step matrix client-side per page (excluded steps
  *      like AwaitingDepositConfirmation are filtered locally; upstream
  *      doesn't expose a flow-step filter param). Track raw status
  *      counts as we go so the route handler can surface them to the UI.
- *   3. Empty-page early-stop is now defensive only: with the server
- *      filter in place, every page returned is already actionable, so
- *      empty pages are rare. 20 in a row reliably signals "drained".
+ *   3. Empty-page early-stop is per-stream and defensive only: with
+ *      the server filter, every page in a stream is already in the
+ *      actionable status, so empty pages mean "matrix dropped all
+ *      records on this page" (excluded flow steps clustered late in
+ *      the lifecycle). 20 in a row reliably signals "drained".
+ *   4. Merge the streams; dedupe by id (defensive — the two statuses
+ *      are disjoint sets upstream).
  *
- * The previous strategy (createdAt DESC + 200-page empty-stop, no
- * server filter) had a correctness bug: ~400 PROCESSING records older
- * than the early-stop horizon were silently dropped every cycle.
- * Server-side filtering scans the full actionable set (~2,640 records,
- * ~53 pages) in ~50s instead of the prior 17 minutes for a partial set.
+ * Wall time is now max(stream durations) instead of their sum, since
+ * the streams overlap. PROCESSING is the larger set (~1,728 records,
+ * ~35 pages) so it dominates: total scan ≈ 35 × ~1.5s/page ≈ 52s.
+ *
+ * The previous strategy (single createdAt DESC stream + 200-page
+ * empty-stop, no server filter) had a correctness bug: ~400 older
+ * PROCESSING records past the horizon were silently dropped every
+ * cycle. The server-side per-status filter walks the full actionable
+ * set in ~52s instead of ~17 minutes for a partial set.
  *
  * Per-type rules applied via isOffboardingActionable:
  *   Termination          → status in (AWAITING_TRIAGE, PROCESSING)
@@ -552,83 +561,111 @@ function isOffboardingActionable(t) {
  * panel header ("X actionable of Y total open: A triage / B processing").
  */
 export async function listOffboardingCases() {
-  const kept = [];
+  const statusCounts = {};                  // raw upstream distribution (merged across streams)
   const seen = new Set();
-  const statusCounts = {};                  // raw upstream distribution
+  const kept = [];
   let serverTotal = null;
-  let page = 0;
-  let scanned = 0;
-  let emptyRun = 0;
+  let totalScanned = 0;
+  let totalPages = 0;
   let mode = 'admin-scan';
   const startedAt = Date.now();
-  // Server-side filter to the two upstream-actionable values. Drops the
-  // haystack from ~71,300 records to ~2,640 (~53 pages) and — more
-  // importantly — closes a correctness gap: the previous unfiltered scan
-  // sorted createdAt DESC and stopped after 200 (now 20) empty pages,
-  // which left ~400 older PROCESSING records past the early-stop horizon
-  // unseen by the queue (live audit 2026-05-01 confirmed only 1,336 of
-  // 1,728 upstream PROCESSING records were reaching the matrix). The
-  // filter is the upstream's own enum: AWAITING_PTO and any other
-  // candidate the matrix doesn't accept either return HTTP 400 from the
-  // Joi validator (see comment block above) — so this filter is the
-  // strict superset of the actionable matrix.
-  const initialQs = 'limit=50&sortBy=createdAt&sort=DESC'
-    + OFFBOARDING_ACTIONABLE_STATUSES.map(s => `&status%5B%5D=${s}`).join('');
 
   function recordStatus(t) {
     const s = (t?.status || '').toUpperCase() || '_UNKNOWN';
     statusCounts[s] = (statusCounts[s] || 0) + 1;
   }
 
+  // Walk one cursor stream filtered to a single status. Each call is
+  // self-contained (its own page/cursor/empty-run state) so multiple can
+  // run in parallel via Promise.all without stepping on each other.
+  // Returns { kept, scanned, pages, statusTotal } — the caller merges.
+  async function scanOneStatus(status) {
+    const local = { kept: [], scanned: 0, pages: 0, statusTotal: null };
+    const initialQs = `limit=50&sortBy=createdAt&sort=DESC&status%5B%5D=${status}`;
+    let cursor = null;
+    let page = 0;
+    let emptyRun = 0;
+    for (; page < OFFBOARDING_MAX_PAGES; page++) {
+      const qs = cursor ? `cursor=${encodeURIComponent(cursor)}` : initialQs;
+      const res = await deelFetch(`/admin/eor/terminations_v3?${qs}`);
+      if (local.statusTotal === null) local.statusTotal = res?.count?.total ?? null;
+      let keptThisPage = 0;
+      for (const t of res?.terminations || []) {
+        local.scanned++;
+        recordStatus(t);
+        if (!isOffboardingActionable(t)) continue;
+        local.kept.push(t);
+        keptThisPage++;
+      }
+      if (keptThisPage === 0) emptyRun++; else emptyRun = 0;
+      cursor = res?.cursor || null;
+      if (!cursor) break;
+      if (emptyRun >= OFFBOARDING_EMPTY_PAGE_STOP) {
+        console.log(`[offboarding] early-stop on status=${status}: ${OFFBOARDING_EMPTY_PAGE_STOP} empty pages in a row at page ${page + 1}`);
+        break;
+      }
+    }
+    local.pages = page + 1;
+    if (page >= OFFBOARDING_MAX_PAGES) {
+      console.warn(`[offboarding] hit OFFBOARDING_MAX_PAGES on status=${status} — may be missing records`);
+    }
+    return local;
+  }
+
   if (!DEEL_ADMIN_TOKEN) {
     // No admin JWT: the REST v2 token can't paginate /admin/* endpoints.
-    // Fall back to single default page and apply the matrix client-side.
+    // Fall back to a single default page (still filtered) and apply matrix.
     mode = 'rest-v2-fallback';
+    const initialQs = 'limit=50&sortBy=createdAt&sort=DESC'
+      + OFFBOARDING_ACTIONABLE_STATUSES.map(s => `&status%5B%5D=${s}`).join('');
     const res = await deelFetch(`/admin/eor/terminations_v3?${initialQs}`);
     serverTotal = res?.count?.total ?? null;
     for (const t of res?.terminations || []) {
-      scanned++;
+      totalScanned++;
       recordStatus(t);
       if (seen.has(t.id)) continue;
       if (!isOffboardingActionable(t)) continue;
       seen.add(t.id);
       kept.push(t);
     }
-    console.log(`[offboarding] mode=${mode}, scanned ${scanned}, kept ${kept.length} (server total=${serverTotal}, statuses=${JSON.stringify(statusCounts)})`);
+    console.log(`[offboarding] mode=${mode}, scanned ${totalScanned}, kept ${kept.length} (server total=${serverTotal}, statuses=${JSON.stringify(statusCounts)})`);
   } else {
-    // Admin JWT present: scan pages unfiltered (sorted createdAt DESC),
-    // apply matrix client-side, early-stop on a long empty-page run.
-    let cursor = null;
-    for (; page < OFFBOARDING_MAX_PAGES; page++) {
-      const qs = cursor ? `cursor=${encodeURIComponent(cursor)}` : initialQs;
-      const res = await deelFetch(`/admin/eor/terminations_v3?${qs}`);
-      if (serverTotal === null) serverTotal = res?.count?.total ?? null;
-
-      let keptThisPage = 0;
-      for (const t of res?.terminations || []) {
-        scanned++;
-        recordStatus(t);
+    // Admin JWT present: run one cursor stream per actionable status in
+    // parallel, then merge + dedupe by id. Since the two statuses are
+    // disjoint sets upstream, dedup is defensive only — but cheap.
+    // Wall time becomes max(stream_durations) instead of their sum,
+    // cutting a ~80s scan to roughly the longer stream's duration
+    // (~52s for the PROCESSING set on the live cohort, 2026-05-01).
+    const results = await Promise.all(
+      OFFBOARDING_ACTIONABLE_STATUSES.map(s => scanOneStatus(s))
+    );
+    let serverTotalSum = 0;
+    let everSawTotal = false;
+    for (const r of results) {
+      totalScanned += r.scanned;
+      totalPages += r.pages;
+      if (Number.isFinite(r.statusTotal)) {
+        serverTotalSum += r.statusTotal;
+        everSawTotal = true;
+      }
+      for (const t of r.kept) {
         if (seen.has(t.id)) continue;
-        if (!isOffboardingActionable(t)) continue;
         seen.add(t.id);
         kept.push(t);
-        keptThisPage++;
-      }
-
-      if (keptThisPage === 0) emptyRun++; else emptyRun = 0;
-      cursor = res?.cursor || null;
-      if (!cursor) break;
-      if (emptyRun >= OFFBOARDING_EMPTY_PAGE_STOP) {
-        console.log(`[offboarding] early-stop: ${OFFBOARDING_EMPTY_PAGE_STOP} empty pages in a row at page ${page + 1}`);
-        break;
       }
     }
-    if (page >= OFFBOARDING_MAX_PAGES) {
-      console.warn(`[offboarding] hit OFFBOARDING_MAX_PAGES (${OFFBOARDING_MAX_PAGES}) — may be missing records`);
-    }
+    // serverTotal here is the sum of upstream count.total per actionable
+    // status — the "actionable upstream" count, not the global 71k+ total
+    // (which was meaningless once we filter). Surface it so the panel
+    // header can read "kept N of Y upstream-actionable".
+    serverTotal = everSawTotal ? serverTotalSum : null;
     const elapsed = Math.round((Date.now() - startedAt) / 1000);
-    console.log(`[offboarding] mode=${mode}, pages=${page + 1}, scanned=${scanned}, kept=${kept.length}, elapsed=${elapsed}s (server total=${serverTotal}, statuses=${JSON.stringify(statusCounts)})`);
+    console.log(`[offboarding] mode=${mode}, parallel-by-status streams=${results.length}, totalPages=${totalPages}, totalScanned=${totalScanned}, kept=${kept.length}, elapsed=${elapsed}s (upstream-actionable total=${serverTotal}, statuses=${JSON.stringify(statusCounts)})`);
   }
+  // Backwards-compat shims — the caller reads `pages` and `scanned`
+  // off the result. Map the merged totals so both shapes work.
+  const page = Math.max(0, totalPages - 1);
+  const scanned = totalScanned;
 
   const mapped = kept.map(c => ({
     id: c.id,                                         // termination ID (e.g. 165810)

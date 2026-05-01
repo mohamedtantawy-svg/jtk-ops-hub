@@ -14,22 +14,21 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-// 2026-05-01 redesign: badge tracks DATA FRESHNESS, not poll-in-flight state.
-// As long as the freshest source completed within the last `STALE_AFTER_MS`
-// the user has actionable data — flipping the badge to amber/orange every
-// time a background poll fires (which can take 30–60s for offboarding) is
-// noise. The badge only goes amber/red when the data itself is genuinely
-// out of date.
+// 2026-05-01 redesign: badge tracks DATA FRESHNESS per source, not a single
+// aggregate. Freshness scoring (per-source 7/10-min thresholds, "stale-but-
+// refreshing → fresh" carve-out) lives in `useQueueUnifiedSync` so the
+// counts arrive here pre-computed in `meta` (freshSourceCount, anyStale,
+// allFailing, etc.). This component just renders the state machine on top.
 //
 // Hover still shows the live per-source breakdown so an HRX lead can
 // see "Workbench refreshing 12s — last ok 3 min ago" while the badge
 // itself stays green. The dropdown has the granular state; the badge
 // has the headline.
-const STALE_AFTER_MS = 10 * 60 * 1000; // hard threshold — data is now stale
-const WARN_AFTER_MS  = 7  * 60 * 1000; // soft threshold — getting close
-// We still need a stall threshold so the *dropdown* can offer a Force
-// Resync action when something's actually hung, but it no longer drives
-// the badge color/state when the freshest source is recent.
+//
+// The only threshold this file owns is the in-flight stall: if a refresh
+// has been running longer than STALL_AFTER_MS, the dropdown surfaces a
+// Force Resync button so the user can abandon a hung scan. It no longer
+// drives the badge color when fresh sources exist.
 const STALL_AFTER_MS = 50 * 1000;
 
 function formatAgo(ts, now) {
@@ -57,12 +56,36 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
     return () => document.removeEventListener('mousedown', h);
   }, [open]);
 
-  // Derive state. Precedence: Offline > Stalled > Error > Refreshing > Stale > Live > Waiting.
-  const { lastSyncAt, oldestSyncAt, isAnyRefreshing, sourceErrors, isOffline, hasEverSynced } = meta;
+  // Derive state. Precedence: Offline > First sync > All stale > All failing >
+  //                          Some stale (partial) > Some aging > Live.
+  // Freshness is now per-source: a stale source that's currently refreshing
+  // counts as fresh ("the system is fixing it"), so the badge stays green
+  // while a background offboarding poll runs. The only states that break
+  // green are genuine red flags — every source stale-and-not-refreshing,
+  // every source erroring, no network — or a mixed state where partial
+  // staleness/failure survives without a refresh in flight.
+  const {
+    lastSyncAt, oldestSyncAt, isAnyRefreshing, sourceErrors, isOffline, hasEverSynced,
+    totalSources = 0,
+    freshSourceCount = 0,
+    agingSourceCount = 0,
+    staleSourceCount = 0,
+    refreshingStaleSourceCount = 0,
+    staleSources = [],
+    agingSources = [],
+    anyStale = false,
+    anyAging = false,
+    allStale = false,
+    allFailing = false,
+  } = meta;
   const now = nowTick || Date.now();
-  const ageMs = oldestSyncAt ? now - oldestSyncAt : null;
-  const isStale = ageMs != null && ageMs > STALE_AFTER_MS;
-  const isWarn  = ageMs != null && ageMs > WARN_AFTER_MS && !isStale;
+  const someFailing = (sourceErrors?.length || 0) > 0 && !allFailing;
+  // Pick the right "synced N min ago" timestamp for the badge label —
+  // when only some sources are stale, the freshest source's timestamp
+  // is what's actually on screen for the user. If everything is in the
+  // window, fall back to the oldest so the label is honest about drift.
+  const staleMixed = anyStale || anyAging;
+  const labelTs = staleMixed ? lastSyncAt : oldestSyncAt;
 
   // ── Refresh-running heartbeat ──────────────────────────────────────────
   // Track when the current refresh started so the indicator can show
@@ -121,28 +144,32 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
     return `${Math.floor(sec / 60)}m ${sec % 60}s`;
   };
 
-  // ── Freshness-first state machine (2026-05-01 redesign) ────────────────
-  // Old behaviour: any in-flight poll → amber "Syncing 12s" badge, even
-  // when the user already had 1-min-old data. That created panic-clicks
-  // and made the page feel broken whenever the offboarding scan ran in
-  // the background. Concretely, an HR lead with 3-min-old cached data
-  // saw the badge flip amber for 60s every poll cycle, then back to
-  // green, then amber, then green — 12× per hour. Awful.
+  // ── Per-source freshness state machine (2026-05-01 second pass) ────────
+  // Earlier pass already moved off "any-in-flight = amber" — but it still
+  // drove staleness from a single `oldestSyncAt` aggregate. That meant a
+  // 15-min-old offboarding source flipped the whole badge red even when
+  // 6 of 7 other sources were synced inside the 2-min mark and offboarding
+  // itself was already refreshing in the background.
   //
-  // New behaviour: the badge follows the *freshest* successful sync time.
-  // If anything completed in the last STALE_AFTER_MS window, the user
-  // has actionable data — show green "Live · synced N min ago", no
-  // matter what's happening in the background. Hover the badge to see
-  // the live per-source breakdown (Workbench refreshing 12s — last ok
-  // 3 min ago) for users who actually want the granular state.
+  // New behaviour scores each source independently against the same
+  // thresholds and reads the mix:
+  //   • Every source fresh (or stale-but-refreshing) → green "Live".
+  //     A refresh in flight on a stale source is the system fixing
+  //     itself; show live, don't panic.
+  //   • Some sources >10 min and not refreshing, but ≥1 fresh → soft
+  //     amber "Live · M of N synced". The user still has actionable
+  //     data on screen and the dropdown shows which source is behind.
+  //   • Every source >10 min and none refreshing → red "Stale".
+  //   • Some sources erroring, others ok → soft amber "X failing".
+  //     Click the row in the dropdown to retry.
+  //   • Every source erroring → red "All sources failing".
+  //   • 7–10 min drift on at least one source, none stale → soft amber
+  //     "Aging".
   //
-  // Only the genuine red flags break the green badge:
-  //   • Offline (no network)
-  //   • Stale (no successful sync inside the 10-min window)
-  //   • All sources failing (every source returned an error)
-  // Background polls — even a 60-second offboarding scan — leave the
-  // badge green as long as the cache is fresh. The dropdown still
-  // surfaces "Syncing Xs" per source for users who hover.
+  // Background polls — even a 80-second offboarding scan that started 15
+  // min after the last cache hit — leave the badge green as long as the
+  // refresh is in flight. The dot pulses to signal "working in the
+  // background"; hover the badge to see which source.
   if (isOffline) {
     state = 'offline';
     label = 'Offline';
@@ -170,49 +197,77 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
     bg = '#fff8e6';
     border = '#ffe27c';
     textColor = '#92400e';
-  } else if (isStale) {
-    // Past the 10-min hard threshold AND not currently refreshing → red.
-    // If a poll is in-flight while stale, the next branch handles that.
-    state = isAnyRefreshing ? 'stale-refreshing' : 'stale';
-    label = `Synced ${formatAgo(oldestSyncAt, now)}`;
-    sublabel = isAnyRefreshing
-      ? `refreshing ${formatRunning(refreshRunningMs)}…`
-      : 'stale — click to refresh';
-    dotColor = '#d42d35';
-    bg = '#fef2f2';
-    border = '#fca5a5';
-    textColor = '#991b1b';
-  } else if (sourceErrors?.length === Object.keys(sources || {}).length && (sourceErrors?.length || 0) > 0) {
-    // Every source failed — escalate to red regardless of freshness, since
-    // the cache is about to drift and the user can't recover by waiting.
-    // Partial failures stay green (they don't invalidate the cache).
+  } else if (allFailing) {
+    // Every source failed — escalate to red regardless of freshness,
+    // since the cache is about to drift and the user can't recover by
+    // waiting.
     state = 'error';
     label = `${sourceErrors.length} source${sourceErrors.length > 1 ? 's' : ''} failing`;
-    sublabel = hasEverSynced ? `last ok ${formatAgo(oldestSyncAt, now)}` : 'retry';
+    sublabel = hasEverSynced ? `last ok ${formatAgo(lastSyncAt, now)}` : 'retry';
     dotColor = '#d42d35';
     bg = '#fef2f2';
     border = '#fca5a5';
     textColor = '#991b1b';
-  } else if (isWarn) {
-    // 7–10 min old. Soft warning so the user notices drift before it's
-    // actionable. If a refresh is in flight, lean back toward green
-    // because relief is on the way.
+  } else if (allStale && !isAnyRefreshing) {
+    // Every source past the 10-min mark AND nothing refreshing → red.
+    // (allStale is computed AFTER the stale-but-refreshing carve-out, so
+    // a single source stuck in a slow refresh leaves us in the partial
+    // branch below, not here.)
+    state = 'stale';
+    label = `Synced ${formatAgo(oldestSyncAt, now)}`;
+    sublabel = 'stale — click to refresh';
+    dotColor = '#d42d35';
+    bg = '#fef2f2';
+    border = '#fca5a5';
+    textColor = '#991b1b';
+  } else if (anyStale) {
+    // Some sources >10 min and not refreshing, but at least one source
+    // is fresh. Soft amber — actionable data is on screen; the dropdown
+    // surfaces which source is behind so the user can retry that one.
+    state = 'partial-stale';
+    const n = staleSourceCount;
+    const labels = staleSources.slice(0, 2).map(s => s.label).join(', ');
+    label = `${n} stale source${n > 1 ? 's' : ''}`;
+    sublabel = staleSources.length
+      ? `${labels}${staleSources.length > 2 ? ` +${staleSources.length - 2}` : ''} — others live`
+      : 'others live';
+    dotColor = '#ed8d00';
+    bg = '#fff8e6';
+    border = '#ffe27c';
+    textColor = '#92400e';
+  } else if (someFailing) {
+    // Partial failure: ≥1 source erroring, ≥1 source ok. Soft amber so
+    // the user notices, but the queue still has live data from the
+    // healthy sources.
+    state = 'partial-error';
+    const n = sourceErrors.length;
+    label = `${n} source${n > 1 ? 's' : ''} failing`;
+    sublabel = `others live · synced ${formatAgo(lastSyncAt, now)}`;
+    dotColor = '#ed8d00';
+    bg = '#fff8e6';
+    border = '#ffe27c';
+    textColor = '#92400e';
+  } else if (anyAging) {
+    // 7–10 min drift on at least one source, none stale. Surface as
+    // "aging" so users notice drift before it's actionable. If a
+    // refresh is in flight, the sublabel hints at relief.
     state = 'aging';
     label = `Synced ${formatAgo(oldestSyncAt, now)}`;
     sublabel = isAnyRefreshing
       ? `refreshing ${formatRunning(refreshRunningMs)}…`
-      : 'aging — refresh soon';
+      : `${agingSourceCount} aging — refresh soon`;
     dotColor = '#ed8d00';
     bg = '#fff8e6';
     border = '#ffe27c';
     textColor = '#92400e';
   } else {
-    // ✨ Default green path. We're inside the freshness window — even if
-    // a background poll is currently running. Show "Live · synced N min
-    // ago" and let the dropdown carry the per-source detail.
+    // ✨ Default green path. Every source either fresh or stale-but-
+    // refreshing. Background polls (even slow ones) live here.
     state = 'live';
     label = 'Live';
-    sublabel = `synced ${formatAgo(oldestSyncAt, now)}`;
+    sublabel = refreshingStaleSourceCount > 0
+      ? `${refreshingStaleSourceCount} refreshing in background`
+      : `synced ${formatAgo(labelTs, now)}`;
     dotColor = '#29811e';
     bg = '#e8f5e9';
     border = '#bbf7d0';
