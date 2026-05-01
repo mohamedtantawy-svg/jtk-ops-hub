@@ -2,10 +2,19 @@
 // All fetch calls go through this wrapper so we can handle auth, errors, and
 // base-URL configuration in one place. Includes retry with backoff for
 // transient failures (network errors, 5xx).
+//
+// Hard timeout — every request gets a 90s ceiling by default (override via
+// `timeoutMs`). This prevents the symptom that triggered the 2026-05-01
+// performance overhaul: queue fetches that hung silently for 5+ minutes,
+// keeping the UI's loading spinner alive forever because the underlying
+// Promise never settled. With a timeout, a hung request fails fast,
+// inFlightRef in the data hooks clears in `finally`, and the sync state
+// machine surfaces a "stalled / retry" UI instead of an infinite spinner.
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || '/api/v1';
 const MAX_RETRIES = 2; // up to 3 total attempts
 const BASE_DELAY = 600; // ms
+const DEFAULT_TIMEOUT_MS = 90_000; // 90s — covers cold-cache scans like terminations_v3 ~600 pages
 
 /**
  * Thin wrapper around fetch that:
@@ -14,6 +23,10 @@ const BASE_DELAY = 600; // ms
  * - Auto-parses JSON responses
  * - Retries on network errors and 5xx (up to 3 attempts)
  * - Throws on non-2xx with a structured error
+ * - Enforces a hard timeout (default 90s) so a hung upstream can't keep
+ *   the FE's loading state pinned forever. Caller can override via
+ *   `options.timeoutMs` (e.g. 30s for routine ticks, longer for one-off
+ *   bulk pulls).
  */
 export async function apiFetch(path, options = {}) {
   let token = null;
@@ -25,9 +38,24 @@ export async function apiFetch(path, options = {}) {
     ...(options.headers || {}),
   };
 
+  const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+    ? options.timeoutMs
+    : DEFAULT_TIMEOUT_MS;
+
   let lastError;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    // Per-attempt timeout controller — chained to caller's signal so an
+    // outer abort still wins, but the timeout fires independently if the
+    // upstream hangs without responding.
+    const timeoutCtrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutId = timeoutCtrl ? setTimeout(() => timeoutCtrl.abort(), timeoutMs) : null;
+    if (options.signal && timeoutCtrl) {
+      if (options.signal.aborted) timeoutCtrl.abort();
+      else options.signal.addEventListener('abort', () => timeoutCtrl.abort(), { once: true });
+    }
+    const effectiveSignal = timeoutCtrl ? timeoutCtrl.signal : options.signal;
+
     try {
       // Early-out if an upstream abort fired before we even tried.
       if (options.signal?.aborted) {
@@ -36,7 +64,7 @@ export async function apiFetch(path, options = {}) {
       const res = await fetch(`${API_BASE}${path}`, {
         ...options,
         headers,
-        signal: options.signal,
+        signal: effectiveSignal,
       });
 
       // 204 No Content
@@ -99,6 +127,19 @@ export async function apiFetch(path, options = {}) {
     } catch (err) {
       lastError = err;
 
+      // Distinguish "caller aborted" from "we timed out". The fetch() call
+      // throws AbortError in BOTH cases — when timeoutCtrl fires we want to
+      // surface a clear timeout (not a generic abort), and we never retry on
+      // timeout because the next attempt would just wait the full window
+      // again with the same upstream.
+      const isTimeout = err.name === 'AbortError' && timeoutCtrl?.signal.aborted && !options.signal?.aborted;
+      if (isTimeout) {
+        const e = new Error(`Request to ${path} timed out after ${timeoutMs}ms`);
+        e.name = 'TimeoutError';
+        e.timeout = true;
+        throw e;
+      }
+
       // Never retry deliberate aborts — caller wants to bail.
       if (err.name === 'AbortError') throw err;
 
@@ -111,6 +152,8 @@ export async function apiFetch(path, options = {}) {
         await new Promise(r => setTimeout(r, delay));
         continue;
       }
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
     }
   }
 

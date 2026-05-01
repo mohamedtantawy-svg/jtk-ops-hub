@@ -9,11 +9,13 @@ import { listIncentivePlans, isDeelConfigured } from '../../../../../../src/lib/
 import { cacheGet, cacheSet } from '../../../../../../src/lib/server-cache';
 import { scopeIncentivePlans } from '../../../../../../src/lib/queue-scoping';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
+import { buildWithTimeout } from '../../../../../../src/lib/scan-timeout';
 
 const DEFAULT_STATUSES = ['PENDING_IP_PREPARATION'];
 const CACHE_KEY = 'deel_incentive_plans_v1';
 const CACHE_TTL = 5 * 60 * 1000;     // 5 minutes
 const STALE_TTL = 30 * 60 * 1000;    // 30 minutes
+const SCAN_TIMEOUT_MS = 45_000;
 
 function scoped(data, user) {
   if (!data?.items) return data;
@@ -49,18 +51,30 @@ export async function GET(req) {
 
     let responseData;
     try {
-      const result = await listIncentivePlans({ status: statuses });
-      const items = result.items.map(r => ({
-        ...r,
-        displayStatus: deriveIncentivePlanStatus(r),
-      }));
-      responseData = { items, total: result.total };
-      cacheSet(cacheKeyFull, responseData);
+      const r = await buildWithTimeout(cacheKeyFull, async () => {
+        const result = await listIncentivePlans({ status: statuses });
+        const items = result.items.map(rr => ({
+          ...rr,
+          displayStatus: deriveIncentivePlanStatus(rr),
+        }));
+        return { items, total: result.total };
+      }, { timeoutMs: SCAN_TIMEOUT_MS, staleTtl: STALE_TTL });
+      if (r.result == null) {
+        return NextResponse.json(
+          { error: 'Incentive plans scan timed out — please retry', _timeout: true },
+          { status: 504 },
+        );
+      }
+      if (r.timedOut) {
+        console.warn('[incentive-plans] Live build exceeded %dms — serving stale cache', SCAN_TIMEOUT_MS);
+        return NextResponse.json({ ...scoped(r.result, user), _stale: true, _stale_reason: 'timeout' });
+      }
+      responseData = r.result;
     } catch (fetchErr) {
       const stale = cacheGet(cacheKeyFull, STALE_TTL);
       if (stale) {
         console.warn('[incentive-plans] Fetch failed, returning stale cache:', fetchErr.message);
-        return NextResponse.json({ ...scoped(stale, user), _stale: true });
+        return NextResponse.json({ ...scoped(stale, user), _stale: true, _stale_reason: 'error' });
       }
       throw fetchErr;
     }

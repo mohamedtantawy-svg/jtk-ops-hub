@@ -1,8 +1,13 @@
 // ── UnifiedSyncButton ───────────────────────────────────────────────────────
 // Single sync-status control for the Queue header. One button, always
 // visible, gives you:
-//   • State at a glance (Live / Syncing / Offline / Stale / Error)
+//   • State at a glance (Live / Syncing / Stalled / Offline / Stale / Error)
 //   • "Synced N min ago" label driven by the parent's nowTick
+//   • Live "Syncing for Xs" counter while a refresh is in flight so the
+//     spinner never feels frozen
+//   • A `stalled` state if a refresh runs longer than STALL_AFTER_MS — the
+//     same dropdown surfaces a Force Resync button so the user is never
+//     stuck behind a hung scan
 //   • Click → refresh all sources (disabled while a refresh is in flight)
 //   • Hover → per-source breakdown with individual Retry buttons
 // ─────────────────────────────────────────────────────────────────────────────
@@ -14,6 +19,11 @@ import { useEffect, useRef, useState } from 'react';
 // resilience audit's recommended thresholds.
 const WARN_AFTER_MS  = 5  * 60 * 1000;
 const STALE_AFTER_MS = 10 * 60 * 1000;
+// If a refresh has been running this long without finishing, flip the
+// indicator to "stalled" and surface an actionable retry. Matches the
+// server-side scan timeout (45s) plus a small buffer for the response
+// to traverse the FE.
+const STALL_AFTER_MS = 50 * 1000;
 
 function formatAgo(ts, now) {
   if (!ts) return 'never';
@@ -40,12 +50,37 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
     return () => document.removeEventListener('mousedown', h);
   }, [open]);
 
-  // Derive state. Precedence: Offline > Error > Refreshing > Stale > Live > Waiting.
+  // Derive state. Precedence: Offline > Stalled > Error > Refreshing > Stale > Live > Waiting.
   const { lastSyncAt, oldestSyncAt, isAnyRefreshing, sourceErrors, isOffline, hasEverSynced } = meta;
   const now = nowTick || Date.now();
   const ageMs = oldestSyncAt ? now - oldestSyncAt : null;
   const isStale = ageMs != null && ageMs > STALE_AFTER_MS;
   const isWarn  = ageMs != null && ageMs > WARN_AFTER_MS && !isStale;
+
+  // ── Refresh-running heartbeat ──────────────────────────────────────────
+  // Track when the current refresh started so the indicator can show
+  // "Syncing 12s" instead of an opaque spinner, and so we can flip to
+  // "stalled" when something is clearly hung. We can't read the start
+  // timestamp from `meta` directly because it's derived per-render — so
+  // the button stamps it locally the moment isAnyRefreshing flips on.
+  const refreshStartedAtRef = useRef(null);
+  const [refreshRunningMs, setRefreshRunningMs] = useState(0);
+  useEffect(() => {
+    if (isAnyRefreshing) {
+      if (refreshStartedAtRef.current == null) refreshStartedAtRef.current = Date.now();
+      // 1s heartbeat while a refresh is in-flight — keeps the "Syncing 12s"
+      // counter alive without coupling to the parent's 30s nowTick.
+      const id = setInterval(() => {
+        if (refreshStartedAtRef.current != null) {
+          setRefreshRunningMs(Date.now() - refreshStartedAtRef.current);
+        }
+      }, 1000);
+      return () => clearInterval(id);
+    }
+    refreshStartedAtRef.current = null;
+    setRefreshRunningMs(0);
+  }, [isAnyRefreshing]);
+  const isStalled = isAnyRefreshing && refreshRunningMs > STALL_AFTER_MS;
 
   let state = 'live';
   let label = 'Synced';
@@ -55,6 +90,14 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
   let border = '#bbf7d0';
   let textColor = '#166534';
 
+  // Format "Xs" / "Xm Ys" for the running counter — the eye picks this
+  // up faster than ms or "12345 ms".
+  const formatRunning = (ms) => {
+    const sec = Math.max(0, Math.floor(ms / 1000));
+    if (sec < 60) return `${sec}s`;
+    return `${Math.floor(sec / 60)}m ${sec % 60}s`;
+  };
+
   if (isOffline) {
     state = 'offline';
     label = 'Offline';
@@ -63,10 +106,20 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
     bg = '#f3f3f3';
     border = '#d5d5d5';
     textColor = '#616161';
+  } else if (isStalled) {
+    state = 'stalled';
+    label = `Sync stalled (${formatRunning(refreshRunningMs)})`;
+    sublabel = hasEverSynced
+      ? `cached ${formatAgo(oldestSyncAt, now)} · click Force resync`
+      : 'first sync taking longer than expected';
+    dotColor = '#d42d35';
+    bg = '#fef2f2';
+    border = '#fca5a5';
+    textColor = '#991b1b';
   } else if (isAnyRefreshing) {
     state = 'syncing';
-    label = 'Syncing…';
-    sublabel = hasEverSynced ? `last ${formatAgo(oldestSyncAt, now)}` : '';
+    label = `Syncing ${formatRunning(refreshRunningMs)}`;
+    sublabel = hasEverSynced ? `last ${formatAgo(oldestSyncAt, now)}` : 'first sync';
     dotColor = '#ed8d00';
     bg = '#fff8e6';
     border = '#ffe27c';
@@ -108,8 +161,12 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
     sublabel = '';
   }
 
+  // Allow forcing a refresh even when one is in flight if it has stalled —
+  // the user shouldn't be locked out of recovery just because a hung scan
+  // is still nominally "running". Otherwise honour the in-flight guard so
+  // the click doesn't spam the same refresh path.
   const handleClick = () => {
-    if (!isAnyRefreshing) onRefresh?.();
+    if (!isAnyRefreshing || isStalled) onRefresh?.();
   };
 
   return (
@@ -119,7 +176,7 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
         onMouseEnter={() => setOpen(true)}
         onFocus={() => setOpen(true)}
         onMouseLeave={() => { /* dismissal via outside click */ }}
-        disabled={isAnyRefreshing}
+        disabled={isAnyRefreshing && !isStalled}
         aria-label={`Sync status: ${label}${sublabel ? `, ${sublabel}` : ''}`}
         title={sublabel || label}
         style={{
@@ -128,7 +185,7 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
           padding: '0 12px', borderRadius: 128,
           border: `1px solid ${border}`, background: bg, color: textColor,
           fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
-          cursor: isAnyRefreshing ? 'wait' : 'pointer',
+          cursor: (isAnyRefreshing && !isStalled) ? 'wait' : 'pointer',
           transition: 'background .15s, border-color .15s',
         }}>
         <span
@@ -178,16 +235,17 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
             </span>
             <button
               onClick={onRefresh}
-              disabled={isAnyRefreshing}
+              disabled={isAnyRefreshing && !isStalled}
               style={{
                 padding: '3px 10px', borderRadius: 128,
-                border: '1px solid #e8e8e8', background: isAnyRefreshing ? '#f7f5f2' : 'white',
-                color: '#1b1b1b', fontSize: 11, fontWeight: 600,
-                cursor: isAnyRefreshing ? 'wait' : 'pointer',
+                border: `1px solid ${isStalled ? '#fca5a5' : '#e8e8e8'}`,
+                background: isStalled ? '#fef2f2' : (isAnyRefreshing ? '#f7f5f2' : 'white'),
+                color: isStalled ? '#991b1b' : '#1b1b1b', fontSize: 11, fontWeight: 600,
+                cursor: (isAnyRefreshing && !isStalled) ? 'wait' : 'pointer',
                 display: 'inline-flex', alignItems: 'center', gap: 4,
               }}>
-              <i className={isAnyRefreshing ? 'bi-arrow-clockwise spin' : 'bi-arrow-clockwise'} style={{ fontSize: 10 }} />
-              {isAnyRefreshing ? 'Syncing' : 'Refresh all'}
+              <i className={(isAnyRefreshing && !isStalled) ? 'bi-arrow-clockwise spin' : 'bi-arrow-clockwise'} style={{ fontSize: 10 }} />
+              {isStalled ? 'Force resync' : (isAnyRefreshing ? 'Syncing' : 'Refresh all')}
             </button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -195,6 +253,17 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
               <SourceRow key={src.id} source={src} now={now} />
             ))}
           </div>
+          {isStalled && (
+            <div style={{
+              marginTop: 6, padding: '6px 10px',
+              background: '#fef2f2', borderRadius: 8,
+              fontSize: 11, color: '#991b1b',
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              <i className="bi-exclamation-triangle-fill" style={{ fontSize: 11 }} />
+              A sync has been running for {formatRunning(refreshRunningMs)} — the server may be cold. Click <strong>Force resync</strong> to abandon and retry, or wait for it to recover on its own.
+            </div>
+          )}
           {isOffline && (
             <div style={{
               marginTop: 6, padding: '6px 10px',
