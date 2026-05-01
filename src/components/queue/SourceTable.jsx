@@ -326,14 +326,23 @@ export default function SourceTable({
   const hasMineSection = mineActive.length + minePaused.length > 0;
 
   // Flatten into a single virtual list. Section ordering:
-  //   1. Mine — Active   (no header — implicit "your queue")
+  //   1. Mine — Active   (header "MINE" when there are also Others/Paused sections)
   //   2. Mine — Paused   (header "MINE — PAUSED" only when minePaused exists)
   //   3. Others — Active (header "OTHERS" only when there's a Mine section above)
   //   4. Others — Paused (header "OTHERS — PAUSED" or "PAUSED" if no Mine)
+  // The 2026-05-01 agent audit found that the Mine — Active block lacked
+  // any heading while Mine — Paused and Others were both labeled, leaving
+  // an unbalanced visual hierarchy ("OTHERS (12)" appeared without a
+  // matching "MINE (3)" above the active rows). Add the symmetric header
+  // when there's anything below the Mine-active block to anchor against.
   // Each kind: 'header' | 'row' renders at ROW_HEIGHT so the windowing
   // math stays arithmetic.
   const virtualItems = useMemo(() => {
     const out = [];
+    const hasAnythingBelowMine = minePaused.length > 0 || othersActive.length > 0 || othersPaused.length > 0;
+    if (mineActive.length > 0 && hasAnythingBelowMine) {
+      out.push({ kind: 'header', tone: 'mine', label: 'MINE', count: mineActive.length });
+    }
     for (const r of mineActive) out.push({ kind: 'row', row: r });
     if (minePaused.length > 0) {
       out.push({ kind: 'header', tone: 'paused', label: hasMineSection ? 'MINE — PAUSED' : 'PAUSED', count: minePaused.length });
@@ -482,9 +491,16 @@ export default function SourceTable({
                   // (slightly lighter, neutral grey). Same 44px height so
                   // the virtualizer math stays uniform.
                   const isPausedHeader = it.tone === 'paused';
+                  const isMineHeader = it.tone === 'mine';
+                  // 3-tone palette: Paused (warm brown), Mine (subtle blue —
+                  // emphasizes the rows the viewer owns), Others (neutral
+                  // grey). Each band rests at 44px so the virtualizer's
+                  // arithmetic stays uniform.
                   const headerStyle = isPausedHeader
                     ? { color: '#6b6560', background: '#faf9f7', icon: 'bi-pause-circle-fill' }
-                    : { color: '#6b6560', background: '#f5f4f2', icon: 'bi-people' };
+                    : isMineHeader
+                      ? { color: '#1d4ed8', background: '#eff6ff', icon: 'bi-person-check-fill' }
+                      : { color: '#6b6560', background: '#f5f4f2', icon: 'bi-people' };
                   return (
                     <tr key={`section-band-${startIdx + i}`} style={{ height: ROW_HEIGHT }}>
                       <td colSpan={sectionColSpan} style={{ padding: '12px 16px', fontSize: 11, fontWeight: 700, color: headerStyle.color, letterSpacing: '.04em', background: headerStyle.background, borderTop: '1px solid #e8e8e8', borderBottom: '1px solid #e8e8e8' }}>
@@ -631,12 +647,18 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
       {/* Assignee — read-only mirror of the Deel-side HRX. The previous
           "Assign me" button only set local state, didn't persist anywhere
           (see Erwin/Celine feedback Apr 2026). Refer to the Deel-assigned
-          HRX; reassignment isn't supported on these queues. */}
-      <td style={tdStyle}>
+          HRX; reassignment isn't supported on these queues.
+          When `row.assigneeIsSynthetic === true` the assignee was synthesized from
+          COUNTRY_OWNERS rather than read from the upstream payload — show
+          a dotted underline + tooltip so the agent knows this is "country
+          owner" attribution rather than a real upstream assignment. The
+          2026-05-01 audit found that Trish couldn't tell synthetic from
+          real. */}
+      <td style={tdStyle} title={row.assignee ? (row.assigneeIsSynthetic ? `${row.assignee} — country owner (synthesized; no upstream assignee on this row)` : row.assignee) : 'Unassigned'}>
         {row.assignee ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
             <Avatar name={row.assignee} size="xs" />
-            <span style={{ fontSize: 11, color: '#1b1b1b', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 80 }}>
+            <span style={{ fontSize: 11, color: '#1b1b1b', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 80, borderBottom: row.assigneeIsSynthetic ? '1px dashed #9e9e9e' : 'none', paddingBottom: row.assigneeIsSynthetic ? 1 : 0 }}>
               {row.assignee.split(' ')[0]}
             </span>
           </div>

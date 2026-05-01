@@ -1354,7 +1354,10 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             return(<>
           <div style={{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:10}}>
             {[
-              {icon:'bi-inbox-fill',label:'Active Requests',value:activeRequestsCount,color:'var(--g)',sub:`avg ${teamAvg.toFixed(1)}`,tr:trend(),expandKey:'active-breakdown'},
+              // Active Requests sub-label is scope-aware so an agent sees
+              // "mine" rather than "avg 437.0" (the team-average string the
+              // 2026-05-01 audit found leaking onto Trish's Home).
+              {icon:'bi-inbox-fill',label:'Active Requests',value:activeRequestsCount,color:'var(--g)',sub:isOwnScope?'mine':isTeamScope?`team · avg ${teamAvg.toFixed(1)}`:`avg ${teamAvg.toFixed(1)}`,tr:trend(),expandKey:'active-breakdown'},
               {icon:'bi-calendar-event',label:'Meetings',value:todayMeetingsCount,color:'#1f74b3',sub:'today',nav:()=>setView('calendar')},
               {icon:'bi-kanban',label:'Projects',value:projectsAssignedCount,color:'#8b6dca',sub:'assigned',nav:()=>setView('projects')},
               {icon:'bi-exclamation-triangle-fill',label:'Escalations',value:myEscalationsCount,color:myEscalationsCount>0?'#d42d35':'#616161',alert:myEscalationsCount>0,nav:()=>{setSubFilter && setSubFilter('mine'); setView('escalations');},accent:myEscalationsCount>0?'#ffe2de':null,sub:'mine'},
