@@ -9,10 +9,16 @@ import { getIssueDescriptionsByKeys, isJiraConfigured } from '../../../../../../
 import { cacheGet, cacheSet } from '../../../../../../src/lib/server-cache';
 import { scopeOffboardingCases } from '../../../../../../src/lib/queue-scoping';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
+import { buildWithTimeout } from '../../../../../../src/lib/scan-timeout';
 
 const CACHE_KEY = 'deel_offboarding';
 const CACHE_TTL = 5 * 60 * 1000;    // fresh for 5 minutes
 const STALE_TTL = 60 * 60 * 1000;   // serve stale up to 60 minutes
+// terminations_v3 is the worst offender — ~600 cursor pages on cold
+// cache, each up to 40s. A 45-second user-facing ceiling keeps the FE's
+// loading spinner honest; the in-flight scan keeps running in the
+// background so the cache eventually refreshes for the next caller.
+const SCAN_TIMEOUT_MS = 45_000;
 
 // Assignee-based scoping per the user-spec: agents see terminations assigned
 // to them; TL / RM see their subtree (and country-matched unassigned cases);
@@ -45,13 +51,28 @@ export async function GET(req) {
 
     let result;
     try {
-      result = await buildOffboardingResult();
-      cacheSet(CACHE_KEY, result);
+      const r = await buildWithTimeout(CACHE_KEY, buildOffboardingResult, {
+        timeoutMs: SCAN_TIMEOUT_MS,
+        staleTtl: STALE_TTL,
+      });
+      if (r.result == null) {
+        // Cold cache + timeout — surface a clean error so the FE shows a
+        // retry button instead of an infinite spinner.
+        return NextResponse.json(
+          { error: 'Offboarding scan timed out and no cached data available — please retry', _timeout: true },
+          { status: 504 },
+        );
+      }
+      if (r.timedOut) {
+        console.warn('[offboarding] Live build exceeded %dms — serving stale cache', SCAN_TIMEOUT_MS);
+        return NextResponse.json({ ...scoped(r.result, user), _stale: true, _stale_reason: 'timeout' });
+      }
+      result = r.result;
     } catch (fetchErr) {
       const stale = cacheGet(CACHE_KEY, STALE_TTL);
       if (stale) {
         console.warn('[offboarding] Fetch failed, returning stale cache:', fetchErr.message);
-        return NextResponse.json({ ...scoped(stale, user), _stale: true });
+        return NextResponse.json({ ...scoped(stale, user), _stale: true, _stale_reason: 'error' });
       }
       throw fetchErr;
     }
