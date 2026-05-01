@@ -38,7 +38,23 @@ export const StatusBadge=memo(({status})=>{
   return <span title={STATUS_TOOLTIPS[status]||''} style={{...badgeBase,...s}}>{STATUS_LABELS[status]||status}</span>;
 });
 
-const fmtRemain=(rem)=>{if(rem<=0)return null;const h=Math.floor(rem/60),m=rem%60;return h>0?`${h}h${m>0?' '+m+'m':''}`:`${m}m`;};
+// Format `rem` (minutes) for the SLA pill. Caps long durations at days /
+// weeks / months / years so a 2-year-old ticket doesn't render as
+// "-14868h 22m" — past a few days the exact-hour count stops conveying
+// useful information and just clutters the row.
+const fmtRemain=(rem)=>{
+  if(!Number.isFinite(rem) || rem<=0) return null;
+  if (rem < 60) return `${rem}m`;
+  if (rem < 24 * 60) {
+    const h=Math.floor(rem/60), m=rem%60;
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  }
+  const days = Math.floor(rem / (24 * 60));
+  if (days < 14) return `${days}d`;
+  if (days < 60) return `${Math.floor(days / 7)}w`;
+  if (days < 365) return `${Math.floor(days / 30)}mo`;
+  return '1y+';
+};
 
 export const SlaBadge=memo(({sla,status})=>{
   if(status==='waiting'){

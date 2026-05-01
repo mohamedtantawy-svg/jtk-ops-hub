@@ -79,8 +79,29 @@ export async function GET(req) {
 
     return NextResponse.json(scoped(result, user));
   } catch (err) {
-    console.error('[integrations/deel/offboarding]', err.message);
-    return NextResponse.json({ error: 'Internal server error' }, { status: err.status || 500 });
+    // Verbose error logging — the previous "Internal server error" string
+    // hid the actual upstream failure (Deel auth expiry, terminations_v3
+    // 500, network) which made the FE's "Failed" pill unactionable. Surface
+    // a category in the response body so the FE tooltip can show a
+    // meaningful message without leaking sensitive upstream payloads.
+    const status = err.status || 500;
+    const upstreamSnippet = (err.message || '').replace(/\s+/g, ' ').slice(0, 240);
+    console.error('[integrations/deel/offboarding]', {
+      status,
+      message: upstreamSnippet,
+      stack: (err.stack || '').split('\n').slice(0, 3).join(' | '),
+    });
+    return NextResponse.json(
+      {
+        error: status === 401 || status === 403
+          ? 'Deel admin auth rejected — check token / permissions'
+          : status >= 500
+            ? `Upstream Deel error (${status})`
+            : `Offboarding sync failed: ${upstreamSnippet || 'unknown error'}`,
+        status,
+      },
+      { status },
+    );
   }
 }
 

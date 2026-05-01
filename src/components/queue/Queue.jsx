@@ -50,11 +50,20 @@ function resolveAssignee(task) {
 }
 
 // ── Time formatter ──
+// Caps long ages at days/weeks/months/years so a stale ticket from 2023
+// doesn't render as "24872h ago". Anything older than 1 year just says
+// "1y+ ago" — the exact age stops being useful past that point and the
+// 2.84-year-old timestamps were uglying up the table.
 const relTime = (m) => {
-  if (m <= 0) return 'now';
+  if (!Number.isFinite(m) || m <= 0) return 'now';
   if (m < 60) return `${m}m ago`;
   if (m < 120) { const r = m % 60; return r ? `1h ${r}m ago` : '1h ago'; }
-  return `${Math.floor(m / 60)}h ago`;
+  if (m < 24 * 60) return `${Math.floor(m / 60)}h ago`;
+  const days = Math.floor(m / (24 * 60));
+  if (days < 14) return `${days}d ago`;
+  if (days < 60) return `${Math.floor(days / 7)}w ago`;
+  if (days < 365) return `${Math.floor(days / 30)}mo ago`;
+  return '1y+ ago';
 };
 
 // ── Work Source Button config ──

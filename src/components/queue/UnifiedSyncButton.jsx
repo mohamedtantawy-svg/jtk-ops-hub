@@ -313,7 +313,10 @@ function SourceRow({ source, now }) {
         {label}
       </span>
       <span style={{ fontSize: 11, color: '#9e9e9e' }}>{count}</span>
-      <span style={{ fontSize: 11, color: error ? '#d42d35' : '#616161' }}>
+      <span
+        style={{ fontSize: 11, color: error ? '#d42d35' : '#616161', cursor: error ? 'help' : 'default' }}
+        title={error ? `Failed — ${error}` : statusText}
+      >
         {statusText}
       </span>
       {(error || !isRefreshing) && retry && (
