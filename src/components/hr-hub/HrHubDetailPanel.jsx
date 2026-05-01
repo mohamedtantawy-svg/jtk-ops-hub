@@ -1,0 +1,573 @@
+// ── HrHubDetailPanel ────────────────────────────────────────────────────────
+// Slide-in drawer that hosts a single request: header (status / assignee /
+// priority pickers), fields, attachments, follower list, audit log, and
+// the Slack-style comment thread + composer.
+//
+// Stage 4 lands here in the same component for cohesion: comments + the
+// composer (≥14px font, emoji picker, @mention autocomplete, attachments)
+// belong with the rest of the detail because the user spends most of
+// their time inside this panel.
+//
+// Real-time: the thread polls /comments?since=<lastSeen> every 5s while
+// the panel is open. Server-persisted notifications still cover the
+// across-pages experience via the existing bell hook (link_view='hr_hub').
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  patchHrHubRequest,
+  listHrHubComments,
+  postHrHubComment,
+  patchHrHubComment,
+  deleteHrHubComment,
+  followHrHubRequest,
+  unfollowHrHubRequest,
+} from '../../../src/services/hrHubApi';
+import { MEMBERS, MEMBERS_BY_EMAIL } from '../../../src/data/members';
+import HrHubComposer from './HrHubComposer';
+
+const STATUS_OPTIONS = [
+  { id: 'new',         label: 'New',         color: '#0369a1', bg: '#e0f2fe' },
+  { id: 'in_progress', label: 'In Progress', color: '#92400e', bg: '#fff8e6' },
+  { id: 'on_hold',     label: 'On Hold',     color: '#616161', bg: '#f3f3f3' },
+  { id: 'resolved',    label: 'Resolved',    color: '#166534', bg: '#e8f5e9' },
+];
+const PRIORITY_OPTIONS = [
+  { id: 'low',      label: 'Low' },
+  { id: 'medium',   label: 'Medium' },
+  { id: 'high',     label: 'High' },
+  { id: 'critical', label: 'Critical' },
+];
+
+const FLOW_LABELS = {
+  hr_request: 'HR Request',
+  hr_reporting: 'HR Reporting',
+  escalation_zero: 'Escalation Zero',
+  feedback: 'Ops Hub Feedback',
+};
+
+function formatRelative(iso) {
+  if (!iso) return '';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60_000) return 'just now';
+  const mins = Math.floor(ms / 60_000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+export default function HrHubDetailPanel({ requestId, detail, loading, error, user, onClose, onRefresh, onItemUpdated }) {
+  const request = detail?.request;
+  const initialComments = detail?.comments || [];
+  const followers = detail?.followers || [];
+  const log = detail?.log || [];
+
+  // Local comments state — seeded from initialComments and grown by the
+  // polling effect. On detail-id change we reset.
+  const [comments, setComments] = useState(initialComments);
+  useEffect(() => { setComments(initialComments); }, [requestId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setComments(initialComments); }, [initialComments]);
+
+  // Polling for new comments while the panel is open. Uses the most
+  // recent comment's createdAt as the cursor — server returns rows
+  // strictly after that timestamp.
+  useEffect(() => {
+    if (!requestId) return;
+    let cancelled = false;
+    const tick = async () => {
+      const latest = comments.length ? comments[comments.length - 1].createdAt : null;
+      try {
+        const res = await listHrHubComments(requestId, { since: latest });
+        if (cancelled) return;
+        const fresh = res?.comments || [];
+        if (fresh.length > 0) {
+          setComments(prev => {
+            const seen = new Set(prev.map(c => c.id));
+            return [...prev, ...fresh.filter(c => !seen.has(c.id))];
+          });
+        }
+      } catch { /* swallow — next tick will try again */ }
+    };
+    const id = setInterval(tick, 5000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [requestId, comments]);
+
+  const isFollowing = useMemo(() => {
+    const e = (user?.email || '').toLowerCase();
+    return followers.some(f => (f.email || '').toLowerCase() === e);
+  }, [followers, user]);
+
+  // ── Local optimistic state for status / assignee / priority ──────────────
+  const [savingField, setSavingField] = useState(null);
+  const updateField = useCallback(async (patch) => {
+    if (!requestId) return;
+    const fieldKey = Object.keys(patch)[0];
+    setSavingField(fieldKey);
+    try {
+      await patchHrHubRequest(requestId, patch);
+      onItemUpdated?.({ id: requestId, ...patch });
+      onRefresh?.();
+    } catch (err) {
+      // eslint-disable-next-line no-alert
+      alert(err?.message || 'Could not update');
+    } finally {
+      setSavingField(null);
+    }
+  }, [requestId, onItemUpdated, onRefresh]);
+
+  if (!requestId) return null;
+  const flowLabel = FLOW_LABELS[request?.flow] || request?.flow || '';
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)',
+        zIndex: 1400,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          position: 'absolute', top: 0, right: 0, bottom: 0,
+          width: 'min(720px, 92vw)', background: 'white',
+          boxShadow: '-12px 0 30px rgba(0,0,0,0.12)',
+          display: 'flex', flexDirection: 'column',
+          fontSize: 14,
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          padding: '14px 20px',
+          borderBottom: '1px solid #e8e8e8',
+          display: 'flex', alignItems: 'center', gap: 12,
+          flexShrink: 0,
+        }}>
+          <div style={{
+            fontSize: 11, fontWeight: 700, letterSpacing: '0.04em',
+            textTransform: 'uppercase', color: '#7a7059',
+          }}>{flowLabel}</div>
+          <div style={{ flex: 1 }} />
+          <FollowButton
+            isFollowing={isFollowing}
+            onToggle={async () => {
+              try {
+                if (isFollowing) await unfollowHrHubRequest(requestId, user.email);
+                else await followHrHubRequest(requestId, user.email);
+                onRefresh?.();
+              } catch (err) {
+                // eslint-disable-next-line no-alert
+                alert(err?.message || 'Could not update follow state');
+              }
+            }}
+          />
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 4, color: '#616161' }}
+          ><i className="bi bi-x-lg" style={{ fontSize: 14 }} /></button>
+        </div>
+
+        {/* Body */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px 16px' }}>
+          {loading && !request && (
+            <div style={{ padding: 30, color: '#9e9e9e', fontSize: 13, textAlign: 'center' }}>Loading…</div>
+          )}
+          {error && (
+            <div style={{ padding: 16, background: '#fef2f2', color: '#991b1b', borderRadius: 10, fontSize: 13 }}>{error}</div>
+          )}
+          {request && (
+            <>
+              <div style={{ fontSize: 18, fontWeight: 700, color: '#1b1b1b', lineHeight: 1.3 }}>
+                {request.title || (request.summary || '').slice(0, 200) || '(untitled)'}
+              </div>
+              <div style={{ marginTop: 6, fontSize: 12, color: '#616161' }}>
+                Submitted by <strong>{request.createdByName || request.createdByEmail}</strong> · {formatRelative(request.createdAt)}
+              </div>
+
+              {/* Status / Priority / Assignee row */}
+              <div style={{
+                marginTop: 14, display: 'flex', alignItems: 'center', gap: 10,
+                flexWrap: 'wrap',
+              }}>
+                <PickerStatus value={request.status} onChange={v => updateField({ status: v })} disabled={savingField === 'status'} />
+                <PickerPriority value={request.priority} onChange={v => updateField({ priority: v })} disabled={savingField === 'priority'} />
+                <PickerAssignee value={request.assigneeEmail} valueName={request.assigneeName} onChange={(email, name) => updateField({ assigneeEmail: email, assigneeName: name })} disabled={savingField === 'assigneeEmail'} />
+              </div>
+
+              {/* Fields */}
+              <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
+                {request.functionArea && <FieldRow label="Function" value={request.functionArea} />}
+                {request.requestType && <FieldRow label="Request Type" value={request.requestType} />}
+                {request.reportType && <FieldRow label="Report Type" value={request.reportType} />}
+                {request.summary && <FieldRow label="Summary" value={request.summary} multiline />}
+                {request.idealSolution && <FieldRow label="Ideal Solution" value={request.idealSolution} multiline />}
+                {request.resolutionNote && <FieldRow label="Resolution Note" value={request.resolutionNote} multiline />}
+                {Array.isArray(request.links) && request.links.length > 0 && (
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: '#7a7059', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6 }}>Links</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {request.links.map((u, i) => (
+                        <a key={i} href={u} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: '#1f74b3', textDecoration: 'none' }}>
+                          <i className="bi bi-link-45deg" /> {u}
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {Array.isArray(request.attachments) && request.attachments.length > 0 && (
+                  <AttachmentsGrid attachments={request.attachments} />
+                )}
+              </div>
+
+              {/* Followers */}
+              {followers.length > 0 && (
+                <div style={{ marginTop: 18 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#7a7059', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6 }}>
+                    Following ({followers.length})
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {followers.map(f => (
+                      <span key={f.email} style={{
+                        fontSize: 11, padding: '3px 8px', borderRadius: 999,
+                        background: '#f3f3f3', color: '#1b1b1b',
+                      }} title={`${f.email} · ${f.source}`}>
+                        {(MEMBERS_BY_EMAIL[f.email]?.name) || f.email}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Comments */}
+              <div style={{ marginTop: 26 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', marginBottom: 8 }}>
+                  Conversation
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {comments.length === 0 && (
+                    <div style={{ fontSize: 13, color: '#9e9e9e' }}>
+                      No comments yet. Start the thread below — tag teammates with <code>@first.last</code> to bring them in as followers.
+                    </div>
+                  )}
+                  {comments.map(c => (
+                    <CommentRow
+                      key={c.id}
+                      comment={c}
+                      currentUserEmail={user?.email}
+                      onEdit={async (newBody) => {
+                        try {
+                          const res = await patchHrHubComment(c.id, newBody);
+                          setComments(prev => prev.map(x => x.id === c.id ? { ...x, body: res?.body || newBody, mentionEmails: res?.mentionEmails || x.mentionEmails, editedAt: res?.editedAt || new Date().toISOString() } : x));
+                        } catch (err) {
+                          // eslint-disable-next-line no-alert
+                          alert(err?.message || 'Could not save edit');
+                        }
+                      }}
+                      onDelete={async () => {
+                        try {
+                          await deleteHrHubComment(c.id);
+                          setComments(prev => prev.filter(x => x.id !== c.id));
+                        } catch (err) {
+                          // eslint-disable-next-line no-alert
+                          alert(err?.message || 'Could not delete');
+                        }
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Audit log (collapsed by default; expand on click) */}
+              <LogSection log={log} />
+            </>
+          )}
+        </div>
+
+        {/* Composer (sticky at bottom) */}
+        {request && (
+          <div style={{ borderTop: '1px solid #e8e8e8', padding: 14, flexShrink: 0, background: 'white' }}>
+            <HrHubComposer
+              onSubmit={async (payload) => {
+                const created = await postHrHubComment(requestId, payload);
+                setComments(prev => [...prev, created]);
+              }}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Sub-components ──────────────────────────────────────────────────────────
+
+function FollowButton({ isFollowing, onToggle }) {
+  return (
+    <button
+      onClick={onToggle}
+      style={{
+        padding: '6px 12px', borderRadius: 999,
+        border: '1px solid ' + (isFollowing ? '#29811e' : '#e8e8e8'),
+        background: isFollowing ? '#e8f5e9' : 'white',
+        color: isFollowing ? '#166534' : '#1b1b1b',
+        fontSize: 12, fontWeight: 600, cursor: 'pointer',
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+      }}
+    >
+      <i className={`bi ${isFollowing ? 'bi-bell-fill' : 'bi-bell'}`} style={{ fontSize: 12 }} />
+      {isFollowing ? 'Following' : 'Follow'}
+    </button>
+  );
+}
+
+function PickerStatus({ value, onChange, disabled }) {
+  return (
+    <select
+      value={value || ''}
+      onChange={e => onChange(e.target.value)}
+      disabled={disabled}
+      style={pickerStyle(STATUS_OPTIONS.find(s => s.id === value)?.bg, STATUS_OPTIONS.find(s => s.id === value)?.color)}
+    >
+      {STATUS_OPTIONS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+    </select>
+  );
+}
+
+function PickerPriority({ value, onChange, disabled }) {
+  return (
+    <select
+      value={value || 'medium'}
+      onChange={e => onChange(e.target.value)}
+      disabled={disabled}
+      style={pickerStyle('#f3f3f3', '#1b1b1b')}
+    >
+      {PRIORITY_OPTIONS.map(p => <option key={p.id} value={p.id}>{`Priority: ${p.label}`}</option>)}
+    </select>
+  );
+}
+
+function PickerAssignee({ value, valueName, onChange, disabled }) {
+  return (
+    <select
+      value={value || ''}
+      onChange={e => {
+        const email = e.target.value || null;
+        const name = email ? (MEMBERS_BY_EMAIL[email]?.name || email) : null;
+        onChange(email, name);
+      }}
+      disabled={disabled}
+      style={pickerStyle('#f3f3f3', '#1b1b1b')}
+    >
+      <option value="">Unassigned</option>
+      {MEMBERS.map(m => (
+        <option key={m.email} value={m.email}>
+          {`Assignee: ${m.name}`}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function pickerStyle(bg, color) {
+  return {
+    padding: '5px 10px', borderRadius: 999,
+    border: '1px solid #e8e8e8',
+    background: bg || '#f3f3f3',
+    color: color || '#1b1b1b',
+    fontSize: 12, fontWeight: 600,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+  };
+}
+
+function FieldRow({ label, value, multiline }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, fontWeight: 600, color: '#7a7059', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6 }}>{label}</div>
+      <div style={{
+        fontSize: 14, color: '#1b1b1b', lineHeight: 1.55,
+        whiteSpace: multiline ? 'pre-wrap' : 'normal',
+      }}>{value}</div>
+    </div>
+  );
+}
+
+function AttachmentsGrid({ attachments }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, fontWeight: 600, color: '#7a7059', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6 }}>
+        Attachments
+      </div>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
+        gap: 8,
+      }}>
+        {attachments.map((a, i) => (
+          <a
+            key={i}
+            href={a.dataUri}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: 'block',
+              borderRadius: 8,
+              overflow: 'hidden',
+              border: '1px solid #e8e8e8',
+              background: '#fafafa',
+              aspectRatio: '4 / 3',
+            }}
+          >
+            {a.kind === 'image' ? (
+              <img src={a.dataUri} alt={a.name || ''} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            ) : (
+              <video src={a.dataUri} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            )}
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── CommentRow with mention chips + edit/delete ─────────────────────────────
+function CommentRow({ comment, currentUserEmail, onEdit, onDelete }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(comment.body);
+  const isMine = (currentUserEmail || '').toLowerCase() === (comment.authorEmail || '').toLowerCase();
+
+  return (
+    <div style={{
+      display: 'flex', gap: 10,
+      padding: '10px 12px',
+      background: '#fafafa', borderRadius: 10,
+    }}>
+      <Avatar name={comment.authorName || comment.authorEmail} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b' }}>{comment.authorName || comment.authorEmail}</div>
+          <div style={{ fontSize: 11, color: '#9e9e9e' }}>
+            {formatRelative(comment.createdAt)}
+            {comment.editedAt ? ' · edited' : ''}
+          </div>
+          {isMine && !editing && (
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+              <button onClick={() => setEditing(true)} style={iconBtn} aria-label="Edit"><i className="bi bi-pencil" /></button>
+              <button onClick={onDelete} style={iconBtn} aria-label="Delete"><i className="bi bi-trash" /></button>
+            </div>
+          )}
+        </div>
+        {!editing && (
+          <CommentBody body={comment.body} />
+        )}
+        {editing && (
+          <div style={{ marginTop: 6 }}>
+            <textarea
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              rows={3}
+              style={{
+                width: '100%', padding: 8, fontSize: 14, lineHeight: 1.5,
+                border: '1px solid #e8e8e8', borderRadius: 8, fontFamily: 'inherit',
+                resize: 'vertical', minHeight: 60,
+              }}
+            />
+            <div style={{ marginTop: 6, display: 'flex', gap: 6 }}>
+              <button
+                onClick={async () => { await onEdit(draft); setEditing(false); }}
+                style={{ padding: '6px 10px', borderRadius: 8, border: 'none', background: '#1b1b1b', color: 'white', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+              >Save</button>
+              <button
+                onClick={() => { setDraft(comment.body); setEditing(false); }}
+                style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid #e8e8e8', background: 'white', color: '#1b1b1b', fontSize: 12, cursor: 'pointer' }}
+              >Cancel</button>
+            </div>
+          </div>
+        )}
+        {Array.isArray(comment.attachments) && comment.attachments.length > 0 && (
+          <div style={{ marginTop: 6 }}>
+            <AttachmentsGrid attachments={comment.attachments} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const iconBtn = {
+  border: 'none', background: 'transparent', cursor: 'pointer',
+  color: '#9e9e9e', fontSize: 12, padding: 4,
+};
+
+function Avatar({ name }) {
+  const initials = (name || '').split(/\s+/).map(s => s[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || '?';
+  return (
+    <div style={{
+      width: 28, height: 28, borderRadius: '50%',
+      background: '#6b3fa0', color: 'white',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: 11, fontWeight: 700, flexShrink: 0,
+    }}>{initials}</div>
+  );
+}
+
+// Render @firstname.lastname tokens as inline chips. Linked names look
+// distinct without a heavy formatter (no markdown lib needed for Stage 4).
+function CommentBody({ body }) {
+  const parts = useMemo(() => {
+    const out = [];
+    const re = /(^|\s)@([a-z][a-z0-9._-]{1,80})/gi;
+    let last = 0;
+    let m;
+    while ((m = re.exec(body)) != null) {
+      const start = m.index + m[1].length;   // index of '@'
+      if (start > last) out.push({ text: body.slice(last, start) });
+      out.push({ mention: m[2] });
+      last = start + 1 + m[2].length;
+    }
+    if (last < body.length) out.push({ text: body.slice(last) });
+    return out;
+  }, [body]);
+  return (
+    <div style={{ marginTop: 4, fontSize: 14, color: '#1b1b1b', lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+      {parts.map((p, i) => p.mention
+        ? <span key={i} style={{ background: '#f3eff8', color: '#5b21b6', borderRadius: 4, padding: '0 4px', fontWeight: 600 }}>@{p.mention}</span>
+        : <span key={i}>{p.text}</span>
+      )}
+    </div>
+  );
+}
+
+function LogSection({ log }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!log || log.length === 0) return null;
+  return (
+    <div style={{ marginTop: 26 }}>
+      <button
+        onClick={() => setExpanded(p => !p)}
+        style={{
+          background: 'transparent', border: 'none',
+          padding: 0, cursor: 'pointer',
+          fontSize: 12, fontWeight: 600, color: '#616161',
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+        }}
+      >
+        <i className={`bi bi-chevron-${expanded ? 'down' : 'right'}`} />
+        Activity log ({log.length})
+      </button>
+      {expanded && (
+        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {log.map(l => (
+            <div key={l.id} style={{ fontSize: 12, color: '#616161', display: 'flex', gap: 8 }}>
+              <span style={{ color: '#9e9e9e', minWidth: 90 }}>{formatRelative(l.createdAt)}</span>
+              <span><strong>{l.actorName || l.actorEmail || 'system'}</strong> · {l.eventType.replace(/_/g, ' ')}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

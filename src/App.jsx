@@ -98,6 +98,7 @@ import Slack from './components/views/Slack';
 import Alerts from './components/views/Alerts';
 import FeedbackView from './components/views/FeedbackView';
 import HrHubView from './components/views/HrHubView';
+import CreateHrHubRequestModal from './components/modals/CreateHrHubRequestModal';
 import CreateProjectModal from './components/modals/CreateProjectModal';
 import CreateRequestModal from './components/modals/CreateRequestModal';
 import CreateEscalationModal from './components/modals/CreateEscalationModal';
@@ -612,6 +613,11 @@ const App=()=>{
   const [sidebarOpen,setSidebarOpen]=useState(true);
   const [subFilter,setSubFilter]=useState(null);
   const [createModal,setCreateModal]=useState(false);
+  // HR Hub create modal — when null the modal is closed; otherwise an
+  // object { initialFlow: string|null } shows the modal. The picker
+  // (initialFlow=null) lets the user choose; deep-links from queue rows
+  // (Stage 7) will preselect a flow.
+  const [hrHubCreate,setHrHubCreate]=useState(null);
   const [notifs,setNotifs]=useState([]);
   const [activity,setActivity]=useState(INITIAL_ACTIVITY);
   const [projects,setProjects]=useState(INITIAL_PROJECTS);
@@ -756,6 +762,17 @@ const App=()=>{
           try { window.dispatchEvent(new CustomEvent('announcements:openDetail', { detail })); }
           catch {}
         }, 60);
+      } else if (n.linkView === 'hr_hub' && n.linkId) {
+        // HR Hub deep-link: route to the HR Hub view and open the detail
+        // drawer for this request id. The view reads ?req=<uuid> from the
+        // URL on mount, so set it before flipping the view to keep the
+        // drawer open across navigations.
+        try {
+          const url = new URL(window.location.href);
+          url.searchParams.set('req', n.linkId);
+          window.history.replaceState({}, '', url.toString());
+        } catch {}
+        setView('hr-hub');
       }
       return;
     }
@@ -1227,6 +1244,7 @@ const App=()=>{
         onCreateRequest={()=>setRequestModal(true)}
         onCreateReport={()=>{setView('hr-reports');setCreateReportModal(true);}}
         onCreateFeedback={()=>{setView('feedback');setFeedbackCompose(true);}}
+        onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}
         setSelTask={()=>{}} tasks={tasks}
       />
       <div style={{height:(impersonating?104:68)+(versionHasUpdate?44:0),flexShrink:0}}/>
@@ -1254,6 +1272,7 @@ const App=()=>{
           {view==='hr-hub'        &&perms?.canView('hr-hub')!==false       &&<div className="page-enter"><HrHubView user={effectiveUser}/></div>}
       </div>
       {createModal   &&<CreateTaskModal onConfirm={confirmCreate} onClose={()=>setCreateModal(false)} currentUser={effectiveUser}/>}
+      {hrHubCreate   &&<CreateHrHubRequestModal initialFlow={hrHubCreate.initialFlow||null} onClose={()=>setHrHubCreate(null)} onCreated={(id,flow)=>{setHrHubCreate(null);setView('hr-hub');addToast?.({kind:'success',message:`Submitted to HR Hub${flow?` (${flow.replace('_',' ')})`:''}.`});}}/>}
       {projectModal  &&<CreateProjectModal onConfirm={confirmProject} onClose={()=>setProjectModal(null)} project={typeof projectModal==='object'?projectModal:null} currentUser={effectiveUser}/>}
       {requestModal  &&<CreateRequestModal onConfirm={confirmRequest} onClose={()=>setRequestModal(false)} currentUser={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks}/>}
       {createEscalModal&&<CreateEscalationModal onConfirm={confirmManualEscal} onClose={()=>setCreateEscalModal(false)} currentUser={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks}/>}

@@ -27,6 +27,9 @@ const PRIMARY_TABS = [
   // Feedback board — open to every authenticated user so the whole team
   // can submit bugs + improvement ideas and vote on what matters.
   { id: 'feedback',      icon: 'bi-lightbulb',        label: 'Feedback' },
+  // HR Hub — single intake for HR Requests, HR Reporting, Escalation
+  // Zero, and Ops Hub Feedback. Open to every authenticated user.
+  { id: 'hr-hub',        icon: 'bi-broadcast-pin',    label: 'HR Hub' },
 ];
 
 /* Secondary tabs under More — all owner-only for now, so for non-owners
@@ -46,6 +49,10 @@ const CREATE_ACTIONS = [
   { icon: 'bi-clipboard-data',    label: 'New Report',       action: 'report',        desc: 'Submit an HR report',         viewReq: 'hr-reports',               restrictToEmail: OWNER_EMAIL },
   // No `perm` gate — every authenticated user can submit a bug / idea.
   { icon: 'bi-lightbulb',         label: 'New Feedback',     action: 'feedback',      desc: 'Report a bug or improvement' },
+  // HR Hub intake — opens the 4-card picker. Every authenticated user
+  // can submit; the picker shows the HR Request / HR Reporting /
+  // Escalation Zero / Ops Hub Feedback options.
+  { icon: 'bi-broadcast-pin',     label: 'Submit to HR Hub', action: 'hr-hub',        desc: 'HR Request, Report, Escalation Zero, or Feedback' },
 ];
 
 const DeelTopNav = ({
@@ -54,6 +61,7 @@ const DeelTopNav = ({
   escalCount, onLogout,
   onCreateTask, onCreateEscalation, onCreateProject,
   onCreateAnnouncement, onCreateRequest, onCreateReport, onCreateFeedback,
+  onCreateHrHub,
   setSelTask, tasks,
 }) => {
   // Manager on Call was previously rendered here as a pill in the right-side
@@ -103,6 +111,7 @@ const DeelTopNav = ({
     else if (action === 'request')    { onCreateRequest?.(); setView('my-queue'); }
     else if (action === 'report')     { onCreateReport?.(); setView('hr-reports'); }
     else if (action === 'feedback')   { setView('feedback'); onCreateFeedback?.(); }
+    else if (action === 'hr-hub')     { onCreateHrHub?.(); }
   };
 
   const unread = notifs ? notifs.filter(n => !n.read).length : 0;
