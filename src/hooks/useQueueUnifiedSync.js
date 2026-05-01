@@ -201,7 +201,23 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
   // A successful sync within RECENT_SYNC_MS proves HTTP works and overrides
   // any `navigator.onLine = false` false-positive. Same for an in-flight
   // refresh — if a request is currently on the wire, we're clearly online.
-  const RECENT_SYNC_MS = 2 * 60 * 1000; // 2 minutes
+  //
+  // Freshness model (2026-05-01 second pass): the badge state used to be
+  // driven by a single `oldestSyncAt` aggregate, which meant any one
+  // source falling out of the window flipped the whole badge to red even
+  // when 6/7 sources were healthy and the slow one was already refreshing
+  // in the background. Now we score each source individually and the
+  // badge reads the per-source mix:
+  //   • fresh    → data <= WARN_AFTER_MS old, OR currently refreshing
+  //                (a background poll on a stale source is "the system
+  //                is fixing it" — show live, don't panic).
+  //   • aging    → data WARN..STALE old, not refreshing.
+  //   • stale    → data > STALE_AFTER_MS old, not refreshing.
+  //   • failing  → last sync errored (regardless of timestamp).
+  // The button renders a state machine on top of those counts.
+  const RECENT_SYNC_MS = 2 * 60 * 1000;     // 2 minutes — offline corroboration window
+  const WARN_AFTER_MS  = 7  * 60 * 1000;    // soft threshold per source
+  const STALE_AFTER_MS = 10 * 60 * 1000;    // hard threshold per source
   const meta = useMemo(() => {
     const list = Object.values(sources);
     const timestamps = list.map(s => s.lastSyncAt).filter(t => typeof t === 'number' && t > 0);
@@ -212,8 +228,47 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
     const sourceErrors = list.filter(s => s.error);
     const hasEverSynced = !!lastSyncAt;
 
-    // Corroborated offline: navigator hint must agree with actual evidence.
+    // Per-source freshness scoring against the SAME thresholds the badge
+    // uses, so the button can answer "is this source fresh / aging /
+    // stale / failing right now?" in one place without re-deriving.
     const now = nowTick;
+    let freshSourceCount = 0;
+    let agingSourceCount = 0;
+    let staleSourceCount = 0;
+    let refreshingStaleSourceCount = 0;     // stale-but-refreshing — counts as fresh
+    const staleSources = [];                // sources that are stale AND not refreshing
+    const agingSources = [];                // 7..10 min, not refreshing
+    for (const s of list) {
+      const ts = typeof s.lastSyncAt === 'number' ? s.lastSyncAt : null;
+      const ageMs = ts ? now - ts : Infinity;
+      const isRefreshing = !!s.isRefreshing;
+      if (ageMs <= WARN_AFTER_MS) {
+        freshSourceCount++;
+      } else if (ageMs <= STALE_AFTER_MS) {
+        if (isRefreshing) {
+          // Aging but the system is already on it — count as fresh.
+          freshSourceCount++;
+        } else {
+          agingSourceCount++;
+          agingSources.push(s);
+        }
+      } else {
+        if (isRefreshing) {
+          refreshingStaleSourceCount++;
+          freshSourceCount++;             // stale-but-refreshing → live for badge purposes
+        } else {
+          staleSourceCount++;
+          staleSources.push(s);
+        }
+      }
+    }
+    const totalSources = list.length;
+    const allStale = totalSources > 0 && staleSourceCount === totalSources;
+    const allFailing = totalSources > 0 && sourceErrors.length === totalSources;
+    const anyStale = staleSourceCount > 0;
+    const anyAging = agingSourceCount > 0;
+
+    // Corroborated offline: navigator hint must agree with actual evidence.
     const recentlySynced = !!(lastSyncAt && (now - lastSyncAt) < RECENT_SYNC_MS);
     const isOffline = navReportsOffline && !recentlySynced && !isAnyRefreshing;
 
@@ -226,6 +281,18 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
       sourceErrors,
       hasEverSynced,
       isOffline,
+      // Per-source freshness aggregates — drive the badge state machine.
+      totalSources,
+      freshSourceCount,
+      agingSourceCount,
+      staleSourceCount,
+      refreshingStaleSourceCount,
+      staleSources,                         // for tooltip / dropdown context
+      agingSources,
+      anyStale,
+      anyAging,
+      allStale,
+      allFailing,
     };
   }, [sources, navReportsOffline, nowTick]);
 
