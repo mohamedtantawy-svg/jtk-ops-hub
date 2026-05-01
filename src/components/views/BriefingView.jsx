@@ -829,17 +829,24 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                       <span style={{color:'#9e9e9e',fontWeight:500}}>Manager On Call:</span>{' '}
                       <span style={{fontWeight:700,color:'#1b1b1b'}}>{managerOnCall.name}</span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={()=>setShowMocPicker(p=>!p)}
-                      aria-label="Change manager on call"
-                      title="Change manager on call"
-                      style={{width:22,height:22,padding:0,border:'none',background:'transparent',borderRadius:'50%',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'background .12s'}}
-                      onMouseEnter={e=>e.currentTarget.style.background='#f0f0f0'}
-                      onMouseLeave={e=>e.currentTarget.style.background='transparent'}
-                    >
-                      <i className="bi bi-pencil" style={{fontSize:11,color:'#9e9e9e'}}></i>
-                    </button>
+                    {/* Edit pencil only visible to admin / TL / RM. The MoC
+                        is an org-wide setting — agents shouldn't be able to
+                        change who's on call for everyone. The 2026-05-01
+                        agent audit observed Trish (Agent) seeing this
+                        pencil and being able to reassign the global MoC. */}
+                    {(perms?.canManageManagerOnCall !== false && (perms?.dataScope === 'all_tasks' || perms?.dataScope === 'team_tasks' || isExec)) && (
+                      <button
+                        type="button"
+                        onClick={()=>setShowMocPicker(p=>!p)}
+                        aria-label="Change manager on call"
+                        title="Change manager on call"
+                        style={{width:22,height:22,padding:0,border:'none',background:'transparent',borderRadius:'50%',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'background .12s'}}
+                        onMouseEnter={e=>e.currentTarget.style.background='#f0f0f0'}
+                        onMouseLeave={e=>e.currentTarget.style.background='transparent'}
+                      >
+                        <i className="bi bi-pencil" style={{fontSize:11,color:'#9e9e9e'}}></i>
+                      </button>
+                    )}
                   </div>
                   {showMocPicker&&(
                     <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,background:'#ffffff',borderRadius:14,border:'1px solid #e8e8e8',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'6px 0',minWidth:300,maxHeight:360,overflowY:'auto',zIndex:1000}}>
@@ -1788,25 +1795,50 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 </div>
               </DeelCard>}
 
-              {/* Quick Nav — visible for all user types */}
-              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(95px,1fr))',gap:10}}>
-                {[
+              {/* Quick Nav — gated through the same `RESTRICTED_VIEWS` /
+                  `isOwner` policy used by the top nav (App.jsx) AND the
+                  route renderers. Pre-2026-05-01-audit, this grid rendered
+                  all 5 buttons unconditionally even when the top nav
+                  correctly hid Reports / Analytics / Escalations from
+                  agents — Trish could click Reports and read all 18
+                  org-wide HR sensitive reports. */}
+              {(() => {
+                const OWNER_EMAIL = 'mohamed.tantawy@deel.com';
+                const isOwner = (user?.email || '').toLowerCase() === OWNER_EMAIL;
+                // Mirror App.jsx#RESTRICTED_VIEWS — these routes only
+                // render for the owner today. Keep this list in sync if
+                // App.jsx changes; ideally these constants live in one
+                // module long-term.
+                const OWNER_ONLY = new Set(['projects', 'hr-reports', 'analytics', 'escalations', 'calendar', 'knowledge-hub']);
+                const canSeeView = (v) => {
+                  if (OWNER_ONLY.has(v) && !isOwner) return false;
+                  if (perms && typeof perms.canView === 'function' && perms.canView(v) === false) return false;
+                  return true;
+                };
+                const allLinks = [
                   {v:'my-queue',icon:'bi-inbox-fill',l:'Queue',c:'var(--g)',bg:'#e8f0fe'},
                   {v:'escalations',icon:'bi-arrow-up-circle-fill',l:'Escalations',c:'#1f74b3',bg:'#e8f0fe'},
                   {v:'hr-reports',icon:'bi-flag-fill',l:'Reports',c:'#8b6dca',bg:'#f3eff8'},
                   {v:'team',icon:'bi-people-fill',l:'Team',c:'#ed8d00',bg:'#fff8e6'},
                   {v:'analytics',icon:'bi-bar-chart-line-fill',l:'Analytics',c:'#1f74b3',bg:'#e8f0fe'},
-                ].map(a=>(
-                  <button key={a.v} onClick={()=>setView(a.v)} style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:6,padding:'14px 8px',cursor:'pointer',fontSize:12,fontWeight:600,color:'#1b1b1b',transition:'all .2s',
-                    background:'white',border:'1px solid #e8e8e8',borderRadius:16}}
-                    onMouseEnter={e=>{e.currentTarget.style.borderColor=a.c;e.currentTarget.style.color=a.c;e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)';}} onMouseLeave={e=>{e.currentTarget.style.borderColor='#e8e8e8';e.currentTarget.style.color='#1b1b1b';e.currentTarget.style.transform='none';e.currentTarget.style.boxShadow='none';}}>
-                    <div style={{width:34,height:34,borderRadius:10,background:a.bg,display:'flex',alignItems:'center',justifyContent:'center'}}>
-                      <i className={a.icon} style={{fontSize:15,color:a.c}}></i>
-                    </div>
-                    {a.l}
-                  </button>
-                ))}
-              </div>
+                ];
+                const links = allLinks.filter(a => canSeeView(a.v));
+                if (links.length === 0) return null;
+                return (
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(95px,1fr))',gap:10}}>
+                    {links.map(a=>(
+                      <button key={a.v} onClick={()=>setView(a.v)} style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:6,padding:'14px 8px',cursor:'pointer',fontSize:12,fontWeight:600,color:'#1b1b1b',transition:'all .2s',
+                        background:'white',border:'1px solid #e8e8e8',borderRadius:16}}
+                        onMouseEnter={e=>{e.currentTarget.style.borderColor=a.c;e.currentTarget.style.color=a.c;e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)';}} onMouseLeave={e=>{e.currentTarget.style.borderColor='#e8e8e8';e.currentTarget.style.color='#1b1b1b';e.currentTarget.style.transform='none';e.currentTarget.style.boxShadow='none';}}>
+                        <div style={{width:34,height:34,borderRadius:10,background:a.bg,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                          <i className={a.icon} style={{fontSize:15,color:a.c}}></i>
+                        </div>
+                        {a.l}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>
