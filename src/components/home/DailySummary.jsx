@@ -1,9 +1,20 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { slaInfo } from '../../utils/helpers';
 
 const DailySummary = ({ tasks = [], escalations = [], scope = 'team' }) => {
+  // SSR-safe time anchor — server's UTC and the client's local timezone
+  // produced different values for `minsSinceStart` (and therefore different
+  // resolved-today / breaches-today counts), driving the React #418
+  // hydration error logged every page load. Defer the read until the
+  // post-mount tick. Re-tick once a minute to keep the summary fresh.
+  const [mountedAt, setMountedAt] = useState(null);
+  useEffect(() => {
+    setMountedAt(new Date());
+    const id = setInterval(() => setMountedAt(new Date()), 60_000);
+    return () => clearInterval(id);
+  }, []);
   const stats = useMemo(() => {
-    const now = new Date();
+    const now = mountedAt || new Date(0); // stable placeholder pre-mount
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const msSinceStart = now - startOfDay;
     const minsSinceStart = msSinceStart / 60000;
@@ -101,7 +112,7 @@ const DailySummary = ({ tasks = [], escalations = [], scope = 'team' }) => {
       busiestHour: busiestStr,
       summary
     };
-  }, [tasks, escalations, scope]);
+  }, [tasks, escalations, scope, mountedAt]);
 
   const statItems = [
     { label: 'Resolved', value: stats.resolved, icon: 'bi-check-circle', color: '#16A34A' },
@@ -118,8 +129,8 @@ const DailySummary = ({ tasks = [], escalations = [], scope = 'team' }) => {
           <i className="bi-bar-chart-line" style={{ fontSize: 13, color: '#2563EB' }}></i>
         </div>
         <span style={{ fontSize: 15, fontWeight: 700, color: '#1b1b1b' }}>Daily Summary</span>
-        <span style={{ fontSize: 11, color: '#6B7280', marginLeft: 'auto', fontWeight: 500 }}>
-          {new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}
+        <span style={{ fontSize: 11, color: '#6B7280', marginLeft: 'auto', fontWeight: 500 }} suppressHydrationWarning>
+          {mountedAt ? mountedAt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : ''}
         </span>
       </div>
 

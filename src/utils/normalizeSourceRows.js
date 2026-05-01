@@ -261,36 +261,72 @@ function resolveEmailByName(name) {
 
 // ── Test-data filter ────────────────────────────────────────────────────────
 // Catches obvious QA / sandbox rows that occasionally leak into the Deel
-// admin payload and pollute the Q tab in production. Examples seen in the
-// 2026-05-01 launch audit:
-//   "VIA Test", "VIA THREE", "Kirce TEST-TWO", "Global Test", "Global Test New",
-//   "Dan Man", "michele wrfgrw" (keyboard-mash).
+// admin payload and pollute the Q tab in production. Examples seen across
+// the 2026-05-01 launch audits:
+//   "VIA Test", "VIA THREE", "VIA TWO", "Kirce TEST-TWO", "Global Test",
+//   "Global Test New", "Dan Man", "michele wrfgrw" (keyboard-mash),
+//   "Yoram Gondwetest" (test embedded in surname).
 //
-// Patterns we filter:
-//   • Standalone "TEST" / "TESTING" tokens (case-insensitive)
-//   • Names containing "test-N" / "testN" sequences
-//   • All-lowercase fully-random strings ≥6 chars that don't match common
-//     name shapes — i.e. no vowels, or all-consonant gibberish
-//   • Subject ending with "TEST", "QA", "DEMO" (case-insensitive)
 // We err on the side of false-negatives (leaving real rows visible) rather
-// than false-positives — anything ambiguous stays in the queue. To bypass
-// for debugging set localStorage `ops_hub_show_test_rows = '1'`.
-const TEST_NAME_RX = /(?:^|\s|[-_])(?:test|testing|qa|demo|sandbox|staging|tmp)(?:\s|[-_]|\d|$)|^test\b|\btest\d+\b|\btest[- ]?\w{1,4}$|^global\s+test\b|^dan\s+man$|^[a-z]{6,}$/i;
+// than false-positives — anything ambiguous stays in the queue. Bypass via
+// `localStorage.ops_hub_show_test_rows = '1'`.
+
+// Number-words used in QA naming patterns ("VIA THREE", "Test Two").
+const NUMBER_WORDS_RX = /(?:one|two|three|four|five|six|seven|eight|nine|ten)/i;
+
+// Tokenise on whitespace + common separators so we can examine each part
+// independently (the previous full-string regex missed `michele wrfgrw`
+// because the random token was the second word).
+function _tokenize(name) {
+  return String(name).toLowerCase().split(/[\s_\-/]+/).filter(Boolean);
+}
+
+// Returns true if a single token looks like keyboard-mash:
+//   • all consonant, length ≥ 4 ("wrfgrw", "wrfgrw", "tnnt")
+//   • mixed lowercase letters with no vowels
+function _isConsonantMash(token) {
+  if (!/^[a-z]+$/.test(token)) return false;
+  if (token.length < 4) return false;
+  if (/[aeiouy]/i.test(token)) return false;
+  return true;
+}
 
 function isLikelyTestRow(name) {
   if (!name) return false;
   const trimmed = String(name).trim();
   if (!trimmed) return false;
-  // Allow real names like "Tester Smith" — only flag if "test" is a *standalone*
-  // token, not a substring of a longer word.
-  if (/^[a-z]{6,20}$/.test(trimmed) && !/[aeiou]/i.test(trimmed)) return true; // "wrfgrw"
-  if (TEST_NAME_RX.test(trimmed)) {
-    // Don't flag names that contain a real first+last shape unless an explicit
-    // "TEST" token is present.
-    if (/\btest\b|\btesting\b|\bqa\b|\bdemo\b|\bsandbox\b|\bstaging\b|\btest[- ]?\d/i.test(trimmed)) return true;
-    if (/^global\s+test\b/i.test(trimmed)) return true;
-    if (/^dan\s+man$/i.test(trimmed)) return true;
-  }
+  const lower = trimmed.toLowerCase();
+
+  // 1) Standalone "TEST" / "TESTING" / "QA" / "DEMO" / "SANDBOX" / "STAGING" / "TMP" token
+  if (/(?:^|[\s\-_])(?:test|testing|qa|demo|sandbox|staging|tmp)(?:[\s\-_]|\d|$)/i.test(trimmed)) return true;
+
+  // 2) "test"-as-suffix or embedded in a surname-like position:
+  //    "Gondwetest", "Smith-test", "Anna_test", "Yoram Gondwetest"
+  if (/\w{2,}test\b/i.test(trimmed)) return true;
+  if (/\btest\w{0,4}\b/i.test(trimmed)) return true;
+
+  // 3) "VIA <NUMBER-WORD>" — the live data has "VIA THREE", "VIA TWO", etc.
+  if (new RegExp('^via\\s+' + NUMBER_WORDS_RX.source + '\\b', 'i').test(trimmed)) return true;
+
+  // 4) "Global Test" / "Global Test New" / similar generic-test names.
+  if (/^global\s+test\b/i.test(trimmed)) return true;
+
+  // 5) Two-word minimal names that look fake:
+  //    "Dan Man", "Foo Bar", anything short with no real surname pattern
+  if (/^dan\s+man$/i.test(trimmed)) return true;
+
+  // 6) Any token in the name that's keyboard-mash (consonant-only, ≥4 chars).
+  //    Catches "michele wrfgrw" — the second token is mash. We require the
+  //    name has at least 2 tokens before applying this, so single-word names
+  //    like "Trinh" (Vietnamese, all consonants by Latin alphabet rules but
+  //    a real name) aren't accidentally caught.
+  const tokens = _tokenize(lower);
+  if (tokens.length >= 2 && tokens.some(_isConsonantMash)) return true;
+
+  // 7) Single-token all-consonant gibberish (≥6 chars) — kept from the
+  //    previous version so "wrfgrw" alone still flags.
+  if (tokens.length === 1 && /^[a-z]{6,}$/.test(tokens[0]) && !/[aeiou]/i.test(tokens[0])) return true;
+
   return false;
 }
 
