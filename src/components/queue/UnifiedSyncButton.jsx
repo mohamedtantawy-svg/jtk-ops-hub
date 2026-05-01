@@ -14,15 +14,22 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-// Two-tier freshness so a long-running tab signals drift *before* users act on
-// stale data: warn at 5 min (yellow), escalate at 10 min (red). Matches the
-// resilience audit's recommended thresholds.
-const WARN_AFTER_MS  = 5  * 60 * 1000;
-const STALE_AFTER_MS = 10 * 60 * 1000;
-// If a refresh has been running this long without finishing, flip the
-// indicator to "stalled" and surface an actionable retry. Matches the
-// server-side scan timeout (45s) plus a small buffer for the response
-// to traverse the FE.
+// 2026-05-01 redesign: badge tracks DATA FRESHNESS, not poll-in-flight state.
+// As long as the freshest source completed within the last `STALE_AFTER_MS`
+// the user has actionable data — flipping the badge to amber/orange every
+// time a background poll fires (which can take 30–60s for offboarding) is
+// noise. The badge only goes amber/red when the data itself is genuinely
+// out of date.
+//
+// Hover still shows the live per-source breakdown so an HRX lead can
+// see "Workbench refreshing 12s — last ok 3 min ago" while the badge
+// itself stays green. The dropdown has the granular state; the badge
+// has the headline.
+const STALE_AFTER_MS = 10 * 60 * 1000; // hard threshold — data is now stale
+const WARN_AFTER_MS  = 7  * 60 * 1000; // soft threshold — getting close
+// We still need a stall threshold so the *dropdown* can offer a Force
+// Resync action when something's actually hung, but it no longer drives
+// the badge color/state when the freshest source is recent.
 const STALL_AFTER_MS = 50 * 1000;
 
 function formatAgo(ts, now) {
@@ -99,7 +106,7 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
   const isStalled = isAnyRefreshing && refreshRunningMs > STALL_AFTER_MS;
 
   let state = 'live';
-  let label = 'Synced';
+  let label = 'Live';
   let sublabel = '';
   let dotColor = '#29811e';
   let bg = '#e8f5e9';
@@ -114,6 +121,28 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
     return `${Math.floor(sec / 60)}m ${sec % 60}s`;
   };
 
+  // ── Freshness-first state machine (2026-05-01 redesign) ────────────────
+  // Old behaviour: any in-flight poll → amber "Syncing 12s" badge, even
+  // when the user already had 1-min-old data. That created panic-clicks
+  // and made the page feel broken whenever the offboarding scan ran in
+  // the background. Concretely, an HR lead with 3-min-old cached data
+  // saw the badge flip amber for 60s every poll cycle, then back to
+  // green, then amber, then green — 12× per hour. Awful.
+  //
+  // New behaviour: the badge follows the *freshest* successful sync time.
+  // If anything completed in the last STALE_AFTER_MS window, the user
+  // has actionable data — show green "Live · synced N min ago", no
+  // matter what's happening in the background. Hover the badge to see
+  // the live per-source breakdown (Workbench refreshing 12s — last ok
+  // 3 min ago) for users who actually want the granular state.
+  //
+  // Only the genuine red flags break the green badge:
+  //   • Offline (no network)
+  //   • Stale (no successful sync inside the 10-min window)
+  //   • All sources failing (every source returned an error)
+  // Background polls — even a 60-second offboarding scan — leave the
+  // badge green as long as the cache is fresh. The dropdown still
+  // surfaces "Syncing Xs" per source for users who hover.
   if (isOffline) {
     state = 'offline';
     label = 'Offline';
@@ -122,33 +151,8 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
     bg = '#f3f3f3';
     border = '#d5d5d5';
     textColor = '#616161';
-  } else if (isStalled) {
-    state = 'stalled';
-    label = `Sync stalled (${formatRunning(refreshRunningMs)})`;
-    sublabel = hasEverSynced
-      ? `cached ${formatAgo(oldestSyncAt, now)} · click Force resync`
-      : 'first sync taking longer than expected';
-    dotColor = '#d42d35';
-    bg = '#fef2f2';
-    border = '#fca5a5';
-    textColor = '#991b1b';
-  } else if (isAnyRefreshing) {
-    state = 'syncing';
-    label = `Syncing ${formatRunning(refreshRunningMs)}`;
-    sublabel = hasEverSynced ? `last ${formatAgo(oldestSyncAt, now)}` : 'first sync';
-    dotColor = '#ed8d00';
-    bg = '#fff8e6';
-    border = '#ffe27c';
-    textColor = '#92400e';
-  } else if (sourceErrors?.length > 0) {
-    state = 'error';
-    label = `${sourceErrors.length} source${sourceErrors.length > 1 ? 's' : ''} failing`;
-    sublabel = hasEverSynced ? `last ok ${formatAgo(oldestSyncAt, now)}` : 'retry';
-    dotColor = '#d42d35';
-    bg = '#fef2f2';
-    border = '#fca5a5';
-    textColor = '#991b1b';
-  } else if (!hasEverSynced) {
+  } else if (!hasEverSynced && !isAnyRefreshing) {
+    // Fresh login, no cache hydrated yet, no poll fired. Brief state.
     state = 'waiting';
     label = 'Waiting…';
     sublabel = 'first sync';
@@ -156,33 +160,77 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
     bg = '#f7f5f2';
     border = '#e8e8e8';
     textColor = '#616161';
+  } else if (!hasEverSynced && isAnyRefreshing) {
+    // First sync in progress — only state where we surface the in-flight
+    // counter on the badge itself. The user has nothing to look at yet.
+    state = 'syncing';
+    label = `Syncing ${formatRunning(refreshRunningMs)}`;
+    sublabel = 'first sync';
+    dotColor = '#ed8d00';
+    bg = '#fff8e6';
+    border = '#ffe27c';
+    textColor = '#92400e';
   } else if (isStale) {
-    state = 'stale';
+    // Past the 10-min hard threshold AND not currently refreshing → red.
+    // If a poll is in-flight while stale, the next branch handles that.
+    state = isAnyRefreshing ? 'stale-refreshing' : 'stale';
     label = `Synced ${formatAgo(oldestSyncAt, now)}`;
-    sublabel = 'stale — click to refresh';
+    sublabel = isAnyRefreshing
+      ? `refreshing ${formatRunning(refreshRunningMs)}…`
+      : 'stale — click to refresh';
+    dotColor = '#d42d35';
+    bg = '#fef2f2';
+    border = '#fca5a5';
+    textColor = '#991b1b';
+  } else if (sourceErrors?.length === Object.keys(sources || {}).length && (sourceErrors?.length || 0) > 0) {
+    // Every source failed — escalate to red regardless of freshness, since
+    // the cache is about to drift and the user can't recover by waiting.
+    // Partial failures stay green (they don't invalidate the cache).
+    state = 'error';
+    label = `${sourceErrors.length} source${sourceErrors.length > 1 ? 's' : ''} failing`;
+    sublabel = hasEverSynced ? `last ok ${formatAgo(oldestSyncAt, now)}` : 'retry';
     dotColor = '#d42d35';
     bg = '#fef2f2';
     border = '#fca5a5';
     textColor = '#991b1b';
   } else if (isWarn) {
+    // 7–10 min old. Soft warning so the user notices drift before it's
+    // actionable. If a refresh is in flight, lean back toward green
+    // because relief is on the way.
     state = 'aging';
     label = `Synced ${formatAgo(oldestSyncAt, now)}`;
-    sublabel = 'aging — consider refresh';
+    sublabel = isAnyRefreshing
+      ? `refreshing ${formatRunning(refreshRunningMs)}…`
+      : 'aging — refresh soon';
     dotColor = '#ed8d00';
     bg = '#fff8e6';
     border = '#ffe27c';
     textColor = '#92400e';
   } else {
-    label = `Synced ${formatAgo(oldestSyncAt, now)}`;
-    sublabel = '';
+    // ✨ Default green path. We're inside the freshness window — even if
+    // a background poll is currently running. Show "Live · synced N min
+    // ago" and let the dropdown carry the per-source detail.
+    state = 'live';
+    label = 'Live';
+    sublabel = `synced ${formatAgo(oldestSyncAt, now)}`;
+    dotColor = '#29811e';
+    bg = '#e8f5e9';
+    border = '#bbf7d0';
+    textColor = '#166534';
   }
 
-  // Allow forcing a refresh even when one is in flight if it has stalled —
-  // the user shouldn't be locked out of recovery just because a hung scan
-  // is still nominally "running". Otherwise honour the in-flight guard so
-  // the click doesn't spam the same refresh path.
+  // Click semantics:
+  //   • In the green "Live" state, a click forces a refresh — users who
+  //     do want the very latest data can override the freshness window.
+  //   • In stalled / stale / aging states, click also force-refreshes.
+  //   • While a fresh-cache first sync is running, clicks are still no-ops
+  //     since there's no cache to refresh.
+  // Pre-2026-05-01 the button was disabled the entire time isAnyRefreshing
+  // was true — that's what made every offboarding poll feel like the page
+  // was locked up.
   const handleClick = () => {
-    if (!isAnyRefreshing || isStalled) onRefresh?.();
+    if (state === 'syncing' || state === 'waiting') return;
+    onRefresh?.();
   };
 
   return (
@@ -192,16 +240,24 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
         onMouseEnter={() => setOpen(true)}
         onFocus={() => setOpen(true)}
         onMouseLeave={() => { /* dismissal via outside click */ }}
-        disabled={isAnyRefreshing && !isStalled}
+        // Only the very first sync (no cache yet) disables the button —
+        // every other state is interactive so the user can always force
+        // a refresh.
+        disabled={state === 'syncing' || state === 'waiting'}
         aria-label={`Sync status: ${label}${sublabel ? `, ${sublabel}` : ''}`}
-        title={sublabel || label}
+        // Hover tooltip emphasises that the per-source breakdown is one
+        // hover away — useful in the "Live" green state where the badge
+        // intentionally hides the in-flight detail.
+        title={isAnyRefreshing && state === 'live'
+          ? `${label} · ${sublabel} — hover for live per-source state`
+          : (sublabel || label)}
         style={{
           height: 32,
           display: 'inline-flex', alignItems: 'center', gap: 6,
           padding: '0 12px', borderRadius: 128,
           border: `1px solid ${border}`, background: bg, color: textColor,
           fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap',
-          cursor: (isAnyRefreshing && !isStalled) ? 'wait' : 'pointer',
+          cursor: (state === 'syncing' || state === 'waiting') ? 'wait' : 'pointer',
           transition: 'background .15s, border-color .15s',
         }}>
         <span
@@ -209,7 +265,11 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
           style={{
             width: 7, height: 7, borderRadius: '50%',
             background: dotColor,
-            animation: state === 'syncing' ? 'pulse 1s infinite' : 'none',
+            // Pulse the dot whenever a poll is in flight — a subtle hint
+            // that the system is still working in the background, even
+            // when the badge stays green. The dot is the only thing that
+            // moves; the rest of the badge holds steady.
+            animation: isAnyRefreshing ? 'pulse 1s infinite' : 'none',
             flexShrink: 0,
           }}
         />
@@ -220,8 +280,8 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
           </span>
         )}
         <i
-          className={state === 'syncing' ? 'bi-arrow-clockwise spin' : 'bi-arrow-clockwise'}
-          style={{ fontSize: 12, marginLeft: 2, opacity: 0.7 }}
+          className={isAnyRefreshing ? 'bi-arrow-clockwise spin' : 'bi-arrow-clockwise'}
+          style={{ fontSize: 12, marginLeft: 2, opacity: 0.55 }}
         />
       </button>
 
@@ -251,17 +311,20 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
             </span>
             <button
               onClick={onRefresh}
-              disabled={isAnyRefreshing && !isStalled}
+              // Only disabled during the very first sync (no cache to refresh).
+              // In every other state the button is interactive so the user
+              // can always override the freshness window.
+              disabled={state === 'syncing' || state === 'waiting'}
               style={{
                 padding: '3px 10px', borderRadius: 128,
                 border: `1px solid ${isStalled ? '#fca5a5' : '#e8e8e8'}`,
-                background: isStalled ? '#fef2f2' : (isAnyRefreshing ? '#f7f5f2' : 'white'),
+                background: isStalled ? '#fef2f2' : 'white',
                 color: isStalled ? '#991b1b' : '#1b1b1b', fontSize: 11, fontWeight: 600,
-                cursor: (isAnyRefreshing && !isStalled) ? 'wait' : 'pointer',
+                cursor: (state === 'syncing' || state === 'waiting') ? 'wait' : 'pointer',
                 display: 'inline-flex', alignItems: 'center', gap: 4,
               }}>
-              <i className={(isAnyRefreshing && !isStalled) ? 'bi-arrow-clockwise spin' : 'bi-arrow-clockwise'} style={{ fontSize: 10 }} />
-              {isStalled ? 'Force resync' : (isAnyRefreshing ? 'Syncing' : 'Refresh all')}
+              <i className={isAnyRefreshing ? 'bi-arrow-clockwise spin' : 'bi-arrow-clockwise'} style={{ fontSize: 10 }} />
+              {isStalled ? 'Force resync' : (isAnyRefreshing ? 'Refreshing…' : 'Refresh all')}
             </button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
