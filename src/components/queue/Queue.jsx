@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useContext, memo } from 'react';
-import { TOOLS, FUNCTIONS, SLA_MINS, getFlag } from '../../data/constants';
+import { TOOLS, FUNCTIONS, SLA_MINS, getFlag, getCountryName } from '../../data/constants';
 import { useVirtualRows } from '../../hooks/useVirtualRows';
 
 // Same row-height contract as SourceTable — every <QueueRow /> inline-locks
@@ -89,6 +89,12 @@ const queueFiltersKey = (email) => {
   return lc ? `${QUEUE_FILTERS_KEY_BASE}:${lc}` : QUEUE_FILTERS_KEY_BASE;
 };
 const loadFilters = (email) => {
+  // SSR safety: localStorage is undefined on the server. Reading during render
+  // (or initial useState) caused React #418 hydration mismatches because the
+  // server initialised every filter to `null`/`[]` while the client populated
+  // them from saved state on first paint. Always return null on the server;
+  // the post-mount effect re-applies persisted filters after hydration.
+  if (typeof window === 'undefined') return null;
   try {
     const raw = localStorage.getItem(queueFiltersKey(email))
       || (!email ? localStorage.getItem(QUEUE_FILTERS_KEY_BASE) : null);
@@ -99,19 +105,30 @@ const loadFilters = (email) => {
 };
 
 const Queue = ({ user, tasks, subFilter }) => {
-  const saved = useMemo(() => loadFilters(user?.email), [user?.email]);
-  const [fTool, setFTool] = useState(saved?.fTool || null);
-  const [fStatus, setFStatus] = useState(() => {
-    const s = saved?.fStatus;
-    if (Array.isArray(s)) return s;
-    if (s) return [s];
-    return [];
-  });
+  // Filters always start in their default state to keep SSR HTML identical
+  // to the first client render. The `useEffect` below rehydrates from
+  // localStorage after mount — prevents React #418 hydration mismatches
+  // that fired on every Queue navigation per the launch audit.
+  const [fTool, setFTool] = useState(null);
+  const [fStatus, setFStatus] = useState([]);
   const [search, setSearch] = useState('');
-  const [fSla, setFSla] = useState(saved?.fSla || null);
-  const [fJiraActionable, setFJiraActionable] = useState(saved?.fJiraActionable !== undefined ? !!saved.fJiraActionable : true);
-  const [fJiraRaised, setFJiraRaised] = useState(saved?.fJiraRaised !== undefined ? !!saved.fJiraRaised : false);
-  const [fUnassigned, setFUnassigned] = useState(saved?.fUnassigned || false);
+  const [fSla, setFSla] = useState(null);
+  const [fJiraActionable, setFJiraActionable] = useState(true);
+  const [fJiraRaised, setFJiraRaised] = useState(false);
+  const [fUnassigned, setFUnassigned] = useState(false);
+
+  // Post-mount filter rehydration — runs once per signed-in identity.
+  useEffect(() => {
+    const saved = loadFilters(user?.email);
+    if (!saved) return;
+    if (saved.fTool) setFTool(saved.fTool);
+    if (Array.isArray(saved.fStatus)) setFStatus(saved.fStatus);
+    else if (saved.fStatus) setFStatus([saved.fStatus]);
+    if (saved.fSla) setFSla(saved.fSla);
+    if (typeof saved.fJiraActionable === 'boolean') setFJiraActionable(saved.fJiraActionable);
+    if (typeof saved.fJiraRaised === 'boolean') setFJiraRaised(saved.fJiraRaised);
+    if (saved.fUnassigned) setFUnassigned(true);
+  }, [user?.email]);
   const [workSource, setWorkSource] = useState(null);
   // ── Column sort for the ZD/Jira table ─────────────────────────────────────
   // Default = SLA tier (Breached → At-Risk → On Track), oldest-first within
@@ -497,7 +514,7 @@ const Queue = ({ user, tasks, subFilter }) => {
           </div>
 
           {(isAdmin || isLead) && (() => {
-            const sourceLabels = { onboarding: 'Onboarding', offboarding: 'Offboarding', amendments: 'Amendments', redlines: 'Redlines', workbench: 'Workbench' };
+            const sourceLabels = { onboarding: 'Onboarding', offboarding: 'Offboarding', amendments: 'Amendments', redlines: 'Redlines', workbench: 'Workbench', incentive_plans: 'Incentive Plans' };
             const toolLabels = { zendesk: 'Zendesk', jira: 'Jira' };
             const viewLabel = sourceLabels[workSource] || toolLabels[fTool] || (isAdmin ? 'All Tasks' : user.team);
             return <span style={{ fontSize: 13, fontWeight: 600, color: '#616161', marginLeft: 6 }}>{viewLabel}</span>;
@@ -560,7 +577,12 @@ const Queue = ({ user, tasks, subFilter }) => {
             ];
           }
           return (
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'nowrap', overflowX: 'auto', paddingBottom: 2 }}>
+            // overflow:visible + flex-wrap so the Status filter popover (which
+            // is position:absolute) is not clipped by the parent's scroll
+            // context. The previous overflow:auto silently swallowed the menu;
+            // wrap also gives narrow desktops / tablets a usable layout instead
+            // of a horizontal-scroll filter row.
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', overflow: 'visible', paddingBottom: 2 }}>
               {WORK_SOURCES.map(ws => {
                 const isQueueFilter = ws.id === 'zendesk' || ws.id === 'jira';
                 const isActive = isQueueFilter ? (fTool === ws.id && !workSource) : workSource === ws.id;
@@ -898,8 +920,10 @@ const QueueRow = memo(({ task, slaAgeClass, settings }) => {
     >
       {/* Source */}
       <td style={tdStyle}><ToolBadge source={task.source}/></td>
-      {/* Subject */}
-      <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: '#1b1b1b', maxWidth: 320 }}>
+      {/* Subject — full text in title attr so truncated subjects (Zendesk
+          long-form messages, employee long names) are reachable on hover.
+          Without this the user had to leave the app to read the full title. */}
+      <td title={task.subject || ''} style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: '#1b1b1b', maxWidth: 320 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           {task.isAlert && <span className="pulse" style={{ width: 6, height: 6, borderRadius: '50%', background: '#ed8d00', flexShrink: 0 }}></span>}
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{task.subject}</span>
@@ -914,12 +938,14 @@ const QueueRow = memo(({ task, slaAgeClass, settings }) => {
       <td style={tdStyle}>
         {fn ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 8px', borderRadius: 128, background: fn.bg || '#f2f2f2', color: fn.color || '#616161', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' }}>{fn.label}</span> : <span style={{ color: '#d5d5d5' }}>--</span>}
       </td>
-      {/* Country */}
-      <td style={{ ...tdStyle, fontSize: 12 }}>
+      {/* Country — flag + ISO code, full name in title for hover. Standardised
+          across tabs so users no longer see "🇩🇪 DE" on Zendesk and "🇩🇪 Germany"
+          on Onboarding for the same country. */}
+      <td title={task.country ? getCountryName(task.country) : ''} style={{ ...tdStyle, fontSize: 12 }}>
         {task.country && <span>{getFlag(task.country)} <span style={{ color: '#616161', fontWeight: 500 }}>{task.country}</span></span>}
       </td>
-      {/* Assignee */}
-      <td style={tdStyle}>
+      {/* Assignee — full name in title attr; cell only displays first name. */}
+      <td title={assignee.name || 'Unassigned'} style={tdStyle}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
           <Avatar name={assignee.name} size="xs"/>
           <span style={{ fontSize: 12, color: '#1b1b1b', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{assignee.name?.split(' ')[0] || ''}</span>

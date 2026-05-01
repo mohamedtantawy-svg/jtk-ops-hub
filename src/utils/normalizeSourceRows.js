@@ -259,6 +259,55 @@ function resolveEmailByName(name) {
   return '';
 }
 
+// ── Test-data filter ────────────────────────────────────────────────────────
+// Catches obvious QA / sandbox rows that occasionally leak into the Deel
+// admin payload and pollute the Q tab in production. Examples seen in the
+// 2026-05-01 launch audit:
+//   "VIA Test", "VIA THREE", "Kirce TEST-TWO", "Global Test", "Global Test New",
+//   "Dan Man", "michele wrfgrw" (keyboard-mash).
+//
+// Patterns we filter:
+//   • Standalone "TEST" / "TESTING" tokens (case-insensitive)
+//   • Names containing "test-N" / "testN" sequences
+//   • All-lowercase fully-random strings ≥6 chars that don't match common
+//     name shapes — i.e. no vowels, or all-consonant gibberish
+//   • Subject ending with "TEST", "QA", "DEMO" (case-insensitive)
+// We err on the side of false-negatives (leaving real rows visible) rather
+// than false-positives — anything ambiguous stays in the queue. To bypass
+// for debugging set localStorage `ops_hub_show_test_rows = '1'`.
+const TEST_NAME_RX = /(?:^|\s|[-_])(?:test|testing|qa|demo|sandbox|staging|tmp)(?:\s|[-_]|\d|$)|^test\b|\btest\d+\b|\btest[- ]?\w{1,4}$|^global\s+test\b|^dan\s+man$|^[a-z]{6,}$/i;
+
+function isLikelyTestRow(name) {
+  if (!name) return false;
+  const trimmed = String(name).trim();
+  if (!trimmed) return false;
+  // Allow real names like "Tester Smith" — only flag if "test" is a *standalone*
+  // token, not a substring of a longer word.
+  if (/^[a-z]{6,20}$/.test(trimmed) && !/[aeiou]/i.test(trimmed)) return true; // "wrfgrw"
+  if (TEST_NAME_RX.test(trimmed)) {
+    // Don't flag names that contain a real first+last shape unless an explicit
+    // "TEST" token is present.
+    if (/\btest\b|\btesting\b|\bqa\b|\bdemo\b|\bsandbox\b|\bstaging\b|\btest[- ]?\d/i.test(trimmed)) return true;
+    if (/^global\s+test\b/i.test(trimmed)) return true;
+    if (/^dan\s+man$/i.test(trimmed)) return true;
+  }
+  return false;
+}
+
+// Allow flag-flip override from the browser console for debugging.
+function testRowsAllowed() {
+  if (typeof window === 'undefined') return false;
+  try { return window.localStorage?.getItem('ops_hub_show_test_rows') === '1'; } catch { return false; }
+}
+
+function dropTestRows(items, getNames) {
+  if (testRowsAllowed()) return items;
+  return (items || []).filter(item => {
+    const names = getNames(item).filter(Boolean);
+    return !names.some(n => isLikelyTestRow(n));
+  });
+}
+
 // ── Date formatter for subject lines ──
 function fmtShortDate(dateStr) {
   if (!dateStr) return '';
@@ -270,7 +319,7 @@ function fmtShortDate(dateStr) {
 // ── Onboarding → normalized rows ──
 export function normalizeOnboarding(items = [], slaConfig = null) {
   const { activeMs } = slaMsFor(slaConfig, 'onboarding', ONBOARDING_SLA_ACTIVE_MS, ONBOARDING_SLA_PAUSED_MS);
-  return items.map(p => {
+  return dropTestRows(items, p => [p?.name, p?.clientName]).map(p => {
     // Friendly flow step: "Onboarding.ComplianceDocs.AwaitingReview" → "Compliance Docs · Awaiting Review"
     const flowParts = (p.flowStep || '').split('.').slice(1);
     const flowDisplay = flowParts.map(part => part.replace(/([A-Z])/g, ' $1').trim()).join(' · ');
@@ -334,7 +383,7 @@ export function normalizeOnboarding(items = [], slaConfig = null) {
 // ── Paused Onboarding → normalized rows ──
 export function normalizePausedOnboarding(items = [], slaConfig = null) {
   const { activeMs, pausedMs } = slaMsFor(slaConfig, 'onboarding', ONBOARDING_SLA_ACTIVE_MS, ONBOARDING_SLA_PAUSED_MS);
-  return items.map(p => {
+  return dropTestRows(items, p => [p?.name, p?.clientName]).map(p => {
     // Pause type label: REDLINE → "Redline", MANUAL → "Manual", AMENDMENT → "Amendment"
     const pauseLabel = (p.pauseType || 'Paused')
       .replace(/_/g, ' ')
@@ -395,7 +444,7 @@ export function normalizePausedOnboarding(items = [], slaConfig = null) {
 export function normalizeOffboarding(items = [], slaConfig = null) {
   const term = slaMsFor(slaConfig, 'offboarding_termination', OFFBOARDING_TERM_ACTIVE_MS, OFFBOARDING_SLA_PAUSED_MS);
   const resig = slaMsFor(slaConfig, 'offboarding_resignation', OFFBOARDING_RESIG_ACTIVE_MS, OFFBOARDING_SLA_PAUSED_MS);
-  return items.map(c => {
+  return dropTestRows(items, c => [c?.name, c?.organizationName]).map(c => {
     const createdAt = c.requestedDate || c.createdAt || '';
     const isResignation = (c.typeLabel || '').startsWith('Resignation');
     const { activeMs, pausedMs } = isResignation ? resig : term;
@@ -440,7 +489,7 @@ export function normalizeOffboarding(items = [], slaConfig = null) {
 // ── Amendments → normalized rows ──
 export function normalizeAmendments(items = [], slaConfig = null) {
   const { activeMs, pausedMs } = slaMsFor(slaConfig, 'amendments', AMENDMENT_SLA_ACTIVE_MS, AMENDMENT_SLA_PAUSED_MS);
-  return items.map(a => {
+  return dropTestRows(items, a => [a?.employeeName, a?.clientName]).map(a => {
     const changesSummary = a.changes?.length > 0
       ? a.changes.map(c => c.label || c.dataPoint).filter(Boolean).join(', ')
       : '';
@@ -486,18 +535,27 @@ export function normalizeAmendments(items = [], slaConfig = null) {
 // ── Redlines → normalized rows ──
 export function normalizeRedlines(items = [], slaConfig = null) {
   const { activeMs, pausedMs } = slaMsFor(slaConfig, 'redlines', REDLINE_SLA_ACTIVE_MS, REDLINE_SLA_PAUSED_MS);
-  return items.map(r => {
+  return dropTestRows(items, r => [r?.employeeName, r?.orgName, r?.templateName]).map(r => {
     const typeLabel = r.type === 'templateRedline' ? 'Template' : r.type === 'contractRedline' ? 'Contract' : r.type || '';
 
     // Subject — the row's lead identifier, shown in the Employee column.
     //   - Contract redlines: the employee's legal name (enriched from
     //     /rest/v2/contracts in the BE if missing from the raw payload).
-    //   - Template redlines: the creating organization's name.
+    //   - Template redlines: there is no employee — render a label that makes
+    //     it clear the row is org-level, not "Org Name == Org Name". Previous
+    //     fall-through to `orgName` produced the 2026-05-01-audit bug where
+    //     every Redlines row showed the same value in Employee and
+    //     Organization columns.
     //   - Else: fall back to template name, then a truncated redline ID so
     //     the row is never anonymous.
+    const isTemplate = r.type === 'templateRedline';
+    const templateLabel = r.templateName
+      ? `Template: ${r.templateName}`
+      : (r.orgName ? `Template (${r.orgName})` : 'Template Redline');
     const subject = r.employeeName
-                 || r.orgName
+                 || (isTemplate ? templateLabel : null)
                  || r.templateName
+                 || r.orgName
                  || (r.id ? `${typeLabel || 'Redline'} ${String(r.id).slice(0, 8)}` : 'Redline');
 
     // Configurable active window (72h default); 48h from pausedAt when paused.
@@ -555,7 +613,7 @@ export function normalizeRedlines(items = [], slaConfig = null) {
 // who's editing it.
 export function normalizeIncentivePlans(items = [], slaConfig = null) {
   const { activeMs, pausedMs } = slaMsFor(slaConfig, 'incentive_plans', INCENTIVE_PLAN_SLA_ACTIVE_MS, INCENTIVE_PLAN_SLA_PAUSED_MS);
-  return items.map(p => {
+  return dropTestRows(items, p => [p?.employeeName, p?.orgName]).map(p => {
     const sla = computeSlaWindow(activeMs, p.createdAt, {
       pausedMs: p.isPaused ? pausedMs : null,
       pausedAt: p.pausedAt || null,
@@ -596,7 +654,7 @@ export function normalizeIncentivePlans(items = [], slaConfig = null) {
 // ── Workbench → normalized rows ──
 export function normalizeWorkbench(items = [], slaConfig = null) {
   const { activeMs, pausedMs } = slaMsFor(slaConfig, 'workbench', WORKBENCH_SLA_ACTIVE_MS, WORKBENCH_SLA_PAUSED_MS);
-  return items.map(t => {
+  return dropTestRows(items, t => [t?.name]).map(t => {
     // Override upstream Deel-side SLA with the configured flat-from-creation
     // policy. The upstream `t.slaTime`/`t.slaRemaining` vary arbitrarily per
     // task config and don't match the team's operating model. Paused branch

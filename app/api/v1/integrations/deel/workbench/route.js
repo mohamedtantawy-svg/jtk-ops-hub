@@ -9,10 +9,17 @@ import { listWorkbenchTasks, isDeelConfigured } from '../../../../../../src/lib/
 import { cacheGet, cacheSet } from '../../../../../../src/lib/server-cache';
 import { scopeWorkbenchTasks } from '../../../../../../src/lib/queue-scoping';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
+import { buildWithTimeout } from '../../../../../../src/lib/scan-timeout';
 
 const CACHE_KEY = 'deel_workbench';
 const CACHE_TTL = 3 * 60 * 1000;    // fresh for 3 minutes
 const STALE_TTL = 30 * 60 * 1000;   // serve stale up to 30 minutes
+// Workbench occasionally pages slowly during peak hours; cap the user-visible
+// wait at 30s. Beyond this, fall back to stale cache (or empty + _warming
+// flag if cold). The previous 90s ceiling produced the
+// "[useWorkbenchData] Failed: ... timed out after 90000ms" console warnings
+// every poll cycle when upstream was slow.
+const SCAN_TIMEOUT_MS = 30_000;
 
 function scoped(data, user) {
   if (!data?.items) return data;
@@ -46,16 +53,33 @@ export async function GET(req) {
 
     let responseData;
     try {
-      const result = await listWorkbenchTasks({ limit: parseInt(limit, 10) });
-
-      // Derive display status for each task
-      const items = result.items.map(t => ({
-        ...t,
-        displayStatus: deriveWorkbenchStatus(t),
-      }));
-
-      responseData = { items, total: result.total };
-      cacheSet(CACHE_KEY, responseData);
+      const r = await buildWithTimeout(
+        CACHE_KEY,
+        async () => {
+          const result = await listWorkbenchTasks({ limit: parseInt(limit, 10) });
+          const items = result.items.map(t => ({
+            ...t,
+            displayStatus: deriveWorkbenchStatus(t),
+          }));
+          return { items, total: result.total };
+        },
+        { timeoutMs: SCAN_TIMEOUT_MS, staleTtl: STALE_TTL },
+      );
+      if (r.result == null) {
+        // Cold cache + timeout — return empty payload with warming hint so the
+        // FE shows "Workbench is warming up" instead of the 90s spinner.
+        return NextResponse.json({
+          items: [],
+          total: 0,
+          _warming: true,
+          _warming_message: 'Workbench data is warming up — auto-refreshes when ready.',
+        });
+      }
+      if (r.timedOut) {
+        console.warn('[workbench] Live build exceeded %dms — serving stale cache', SCAN_TIMEOUT_MS);
+        return NextResponse.json({ ...scoped(r.result, user), _stale: true, _stale_reason: 'timeout' });
+      }
+      responseData = r.result;
     } catch (fetchErr) {
       const stale = cacheGet(CACHE_KEY, STALE_TTL);
       if (stale) {

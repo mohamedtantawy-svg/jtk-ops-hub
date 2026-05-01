@@ -53,7 +53,10 @@ export async function fetchDeelOrg() {
 
 export async function fetchDeelOffboarding({ bustCache } = {}) {
   const qs = bustCache ? '?bust=1' : '';
-  return apiFetch(`/integrations/deel/offboarding${qs}`);
+  // Server caps the scan at 45s and falls back to a `_warming` empty payload
+  // beyond that — give the FE a slightly higher 60s ceiling so we capture
+  // the warming response cleanly instead of timing out the network request.
+  return apiFetch(`/integrations/deel/offboarding${qs}`, { timeoutMs: 60_000 });
 }
 
 export async function fetchDeelOnboarding({ limit, offset } = {}) {
@@ -89,7 +92,9 @@ export async function fetchDeelWorkbench({ limit, bustCache } = {}) {
   if (limit) params.set('limit', String(limit));
   if (bustCache) params.set('bust', '1');
   const qs = params.toString();
-  return apiFetch(`/integrations/deel/workbench${qs ? `?${qs}` : ''}`);
+  // Server caps the scan at 30s; give the FE 45s so warming responses arrive
+  // intact instead of being aborted by the default 90s ceiling.
+  return apiFetch(`/integrations/deel/workbench${qs ? `?${qs}` : ''}`, { timeoutMs: 45_000 });
 }
 
 export async function fetchDeelIncentivePlans({ status, bustCache } = {}) {
