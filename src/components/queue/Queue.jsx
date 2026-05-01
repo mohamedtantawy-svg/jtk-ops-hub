@@ -17,7 +17,6 @@ import {
 import { ToolBadge, StatusBadge, SlaBadge } from '../ui/Badges';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import Avatar from '../ui/Avatar';
-import { useQueueUnifiedSync } from '../../hooks/useQueueUnifiedSync';
 import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
 import UnifiedSyncButton from './UnifiedSyncButton';
 import SourceTable from './SourceTable';
@@ -113,7 +112,7 @@ const Queue = ({ user, tasks, subFilter }) => {
 
   const perms = useContext(PermissionsContext);
   const settings = useContext(SettingsContext);
-  const { queueSync } = useContext(IntegrationsContext);
+  const { queueSync, queueUnified } = useContext(IntegrationsContext);
 
   // Wire subFilter from parent (BriefingView "View resolved" etc.) to internal filter
   useEffect(() => {
@@ -124,12 +123,22 @@ const Queue = ({ user, tasks, subFilter }) => {
     }
   }, [subFilter]);
 
-  // Unified sync aggregator — one source of truth for all Deel feeds + tickets.
-  const unified = useQueueUnifiedSync({ queueSync, enabled: !!user, userEmail: user?.email || null });
+  // Unified sync aggregator — pre-warmed at the App.jsx boundary so every
+  // queue's data is already in flight (or done) by the time the user
+  // clicks any tab. We just read it from context here. Fallback to an
+  // empty shape so the unsigned-in / SSR path doesn't crash.
+  const unified = queueUnified || {};
   const {
-    onboardingData, pausedOnboardingData, offboardingData,
-    changeRequestData, workbenchData, incentivePlansData,
-    meta: syncMeta, sources: syncSources, refreshAll: syncRefreshAll, nowTick: syncNowTick,
+    onboardingData = { items: [] },
+    pausedOnboardingData = { items: [] },
+    offboardingData = { items: [] },
+    changeRequestData = { amendments: [], redlines: [] },
+    workbenchData = { tasks: [] },
+    incentivePlansData = { items: [] },
+    meta: syncMeta = {},
+    sources: syncSources = {},
+    refreshAll: syncRefreshAll = () => {},
+    nowTick: syncNowTick = Date.now(),
   } = unified;
 
   // ── Normalized rows for SourceTable ──
