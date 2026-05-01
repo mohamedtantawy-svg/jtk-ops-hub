@@ -702,20 +702,37 @@ async function fetchIncentivePlanDetail(planId) {
   if (hit && Date.now() - hit.ts < INCENTIVE_PLAN_DETAIL_TTL_MS) return hit.detail;
   try {
     const r = await deelFetch(`/admin/eor-experience/incentive-plans/${encodeURIComponent(key)}`);
+    // Field paths broadened 2026-05-01 — Mohamed reported every IP row in
+    // prod showed "--" for Country and Organization. The admin API surfaces
+    // these under non-uniform keys depending on the IP type (whitelabel vs
+    // direct, contract-bound vs template). Mirror offboarding's pattern of
+    // reading `employmentCountry` + `organizationName` first, then fall
+    // back to the older nested paths so any payload variant resolves.
     const detail = {
       country:        r?.country
                    || r?.countryCode
+                   || r?.employmentCountry
                    || r?.eorContract?.country
                    || r?.eorContract?.countryCode
+                   || r?.eorContract?.employmentCountry
+                   || r?.contract?.country
+                   || r?.contract?.countryCode
+                   || r?.employee?.country
                    || '',
       eorContractId:  r?.eorContractId
+                   || r?.contractId
+                   || r?.contractOid
                    || r?.eorContract?.id
                    || r?.eorContract?.oid
+                   || r?.contract?.id
+                   || r?.contract?.oid
                    || '',
-      // Some payloads carry the org inline; fall back to the contract
-      // detail enrichment below for the rest.
       orgName:        r?.eorContract?.organization?.name
                    || r?.organization?.name
+                   || r?.organizationName
+                   || r?.eorContract?.team?.organization?.name
+                   || r?.team?.organization?.name
+                   || r?.contract?.organization?.name
                    || '',
       status:         r?.status || '',
       pausedAt:       r?.pausedAt || null,
@@ -768,26 +785,65 @@ export async function listIncentivePlans(params = {}) {
   // refreshes hit the 1-hour cache.
   const detailMap = await resolveIncentivePlanDetails(rawItems.map(r => r.id));
 
-  // Use eorContractId (when present) to drop Deel-internal contracts and
+  // Helper — pick the contract OID from any of the three field surfaces
+  // (list item / IP detail / nested eorContract). Mirrors the 2026-05-01
+  // broadening in fetchIncentivePlanDetail; offboarding's list response
+  // exposes `eorContractId` inline so IP rows often do too, but the
+  // previous code only looked at the detail-call's view.
+  const pickOid = (r, d) => (d?.eorContractId)
+    || r?.eorContractId
+    || r?.contractId
+    || r?.contractOid
+    || r?.eorContract?.id
+    || r?.eorContract?.oid
+    || r?.contract?.id
+    || r?.contract?.oid
+    || '';
+
+  // Use the contract OID (when present) to drop Deel-internal contracts and
   // pick up the canonical org name via /admin/api/contract/{oid}.
   const oidsForContract = [];
   for (const r of rawItems) {
-    const d = detailMap.get(r.id);
-    if (d?.eorContractId) oidsForContract.push(d.eorContractId);
+    const oid = pickOid(r, detailMap.get(r.id));
+    if (oid) oidsForContract.push(oid);
   }
   const contractDetails = oidsForContract.length > 0
     ? await resolveContractDetails(oidsForContract)
     : new Map();
 
   let droppedDeelers = 0;
+  let missingCountry = 0, missingOrg = 0;
   const items = [];
   for (const r of rawItems) {
     const d = detailMap.get(r.id) || {};
-    const cd = d.eorContractId ? contractDetails.get(String(d.eorContractId)) : null;
+    const oid = pickOid(r, d);
+    const cd = oid ? contractDetails.get(String(oid)) : null;
     if (cd && hasDeelerTag(cd.tags)) {
       droppedDeelers++;
       continue;
     }
+    // Country / orgName lookup chain — same priority order as offboarding:
+    // contract detail (canonical) → IP detail → list item. List-item
+    // fallbacks were absent before today, which is why every row showed
+    // "--" when Deel started returning country/org only on the list payload.
+    const country = cd?.country
+                 || d.country
+                 || r?.country
+                 || r?.countryCode
+                 || r?.employmentCountry
+                 || r?.eorContract?.country
+                 || r?.eorContract?.countryCode
+                 || r?.eorContract?.employmentCountry
+                 || '';
+    const orgName = cd?.orgName
+                 || d.orgName
+                 || r?.organizationName
+                 || r?.organization?.name
+                 || r?.eorContract?.organization?.name
+                 || r?.eorContract?.team?.organization?.name
+                 || '';
+    if (!country) missingCountry++;
+    if (!orgName) missingOrg++;
     items.push({
       id:                r.id || '',
       __status:          r.__status,
@@ -795,13 +851,10 @@ export async function listIncentivePlans(params = {}) {
       employeeName:      r.employeeLegalName || cd?.employeeName || '',
       startDate:         r.startDate || '',
       createdAt:         r.createdAt || '',
-      // Country lookup chain — direct field, then detail, then contract.
-      country:           cd?.country || d.country || '',
-      // Organization — prefer the contract's team/org name (canonical),
-      // fall back to whatever the IP detail surfaced.
-      orgName:           cd?.orgName || d.orgName || '',
-      eorContractId:     d.eorContractId || '',
-      contractOid:       cd?.contractOid || d.eorContractId || '',
+      country,
+      orgName,
+      eorContractId:     d.eorContractId || oid || '',
+      contractOid:       cd?.contractOid || oid || '',
       isWhiteLabeled:    !!r.isWhiteLabeled,
       // Pause hooks — most rows aren't paused, but if the detail call
       // returns one, normalizeIncentivePlans will tick the SLA from
@@ -812,6 +865,13 @@ export async function listIncentivePlans(params = {}) {
   }
   if (droppedDeelers > 0) {
     console.info(`[incentive-plans] filtered ${droppedDeelers} Deeler contract(s) of ${rawItems.length}`);
+  }
+  // Surface enrichment gaps so the next regression is easy to diagnose
+  // without redeploying with debug logging. Both cd and d enrich asynchronously
+  // — if a large fraction is missing it usually means the upstream payload
+  // changed shape and a new path needs to be added above.
+  if (items.length > 0 && (missingCountry > 0 || missingOrg > 0)) {
+    console.warn(`[incentive-plans] enrichment gaps: ${missingCountry}/${items.length} missing country, ${missingOrg}/${items.length} missing orgName`);
   }
   return { items, total: items.length };
 }
