@@ -52,7 +52,19 @@ export async function sendAnnouncement(id) {
 }
 
 // ── Mark as read / acknowledged ──────────────────────────────────────────────
+// The DB persists announcements with UUID primary keys. Seed-only IDs like
+// `COM-001` (the demo announcements baked into FE state) hit the route and
+// blow up Postgres with `invalid input syntax for type uuid`. They also
+// spam the origin-check warning. Skip the call client-side when the id
+// isn't a UUID — there's nothing to mark read on the server, and the FE
+// state already updated optimistically.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export async function acknowledgeAnnouncement(id) {
+  if (!id || typeof id !== 'string' || !UUID_RE.test(id)) {
+    // Resolve as a no-op for seed/demo ids so callers keep working without
+    // a try/catch dance.
+    return { ok: true, skipped: 'non-uuid-id', id };
+  }
   return apiFetch(`/announcements/${id}/read`, { method: 'POST' });
 }
 
