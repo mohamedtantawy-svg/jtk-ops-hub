@@ -27,7 +27,7 @@ export function useIncentivePlansData(enabled = true, userEmail = null) {
   const refresh = useCallback(async (force = false) => {
     if (!enabled) return null;
     if (!force && Date.now() - lastFetchRef.current < CACHE_TTL) return null;
-    if (inFlightRef.current) return inFlightRef.current;
+    if (!force && inFlightRef.current) return inFlightRef.current;
 
     setIsRefreshing(true);
     setLoading(prev => items.length === 0 ? true : prev);

@@ -33,7 +33,12 @@ export function useOffboardingData(enabled = true, userEmail = null) {
   const refresh = useCallback(async (force = false) => {
     if (!enabled) return null;
     if (!force && Date.now() - lastFetchRef.current < CACHE_TTL) return null;
-    if (inFlightRef.current) return inFlightRef.current;
+    // force=true bypasses the in-flight guard so Force resync can recover
+    // from a hung Promise instead of attaching to it. The previous Promise
+    // keeps running until apiFetch's 90s timeout resolves it (we don't
+    // try to abort here — the server's 45s ceiling means the response
+    // path is short anyway).
+    if (!force && inFlightRef.current) return inFlightRef.current;
 
     setIsRefreshing(true);
     setLoading(prev => items.length === 0 ? true : prev);

@@ -44,7 +44,7 @@ export function useChangeRequestData(enabled = true, userEmail = null) {
       && Date.now() - lastFetchAmendmentsRef.current < CACHE_TTL
       && Date.now() - lastFetchRedlinesRef.current < CACHE_TTL;
     if (bothFresh) return null;
-    if (inFlightRef.current) return inFlightRef.current;
+    if (!force && inFlightRef.current) return inFlightRef.current;
 
     setIsRefreshing(true);
     setLoading(prev => (amendments.length === 0 && redlines.length === 0) ? true : prev);
