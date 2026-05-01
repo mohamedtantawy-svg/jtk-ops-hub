@@ -66,12 +66,19 @@ function CapacityBar({ pct }) {
   else if (pct > 100) color = '#ed8d00';
   else if (pct > 80) color = '#ed8d00';
 
+  // Display the percentage capped at 100% — anything above shows up as a
+  // separate "+N over" overflow chip so the column stays scannable. Mirrors
+  // the Home Team Summary treatment so the two surfaces tell the same story.
+  // Pre-2026-05-01-audit, every overloaded agent read "150%" with no visual
+  // cue separating "exactly at capacity" from "way past capacity".
+  const overflow = Math.max(0, pct - 100);
+  const displayed = Math.min(100, pct);
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }} title={overflow > 0 ? `${pct}% — ${overflow} percentage points over baseline` : `${pct}% of baseline`}>
       <div style={{ width: 60, height: 6, background: '#f2f2f2', borderRadius: 128, overflow: 'hidden' }}>
         <div
           style={{
-            width: `${Math.min(100, (pct / 150) * 100)}%`,
+            width: `${displayed}%`,
             height: '100%',
             background: color,
             borderRadius: 128,
@@ -79,7 +86,12 @@ function CapacityBar({ pct }) {
           }}
         />
       </div>
-      <span style={{ fontSize: 11, fontWeight: 700, color }}>{pct}%</span>
+      <span style={{ fontSize: 11, fontWeight: 700, color }}>{displayed}%</span>
+      {overflow > 0 && (
+        <span style={{ fontSize: 9, fontWeight: 700, color: '#d42d35', background: '#fef2f2', padding: '1px 6px', borderRadius: 128, letterSpacing: '0.02em' }}>
+          +{overflow} over
+        </span>
+      )}
     </div>
   );
 }

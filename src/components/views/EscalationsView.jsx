@@ -106,10 +106,22 @@ function StatusDot({ status, isActionRequired }) {
 }
 
 // ── Main View ─────────────────────────────────────────────────────────────────
-const EscalationsView = ({ escalations, setEscalations, currentUser, onNewEscalation }) => {
+const EscalationsView = ({ escalations, setEscalations, currentUser, onNewEscalation, subFilter, setSubFilter }) => {
   const [statusFilter, setStatusFilter]   = useState('all');
   const [sourceFilter, setSourceFilter]   = useState('all');
   const [severityFilter, setSeverityFilter] = useState('all');
+  // "Mine" filter — set by Home → Escalations card click. The 2026-05-01
+  // audit found Trish (agent) clicked her "Escalations 0 mine" KPI and
+  // landed on a view that didn't honor the mine intent. Now we read
+  // `subFilter === 'mine'` once on mount, apply, and clear so subsequent
+  // user filter actions work normally.
+  const [mineOnly, setMineOnly] = useState(false);
+  useEffect(() => {
+    if (subFilter === 'mine') {
+      setMineOnly(true);
+      setSubFilter && setSubFilter(null);
+    }
+  }, [subFilter, setSubFilter]);
   const [replyOpen, setReplyOpen]         = useState(null);
   const [replyText, setReplyText]         = useState({});
   const [hoveredRow, setHoveredRow]       = useState(null);
@@ -155,6 +167,20 @@ const EscalationsView = ({ escalations, setEscalations, currentUser, onNewEscala
   // is to highlight the items that "need action from me" in a separate section
   // further below, which is matched on `managerId` — see `myPending`.
   let vis = escalations;
+
+  // "Mine only" — escalations the current user is directly involved in:
+  // either the responder (managerId) or the raiser (escalatedById /
+  // escalatedByEmail). Mirrors the same logic used by the Home → Escalations
+  // KPI count so the navigation experience is internally consistent.
+  if (mineOnly && currentUser) {
+    const myEmail = (currentUser.email || '').toLowerCase();
+    vis = vis.filter(e => {
+      if (e.managerId === currentUser.id) return true;
+      if (e.escalatedById === currentUser.id) return true;
+      if (e.escalatedByEmail && e.escalatedByEmail.toLowerCase() === myEmail) return true;
+      return false;
+    });
+  }
 
   // Status + source + severity filters
   if (statusFilter === 'pending')  vis = vis.filter(e => e.status === 'pending');

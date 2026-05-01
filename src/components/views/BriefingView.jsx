@@ -100,12 +100,27 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     document.addEventListener('mousedown',onDocClick);
     return ()=>document.removeEventListener('mousedown',onDocClick);
   },[showMocPicker]);
-  const now=new Date();
-  const hour=now.getHours();
-  const greeting=hour<12?'Good Morning':hour<17?'Good Afternoon':'Good Evening';
-  const emoji=hour<12?'\u2600\uFE0F':hour<17?'\uD83C\uDF24\uFE0F':'\uD83C\uDF19';
-  const dateStr=now.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
-  const timeStr=now.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+  // \u2500\u2500 SSR-safe time state \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  // The greeting / dateStr / timeStr depend on the *user's* local time. Server
+  // renders in UTC, client hydrates in the visitor's timezone, and React's
+  // hydration check fires #418 ("HTML didn't match") whenever those strings
+  // differ. The 2026-05-01 audit found this error printing every 5 minutes.
+  // Fix: start with a stable placeholder, then update inside useEffect after
+  // mount. The first paint shows neutral text for ~1 frame; React's diff is
+  // then reconciled cleanly on the next render.
+  const [now, setNow] = useState(null);
+  useEffect(() => {
+    setNow(new Date());
+    // Refresh once per minute so the timeStr stays accurate without a heavy
+    // re-render. Cleared on unmount.
+    const id = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  const hour = now ? now.getHours() : 12;          // neutral default \u2192 "Good Afternoon"
+  const greeting = !now ? 'Welcome' : hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening';
+  const emoji = !now ? '\uD83D\uDC4B' : hour < 12 ? '\u2600\uFE0F' : hour < 17 ? '\uD83C\uDF24\uFE0F' : '\uD83C\uDF19';
+  const dateStr = now ? now.toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'}) : '';
+  const timeStr = now ? now.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}) : '';
   const firstName=user.name.split(' ')[0];
 
   // ── Click-outside for health breakdown ───────────────────────────────
@@ -266,7 +281,10 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // Calendar events carry a type — we only count real meetings, not deadlines
   // or leave markers (those show up in other cards). Same rule for every role
   // since the calendar is org-wide and users care about their own day.
-  const todayStr = new Date().toISOString().slice(0, 10);
+  // Use the SSR-safe `now` state above. ISO date is timezone-stable enough
+  // (UTC date string) but we still defer the read until `now` is set so it
+  // matches what the rest of the component is rendering.
+  const todayStr = now ? now.toISOString().slice(0, 10) : '1970-01-01';
   const todayMeetingsCount = CALENDAR_EVENTS.filter(e => e.date === todayStr && e.type === 'meeting').length;
 
   // ── Projects assigned / visible ───────────────────────────────────────
@@ -411,18 +429,18 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     const tOpen    = mTickets.filter(t => t.status === 'new' || t.status === 'in_progress' || t.status === 'escalated').length;
     const tPaused  = mTickets.filter(t => t.status === 'waiting').length;
     // Pull escalation count from the dedicated `escalations` array. The
-    // previous logic counted tickets with `status === 'escalated'`, which
-    // never populates because escalations live in their own table — the
     // 2026-05-01 audit observed every row in this column reading "0" while
-    // the Escalations tab showed 3 active items. An escalation belongs to a
-    // member when they're either the responder (manager handling it) or
-    // the raiser (agent who flagged it).
+    // the Escalations tab showed 3 active items. The previous fix used
+    // `responderId/Email` / `raiserId/Email` which don't exist on the
+    // normalised escalation shape — the actual fields are `managerId`
+    // (responder) and `escalatedById` / `escalatedByEmail` (raiser). An
+    // escalation belongs to a member when they're either the responder or
+    // the raiser.
     const tEsc = (escalations || []).filter(e => {
       if (e.status === 'resolved' || e.status === 'dismissed') return false;
-      if (e.responderId === m.id) return true;
-      if (e.responderEmail && e.responderEmail.toLowerCase() === memEmail) return true;
-      if (e.raiserId === m.id) return true;
-      if (e.raiserEmail && e.raiserEmail.toLowerCase() === memEmail) return true;
+      if (e.managerId === m.id) return true;
+      if (e.escalatedById === m.id) return true;
+      if (e.escalatedByEmail && e.escalatedByEmail.toLowerCase() === memEmail) return true;
       return false;
     }).length;
     const tBreach  = mTickets.filter(t => { const s = slaInfo(t); return s && s.breach; }).length;
@@ -811,17 +829,24 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                       <span style={{color:'#9e9e9e',fontWeight:500}}>Manager On Call:</span>{' '}
                       <span style={{fontWeight:700,color:'#1b1b1b'}}>{managerOnCall.name}</span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={()=>setShowMocPicker(p=>!p)}
-                      aria-label="Change manager on call"
-                      title="Change manager on call"
-                      style={{width:22,height:22,padding:0,border:'none',background:'transparent',borderRadius:'50%',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'background .12s'}}
-                      onMouseEnter={e=>e.currentTarget.style.background='#f0f0f0'}
-                      onMouseLeave={e=>e.currentTarget.style.background='transparent'}
-                    >
-                      <i className="bi bi-pencil" style={{fontSize:11,color:'#9e9e9e'}}></i>
-                    </button>
+                    {/* Edit pencil only visible to admin / TL / RM. The MoC
+                        is an org-wide setting — agents shouldn't be able to
+                        change who's on call for everyone. The 2026-05-01
+                        agent audit observed Trish (Agent) seeing this
+                        pencil and being able to reassign the global MoC. */}
+                    {(perms?.canManageManagerOnCall !== false && (perms?.dataScope === 'all_tasks' || perms?.dataScope === 'team_tasks' || isExec)) && (
+                      <button
+                        type="button"
+                        onClick={()=>setShowMocPicker(p=>!p)}
+                        aria-label="Change manager on call"
+                        title="Change manager on call"
+                        style={{width:22,height:22,padding:0,border:'none',background:'transparent',borderRadius:'50%',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'background .12s'}}
+                        onMouseEnter={e=>e.currentTarget.style.background='#f0f0f0'}
+                        onMouseLeave={e=>e.currentTarget.style.background='transparent'}
+                      >
+                        <i className="bi bi-pencil" style={{fontSize:11,color:'#9e9e9e'}}></i>
+                      </button>
+                    )}
                   </div>
                   {showMocPicker&&(
                     <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,background:'#ffffff',borderRadius:14,border:'1px solid #e8e8e8',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'6px 0',minWidth:300,maxHeight:360,overflowY:'auto',zIndex:1000}}>
@@ -1329,7 +1354,10 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             return(<>
           <div style={{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:10}}>
             {[
-              {icon:'bi-inbox-fill',label:'Active Requests',value:activeRequestsCount,color:'var(--g)',sub:`avg ${teamAvg.toFixed(1)}`,tr:trend(),expandKey:'active-breakdown'},
+              // Active Requests sub-label is scope-aware so an agent sees
+              // "mine" rather than "avg 437.0" (the team-average string the
+              // 2026-05-01 audit found leaking onto Trish's Home).
+              {icon:'bi-inbox-fill',label:'Active Requests',value:activeRequestsCount,color:'var(--g)',sub:isOwnScope?'mine':isTeamScope?`team · avg ${teamAvg.toFixed(1)}`:`avg ${teamAvg.toFixed(1)}`,tr:trend(),expandKey:'active-breakdown'},
               {icon:'bi-calendar-event',label:'Meetings',value:todayMeetingsCount,color:'#1f74b3',sub:'today',nav:()=>setView('calendar')},
               {icon:'bi-kanban',label:'Projects',value:projectsAssignedCount,color:'#8b6dca',sub:'assigned',nav:()=>setView('projects')},
               {icon:'bi-exclamation-triangle-fill',label:'Escalations',value:myEscalationsCount,color:myEscalationsCount>0?'#d42d35':'#616161',alert:myEscalationsCount>0,nav:()=>{setSubFilter && setSubFilter('mine'); setView('escalations');},accent:myEscalationsCount>0?'#ffe2de':null,sub:'mine'},
@@ -1770,25 +1798,50 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 </div>
               </DeelCard>}
 
-              {/* Quick Nav — visible for all user types */}
-              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(95px,1fr))',gap:10}}>
-                {[
+              {/* Quick Nav — gated through the same `RESTRICTED_VIEWS` /
+                  `isOwner` policy used by the top nav (App.jsx) AND the
+                  route renderers. Pre-2026-05-01-audit, this grid rendered
+                  all 5 buttons unconditionally even when the top nav
+                  correctly hid Reports / Analytics / Escalations from
+                  agents — Trish could click Reports and read all 18
+                  org-wide HR sensitive reports. */}
+              {(() => {
+                const OWNER_EMAIL = 'mohamed.tantawy@deel.com';
+                const isOwner = (user?.email || '').toLowerCase() === OWNER_EMAIL;
+                // Mirror App.jsx#RESTRICTED_VIEWS — these routes only
+                // render for the owner today. Keep this list in sync if
+                // App.jsx changes; ideally these constants live in one
+                // module long-term.
+                const OWNER_ONLY = new Set(['projects', 'hr-reports', 'analytics', 'escalations', 'calendar', 'knowledge-hub']);
+                const canSeeView = (v) => {
+                  if (OWNER_ONLY.has(v) && !isOwner) return false;
+                  if (perms && typeof perms.canView === 'function' && perms.canView(v) === false) return false;
+                  return true;
+                };
+                const allLinks = [
                   {v:'my-queue',icon:'bi-inbox-fill',l:'Queue',c:'var(--g)',bg:'#e8f0fe'},
                   {v:'escalations',icon:'bi-arrow-up-circle-fill',l:'Escalations',c:'#1f74b3',bg:'#e8f0fe'},
                   {v:'hr-reports',icon:'bi-flag-fill',l:'Reports',c:'#8b6dca',bg:'#f3eff8'},
                   {v:'team',icon:'bi-people-fill',l:'Team',c:'#ed8d00',bg:'#fff8e6'},
                   {v:'analytics',icon:'bi-bar-chart-line-fill',l:'Analytics',c:'#1f74b3',bg:'#e8f0fe'},
-                ].map(a=>(
-                  <button key={a.v} onClick={()=>setView(a.v)} style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:6,padding:'14px 8px',cursor:'pointer',fontSize:12,fontWeight:600,color:'#1b1b1b',transition:'all .2s',
-                    background:'white',border:'1px solid #e8e8e8',borderRadius:16}}
-                    onMouseEnter={e=>{e.currentTarget.style.borderColor=a.c;e.currentTarget.style.color=a.c;e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)';}} onMouseLeave={e=>{e.currentTarget.style.borderColor='#e8e8e8';e.currentTarget.style.color='#1b1b1b';e.currentTarget.style.transform='none';e.currentTarget.style.boxShadow='none';}}>
-                    <div style={{width:34,height:34,borderRadius:10,background:a.bg,display:'flex',alignItems:'center',justifyContent:'center'}}>
-                      <i className={a.icon} style={{fontSize:15,color:a.c}}></i>
-                    </div>
-                    {a.l}
-                  </button>
-                ))}
-              </div>
+                ];
+                const links = allLinks.filter(a => canSeeView(a.v));
+                if (links.length === 0) return null;
+                return (
+                  <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(95px,1fr))',gap:10}}>
+                    {links.map(a=>(
+                      <button key={a.v} onClick={()=>setView(a.v)} style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:6,padding:'14px 8px',cursor:'pointer',fontSize:12,fontWeight:600,color:'#1b1b1b',transition:'all .2s',
+                        background:'white',border:'1px solid #e8e8e8',borderRadius:16}}
+                        onMouseEnter={e=>{e.currentTarget.style.borderColor=a.c;e.currentTarget.style.color=a.c;e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)';}} onMouseLeave={e=>{e.currentTarget.style.borderColor='#e8e8e8';e.currentTarget.style.color='#1b1b1b';e.currentTarget.style.transform='none';e.currentTarget.style.boxShadow='none';}}>
+                        <div style={{width:34,height:34,borderRadius:10,background:a.bg,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                          <i className={a.icon} style={{fontSize:15,color:a.c}}></i>
+                        </div>
+                        {a.l}
+                      </button>
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>

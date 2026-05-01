@@ -861,7 +861,7 @@ const Queue = ({ user, tasks, subFilter }) => {
                   <SortableTh col="assignee" label="Assignee" width={80}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <SortableTh col="received" label="Received" width={68}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   {settings.sla_enabled !== false && (
-                    <SortableTh col="sla" label="SLA" width={60} sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                    <SortableTh col="sla" label="SLA" width={60} sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} tooltip="Sorted by triage tier first (Breached → At Risk → On Track), then oldest within each tier — not by raw SLA value. Hover any row's SLA pill for the exact remaining/over time." />
                   )}
                   <SortableTh col="status"   label="Status"   width={90}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <th scope="col" style={{ ...thStyle, width: 60 }}>Link</th>
@@ -980,7 +980,13 @@ QueueRow.displayName = 'QueueRow';
 // column resets to asc. The chevron pair indicates the active column +
 // direction; both stay light grey on inactive headers so users can see
 // every column is sortable without the row turning into a row of arrows.
-const SortableTh = memo(function SortableTh({ col, label, width, minWidth, align, sortCol, sortDir, onSort }) {
+//
+// `tooltip` is rendered as a `title` attribute and is used by the SLA column
+// to explain that the sort is "tier-then-age" (Breached → At Risk → On Track,
+// oldest first within tier) — the 2026-05-01 audit found users expected
+// numeric "most-overdue first" sort and were confused when -9m came before
+// -3h 43m. Other columns can pass an optional tooltip too.
+const SortableTh = memo(function SortableTh({ col, label, width, minWidth, align, sortCol, sortDir, onSort, tooltip }) {
   const active = sortCol === col;
   const sortState = active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
   const onKey = (e) => {
@@ -994,6 +1000,7 @@ const SortableTh = memo(function SortableTh({ col, label, width, minWidth, align
       onClick={() => onSort(col)}
       onKeyDown={onKey}
       tabIndex={0}
+      title={tooltip}
       style={{
         ...thStyle,
         ...(width ? { width } : null),
@@ -1002,7 +1009,7 @@ const SortableTh = memo(function SortableTh({ col, label, width, minWidth, align
         cursor: 'pointer',
         userSelect: 'none',
       }}
-      aria-label={`Sort by ${label}${active ? `, currently ${sortState}` : ''}`}
+      aria-label={`Sort by ${label}${active ? `, currently ${sortState}` : ''}${tooltip ? ` — ${tooltip}` : ''}`}
     >
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
         {label}
