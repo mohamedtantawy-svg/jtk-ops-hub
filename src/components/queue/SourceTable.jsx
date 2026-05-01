@@ -6,6 +6,7 @@ import { useState, useMemo, useRef, memo } from 'react';
 import { TOOLS, getFlag, getCountryName } from '../../data/constants';
 import Avatar from '../ui/Avatar';
 import { useVirtualRows } from '../../hooks/useVirtualRows';
+import { elapsedBizMs } from '../../utils/bizTime';
 
 // Fixed row height for virtualization. Rows below `<SourceRow />` are
 // locked to this height via inline style + `overflow:hidden` on cells so
@@ -34,15 +35,23 @@ function timeAgo(dateStr) {
   return `${days}d ago`;
 }
 
-function slaAge(dateStr) {
+// Business-day elapsed minutes since `dateStr`. Saturday/Sunday don't tick,
+// matching every other SLA pill in the app (computeSlaWindow / slaInfo).
+// Returns null for missing or future timestamps so callers can fall through.
+function bizMinutesSince(dateStr) {
   if (!dateStr) return null;
-  const d = new Date(dateStr);
-  if (isNaN(d)) return null;
-  return Math.floor((Date.now() - d.getTime()) / 60000); // minutes
+  const ts = new Date(dateStr).getTime();
+  if (!Number.isFinite(ts)) return null;
+  return Math.floor(elapsedBizMs(ts, Date.now()) / 60000);
 }
 
 function slaBadge(createdAt, thresholdDays = null) {
-  const mins = slaAge(createdAt);
+  // Fallback pill — only renders when a row has no `slaRemaining`. Uses
+  // BUSINESS-DAY age so the rare miss-path agrees with the per-row biz-day
+  // pill (WorkbenchSlaBadge) rest of the table draws. `thresholdDays` is a
+  // biz-day threshold (offboarding: 14 term, 5 resig) — matches the
+  // configured SLA window.
+  const mins = bizMinutesSince(createdAt);
   if (mins == null || mins < 0) return null; // guard against future dates
   const days = Math.floor(mins / 1440);
   const hrs = Math.floor((mins % 1440) / 60);
@@ -70,9 +79,17 @@ function slaBadge(createdAt, thresholdDays = null) {
 
 // ── Offboarding SLA + end-date urgency ──────────────────────────────────────
 // Combines two urgency signals into a single tier + rank:
-//   • SLA age (14d for terminations, 5d for resignations)
-//   • End-date proximity (ASAP / past / within 3 days)
+//   • SLA age (14 BIZ days for terminations, 5 BIZ days for resignations)
+//   • End-date proximity (ASAP / past / within 3 days — calendar, since the
+//     contract end date is a wall-clock anchor)
 // Lower tier = more urgent. Within a tier, higher rank = more urgent.
+//
+// Reads the row's biz-day-derived SLA fields (slaBreachStatus / slaRemaining
+// / slaWindowMs) populated by normalizeOffboarding so the sort tier matches
+// the per-row pill exactly. Earlier code re-computed `(now - createdAt) / 86400000`
+// on the calendar clock against a 14/5 calendar threshold — that disagreed
+// with the biz-day pill on rows straddling weekends, e.g. a Friday row could
+// sort to "breached" while still showing on-track in the badge.
 function offboardingSlaThreshold(row) {
   return (row.typeLabel || '').startsWith('Resignation') ? 5 : 14;
 }
@@ -80,9 +97,22 @@ function offboardingUrgency(row) {
   const now = Date.now();
   const createdMs = row.createdAt ? new Date(row.createdAt).getTime() : NaN;
   const ageDays = Number.isFinite(createdMs) ? (now - createdMs) / 86400000 : 0;
-  const threshold = offboardingSlaThreshold(row);
-  const slaBreached = ageDays >= threshold;
-  const slaAtRisk = ageDays >= threshold * 0.7;
+
+  const slaBreached = row?.slaBreachStatus === 'SLA_BREACHED'
+    || (typeof row?.slaRemaining === 'number' && row.slaRemaining <= 0);
+  const slaAtRisk = !slaBreached
+    && typeof row?.slaRemaining === 'number'
+    && row.slaRemaining > 0
+    && Number.isFinite(row?.slaWindowMs) && row.slaWindowMs > 0
+    && row.slaRemaining < (row.slaWindowMs / 1000) / 4;
+
+  // "How far past breach" in days, used to rank the breached tiers. For
+  // non-breached rows we fall back to wall-clock age (older first) — same
+  // behaviour the original code produced inside the imminent / at-risk
+  // tiers.
+  const breachOverflowDays = slaBreached
+    ? Math.max(0, -(typeof row?.slaRemaining === 'number' ? row.slaRemaining : 0)) / 86400
+    : 0;
 
   const endMsRaw = row.endDate ? new Date(row.endDate).getTime() : NaN;
   const endMs = Number.isFinite(endMsRaw) ? endMsRaw : null;
@@ -91,8 +121,8 @@ function offboardingUrgency(row) {
   const endImminent = endDays != null && endDays > 0 && endDays <= 3;
   const asap = endMs == null || row.endDateIsConfirmed === false;
 
-  if (slaBreached && endPast)  return { tier: 0, rank: (ageDays - threshold) + Math.min(60, -endDays) };
-  if (slaBreached)             return { tier: 1, rank: ageDays - threshold };
+  if (slaBreached && endPast)  return { tier: 0, rank: breachOverflowDays + Math.min(60, -endDays) };
+  if (slaBreached)             return { tier: 1, rank: breachOverflowDays };
   if (endPast)                 return { tier: 2, rank: Math.min(60, -endDays) };
   if (endImminent)             return { tier: 3, rank: 3 - endDays };
   if (asap)                    return { tier: 4, rank: ageDays };
@@ -736,14 +766,18 @@ function WorkbenchSlaBadge({ slaRemaining, slaBreachStatus }) {
   );
 }
 
-// ── Paused SLA badge (48h countdown from pausedAt) ──
+// ── Paused SLA badge (48 BIZ hours countdown from pausedAt) ──
+// Fallback only — fires when a row has `pausedAt` but no `slaRemaining`.
+// Uses business-day elapsed (Sat/Sun excluded) so this rare path doesn't
+// drift from the rest of the SLA pipeline (`computeSlaWindow` /
+// `WorkbenchSlaBadge`).
 function PausedSlaBadge({ pausedAt }) {
   if (!pausedAt) return <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>;
   const pausedTime = new Date(pausedAt).getTime();
   if (isNaN(pausedTime)) return <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>;
 
-  const SLA_MS = 48 * 60 * 60 * 1000; // 48 hours
-  const elapsed = Date.now() - pausedTime;
+  const SLA_MS = 48 * 60 * 60 * 1000; // 48 biz hours
+  const elapsed = elapsedBizMs(pausedTime, Date.now());
   const remaining = SLA_MS - elapsed;
 
   let label, color, bg;
