@@ -427,7 +427,11 @@ export function useQueueSync(arg = true) {
       if (msg.source !== 'zendesk' && msg.source !== 'jira') return;
       const myEmail = (userEmailRef.current || '').toLowerCase();
       const theirEmail = (msg.userKey || '').toLowerCase();
-      if (myEmail && theirEmail && myEmail !== theirEmail) return;
+      // Tighter than the previous `myEmail && theirEmail && ...` — that
+      // accepted a scoped message from another user when our own email
+      // hadn't loaded yet (logged-out tab, hydration race). Reject
+      // whenever EITHER side has a key that doesn't match the other.
+      if ((myEmail || theirEmail) && myEmail !== theirEmail) return;
       if (!msg.ts || msg.ts <= (lastFetchTsRefs.current[msg.source] || 0)) return;
 
       const items = msg.items || [];

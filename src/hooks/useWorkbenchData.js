@@ -28,6 +28,11 @@ export function useWorkbenchData(enabled = true, userEmail = null) {
   const lastFetchRef = useRef(0);
   const inFlightRef = useRef(null);
   const liveReceivedRef = useRef(false);
+  // Mirror tasks via ref so refresh() can read the current count without
+  // listing tasks.length in its deps. See useOnboardingData for the
+  // detailed rationale.
+  const tasksRef = useRef(tasks);
+  useEffect(() => { tasksRef.current = tasks; }, [tasks]);
 
   const refresh = useCallback(async (force = false) => {
     if (!enabled) return null;
@@ -35,7 +40,7 @@ export function useWorkbenchData(enabled = true, userEmail = null) {
     if (!force && inFlightRef.current) return inFlightRef.current;
 
     setIsRefreshing(true);
-    setLoading(prev => tasks.length === 0 ? true : prev);
+    setLoading(prev => tasksRef.current.length === 0 ? true : prev);
     setError(null);
 
     const run = (async () => {
@@ -43,7 +48,7 @@ export function useWorkbenchData(enabled = true, userEmail = null) {
         const res = await fetchDeelWorkbench({ limit: 50, bustCache: force });
         const fetched = res?.items || [];
         const now = Date.now();
-        if (fetched.length > 0 || tasks.length === 0) {
+        if (fetched.length > 0 || tasksRef.current.length === 0) {
           setTasks(fetched);
           idbSet(cacheKeyFor(userEmail), { items: fetched, ts: now }).catch(() => {});
           broadcastSync(SOURCE_ID, fetched, null, userEmail);
@@ -64,7 +69,7 @@ export function useWorkbenchData(enabled = true, userEmail = null) {
     })();
     inFlightRef.current = run;
     return run;
-  }, [enabled, tasks.length, userEmail]);
+  }, [enabled, userEmail]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -111,7 +116,11 @@ export function useWorkbenchData(enabled = true, userEmail = null) {
       if (!msg || msg.source !== SOURCE_ID) return;
       const myKey = (userEmail || '').toLowerCase();
       const theirKey = (msg.userKey || '').toLowerCase();
-      if (myKey && theirKey && myKey !== theirKey) return;
+      // Tighter than the previous `myKey && theirKey && ...` — that
+      // accepted a scoped message from another user when our own email
+      // hadn't loaded yet (logged-out tab, hydration race). Reject
+      // whenever EITHER side has a key that doesn't match the other.
+      if ((myKey || theirKey) && myKey !== theirKey) return;
       if (msg.ts && msg.ts > lastFetchRef.current) {
         setTasks(msg.items || []);
         lastFetchRef.current = msg.ts;
