@@ -407,10 +407,23 @@ export async function listPausedOnboarding() {
 //   Resignation (Client) → AWAITING_TRIAGE, PROCESSING, AWAITING_HRX_ACTION
 //   Resignation (Employee) → AWAITING_TRIAGE, PROCESSING, AWAITING_HRX_ACTION
 //
-// We attempted server-side filtering via `status[]=` but the Deel admin
-// endpoint rejects that param shape with a Joi validation error
-// (`"status" is not allowed`), so the filter MUST run client-side. We
-// scan unfiltered and apply the matrix on each page.
+// 2026-05-01 update: server-side filtering via `status[]=X&status[]=Y` IS
+// supported by Deel admin's terminations_v3 endpoint — verified via the
+// test-filter probe (now removed). The earlier "Joi rejects status[]"
+// comment was wrong; an unrelated misconfig at the time looked like a
+// validator rejection. With the filter applied, the upstream haystack
+// drops from 71,309 records (all statuses) to ~2,639 (only the 3
+// actionable buckets). Scan time falls from ~17 minutes → ~50 seconds.
+//
+// We still apply the matrix client-side because it gates Termination
+// rows out of AWAITING_HRX_ACTION (see isOffboardingActionable below) —
+// the server filter is a superset; the matrix narrows it to the precise
+// per-type subset HRX wants.
+const OFFBOARDING_ACTIONABLE_STATUSES = [
+  'AWAITING_TRIAGE',
+  'PROCESSING',
+  'AWAITING_HRX_ACTION',
+];
 const OFFBOARDING_TERMINATION_STATUSES = new Set([
   'AWAITING_TRIAGE',
   'PROCESSING',
