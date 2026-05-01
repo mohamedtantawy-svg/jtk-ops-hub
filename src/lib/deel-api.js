@@ -402,27 +402,61 @@ export async function listPausedOnboarding() {
 
 // ── Offboarding / Terminations (Admin API) ──────────────────────────────────
 
-// Type+status matrix the team operates on (Pilar/Raquel spec, 2026-04-30):
+// Type+status matrix the team operates on (Pilar/Raquel spec, 2026-04-30,
+// reconciled against upstream reality 2026-05-01):
 //   Termination          → AWAITING_TRIAGE, PROCESSING
-//   Resignation (Client) → AWAITING_TRIAGE, PROCESSING, AWAITING_HRX_ACTION
-//   Resignation (Employee) → AWAITING_TRIAGE, PROCESSING, AWAITING_HRX_ACTION
+//   Resignation (Client) → AWAITING_TRIAGE, PROCESSING
+//   Resignation (Employee) → AWAITING_TRIAGE, PROCESSING
 //
-// 2026-05-01 update: server-side filtering via `status[]=X&status[]=Y` IS
-// supported by Deel admin's terminations_v3 endpoint — verified via the
-// test-filter probe (now removed). The earlier "Joi rejects status[]"
-// comment was wrong; an unrelated misconfig at the time looked like a
-// validator rejection. With the filter applied, the upstream haystack
-// drops from 71,309 records (all statuses) to ~2,639 (only the 3
-// actionable buckets). Scan time falls from ~17 minutes → ~50 seconds.
+// 2026-05-01 reality check: the spec mentioned a third actionable bucket
+// `AWAITING_HRX_ACTION` for resignations, but the upstream admin API
+// has no such status. The test-filter probe (since removed) enumerated
+// every candidate status against `terminations_v3`:
+//   • COMPLETED        → 62,012 rows (closed)
+//   • AWAITING_REFUND  →  6,637 rows (post-actionable: deposit refund
+//                                    and offboarding-payment phases)
+//   • PROCESSING       →  1,728 rows  ← upstream-actionable
+//   • AWAITING_TRIAGE  →    911 rows  ← upstream-actionable
+//   • CANCELLED        →      0 rows
+//   • AWAITING_HRX_ACTION → HTTP 400 from upstream (unknown value)
+//   • AWAITING_PTO     → HTTP 400 as filter, but ~25 records exist with
+//                        this status (visible in unfiltered scans). The
+//                        upstream Joi validator is asymmetric here: it
+//                        won't accept the value as a filter input but
+//                        records carry it as a state value. AWAITING_PTO
+//                        is a date-gated wait (employee consuming accrued
+//                        PTO before final exit); HRX has no action there
+//                        and there's no UI bucket for it — same shape as
+//                        AWAITING_REFUND, treated as post-actionable.
+//   • + 23 other guesses, all rejected by upstream Joi validator
+// The 4 accepted statuses + 25 AWAITING_PTO ≈ 71,313 baseline, so the
+// matrix is exhaustive: AWAITING_HRX_ACTION is dead, AWAITING_PTO is
+// post-actionable, and only AWAITING_TRIAGE + PROCESSING are actionable.
 //
-// We still apply the matrix client-side because it gates Termination
-// rows out of AWAITING_HRX_ACTION (see isOffboardingActionable below) —
-// the server filter is a superset; the matrix narrows it to the precise
-// per-type subset HRX wants.
+// 2026-05-01 fix: server-side filtering via `status[]=X&status[]=Y` IS
+// supported (the earlier "Joi rejects status[]" comment turned out to
+// be wrong — an unrelated misconfig made it look like a validator
+// rejection). Sending the two actionable values directly cuts the
+// upstream haystack from 71,313 records → 2,639 records, and — more
+// importantly — closes a correctness gap. The pre-filter scan sorted
+// createdAt DESC and stopped after the empty-page slack expired, which
+// left older PROCESSING records past the horizon unseen. Live audit
+// 2026-05-01 captured upstream PROCESSING=1,728 vs scan-seen=1,336 —
+// ~392 actionable records were being silently dropped from the queue
+// every cycle. With the server filter, every page returned is in the
+// actionable set, so we walk the full ~53 pages with no early-stop
+// risk and pick all of them up. Scan time drops from ~17 minutes →
+// ~50 seconds; the 200-empty-page slack (designed for the unfiltered
+// scan's long tail) is no longer needed.
+//
+// The Termination/Resignation matrix below is functionally redundant
+// now that AWAITING_HRX_ACTION is gone — Termination and Resignation
+// share the same two actionable statuses — but it stays as
+// documentation of intent in case Deel ever introduces a real per-type
+// status divergence (e.g. an `AWAITING_HRX_ACTION` that actually exists).
 const OFFBOARDING_ACTIONABLE_STATUSES = [
   'AWAITING_TRIAGE',
   'PROCESSING',
-  'AWAITING_HRX_ACTION',
 ];
 const OFFBOARDING_TERMINATION_STATUSES = new Set([
   'AWAITING_TRIAGE',
@@ -431,7 +465,6 @@ const OFFBOARDING_TERMINATION_STATUSES = new Set([
 const OFFBOARDING_RESIGNATION_STATUSES = new Set([
   'AWAITING_TRIAGE',
   'PROCESSING',
-  'AWAITING_HRX_ACTION',
 ]);
 
 // Flow states treated as "past the actionable phase" — records dropped
@@ -448,20 +481,22 @@ const OFFBOARDING_EXCLUDED_STEPS = new Set([
 ]);
 
 // Pagination cap — defensive ceiling so a runaway loop can't lock the
-// request. With sortBy=createdAt&sort=DESC the actionable subset
-// concentrates in the first ~50 pages (newest records); the long tail
-// is dominated by old closed records (COMPLETED / CANCELLED / DONE)
-// that the matrix filters out. The early-stop below kicks in well
-// before this cap on a healthy upstream.
+// request. With the server-side `status[]=` filter applied the haystack
+// shrinks to ~2,640 records (~53 pages at limit=50), so this cap is
+// pure paranoia: if upstream ever returns more, we don't want to walk
+// forever. Pre-filter this was a real concern (~514 pages of mostly
+// closed records); post-filter it's safety net only.
 const OFFBOARDING_MAX_PAGES = 1000;
 
-// Empty-page early-stop threshold. With createdAt-DESC the actionable
-// subset is heavily front-loaded (recent records), so a long stretch of
-// closed-only pages reliably means "we're past the actionable horizon".
-// 200 is generous enough to absorb any cluster of recently-closed
-// records before quitting; the wall-time saving vs walking the full
-// 30k upstream is roughly 10x.
-const OFFBOARDING_EMPTY_PAGE_STOP = 200;
+// Empty-page early-stop threshold. Pre-filter we walked through long
+// stretches of closed records (COMPLETED dominates the unfiltered tail)
+// and needed 200 empty pages of slack to be confident we were past the
+// actionable horizon. With the server-side filter, every page returned
+// is *already* actionable, so an empty page is much rarer and far more
+// meaningful — 20 in a row reliably signals "we've drained the queue".
+// Tightening this from 200 → 20 saves ~5 minutes of wall time on a
+// cold scan when the upstream filter does its job.
+const OFFBOARDING_EMPTY_PAGE_STOP = 20;
 
 function isOffboardingActionable(t) {
   if (t?.isDuplicate === true) return false;
@@ -488,33 +523,33 @@ function isOffboardingActionable(t) {
  * Fetches all actionable EOR termination cases from the admin API.
  *
  * Strategy:
- *   1. First request sets `sortBy=createdAt&sort=DESC` so the cursor
- *      walks newest-first. The actionable subset (AWAITING_TRIAGE +
- *      PROCESSING + AWAITING_HRX_ACTION) is heavily concentrated in
- *      records created over the last few months — the older a
- *      termination, the more likely it's COMPLETED / CANCELLED.
- *   2. Apply the type+status matrix client-side per page. Track raw
- *      status counts as we go so the route handler can surface them
- *      to the UI ("here's what's in the upstream queue and what we
- *      filtered out").
- *   3. Early-stop after OFFBOARDING_EMPTY_PAGE_STOP consecutive pages
- *      with zero matrix hits — at that point we're deep in the
- *      already-closed long tail and continuing wastes round-trips.
+ *   1. First request sets `sortBy=createdAt&sort=DESC` AND filters to
+ *      the upstream-actionable status values (status[]=AWAITING_TRIAGE
+ *      &status[]=PROCESSING). Cursor pages inherit the filter from the
+ *      initial request — confirmed by the same convention sortBy uses.
+ *   2. Apply the flow-step matrix client-side per page (excluded steps
+ *      like AwaitingDepositConfirmation are filtered locally; upstream
+ *      doesn't expose a flow-step filter param). Track raw status
+ *      counts as we go so the route handler can surface them to the UI.
+ *   3. Empty-page early-stop is now defensive only: with the server
+ *      filter in place, every page returned is already actionable, so
+ *      empty pages are rare. 20 in a row reliably signals "drained".
  *
- * The previous strategy (default sort, no early-stop) was correct but
- * walked all ~600 pages every cache miss. createdAt-DESC + early-stop
- * gets us the same accuracy in ~10x less wall time.
+ * The previous strategy (createdAt DESC + 200-page empty-stop, no
+ * server filter) had a correctness bug: ~400 PROCESSING records older
+ * than the early-stop horizon were silently dropped every cycle.
+ * Server-side filtering scans the full actionable set (~2,640 records,
+ * ~53 pages) in ~50s instead of the prior 17 minutes for a partial set.
  *
  * Per-type rules applied via isOffboardingActionable:
  *   Termination          → status in (AWAITING_TRIAGE, PROCESSING)
- *   Resignation (any)    → status in (AWAITING_TRIAGE, PROCESSING, AWAITING_HRX_ACTION)
+ *   Resignation (any)    → status in (AWAITING_TRIAGE, PROCESSING)
  *   Plus: isDuplicate=false AND no excluded flow step.
  *
  * Returns: { items, statusCounts } so the route can include the
  * upstream breakdown alongside the filtered list. statusCounts is the
  * raw distribution across every record we scanned, useful for the
- * panel header ("X actionable of Y total open: A triage / B processing
- * / C HRX action").
+ * panel header ("X actionable of Y total open: A triage / B processing").
  */
 export async function listOffboardingCases() {
   const kept = [];
@@ -526,7 +561,19 @@ export async function listOffboardingCases() {
   let emptyRun = 0;
   let mode = 'admin-scan';
   const startedAt = Date.now();
-  const initialQs = 'limit=50&sortBy=createdAt&sort=DESC';
+  // Server-side filter to the two upstream-actionable values. Drops the
+  // haystack from ~71,300 records to ~2,640 (~53 pages) and — more
+  // importantly — closes a correctness gap: the previous unfiltered scan
+  // sorted createdAt DESC and stopped after 200 (now 20) empty pages,
+  // which left ~400 older PROCESSING records past the early-stop horizon
+  // unseen by the queue (live audit 2026-05-01 confirmed only 1,336 of
+  // 1,728 upstream PROCESSING records were reaching the matrix). The
+  // filter is the upstream's own enum: AWAITING_PTO and any other
+  // candidate the matrix doesn't accept either return HTTP 400 from the
+  // Joi validator (see comment block above) — so this filter is the
+  // strict superset of the actionable matrix.
+  const initialQs = 'limit=50&sortBy=createdAt&sort=DESC'
+    + OFFBOARDING_ACTIONABLE_STATUSES.map(s => `&status%5B%5D=${s}`).join('');
 
   function recordStatus(t) {
     const s = (t?.status || '').toUpperCase() || '_UNKNOWN';
