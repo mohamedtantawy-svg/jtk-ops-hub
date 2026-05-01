@@ -1,6 +1,6 @@
 ---
 name: ops-hub-improvement
-description: Use this skill whenever the user asks for ANY improvement, fix, feature, bug fix, refactor, or UI change in the ops-hub project. It enforces the full workflow — deep cross-feature audit, multi-role consideration (Agent/TL/Regional/Director), tree-view preservation, UI polish verification, implementation, commit, push, PR, CI wait, merge to dev — so the user only has to "go to Nexus and deploy". Also encodes every mistake-avoidance rule learned from prior sessions. Triggers: any ops-hub code change request, anything touching /Users/mohamed.tantawy/Desktop/ops-hub/, any mention of Queue/Briefing/Announcements/Escalations/ACK/cache/sync/TL/Regional/Agent/Team/hierarchy/tree view.
+description: Use this skill whenever the user asks for ANY improvement, fix, feature, bug fix, refactor, or UI change in the ops-hub project. It enforces the full workflow — deep cross-feature audit, multi-role consideration (Agent/TL/Regional/Director), tree-view preservation, UI polish verification, implementation, commit, push, PR, CI wait, merge to dev — so the user only has to "go to Nexus and deploy". Also encodes every mistake-avoidance rule learned from prior sessions. Triggers: any ops-hub code change request, anything touching /Users/mohamed.tantawy/Desktop/ops-hub/, any mention of Queue/Briefing/Announcements/Escalations/HR Hub/Feedback/Offboarding/Onboarding/Workbench/ACK/cache/sync/TL/Regional/Agent/Team/hierarchy/tree view.
 ---
 
 # Ops Hub Improvement Workflow
@@ -60,7 +60,7 @@ For the feature being changed, enumerate:
 
 ### 1.2 Cross-tab consumer check
 
-If the change touches data that multiple views consume, enumerate every consumer. The eight top-level views are: **Briefing (Home), Queue, Team, Analytics, Escalations, Announcements, Calendar, Projects, HR Reports, Settings, Knowledge Hub**. Audit grep:
+If the change touches data that multiple views consume, enumerate every consumer. The top-level views are: **Briefing (Home), Queue, Team, Analytics, Escalations, Announcements, Calendar, Projects, HR Hub, Settings, Knowledge Hub, Feedback** (the legacy `hr-reports` view was retired 2026-05-02 — its scope moved into HR Hub's `hr_reporting` flow). Audit grep:
 ```
 Grep: <symbol you're changing> in src/components/views/ and src/App.jsx
 ```
@@ -320,22 +320,33 @@ The `api-prod-admin.letsdeel.com` admin endpoints have non-obvious behaviour tha
 
 **Cursor pagination**: every paginated admin endpoint (`/admin/eor/terminations_v3`, `/admin/eor/employee-manager/list/...`, etc.) returns a `cursor` token. The cursor encodes the FILTER + SORT state from the first request. Subsequent calls must send ONLY `cursor=...` — sending `limit` or any filter param alongside an existing cursor returns 400.
 
-**Server-side filter rejection (Joi)**: the terminations_v3 endpoint rejects `status[]=` as a query param with a Joi error like:
+**`?status[]=` IS supported on `terminations_v3`** (verified 2026-05-01 via the test-filter probe; previous comments saying Joi rejects it were wrong — an unrelated misconfig at the time looked like a validator rejection). Use it. Send the actionable status values as the initial filter and walk only the matching subset:
+
 ```
-"value does not match any of the allowed types"
-"cursor required (alt 1) | limit not allowed (alt 2) | status not allowed (alt 3) | status[2] must... (alt 4)"
+/admin/eor/terminations_v3?limit=50&sortBy=createdAt&sort=DESC&status%5B%5D=AWAITING_TRIAGE&status%5B%5D=PROCESSING
 ```
-Read every alternative — alt N+1 with a value-level constraint hint (e.g. `status[2] must be one of [...]`) often reveals which alternative the request was CLOSEST to matching. Don't blindly retry with random param names; if status[] is rejected, filter client-side and use a smart sort.
 
-**Smart sort for huge upstreams**: when the upstream queue dwarfs the actionable subset (e.g. terminations_v3 returns ~30k records of which ~1.1k are actionable), pass `sortBy=createdAt&sort=DESC` on the FIRST request. The cursor preserves it, so the entire walk is newest-first. Actionable records cluster in recent createdAt; closed records dominate the long tail. An empty-page early-stop at ~200 pages reliably catches the actionable set without walking all 600 pages.
+Without this you walk the full ~71k haystack to find the ~1k actionable rows. With it, the upstream subset is ~2.6k records over ~53 pages.
 
-**Sort vs early-stop interaction** — never early-stop against the default `endDate ASC nulls first` sort: actionable PROCESSING / AWAITING_HRX_ACTION rows interleave with closed rows across the entire walk and a 50-page heuristic loses two-thirds of them (Mohamed reported 327 visible vs ~1100 expected). Always pair early-stop with a sort that front-loads the kept set.
+**Asymmetric Joi (status as state vs status as filter)**: some upstream values pass through as record state but get rejected as filter inputs. Example: `AWAITING_PTO` rows exist (~25 of them on terminations_v3) but `?status[]=AWAITING_PTO` returns HTTP 400. Confirm this with the test-filter probe shape: enumerate every candidate status against `count.total` and compare the sum to the unfiltered baseline. The gap = asymmetric values. Treat them as post-actionable unless you have explicit business confirmation otherwise.
 
-**Track raw status counts** as you scan and surface them in the route response (`upstreamStatusCounts: { AWAITING_TRIAGE: ..., COMPLETED: ..., ... }`). Without this you can't debug "why isn't the count what I expect" — you have no visibility into what the upstream actually contains.
+**Parallel-by-status streams beat one cursor with multiple filters** when the actionable set has 2+ disjoint status values. Run one cursor stream per status via `Promise.all` and merge by `id`. Wall time becomes `max(stream durations)` instead of their sum — for terminations_v3 (PROCESSING is the larger set at ~35 pages, TRIAGE ~19 pages) total ≈ 35 × ~1.5s ≈ ~52s instead of ~80s. Each stream gets its own per-stream empty-page early-stop; defensive only with the server filter applied.
+
+**Smart sort for huge upstreams (legacy fallback)**: if you're forced to scan unfiltered (no admin JWT, REST-v2 fallback, etc.), pass `sortBy=createdAt&sort=DESC` on the first request so actionable records cluster at the front of the walk. The cursor preserves the sort. **Never pair early-stop with the default `endDate ASC nulls first` sort** — actionable rows interleave with closed rows across the entire walk and a 50-page heuristic loses two-thirds of them.
+
+**Track raw status counts** as you scan and surface them in the route response (`upstreamStatusCounts: { AWAITING_TRIAGE: ..., PROCESSING: ..., ... }` plus `upstreamServerTotal`, `upstreamScanned`, `upstreamPages`). This is the only way to debug "why isn't the count what I expect" — without it you have no visibility into what the upstream actually contains. The 2026-05-01 audit caught a 392-record gap (1336 PROCESSING seen vs 1728 actually present) only because the route surfaced these counters.
+
+**Upstream returns assignee NAME, never email** on `terminations_v3` — verified 2026-05-01: 1042 of 1046 actionable rows had `exAssignee` populated with a display name, **0** had `exAssigneeEmail`. The route handler must resolve the name against the team directory before returning, otherwise:
+- `_scopeCountryOrAssignee` falls through to country-only matches → TLs see a tiny fraction of their queue
+- The Queue's "Unassigned" filter (`r => !r.assigneeEmail`) matches every row — looks like ~1k unassigned instead of ~5
+
+The fix is one line per mapping: `assigneeEmail: (c.exAssigneeEmail || resolveEmailByName(c.exAssignee) || '').toLowerCase()` (helper exported from `src/utils/normalizeSourceRows.js` — handles accents, "De Luca" ↔ "Deluca", and middle-name drift). Apply the same pattern to any upstream that ships display names without emails.
 
 **Parent-bucket endpoints can be incomplete**: `/admin/eor/employee-manager/list/Onboarding.ActionableQueue` does NOT consistently surface every sub-status (we explicitly fan out to `Onboarding.ComplianceDocs.AwaitingReview`, `Onboarding.EA.EASigning.AwaitingToSendEA`, `Onboarding.EA.EAAdditionalDetails.AwaitingReview`, `Onboarding.PayrollComplianceDetails.AwaitingReview`). When in doubt, fan out per-status and merge by `onboardingId || oid`.
 
 **Per-country fan-out for paged sub-statuses**: most sub-status list endpoints return ~50 rows per call without a country filter. To pull every actionable row, hit `/admin/eor/employee-manager/countries/list/<status>` first to get country totals, then call `/admin/eor/employee-manager/list/<status>?countries[]=<CC>` per country. Mirror the Paused-onboarding pattern in `_scanOnboardingByStatus` for any new sub-status scan.
+
+**The test-filter probe pattern**: when you need to confirm what an upstream accepts, ship a temporary owner-gated route that enumerates each candidate value against `count.total` plus an empirical pass that walks the first N pages and tallies real status values. Compare per-status sum vs baseline to find asymmetric (state-only) values. Delete the probe in the same commit as the real fix. Pattern lived briefly at `app/api/v1/integrations/deel/test-filter/route.js`.
 
 ### 3.7 Country ownership is DB-backed (not static)
 
@@ -372,7 +383,56 @@ Three things to get right:
 2. **Always include the deploy's data file** (e.g. JSON) in the same commit as the version bump — they ship together.
 3. **Use email or a stable UUID as the seed key, not a fuzzy name match.** Name-matching seeds cause display-name vs email-localpart drift bugs; the v1 country seed had this and we re-seeded as v2 to correct it.
 
-### 3.9 CSV export format hardening
+### 3.9 Stackable per-feature admin power (Team-tab grants)
+
+When you need a permission that gates feature-level edit rights without escalating someone to RM/Admin, mirror the existing `is_access_admin` / `is_announcements_admin` pattern. Stackable on top of any base access type (TL or agent can be granted without losing their existing role).
+
+Five plumbing points — touch all five or the flag never reaches the FE:
+
+1. **Migration**: `ALTER TABLE team_member_overrides ADD COLUMN IF NOT EXISTS is_<feature>_admin BOOLEAN DEFAULT FALSE` + a partial index `WHERE is_<feature>_admin = true` for the few rows that have it.
+2. **Server helper** at `src/lib/<feature>-admin.js`: 30 s in-memory cache keyed by lowercased email, `canAdminister<Feature>(user)` combines `user.role === 'admin'` + DB lookup. `bust<Feature>AdminCache(email)` for the Team-tab settings UI to invalidate after a flip. Mirrors `access-admin.js` shape.
+3. **`team-members-merge.js`**: include `is_<feature>_admin` in the `normaliseOverrideRow` SELECT projection AND in `applyOverride`'s no-override branch (defaulting to `false`).
+4. **`/api/v1/me`**: SELECT the column, include `is<Feature>Admin: mergedEntry.isHrHubAdmin === true` in the JSON response. `App.jsx`'s localStorage snapshot init AND post-`/me` hydration must both carry the field through — three patches in one file.
+5. **`accessControl.js` + `usePermissions.js`**: append the action to `ALL_ADMIN_POWERS` + label, define a dedicated default access type (e.g. `at_<feature>_admin`) bundling it, and expose `canManage<Feature>` via the permissions hook combining the per-user grant with full-admin baseline.
+
+The HR Hub Admin grant landed via this exact pattern (`is_hr_hub_admin` + `hr-hub-admin.js` + `canManageHrHub`); replicate it for any future feature that needs delegation.
+
+### 3.10 Long-running multi-stage builds — living plan doc + direct-to-dev
+
+For multi-stage features (≥3 commits / ≥1 day of work) where the user is the only reviewer, the standard "feature branch → PR to dev" flow becomes friction. The pattern that works:
+
+- **Living plan doc at the repo root** (e.g. `HR_HUB_PLAN.md`): single source of truth captured up front and kept in sync with every commit. Include a "Maintenance protocol" section at the top stating that every new rule, decision, or cross-tab connection MUST be appended here before the work ships. Stage-by-stage verification checklists with checkboxes; tick as you land each item; never delete unchecked items (cross out with strikethrough + a note if skipped).
+- **Direct commits to `nexus/dev` with rebase-on-fetch**: only when the user has explicitly authorised it for the build (e.g. "commit and push to nexus dev, once all stages are done I will deploy"). The CI auto-bumps `.test-trigger`, so every push needs `git pull --rebase nexus dev` before `git push`. Don't mix this with the standard PR flow — pick one per build at the start.
+- **Per-stage commit, per-stage skill update**: each stage gets its own commit with a coherent message body. Tick the plan-doc checkboxes in the same commit. Don't batch multiple stages into one commit — it makes rollback harder and the audit log noisier.
+- **Pre-launch audit pass**: before the user deploys, do one final read-through of every shipped file looking for (a) `useEffect` deps including the polled state, (b) async checks that should be awaited, (c) plumbing gaps (e.g. server returns a flag but FE never reads it), (d) leftover dead-code from removed features. Capture findings in the plan's "Audit log" section.
+
+### 3.11 Polling effect rules
+
+Three traps for any in-app polling loop (5 s comment poll, 30 s notification poll, etc.):
+
+- **Don't include the polled state in `useEffect` deps**. If the effect lists `[requestId, comments]`, every poll tears down + rebuilds the interval, leaking timers on long-lived sessions. Use a ref: `const commentsRef = useRef(comments); useEffect(() => { commentsRef.current = comments; }, [comments]);` and have the polling effect deps be just `[requestId]`. Read `commentsRef.current` inside the tick.
+- **Cursor on the tail timestamp, not a counter**: `?since=<ISO>` of the latest known item, server returns strictly-after rows. Counter-based ("page 2") loses items if anyone else posts mid-poll.
+- **Dedup by id on merge**: `setComments(prev => { const seen = new Set(prev.map(c => c.id)); return [...prev, ...fresh.filter(c => !seen.has(c.id))]; })`. Two reasons: optimistic local appends followed by a poll that returns the same row; cross-tab BroadcastChannel echoes.
+
+### 3.12 Notification polymorphism — extending the bell
+
+The `user_notifications` table is already polymorphic — `link_view`, `link_id`, `source_type`, `source_id` are all opaque strings. To surface a new feature in the bell, write rows with your own `link_view` value and let the existing 30 s bell hook (`src/hooks/useNotifications.js`) display them automatically. No schema change.
+
+The deep-link routing lives in `App.jsx::handleNotifClick`. Add a branch keyed off `n.linkView === '<feature>'` that does whatever your feature needs (set view, dispatch a CustomEvent, or stash an id in the URL via `history.replaceState` before flipping the view so the receiver opens to the right detail).
+
+Server-side fan-out helper pattern: take `recipients`, `excludeEmail` (typically the actor), `type` (e.g. `mention` / `comment` / `status_change`), title, body, requestId, sourceType, sourceId. Multi-row INSERT with a single round-trip; `ON CONFLICT DO NOTHING` to dedup by `(recipient, source_type, source_id)`.
+
+### 3.13 Sync-badge state machine — per-source, not aggregate
+
+The Queue's sync badge tracks per-source freshness, not a single `oldestSyncAt` aggregate. Old logic ("any source >10 min → red") created panic states whenever offboarding's slow scan ran in the background. The 2026-05-01 redesign:
+
+- Each source is scored against the same thresholds independently. A stale source that's currently refreshing counts as **fresh** ("the system is fixing it") — keeps the badge green during background polls.
+- Per-source threshold overrides for sources whose natural cycle is longer than the default. Offboarding gets `WARN_AFTER_BY_SOURCE = 12 min` and `STALE_AFTER_BY_SOURCE = 15 min` (vs the default 7 min / 10 min) because its scan + cache TTL puts the cycle around 5–6 min, so 2 missed cycles + slack.
+- Aggregates exposed via `meta` in `useQueueUnifiedSync`: `freshSourceCount`, `staleSourceCount`, `refreshingStaleSourceCount`, `agingSources`, `staleSources`, `anyStale`, `anyAging`, `allStale`, `allFailing`. The `UnifiedSyncButton` state machine reads these — `live`, `partial-stale`, `partial-error`, `aging`, `stale`, `error`, `offline`, `waiting`, `syncing`. Quiet "Live" sublabel by default; only surface "synced N min ago" when something has actually crossed its per-source threshold.
+
+When you add a new queue source, plumb its `lastSyncAt` and `isRefreshing` into `useQueueUnifiedSync.sources`, optionally add a per-source threshold override if the natural cycle exceeds 5 min, and the badge handles it without a state-machine change.
+
+### 3.14 CSV export format hardening
 
 Any new CSV download route must:
 - **Prefix the body with `﻿`** (UTF-8 BOM) so Excel on Windows recognises encoding and doesn't mojibake accented HRX names.
@@ -660,6 +720,16 @@ Before telling the user "deploy broken, regressions everywhere":
 20. **Don't fuzzy-match names when an email or stable ID is available.** Display-name vs email-localpart drift (e.g. "André Martins" → andre.maia@deel.com, "Suzy Santos" → susana.santos@deel.com) silently loses rows. Use email-keyed seeds and a versioned re-seed when the upstream reference is name-only.
 21. **Don't skip `LOCK TABLE` during a destructive re-seed.** A concurrent PUT during a `DELETE` + bulk `INSERT` will lose its write. Wrap re-seeds in `BEGIN; LOCK TABLE <target> IN ACCESS EXCLUSIVE MODE; ... COMMIT;`.
 22. **Don't omit `.catch()` on optional secondary queries in `Promise.all`.** A missing table on a brand-new env (migration hasn't run yet) or transient DB blip will 500 the whole route. Wrap with `.catch(err => { console.warn(...); return { rows: [] }; })` so the primary query still serves.
+
+23. **Don't trust upstream `assigneeEmail` on Deel admin endpoints.** `terminations_v3` (and probably others) return only the display name — `exAssignee = "Mauro Coronel"`, `exAssigneeEmail = ''`. The route handler must resolve via `resolveEmailByName` from `normalizeSourceRows.js` before returning, otherwise TL/RM scoping collapses to country-only matches and the Unassigned filter matches every row. Verified live 2026-05-01: 1042/1046 rows had a name, 0 had an email. See §3.6 "Upstream returns assignee NAME, never email".
+
+24. **Don't include polled state in a polling `useEffect`'s deps.** It tears down + rebuilds the interval on every poll, leaking timers on long-lived sessions. Use a ref to read the latest state inside the tick. See §3.9d. Caught in the HR Hub pre-launch audit (HrHubDetailPanel comments-poll).
+
+25. **Don't assume Joi rejection means a filter param is unsupported.** The 2026-04-30 comment in `deel-api.js` claimed `terminations_v3` rejects `?status[]=` — wrong. An unrelated misconfig at the time made it look like a Joi rejection, and we lived with the slow unfiltered scan for weeks. Confirm hypotheses with the test-filter probe pattern (§3.6 final paragraph) before encoding "X is unsupported" as fact.
+
+26. **Don't ship a feature without an admin power if the user wants Director-delegated edit rights.** Mirror the `is_<feature>_admin` pattern across all five plumbing points (§3.9b). Skipping any one leaves the flag stranded — the DB column flips but the FE never sees it, the gear button never appears, the user thinks the feature is broken. Caught in the HR Hub pre-launch audit (`/api/v1/me` SELECT didn't include `is_hr_hub_admin`).
+
+27. **Don't forget to grep for stale references when retiring a feature.** Every removal has at least 6 sites: the view component file, `data/*` mock data, `App.jsx` mount line + import + state, `DeelTopNav.jsx` PRIMARY_TABS + CREATE_ACTIONS + handler, `BriefingView.jsx` OWNER_ONLY set + tile, `accessControl.js` ALL_VIEWS + VIEW_LABELS. Walk the audit-before-delete list (`grep -rn '<feature-id>\|<ComponentName>'`) before committing — leftover refs cause silent UI breakage on the next deploy. Existing access-type rows in DB that still list a removed view are harmless dead data; no migration needed.
 
 ---
 
