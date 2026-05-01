@@ -198,6 +198,7 @@ export default function SourceTable({
   hideFilterBar = false,     // hide the whole filter bar (pills + search + refresh + count) when redundant
   hideUpdated = false,       // hide the "Updated" column
   hideContract = false,      // hide the "Contract" column (redlines don't always have one)
+  viewerEmail = '',          // signed-in user's email — splits the table into Mine vs Others
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   // Default sort = SLA tier oldest-first across every panel — the per-PR-2
@@ -303,34 +304,53 @@ export default function SourceTable({
     return c;
   }, [rows]);
 
-  // Partition the sorted list into Active (top) and Paused (bottom). Spec:
-  // every Q gets a "Paused" section when applicable, no separate filter.
-  // Paused rows still go through the same column sort + tier+age tie-break,
-  // so within each section the most-urgent paused row floats to the top of
-  // its bucket.
-  const { activeSorted, pausedSorted } = useMemo(() => {
-    const active = [];
-    const paused = [];
+  // Partition the sorted list into Mine vs Others, then split each into
+  // Active vs Paused. "Mine" = rows whose assigneeEmail matches the
+  // viewer (real or synthetic-from-country-owner). When the viewer has
+  // no rows of their own (admin / RM looking at a region they don't
+  // personally own, or pre-auth) the Mine sections collapse and we
+  // render a single Active + Paused stack like before.
+  const viewerEmailLc = (viewerEmail || '').toLowerCase();
+  const { mineActive, minePaused, othersActive, othersPaused } = useMemo(() => {
+    const mA = [], mP = [], oA = [], oP = [];
     for (const r of sorted) {
-      if (r?.isPaused) paused.push(r);
-      else active.push(r);
+      const isMine = !!viewerEmailLc && (r.assigneeEmail || '').toLowerCase() === viewerEmailLc;
+      const bucket = r?.isPaused
+        ? (isMine ? mP : oP)
+        : (isMine ? mA : oA);
+      bucket.push(r);
     }
-    return { activeSorted: active, pausedSorted: paused };
-  }, [sorted]);
+    return { mineActive: mA, minePaused: mP, othersActive: oA, othersPaused: oP };
+  }, [sorted, viewerEmailLc]);
 
-  // Flatten Active + Paused-header + Paused into a single virtual list
-  // so windowing math is a simple slice. Each item carries `kind: 'row'`
-  // or `kind: 'header'`; both render at ROW_HEIGHT so the math stays
-  // arithmetic. With Jira at 3,046 rows, this drops the rendered DOM
-  // from ~27k nodes to ~270 — repaint becomes O(viewport), not O(rows).
+  const hasMineSection = mineActive.length + minePaused.length > 0;
+
+  // Flatten into a single virtual list. Section ordering:
+  //   1. Mine — Active   (no header — implicit "your queue")
+  //   2. Mine — Paused   (header "MINE — PAUSED" only when minePaused exists)
+  //   3. Others — Active (header "OTHERS" only when there's a Mine section above)
+  //   4. Others — Paused (header "OTHERS — PAUSED" or "PAUSED" if no Mine)
+  // Each kind: 'header' | 'row' renders at ROW_HEIGHT so the windowing
+  // math stays arithmetic.
   const virtualItems = useMemo(() => {
-    const out = activeSorted.map(r => ({ kind: 'row', row: r }));
-    if (pausedSorted.length > 0) {
-      out.push({ kind: 'header', count: pausedSorted.length });
-      for (const r of pausedSorted) out.push({ kind: 'row', row: r });
+    const out = [];
+    for (const r of mineActive) out.push({ kind: 'row', row: r });
+    if (minePaused.length > 0) {
+      out.push({ kind: 'header', tone: 'paused', label: hasMineSection ? 'MINE — PAUSED' : 'PAUSED', count: minePaused.length });
+      for (const r of minePaused) out.push({ kind: 'row', row: r });
+    }
+    if (othersActive.length > 0) {
+      if (hasMineSection) {
+        out.push({ kind: 'header', tone: 'others', label: 'OTHERS', count: othersActive.length + othersPaused.length });
+      }
+      for (const r of othersActive) out.push({ kind: 'row', row: r });
+    }
+    if (othersPaused.length > 0) {
+      out.push({ kind: 'header', tone: 'paused', label: hasMineSection ? 'OTHERS — PAUSED' : 'PAUSED', count: othersPaused.length });
+      for (const r of othersPaused) out.push({ kind: 'row', row: r });
     }
     return out;
-  }, [activeSorted, pausedSorted]);
+  }, [mineActive, minePaused, othersActive, othersPaused, hasMineSection]);
 
   const scrollerRef = useRef(null);
   const { startIdx, endIdx, topPad, bottomPad } = useVirtualRows({
@@ -458,11 +478,18 @@ export default function SourceTable({
               )}
               {visibleItems.map((it, i) => {
                 if (it.kind === 'header') {
+                  // Two tones — paused (existing brown band) vs others
+                  // (slightly lighter, neutral grey). Same 44px height so
+                  // the virtualizer math stays uniform.
+                  const isPausedHeader = it.tone === 'paused';
+                  const headerStyle = isPausedHeader
+                    ? { color: '#6b6560', background: '#faf9f7', icon: 'bi-pause-circle-fill' }
+                    : { color: '#6b6560', background: '#f5f4f2', icon: 'bi-people' };
                   return (
-                    <tr key={`pause-band-${startIdx + i}`} style={{ height: ROW_HEIGHT }}>
-                      <td colSpan={sectionColSpan} style={{ padding: '12px 16px', fontSize: 11, fontWeight: 700, color: '#6b6560', letterSpacing: '.04em', background: '#faf9f7', borderTop: '1px solid #e8e8e8', borderBottom: '1px solid #e8e8e8' }}>
-                        <i className="bi-pause-circle-fill" style={{ fontSize: 11, marginRight: 6 }} />
-                        PAUSED ({it.count})
+                    <tr key={`section-band-${startIdx + i}`} style={{ height: ROW_HEIGHT }}>
+                      <td colSpan={sectionColSpan} style={{ padding: '12px 16px', fontSize: 11, fontWeight: 700, color: headerStyle.color, letterSpacing: '.04em', background: headerStyle.background, borderTop: '1px solid #e8e8e8', borderBottom: '1px solid #e8e8e8' }}>
+                        <i className={headerStyle.icon} style={{ fontSize: 11, marginRight: 6 }} />
+                        {it.label} ({it.count})
                       </td>
                     </tr>
                   );

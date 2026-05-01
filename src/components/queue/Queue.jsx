@@ -678,6 +678,7 @@ const Queue = ({ user, tasks, subFilter }) => {
       {workSource === 'onboarding' && (
         <ErrorBoundary>
           <SourceTable
+            viewerEmail={user?.email}
             rows={tblOnboardingRows}
             loading={onboardingData.loading || pausedOnboardingData.loading}
             error={onboardingData.error || pausedOnboardingData.error}
@@ -695,6 +696,7 @@ const Queue = ({ user, tasks, subFilter }) => {
       {workSource === 'offboarding' && (
         <ErrorBoundary>
           <SourceTable
+            viewerEmail={user?.email}
             rows={tblOffboardingRows}
             loading={offboardingData.loading}
             error={offboardingData.error}
@@ -714,6 +716,7 @@ const Queue = ({ user, tasks, subFilter }) => {
       {workSource === 'amendments' && (
         <ErrorBoundary>
           <SourceTable
+            viewerEmail={user?.email}
             rows={tblAmendmentRows}
             loading={changeRequestData.loading}
             error={changeRequestData.error}
@@ -734,6 +737,7 @@ const Queue = ({ user, tasks, subFilter }) => {
       {workSource === 'redlines' && (
         <ErrorBoundary>
           <SourceTable
+            viewerEmail={user?.email}
             rows={tblRedlineRows}
             loading={changeRequestData.loading}
             error={changeRequestData.error}
@@ -754,6 +758,7 @@ const Queue = ({ user, tasks, subFilter }) => {
       {workSource === 'workbench' && (
         <ErrorBoundary>
           <SourceTable
+            viewerEmail={user?.email}
             rows={tblWorkbenchRows}
             loading={workbenchData.loading}
             error={workbenchData.error}
@@ -774,6 +779,7 @@ const Queue = ({ user, tasks, subFilter }) => {
       {workSource === 'incentive_plans' && (
         <ErrorBoundary>
           <SourceTable
+            viewerEmail={user?.email}
             rows={tblIncentivePlanRows}
             loading={incentivePlansData.loading}
             error={incentivePlansData.error}
