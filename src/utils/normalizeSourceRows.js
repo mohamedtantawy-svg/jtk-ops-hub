@@ -236,7 +236,7 @@ for (const m of TEAM_MEMBERS) {
   }
 }
 
-function resolveEmailByName(name) {
+export function resolveEmailByName(name) {
   if (!name) return '';
   const lower = name.toLowerCase();
   const stripped = stripAccents(lower);
