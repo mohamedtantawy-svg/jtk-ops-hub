@@ -2,9 +2,17 @@
 // Unified table for all work sources (onboarding, offboarding, amendments,
 // redlines, workbench, and the combined "All" view).
 // Expects normalized rows with a common shape.
-import { useState, useMemo, memo } from 'react';
+import { useState, useMemo, useRef, memo } from 'react';
 import { TOOLS, getFlag, getCountryName } from '../../data/constants';
 import Avatar from '../ui/Avatar';
+import { useVirtualRows } from '../../hooks/useVirtualRows';
+
+// Fixed row height for virtualization. Rows below `<SourceRow />` are
+// locked to this height via inline style + `overflow:hidden` on cells so
+// the windowing math stays accurate. 44px matches the existing visual
+// rhythm (8px padding × 2 + ~28px content) without changing anything
+// users see.
+const ROW_HEIGHT = 44;
 
 // ── Date formatters ──
 function fmtDate(dateStr) {
@@ -280,6 +288,29 @@ export default function SourceTable({
     return { activeSorted: active, pausedSorted: paused };
   }, [sorted]);
 
+  // Flatten Active + Paused-header + Paused into a single virtual list
+  // so windowing math is a simple slice. Each item carries `kind: 'row'`
+  // or `kind: 'header'`; both render at ROW_HEIGHT so the math stays
+  // arithmetic. With Jira at 3,046 rows, this drops the rendered DOM
+  // from ~27k nodes to ~270 — repaint becomes O(viewport), not O(rows).
+  const virtualItems = useMemo(() => {
+    const out = activeSorted.map(r => ({ kind: 'row', row: r }));
+    if (pausedSorted.length > 0) {
+      out.push({ kind: 'header', count: pausedSorted.length });
+      for (const r of pausedSorted) out.push({ kind: 'row', row: r });
+    }
+    return out;
+  }, [activeSorted, pausedSorted]);
+
+  const scrollerRef = useRef(null);
+  const { startIdx, endIdx, topPad, bottomPad } = useVirtualRows({
+    rowCount: virtualItems.length,
+    rowHeight: ROW_HEIGHT,
+    overscan: 8,
+    scrollerRef,
+  });
+  const visibleItems = virtualItems.slice(startIdx, endIdx);
+
   // Column count for the "PAUSED" section header — needs to match the
   // active <thead> exactly so the band spans the table width regardless of
   // which optional columns the panel toggles on/off.
@@ -367,7 +398,7 @@ export default function SourceTable({
 
       {/* ── Table ── */}
       {sorted.length > 0 && (
-        <div style={{ flex: 1, overflowY: 'auto' }}>
+        <div ref={scrollerRef} style={{ flex: 1, overflowY: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: '#f5f4f2', position: 'sticky', top: 0, zIndex: 2 }}>
@@ -386,20 +417,46 @@ export default function SourceTable({
               </tr>
             </thead>
             <tbody>
-              {activeSorted.map(row => (
-                <SourceRow key={`${row.source}-${row.id}`} row={row} showSource={showSourceColumn} showPausedSla={showPausedSla} dateField={dateField} showClient={showClient} showType={showType} hideUpdated={hideUpdated} hideContract={hideContract} />
-              ))}
-              {pausedSorted.length > 0 && (
-                <tr>
-                  <td colSpan={sectionColSpan} style={{ padding: '12px 16px', fontSize: 11, fontWeight: 700, color: '#6b6560', letterSpacing: '.04em', background: '#faf9f7', borderTop: '1px solid #e8e8e8', borderBottom: '1px solid #e8e8e8' }}>
-                    <i className="bi-pause-circle-fill" style={{ fontSize: 11, marginRight: 6 }} />
-                    PAUSED ({pausedSorted.length})
-                  </td>
+              {/* Virtual top spacer — preserves scroll position for the
+                  rows we skipped. Setting `height` on a <td colSpan> keeps
+                  the table layout intact (browsers measure spacer rows
+                  before laying out the visible ones). */}
+              {topPad > 0 && (
+                <tr style={{ height: topPad }} aria-hidden="true">
+                  <td colSpan={sectionColSpan} style={{ padding: 0, height: topPad }} />
                 </tr>
               )}
-              {pausedSorted.map(row => (
-                <SourceRow key={`${row.source}-${row.id}`} row={row} showSource={showSourceColumn} showPausedSla={showPausedSla} dateField={dateField} showClient={showClient} showType={showType} hideUpdated={hideUpdated} hideContract={hideContract} />
-              ))}
+              {visibleItems.map((it, i) => {
+                if (it.kind === 'header') {
+                  return (
+                    <tr key={`pause-band-${startIdx + i}`} style={{ height: ROW_HEIGHT }}>
+                      <td colSpan={sectionColSpan} style={{ padding: '12px 16px', fontSize: 11, fontWeight: 700, color: '#6b6560', letterSpacing: '.04em', background: '#faf9f7', borderTop: '1px solid #e8e8e8', borderBottom: '1px solid #e8e8e8' }}>
+                        <i className="bi-pause-circle-fill" style={{ fontSize: 11, marginRight: 6 }} />
+                        PAUSED ({it.count})
+                      </td>
+                    </tr>
+                  );
+                }
+                const row = it.row;
+                return (
+                  <SourceRow
+                    key={`${row.source}-${row.id}`}
+                    row={row}
+                    showSource={showSourceColumn}
+                    showPausedSla={showPausedSla}
+                    dateField={dateField}
+                    showClient={showClient}
+                    showType={showType}
+                    hideUpdated={hideUpdated}
+                    hideContract={hideContract}
+                  />
+                );
+              })}
+              {bottomPad > 0 && (
+                <tr style={{ height: bottomPad }} aria-hidden="true">
+                  <td colSpan={sectionColSpan} style={{ padding: 0, height: bottomPad }} />
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -441,6 +498,10 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
+        // Lock row height for the virtualizer's arithmetic (44px === ROW_HEIGHT
+        // in the parent). Without this the actual height drifts a few px per
+        // row and the cumulative scroll position skews on long lists.
+        height: 44,
         borderBottom: '1px solid #f0efed',
         background: hov ? '#faf8ff' : rowBg,
         transition: 'background .1s',

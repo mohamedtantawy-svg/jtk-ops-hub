@@ -1,5 +1,11 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useContext, memo } from 'react';
 import { TOOLS, FUNCTIONS, SLA_MINS, getFlag } from '../../data/constants';
+import { useVirtualRows } from '../../hooks/useVirtualRows';
+
+// Same row-height contract as SourceTable — every <QueueRow /> inline-locks
+// its <tr> to 44px so the windowing math stays accurate even when Jira's
+// 3,000+ rows are in the dataset.
+const TICKET_ROW_HEIGHT = 44;
 import { MEMBERS_BY_EMAIL } from '../../data/members';
 import { slaInfo, getUrl } from '../../utils/helpers';
 import {
@@ -109,6 +115,10 @@ const Queue = ({ user, tasks, subFilter }) => {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortCol(col); setSortDir('asc'); }
   }, [sortCol]);
+
+  // Scroll container ref for the ZD/Jira table virtualizer (the Deel
+  // panels each get their own scroller inside SourceTable).
+  const ticketScrollerRef = useRef(null);
 
   const perms = useContext(PermissionsContext);
   const settings = useContext(SettingsContext);
@@ -416,6 +426,32 @@ const Queue = ({ user, tasks, subFilter }) => {
       );
     } catch {}
   }, [user?.email, fTool, fStatus, fSla, fUnassigned, fJiraActionable, fJiraRaised]);
+
+  // Flatten Active → SNOOZED header → snoozed → DONE header → done into
+  // one virtual list. Each item carries `kind: 'row' | 'header'`; both
+  // render at TICKET_ROW_HEIGHT so the windowing math is uniform. With
+  // Jira at 3,046 active rows, this drops the rendered DOM from ~27k
+  // nodes to ~270 — repaint becomes O(viewport), not O(rows).
+  const ticketVirtualItems = useMemo(() => {
+    const out = active.map(t => ({ kind: 'row', row: t }));
+    if (snoozed.length > 0) {
+      out.push({ kind: 'header', label: 'PAUSED', color: '#6b6560', bg: '#faf9f7', icon: 'bi-pause-circle-fill', count: snoozed.length });
+      for (const t of snoozed) out.push({ kind: 'row', row: t });
+    }
+    if (done.length > 0) {
+      out.push({ kind: 'header', label: 'RESOLVED TODAY', color: '#29811e', bg: '#f9faf8', icon: 'bi-check-circle', count: done.length });
+      for (const t of done) out.push({ kind: 'row', row: t });
+    }
+    return out;
+  }, [active, snoozed, done]);
+  const ticketColSpan = settings.sla_enabled !== false ? 9 : 8;
+  const { startIdx: ticketStart, endIdx: ticketEnd, topPad: ticketTopPad, bottomPad: ticketBottomPad } = useVirtualRows({
+    rowCount: ticketVirtualItems.length,
+    rowHeight: TICKET_ROW_HEIGHT,
+    overscan: 8,
+    scrollerRef: ticketScrollerRef,
+  });
+  const ticketVisible = ticketVirtualItems.slice(ticketStart, ticketEnd);
 
   // SLA-based row color
   const slaAgeClass = (task) => {
@@ -748,7 +784,7 @@ const Queue = ({ user, tasks, subFilter }) => {
 
       {/* ── Main ZD/JR table (when no work source is active) ── */}
       {!workSource && (
-        <div style={{ flex: 1, overflowY: 'auto', background: '#fafaf9' }}>
+        <div ref={ticketScrollerRef} style={{ flex: 1, overflowY: 'auto', background: '#fafaf9' }}>
           {all.length === 0 ? (
             hasActiveFilters
               ? <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--text-muted)' }}>
@@ -795,15 +831,30 @@ const Queue = ({ user, tasks, subFilter }) => {
                 </tr>
               </thead>
               <tbody>
-                {active.map(task => <QueueRow key={task.id} task={task} slaAgeClass={slaAgeClass} settings={settings}/>)}
-                {snoozed.length > 0 && (
-                  <tr><td colSpan={settings.sla_enabled !== false ? 9 : 8} style={{ padding: '12px 16px', fontSize: 11, fontWeight: 700, color: '#6b6560', letterSpacing: '.04em', background: '#faf9f7', borderTop: '1px solid #e8e8e8', borderBottom: '1px solid #e8e8e8' }}><i className="bi-pause-circle-fill" style={{ fontSize: 11, marginRight: 6 }}></i>PAUSED ({snoozed.length})</td></tr>
+                {ticketTopPad > 0 && (
+                  <tr style={{ height: ticketTopPad }} aria-hidden="true">
+                    <td colSpan={ticketColSpan} style={{ padding: 0, height: ticketTopPad }} />
+                  </tr>
                 )}
-                {snoozed.map(task => <QueueRow key={task.id} task={task} slaAgeClass={slaAgeClass} settings={settings}/>)}
-                {done.length > 0 && (
-                  <tr><td colSpan={settings.sla_enabled !== false ? 9 : 8} style={{ padding: '12px 16px', fontSize: 11, fontWeight: 700, color: '#29811e', letterSpacing: '.04em', background: '#f9faf8', borderTop: '1px solid #e8e8e8', borderBottom: '1px solid #e8e8e8' }}><i className="bi-check-circle" style={{ fontSize: 11, marginRight: 6 }}></i>RESOLVED TODAY ({done.length})</td></tr>
+                {ticketVisible.map((it, i) => {
+                  if (it.kind === 'header') {
+                    return (
+                      <tr key={`hdr-${ticketStart + i}-${it.label}`} style={{ height: TICKET_ROW_HEIGHT }}>
+                        <td colSpan={ticketColSpan} style={{ padding: '12px 16px', fontSize: 11, fontWeight: 700, color: it.color, letterSpacing: '.04em', background: it.bg, borderTop: '1px solid #e8e8e8', borderBottom: '1px solid #e8e8e8' }}>
+                          <i className={it.icon} style={{ fontSize: 11, marginRight: 6 }}></i>
+                          {it.label} ({it.count})
+                        </td>
+                      </tr>
+                    );
+                  }
+                  const task = it.row;
+                  return <QueueRow key={task.id} task={task} slaAgeClass={slaAgeClass} settings={settings} />;
+                })}
+                {ticketBottomPad > 0 && (
+                  <tr style={{ height: ticketBottomPad }} aria-hidden="true">
+                    <td colSpan={ticketColSpan} style={{ padding: 0, height: ticketBottomPad }} />
+                  </tr>
                 )}
-                {done.map(task => <QueueRow key={task.id} task={task} slaAgeClass={slaAgeClass} settings={settings}/>)}
               </tbody>
             </table>
           )}
@@ -828,7 +879,7 @@ const QueueRow = memo(({ task, slaAgeClass, settings }) => {
       className={rowAgeClass}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
-      style={{ borderBottom: '1px solid #f0efed', background: hov ? '#fafaf9' : 'white', transition: 'background 0.1s', borderLeft: priColor ? `3px solid ${priColor}` : '3px solid transparent' }}
+      style={{ height: 44, borderBottom: '1px solid #f0efed', background: hov ? '#fafaf9' : 'white', transition: 'background 0.1s', borderLeft: priColor ? `3px solid ${priColor}` : '3px solid transparent' }}
     >
       {/* Source */}
       <td style={tdStyle}><ToolBadge source={task.source}/></td>
