@@ -26,6 +26,7 @@ export const ALL_VIEWS = [
   'slack',
   'team',
   'feedback',
+  'hr-hub',
   'settings',
 ];
 
@@ -61,6 +62,12 @@ export const ALL_ADMIN_POWERS = [
   'can_manage_access_control',
   'can_manage_users',
   'can_manage_org',
+  // HR Hub admin power: edit statuses, fields, dropdown options, and
+  // auto-assign rules from the in-app Settings panel; edit any
+  // request/comment regardless of authorship; bypass the Team-toggle
+  // scope on list views. Bundled into the `at_hr_hub_admin` default
+  // access type and stackable on top of any other access type.
+  'can_manage_hr_hub',
 ];
 
 export const DATA_SCOPES = [
@@ -89,6 +96,7 @@ export const VIEW_LABELS = {
   'slack':         'Slack',
   'team':          'Team',
   'feedback':      'Feedback',
+  'hr-hub':        'HR Hub',
   'settings':      'Settings',
 };
 
@@ -117,6 +125,7 @@ export const ADMIN_POWER_LABELS = {
   'can_manage_access_control': 'Manage Access Control',
   'can_manage_users':          'Manage Users',
   'can_manage_org':            'Manage Org Structure',
+  'can_manage_hr_hub':         'Manage HR Hub',
 };
 
 export const DATA_SCOPE_LABELS = {
@@ -174,6 +183,23 @@ export const DEFAULT_ACCESS_TYPES = [
     views: VIEWS_NO_SETTINGS,
     actions: [...ALL_ACTIONS],
     adminPowers: [],
+    dataScope: 'own_tasks_only',
+    isDefault: true,
+  },
+  {
+    // HR Hub Admin — assignable from the Team tab. Grants full edit
+    // rights inside the HR Hub (statuses, fields, dropdown options,
+    // auto-assign rules; can edit any request/comment regardless of
+    // authorship; bypasses the Team-toggle scope on list views) WITHOUT
+    // granting any other system-level admin powers. Stackable on top of
+    // an agent / TL / RM access type — when a user has multiple types,
+    // the union of `views` / `actions` / `adminPowers` applies.
+    id: 'at_hr_hub_admin',
+    name: 'HR Hub Admin',
+    description: 'Full edit access to the HR Hub: statuses, fields, dropdowns, auto-assign rules, and any request or comment. Does not grant other settings access.',
+    views: [...VIEWS_NO_SETTINGS],
+    actions: [...ALL_ACTIONS],
+    adminPowers: ['can_manage_hr_hub'],
     dataScope: 'own_tasks_only',
     isDefault: true,
   },

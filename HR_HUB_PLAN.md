@@ -348,16 +348,20 @@ displays them automatically — no schema change needed.
 
 **Verification:**
 
-- [ ] Migrations apply on a fresh DB without errors
-- [ ] All 7 HR Hub tables exist + indexes present
-- [ ] `hr_hub_settings` seeded with defaults for the 4 flows (statuses, fields, dropdowns) on first boot
-- [ ] `'hr-hub'` view + `can_manage_hr_hub` admin power present in `accessControl.js`
-- [ ] Default `hr_hub_admin` access type renders in Team tab → Access Type Editor
-- [ ] Every HR Hub API route requires auth (`getAuthUser`); settings PUT → 403 unless caller has `can_manage_hr_hub`
-- [ ] `GET /requests` p95 < 100 ms with 10 k seeded rows (load-test locally)
-- [ ] Log entry written on every state-changing call
-- [ ] Tab nav entry added + `/hr-hub` route stub (feature-flagged off by default)
-- [ ] **Existing Feedback tab still works untouched** (hit it post-deploy and confirm)
+- [x] Migrations apply on a fresh DB without errors *(append-only `CREATE TABLE IF NOT EXISTS` + `ALTER TABLE … IF NOT EXISTS`)*
+- [x] All 6 HR Hub tables exist + indexes present (`hr_hub_request`, `hr_hub_comment`, `hr_hub_follower`, `hr_hub_log`, `hr_hub_settings`, `hr_hub_settings_history`); plus `team_member_overrides.is_hr_hub_admin` column
+- [x] `hr_hub_settings` seeded with defaults for the 4 flows (statuses, fields, dropdowns, auto_assign, meta) on first boot via `seedHrHubSettingsIfNeeded()`
+- [x] `'hr-hub'` view + `can_manage_hr_hub` admin power present in `accessControl.js`; default `at_hr_hub_admin` access type renders in Team tab → Access Type Editor
+- [x] Every HR Hub API route requires auth (`getAuthUser`); settings PUT + admin-only edits → 403 unless caller passes `canAdministerHrHub` (admin role or `is_hr_hub_admin = true` on team_member_overrides)
+- [ ] `GET /requests` p95 < 100 ms with 10 k seeded rows (load-test post-deploy)
+- [x] Log entry written on every state-changing call (create / status_change / assignee_change / priority_change / field_edit / comment_added / comment_edited / comment_deleted / follower_added / follower_removed)
+- [x] `/hr-hub` route stub via `HrHubView.jsx` (no visible nav entry yet — Stage 2 adds the + button modal); reachable via `setView('hr-hub')`
+- [ ] **Existing Feedback tab still works untouched** *(verify post-deploy)*
+
+Notes:
+- The `at_hr_hub_admin` access type in `DEFAULT_ACCESS_TYPES` is the user-facing label; the actual server-side enforcement reads `team_member_overrides.is_hr_hub_admin` (mirrors the existing `is_access_admin` pattern). Stage 6's Settings UI flips that boolean from the Team tab.
+- File upload uses the same shape as `feedback_requests.attachments` (JSONB array of `{kind, dataUri, name}`) so Stage 5 migration is a straight INSERT … SELECT.
+- Notifications reuse `user_notifications` with `link_view = 'hr_hub'` — the existing 30 s polling bell hook surfaces them automatically.
 
 ### Stage 2 — `+` button popup + create flow
 

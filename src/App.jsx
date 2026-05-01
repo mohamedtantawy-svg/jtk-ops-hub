@@ -97,6 +97,7 @@ import ProjectsView from './components/views/ProjectsView';
 import Slack from './components/views/Slack';
 import Alerts from './components/views/Alerts';
 import FeedbackView from './components/views/FeedbackView';
+import HrHubView from './components/views/HrHubView';
 import CreateProjectModal from './components/modals/CreateProjectModal';
 import CreateRequestModal from './components/modals/CreateRequestModal';
 import CreateEscalationModal from './components/modals/CreateEscalationModal';
@@ -1246,6 +1247,11 @@ const App=()=>{
           {view==='slack'         &&perms?.canView('slack')!==false        &&<div className="page-enter"><Slack tasks={tasks.filter(t=>t.source==='slack')} setTasks={setTasks} onEscalMgr={()=>{}} addToast={addToast} user={effectiveUser}/></div>}
           {view==='alerts'        &&perms?.canView('alerts')!==false       &&<div className="page-enter"><Alerts tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setTasks={setTasks}/></div>}
           {view==='feedback'      &&perms?.canView('feedback')!==false     &&<div className="page-enter"><FeedbackView user={effectiveUser} addToast={addToast} openCompose={feedbackCompose} onComposeOpened={()=>setFeedbackCompose(false)}/></div>}
+          {/* HR Hub — Stage 1 stub. No visible nav entry yet; reachable
+              by setting view='hr-hub' (e.g. via a future + button popup
+              landing in Stage 2). Backend routes under /api/v1/hr-hub/
+              are live and exercised by HrHubView's smoke check. */}
+          {view==='hr-hub'        &&perms?.canView('hr-hub')!==false       &&<div className="page-enter"><HrHubView user={effectiveUser}/></div>}
       </div>
       {createModal   &&<CreateTaskModal onConfirm={confirmCreate} onClose={()=>setCreateModal(false)} currentUser={effectiveUser}/>}
       {projectModal  &&<CreateProjectModal onConfirm={confirmProject} onClose={()=>setProjectModal(null)} project={typeof projectModal==='object'?projectModal:null} currentUser={effectiveUser}/>}
