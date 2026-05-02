@@ -422,6 +422,56 @@ The deep-link routing lives in `App.jsx::handleNotifClick`. Add a branch keyed o
 
 Server-side fan-out helper pattern: take `recipients`, `excludeEmail` (typically the actor), `type` (e.g. `mention` / `comment` / `status_change`), title, body, requestId, sourceType, sourceId. Multi-row INSERT with a single round-trip; `ON CONFLICT DO NOTHING` to dedup by `(recipient, source_type, source_id)`.
 
+### 3.13a In-app board layout — Feedback's pattern is the reference
+
+Any new tab that shows a list of items (HR Hub, future "Tasks board", etc.)
+should match the **Feedback board** visual rhythm so users don't have to
+re-learn the surface tab to tab. The 2026-05-02 HR Hub redesign was a
+direct port of these tokens — copy them; don't invent new ones.
+
+Top-to-bottom block order, with reference styles in `FeedbackView.jsx` /
+`HrHubView.jsx`:
+
+  1. **Hero header** (`pageHead` style): 40×40 rounded coloured icon tile
+     on the left, H1 + subtitle inline, primary action button on the
+     right (`primaryBtn` — purple `#7c3aed` with the soft shadow). One
+     line, ~58 px tall. Padding `20 0 12` keeps it tight.
+  2. **Segmented scope toggle** (`segmentedControl` / `segmentBtn` /
+     `segmentBtnActive` / `segmentCount`): pill-rail with each segment
+     showing label + a small count badge. Active segment gets the
+     subtle white pill + shadow + bold weight. Counts always reflect
+     the current secondary filters so the user can pre-empt how busy
+     each segment is before clicking.
+  3. **4-up status filter cards** (`statusFilterBtn` + the
+     `<feature>-status-grid` CSS class with `repeat(4, minmax(0,1fr))`,
+     collapsing to `repeat(2, …)` at ≤900 px): coloured icon tile on
+     the left, status label + "N requests" sub-line, big tabular-nums
+     count on the right. Active state tints the card background + flips
+     the icon tile to the bold accent. Click to filter, click again to
+     clear.
+  4. **Filter bar** (`filterBar`): single line. Type/category pill chips
+     on the left (each with their own `filterPill` + `filterPillActive`
+     accent colour), search input + sort `<select>` + refresh `iconBtn`
+     + admin-only settings `iconBtn` on the right. Always at 32 px row
+     height so the chips align with the inputs.
+  5. **Row list** (compact, ~50 px tall per row, hover tint via
+     `var(--surface-2)`): priority dot (8 px coloured) → small flow
+     icon tile (24 px coloured) → two-line title + meta → status pill
+     + attachment count + relative time on the right. Status pills use
+     `bi-circle-fill` / `bi-arrow-repeat` / `bi-pause-circle-fill` /
+     `bi-check-circle-fill` to match Feedback's icons exactly.
+
+The token block at the bottom of `HrHubView.jsx` (`page`, `pageHead`,
+`scopeRow`, `segmentedControl`, `segmentBtn`, `statusFilterBtn`,
+`filterBar`, `filterPill`, `primaryBtn`, `iconBtn`) is a verbatim copy
+of Feedback's. Keep them in sync — if you tune one surface's spacing,
+tune the other.
+
+Compactness target: hero + scope toggle + status cards + filter bar
+should fit in ~290 px above the first row at 1440 px wide. Anything
+taller wastes scroll real estate the user explicitly called out as a
+problem.
+
 ### 3.13 Sync-badge state machine — per-source, not aggregate
 
 The Queue's sync badge tracks per-source freshness, not a single `oldestSyncAt` aggregate. Old logic ("any source >10 min → red") created panic states whenever offboarding's slow scan ran in the background. The 2026-05-01 redesign:
