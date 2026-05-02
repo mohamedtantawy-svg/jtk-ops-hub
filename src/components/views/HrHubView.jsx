@@ -31,7 +31,7 @@ const FLOW_TABS = [
 const STATUS_PILLS = {
   new:         { label: 'New',         color: '#0369a1', bg: '#e0f2fe' },
   in_progress: { label: 'In Progress', color: '#92400e', bg: '#fff8e6' },
-  on_hold:     { label: 'On Hold',     color: '#616161', bg: '#f3f3f3' },
+  on_hold:     { label: 'On Hold',     color: 'var(--text-secondary)', bg: '#f3f3f3' },
   resolved:    { label: 'Resolved',    color: '#166534', bg: '#e8f5e9' },
 };
 
@@ -201,8 +201,8 @@ export default function HrHubView({ user }) {
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '0 0 80px' }}>
       <div style={headerStyle}>
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, color: '#1b1b1b' }}>HR Hub</h1>
-          <p style={{ fontSize: 13, color: '#616161', margin: '4px 0 0' }}>
+          <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, color: 'var(--text)' }}>HR Hub</h1>
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 0' }}>
             HR Requests, Reports, Escalation Zero, and Ops Hub Feedback in one place.
           </p>
         </div>
@@ -216,8 +216,8 @@ export default function HrHubView({ user }) {
               title="HR Hub Settings"
               style={{
                 padding: '8px 10px', borderRadius: 999,
-                border: '1px solid #e8e8e8', background: 'white',
-                cursor: 'pointer', color: '#1b1b1b', fontSize: 13,
+                border: '1px solid var(--border)', background: 'var(--surface)',
+                cursor: 'pointer', color: 'var(--text)', fontSize: 13,
                 display: 'inline-flex', alignItems: 'center', gap: 6,
               }}
             ><i className="bi bi-gear" /> Settings</button>
@@ -229,7 +229,7 @@ export default function HrHubView({ user }) {
       {/* Flow tabs */}
       <div style={{
         display: 'flex', gap: 4, padding: '8px 24px 0',
-        overflowX: 'auto', borderBottom: '1px solid #e8e8e8',
+        overflowX: 'auto', borderBottom: '1px solid var(--border)',
       }}>
         {FLOW_TABS.map(t => (
           <FlowTabButton
@@ -244,7 +244,7 @@ export default function HrHubView({ user }) {
       {/* Filter bar */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 10, padding: '12px 24px',
-        borderBottom: '1px solid #f0f0f0', flexWrap: 'wrap',
+        borderBottom: '1px solid var(--border-light)', flexWrap: 'wrap',
       }}>
         <input
           type="text"
@@ -254,8 +254,8 @@ export default function HrHubView({ user }) {
           style={{
             flex: 1, minWidth: 200,
             padding: '8px 12px', fontSize: 13,
-            border: '1px solid #e8e8e8', borderRadius: 8,
-            outline: 'none', background: 'white',
+            border: '1px solid var(--border)', borderRadius: 8,
+            outline: 'none', background: 'var(--surface)',
           }}
         />
         <StatusFilter status={status} setStatus={setStatus} />
@@ -264,7 +264,7 @@ export default function HrHubView({ user }) {
       {/* List */}
       <div style={{ padding: '12px 24px' }}>
         {loading && items.length === 0 && (
-          <div style={{ padding: 40, textAlign: 'center', color: '#9e9e9e', fontSize: 13 }}>
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
             Loading…
           </div>
         )}
@@ -293,7 +293,7 @@ export default function HrHubView({ user }) {
                 style={{
                   alignSelf: 'center', marginTop: 8,
                   padding: '8px 16px', borderRadius: 10,
-                  border: '1px solid #e8e8e8', background: 'white',
+                  border: '1px solid var(--border)', background: 'var(--surface)',
                   fontSize: 13, fontWeight: 500, cursor: loadingMore ? 'wait' : 'pointer',
                 }}
               >{loadingMore ? 'Loading more…' : 'Load more'}</button>
@@ -326,7 +326,7 @@ function ScopeToggle({ scope, setScope, isManager }) {
     : [{ id: 'mine', label: 'My Requests' }, { id: 'all', label: 'All Requests' }];
   return (
     <div style={{
-      display: 'inline-flex', padding: 3, background: '#f3f3f3', borderRadius: 999,
+      display: 'inline-flex', padding: 3, background: 'var(--surface-3)', borderRadius: 999,
       gap: 2,
     }}>
       {options.map(o => (
@@ -338,7 +338,7 @@ function ScopeToggle({ scope, setScope, isManager }) {
             borderRadius: 999,
             border: 'none',
             background: scope === o.id ? 'white' : 'transparent',
-            color: scope === o.id ? '#1b1b1b' : '#616161',
+            color: scope === o.id ? 'var(--text)' : 'var(--text-secondary)',
             boxShadow: scope === o.id ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
             fontSize: 12, fontWeight: 600, cursor: 'pointer',
             whiteSpace: 'nowrap',
@@ -359,12 +359,12 @@ function FlowTabButton({ label, active, onClick }) {
         borderRadius: '8px 8px 0 0',
         border: 'none',
         background: 'transparent',
-        color: active ? '#1b1b1b' : '#616161',
+        color: active ? 'var(--text)' : 'var(--text-secondary)',
         fontSize: 13, fontWeight: active ? 600 : 500,
         cursor: 'pointer', whiteSpace: 'nowrap',
         position: 'relative',
         marginBottom: -1,
-        borderBottom: active ? '2px solid #1b1b1b' : '2px solid transparent',
+        borderBottom: active ? '2px solid var(--text)' : '2px solid transparent',
       }}
     >{label}</button>
   );
@@ -421,18 +421,18 @@ function RequestRow({ item, active, onClick }) {
     >
       <div style={{
         flexShrink: 0,
-        width: 80, fontSize: 11, fontWeight: 600, color: '#616161',
+        width: 80, fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)',
         textTransform: 'uppercase', letterSpacing: '.04em',
       }}>{flowLabel}</div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{
-          fontSize: 14, fontWeight: 600, color: '#1b1b1b',
+          fontSize: 14, fontWeight: 600, color: 'var(--text)',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
           {item.title || (item.summary || '').slice(0, 120) || '(untitled)'}
         </div>
         <div style={{
-          fontSize: 12, color: '#616161', marginTop: 2,
+          fontSize: 12, color: 'var(--text-secondary)', marginTop: 2,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
           {(() => {
@@ -454,7 +454,7 @@ function RequestRow({ item, active, onClick }) {
           padding: '2px 10px', borderRadius: 999,
           background: pill.bg, color: pill.color,
         }}>{pill.label}</span>
-        <span style={{ fontSize: 11, color: '#9e9e9e' }}>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
           {item.attachmentCount > 0 && (
             <span style={{ marginRight: 8 }}>
               <i className="bi bi-paperclip" /> {item.attachmentCount}
@@ -477,9 +477,9 @@ function EmptyState({ scope, flowTab }) {
     <div style={{
       padding: '40px 20px', textAlign: 'center',
       border: '1px dashed #e8e8e8', borderRadius: 12,
-      color: '#9e9e9e', fontSize: 13,
+      color: 'var(--text-muted)', fontSize: 13,
     }}>
-      <div style={{ fontSize: 14, color: '#616161', fontWeight: 600 }}>{lines[0]}</div>
+      <div style={{ fontSize: 14, color: 'var(--text-secondary)', fontWeight: 600 }}>{lines[0]}</div>
       <div style={{ marginTop: 4 }}>{lines[1]}</div>
     </div>
   );

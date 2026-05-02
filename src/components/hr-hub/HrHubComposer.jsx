@@ -204,9 +204,9 @@ export default function HrHubComposer({ onSubmit }) {
         style={{
           width: '100%', minHeight: 64, padding: '10px 12px',
           fontSize: 14, lineHeight: 1.55,
-          border: '1px solid #e8e8e8', borderRadius: 12,
+          border: '1px solid var(--border)', borderRadius: 12,
           outline: 'none', resize: 'vertical', fontFamily: 'inherit',
-          background: 'white', color: '#1b1b1b', boxSizing: 'border-box',
+          background: 'var(--surface)', color: 'var(--text)', boxSizing: 'border-box',
         }}
       />
 
@@ -214,7 +214,7 @@ export default function HrHubComposer({ onSubmit }) {
       {mentionState && mentionState.options.length > 0 && (
         <div style={{
           position: 'absolute', bottom: 'calc(100% + 4px)', left: 0,
-          background: 'white', border: '1px solid #e8e8e8',
+          background: 'var(--surface)', border: '1px solid var(--border)',
           borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
           minWidth: 240, padding: 4, zIndex: 50,
         }}>
@@ -235,7 +235,7 @@ export default function HrHubComposer({ onSubmit }) {
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               }}>{(m.name || '').split(/\s+/).map(s => s[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()}</span>
               <span style={{ fontWeight: 600 }}>{m.name}</span>
-              <span style={{ color: '#9e9e9e', fontSize: 11 }}>{m.email}</span>
+              <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{m.email}</span>
             </button>
           ))}
         </div>
@@ -252,7 +252,7 @@ export default function HrHubComposer({ onSubmit }) {
             <div key={a.id} style={{
               position: 'relative', aspectRatio: '4 / 3',
               borderRadius: 6, overflow: 'hidden',
-              border: '1px solid #e8e8e8', background: '#fafafa',
+              border: '1px solid var(--border)', background: 'var(--surface-2)',
             }}>
               {a.kind === 'image'
                 ? <img src={a.dataUri} alt={a.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -302,7 +302,7 @@ export default function HrHubComposer({ onSubmit }) {
           style={{ display: 'none' }}
           onChange={e => addFiles(e.target.files)}
         />
-        <div style={{ flex: 1, fontSize: 11, color: '#9e9e9e' }}>
+        <div style={{ flex: 1, fontSize: 11, color: 'var(--text-muted)' }}>
           {body && /\@/.test(body) ? 'Mentioned users will be added as followers.' : 'Cmd/Ctrl + Enter to send'}
         </div>
         <button
@@ -321,7 +321,7 @@ export default function HrHubComposer({ onSubmit }) {
       {showEmoji && (
         <div style={{
           position: 'absolute', bottom: 'calc(100% + 4px)', right: 60,
-          background: 'white', border: '1px solid #e8e8e8',
+          background: 'var(--surface)', border: '1px solid var(--border)',
           borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
           padding: 8, zIndex: 50,
           width: 220,
@@ -355,8 +355,8 @@ export default function HrHubComposer({ onSubmit }) {
 }
 
 const iconBtnStyle = {
-  border: '1px solid #e8e8e8', background: 'white',
+  border: '1px solid var(--border)', background: 'var(--surface)',
   width: 32, height: 32, borderRadius: 8,
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-  cursor: 'pointer', color: '#616161', fontSize: 14,
+  cursor: 'pointer', color: 'var(--text-secondary)', fontSize: 14,
 };
