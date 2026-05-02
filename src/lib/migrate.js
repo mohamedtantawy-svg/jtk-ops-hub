@@ -1,6 +1,7 @@
 import { query } from './db';
 import { seedCountryOwnersIfEmpty } from './country-owners-seed';
 import { seedHrHubSettingsIfNeeded } from './hr-hub-seed';
+import { seedLeaderAlertsSettingsIfNeeded } from './leader-alerts-seed';
 
 const SCHEMA_SQL = `
 -- Members
@@ -900,6 +901,117 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_hr_hub_request_flow_external
   ON hr_hub_request(flow, external_id) WHERE external_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uniq_hr_hub_comment_external
   ON hr_hub_comment(external_id) WHERE external_id IS NOT NULL;
+
+-- ── Leaders Alerts (2026-05-02) ────────────────────────────────────────────
+-- Tab where any manager (TL / RM / Admin) posts a short alert about a
+-- country, team, or global issue. Other managers ack with one click.
+-- Slack-like comment thread underneath with emoji reactions, screenshot
+-- paste, @-mentions, and per-thread mute. Plan doc: LEADER_ALERTS_PLAN.md.
+CREATE TABLE IF NOT EXISTS leader_alert (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  status       VARCHAR(20)  NOT NULL DEFAULT 'new'    CHECK (status   IN ('new','in_progress','on_hold','resolved')),
+  severity     VARCHAR(20)  NOT NULL DEFAULT 'medium' CHECK (severity IN ('critical','high','medium','low')),
+  category     VARCHAR(80)  NOT NULL,                              -- editable via Settings
+  title        VARCHAR(300) NOT NULL,
+  body         TEXT         NOT NULL,
+  impact_tags  TEXT[]       NOT NULL DEFAULT '{}'::text[],         -- 'Global' | 'Team' | <ISO country code>
+  links        JSONB        NOT NULL DEFAULT '[]'::jsonb,
+  attachments  JSONB        NOT NULL DEFAULT '[]'::jsonb,          -- {kind,dataUri,name}[] — same shape as feedback_requests.attachments
+  created_by_email VARCHAR(255) NOT NULL,
+  created_by_name  VARCHAR(255),
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  resolved_at  TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_leader_alert_status_created ON leader_alert(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_leader_alert_creator        ON leader_alert(created_by_email, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_leader_alert_category       ON leader_alert(category, status);
+CREATE INDEX IF NOT EXISTS idx_leader_alert_severity       ON leader_alert(severity, status);
+CREATE INDEX IF NOT EXISTS idx_leader_alert_impact         ON leader_alert USING GIN (impact_tags);
+
+CREATE TABLE IF NOT EXISTS leader_alert_ack (
+  alert_id    UUID         NOT NULL REFERENCES leader_alert(id) ON DELETE CASCADE,
+  email       VARCHAR(255) NOT NULL,
+  name        VARCHAR(255),
+  created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (alert_id, email)
+);
+CREATE INDEX IF NOT EXISTS idx_leader_alert_ack_email ON leader_alert_ack(email);
+
+CREATE TABLE IF NOT EXISTS leader_alert_comment (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  alert_id           UUID NOT NULL REFERENCES leader_alert(id) ON DELETE CASCADE,
+  parent_comment_id  UUID REFERENCES leader_alert_comment(id) ON DELETE SET NULL,
+  author_email       VARCHAR(255) NOT NULL,
+  author_name        VARCHAR(255),
+  body               TEXT NOT NULL,
+  mention_emails     TEXT[] NOT NULL DEFAULT '{}'::text[],
+  attachments        JSONB  NOT NULL DEFAULT '[]'::jsonb,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  edited_at          TIMESTAMPTZ,
+  deleted_at         TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_leader_alert_comment_alert ON leader_alert_comment(alert_id, created_at);
+
+CREATE TABLE IF NOT EXISTS leader_alert_comment_reaction (
+  comment_id  UUID NOT NULL REFERENCES leader_alert_comment(id) ON DELETE CASCADE,
+  email       VARCHAR(255) NOT NULL,
+  emoji       VARCHAR(40)  NOT NULL,                  -- ':thumbsup:' | unicode | shortcode
+  created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (comment_id, email, emoji)
+);
+CREATE INDEX IF NOT EXISTS idx_leader_alert_reaction_comment ON leader_alert_comment_reaction(comment_id);
+
+CREATE TABLE IF NOT EXISTS leader_alert_follower (
+  alert_id    UUID NOT NULL REFERENCES leader_alert(id) ON DELETE CASCADE,
+  email       VARCHAR(255) NOT NULL,
+  source      VARCHAR(20)  NOT NULL DEFAULT 'manual' CHECK (source IN ('creator','tagged','commenter','manual')),
+  muted       BOOLEAN      NOT NULL DEFAULT FALSE,
+  created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (alert_id, email)
+);
+CREATE INDEX IF NOT EXISTS idx_leader_alert_follower_email ON leader_alert_follower(email);
+
+CREATE TABLE IF NOT EXISTS leader_alert_log (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  alert_id     UUID NOT NULL REFERENCES leader_alert(id) ON DELETE CASCADE,
+  actor_email  VARCHAR(255),
+  actor_name   VARCHAR(255),
+  event_type   VARCHAR(40) NOT NULL,
+    -- created | status_change | severity_change | category_change | field_edit
+    -- | comment_added | comment_edited | comment_deleted
+    -- | reaction_added | reaction_removed
+    -- | ack_added | ack_removed
+    -- | follower_added | follower_removed | thread_muted | thread_unmuted
+  before_json  JSONB,
+  after_json   JSONB,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_leader_alert_log_alert ON leader_alert_log(alert_id, created_at);
+
+CREATE TABLE IF NOT EXISTS leader_alert_settings (
+  key               VARCHAR(60) PRIMARY KEY,                 -- 'categories' | 'statuses' | 'notifications'
+  value_json        JSONB       NOT NULL,
+  updated_by_email  VARCHAR(255),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS leader_alert_settings_history (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key          VARCHAR(60) NOT NULL,
+  before_json  JSONB,
+  after_json   JSONB,
+  actor_email  VARCHAR(255),
+  actor_name   VARCHAR(255),
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_leader_alert_settings_history ON leader_alert_settings_history(key, created_at DESC);
+
+-- Leaders Alerts admin grant — mirrors is_hr_hub_admin / is_announcements_admin
+-- pattern. Per-user override on team_member_overrides; carries the
+-- entitlements listed in LEADER_ALERTS_PLAN.md → "Alerts Admin access type".
+ALTER TABLE team_member_overrides ADD COLUMN IF NOT EXISTS is_leader_alerts_admin BOOLEAN DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS idx_tmo_is_leader_alerts_admin
+  ON team_member_overrides(is_leader_alerts_admin) WHERE is_leader_alerts_admin = true;
 `;
 
 export async function runMigrations() {
@@ -939,5 +1051,17 @@ export async function runMigrations() {
     }
   } catch (err) {
     console.warn('[db] HR Hub settings seed failed:', err?.message);
+  }
+
+  // Leaders Alerts: insert defaults for categories / statuses / notification
+  // policy on first boot. Idempotent via the same version-marker pattern as
+  // HR Hub. Settings panel writes are preserved across deploys.
+  try {
+    const seedResult = await seedLeaderAlertsSettingsIfNeeded();
+    if (!seedResult?.skipped) {
+      console.log(`[db] Leaders Alerts settings seeded to v${seedResult.version}: ${seedResult.inserted} rows`);
+    }
+  } catch (err) {
+    console.warn('[db] Leaders Alerts settings seed failed:', err?.message);
   }
 }

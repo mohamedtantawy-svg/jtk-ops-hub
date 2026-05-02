@@ -77,7 +77,7 @@ export async function GET(req) {
             `SELECT email, name, initials, title, access, manager_email, team, region,
                     service, country, avatar_url, start_date, is_new, is_deleted,
                     on_leave, last_login_at, login_count, is_announcements_admin,
-                    is_access_admin, is_hr_hub_admin
+                    is_access_admin, is_hr_hub_admin, is_leader_alerts_admin
                FROM team_member_overrides`
           );
           const merged = mergeTeamMembers(ovRows);
@@ -174,6 +174,7 @@ export async function GET(req) {
         isAnnouncementsAdmin: mergedEntry.isAnnouncementsAdmin === true,
         isAccessAdmin: mergedEntry.isAccessAdmin === true,
         isHrHubAdmin: mergedEntry.isHrHubAdmin === true,
+        isLeaderAlertsAdmin: mergedEntry.isLeaderAlertsAdmin === true,
       });
     }
 

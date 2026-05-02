@@ -33,6 +33,11 @@ const PRIMARY_TABS = [
   // HR Hub — single intake for HR Requests, HR Reporting, Escalation
   // Zero, and Ops Hub Feedback. Open to every authenticated user.
   { id: 'hr-hub',        icon: 'bi-broadcast-pin',    label: 'HR Hub' },
+  // Leaders Alerts — managerial-only surface for posting + acknowledging
+  // alerts across the leadership group. Visibility is gated by
+  // accessControl.MANAGERIAL_ONLY_VIEWS — agents are filtered out via
+  // tabAllowed below.
+  { id: 'leader-alerts', icon: 'bi-broadcast',        label: 'Leaders Alerts' },
 ];
 
 /* Secondary tabs under More — all owner-only for now, so for non-owners
@@ -57,6 +62,9 @@ const CREATE_ACTIONS = [
   // can submit; the picker shows the HR Request / HR Reporting /
   // Escalation Zero / Ops Hub Feedback options.
   { icon: 'bi-broadcast-pin',     label: 'Submit to HR Hub', action: 'hr-hub',        desc: 'HR Request, Report, Escalation Zero, or Feedback' },
+  // Leaders Alerts intake — opens the single-flow composer modal.
+  // Gated to managers via the `viewReq` check so agents don't see it.
+  { icon: 'bi-broadcast',         label: 'New Leaders Alert', action: 'leader-alerts', desc: 'Quick alert visible to every manager', viewReq: 'leader-alerts' },
 ];
 
 const DeelTopNav = ({
@@ -66,6 +74,8 @@ const DeelTopNav = ({
   onCreateTask, onCreateEscalation, onCreateProject,
   onCreateAnnouncement, onCreateRequest, onCreateFeedback,
   onCreateHrHub,
+  onCreateLeaderAlert,
+  leaderAlertsBadge = 0,
   setSelTask, tasks,
 }) => {
   // Manager on Call was previously rendered here as a pill in the right-side
@@ -115,6 +125,7 @@ const DeelTopNav = ({
     else if (action === 'request')    { onCreateRequest?.(); setView('my-queue'); }
     else if (action === 'feedback')   { setView('feedback'); onCreateFeedback?.(); }
     else if (action === 'hr-hub')     { onCreateHrHub?.(); }
+    else if (action === 'leader-alerts') { onCreateLeaderAlert?.(); }
   };
 
   const unread = notifs ? notifs.filter(n => !n.read).length : 0;
@@ -159,6 +170,7 @@ const DeelTopNav = ({
           // the top nav — see AnnouncementsView for the pending-approval pill.
           let badge = 0;
           if (tab.badge && escalCount > 0) badge = escalCount;
+          if (tab.id === 'leader-alerts' && leaderAlertsBadge > 0) badge = leaderAlertsBadge;
           return (
             <div key={tab.id} className={`deel-nav-item${active ? ' active' : ''}`}
               role="button"

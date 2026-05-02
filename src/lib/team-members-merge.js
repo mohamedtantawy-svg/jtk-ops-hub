@@ -51,6 +51,7 @@ function normaliseOverrideRow(row) {
     isAnnouncementsAdmin: row.is_announcements_admin === true,
     isAccessAdmin: row.is_access_admin === true,
     isHrHubAdmin: row.is_hr_hub_admin === true,
+    isLeaderAlertsAdmin: row.is_leader_alerts_admin === true,
   };
 }
 
@@ -62,6 +63,7 @@ function applyOverride(base, override) {
     isAnnouncementsAdmin: false,
     isAccessAdmin: false,
     isHrHubAdmin: false,
+    isLeaderAlertsAdmin: false,
   };
   const merged = { ...base };
   // Only overwrite when the override has a non-null value for the field.
@@ -80,6 +82,7 @@ function applyOverride(base, override) {
   merged.isAnnouncementsAdmin = override.isAnnouncementsAdmin === true;
   merged.isAccessAdmin = override.isAccessAdmin === true;
   merged.isHrHubAdmin = override.isHrHubAdmin === true;
+  merged.isLeaderAlertsAdmin = override.isLeaderAlertsAdmin === true;
   return merged;
 }
 
@@ -135,6 +138,9 @@ export function mergeTeamMembers(overrideRows = []) {
       lastLoginAt: override.lastLoginAt,
       loginCount: override.loginCount,
       isAnnouncementsAdmin: override.isAnnouncementsAdmin === true,
+      isAccessAdmin: override.isAccessAdmin === true,
+      isHrHubAdmin: override.isHrHubAdmin === true,
+      isLeaderAlertsAdmin: override.isLeaderAlertsAdmin === true,
     });
   }
 
