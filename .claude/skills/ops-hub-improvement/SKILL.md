@@ -1,6 +1,6 @@
 ---
 name: ops-hub-improvement
-description: Use this skill whenever the user asks for ANY improvement, fix, feature, bug fix, refactor, or UI change in the ops-hub project. It enforces the full workflow — deep cross-feature audit, multi-role consideration (Agent/TL/Regional/Director), tree-view preservation, UI polish verification, implementation, commit, push, PR, CI wait, merge to dev — so the user only has to "go to Nexus and deploy". Also encodes every mistake-avoidance rule learned from prior sessions. Triggers: any ops-hub code change request, anything touching /Users/mohamed.tantawy/Desktop/ops-hub/, any mention of Queue/Briefing/Announcements/Escalations/HR Hub/Feedback/Offboarding/Onboarding/Workbench/ACK/cache/sync/TL/Regional/Agent/Team/hierarchy/tree view.
+description: Use this skill whenever the user asks for ANY improvement, fix, feature, bug fix, refactor, or UI change in the ops-hub project. It enforces the full workflow — deep cross-feature audit, multi-role consideration (Agent/TL/Regional/Director), tree-view preservation, UI polish verification, implementation, commit, push, PR, CI wait, merge to dev — so the user only has to "go to Nexus and deploy". Includes the live post-deploy audit playbook (§6.7) for "I deployed, audit live by the book" requests, the in-app board layout reference (§3.13) anchored on Feedback's pattern, and every mistake-avoidance rule learned from prior sessions. Triggers: any ops-hub code change request, anything touching /Users/mohamed.tantawy/Desktop/ops-hub/, any mention of Queue/Briefing/Announcements/Escalations/HR Hub/Feedback/Offboarding/Onboarding/Workbench/ACK/cache/sync/TL/Regional/Agent/Team/hierarchy/tree view, any "audit live" / "test live" request, any new tab or list-of-items surface.
 ---
 
 # Ops Hub Improvement Workflow
@@ -422,7 +422,7 @@ The deep-link routing lives in `App.jsx::handleNotifClick`. Add a branch keyed o
 
 Server-side fan-out helper pattern: take `recipients`, `excludeEmail` (typically the actor), `type` (e.g. `mention` / `comment` / `status_change`), title, body, requestId, sourceType, sourceId. Multi-row INSERT with a single round-trip; `ON CONFLICT DO NOTHING` to dedup by `(recipient, source_type, source_id)`.
 
-### 3.13a In-app board layout — Feedback's pattern is the reference
+### 3.13 In-app board layout — Feedback's pattern is the reference
 
 Any new tab that shows a list of items (HR Hub, future "Tasks board", etc.)
 should match the **Feedback board** visual rhythm so users don't have to
@@ -472,7 +472,7 @@ should fit in ~290 px above the first row at 1440 px wide. Anything
 taller wastes scroll real estate the user explicitly called out as a
 problem.
 
-### 3.13 Sync-badge state machine — per-source, not aggregate
+### 3.14 Sync-badge state machine — per-source, not aggregate
 
 The Queue's sync badge tracks per-source freshness, not a single `oldestSyncAt` aggregate. Old logic ("any source >10 min → red") created panic states whenever offboarding's slow scan ran in the background. The 2026-05-01 redesign:
 
@@ -482,7 +482,7 @@ The Queue's sync badge tracks per-source freshness, not a single `oldestSyncAt` 
 
 When you add a new queue source, plumb its `lastSyncAt` and `isRefreshing` into `useQueueUnifiedSync.sources`, optionally add a per-source threshold override if the natural cycle exceeds 5 min, and the badge handles it without a state-machine change.
 
-### 3.14 CSV export format hardening
+### 3.15 CSV export format hardening
 
 Any new CSV download route must:
 - **Prefix the body with `﻿`** (UTF-8 BOM) so Excel on Windows recognises encoding and doesn't mojibake accented HRX names.
@@ -527,10 +527,13 @@ Answer out loud (in a comment or in the response): "For Agent / TL / Regional / 
 - [ ] Text baselines align across columns (inconsistent `lineHeight` causes staircase effects)
 - [ ] Icons vertically centered with their text (`display:'flex', alignItems:'center'`)
 
-**Color & contrast:**
-- [ ] Uses CSS variables where available (`var(--text)`, `var(--text-secondary)`, `var(--text-muted)`, `var(--surface)`, `var(--surface-2)`, `var(--border)`, `var(--purple)`, etc.) — never hardcode `#1b1b1b` unless consistent with the surrounding block
+**Color & contrast — CSS vars from day one, never "fix dark mode later":**
+- [ ] Uses CSS variables where available (`var(--text)`, `var(--text-secondary)`, `var(--text-muted)`, `var(--surface)`, `var(--surface-2)`, `var(--surface-3)`, `var(--border)`, `var(--border-light)`, `var(--purple)`, etc.) — never hardcode `#1b1b1b` / `'white'` / `#f7f5f2` for theme-dependent contexts
+- [ ] **Hardcoding `'white'` for `background:` is a tell that dark mode is broken.** It almost always needs to be `var(--surface)`. Same for `#1b1b1b` text on light cards, `#616161` for secondary text, `#e8e8e8` for borders.
+- [ ] **Status semantics stay LITERAL on purpose.** `#0369a1` for new / `#d97706` for in-progress / `#15803d` for done / `#dc2626` for critical — these convey meaning that must NOT shift with theme. Don't blanket-replace status pill colours with CSS vars.
+- [ ] If a hardcoded color is a status indicator AND has both a `color` and a `bg`, both must stay literal so the contrast pair holds in light + dark. The 2026-05-02 HR Hub Stage B sweep ran ~150 replacements but left every status-pill colour intact for this reason.
 - [ ] Matches the existing Deel design tokens (fonts: Inter; body 12–13px; headings 16px; small 10–11px)
-- [ ] Dark mode intact — if the change adds hardcoded colors, they must have a dark-mode equivalent via `data-theme="dark"` CSS vars
+- [ ] Dark mode intact — if the change adds hardcoded theme-context colors (text, surface, border), they must have a dark-mode equivalent via `data-theme="dark"` CSS vars OR use the existing vars from the start.
 
 **Interaction states:**
 - [ ] Hover state (`onMouseEnter` / `onMouseLeave` OR `:hover` via styled block)
@@ -744,6 +747,108 @@ Before telling the user "deploy broken, regressions everywhere":
 2. If yes, it's almost certainly stale browser cache. Next.js serves immutable-cached JS chunks. **Tell the user to Cmd+Shift+R before assuming a regression.**
 3. Only after cache clear still shows the bug, investigate for a real regression.
 
+### 6.6 Transient 503 during deploy tail-end
+
+For 30–60 s after the build's "Push on main" run goes green, ArgoCD is
+still rolling pods + running migrations. Hits to dynamic `[id]` routes
+(or anything that doesn't have its bytecode warm yet) can return
+**HTTP 503 from nginx** with the generic "Service Temporarily
+Unavailable" page. This is not a code bug — it's the pod-warm tail.
+Behaviour:
+
+- Static routes (`/api/v1/feedback`, `/api/v1/notifications`, etc.) and
+  the SSR HTML usually work first.
+- New dynamic routes from this deploy (e.g. `/api/v1/hr-hub/requests/[id]`)
+  503 until the pod has compiled them.
+- Unrelated existing dynamic routes (`/api/v1/feedback/[id]`) can also
+  503 momentarily because nginx is reusing connections to a recycling
+  upstream.
+
+If you hit 503 on the very first audit fetch, **wait 30–60 s and retry
+once before opening a finding.** Only treat it as a code bug if it
+persists past the build's autobump + a fresh pod-warm window.
+
+### 6.7 Live post-deploy audit playbook
+
+When the user says "I deployed, audit live by the book," run an explicit
+8-phase walkthrough — don't ad-hoc click around. Each phase is
+checkpointable, the report at the end groups findings by severity, and
+**no code changes happen during the audit** (write notes only; the user
+explicitly approves a fix plan before any edit).
+
+Take screenshots at every state transition. Browser_batch every batch of
+clicks + waits. Capture the live API response shapes verbatim — they're
+the strongest evidence for any finding.
+
+```
+Phase 1 — Deploy verification
+  • git fetch nexus; git log nexus/main --oneline -5
+  • Confirm "deploy: merge dev into main" + image-tag autobump SHAs
+  • gh run list … --branch main → most recent build conclusion=success
+  • git show nexus/main:<path> | grep <expected-change> for each file
+    you shipped (squash merges hide your dev commits — file-level
+    verify is the only honest check)
+
+Phase 2 — Schema + seed verification
+  • Probe each new route via fetch from the live page console. Don't
+    forget Authorization: Bearer <localStorage.ops_hub_token>.
+  • For new tables with seeds: GET /<feature>/settings/<flow> per
+    flow, confirm all expected keys are present.
+  • For new per-user grants: hit /api/v1/me, confirm the new flag
+    appears in the response.
+
+Phase 3 — Existing functionality untouched
+  • Probe every existing data source (feedback, notifications,
+    onboarding, offboarding, workbench, amendments, redlines,
+    incentive plans, queue) and confirm 200 + healthy counts. Use
+    8-second AbortController timeouts so a single slow source
+    doesn't lock the renderer.
+
+Phase 4 — New tab visible + retired tab gone
+  • Quick DOM probe: `document.querySelectorAll('.deel-nav-item')`
+    → spread to text array. Confirm new tab present, retired tab
+    absent.
+
+Phase 5 — Walk all rules with concrete tests
+  • Each rule from the project plan gets one observable test. e.g.
+    rule "every authenticated user has full access" → POST a
+    request as a non-admin (or via a test token), expect 201.
+  • Rule "managers get a third toggle" → render the page as
+    admin, confirm 3 segments visible.
+
+Phase 6 — Stage-by-stage verification against PLAN.md
+  • Tick each Stage's verification checklist. Cross out items you
+    can't verify live (e.g. p95 < 100 ms — note "needs load test").
+
+Phase 7 — Each flow end-to-end
+  • Create one record per flow via the FE (not just the API). Open
+    the detail. Change status. Post a comment with @-mention. Verify
+    the audit log + follower list update. Verify cross-tab features
+    (notifications, deep-links) work.
+  • Clean up: mark resolved with a "live audit test — auto-resolved"
+    note. Don't leave artefacts in prod.
+
+Phase 8 — Edge cases + UI polish
+  • Resize to 1280 / 1024 / 900 / 760 px. Screenshot each. Confirm
+    no clipping, no overflow, no horizontal scroll.
+  • Dark mode: localStorage.setItem('ops_hub_theme','dark') + reload,
+    or toggle from the user menu. Screenshot. Confirm every NEW
+    surface uses CSS vars (text/surface/border) and not hardcoded
+    light-mode literals.
+  • Long text: confirm titles/summaries ellipsize, don't push siblings.
+  • Empty states: filter to a status with no rows, confirm a
+    helpful empty-state copy renders (not a broken grid).
+
+Compile report
+  • Group findings by severity: Critical / High / Medium / Low / Cosmetic
+  • For each finding: severity, repro steps, root cause (if known),
+    proposed fix, file paths.
+  • Separate "verified ✓" list so the user can see what's working.
+  • End with the recommended fix-plan ordering (Stage A correctness
+    → Stage B theme → Stage C responsive, etc.) and DO NOT START
+    FIXING UNTIL THE USER APPROVES.
+```
+
 ---
 
 ## Mistakes to NEVER repeat (from prior sessions)
@@ -780,6 +885,16 @@ Before telling the user "deploy broken, regressions everywhere":
 26. **Don't ship a feature without an admin power if the user wants Director-delegated edit rights.** Mirror the `is_<feature>_admin` pattern across all five plumbing points (§3.9b). Skipping any one leaves the flag stranded — the DB column flips but the FE never sees it, the gear button never appears, the user thinks the feature is broken. Caught in the HR Hub pre-launch audit (`/api/v1/me` SELECT didn't include `is_hr_hub_admin`).
 
 27. **Don't forget to grep for stale references when retiring a feature.** Every removal has at least 6 sites: the view component file, `data/*` mock data, `App.jsx` mount line + import + state, `DeelTopNav.jsx` PRIMARY_TABS + CREATE_ACTIONS + handler, `BriefingView.jsx` OWNER_ONLY set + tile, `accessControl.js` ALL_VIEWS + VIEW_LABELS. Walk the audit-before-delete list (`grep -rn '<feature-id>\|<ComponentName>'`) before committing — leftover refs cause silent UI breakage on the next deploy. Existing access-type rows in DB that still list a removed view are harmless dead data; no migration needed.
+
+28. **Don't trust local optimistic state to keep sibling props fresh.** If a detail-drawer composer mutates server state that other props depend on (followers list, audit log, status pill counts), the parent's `detail` prop holds the stale snapshot until you call `onRefresh()` after the mutation. The 2026-05-02 HR Hub audit caught this: posting a comment with `@-mention` correctly added the follower + log entry on the server, but the drawer's `Following (N)` pill list and `Activity log (N)` counter stayed at the pre-comment values. Fix is one line — `onRefresh?.()` after `postHrHubComment` resolves. Same pattern applies to any in-drawer action that touches more than just its own local state.
+
+29. **Don't open findings on transient 503 during the deploy tail-end.** For 30–60 s after the build's "Push on main" run goes green, ArgoCD is still rolling pods and dynamic `[id]` routes can return HTTP 503 from nginx. The 2026-05-02 HR Hub live audit hit `/api/v1/hr-hub/requests/[id]` with 503 once, then 200 a minute later — and the same 503 hit unrelated dynamic routes (`/api/v1/feedback/[id]`, `/api/v1/notifications/[id]/read`) at the same instant. Wait 30–60 s and retry once before opening a finding. See §6.6.
+
+30. **Don't hardcode `'white'` / `#1b1b1b` / `#f7f5f2` for theme-dependent contexts.** Those are dark-mode bombs. Use `var(--surface)` / `var(--text)` / `var(--surface-2)` from day one. The 2026-05-02 HR Hub Stage B sweep replaced ~150 such literals — almost all of them avoidable if the original components had used CSS vars. Only status semantics (`#0369a1` blue / `#d97706` orange / `#15803d` green / `#dc2626` red) stay literal because they convey meaning that must NOT shift with theme. See §4.5 Color & contrast.
+
+31. **Don't read URL params in a `useEffect`; read them in the `useState` initialiser.** Hard refresh on a deep-link URL (`?view=hr-hub&req=<uuid>`) defaults to `briefing` if `view` is initialised as the literal `'briefing'` and the URL is only consulted on mount. Read the URL search params inside the `useState(() => …)` initialiser so the first paint is correct. The 2026-05-02 HR Hub fix landed this in `App.jsx`'s view useState init — server-pushed deep-links from the bell + shared URLs now restore both view and per-view drawer state on F5.
+
+32. **Don't ship a topbar without responsive collapse rules.** The 2026-05-02 audit caught the topnav clipping at ≤1100 px: HR Hub label rendered as "HR Hu", search/bell/avatar pushed off-screen. Three-tier CSS-only collapse (1280 → icon-only tabs, 900 → user-pill text hidden, 760 → primary tabs scroll horizontally) lives in `index.css` § "Top nav responsive collapse". Whenever you add a new primary tab or right-side icon, re-test at all four breakpoints; small additions cumulatively overflow.
 
 ---
 
