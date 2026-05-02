@@ -67,30 +67,30 @@ export default function HrHubSettingsPanel({ onClose }) {
     }}>
       <div onClick={e => e.stopPropagation()} style={{
         position: 'absolute', top: 0, right: 0, bottom: 0,
-        width: 'min(820px, 96vw)', background: 'white',
+        width: 'min(820px, 96vw)', background: 'var(--surface)',
         boxShadow: '-12px 0 30px rgba(0,0,0,0.12)',
         display: 'flex', flexDirection: 'column',
       }}>
         <div style={{
-          padding: '14px 20px', borderBottom: '1px solid #e8e8e8',
+          padding: '14px 20px', borderBottom: '1px solid var(--border)',
           display: 'flex', alignItems: 'center', gap: 10,
           flexShrink: 0,
         }}>
-          <i className="bi bi-gear" style={{ fontSize: 16, color: '#1b1b1b' }} />
+          <i className="bi bi-gear" style={{ fontSize: 16, color: 'var(--text)' }} />
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 16, fontWeight: 700, color: '#1b1b1b' }}>HR Hub Settings</div>
-            <div style={{ fontSize: 12, color: '#616161' }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>HR Hub Settings</div>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
               Configure statuses, fields, dropdowns, and auto-assign rules per flow. Changes apply immediately.
             </div>
           </div>
-          <button onClick={onClose} aria-label="Close" style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 4, color: '#616161' }}>
+          <button onClick={onClose} aria-label="Close" style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 4, color: 'var(--text-secondary)' }}>
             <i className="bi bi-x-lg" style={{ fontSize: 14 }} />
           </button>
         </div>
 
         {/* Flow + tab switcher */}
-        <div style={{ display: 'flex', borderBottom: '1px solid #e8e8e8', flexShrink: 0 }}>
-          <div style={{ borderRight: '1px solid #e8e8e8', width: 200, padding: '8px 0' }}>
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+          <div style={{ borderRight: '1px solid var(--border)', width: 200, padding: '8px 0' }}>
             {FLOWS.map(f => (
               <button
                 key={f.id}
@@ -98,11 +98,11 @@ export default function HrHubSettingsPanel({ onClose }) {
                 style={{
                   display: 'block', width: '100%', textAlign: 'left',
                   padding: '8px 14px',
-                  background: activeFlow === f.id ? '#f3f3f3' : 'transparent',
+                  background: activeFlow === f.id ? 'var(--surface-3)' : 'transparent',
                   border: 'none',
                   fontSize: 13,
                   fontWeight: activeFlow === f.id ? 600 : 500,
-                  color: '#1b1b1b',
+                  color: 'var(--text)',
                   cursor: 'pointer',
                 }}
               >{f.label}</button>
@@ -122,8 +122,8 @@ export default function HrHubSettingsPanel({ onClose }) {
                   padding: '8px 14px', borderRadius: '8px 8px 0 0',
                   border: 'none', background: 'transparent',
                   fontSize: 13, fontWeight: tab === t.id ? 600 : 500,
-                  color: tab === t.id ? '#1b1b1b' : '#616161',
-                  borderBottom: tab === t.id ? '2px solid #1b1b1b' : '2px solid transparent',
+                  color: tab === t.id ? 'var(--text)' : 'var(--text-secondary)',
+                  borderBottom: tab === t.id ? '2px solid var(--text)' : '2px solid transparent',
                   marginBottom: -1, cursor: 'pointer',
                 }}
               >{t.label}</button>
@@ -134,7 +134,7 @@ export default function HrHubSettingsPanel({ onClose }) {
         {/* Body */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px' }}>
           {loading && (
-            <div style={{ padding: 30, color: '#9e9e9e', fontSize: 13, textAlign: 'center' }}>Loading…</div>
+            <div style={{ padding: 30, color: 'var(--text-muted)', fontSize: 13, textAlign: 'center' }}>Loading…</div>
           )}
           {error && (
             <div style={{ padding: 16, background: '#fef2f2', color: '#991b1b', borderRadius: 10, fontSize: 13 }}>{error}</div>
@@ -198,7 +198,7 @@ function DropdownsEditor({ flow, settings, saving, onSave }) {
   return (
     <div>
       {Object.keys(draft).length === 0 && (
-        <div style={{ color: '#9e9e9e', fontSize: 13, padding: 20, textAlign: 'center' }}>
+        <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: 20, textAlign: 'center' }}>
           No dropdowns configured for this flow.
         </div>
       )}
@@ -217,8 +217,8 @@ function DropdownsEditor({ flow, settings, saving, onSave }) {
             <Section key={key} title={`${key.replace(/_/g, ' ')} (cascading)`}>
               {Object.entries(val).map(([parent, list]) => (
                 <div key={parent} style={{ marginBottom: 14 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: '#1b1b1b' }}>
-                    Parent: <span style={{ color: '#7a7059' }}>{parent}</span>
+                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6, color: 'var(--text)' }}>
+                    Parent: <span style={{ color: 'var(--text-muted)' }}>{parent}</span>
                   </div>
                   <ListEditor list={list} onChange={(next) => updateNested(key, parent, next)} />
                 </div>
@@ -235,8 +235,8 @@ function DropdownsEditor({ flow, settings, saving, onSave }) {
           disabled={!dirty || saving}
           style={{
             padding: '8px 14px', borderRadius: 10,
-            border: '1px solid #e8e8e8', background: 'white',
-            color: '#1b1b1b', fontSize: 13, fontWeight: 500,
+            border: '1px solid var(--border)', background: 'var(--surface)',
+            color: 'var(--text)', fontSize: 13, fontWeight: 500,
             cursor: (!dirty || saving) ? 'not-allowed' : 'pointer',
           }}
         >Discard</button>
@@ -259,7 +259,7 @@ function Section({ title, children }) {
   return (
     <div style={{ marginBottom: 22 }}>
       <div style={{
-        fontSize: 11, fontWeight: 700, color: '#7a7059',
+        fontSize: 11, fontWeight: 700, color: 'var(--text-muted)',
         textTransform: 'uppercase', letterSpacing: '.04em',
         marginBottom: 8,
       }}>{title}</div>
@@ -276,14 +276,14 @@ function ListEditor({ list, onChange }) {
         {list.map((opt, idx) => (
           <div key={`${opt}-${idx}`} style={{
             display: 'flex', alignItems: 'center', gap: 6,
-            padding: '6px 10px', background: '#f7f5f2', borderRadius: 6,
+            padding: '6px 10px', background: 'var(--surface-2)', borderRadius: 6,
             fontSize: 13,
           }}>
             <span style={{ flex: 1 }}>{opt}</span>
             <button
               onClick={() => onChange(list.filter((_, i) => i !== idx))}
               aria-label="Remove"
-              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#9e9e9e', padding: 0, fontSize: 14 }}
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 0, fontSize: 14 }}
             ><i className="bi bi-x" /></button>
           </div>
         ))}
@@ -302,13 +302,13 @@ function ListEditor({ list, onChange }) {
           placeholder="Add a new option and press Enter…"
           style={{
             flex: 1, padding: '6px 10px', fontSize: 13,
-            border: '1px solid #e8e8e8', borderRadius: 6, outline: 'none',
-            background: 'white',
+            border: '1px solid var(--border)', borderRadius: 6, outline: 'none',
+            background: 'var(--surface)',
           }}
         />
         <button
           onClick={() => { if (draft.trim()) { onChange([...list, draft.trim()]); setDraft(''); } }}
-          style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #e8e8e8', background: 'white', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
+          style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
         >Add</button>
       </div>
     </div>
@@ -328,7 +328,7 @@ function StatusesEditor({ flow, settings, saving, onSave }) {
   return (
     <div>
       <div style={{
-        fontSize: 12, color: '#616161', marginBottom: 10,
+        fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10,
         background: '#fff8e6', padding: '8px 12px', borderRadius: 8,
       }}>
         <strong>Heads up:</strong> the lifecycle is enforced by a database CHECK
@@ -340,7 +340,7 @@ function StatusesEditor({ flow, settings, saving, onSave }) {
         <div key={s.id || idx} style={{
           display: 'flex', alignItems: 'center', gap: 10,
           padding: 10, marginBottom: 8,
-          border: '1px solid #e8e8e8', borderRadius: 10,
+          border: '1px solid var(--border)', borderRadius: 10,
         }}>
           <span style={{
             width: 12, height: 12, borderRadius: 999,
@@ -350,21 +350,21 @@ function StatusesEditor({ flow, settings, saving, onSave }) {
             value={s.label || ''}
             onChange={e => updateField(idx, 'label', e.target.value)}
             placeholder="Label"
-            style={{ flex: 1, padding: '6px 10px', fontSize: 13, border: '1px solid #e8e8e8', borderRadius: 6, outline: 'none' }}
+            style={{ flex: 1, padding: '6px 10px', fontSize: 13, border: '1px solid var(--border)', borderRadius: 6, outline: 'none' }}
           />
           <input
             value={s.color || ''}
             onChange={e => updateField(idx, 'color', e.target.value)}
             placeholder="#color"
-            style={{ width: 110, padding: '6px 10px', fontSize: 12, border: '1px solid #e8e8e8', borderRadius: 6, outline: 'none' }}
+            style={{ width: 110, padding: '6px 10px', fontSize: 12, border: '1px solid var(--border)', borderRadius: 6, outline: 'none' }}
           />
-          <span style={{ fontSize: 11, color: '#9e9e9e' }}>{s.id}</span>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.id}</span>
         </div>
       ))}
       <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
         <button onClick={() => setDraft(Array.isArray(value) ? value : [])}
           disabled={!dirty || saving}
-          style={{ padding: '8px 14px', borderRadius: 10, border: '1px solid #e8e8e8', background: 'white', color: '#1b1b1b', fontSize: 13, fontWeight: 500, cursor: (!dirty || saving) ? 'not-allowed' : 'pointer' }}
+          style={{ padding: '8px 14px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, fontWeight: 500, cursor: (!dirty || saving) ? 'not-allowed' : 'pointer' }}
         >Discard</button>
         <button onClick={() => onSave(draft)}
           disabled={!dirty || saving}
@@ -379,12 +379,12 @@ function FieldsViewer({ settings }) {
   const fields = settings?.fields?.value || settings?.fields || [];
   return (
     <div>
-      <div style={{ fontSize: 12, color: '#616161', marginBottom: 10 }}>
+      <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10 }}>
         Field labels and required flags are stored here. The kind / source / cascading rules are code-defined for now (Stage 6 ships dropdown editing — full schema editing is Stage 7).
       </div>
       <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
         <thead>
-          <tr style={{ borderBottom: '1px solid #e8e8e8' }}>
+          <tr style={{ borderBottom: '1px solid var(--border)' }}>
             <th style={th}>Field</th>
             <th style={th}>Label</th>
             <th style={th}>Kind</th>
@@ -393,7 +393,7 @@ function FieldsViewer({ settings }) {
         </thead>
         <tbody>
           {fields.map((f, idx) => (
-            <tr key={f.id || idx} style={{ borderBottom: '1px solid #f3f3f3' }}>
+            <tr key={f.id || idx} style={{ borderBottom: '1px solid var(--border-light)' }}>
               <td style={td}>{f.id}</td>
               <td style={td}>{f.label}</td>
               <td style={td}><code>{f.kind}</code></td>
@@ -410,17 +410,17 @@ function AutoAssignViewer({ settings }) {
   const rules = settings?.auto_assign?.value || settings?.auto_assign || [];
   return (
     <div>
-      <div style={{ fontSize: 12, color: '#616161', marginBottom: 10 }}>
+      <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 10 }}>
         Auto-assignment rules. Editing UI ships in Stage 7; these are populated via the API today.
       </div>
       {rules.length === 0 ? (
-        <div style={{ color: '#9e9e9e', fontSize: 13, padding: 20, textAlign: 'center' }}>
+        <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: 20, textAlign: 'center' }}>
           No auto-assign rules.
         </div>
       ) : (
         <pre style={{
-          padding: 12, background: '#f7f5f2', borderRadius: 8,
-          fontSize: 12, color: '#1b1b1b', overflowX: 'auto',
+          padding: 12, background: 'var(--surface-2)', borderRadius: 8,
+          fontSize: 12, color: 'var(--text)', overflowX: 'auto',
         }}>
           {JSON.stringify(rules, null, 2)}
         </pre>
@@ -429,5 +429,5 @@ function AutoAssignViewer({ settings }) {
   );
 }
 
-const th = { textAlign: 'left', padding: '8px 10px', fontSize: 12, color: '#7a7059', fontWeight: 600 };
+const th = { textAlign: 'left', padding: '8px 10px', fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 };
 const td = { padding: '8px 10px', verticalAlign: 'top' };

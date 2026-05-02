@@ -28,7 +28,7 @@ import HrHubComposer from './HrHubComposer';
 const STATUS_OPTIONS = [
   { id: 'new',         label: 'New',         color: '#0369a1', bg: '#e0f2fe' },
   { id: 'in_progress', label: 'In Progress', color: '#92400e', bg: '#fff8e6' },
-  { id: 'on_hold',     label: 'On Hold',     color: '#616161', bg: '#f3f3f3' },
+  { id: 'on_hold',     label: 'On Hold',     color: 'var(--text-secondary)', bg: '#f3f3f3' },
   { id: 'resolved',    label: 'Resolved',    color: '#166534', bg: '#e8f5e9' },
 ];
 const PRIORITY_OPTIONS = [
@@ -137,7 +137,7 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
         onClick={e => e.stopPropagation()}
         style={{
           position: 'absolute', top: 0, right: 0, bottom: 0,
-          width: 'min(720px, 92vw)', background: 'white',
+          width: 'min(720px, 92vw)', background: 'var(--surface)',
           boxShadow: '-12px 0 30px rgba(0,0,0,0.12)',
           display: 'flex', flexDirection: 'column',
           fontSize: 14,
@@ -146,13 +146,13 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
         {/* Header */}
         <div style={{
           padding: '14px 20px',
-          borderBottom: '1px solid #e8e8e8',
+          borderBottom: '1px solid var(--border)',
           display: 'flex', alignItems: 'center', gap: 12,
           flexShrink: 0,
         }}>
           <div style={{
             fontSize: 11, fontWeight: 700, letterSpacing: '0.04em',
-            textTransform: 'uppercase', color: '#7a7059',
+            textTransform: 'uppercase', color: 'var(--text-muted)',
           }}>{flowLabel}</div>
           <div style={{ flex: 1 }} />
           <FollowButton
@@ -171,24 +171,24 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
           <button
             onClick={onClose}
             aria-label="Close"
-            style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 4, color: '#616161' }}
+            style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 4, color: 'var(--text-secondary)' }}
           ><i className="bi bi-x-lg" style={{ fontSize: 14 }} /></button>
         </div>
 
         {/* Body */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px 16px' }}>
           {loading && !request && (
-            <div style={{ padding: 30, color: '#9e9e9e', fontSize: 13, textAlign: 'center' }}>Loading…</div>
+            <div style={{ padding: 30, color: 'var(--text-muted)', fontSize: 13, textAlign: 'center' }}>Loading…</div>
           )}
           {error && (
             <div style={{ padding: 16, background: '#fef2f2', color: '#991b1b', borderRadius: 10, fontSize: 13 }}>{error}</div>
           )}
           {request && (
             <>
-              <div style={{ fontSize: 18, fontWeight: 700, color: '#1b1b1b', lineHeight: 1.3 }}>
+              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)', lineHeight: 1.3 }}>
                 {request.title || (request.summary || '').slice(0, 200) || '(untitled)'}
               </div>
-              <div style={{ marginTop: 6, fontSize: 12, color: '#616161' }}>
+              <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
                 Submitted by <strong>{request.createdByName || request.createdByEmail}</strong> · {formatRelative(request.createdAt)}
               </div>
 
@@ -212,7 +212,7 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
                 {request.resolutionNote && <FieldRow label="Resolution Note" value={request.resolutionNote} multiline />}
                 {Array.isArray(request.links) && request.links.length > 0 && (
                   <div>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: '#7a7059', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6 }}>Links</div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6 }}>Links</div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                       {request.links.map((u, i) => (
                         <a key={i} href={u} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: '#1f74b3', textDecoration: 'none' }}>
@@ -230,14 +230,14 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
               {/* Followers */}
               {followers.length > 0 && (
                 <div style={{ marginTop: 18 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: '#7a7059', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6 }}>
                     Following ({followers.length})
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                     {followers.map(f => (
                       <span key={f.email} style={{
                         fontSize: 11, padding: '3px 8px', borderRadius: 999,
-                        background: '#f3f3f3', color: '#1b1b1b',
+                        background: 'var(--surface-3)', color: 'var(--text)',
                       }} title={`${f.email} · ${f.source}`}>
                         {(MEMBERS_BY_EMAIL[f.email]?.name) || f.email}
                       </span>
@@ -248,12 +248,12 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
 
               {/* Comments */}
               <div style={{ marginTop: 26 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', marginBottom: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 8 }}>
                   Conversation
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {comments.length === 0 && (
-                    <div style={{ fontSize: 13, color: '#9e9e9e' }}>
+                    <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
                       No comments yet. Start the thread below — tag teammates with <code>@first.last</code> to bring them in as followers.
                     </div>
                   )}
@@ -293,11 +293,17 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
 
         {/* Composer (sticky at bottom) */}
         {request && (
-          <div style={{ borderTop: '1px solid #e8e8e8', padding: 14, flexShrink: 0, background: 'white' }}>
+          <div style={{ borderTop: '1px solid var(--border)', padding: 14, flexShrink: 0, background: 'var(--surface)' }}>
             <HrHubComposer
               onSubmit={async (payload) => {
                 const created = await postHrHubComment(requestId, payload);
+                // Optimistic local append so the author sees their comment
+                // instantly. Then refresh the parent so the Following pill
+                // list and Activity log row count pick up the @-mention
+                // followers + comment_added log entry the server just
+                // wrote — without this they read stale until manual reload.
                 setComments(prev => [...prev, created]);
+                onRefresh?.();
               }}
             />
           </div>
@@ -379,7 +385,7 @@ function PickerAssignee({ value, valueName, onChange, disabled }) {
 function pickerStyle(bg, color) {
   return {
     padding: '5px 10px', borderRadius: 999,
-    border: '1px solid #e8e8e8',
+    border: '1px solid var(--border)',
     background: bg || '#f3f3f3',
     color: color || '#1b1b1b',
     fontSize: 12, fontWeight: 600,
@@ -391,9 +397,9 @@ function pickerStyle(bg, color) {
 function FieldRow({ label, value, multiline }) {
   return (
     <div>
-      <div style={{ fontSize: 11, fontWeight: 600, color: '#7a7059', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6 }}>{label}</div>
       <div style={{
-        fontSize: 14, color: '#1b1b1b', lineHeight: 1.55,
+        fontSize: 14, color: 'var(--text)', lineHeight: 1.55,
         whiteSpace: multiline ? 'pre-wrap' : 'normal',
       }}>{value}</div>
     </div>
@@ -403,7 +409,7 @@ function FieldRow({ label, value, multiline }) {
 function AttachmentsGrid({ attachments }) {
   return (
     <div>
-      <div style={{ fontSize: 11, fontWeight: 600, color: '#7a7059', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6 }}>
+      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6 }}>
         Attachments
       </div>
       <div style={{
@@ -421,8 +427,8 @@ function AttachmentsGrid({ attachments }) {
               display: 'block',
               borderRadius: 8,
               overflow: 'hidden',
-              border: '1px solid #e8e8e8',
-              background: '#fafafa',
+              border: '1px solid var(--border)',
+              background: 'var(--surface-2)',
               aspectRatio: '4 / 3',
             }}
           >
@@ -448,13 +454,13 @@ function CommentRow({ comment, currentUserEmail, onEdit, onDelete }) {
     <div style={{
       display: 'flex', gap: 10,
       padding: '10px 12px',
-      background: '#fafafa', borderRadius: 10,
+      background: 'var(--surface-2)', borderRadius: 10,
     }}>
       <Avatar name={comment.authorName || comment.authorEmail} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b' }}>{comment.authorName || comment.authorEmail}</div>
-          <div style={{ fontSize: 11, color: '#9e9e9e' }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{comment.authorName || comment.authorEmail}</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
             {formatRelative(comment.createdAt)}
             {comment.editedAt ? ' · edited' : ''}
           </div>
@@ -476,7 +482,7 @@ function CommentRow({ comment, currentUserEmail, onEdit, onDelete }) {
               rows={3}
               style={{
                 width: '100%', padding: 8, fontSize: 14, lineHeight: 1.5,
-                border: '1px solid #e8e8e8', borderRadius: 8, fontFamily: 'inherit',
+                border: '1px solid var(--border)', borderRadius: 8, fontFamily: 'inherit',
                 resize: 'vertical', minHeight: 60,
               }}
             />
@@ -487,7 +493,7 @@ function CommentRow({ comment, currentUserEmail, onEdit, onDelete }) {
               >Save</button>
               <button
                 onClick={() => { setDraft(comment.body); setEditing(false); }}
-                style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid #e8e8e8', background: 'white', color: '#1b1b1b', fontSize: 12, cursor: 'pointer' }}
+                style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 12, cursor: 'pointer' }}
               >Cancel</button>
             </div>
           </div>
@@ -504,7 +510,7 @@ function CommentRow({ comment, currentUserEmail, onEdit, onDelete }) {
 
 const iconBtn = {
   border: 'none', background: 'transparent', cursor: 'pointer',
-  color: '#9e9e9e', fontSize: 12, padding: 4,
+  color: 'var(--text-muted)', fontSize: 12, padding: 4,
 };
 
 function Avatar({ name }) {
@@ -537,7 +543,7 @@ function CommentBody({ body }) {
     return out;
   }, [body]);
   return (
-    <div style={{ marginTop: 4, fontSize: 14, color: '#1b1b1b', lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+    <div style={{ marginTop: 4, fontSize: 14, color: 'var(--text)', lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
       {parts.map((p, i) => p.mention
         ? <span key={i} style={{ background: '#f3eff8', color: '#5b21b6', borderRadius: 4, padding: '0 4px', fontWeight: 600 }}>@{p.mention}</span>
         : <span key={i}>{p.text}</span>
@@ -556,7 +562,7 @@ function LogSection({ log }) {
         style={{
           background: 'transparent', border: 'none',
           padding: 0, cursor: 'pointer',
-          fontSize: 12, fontWeight: 600, color: '#616161',
+          fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)',
           display: 'inline-flex', alignItems: 'center', gap: 6,
         }}
       >
@@ -566,8 +572,8 @@ function LogSection({ log }) {
       {expanded && (
         <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {log.map(l => (
-            <div key={l.id} style={{ fontSize: 12, color: '#616161', display: 'flex', gap: 8 }}>
-              <span style={{ color: '#9e9e9e', minWidth: 90 }}>{formatRelative(l.createdAt)}</span>
+            <div key={l.id} style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'flex', gap: 8 }}>
+              <span style={{ color: 'var(--text-muted)', minWidth: 90 }}>{formatRelative(l.createdAt)}</span>
               <span><strong>{l.actorName || l.actorEmail || 'system'}</strong> · {l.eventType.replace(/_/g, ' ')}</span>
             </div>
           ))}

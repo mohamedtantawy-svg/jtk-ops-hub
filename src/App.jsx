@@ -277,7 +277,23 @@ const App=()=>{
     if (!impersonating || !user) return user;
     return resolveEffectiveMember(impersonating) || user;
   }, [impersonating, user, resolveEffectiveMember]);
-  const [view,setView]=useState('briefing');
+  // Initial view honours `?view=<name>` on hard refresh so deep-links from
+  // server-pushed notifications + shared URLs (e.g. /?view=hr-hub&req=<uuid>)
+  // restore both the view AND the per-view drawer state. If `?req=` is
+  // present without an explicit `?view=`, fall back to hr-hub since that's
+  // currently the only route that uses `?req=`. Any unknown view name is
+  // ignored — the per-route gating below still reroutes to a permitted
+  // default if the user can't access the requested view.
+  const [view,setView]=useState(()=>{
+    if (typeof window === 'undefined') return 'briefing';
+    try {
+      const sp = new URL(window.location.href).searchParams;
+      const v = sp.get('view');
+      if (v && /^[a-z][a-z0-9-]{0,30}$/i.test(v)) return v;
+      if (sp.get('req')) return 'hr-hub';
+    } catch {}
+    return 'briefing';
+  });
   // Temporary: gate unready features behind the owner's email. Nav tabs are
   // also filtered in DeelTopNav.jsx; this guards deep-link / programmatic
   // navigation (e.g. BriefingView KPI tiles that call setView('announcements')).

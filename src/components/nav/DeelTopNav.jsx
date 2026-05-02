@@ -167,10 +167,10 @@ const DeelTopNav = ({
               onClick={() => setView(tab.id)}
               onKeyDown={e => e.key === 'Enter' && setView(tab.id)}
               style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', letterSpacing: '0.01em' }}>
-              <i className={`bi ${tab.icon}`} style={{ fontSize: 14 }}></i>
-              <span>{tab.label}</span>
+              <i className={`bi ${tab.icon}`} style={{ fontSize: 14 }} title={tab.label}></i>
+              <span className="deel-nav-item-label">{tab.label}</span>
               {badge > 0 && (
-                <span style={{
+                <span className="deel-nav-item-badge" style={{
                   background: 'var(--red-solid)', color: 'white', fontSize: 10,
                   fontWeight: 700, padding: '1px 6px', borderRadius: 'var(--radius-pill)',
                   lineHeight: '14px', marginLeft: 2,
@@ -328,11 +328,11 @@ const DeelTopNav = ({
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               color: 'white', fontSize: 13, fontWeight: 700, flexShrink: 0,
             }}>{user?.initials || 'U'}</div>
-            <div style={{ minWidth: 0 }}>
+            <div className="deel-user-pill-text" style={{ minWidth: 0 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', lineHeight: '16px', whiteSpace: 'nowrap' }}>{user?.name}</div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: '14px', whiteSpace: 'nowrap' }}>{perms?.accessTypeName || 'Agent'} | {user?.team || 'Ops'}</div>
             </div>
-            <i className="bi bi-chevron-down" style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 2 }}></i>
+            <i className="bi bi-chevron-down deel-user-pill-chevron" style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 2 }}></i>
           </div>
           {showUser && (
             <div style={{ ...dropdown, right: 0, borderRadius: 14, width: 280, overflow: 'hidden', padding: 0 }}>

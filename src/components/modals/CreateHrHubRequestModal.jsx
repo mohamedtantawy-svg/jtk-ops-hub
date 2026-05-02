@@ -107,13 +107,13 @@ function FieldInput({ field, settings, value, onChange, autofocus }) {
   useEffect(() => { if (autofocus) ref.current?.focus(); }, [autofocus]);
 
   const labelStyle = {
-    fontSize: 12, fontWeight: 600, color: '#1b1b1b',
+    fontSize: 12, fontWeight: 600, color: 'var(--text)',
     display: 'block', marginBottom: 6,
   };
   const inputStyle = {
     width: '100%', padding: '9px 12px', fontSize: 14, lineHeight: 1.45,
-    border: '1px solid #e8e8e8', borderRadius: 10, background: 'white',
-    color: '#1b1b1b', outline: 'none', fontFamily: 'inherit',
+    border: '1px solid var(--border)', borderRadius: 10, background: 'var(--surface)',
+    color: 'var(--text)', outline: 'none', fontFamily: 'inherit',
     boxSizing: 'border-box',
   };
 
@@ -207,7 +207,7 @@ function FieldInput({ field, settings, value, onChange, autofocus }) {
     return (
       <div style={{ marginBottom: 16 }}>
         {labelEl}
-        <div style={{ fontSize: 12, color: '#9e9e9e', padding: '8px 0' }}>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 0' }}>
           Auto-populated from your team directory at submit time.
         </div>
       </div>
@@ -223,7 +223,7 @@ function FieldInput({ field, settings, value, onChange, autofocus }) {
 function UrlListEditor({ list, onChange }) {
   const [draft, setDraft] = useState('');
   const inputStyle = {
-    flex: 1, padding: '8px 10px', fontSize: 13, border: '1px solid #e8e8e8',
+    flex: 1, padding: '8px 10px', fontSize: 13, border: '1px solid var(--border)',
     borderRadius: 8, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box',
   };
   const add = () => {
@@ -250,8 +250,8 @@ function UrlListEditor({ list, onChange }) {
           type="button"
           onClick={add}
           style={{
-            padding: '8px 14px', borderRadius: 8, border: '1px solid #e8e8e8',
-            background: 'white', color: '#1b1b1b', fontSize: 12, fontWeight: 600,
+            padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)',
+            background: 'var(--surface)', color: 'var(--text)', fontSize: 12, fontWeight: 600,
             cursor: 'pointer',
           }}
         >Add</button>
@@ -261,14 +261,14 @@ function UrlListEditor({ list, onChange }) {
           {list.map((u, idx) => (
             <div key={`${u}-${idx}`} style={{
               display: 'flex', alignItems: 'center', gap: 8,
-              padding: '6px 10px', background: '#f7f5f2', borderRadius: 6, fontSize: 12,
+              padding: '6px 10px', background: 'var(--surface-2)', borderRadius: 6, fontSize: 12,
             }}>
-              <i className="bi bi-link-45deg" style={{ color: '#9e9e9e' }} />
+              <i className="bi bi-link-45deg" style={{ color: 'var(--text-muted)' }} />
               <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u}</span>
               <button
                 type="button"
                 onClick={() => onChange(list.filter((_, i) => i !== idx))}
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#9e9e9e', fontSize: 14, padding: 0 }}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 14, padding: 0 }}
                 aria-label="Remove URL"
               ><i className="bi bi-x" /></button>
             </div>
@@ -344,8 +344,8 @@ function AttachmentField({ attachments, setAttachments, error, setError }) {
 
   return (
     <div style={{ marginBottom: 16 }}>
-      <label style={{ fontSize: 12, fontWeight: 600, color: '#1b1b1b', display: 'block', marginBottom: 6 }}>
-        Attachments <span style={{ color: '#9e9e9e', fontWeight: 400 }}>(optional, max {MAX_ATTACHMENTS})</span>
+      <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 6 }}>
+        Attachments <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional, max {MAX_ATTACHMENTS})</span>
       </label>
       <div
         onDragOver={e => { e.preventDefault(); setDropActive(true); }}
@@ -360,7 +360,7 @@ function AttachmentField({ attachments, setAttachments, error, setError }) {
           cursor: 'pointer',
           background: dropActive ? '#e0f2fe' : '#f9f9f7',
           fontSize: 12,
-          color: '#616161',
+          color: 'var(--text-secondary)',
           transition: 'background .15s, border-color .15s',
         }}
       >
@@ -387,8 +387,8 @@ function AttachmentField({ attachments, setAttachments, error, setError }) {
               position: 'relative',
               borderRadius: 8,
               overflow: 'hidden',
-              border: '1px solid #e8e8e8',
-              background: '#fafafa',
+              border: '1px solid var(--border)',
+              background: 'var(--surface-2)',
               aspectRatio: '4 / 3',
             }}>
               {a.kind === 'image' ? (
@@ -516,7 +516,7 @@ export default function CreateHrHubRequestModal({ initialFlow = null, onClose, o
         onClick={e => e.stopPropagation()}
         style={{
           width: 'min(720px, 92vw)', maxHeight: '85vh',
-          background: 'white', borderRadius: 16,
+          background: 'var(--surface)', borderRadius: 16,
           boxShadow: '0 20px 50px rgba(0,0,0,0.18)',
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
         }}
@@ -524,29 +524,29 @@ export default function CreateHrHubRequestModal({ initialFlow = null, onClose, o
         {/* Header */}
         <div style={{
           display: 'flex', alignItems: 'center', gap: 12,
-          padding: '16px 20px', borderBottom: '1px solid #e8e8e8',
+          padding: '16px 20px', borderBottom: '1px solid var(--border)',
           flexShrink: 0,
         }}>
           {flow && (
             <button
               onClick={() => { setFlow(null); setValues({}); setAttachments([]); setError(null); }}
-              style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 4, marginLeft: -4, color: '#616161' }}
+              style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 4, marginLeft: -4, color: 'var(--text-secondary)' }}
               aria-label="Back to picker"
             ><i className="bi bi-arrow-left" style={{ fontSize: 16 }} /></button>
           )}
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 16, fontWeight: 700, color: '#1b1b1b' }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>
               {flow ? card?.label || 'New request' : 'Submit to HR Hub'}
             </div>
             {!flow && (
-              <div style={{ fontSize: 12, color: '#616161', marginTop: 2 }}>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
                 Choose what you'd like to raise.
               </div>
             )}
           </div>
           <button
             onClick={() => { if (!submitting) onClose?.(); }}
-            style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 4, color: '#616161' }}
+            style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 4, color: 'var(--text-secondary)' }}
             aria-label="Close"
           ><i className="bi bi-x-lg" style={{ fontSize: 14 }} /></button>
         </div>
@@ -565,10 +565,10 @@ export default function CreateHrHubRequestModal({ initialFlow = null, onClose, o
                   onClick={() => setFlow(c.id)}
                   style={{
                     textAlign: 'left',
-                    border: '1px solid #e8e8e8',
+                    border: '1px solid var(--border)',
                     borderRadius: 14,
                     padding: 16,
-                    background: 'white',
+                    background: 'var(--surface)',
                     cursor: 'pointer',
                     display: 'flex', flexDirection: 'column', gap: 10,
                     transition: 'border-color .15s, transform .1s',
@@ -584,21 +584,21 @@ export default function CreateHrHubRequestModal({ initialFlow = null, onClose, o
                   }}>
                     <i className={`bi ${c.icon}`} />
                   </div>
-                  <div style={{ fontSize: 15, fontWeight: 600, color: '#1b1b1b' }}>{c.label}</div>
-                  <div style={{ fontSize: 12, color: '#616161', lineHeight: 1.45 }}>{c.desc}</div>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>{c.label}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45 }}>{c.desc}</div>
                 </button>
               ))}
             </div>
           )}
 
           {flow && loadingSettings && (
-            <div style={{ padding: 40, textAlign: 'center', color: '#9e9e9e', fontSize: 13 }}>
+            <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
               Loading form…
             </div>
           )}
 
           {flow && !loadingSettings && fields.length === 0 && (
-            <div style={{ padding: 24, textAlign: 'center', color: '#9e9e9e', fontSize: 13 }}>
+            <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
               This flow has no editable fields configured. Contact an HR Hub Admin.
             </div>
           )}
@@ -647,8 +647,8 @@ export default function CreateHrHubRequestModal({ initialFlow = null, onClose, o
         {/* Footer */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-          gap: 10, padding: '14px 20px', borderTop: '1px solid #e8e8e8',
-          background: '#fafafa', flexShrink: 0,
+          gap: 10, padding: '14px 20px', borderTop: '1px solid var(--border)',
+          background: 'var(--surface-2)', flexShrink: 0,
         }}>
           {flow && (
             <>
@@ -656,8 +656,8 @@ export default function CreateHrHubRequestModal({ initialFlow = null, onClose, o
                 onClick={() => { if (!submitting) onClose?.(); }}
                 disabled={submitting}
                 style={{
-                  padding: '8px 16px', borderRadius: 10, border: '1px solid #e8e8e8',
-                  background: 'white', color: '#1b1b1b', fontSize: 13, fontWeight: 500,
+                  padding: '8px 16px', borderRadius: 10, border: '1px solid var(--border)',
+                  background: 'var(--surface)', color: 'var(--text)', fontSize: 13, fontWeight: 500,
                   cursor: submitting ? 'wait' : 'pointer',
                 }}
               >Cancel</button>
@@ -677,8 +677,8 @@ export default function CreateHrHubRequestModal({ initialFlow = null, onClose, o
             <button
               onClick={() => { if (!submitting) onClose?.(); }}
               style={{
-                padding: '8px 16px', borderRadius: 10, border: '1px solid #e8e8e8',
-                background: 'white', color: '#1b1b1b', fontSize: 13, fontWeight: 500, cursor: 'pointer',
+                padding: '8px 16px', borderRadius: 10, border: '1px solid var(--border)',
+                background: 'var(--surface)', color: 'var(--text)', fontSize: 13, fontWeight: 500, cursor: 'pointer',
               }}
             >Close</button>
           )}
