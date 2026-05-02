@@ -290,6 +290,35 @@
 [data-theme="dark"] .deel-search-btn{background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.1);}
 [data-theme="dark"] .deel-search-btn:hover{background:rgba(255,255,255,0.12);}
 .deel-kbd{background:var(--bg-2);border-radius:5px;padding:2px 7px;font-size:var(--font-xs);font-family:-apple-system,system-ui,sans-serif;color:var(--text-muted);font-weight:var(--fw-medium);letter-spacing:.02em;}
+
+/* ── Top nav responsive collapse ──────────────────────────────────────────
+ * The post-deploy audit (2026-05-02) caught the top nav clipping below
+ * ~1100 px: HR Hub label cut to "HR Hu", search/bell/avatar pushed off
+ * the right edge. Two-tier collapse:
+ *   • ≤1280 px → tabs become icon-only (label hidden, nav-item padding
+ *     tightened) so all primary tabs still fit.
+ *   • ≤900 px → user pill collapses to avatar only (name + team text
+ *     hidden, chevron hidden) so the right-side bar stops overflowing.
+ * The `title` attribute on each tab icon retains the label as a tooltip
+ * for the icon-only state.
+ */
+@media (max-width: 1280px) {
+  .deel-nav-item .deel-nav-item-label { display: none; }
+  .deel-nav-item { padding: 7px 8px; }
+  .deel-nav-item .deel-nav-item-badge { margin-left: 0; }
+}
+@media (max-width: 900px) {
+  .deel-user-pill-text,
+  .deel-user-pill-chevron { display: none; }
+  .deel-topnav { padding: 0 12px; gap: 4px; }
+}
+@media (max-width: 760px) {
+  /* Last resort — the More dropdown owns secondary tabs already; if the
+   * primary bar still overflows at this width, allow a horizontal scroll
+   * inside it rather than pushing the right-side icon bar off-screen. */
+  .deel-nav-items { overflow-x: auto; flex-wrap: nowrap; min-width: 0; max-width: 100%; }
+  .deel-nav-items::-webkit-scrollbar { display: none; }
+}
 .deel-notif-badge{position:absolute;top:2px;right:2px;min-width:16px;height:16px;border-radius:8px;background:var(--red-solid);color:white;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 4px;}
 .deel-avatar-sm{width:36px;height:36px;border-radius:50%;object-fit:cover;}
 
