@@ -374,7 +374,7 @@ const App=()=>{
       const stored=JSON.parse(s);
       if(!Array.isArray(stored)) return DEFAULT_ACCESS_TYPES;
       const union=(a,b)=>Array.from(new Set([...(a||[]),...(b||[])]));
-      return stored.map(at=>{
+      const enriched=stored.map(at=>{
         const def=DEFAULT_ACCESS_TYPES.find(d=>d.id===at.id);
         if(!def) return at;
         return {
@@ -384,6 +384,14 @@ const App=()=>{
           adminPowers: union(at.adminPowers, def.adminPowers),
         };
       });
+      // Append any new default access types that aren't yet in the stored
+      // list — without this, types added in a later release (e.g.
+      // at_hr_hub_admin, at_leader_alerts_admin) never surface in the
+      // Settings → Access Types editor and Directors can't assign them.
+      // Caught in the Leaders Alerts live audit (M1).
+      const storedIds=new Set(stored.map(at=>at.id));
+      const missing=DEFAULT_ACCESS_TYPES.filter(d=>!storedIds.has(d.id));
+      return [...enriched, ...missing];
     }catch(e){return DEFAULT_ACCESS_TYPES;}
   });
   const [userAccessMap,setUserAccessMap]=useState(()=>{try{const ver=localStorage.getItem('ops_hub_uam_ver');if(ver!==ADMIN_LIST_VERSION){localStorage.removeItem('ops_hub_user_access_map');localStorage.setItem('ops_hub_uam_ver',ADMIN_LIST_VERSION);return{...DEFAULT_USER_ACCESS_MAP};}const s=localStorage.getItem('ops_hub_user_access_map');return s?JSON.parse(s):{...DEFAULT_USER_ACCESS_MAP};}catch(e){return DEFAULT_USER_ACCESS_MAP;}});
