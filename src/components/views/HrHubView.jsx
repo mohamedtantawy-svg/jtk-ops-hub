@@ -1,15 +1,20 @@
 // ── HrHubView ───────────────────────────────────────────────────────────────
-// Stage 3: list + detail. Toggles (My / Team / All), filter by flow +
-// status + function, search, cursor pagination. Detail opens as a slide-in
-// drawer so the list keeps its scroll position; clicking the URL bar still
-// works for direct linking via ?req=<uuid>.
+// 2026-05-02 redesign: matches the Feedback board's information density.
+// Hero header (icon + title + subtitle + primary New-request button), a
+// segmented scope toggle with inline count badges, four large status
+// filter cards in a responsive grid, and a compact filter bar that pairs
+// flow-type pill chips with search / refresh / settings.
 //
-// Comments + Slack-style composer + emoji + mentions land in HrHubDetailPanel
-// (Stage 4).
+// The previous flat header + tab strip burned ~250 px before the first
+// row even rendered. The new layout puts the four status cards right
+// under the hero, makes the filter row a single line, and tightens row
+// padding — net effect is roughly twice the rows visible above the fold
+// at 1440 px while the surface still looks polished.
 //
-// Stage 5 will merge Ops Hub Feedback into this view by surfacing the
-// `feedback` flow in the same chassis. Until then the existing /feedback
-// tab continues to read from feedback_requests untouched.
+// Detail drawer + Settings panel integrations are unchanged. The HR Hub
+// composer continues to open via the global `+` button picker (see
+// CreateHrHubRequestModal). Comments + Slack-style mention/emoji land in
+// HrHubDetailPanel (Stage 4).
 
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -20,43 +25,59 @@ import HrHubDetailPanel from '../hr-hub/HrHubDetailPanel';
 import HrHubSettingsPanel from '../hr-hub/HrHubSettingsPanel';
 import { PermissionsContext } from '../../App';
 
-const FLOW_TABS = [
-  { id: 'all',              label: 'All flows',        flow: null },
-  { id: 'hr_request',       label: 'HR Requests',      flow: 'hr_request' },
-  { id: 'hr_reporting',     label: 'HR Reporting',     flow: 'hr_reporting' },
-  { id: 'escalation_zero',  label: 'Escalation Zero',  flow: 'escalation_zero' },
-  { id: 'feedback',         label: 'Ops Hub Feedback', flow: 'feedback' },
+// Single source of truth for status visuals — same shape as Feedback's
+// STATUS_FILTERS so the four buttons feel identical across the two tabs.
+const STATUS_FILTERS = [
+  { value: 'new',         label: 'New',         icon: 'bi-circle-fill',          color: '#0369a1', bg: '#e0f2fe', tint: '#bae6fd' },
+  { value: 'in_progress', label: 'In Progress', icon: 'bi-arrow-repeat',         color: '#d97706', bg: '#fff8e6', tint: '#fde68a' },
+  { value: 'on_hold',     label: 'On Hold',     icon: 'bi-pause-circle-fill',    color: '#737373', bg: '#f5f5f4', tint: '#e7e5e4' },
+  { value: 'resolved',    label: 'Resolved',    icon: 'bi-check-circle-fill',    color: '#15803d', bg: '#e8f5e9', tint: '#bbf7d0' },
+];
+const STATUS_BY_VALUE = Object.fromEntries(STATUS_FILTERS.map(s => [s.value, s]));
+
+// Per-flow visuals mirror the create-modal cards so the surface feels
+// consistent — same icon + accent across the picker, the row chip, and
+// the flow filter pill.
+const FLOW_VISUALS = {
+  hr_request:      { label: 'HR Request',       short: 'Request',     icon: 'bi-send-fill',         color: '#1f74b3', bg: '#e0f2fe' },
+  hr_reporting:    { label: 'HR Reporting',     short: 'Reporting',   icon: 'bi-megaphone-fill',    color: '#dc2626', bg: '#fef2f2' },
+  escalation_zero: { label: 'Escalation Zero',  short: 'Escalation',  icon: 'bi-stars',             color: '#7c3aed', bg: '#f3eff8' },
+  feedback:        { label: 'Ops Hub Feedback', short: 'Feedback',    icon: 'bi-lightbulb-fill',    color: '#d97706', bg: '#fff8e6' },
+};
+const FLOW_FILTERS = [
+  { value: 'all',             label: 'All flows', icon: 'bi-grid-fill',       color: 'var(--text)' },
+  { value: 'hr_request',      label: 'Requests',  icon: 'bi-send-fill',        color: '#1f74b3' },
+  { value: 'hr_reporting',    label: 'Reporting', icon: 'bi-megaphone-fill',   color: '#dc2626' },
+  { value: 'escalation_zero', label: 'Escalations', icon: 'bi-stars',           color: '#7c3aed' },
+  { value: 'feedback',        label: 'Feedback',  icon: 'bi-lightbulb-fill',   color: '#d97706' },
 ];
 
-const STATUS_PILLS = {
-  new:         { label: 'New',         color: '#0369a1', bg: '#e0f2fe' },
-  in_progress: { label: 'In Progress', color: '#92400e', bg: '#fff8e6' },
-  on_hold:     { label: 'On Hold',     color: 'var(--text-secondary)', bg: '#f3f3f3' },
-  resolved:    { label: 'Resolved',    color: '#166534', bg: '#e8f5e9' },
+const PRIORITY_DOT = {
+  low:      '#9b928a',
+  medium:   '#0ea5e9',
+  high:     '#f59e0b',
+  critical: '#dc2626',
 };
 
-const FLOW_LABELS = {
-  hr_request: 'HR Request',
-  hr_reporting: 'HR Reporting',
-  escalation_zero: 'Escalation Zero',
-  feedback: 'Ops Hub Feedback',
-};
+const SORTS = [
+  { value: 'updated', label: 'Recently updated' },
+  { value: 'new',     label: 'Newest' },
+  { value: 'oldest',  label: 'Oldest' },
+];
 
-function formatRelative(iso) {
+function relTime(iso) {
   if (!iso) return '';
-  const ms = Date.now() - new Date(iso).getTime();
-  if (ms < 60_000) return 'just now';
-  const mins = Math.floor(ms / 60_000);
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  const mins = Math.max(0, Math.floor((Date.now() - d.getTime()) / 60000));
+  if (mins < 1) return 'just now';
   if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
+  if (mins < 1440) return `${Math.floor(mins / 60)}h ago`;
+  const days = Math.floor(mins / 1440);
   if (days < 30) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString();
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-// Determine if the user is a manager — drives the 3-toggle (My/Team/All)
-// vs 2-toggle (My/All) split. Mirrors queue-scoping's role tiers.
 function isManagerRole(user) {
   if (!user) return false;
   if (user.role === 'admin') return true;
@@ -68,10 +89,9 @@ function isManagerRole(user) {
   return false;
 }
 
-export default function HrHubView({ user }) {
+export default function HrHubView({ user, onCreateHrHub }) {
   const perms = useContext(PermissionsContext);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // ── URL deep-link support ─────────────────────────────────────────────────
   const initialReqId = (() => {
     try {
       const url = typeof window !== 'undefined' ? new URL(window.location.href) : null;
@@ -81,11 +101,12 @@ export default function HrHubView({ user }) {
 
   // ── Filters & toggles ─────────────────────────────────────────────────────
   const isManager = isManagerRole(user);
-  const [scope, setScope] = useState('mine');           // 'mine' | 'team' | 'all'
-  const [flowTab, setFlowTab] = useState('all');
-  const [status, setStatus] = useState(null);
+  const [scope, setScope] = useState('mine');
+  const [flowFilter, setFlowFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState(null);          // null = all statuses
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [sort, setSort] = useState('updated');
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 250);
     return () => clearTimeout(t);
@@ -97,10 +118,10 @@ export default function HrHubView({ user }) {
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(null);
+  const [lastSyncAt, setLastSyncAt] = useState(null);
 
-  // Cancel in-flight requests when filters change so we don't paint stale data.
   const reqSeqRef = useRef(0);
-  const flowQuery = FLOW_TABS.find(t => t.id === flowTab)?.flow || null;
+  const flowQuery = flowFilter === 'all' ? null : flowFilter;
 
   const loadFirstPage = useCallback(async () => {
     const seq = ++reqSeqRef.current;
@@ -110,13 +131,14 @@ export default function HrHubView({ user }) {
       const res = await listHrHubRequests({
         flow: flowQuery,
         scope,
-        status: status || undefined,
+        status: statusFilter || undefined,
         search: debouncedSearch || undefined,
         limit: 25,
       });
       if (seq !== reqSeqRef.current) return;
       setItems(res?.items || []);
       setCursor(res?.nextCursor || null);
+      setLastSyncAt(Date.now());
     } catch (err) {
       if (seq !== reqSeqRef.current) return;
       setError(err?.message || 'Could not load requests');
@@ -125,7 +147,7 @@ export default function HrHubView({ user }) {
     } finally {
       if (seq === reqSeqRef.current) setLoading(false);
     }
-  }, [flowQuery, scope, status, debouncedSearch]);
+  }, [flowQuery, scope, statusFilter, debouncedSearch]);
 
   useEffect(() => { loadFirstPage(); }, [loadFirstPage]);
 
@@ -136,7 +158,7 @@ export default function HrHubView({ user }) {
       const res = await listHrHubRequests({
         flow: flowQuery,
         scope,
-        status: status || undefined,
+        status: statusFilter || undefined,
         search: debouncedSearch || undefined,
         cursor,
         limit: 25,
@@ -148,7 +170,64 @@ export default function HrHubView({ user }) {
     } finally {
       setLoadingMore(false);
     }
-  }, [cursor, flowQuery, scope, status, debouncedSearch, loadingMore]);
+  }, [cursor, flowQuery, scope, statusFilter, debouncedSearch, loadingMore]);
+
+  // ── Counts for status cards + scope toggle ─────────────────────────────
+  // Both reflect the *current* scope + flow filter so badges stay in sync
+  // with whatever the user's looking at. We don't filter for this — we
+  // ask the server for the unfiltered (by status) set under the same
+  // scope/flow, then count locally. Cheap because the page size is 25 +
+  // the four status totals fit a single round-trip.
+  const [statusCounts, setStatusCounts] = useState({ new: 0, in_progress: 0, on_hold: 0, resolved: 0, total: 0 });
+  const [scopeCounts, setScopeCounts] = useState({ mine: null, team: null, all: null });
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await listHrHubRequests({
+          flow: flowQuery,
+          scope,
+          search: debouncedSearch || undefined,
+          limit: 100,
+        });
+        if (cancelled) return;
+        const counts = { new: 0, in_progress: 0, on_hold: 0, resolved: 0, total: (r?.items || []).length };
+        for (const it of r?.items || []) {
+          if (counts[it.status] != null) counts[it.status]++;
+        }
+        setStatusCounts(counts);
+      } catch { /* swallow */ }
+    })();
+    return () => { cancelled = true; };
+  }, [flowQuery, scope, debouncedSearch]);
+
+  // Scope counts run once per flow change — three small queries.
+  useEffect(() => {
+    let cancelled = false;
+    const scopes = isManager ? ['mine', 'team', 'all'] : ['mine', 'all'];
+    (async () => {
+      const out = { mine: null, team: null, all: null };
+      for (const sc of scopes) {
+        try {
+          const r = await listHrHubRequests({ flow: flowQuery, scope: sc, limit: 100 });
+          if (cancelled) return;
+          out[sc] = (r?.items || []).length;
+        } catch { /* swallow */ }
+      }
+      if (!cancelled) setScopeCounts(out);
+    })();
+    return () => { cancelled = true; };
+  }, [flowQuery, isManager]);
+
+  // Local sort — server returns newest-first by default; we re-sort client-side
+  // for the small page (25 rows) so toggling sort doesn't refetch.
+  const sortedItems = useMemo(() => {
+    const list = [...items];
+    if (sort === 'updated') list.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+    else if (sort === 'new') list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    else if (sort === 'oldest') list.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+    return list;
+  }, [items, sort]);
 
   // ── Detail drawer state ──────────────────────────────────────────────────
   const [detailId, setDetailId] = useState(initialReqId);
@@ -173,7 +252,6 @@ export default function HrHubView({ user }) {
 
   useEffect(() => {
     loadDetail(detailId);
-    // Keep the URL in sync so deep links work without overriding history.
     try {
       const url = new URL(window.location.href);
       if (detailId) url.searchParams.set('req', detailId);
@@ -192,79 +270,165 @@ export default function HrHubView({ user }) {
   }, []);
 
   // ── Render ───────────────────────────────────────────────────────────────
-  const headerStyle = {
-    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    gap: 16, padding: '20px 24px 8px', flexWrap: 'wrap',
-  };
-
   return (
-    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '0 0 80px' }}>
-      <div style={headerStyle}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, color: 'var(--text)' }}>HR Hub</h1>
-          <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: '4px 0 0' }}>
-            HR Requests, Reports, Escalation Zero, and Ops Hub Feedback in one place.
-          </p>
+    <div style={page}>
+      <style>{`
+        .hrhub-status-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+        @media (max-width: 900px) { .hrhub-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        .hrhub-row:hover { border-color: var(--border-light); background: var(--surface-2); }
+      `}</style>
+
+      {/* Hero header */}
+      <div style={pageHead}>
+        <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: 12,
+            background: '#f3eff8', color: '#7c3aed',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <i className="bi-broadcast-pin" style={{ fontSize: 20 }} />
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: 'var(--text)' }}>HR Hub</h1>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+              HR Requests, Reporting, Escalation Zero, and Ops Hub Feedback in one place.
+              {lastSyncAt && <> · synced {relTime(new Date(lastSyncAt).toISOString())}</>}
+            </div>
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* Scope toggle: 2 buttons (mine/all) for everyone, 3 for managers */}
-          <ScopeToggle scope={scope} setScope={setScope} isManager={isManager} />
-          {perms?.canManageHrHub && (
+        <button
+          onClick={() => onCreateHrHub?.()}
+          style={primaryBtn}
+        >
+          <i className="bi-plus-circle-fill" style={{ fontSize: 13 }} /> New request
+        </button>
+      </div>
+
+      {/* Scope toggle (My / Team / All) with count badges */}
+      <div style={scopeRow}>
+        <div role="tablist" aria-label="Request scope" style={segmentedControl}>
+          {(isManager
+            ? [{ value: 'mine', label: 'My Requests' }, { value: 'team', label: 'Team Requests' }, { value: 'all', label: 'All Requests' }]
+            : [{ value: 'mine', label: 'My Requests' }, { value: 'all', label: 'All Requests' }]
+          ).map(seg => {
+            const active = scope === seg.value;
+            const cnt = scopeCounts[seg.value];
+            return (
+              <button
+                key={seg.value}
+                role="tab"
+                aria-selected={active}
+                onClick={() => setScope(seg.value)}
+                style={{ ...segmentBtn, ...(active ? segmentBtnActive : null) }}
+              >
+                {seg.label}
+                {cnt != null && (
+                  <span style={{ ...segmentCount, ...(active ? segmentCountActive : null) }}>{cnt}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 4 large status cards */}
+      <div className="hrhub-status-grid" style={{ marginBottom: 12 }}>
+        {STATUS_FILTERS.map(f => {
+          const active = statusFilter === f.value;
+          const cnt = statusCounts[f.value] || 0;
+          return (
             <button
-              onClick={() => setSettingsOpen(true)}
-              aria-label="HR Hub settings"
-              title="HR Hub Settings"
+              key={f.value}
+              onClick={() => setStatusFilter(active ? null : f.value)}
+              aria-pressed={active}
               style={{
-                padding: '8px 10px', borderRadius: 999,
-                border: '1px solid var(--border)', background: 'var(--surface)',
-                cursor: 'pointer', color: 'var(--text)', fontSize: 13,
-                display: 'inline-flex', alignItems: 'center', gap: 6,
+                ...statusFilterBtn,
+                background: active ? f.bg : 'var(--surface)',
+                borderColor: active ? f.tint : 'var(--border)',
+                boxShadow: active ? `0 0 0 1px ${f.tint} inset, 0 1px 0 rgba(15,23,42,0.02)` : '0 1px 0 rgba(15,23,42,0.02)',
               }}
-            ><i className="bi bi-gear" /> Settings</button>
+              onMouseEnter={e => { if (!active) { e.currentTarget.style.background = f.bg; e.currentTarget.style.borderColor = f.tint; } }}
+              onMouseLeave={e => { if (!active) { e.currentTarget.style.background = 'var(--surface)'; e.currentTarget.style.borderColor = 'var(--border)'; } }}
+            >
+              <span style={{
+                width: 28, height: 28, borderRadius: 8,
+                background: active ? f.color : f.bg,
+                color: active ? 'white' : f.color,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                transition: 'background .12s, color .12s',
+              }}>
+                <i className={f.icon} style={{ fontSize: 13 }} />
+              </span>
+              <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0, flex: 1 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: active ? f.color : 'var(--text)', whiteSpace: 'nowrap' }}>{f.label}</span>
+                <span style={{ fontSize: 10.5, fontWeight: 500, color: 'var(--text-muted)' }}>
+                  {cnt} {cnt === 1 ? 'request' : 'requests'}
+                </span>
+              </span>
+              <span style={{
+                fontSize: 16, fontWeight: 800,
+                color: active ? f.color : 'var(--text-muted)',
+                fontVariantNumeric: 'tabular-nums',
+                marginLeft: 'auto',
+              }}>{cnt}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Filter bar — flow chips on the left, search/sort/refresh/settings on the right */}
+      <div style={filterBar}>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          {FLOW_FILTERS.map(f => {
+            const active = flowFilter === f.value;
+            return (
+              <button
+                key={f.value}
+                onClick={() => setFlowFilter(f.value)}
+                style={{
+                  ...filterPill,
+                  ...(active ? { ...filterPillActive, background: f.value === 'all' ? 'var(--surface-3)' : (FLOW_VISUALS[f.value]?.bg || 'var(--surface-3)'), color: f.color, borderColor: f.color } : null),
+                }}
+                aria-pressed={active}
+                title={f.label}
+              >
+                <i className={f.icon} style={{ fontSize: 11, color: f.color }} /> {f.label}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginLeft: 'auto', flexShrink: 0, alignItems: 'center' }}>
+          <div style={{ position: 'relative' }}>
+            <i className="bi-search" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: 'var(--text-muted)' }} />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search…"
+              style={{ width: 220, height: 32, paddingLeft: 30, paddingRight: 10, borderRadius: 8, border: '1px solid var(--border)', fontSize: 12, background: 'var(--surface)', color: 'var(--text)', outline: 'none' }}
+            />
+          </div>
+          <select
+            value={sort}
+            onChange={e => setSort(e.target.value)}
+            style={{ height: 32, padding: '0 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 12, background: 'var(--surface)', color: 'var(--text)', cursor: 'pointer' }}
+          >
+            {SORTS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+          <button onClick={() => loadFirstPage()} title="Refresh" style={iconBtn}>
+            <i className={loading ? 'bi-arrow-clockwise spin' : 'bi-arrow-clockwise'} style={{ fontSize: 13, color: 'var(--text-muted)' }} />
+          </button>
+          {perms?.canManageHrHub && (
+            <button onClick={() => setSettingsOpen(true)} title="HR Hub Settings" style={iconBtn}>
+              <i className="bi-gear" style={{ fontSize: 13, color: 'var(--text-muted)' }} />
+            </button>
           )}
         </div>
       </div>
-      {settingsOpen && <HrHubSettingsPanel onClose={() => setSettingsOpen(false)} />}
-
-      {/* Flow tabs */}
-      <div style={{
-        display: 'flex', gap: 4, padding: '8px 24px 0',
-        overflowX: 'auto', borderBottom: '1px solid var(--border)',
-      }}>
-        {FLOW_TABS.map(t => (
-          <FlowTabButton
-            key={t.id}
-            label={t.label}
-            active={flowTab === t.id}
-            onClick={() => setFlowTab(t.id)}
-          />
-        ))}
-      </div>
-
-      {/* Filter bar */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 10, padding: '12px 24px',
-        borderBottom: '1px solid var(--border-light)', flexWrap: 'wrap',
-      }}>
-        <input
-          type="text"
-          placeholder="Search title or summary…"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          style={{
-            flex: 1, minWidth: 200,
-            padding: '8px 12px', fontSize: 13,
-            border: '1px solid var(--border)', borderRadius: 8,
-            outline: 'none', background: 'var(--surface)',
-          }}
-        />
-        <StatusFilter status={status} setStatus={setStatus} />
-      </div>
 
       {/* List */}
-      <div style={{ padding: '12px 24px' }}>
+      <div style={{ marginTop: 4 }}>
         {loading && items.length === 0 && (
-          <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+          <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
             Loading…
           </div>
         )}
@@ -273,12 +437,12 @@ export default function HrHubView({ user }) {
             {error}
           </div>
         )}
-        {!loading && !error && items.length === 0 && (
-          <EmptyState scope={scope} flowTab={flowTab} />
+        {!loading && !error && sortedItems.length === 0 && (
+          <EmptyState scope={scope} flowFilter={flowFilter} statusFilter={statusFilter} />
         )}
-        {items.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {items.map(item => (
+        {sortedItems.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {sortedItems.map(item => (
               <RequestRow
                 key={item.id}
                 item={item}
@@ -291,10 +455,11 @@ export default function HrHubView({ user }) {
                 onClick={loadMore}
                 disabled={loadingMore}
                 style={{
-                  alignSelf: 'center', marginTop: 8,
+                  alignSelf: 'center', marginTop: 6,
                   padding: '8px 16px', borderRadius: 10,
                   border: '1px solid var(--border)', background: 'var(--surface)',
-                  fontSize: 13, fontWeight: 500, cursor: loadingMore ? 'wait' : 'pointer',
+                  color: 'var(--text)', fontSize: 13, fontWeight: 500,
+                  cursor: loadingMore ? 'wait' : 'pointer',
                 }}
               >{loadingMore ? 'Loading more…' : 'Load more'}</button>
             )}
@@ -302,7 +467,7 @@ export default function HrHubView({ user }) {
         )}
       </div>
 
-      {/* Detail drawer */}
+      {settingsOpen && <HrHubSettingsPanel onClose={() => setSettingsOpen(false)} />}
       {detailId && (
         <HrHubDetailPanel
           requestId={detailId}
@@ -319,168 +484,128 @@ export default function HrHubView({ user }) {
   );
 }
 
-// ── ScopeToggle ─────────────────────────────────────────────────────────────
-function ScopeToggle({ scope, setScope, isManager }) {
-  const options = isManager
-    ? [{ id: 'mine', label: 'My Requests' }, { id: 'team', label: 'Team Requests' }, { id: 'all', label: 'All Requests' }]
-    : [{ id: 'mine', label: 'My Requests' }, { id: 'all', label: 'All Requests' }];
-  return (
-    <div style={{
-      display: 'inline-flex', padding: 3, background: 'var(--surface-3)', borderRadius: 999,
-      gap: 2,
-    }}>
-      {options.map(o => (
-        <button
-          key={o.id}
-          onClick={() => setScope(o.id)}
-          style={{
-            padding: '6px 14px',
-            borderRadius: 999,
-            border: 'none',
-            background: scope === o.id ? 'white' : 'transparent',
-            color: scope === o.id ? 'var(--text)' : 'var(--text-secondary)',
-            boxShadow: scope === o.id ? '0 1px 2px rgba(0,0,0,0.06)' : 'none',
-            fontSize: 12, fontWeight: 600, cursor: 'pointer',
-            whiteSpace: 'nowrap',
-            transition: 'background .12s',
-          }}
-        >{o.label}</button>
-      ))}
-    </div>
-  );
-}
-
-function FlowTabButton({ label, active, onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        padding: '8px 14px',
-        borderRadius: '8px 8px 0 0',
-        border: 'none',
-        background: 'transparent',
-        color: active ? 'var(--text)' : 'var(--text-secondary)',
-        fontSize: 13, fontWeight: active ? 600 : 500,
-        cursor: 'pointer', whiteSpace: 'nowrap',
-        position: 'relative',
-        marginBottom: -1,
-        borderBottom: active ? '2px solid var(--text)' : '2px solid transparent',
-      }}
-    >{label}</button>
-  );
-}
-
-function StatusFilter({ status, setStatus }) {
-  const options = [
-    { id: null,         label: 'All' },
-    { id: 'new',        label: 'New' },
-    { id: 'in_progress',label: 'In Progress' },
-    { id: 'on_hold',    label: 'On Hold' },
-    { id: 'resolved',   label: 'Resolved' },
-  ];
-  return (
-    <div style={{ display: 'flex', gap: 4 }}>
-      {options.map(o => {
-        const active = status === o.id;
-        return (
-          <button
-            key={String(o.id)}
-            onClick={() => setStatus(o.id)}
-            style={{
-              padding: '6px 10px',
-              borderRadius: 8,
-              border: '1px solid ' + (active ? '#1b1b1b' : '#e8e8e8'),
-              background: active ? '#1b1b1b' : 'white',
-              color: active ? 'white' : '#616161',
-              fontSize: 11, fontWeight: 600, cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >{o.label}</button>
-        );
-      })}
-    </div>
-  );
-}
-
+// ── Row ────────────────────────────────────────────────────────────────────
+// Single-line layout matching Feedback's row density: priority dot on
+// the far left, flow chip + status pill + meta line in the middle, a
+// metadata cluster on the right (attachments / time / chevron).
 function RequestRow({ item, active, onClick }) {
-  const pill = STATUS_PILLS[item.status] || STATUS_PILLS.new;
-  const flowLabel = FLOW_LABELS[item.flow] || item.flow;
+  const flow = FLOW_VISUALS[item.flow] || FLOW_VISUALS.hr_request;
+  const status = STATUS_BY_VALUE[item.status] || STATUS_BY_VALUE.new;
+  const priColor = PRIORITY_DOT[item.priority] || PRIORITY_DOT.medium;
+  const meta = [item.functionArea, item.requestType || item.reportType].filter(Boolean).join(' · ');
+
   return (
     <button
+      className="hrhub-row"
       onClick={onClick}
       style={{
-        textAlign: 'left',
         display: 'flex', alignItems: 'center', gap: 12,
-        padding: '12px 14px',
-        background: active ? '#f7f5f2' : 'white',
-        border: '1px solid ' + (active ? '#d8d8d8' : '#e8e8e8'),
-        borderRadius: 12,
+        padding: '10px 14px',
+        background: active ? 'var(--surface-2)' : 'var(--surface)',
+        border: '1px solid ' + (active ? 'var(--border)' : 'var(--border-light)'),
+        borderRadius: 10,
         cursor: 'pointer',
         transition: 'background .12s, border-color .12s',
+        textAlign: 'left',
+        minWidth: 0,
       }}
+      title={item.title || item.summary || ''}
     >
-      <div style={{
+      {/* Priority dot (semantic, not a button) */}
+      <span style={{
+        width: 8, height: 8, borderRadius: 999,
+        background: priColor,
         flexShrink: 0,
-        width: 80, fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)',
-        textTransform: 'uppercase', letterSpacing: '.04em',
-      }}>{flowLabel}</div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{
+      }} aria-label={`Priority ${item.priority || 'medium'}`} />
+
+      {/* Flow chip — small icon-only square */}
+      <span style={{
+        width: 24, height: 24, borderRadius: 6,
+        background: flow.bg, color: flow.color,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+      }} title={flow.label}>
+        <i className={flow.icon} style={{ fontSize: 11 }} />
+      </span>
+
+      {/* Center: title + meta */}
+      <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1, gap: 2 }}>
+        <span style={{
           fontSize: 14, fontWeight: 600, color: 'var(--text)',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
-          {item.title || (item.summary || '').slice(0, 120) || '(untitled)'}
-        </div>
-        <div style={{
-          fontSize: 12, color: 'var(--text-secondary)', marginTop: 2,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {(() => {
-            // Only join non-empty parts with `·` so flows that don't have a
-            // request_type / report_type (e.g. Escalation Zero) don't render
-            // a trailing separator.
-            const parts = [
-              item.functionArea,
-              item.requestType || item.reportType,
-              item.assigneeName,
-            ].filter(Boolean);
-            return parts.join(' · ');
-          })()}
-        </div>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
-        <span style={{
-          fontSize: 11, fontWeight: 600,
-          padding: '2px 10px', borderRadius: 999,
-          background: pill.bg, color: pill.color,
-        }}>{pill.label}</span>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-          {item.attachmentCount > 0 && (
-            <span style={{ marginRight: 8 }}>
-              <i className="bi bi-paperclip" /> {item.attachmentCount}
-            </span>
-          )}
-          {formatRelative(item.updatedAt || item.createdAt)}
+          {item.title || (item.summary || '').slice(0, 140) || '(untitled)'}
         </span>
-      </div>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span style={{ fontWeight: 600, color: flow.color }}>{flow.short}</span>
+          {meta ? ` · ${meta}` : ''}
+          {item.assigneeName ? ` · ${item.assigneeName}` : ''}
+          {item.createdByName && !item.assigneeName ? ` · ${item.createdByName}` : ''}
+        </span>
+      </span>
+
+      {/* Right: status pill + meta cluster */}
+      <span style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: 4,
+          fontSize: 11, fontWeight: 700,
+          padding: '3px 9px', borderRadius: 999,
+          background: status.bg, color: status.color,
+        }}>
+          <i className={status.icon} style={{ fontSize: 9 }} />
+          {status.label}
+        </span>
+        {item.attachmentCount > 0 && (
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+            <i className="bi-paperclip" style={{ fontSize: 11 }} /> {item.attachmentCount}
+          </span>
+        )}
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', minWidth: 56, textAlign: 'right' }}>
+          {relTime(item.updatedAt || item.createdAt)}
+        </span>
+      </span>
     </button>
   );
 }
 
-function EmptyState({ scope, flowTab }) {
-  const lines = scope === 'mine'
-    ? ['Nothing on your plate yet.', 'Hit the + button in the header to submit a request.']
-    : flowTab === 'all'
-      ? ['No requests match these filters.', 'Try widening the scope or clearing the search.']
-      : ['No requests in this flow yet.', 'Switch the flow tab or hit the + button to add one.'];
+function EmptyState({ scope, flowFilter, statusFilter }) {
+  let title = 'No requests yet';
+  let body = 'Hit the New request button in the header to submit one.';
+  if (statusFilter) {
+    const s = STATUS_BY_VALUE[statusFilter];
+    title = `No ${s?.label?.toLowerCase() || statusFilter} requests`;
+    body = 'Try clearing the status filter or widening the scope.';
+  } else if (scope === 'mine') {
+    title = 'Nothing on your plate yet';
+    body = 'Hit New request in the header to submit one.';
+  } else if (flowFilter !== 'all') {
+    title = `No ${FLOW_VISUALS[flowFilter]?.label || flowFilter} yet`;
+    body = 'Switch the flow filter or hit New request to add one.';
+  }
   return (
     <div style={{
       padding: '40px 20px', textAlign: 'center',
-      border: '1px dashed #e8e8e8', borderRadius: 12,
+      border: '1px dashed var(--border)', borderRadius: 12,
       color: 'var(--text-muted)', fontSize: 13,
+      background: 'var(--surface)',
     }}>
-      <div style={{ fontSize: 14, color: 'var(--text-secondary)', fontWeight: 600 }}>{lines[0]}</div>
-      <div style={{ marginTop: 4 }}>{lines[1]}</div>
+      <div style={{ fontSize: 14, color: 'var(--text-secondary)', fontWeight: 600 }}>{title}</div>
+      <div style={{ marginTop: 4 }}>{body}</div>
     </div>
   );
 }
+
+// ── Style tokens (copy of Feedback's so the two surfaces stay in sync) ────
+const page = { flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, padding: '0 24px 24px', background: 'var(--bg)' };
+const pageHead = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, padding: '20px 0 12px' };
+const scopeRow = { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 };
+const segmentedControl = { display: 'inline-flex', padding: 3, borderRadius: 128, background: 'var(--surface-2)', border: '1px solid var(--border-light)', gap: 2 };
+const segmentBtn = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 16px', borderRadius: 128, border: 'none', background: 'transparent', color: 'var(--text-muted)', fontSize: 13, fontWeight: 600, cursor: 'pointer', transition: 'all .12s' };
+const segmentBtnActive = { background: 'var(--surface)', color: 'var(--text)', boxShadow: '0 1px 3px rgba(15,23,42,0.08)', fontWeight: 700 };
+const segmentCount = { padding: '0 7px', borderRadius: 128, fontSize: 10, fontWeight: 700, background: 'rgba(15,23,42,0.06)', color: 'var(--text-muted)', minWidth: 18, textAlign: 'center', lineHeight: '16px' };
+const segmentCountActive = { background: '#7c3aed', color: 'white' };
+const statusFilterBtn = { display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 14, border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer', transition: 'all .15s', textAlign: 'left', minWidth: 0 };
+const filterBar = { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 12, background: 'var(--surface)', border: '1px solid var(--border-light)', marginBottom: 10, flexWrap: 'wrap' };
+const filterPill = { display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 128, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-muted)', fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all .12s' };
+const filterPillActive = { background: 'var(--surface-3)', color: 'var(--text)', borderColor: 'var(--text)' };
+const primaryBtn = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 16px', borderRadius: 10, border: 'none', background: '#7c3aed', color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 8px rgba(124,58,237,0.25)' };
+const iconBtn = { width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
