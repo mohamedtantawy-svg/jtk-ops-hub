@@ -28,23 +28,33 @@ const SEVERITY_META = {
 const STATUS_META = {
   new:         { label: 'New',         color: '#1d4ed8', bg: '#dbeafe', icon: 'bi-circle-fill' },
   in_progress: { label: 'In Progress', color: '#ed8d00', bg: '#fff8e6', icon: 'bi-arrow-repeat' },
-  on_hold:     { label: 'On Hold',     color: '#9e9e9e', bg: '#f3f4f6', icon: 'bi-pause-circle-fill' },
+  on_hold:     { label: 'On Hold',     color: '#525252', bg: '#f3f4f6', icon: 'bi-pause-circle-fill' },
   resolved:    { label: 'Resolved',    color: '#29811e', bg: '#dcfce7', icon: 'bi-check-circle-fill' },
 };
 
 const STATUS_OPTIONS = ['new', 'in_progress', 'on_hold', 'resolved'];
 const SEVERITY_OPTIONS = ['critical', 'high', 'medium', 'low'];
 
+// Defensive ISO parse — see audit L2 in LEADER_ALERTS_PLAN.md.
+function ensureIsoZ(s) {
+  if (!s) return s;
+  const str = String(s);
+  if (/[zZ]|[+-]\d{2}:?\d{2}$/.test(str)) return str;
+  if (/T\d{2}:\d{2}/.test(str)) return str + 'Z';
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(str)) return str.replace(' ', 'T') + 'Z';
+  return str;
+}
+
 function formatExact(iso) {
   if (!iso) return '';
-  return new Date(iso).toLocaleString(undefined, {
+  return new Date(ensureIsoZ(iso)).toLocaleString(undefined, {
     weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
   });
 }
 
 function formatRelative(iso) {
   if (!iso) return '';
-  const ms = Date.now() - new Date(iso).getTime();
+  const ms = Date.now() - new Date(ensureIsoZ(iso)).getTime();
   const min = Math.round(ms / 60000);
   if (min < 1) return 'just now';
   if (min < 60) return `${min} min ago`;
@@ -53,7 +63,7 @@ function formatRelative(iso) {
   const day = Math.round(hr / 24);
   if (day === 1) return 'yesterday';
   if (day < 7) return `${day} days ago`;
-  return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  return new Date(ensureIsoZ(iso)).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
 
 // All current managers (for the "Missing" panel + ack universe size).
