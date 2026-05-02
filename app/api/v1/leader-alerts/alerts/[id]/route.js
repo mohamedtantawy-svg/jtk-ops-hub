@@ -30,7 +30,7 @@ export async function GET(_req, { params }) {
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   await ensureRosterHydrated();
-  const { id } = params;
+  const { id } = await params;
 
   try {
     const { rows: alertRows } = await query(
@@ -101,7 +101,7 @@ export async function PATCH(req, { params }) {
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   await ensureRosterHydrated();
-  const { id } = params;
+  const { id } = await params;
 
   let payload;
   try { payload = await req.json(); }
@@ -255,7 +255,7 @@ export async function DELETE(_req, { params }) {
     return NextResponse.json({ error: 'Only an Alerts Admin can delete alerts' }, { status: 403 });
   }
 
-  const { id } = params;
+  const { id } = await params;
   try {
     const { rowCount } = await query(`DELETE FROM leader_alert WHERE id = $1`, [id]);
     if (rowCount === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });

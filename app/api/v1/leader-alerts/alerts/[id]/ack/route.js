@@ -16,7 +16,7 @@ export async function POST(_req, { params }) {
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   await ensureRosterHydrated();
-  const { id } = params;
+  const { id } = await params;
 
   try {
     const { rowCount: alertExists } = await query(`SELECT 1 FROM leader_alert WHERE id = $1`, [id]);
@@ -57,7 +57,7 @@ export async function DELETE(_req, { params }) {
   const user = getAuthUser(_req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { id } = params;
+  const { id } = await params;
   try {
     const result = await query(
       `DELETE FROM leader_alert_ack WHERE alert_id = $1 AND LOWER(email) = $2`,
