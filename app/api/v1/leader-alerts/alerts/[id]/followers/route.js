@@ -20,7 +20,7 @@ export async function POST(req, { params }) {
   const user = getAuthUser(req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { id } = params;
+  const { id } = await params;
   if (!(await alertExists(id))) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   let payload = {};
@@ -47,7 +47,7 @@ export async function DELETE(req, { params }) {
   const user = getAuthUser(req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { id } = params;
+  const { id } = await params;
   try {
     const removed = await removeFollower(id, user.email);
     writeLog(

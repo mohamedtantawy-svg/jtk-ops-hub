@@ -24,7 +24,7 @@ export const LEADER_ALERTS_SEED_VERSION = 1;
 const DEFAULT_STATUSES = [
   { id: 'new',         label: 'New',         color: '#1d4ed8' },
   { id: 'in_progress', label: 'In Progress', color: '#ed8d00' },
-  { id: 'on_hold',     label: 'On Hold',     color: '#9e9e9e' },
+  { id: 'on_hold',     label: 'On Hold',     color: '#525252' },
   { id: 'resolved',    label: 'Resolved',    color: '#29811e' },
 ];
 

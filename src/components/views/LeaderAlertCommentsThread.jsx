@@ -40,9 +40,19 @@ const ACCEPTED_VIDEO_TYPES = new Set(['video/mp4', 'video/webm', 'video/quicktim
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
+// Defensive ISO parse — see audit L2 in LEADER_ALERTS_PLAN.md.
+function ensureIsoZ(s) {
+  if (!s) return s;
+  const str = String(s);
+  if (/[zZ]|[+-]\d{2}:?\d{2}$/.test(str)) return str;
+  if (/T\d{2}:\d{2}/.test(str)) return str + 'Z';
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(str)) return str.replace(' ', 'T') + 'Z';
+  return str;
+}
+
 function formatRelative(iso) {
   if (!iso) return '';
-  const ms = Date.now() - new Date(iso).getTime();
+  const ms = Date.now() - new Date(ensureIsoZ(iso)).getTime();
   const min = Math.round(ms / 60000);
   if (min < 1) return 'just now';
   if (min < 60) return `${min} min ago`;
@@ -51,7 +61,7 @@ function formatRelative(iso) {
   const day = Math.round(hr / 24);
   if (day === 1) return 'yesterday';
   if (day < 7) return `${day} days ago`;
-  return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  return new Date(ensureIsoZ(iso)).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
 
 function fileToDataUri(file) {

@@ -24,7 +24,7 @@ export async function POST(req, { params }) {
   const user = getAuthUser(req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { id } = params;
+  const { id } = await params;
   const alertId = await loadCommentAlertId(id);
   if (!alertId) return NextResponse.json({ error: 'Comment not found' }, { status: 404 });
 
@@ -64,7 +64,7 @@ export async function DELETE(req, { params }) {
   const user = getAuthUser(req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { id } = params;
+  const { id } = await params;
   const { searchParams } = new URL(req.url);
   const emoji = (searchParams.get('emoji') || '').slice(0, MAX_EMOJI_LEN);
   if (!emoji) return NextResponse.json({ error: 'emoji query param required' }, { status: 400 });

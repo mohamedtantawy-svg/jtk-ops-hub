@@ -19,7 +19,7 @@ export async function PATCH(req, { params }) {
   const user = getAuthUser(req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { id } = params;
+  const { id } = await params;
   const existing = await loadComment(id);
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   if (existing.deleted_at) return NextResponse.json({ error: 'Comment was deleted' }, { status: 410 });
@@ -68,7 +68,7 @@ export async function DELETE(_req, { params }) {
   const user = getAuthUser(_req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { id } = params;
+  const { id } = await params;
   const existing = await loadComment(id);
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   if (existing.deleted_at) return NextResponse.json({ ok: true, alreadyDeleted: true });

@@ -34,7 +34,7 @@ export async function PUT(req, { params }) {
   const user = getAuthUser(req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { key } = params;
+  const { key } = await params;
   if (!ALLOWED_KEYS.has(key)) {
     return NextResponse.json({ error: `Unknown settings key: ${key}` }, { status: 400 });
   }

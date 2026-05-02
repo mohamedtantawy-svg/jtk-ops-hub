@@ -25,7 +25,7 @@ const SEVERITY_META = {
 const STATUS_META = {
   new:         { label: 'New',         color: '#1d4ed8', bg: '#dbeafe', icon: 'bi-circle-fill' },
   in_progress: { label: 'In Progress', color: '#ed8d00', bg: '#fff8e6', icon: 'bi-arrow-repeat' },
-  on_hold:     { label: 'On Hold',     color: '#9e9e9e', bg: '#f3f4f6', icon: 'bi-pause-circle-fill' },
+  on_hold:     { label: 'On Hold',     color: '#525252', bg: '#f3f4f6', icon: 'bi-pause-circle-fill' },
   resolved:    { label: 'Resolved',    color: '#29811e', bg: '#dcfce7', icon: 'bi-check-circle-fill' },
 };
 
@@ -38,9 +38,24 @@ const STATUS_ORDER = ['new', 'in_progress', 'on_hold', 'resolved'];
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+// Defensive ISO parse: when the API returns a TIMESTAMPTZ that's missing
+// its trailing Z (some serialization paths drop it), Chrome interprets
+// the bare string as local time and the relative time drifts by the
+// user's UTC offset (audit L2 — "3 h ago" on a 7-min-old alert in UTC+3).
+// Coerce a missing Z so parsing is always UTC-anchored.
+function ensureIsoZ(s) {
+  if (!s) return s;
+  const str = String(s);
+  if (/[zZ]|[+-]\d{2}:?\d{2}$/.test(str)) return str;
+  if (/T\d{2}:\d{2}/.test(str)) return str + 'Z';
+  // Postgres canonical "YYYY-MM-DD HH:MM:SS.sss" (space, no T) — same fix.
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(str)) return str.replace(' ', 'T') + 'Z';
+  return str;
+}
+
 function formatRelative(iso) {
   if (!iso) return '';
-  const ms = Date.now() - new Date(iso).getTime();
+  const ms = Date.now() - new Date(ensureIsoZ(iso)).getTime();
   const min = Math.round(ms / 60000);
   if (min < 1) return 'just now';
   if (min < 60) return `${min} min ago`;
@@ -50,7 +65,7 @@ function formatRelative(iso) {
   if (day === 1) return 'yesterday';
   if (day < 7) return `${day} days ago`;
   if (day < 30) return `${Math.round(day / 7)} wk ago`;
-  return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  return new Date(ensureIsoZ(iso)).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
 
 function getCategoryMeta(settings, catLabel) {
@@ -80,7 +95,7 @@ function setAlertIdInUrl(id) {
 
 // ── Main view ──────────────────────────────────────────────────────────────
 
-const LeaderAlertsView = ({ user, perms }) => {
+const LeaderAlertsView = ({ user, perms, refreshNonce = 0 }) => {
   // List state
   const [scope, setScope]           = useState('all');
   const [statusFilter, setStatusF]  = useState(null);     // null = all
@@ -98,18 +113,23 @@ const LeaderAlertsView = ({ user, perms }) => {
   const [openAlertId, setOpenAlertId] = useState(() => readAlertIdFromUrl());
   const [showSettings, setShowSettings] = useState(false);
 
-  // Settings — categories + statuses reference list.
+  // Settings — categories + statuses reference list. Re-fetches on
+  // refreshTick (manual button) and refreshNonce (post-create signal
+  // from App.jsx). AbortController on cleanup so a stale fetch can't
+  // overwrite a newer one's state (audit H2).
   useEffect(() => {
-    let cancelled = false;
-    getLeaderAlertsSettings()
-      .then(d => { if (!cancelled) setSettings(d?.settings || {}); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [refreshTick]);
+    const ac = new AbortController();
+    getLeaderAlertsSettings({ signal: ac.signal })
+      .then(d => { if (!ac.signal.aborted) setSettings(d?.settings || {}); })
+      .catch(e => { if (e?.name !== 'AbortError') console.warn('[leader-alerts] settings load:', e?.message); });
+    return () => ac.abort();
+  }, [refreshTick, refreshNonce]);
 
-  // Alert list — reload on filter change.
+  // Alert list — reload on filter change. AbortController on cleanup
+  // (audit H2) so a stale resolve can't leave loading=true if a new
+  // filter change supersedes the in-flight request mid-flight.
   useEffect(() => {
-    let cancelled = false;
+    const ac = new AbortController();
     setLoading(true);
     setError(null);
     listLeaderAlerts({
@@ -119,21 +139,22 @@ const LeaderAlertsView = ({ user, perms }) => {
       category: categoryFilter || undefined,
       search: search.trim() || undefined,
       limit: 50,
+      signal: ac.signal,
     })
       .then(d => {
-        if (cancelled) return;
+        if (ac.signal.aborted) return;
         setAlerts(Array.isArray(d?.alerts) ? d.alerts : []);
         setNextCursor(d?.nextCursor || null);
         setLoading(false);
       })
       .catch(e => {
-        if (cancelled) return;
+        if (ac.signal.aborted || e?.name === 'AbortError') return;
         setError(e?.message || 'Failed to load alerts');
         setAlerts([]);
         setLoading(false);
       });
-    return () => { cancelled = true; };
-  }, [scope, statusFilter, severityFilter, categoryFilter, search, refreshTick]);
+    return () => ac.abort();
+  }, [scope, statusFilter, severityFilter, categoryFilter, search, refreshTick, refreshNonce]);
 
   // URL ↔ openAlertId sync (browser back/forward + deep-links).
   useEffect(() => {
@@ -148,7 +169,7 @@ const LeaderAlertsView = ({ user, perms }) => {
   // single batch when those change.
   const [statusCounts, setStatusCounts] = useState({ new: 0, in_progress: 0, on_hold: 0, resolved: 0 });
   useEffect(() => {
-    let cancelled = false;
+    const ac = new AbortController();
     Promise.all(STATUS_ORDER.map(s =>
       listLeaderAlerts({
         scope,
@@ -157,10 +178,11 @@ const LeaderAlertsView = ({ user, perms }) => {
         category: categoryFilter || undefined,
         search: search.trim() || undefined,
         limit: 1,
+        signal: ac.signal,
       }).then(r => Array.isArray(r?.alerts) ? r.alerts : [])
         .catch(() => [])
     )).then(results => {
-      if (cancelled) return;
+      if (ac.signal.aborted) return;
       // Approximate count: API returns up to limit, doesn't include total.
       // For accuracy at scale we'd add a /count endpoint; for v1 the row
       // count is good enough as a presence signal.
@@ -168,8 +190,8 @@ const LeaderAlertsView = ({ user, perms }) => {
       STATUS_ORDER.forEach((s, i) => { counts[s] = results[i].length; });
       setStatusCounts(counts);
     });
-    return () => { cancelled = true; };
-  }, [scope, severityFilter, categoryFilter, search, refreshTick]);
+    return () => ac.abort();
+  }, [scope, severityFilter, categoryFilter, search, refreshTick, refreshNonce]);
 
   // Local sort — backend always returns newest-first; we resort client-side
   // for the secondary sort options.

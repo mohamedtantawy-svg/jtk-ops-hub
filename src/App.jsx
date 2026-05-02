@@ -374,7 +374,7 @@ const App=()=>{
       const stored=JSON.parse(s);
       if(!Array.isArray(stored)) return DEFAULT_ACCESS_TYPES;
       const union=(a,b)=>Array.from(new Set([...(a||[]),...(b||[])]));
-      return stored.map(at=>{
+      const enriched=stored.map(at=>{
         const def=DEFAULT_ACCESS_TYPES.find(d=>d.id===at.id);
         if(!def) return at;
         return {
@@ -384,6 +384,14 @@ const App=()=>{
           adminPowers: union(at.adminPowers, def.adminPowers),
         };
       });
+      // Append any new default access types that aren't yet in the stored
+      // list — without this, types added in a later release (e.g.
+      // at_hr_hub_admin, at_leader_alerts_admin) never surface in the
+      // Settings → Access Types editor and Directors can't assign them.
+      // Caught in the Leaders Alerts live audit (M1).
+      const storedIds=new Set(stored.map(at=>at.id));
+      const missing=DEFAULT_ACCESS_TYPES.filter(d=>!storedIds.has(d.id));
+      return [...enriched, ...missing];
     }catch(e){return DEFAULT_ACCESS_TYPES;}
   });
   const [userAccessMap,setUserAccessMap]=useState(()=>{try{const ver=localStorage.getItem('ops_hub_uam_ver');if(ver!==ADMIN_LIST_VERSION){localStorage.removeItem('ops_hub_user_access_map');localStorage.setItem('ops_hub_uam_ver',ADMIN_LIST_VERSION);return{...DEFAULT_USER_ACCESS_MAP};}const s=localStorage.getItem('ops_hub_user_access_map');return s?JSON.parse(s):{...DEFAULT_USER_ACCESS_MAP};}catch(e){return DEFAULT_USER_ACCESS_MAP;}});
@@ -645,6 +653,9 @@ const App=()=>{
   const [hrHubCreate,setHrHubCreate]=useState(null);
   const [leaderAlertCreate,setLeaderAlertCreate]=useState(false);
   const [leaderAlertsBadge,setLeaderAlertsBadge]=useState(0);
+  // Bumped after a successful POST so LeaderAlertsView's fetch effect
+  // re-fires and the new alert appears without a manual reload (audit H1).
+  const [leaderAlertsRefreshNonce,setLeaderAlertsRefreshNonce]=useState(0);
   const [notifs,setNotifs]=useState([]);
   const [activity,setActivity]=useState(INITIAL_ACTIVITY);
   const [projects,setProjects]=useState(INITIAL_PROJECTS);
@@ -1326,11 +1337,11 @@ const App=()=>{
               landing in Stage 2). Backend routes under /api/v1/hr-hub/
               are live and exercised by HrHubView's smoke check. */}
           {view==='hr-hub'        &&perms?.canView('hr-hub')!==false       &&<div className="page-enter"><HrHubView user={effectiveUser} onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}/></div>}
-          {view==='leader-alerts' &&perms?.canView('leader-alerts')!==false&&<div className="page-enter"><LeaderAlertsView user={effectiveUser} perms={perms}/></div>}
+          {view==='leader-alerts' &&perms?.canView('leader-alerts')!==false&&<div className="page-enter"><LeaderAlertsView user={effectiveUser} perms={perms} refreshNonce={leaderAlertsRefreshNonce}/></div>}
       </div>
       {createModal   &&<CreateTaskModal onConfirm={confirmCreate} onClose={()=>setCreateModal(false)} currentUser={effectiveUser}/>}
       {hrHubCreate   &&<CreateHrHubRequestModal initialFlow={hrHubCreate.initialFlow||null} onClose={()=>setHrHubCreate(null)} onCreated={(id,flow)=>{setHrHubCreate(null);setView('hr-hub');addToast?.({kind:'success',message:`Submitted to HR Hub${flow?` (${flow.replace('_',' ')})`:''}.`});}}/>}
-      {leaderAlertCreate&&<CreateLeaderAlertModal onClose={()=>setLeaderAlertCreate(false)} onCreated={(alert)=>{setLeaderAlertCreate(false);setView('leader-alerts');addToast?.({kind:'success',message:`Posted${alert?.title?`: "${alert.title.slice(0,60)}${alert.title.length>60?'…':''}"`:' alert'}.`});}}/>}
+      {leaderAlertCreate&&<CreateLeaderAlertModal onClose={()=>setLeaderAlertCreate(false)} onCreated={(alert)=>{setLeaderAlertCreate(false);setView('leader-alerts');setLeaderAlertsRefreshNonce(n=>n+1);addToast?.({kind:'success',message:`Posted${alert?.title?`: "${alert.title.slice(0,60)}${alert.title.length>60?'…':''}"`:' alert'}.`});}}/>}
       {projectModal  &&<CreateProjectModal onConfirm={confirmProject} onClose={()=>setProjectModal(null)} project={typeof projectModal==='object'?projectModal:null} currentUser={effectiveUser}/>}
       {requestModal  &&<CreateRequestModal onConfirm={confirmRequest} onClose={()=>setRequestModal(false)} currentUser={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks}/>}
       {createEscalModal&&<CreateEscalationModal onConfirm={confirmManualEscal} onClose={()=>setCreateEscalModal(false)} currentUser={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks}/>}

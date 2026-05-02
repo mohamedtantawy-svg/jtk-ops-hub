@@ -302,6 +302,13 @@
  * The `title` attribute on each tab icon retains the label as a tooltip
  * for the icon-only state.
  */
+/* Labels never wrap — adding "Leaders Alerts" + "HR Hub" pushed the
+ * 1456 px audit width over the previous breakpoint and "HR Hub" /
+ * "Leaders Alerts" both broke onto two lines (audit L3). nowrap keeps
+ * each label single-line; the 1280-breakpoint below still hides labels
+ * on narrow monitors. */
+.deel-nav-item .deel-nav-item-label { white-space: nowrap; }
+
 @media (max-width: 1280px) {
   .deel-nav-item .deel-nav-item-label { display: none; }
   .deel-nav-item { padding: 7px 8px; }
