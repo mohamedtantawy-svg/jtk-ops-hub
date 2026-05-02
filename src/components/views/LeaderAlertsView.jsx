@@ -80,7 +80,7 @@ function setAlertIdInUrl(id) {
 
 // ── Main view ──────────────────────────────────────────────────────────────
 
-const LeaderAlertsView = ({ user, perms }) => {
+const LeaderAlertsView = ({ user, perms, refreshNonce = 0 }) => {
   // List state
   const [scope, setScope]           = useState('all');
   const [statusFilter, setStatusF]  = useState(null);     // null = all
@@ -98,14 +98,16 @@ const LeaderAlertsView = ({ user, perms }) => {
   const [openAlertId, setOpenAlertId] = useState(() => readAlertIdFromUrl());
   const [showSettings, setShowSettings] = useState(false);
 
-  // Settings — categories + statuses reference list.
+  // Settings — categories + statuses reference list. Re-fetches on
+  // refreshTick (manual button) and refreshNonce (post-create signal
+  // from App.jsx).
   useEffect(() => {
     let cancelled = false;
     getLeaderAlertsSettings()
       .then(d => { if (!cancelled) setSettings(d?.settings || {}); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [refreshTick]);
+  }, [refreshTick, refreshNonce]);
 
   // Alert list — reload on filter change.
   useEffect(() => {
@@ -133,7 +135,7 @@ const LeaderAlertsView = ({ user, perms }) => {
         setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [scope, statusFilter, severityFilter, categoryFilter, search, refreshTick]);
+  }, [scope, statusFilter, severityFilter, categoryFilter, search, refreshTick, refreshNonce]);
 
   // URL ↔ openAlertId sync (browser back/forward + deep-links).
   useEffect(() => {
@@ -169,7 +171,7 @@ const LeaderAlertsView = ({ user, perms }) => {
       setStatusCounts(counts);
     });
     return () => { cancelled = true; };
-  }, [scope, severityFilter, categoryFilter, search, refreshTick]);
+  }, [scope, severityFilter, categoryFilter, search, refreshTick, refreshNonce]);
 
   // Local sort — backend always returns newest-first; we resort client-side
   // for the secondary sort options.

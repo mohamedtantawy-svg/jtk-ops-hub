@@ -645,6 +645,9 @@ const App=()=>{
   const [hrHubCreate,setHrHubCreate]=useState(null);
   const [leaderAlertCreate,setLeaderAlertCreate]=useState(false);
   const [leaderAlertsBadge,setLeaderAlertsBadge]=useState(0);
+  // Bumped after a successful POST so LeaderAlertsView's fetch effect
+  // re-fires and the new alert appears without a manual reload (audit H1).
+  const [leaderAlertsRefreshNonce,setLeaderAlertsRefreshNonce]=useState(0);
   const [notifs,setNotifs]=useState([]);
   const [activity,setActivity]=useState(INITIAL_ACTIVITY);
   const [projects,setProjects]=useState(INITIAL_PROJECTS);
@@ -1326,11 +1329,11 @@ const App=()=>{
               landing in Stage 2). Backend routes under /api/v1/hr-hub/
               are live and exercised by HrHubView's smoke check. */}
           {view==='hr-hub'        &&perms?.canView('hr-hub')!==false       &&<div className="page-enter"><HrHubView user={effectiveUser} onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}/></div>}
-          {view==='leader-alerts' &&perms?.canView('leader-alerts')!==false&&<div className="page-enter"><LeaderAlertsView user={effectiveUser} perms={perms}/></div>}
+          {view==='leader-alerts' &&perms?.canView('leader-alerts')!==false&&<div className="page-enter"><LeaderAlertsView user={effectiveUser} perms={perms} refreshNonce={leaderAlertsRefreshNonce}/></div>}
       </div>
       {createModal   &&<CreateTaskModal onConfirm={confirmCreate} onClose={()=>setCreateModal(false)} currentUser={effectiveUser}/>}
       {hrHubCreate   &&<CreateHrHubRequestModal initialFlow={hrHubCreate.initialFlow||null} onClose={()=>setHrHubCreate(null)} onCreated={(id,flow)=>{setHrHubCreate(null);setView('hr-hub');addToast?.({kind:'success',message:`Submitted to HR Hub${flow?` (${flow.replace('_',' ')})`:''}.`});}}/>}
-      {leaderAlertCreate&&<CreateLeaderAlertModal onClose={()=>setLeaderAlertCreate(false)} onCreated={(alert)=>{setLeaderAlertCreate(false);setView('leader-alerts');addToast?.({kind:'success',message:`Posted${alert?.title?`: "${alert.title.slice(0,60)}${alert.title.length>60?'…':''}"`:' alert'}.`});}}/>}
+      {leaderAlertCreate&&<CreateLeaderAlertModal onClose={()=>setLeaderAlertCreate(false)} onCreated={(alert)=>{setLeaderAlertCreate(false);setView('leader-alerts');setLeaderAlertsRefreshNonce(n=>n+1);addToast?.({kind:'success',message:`Posted${alert?.title?`: "${alert.title.slice(0,60)}${alert.title.length>60?'…':''}"`:' alert'}.`});}}/>}
       {projectModal  &&<CreateProjectModal onConfirm={confirmProject} onClose={()=>setProjectModal(null)} project={typeof projectModal==='object'?projectModal:null} currentUser={effectiveUser}/>}
       {requestModal  &&<CreateRequestModal onConfirm={confirmRequest} onClose={()=>setRequestModal(false)} currentUser={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks}/>}
       {createEscalModal&&<CreateEscalationModal onConfirm={confirmManualEscal} onClose={()=>setCreateEscalModal(false)} currentUser={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks}/>}
