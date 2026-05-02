@@ -167,6 +167,8 @@ const LeaderAlertsView = ({ user, perms, refreshNonce = 0 }) => {
   // Counts for the 4-up status cards — reflect the CURRENT secondary
   // filters (scope + severity + category + search). Re-fetched as a small
   // single batch when those change.
+  // Counts may be string ("50+") when the server has more pages, otherwise
+  // a number. The render path handles both.
   const [statusCounts, setStatusCounts] = useState({ new: 0, in_progress: 0, on_hold: 0, resolved: 0 });
   useEffect(() => {
     const ac = new AbortController();
@@ -177,17 +179,19 @@ const LeaderAlertsView = ({ user, perms, refreshNonce = 0 }) => {
         severity: severityFilter || undefined,
         category: categoryFilter || undefined,
         search: search.trim() || undefined,
-        limit: 1,
+        limit: 50,
         signal: ac.signal,
-      }).then(r => Array.isArray(r?.alerts) ? r.alerts : [])
-        .catch(() => [])
+      }).then(r => ({ count: Array.isArray(r?.alerts) ? r.alerts.length : 0, hasMore: !!r?.nextCursor }))
+        .catch(() => ({ count: 0, hasMore: false }))
     )).then(results => {
       if (ac.signal.aborted) return;
-      // Approximate count: API returns up to limit, doesn't include total.
-      // For accuracy at scale we'd add a /count endpoint; for v1 the row
-      // count is good enough as a presence signal.
+      // Accurate up to 50; "50+" if the server has more pages. A dedicated
+      // /count endpoint can replace this if traffic scales.
       const counts = {};
-      STATUS_ORDER.forEach((s, i) => { counts[s] = results[i].length; });
+      STATUS_ORDER.forEach((s, i) => {
+        const r = results[i];
+        counts[s] = r.hasMore ? `${r.count}+` : r.count;
+      });
       setStatusCounts(counts);
     });
     return () => ac.abort();
@@ -296,7 +300,14 @@ const LeaderAlertsView = ({ user, perms, refreshNonce = 0 }) => {
           {STATUS_ORDER.map(s => {
             const meta = STATUS_META[s];
             const active = statusFilter === s;
-            const count = statusCounts[s] || 0;
+            const raw = statusCounts[s] ?? 0;
+            // raw is either a number (accurate count) or a "<N>+" string
+            // (server has more pages). Pluralisation reads off the digits.
+            const display = String(raw);
+            const numeric = parseInt(display, 10) || 0;
+            const subline = numeric === 1 && !display.endsWith('+')
+              ? `${display} alert`
+              : `${display} alerts`;
             return (
               <button
                 key={s}
@@ -322,16 +333,14 @@ const LeaderAlertsView = ({ user, perms, refreshNonce = 0 }) => {
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: active ? meta.color : 'var(--text)' }}>{meta.label}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                    {count >= 50 ? `${count}+ alerts` : `${count} alert${count === 1 ? '' : 's'}`}
-                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{subline}</div>
                 </div>
                 <div style={{
                   fontSize: 22, fontWeight: 800,
                   fontVariantNumeric: 'tabular-nums',
                   color: active ? meta.color : 'var(--text-secondary)',
                 }}>
-                  {count >= 50 ? '50+' : count}
+                  {display}
                 </div>
               </button>
             );

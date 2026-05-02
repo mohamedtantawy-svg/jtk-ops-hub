@@ -67,10 +67,15 @@ function formatRelative(iso) {
 }
 
 // All current managers (for the "Missing" panel + ack universe size).
+// MEMBERS objects come from `_buildMembers` in data/members.js which renames
+// `access` → `role`. TEAM_MEMBERS keeps the original `access`. We read both
+// so this works whether the binding has been hydrated (`role`) or is the
+// raw baseline (`access`). Audit caught this post-deploy: missing pool was
+// always 0 because we only checked `m.access` against a `role`-only shape.
 function listAllManagers() {
   const out = [];
   for (const m of MEMBERS) {
-    const access = String(m.access || '').toLowerCase();
+    const access = String(m.access || m.role || '').toLowerCase();
     if (access === 'team_lead' || access === 'regional_manager' || access === 'admin') out.push(m);
   }
   return out;
