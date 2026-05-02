@@ -100,18 +100,21 @@ const LeaderAlertsView = ({ user, perms, refreshNonce = 0 }) => {
 
   // Settings — categories + statuses reference list. Re-fetches on
   // refreshTick (manual button) and refreshNonce (post-create signal
-  // from App.jsx).
+  // from App.jsx). AbortController on cleanup so a stale fetch can't
+  // overwrite a newer one's state (audit H2).
   useEffect(() => {
-    let cancelled = false;
-    getLeaderAlertsSettings()
-      .then(d => { if (!cancelled) setSettings(d?.settings || {}); })
-      .catch(() => {});
-    return () => { cancelled = true; };
+    const ac = new AbortController();
+    getLeaderAlertsSettings({ signal: ac.signal })
+      .then(d => { if (!ac.signal.aborted) setSettings(d?.settings || {}); })
+      .catch(e => { if (e?.name !== 'AbortError') console.warn('[leader-alerts] settings load:', e?.message); });
+    return () => ac.abort();
   }, [refreshTick, refreshNonce]);
 
-  // Alert list — reload on filter change.
+  // Alert list — reload on filter change. AbortController on cleanup
+  // (audit H2) so a stale resolve can't leave loading=true if a new
+  // filter change supersedes the in-flight request mid-flight.
   useEffect(() => {
-    let cancelled = false;
+    const ac = new AbortController();
     setLoading(true);
     setError(null);
     listLeaderAlerts({
@@ -121,20 +124,21 @@ const LeaderAlertsView = ({ user, perms, refreshNonce = 0 }) => {
       category: categoryFilter || undefined,
       search: search.trim() || undefined,
       limit: 50,
+      signal: ac.signal,
     })
       .then(d => {
-        if (cancelled) return;
+        if (ac.signal.aborted) return;
         setAlerts(Array.isArray(d?.alerts) ? d.alerts : []);
         setNextCursor(d?.nextCursor || null);
         setLoading(false);
       })
       .catch(e => {
-        if (cancelled) return;
+        if (ac.signal.aborted || e?.name === 'AbortError') return;
         setError(e?.message || 'Failed to load alerts');
         setAlerts([]);
         setLoading(false);
       });
-    return () => { cancelled = true; };
+    return () => ac.abort();
   }, [scope, statusFilter, severityFilter, categoryFilter, search, refreshTick, refreshNonce]);
 
   // URL ↔ openAlertId sync (browser back/forward + deep-links).
@@ -150,7 +154,7 @@ const LeaderAlertsView = ({ user, perms, refreshNonce = 0 }) => {
   // single batch when those change.
   const [statusCounts, setStatusCounts] = useState({ new: 0, in_progress: 0, on_hold: 0, resolved: 0 });
   useEffect(() => {
-    let cancelled = false;
+    const ac = new AbortController();
     Promise.all(STATUS_ORDER.map(s =>
       listLeaderAlerts({
         scope,
@@ -159,10 +163,11 @@ const LeaderAlertsView = ({ user, perms, refreshNonce = 0 }) => {
         category: categoryFilter || undefined,
         search: search.trim() || undefined,
         limit: 1,
+        signal: ac.signal,
       }).then(r => Array.isArray(r?.alerts) ? r.alerts : [])
         .catch(() => [])
     )).then(results => {
-      if (cancelled) return;
+      if (ac.signal.aborted) return;
       // Approximate count: API returns up to limit, doesn't include total.
       // For accuracy at scale we'd add a /count endpoint; for v1 the row
       // count is good enough as a presence signal.
@@ -170,7 +175,7 @@ const LeaderAlertsView = ({ user, perms, refreshNonce = 0 }) => {
       STATUS_ORDER.forEach((s, i) => { counts[s] = results[i].length; });
       setStatusCounts(counts);
     });
-    return () => { cancelled = true; };
+    return () => ac.abort();
   }, [scope, severityFilter, categoryFilter, search, refreshTick, refreshNonce]);
 
   // Local sort — backend always returns newest-first; we resort client-side

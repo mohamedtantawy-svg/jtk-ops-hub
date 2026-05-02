@@ -6,7 +6,7 @@ import { apiFetch } from './api';
 
 // ── Alerts ────────────────────────────────────────────────────────────────
 
-export async function listLeaderAlerts({ scope = 'all', status, severity, category, impact, search, cursor, limit } = {}) {
+export async function listLeaderAlerts({ scope = 'all', status, severity, category, impact, search, cursor, limit, signal } = {}) {
   const p = new URLSearchParams();
   if (scope) p.set('scope', scope);
   if (status) p.set('status', status);
@@ -17,7 +17,7 @@ export async function listLeaderAlerts({ scope = 'all', status, severity, catego
   if (cursor) p.set('cursor', cursor);
   if (limit) p.set('limit', String(limit));
   const qs = p.toString();
-  return apiFetch(`/leader-alerts/alerts${qs ? `?${qs}` : ''}`);
+  return apiFetch(`/leader-alerts/alerts${qs ? `?${qs}` : ''}`, signal ? { signal } : undefined);
 }
 
 export async function getLeaderAlert(id) {
@@ -116,8 +116,8 @@ export async function getLeaderAlertsUnackedCount() {
 
 // ── Settings ──────────────────────────────────────────────────────────────
 
-export async function getLeaderAlertsSettings() {
-  return apiFetch('/leader-alerts/settings');
+export async function getLeaderAlertsSettings({ signal } = {}) {
+  return apiFetch('/leader-alerts/settings', signal ? { signal } : undefined);
 }
 
 export async function putLeaderAlertsSettings(key, value) {
