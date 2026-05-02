@@ -297,7 +297,13 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
             <HrHubComposer
               onSubmit={async (payload) => {
                 const created = await postHrHubComment(requestId, payload);
+                // Optimistic local append so the author sees their comment
+                // instantly. Then refresh the parent so the Following pill
+                // list and Activity log row count pick up the @-mention
+                // followers + comment_added log entry the server just
+                // wrote — without this they read stale until manual reload.
                 setComments(prev => [...prev, created]);
+                onRefresh?.();
               }}
             />
           </div>

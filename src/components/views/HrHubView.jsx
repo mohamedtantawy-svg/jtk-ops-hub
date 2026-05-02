@@ -435,9 +435,17 @@ function RequestRow({ item, active, onClick }) {
           fontSize: 12, color: '#616161', marginTop: 2,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
-          {item.functionArea ? `${item.functionArea} · ` : ''}
-          {item.requestType || item.reportType || ''}
-          {item.assigneeName ? ` · ${item.assigneeName}` : ''}
+          {(() => {
+            // Only join non-empty parts with `·` so flows that don't have a
+            // request_type / report_type (e.g. Escalation Zero) don't render
+            // a trailing separator.
+            const parts = [
+              item.functionArea,
+              item.requestType || item.reportType,
+              item.assigneeName,
+            ].filter(Boolean);
+            return parts.join(' · ');
+          })()}
         </div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
