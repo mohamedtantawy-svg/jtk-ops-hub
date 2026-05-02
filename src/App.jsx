@@ -100,7 +100,10 @@ import Slack from './components/views/Slack';
 import Alerts from './components/views/Alerts';
 import FeedbackView from './components/views/FeedbackView';
 import HrHubView from './components/views/HrHubView';
+import LeaderAlertsView from './components/views/LeaderAlertsView';
 import CreateHrHubRequestModal from './components/modals/CreateHrHubRequestModal';
+import CreateLeaderAlertModal from './components/modals/CreateLeaderAlertModal';
+import { getLeaderAlertsUnackedCount } from './services/leaderAlertsApi';
 import CreateProjectModal from './components/modals/CreateProjectModal';
 import CreateRequestModal from './components/modals/CreateRequestModal';
 import CreateEscalationModal from './components/modals/CreateEscalationModal';
@@ -158,6 +161,7 @@ const App=()=>{
               isAnnouncementsAdmin: stored.isAnnouncementsAdmin === true,
               isAccessAdmin: stored.isAccessAdmin === true,
               isHrHubAdmin: stored.isHrHubAdmin === true,
+              isLeaderAlertsAdmin: stored.isLeaderAlertsAdmin === true,
             };
           }
         }
@@ -502,6 +506,7 @@ const App=()=>{
                   isAnnouncementsAdmin: serverUser.isAnnouncementsAdmin === true,
                   isAccessAdmin: serverUser.isAccessAdmin === true,
                   isHrHubAdmin: serverUser.isHrHubAdmin === true,
+                  isLeaderAlertsAdmin: serverUser.isLeaderAlertsAdmin === true,
                 }
               : serverUser;
             // Persist the freshest snapshot so the next mount's useState
@@ -638,6 +643,8 @@ const App=()=>{
   // (initialFlow=null) lets the user choose; deep-links from queue rows
   // (Stage 7) will preselect a flow.
   const [hrHubCreate,setHrHubCreate]=useState(null);
+  const [leaderAlertCreate,setLeaderAlertCreate]=useState(false);
+  const [leaderAlertsBadge,setLeaderAlertsBadge]=useState(0);
   const [notifs,setNotifs]=useState([]);
   const [activity,setActivity]=useState(INITIAL_ACTIVITY);
   const [projects,setProjects]=useState(INITIAL_PROJECTS);
@@ -873,6 +880,28 @@ const App=()=>{
   // render). The hook reads `toastRef.current` on every error path, so keeping
   // this in sync means latest-addToast is always used.
   useEffect(()=>{ toastRef.current = addToast; },[addToast]);
+
+  // ── Leaders Alerts: sidebar unacked badge ──────────────────────────────
+  // Polls the unacked-count endpoint on the same 30 s cadence as the
+  // notification bell. Only enabled for managerial users (the tab is
+  // hidden for agents anyway). Quiet failure mode — a 401/500 just keeps
+  // the previous count; the badge isn't a critical signal.
+  useEffect(() => {
+    if (!user || !perms?.canView?.('leader-alerts')) {
+      setLeaderAlertsBadge(0);
+      return;
+    }
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const d = await getLeaderAlertsUnackedCount();
+        if (!cancelled && typeof d?.count === 'number') setLeaderAlertsBadge(d.count);
+      } catch { /* keep prior count */ }
+    };
+    tick();
+    const id = setInterval(tick, 30_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [user, perms]);
 
   // ── Meeting alerts ──────────────────────────────────────────────────────
   // Runs globally (not just on the Calendar tab) so the 5-minute reminder
@@ -1169,14 +1198,20 @@ const App=()=>{
   useEffect(()=>{setSubFilter(null);},[view]);
 
   // ── View permission guard — redirect to first allowed view ──────────────
+  // Wait for the user to hydrate before evaluating canView. Otherwise the
+  // role-fallback inside resolveUserPermissions defaults to `at_agent`,
+  // which redirects deep-link URLs (`?view=leader-alerts`) to briefing
+  // before the actual access type is known. Bug surfaced 2026-05-02 when
+  // managerial-only views landed; the latent issue dates back to the
+  // first version of this guard.
   useEffect(()=>{
-    if(!perms)return;
+    if(!perms||!user)return;
     if(view&&!perms.canView(view)){
       // Find first allowed view
       const fallback=['briefing','my-queue','calendar','projects','escalations','knowledge-hub','analytics','announcements','slack','team','hr-hub','settings'].find(v=>perms.canView(v));
       setView(fallback||'briefing');
     }
-  },[view,perms]);
+  },[view,perms,user]);
 
   // ── Live feed + occasional toast ──────────────────────────────────────────
   useEffect(()=>{
@@ -1264,6 +1299,8 @@ const App=()=>{
         onCreateRequest={()=>setRequestModal(true)}
         onCreateFeedback={()=>{setView('feedback');setFeedbackCompose(true);}}
         onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}
+        onCreateLeaderAlert={()=>setLeaderAlertCreate(true)}
+        leaderAlertsBadge={leaderAlertsBadge}
         setSelTask={()=>{}} tasks={tasks}
       />
       <div style={{height:(impersonating?104:68)+(versionHasUpdate?44:0),flexShrink:0}}/>
@@ -1289,9 +1326,11 @@ const App=()=>{
               landing in Stage 2). Backend routes under /api/v1/hr-hub/
               are live and exercised by HrHubView's smoke check. */}
           {view==='hr-hub'        &&perms?.canView('hr-hub')!==false       &&<div className="page-enter"><HrHubView user={effectiveUser} onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}/></div>}
+          {view==='leader-alerts' &&perms?.canView('leader-alerts')!==false&&<div className="page-enter"><LeaderAlertsView user={effectiveUser} perms={perms}/></div>}
       </div>
       {createModal   &&<CreateTaskModal onConfirm={confirmCreate} onClose={()=>setCreateModal(false)} currentUser={effectiveUser}/>}
       {hrHubCreate   &&<CreateHrHubRequestModal initialFlow={hrHubCreate.initialFlow||null} onClose={()=>setHrHubCreate(null)} onCreated={(id,flow)=>{setHrHubCreate(null);setView('hr-hub');addToast?.({kind:'success',message:`Submitted to HR Hub${flow?` (${flow.replace('_',' ')})`:''}.`});}}/>}
+      {leaderAlertCreate&&<CreateLeaderAlertModal onClose={()=>setLeaderAlertCreate(false)} onCreated={(alert)=>{setLeaderAlertCreate(false);setView('leader-alerts');addToast?.({kind:'success',message:`Posted${alert?.title?`: "${alert.title.slice(0,60)}${alert.title.length>60?'…':''}"`:' alert'}.`});}}/>}
       {projectModal  &&<CreateProjectModal onConfirm={confirmProject} onClose={()=>setProjectModal(null)} project={typeof projectModal==='object'?projectModal:null} currentUser={effectiveUser}/>}
       {requestModal  &&<CreateRequestModal onConfirm={confirmRequest} onClose={()=>setRequestModal(false)} currentUser={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks}/>}
       {createEscalModal&&<CreateEscalationModal onConfirm={confirmManualEscal} onClose={()=>setCreateEscalModal(false)} currentUser={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks}/>}

@@ -30,6 +30,15 @@ export const usePermissions = (user, accessTypes, userAccessMap) => {
       || hasAdminPower(accessType, 'can_manage_hr_hub')
       || hasAdminPower(accessType, 'can_manage_settings');
 
+    // Per-user Leaders Alerts admin grant — same shape as HR Hub Admin.
+    // Read from team_member_overrides.is_leader_alerts_admin by the
+    // server, surfaced as `isLeaderAlertsAdmin`. Full admins always
+    // qualify; the per-user flag delegates Settings + edit-anyone's-alert
+    // power to specific TLs / agents without escalating their main tier.
+    const canManageLeaderAlerts = user?.isLeaderAlertsAdmin === true
+      || hasAdminPower(accessType, 'can_manage_leader_alerts')
+      || hasAdminPower(accessType, 'can_manage_settings');
+
     return {
       raw: accessType,
       canView: (viewId) => canAccessView(accessType, viewId),
@@ -51,6 +60,10 @@ export const usePermissions = (user, accessTypes, userAccessMap) => {
       // HR Hub admin — schema/dropdowns/auto-assign editing in the HR Hub
       // Settings panel; bypass scope on lists; edit any request/comment.
       canManageHrHub,
+      // Leaders Alerts admin — categories/statuses/notification-policy
+      // editing in the Settings panel; edit/soft-delete any alert or
+      // comment regardless of authorship.
+      canManageLeaderAlerts,
       accessTypeName: accessType?.name || 'Agent',
       accessTypeId: accessType?.id || 'at_agent',
       scopeTasks: (tasks, allMembers) => scopeTasks(tasks, user, accessType, allMembers),

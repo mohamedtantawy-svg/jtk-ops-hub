@@ -27,8 +27,16 @@ export const ALL_VIEWS = [
   'team',
   'feedback',
   'hr-hub',
+  'leader-alerts',
   'settings',
 ];
+
+// Views that require managerial access regardless of base tier. Agents and
+// stackable per-feature-admin grants (HR Hub Admin) don't see these unless
+// their base type is at least Team Lead. Used to derive `VIEWS_AGENT` and
+// to keep the at_*_admin types from accidentally unlocking managerial
+// surfaces. Update whenever a new managerial-only tab lands.
+const MANAGERIAL_ONLY_VIEWS = new Set(['leader-alerts']);
 
 export const ALL_ACTIONS = [
   // Task actions
@@ -68,6 +76,11 @@ export const ALL_ADMIN_POWERS = [
   // scope on list views. Bundled into the `at_hr_hub_admin` default
   // access type and stackable on top of any other access type.
   'can_manage_hr_hub',
+  // Leaders Alerts admin power: edit categories, statuses, notification
+  // policy from the Settings panel; edit/soft-delete any alert or
+  // comment regardless of authorship. Bundled into `at_leader_alerts_admin`
+  // and stackable on top of any other access type.
+  'can_manage_leader_alerts',
 ];
 
 export const DATA_SCOPES = [
@@ -97,6 +110,7 @@ export const VIEW_LABELS = {
   'team':          'Team',
   'feedback':      'Feedback',
   'hr-hub':        'HR Hub',
+  'leader-alerts': 'Leaders Alerts',
   'settings':      'Settings',
 };
 
@@ -126,6 +140,7 @@ export const ADMIN_POWER_LABELS = {
   'can_manage_users':          'Manage Users',
   'can_manage_org':            'Manage Org Structure',
   'can_manage_hr_hub':         'Manage HR Hub',
+  'can_manage_leader_alerts':  'Manage Leaders Alerts',
 };
 
 export const DATA_SCOPE_LABELS = {
@@ -140,6 +155,11 @@ export const DATA_SCOPE_LABELS = {
 // ---------------------------------------------------------------------------
 const VIEWS_ALL = [...ALL_VIEWS];
 const VIEWS_NO_SETTINGS = ALL_VIEWS.filter(v => v !== 'settings');
+// Agent baseline + per-feature admin grants strip managerial-only tabs so
+// a Director-granted HR Hub Admin who's an agent doesn't accidentally see
+// Leaders Alerts (or future managerial surfaces). Promotion to TL or
+// above restores the full no-settings list.
+const VIEWS_NO_SETTINGS_NO_MANAGERIAL = VIEWS_NO_SETTINGS.filter(v => !MANAGERIAL_ONLY_VIEWS.has(v));
 
 // ---------------------------------------------------------------------------
 // Default access types — these define the 4-tier permission system
@@ -179,8 +199,8 @@ export const DEFAULT_ACCESS_TYPES = [
   {
     id: 'at_agent',
     name: 'Agent',
-    description: 'All views except settings. Sees own work only.',
-    views: VIEWS_NO_SETTINGS,
+    description: 'All non-managerial views except settings. Sees own work only.',
+    views: VIEWS_NO_SETTINGS_NO_MANAGERIAL,
     actions: [...ALL_ACTIONS],
     adminPowers: [],
     dataScope: 'own_tasks_only',
@@ -197,9 +217,25 @@ export const DEFAULT_ACCESS_TYPES = [
     id: 'at_hr_hub_admin',
     name: 'HR Hub Admin',
     description: 'Full edit access to the HR Hub: statuses, fields, dropdowns, auto-assign rules, and any request or comment. Does not grant other settings access.',
-    views: [...VIEWS_NO_SETTINGS],
+    views: [...VIEWS_NO_SETTINGS_NO_MANAGERIAL],
     actions: [...ALL_ACTIONS],
     adminPowers: ['can_manage_hr_hub'],
+    dataScope: 'own_tasks_only',
+    isDefault: true,
+  },
+  {
+    // Leaders Alerts Admin — assignable from the Team tab. Grants full
+    // edit rights inside Leaders Alerts (categories, statuses, notification
+    // policy; edit/soft-delete any alert or comment regardless of
+    // authorship) AND visibility on the Leaders Alerts tab itself (so the
+    // grant is meaningful for non-managers). Stackable on top of an agent
+    // / TL / RM access type.
+    id: 'at_leader_alerts_admin',
+    name: 'Alerts Admin',
+    description: 'Full edit access to Leaders Alerts: categories, statuses, notification policy, and any alert or comment. Includes visibility on the Leaders Alerts tab.',
+    views: [...VIEWS_NO_SETTINGS],
+    actions: [...ALL_ACTIONS],
+    adminPowers: ['can_manage_leader_alerts'],
     dataScope: 'own_tasks_only',
     isDefault: true,
   },
