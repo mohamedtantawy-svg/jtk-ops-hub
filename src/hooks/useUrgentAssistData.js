@@ -198,30 +198,23 @@ export function useUrgentAssistData({
       }
       return matched;
     }
+    // Per the 2026-05-03 spec: "my requests = any request where I'm
+    // assigned" — workbench-sourced rows now match on `assignee.email`
+    // ONLY (no creator-OR fallback). Same rule for Team (assignee in
+    // the manager's team subtree) and the role-collapsed agent path.
     if (scope === 'team') {
       if (!isManager) {
         // Agents asking for team collapse to mine — same rule the API uses.
-        return matched.filter(t => {
-          const ae = (t.assignee?.email || '').toLowerCase();
-          const ce = (t.creator?.email || '').toLowerCase();
-          return (ae && ae === lcUser) || (ce && ce === lcUser);
-        });
+        return matched.filter(t => (t.assignee?.email || '').toLowerCase() === lcUser);
       }
       const team = teamEmails || new Set();
       return matched.filter(t => {
         const ae = (t.assignee?.email || '').toLowerCase();
-        const ce = (t.creator?.email || '').toLowerCase();
-        if (ae && (ae === lcUser || team.has(ae))) return true;
-        if (ce && (ce === lcUser || team.has(ce))) return true;
-        return false;
+        return ae && (ae === lcUser || team.has(ae));
       });
     }
-    // mine
-    return matched.filter(t => {
-      const ae = (t.assignee?.email || '').toLowerCase();
-      const ce = (t.creator?.email || '').toLowerCase();
-      return (ae && ae === lcUser) || (ce && ce === lcUser);
-    });
+    // mine — assignee match only, per spec.
+    return matched.filter(t => (t.assignee?.email || '').toLowerCase() === lcUser);
   }, [workbenchData.tasks, scope, lcUser, isManager, isAdmin, teamEmails, visibleEmails]);
 
   const items = useMemo(() => {
