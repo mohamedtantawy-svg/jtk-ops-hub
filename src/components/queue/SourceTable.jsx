@@ -200,6 +200,7 @@ export default function SourceTable({
   hideContract = false,      // hide the "Contract" column (redlines don't always have one)
   viewerEmail = '',          // signed-in user's email — splits the table into Mine vs Others
   onHide,                    // (row) => void — called when the row's Hide button is clicked
+  onEscalate,                // (row) => void — called when the row's Escalate button is clicked
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   // Default sort = SLA tier oldest-first across every panel — the per-PR-2
@@ -383,7 +384,7 @@ export default function SourceTable({
     + 1 // Status
     + 1 // Task
     + (hideContract ? 0 : 1)
-    + (onHide ? 1 : 0); // Actions column when the parent provides a hide handler
+    + ((onHide || onEscalate) ? 1 : 0); // Actions column when the parent provides any row action
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#fafaf9', overflow: 'hidden' }}>
@@ -475,7 +476,7 @@ export default function SourceTable({
                 <SortTh col="status"    label="Status"     sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 115 }} />
                 <th style={{ ...thStyle, width: 55 }}>Task</th>
                 {!hideContract && <th style={{ ...thStyle, width: 55 }}>Contract</th>}
-                {onHide && <th style={{ ...thStyle, width: 70 }}>Actions</th>}
+                {(onHide || onEscalate) && <th style={{ ...thStyle, width: 160 }}>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -526,6 +527,7 @@ export default function SourceTable({
                     hideUpdated={hideUpdated}
                     hideContract={hideContract}
                     onHide={onHide ? () => onHide(row) : null}
+                    onEscalate={onEscalate ? () => onEscalate(row) : null}
                   />
                 );
               })}
@@ -543,7 +545,7 @@ export default function SourceTable({
 }
 
 // ── Row component ──
-const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, dateField = 'startDate', showClient = false, showType = false, hideUpdated = false, hideContract = false, onHide = null }) {
+const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, dateField = 'startDate', showClient = false, showType = false, hideUpdated = false, hideContract = false, onHide = null, onEscalate = null }) {
   const [hov, setHov] = useState(false);
   const sev = row.status?.severity || 'info';
   const isUrgent = sev === 'critical';
@@ -787,28 +789,52 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
         </td>
       )}
 
-      {/* Actions — Hide button. Cell only renders when the parent passed
-          a handler so the column is opt-in per panel. */}
-      {onHide && (
+      {/* Actions — Escalate + Hide buttons. Cell only renders when the
+          parent passed at least one handler so the column is opt-in. */}
+      {(onHide || onEscalate) && (
         <td style={tdStyle}>
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); onHide(); }}
-            aria-label={`Hide task "${row.subject || row.id}"`}
-            title="Request to hide this task"
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-              padding: '3px 8px', borderRadius: 6,
-              background: hov ? '#fef2f2' : '#f5f4f2',
-              color: hov ? '#d42d35' : '#9e9e9e',
-              border: hov ? '1px solid #fca5a5' : '1px solid transparent',
-              fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
-              cursor: 'pointer', fontFamily: 'inherit',
-            }}
-          >
-            <i className="bi-eye-slash" style={{ fontSize: 9 }} />
-            Hide
-          </button>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            {onEscalate && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onEscalate(); }}
+                aria-label={`Escalate "${row.subject || row.id}" to HR Hub`}
+                title="Escalate to HR Hub"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '3px 8px', borderRadius: 6,
+                  background: hov ? '#f5f3ff' : '#f5f4f2',
+                  color: hov ? '#7c3aed' : '#9e9e9e',
+                  border: hov ? '1px solid #d4c4f0' : '1px solid transparent',
+                  fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
+                  cursor: 'pointer', fontFamily: 'inherit',
+                }}
+              >
+                <i className="bi-arrow-up-right-circle" style={{ fontSize: 9 }} />
+                Escalate
+              </button>
+            )}
+            {onHide && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onHide(); }}
+                aria-label={`Hide task "${row.subject || row.id}"`}
+                title="Request to hide this task"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '3px 8px', borderRadius: 6,
+                  background: hov ? '#fef2f2' : '#f5f4f2',
+                  color: hov ? '#d42d35' : '#9e9e9e',
+                  border: hov ? '1px solid #fca5a5' : '1px solid transparent',
+                  fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
+                  cursor: 'pointer', fontFamily: 'inherit',
+                }}
+              >
+                <i className="bi-eye-slash" style={{ fontSize: 9 }} />
+                Hide
+              </button>
+            )}
+          </div>
         </td>
       )}
     </tr>

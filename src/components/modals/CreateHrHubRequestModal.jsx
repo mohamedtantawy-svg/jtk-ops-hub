@@ -422,11 +422,51 @@ function AttachmentField({ attachments, setAttachments, error, setError }) {
 }
 
 // ── Main modal component ────────────────────────────────────────────────────
-export default function CreateHrHubRequestModal({ initialFlow = null, onClose, onCreated }) {
+/**
+ * @param {Object}    props
+ * @param {?string}   props.initialFlow  — preselected flow id; null → user picks
+ * @param {?Object}   props.prefill      — values seeded into the form on open.
+ *   Shape:
+ *     {
+ *       links?: string[],         // injected into values.links so url_list
+ *                                 // fields render with the task URL pre-filled
+ *       title?: string,           // pre-fills values.title
+ *       summary?: string,         // pre-fills values.summary
+ *       assigneeEmail?: string,   // routes the new request to a specific
+ *                                 // person at create time (e.g. requester's
+ *                                 // direct manager when escalating from queue)
+ *       assigneeName?: string,    // optional display name for the assignee
+ *       banner?: { title: string, subtitle?: string, color?: string, bg?: string, icon?: string }
+ *                                 // inline banner that explains why the
+ *                                 // modal was pre-populated (Queue → HR Hub
+ *                                 // escalation context)
+ *     }
+ *   Used by the Queue → HR Hub Escalate flow to seed the new request with the
+ *   task link, the requester's manager, and an "Escalating from queue" banner.
+ */
+export default function CreateHrHubRequestModal({ initialFlow = null, prefill = null, onClose, onCreated }) {
   const [flow, setFlow] = useState(initialFlow);
   const [settings, setSettings] = useState(null);
   const [loadingSettings, setLoadingSettings] = useState(false);
-  const [values, setValues] = useState({});
+  // Seed `values` from `prefill` on first render so the FE inputs already
+  // carry the task link / suggested title before settings load. We only
+  // populate keys the prefill sets so a downstream field with the same id
+  // still wins from its `default` if the prefill doesn't override it.
+  const [values, setValues] = useState(() => {
+    if (!prefill) return {};
+    const out = {};
+    if (Array.isArray(prefill.links) && prefill.links.length) out.links = [...prefill.links];
+    if (prefill.title) out.title = prefill.title;
+    if (prefill.summary) out.summary = prefill.summary;
+    return out;
+  });
+  // Lock the assignee for the lifetime of the modal — the spec for the
+  // Queue → HR Hub escalation says "default to the team member's manager",
+  // so we hold it here and surface it in the payload at submit time. Not a
+  // form field today (auto_manager is read-only); could become editable in
+  // a follow-up if the team needs to retarget.
+  const [assigneeEmail] = useState(prefill?.assigneeEmail || null);
+  const [assigneeName] = useState(prefill?.assigneeName || null);
   const [attachments, setAttachments] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
@@ -485,6 +525,11 @@ export default function CreateHrHubRequestModal({ initialFlow = null, onClose, o
         priority: values.priority || 'medium',
         links: Array.isArray(values.links) ? values.links : [],
         attachments: attachments.map(a => ({ kind: a.kind, dataUri: a.dataUri, name: a.name })),
+        // Optional create-time assignee — populated by the Queue→HR Hub
+        // escalation flow which routes to the requester's manager. Backend
+        // ignores when null.
+        assigneeEmail: assigneeEmail || null,
+        assigneeName: assigneeName || null,
       };
       const res = await createHrHubRequest(payload);
       onCreated?.(res?.id || null, flow);
@@ -553,6 +598,33 @@ export default function CreateHrHubRequestModal({ initialFlow = null, onClose, o
 
         {/* Body */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+          {/* Prefill banner — surfaces the queue task we're escalating
+              from so the user knows the link/title/manager are already
+              wired up. Renders on both the picker and the form. */}
+          {prefill?.banner && (
+            <div style={{
+              display: 'flex', alignItems: 'flex-start', gap: 10,
+              padding: '10px 12px', borderRadius: 10, marginBottom: 16,
+              background: prefill.banner.bg || '#eff6ff',
+              border: `1px solid ${prefill.banner.color || '#1d4ed8'}30`,
+            }}>
+              <i className={prefill.banner.icon || 'bi-arrow-up-right-circle-fill'} style={{ fontSize: 14, color: prefill.banner.color || '#1d4ed8', marginTop: 2 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: prefill.banner.color || '#1d4ed8' }}>{prefill.banner.title}</div>
+                {prefill.banner.subtitle && (
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {prefill.banner.subtitle}
+                  </div>
+                )}
+                {assigneeName && (
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>
+                    <i className="bi-person-fill" style={{ fontSize: 10, marginRight: 4 }} />
+                    Assignee: <strong style={{ color: 'var(--text)' }}>{assigneeName}</strong>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           {!flow && (
             <div style={{
               display: 'grid',

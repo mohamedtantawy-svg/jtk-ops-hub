@@ -277,6 +277,19 @@ export async function POST(req) {
     }
   }
 
+  // Optional create-time assignee — used by the Queue → HR Hub escalation
+  // flow which auto-routes to the requester's direct manager. We resolve
+  // the display name from the roster so the FE doesn't need to ship one.
+  let assigneeEmail = null;
+  let assigneeName = null;
+  if (body.assigneeEmail) {
+    const lc = clean(String(body.assigneeEmail), 255)?.toLowerCase() || null;
+    if (lc) {
+      assigneeEmail = lc;
+      assigneeName = clean(body.assigneeName, 255) || memberByEmail(lc)?.name || null;
+    }
+  }
+
   const insert = await query(
     `INSERT INTO hr_hub_request
        (flow, priority,
@@ -284,6 +297,7 @@ export async function POST(req) {
         title, summary, ideal_solution,
         links, attachments,
         created_by_email, created_by_name,
+        assignee_email, assignee_name,
         team_lead_email, cc_email,
         task_source, task_id, task_url, task_subject)
      VALUES ($1, $2,
@@ -292,7 +306,8 @@ export async function POST(req) {
              $9::jsonb, $10::jsonb,
              $11, $12,
              $13, $14,
-             $15, $16, $17, $18)
+             $15, $16,
+             $17, $18, $19, $20)
      RETURNING id, status, created_at`,
     [
       flow, priority,
@@ -300,6 +315,7 @@ export async function POST(req) {
       clean(body.title, 300), summary, clean(body.idealSolution, 20000),
       JSON.stringify(links), JSON.stringify(attachments),
       callerEmail, callerName,
+      assigneeEmail, assigneeName,
       teamLeadEmail || null, ccEmail || null,
       taskSource, taskId, taskUrl, taskSubject,
     ],
@@ -307,10 +323,12 @@ export async function POST(req) {
 
   const newId = insert.rows[0].id;
 
-  // Auto-followers: creator + auto-cc (HR Reporting). Both are best-effort
-  // and idempotent — failure here doesn't fail the request creation.
+  // Auto-followers: creator + auto-cc (HR Reporting) + create-time
+  // assignee (Queue→HR Hub escalation). All idempotent; failures here
+  // don't fail the request creation itself.
   await addFollower(newId, callerEmail, 'creator');
   if (ccEmail) await addFollower(newId, ccEmail, 'tagged');
+  if (assigneeEmail) await addFollower(newId, assigneeEmail, 'assignee');
 
   await writeLog(
     newId,
