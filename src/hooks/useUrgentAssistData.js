@@ -184,18 +184,13 @@ export function useUrgentAssistData({
     const tasks = Array.isArray(workbenchData.tasks) ? workbenchData.tasks : [];
     const matched = tasks.filter(t => isUrgentAssistTaskType(t?.taskType) || isUrgentAssistTaskType(t?.sourceType));
     if (scope === 'all') {
-      if (isAdmin) return matched;
-      // Non-admin "all" — narrow to their visible chain so we don't surface
-      // tickets they have no operational relationship with.
-      if (visibleEmails) {
-        return matched.filter(t => {
-          const ae = (t.assignee?.email || '').toLowerCase();
-          if (ae && visibleEmails.has(ae)) return true;
-          const ce = (t.creator?.email || '').toLowerCase();
-          if (ce && visibleEmails.has(ce)) return true;
-          return false;
-        });
-      }
+      // 2026-05-04 spec: "All Requests" is literal — every urgent-assist
+      // row across the org. Returning `matched` for every role matches
+      // the user's intent and aligns with the manual rows API which
+      // already returns everything for `all` (no predicate). Earlier
+      // implementation narrowed non-admins by visibleEmails (audit F7);
+      // that drift caused RM/TL "All" totals to differ from admin's,
+      // contradicting the label.
       return matched;
     }
     // Per the 2026-05-03 spec: "my requests = any request where I'm
