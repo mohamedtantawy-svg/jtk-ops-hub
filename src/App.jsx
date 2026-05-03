@@ -102,6 +102,7 @@ import Alerts from './components/views/Alerts';
 import FeedbackView from './components/views/FeedbackView';
 import HrHubView from './components/views/HrHubView';
 import LeaderAlertsView from './components/views/LeaderAlertsView';
+import LeadersHubView from './components/views/LeadersHubView';
 import UrgentAssistView from './components/views/UrgentAssistView';
 import CreateHrHubRequestModal from './components/modals/CreateHrHubRequestModal';
 import CreateLeaderAlertModal from './components/modals/CreateLeaderAlertModal';
@@ -1231,7 +1232,7 @@ const App=()=>{
     if(!perms||!user)return;
     if(view&&!perms.canView(view)){
       // Find first allowed view
-      const fallback=['briefing','my-queue','calendar','projects','escalations','knowledge-hub','analytics','announcements','slack','team','hr-hub','urgent-assist','settings'].find(v=>perms.canView(v));
+      const fallback=['briefing','my-queue','hr-hub','leader-alerts','urgent-assist','feedback','announcements','slack','settings'].find(v=>perms.canView(v));
       setView(fallback||'briefing');
     }
   },[view,perms,user]);
@@ -1314,12 +1315,8 @@ const App=()=>{
       <DeelTopNav
         view={view} setView={setView} user={effectiveUser} setUser={setUser}
         onSearch={()=>setShowSearch(true)} notifs={mergedNotifs} markAllRead={markAllRead} onNotifClick={handleNotifClick}
-        escalCount={pendingEscal||0} onLogout={handleLogout}
-        onCreateTask={()=>setCreateModal(true)}
-        onCreateEscalation={()=>setCreateEscalModal(true)}
-        onCreateProject={()=>setProjectModal('create')}
+        onLogout={handleLogout}
         onCreateAnnouncement={()=>{setView('announcements');setAnnounceCompose(true);}}
-        onCreateRequest={()=>setRequestModal(true)}
         onCreateFeedback={()=>{setView('feedback');setFeedbackCompose(true);}}
         onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}
         onCreateLeaderAlert={()=>setLeaderAlertCreate(true)}
@@ -1330,28 +1327,24 @@ const App=()=>{
       <div style={{height:(impersonating?104:68)+(versionHasUpdate?44:0),flexShrink:0}}/>
       <DeelSubNav view={view} subFilter={subFilter} setSubFilter={setSubFilter} tasks={tasks} user={effectiveUser}/>
       <div className="deel-content" data-region="main-content" aria-label="Main content" style={{display:'flex',overflowX:'hidden',overflowY:'auto',position:'relative',flex:1}}>
-          {view==='briefing'      &&perms?.canView('briefing')!==false     &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={()=>{}} comms={comms} escalations={scopedEscalations} setSubFilter={setSubFilter} requests={requests} projects={projects} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall}/></div>}
+          {view==='briefing'      &&perms?.canView('briefing')!==false     &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={()=>{}} comms={comms} escalations={[]} setSubFilter={setSubFilter} requests={[]} projects={[]} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall}/></div>}
           {view==='my-queue'      &&perms?.canView('my-queue')!==false     &&<div className="page-enter"><Queue user={effectiveUser} tasks={tasks} subFilter={subFilter}/></div>}
-          {view==='team'          &&perms?.canView('team')!==false         &&<div className="page-enter"><Team user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setTask={()=>{}} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
-          {view==='analytics'     &&isOwner&&perms?.canView('analytics')!==false    &&<div className="page-enter"><Analytics tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} currentUser={effectiveUser} subFilter={subFilter} escalations={scopedEscalations}/></div>}
-          {view==='escalations'   &&isOwner&&perms?.canView('escalations')!==false  &&<div className="page-enter"><EscalationsView escalations={scopedEscalations} setEscalations={setEscalations} currentUser={effectiveUser} onNewEscalation={()=>setCreateEscalModal(true)} subFilter={subFilter} setSubFilter={setSubFilter}/></div>}
           {view==='announcements' &&perms?.canView('announcements')!==false&&<div className="page-enter"><AnnouncementsView user={effectiveUser} serverUserId={apiServerUserId} serverUserEmail={apiServerUserEmail} comms={comms} setComms={setComms} addToast={addToast} tasks={tasks} apiAcknowledge={apiAcknowledge} apiCreate={apiCreate} apiSend={apiSend} apiUpdate={apiUpdate} apiArchive={apiArchive} apiRemove={apiRemove} apiTogglePin={apiTogglePin} openCompose={announceCompose} onComposeOpened={()=>setAnnounceCompose(false)} apiUnarchive={apiUnarchive} apiComments={apiComments} apiSetComments={apiSetComments} apiLoadComments={apiLoadComments} apiAddComment={apiAddCommentFn} apiDeleteComment={apiDeleteCommentFn} apiLinks={apiLinks} apiLoadLinks={apiLoadLinks} apiLinkAnnouncement={apiLinkAnnouncementFn} apiUnlinkAnnouncement={apiUnlinkAnnouncementFn} apiReact={apiReactFn}/></div>}
           {view==='approval-queue' &&<div className="page-enter"><ApprovalQueueView user={effectiveUser} addToast={addToast}/></div>}
-          {view==='calendar'      &&isOwner&&perms?.canView('calendar')!==false     &&<div className="page-enter"><CalendarView user={effectiveUser} addToast={addToast} setView={setView}/></div>}
-          {view==='knowledge-hub' &&isOwner&&perms?.canView('knowledge-hub')!==false&&<div className="page-enter"><KnowledgeHub subFilter={subFilter} user={effectiveUser}/></div>}
-          {/* hr-reports view retired 2026-05-02 — reach the hr_reporting flow via the HR Hub tab. */}
           {view==='settings'      &&perms?.canView('settings')!==false     &&<div className="page-enter"><SettingsView settings={settings} setSettings={setSettings} user={user} addToast={addToast} tasks={tasks} setTasks={setTasks} subFilter={subFilter} accessTypes={accessTypes} setAccessTypes={setAccessTypes} userAccessMap={userAccessMap} setUserAccessMap={setUserAccessMap} perms={perms}/></div>}
-          {view==='projects'      &&isOwner&&perms?.canView('projects')!==false     &&<div className="page-enter"><ProjectsView projects={projects} setProjects={setProjects} user={user} onNewProject={()=>setProjectModal('create')} onEditProject={(p)=>setProjectModal(p)}/></div>}
           {view==='slack'         &&perms?.canView('slack')!==false        &&<div className="page-enter"><Slack tasks={tasks.filter(t=>t.source==='slack')} setTasks={setTasks} onEscalMgr={()=>{}} addToast={addToast} user={effectiveUser}/></div>}
           {view==='alerts'        &&perms?.canView('alerts')!==false       &&<div className="page-enter"><Alerts tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setTasks={setTasks}/></div>}
           {view==='feedback'      &&perms?.canView('feedback')!==false     &&<div className="page-enter"><FeedbackView user={effectiveUser} addToast={addToast} openCompose={feedbackCompose} onComposeOpened={()=>setFeedbackCompose(false)}/></div>}
-          {/* HR Hub — Stage 1 stub. No visible nav entry yet; reachable
-              by setting view='hr-hub' (e.g. via a future + button popup
-              landing in Stage 2). Backend routes under /api/v1/hr-hub/
-              are live and exercised by HrHubView's smoke check. */}
           {view==='hr-hub'        &&perms?.canView('hr-hub')!==false       &&<div className="page-enter"><HrHubView user={effectiveUser} onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}/></div>}
           {view==='urgent-assist' &&perms?.canView('urgent-assist')!==false&&<div className="page-enter" key={urgentAssistRefreshNonce}><UrgentAssistView user={effectiveUser} onCreate={()=>setUrgentAssistCreate(true)}/></div>}
-          {view==='leader-alerts' &&perms?.canView('leader-alerts')!==false&&<div className="page-enter"><LeaderAlertsView user={effectiveUser} perms={perms} refreshNonce={leaderAlertsRefreshNonce}/></div>}
+          {/* Leaders Hub — wraps the alerts view + the team admin surface
+              behind a single sub-toggle. Default sub-tab is alerts. */}
+          {view==='leader-alerts' &&perms?.canView('leader-alerts')!==false&&<div className="page-enter"><LeadersHubView user={effectiveUser} perms={perms} refreshNonce={leaderAlertsRefreshNonce} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
+          {/* Legacy direct route — keeps deep-links to ?view=team working
+              by sending the user to Leaders Hub (which contains the Team
+              sub-view). Avoids 404s on bookmarks/notifications from the
+              pre-2026-05-03 nav. */}
+          {view==='team'          &&perms?.canView('team')!==false         &&<div className="page-enter"><LeadersHubView user={effectiveUser} perms={perms} refreshNonce={leaderAlertsRefreshNonce} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
       </div>
       {createModal   &&<CreateTaskModal onConfirm={confirmCreate} onClose={()=>setCreateModal(false)} currentUser={effectiveUser}/>}
       {hrHubCreate   &&<CreateHrHubRequestModal initialFlow={hrHubCreate.initialFlow||null} onClose={()=>setHrHubCreate(null)} onCreated={(id,flow)=>{setHrHubCreate(null);setView('hr-hub');addToast?.({kind:'success',message:`Submitted to HR Hub${flow?` (${flow.replace('_',' ')})`:''}.`});}}/>}

@@ -13,20 +13,22 @@
 
 export const ALL_VIEWS = [
   'briefing',
+  // 'my-queue' is the route id; users see "Workspace" in the nav.
   'my-queue',
-  'calendar',
-  'projects',
-  'escalations',
+  // Removed 2026-05-03: projects, escalations, calendar, knowledge-hub,
+  // analytics — entire features deleted from the product. The DB tables
+  // (escalations, projects, requests) and any historical data are kept
+  // intact; only the UI surfaces and quick-create entries are gone.
   'alerts',
-  // 'hr-reports' retired 2026-05-02 — superseded by 'hr-hub' / hr_reporting flow.
-  'knowledge-hub',
-  'analytics',
   'announcements',
   'approval-queue',
   'slack',
+  // 'team' route still exists, but lives inside Leaders Hub via a
+  // sub-toggle now — it isn't a primary nav entry of its own.
   'team',
   'feedback',
   'hr-hub',
+  // 'leader-alerts' is the route id; users see "Leaders Hub" in the nav.
   'leader-alerts',
   'urgent-assist',
   'settings',
@@ -96,22 +98,16 @@ export const DATA_SCOPES = [
 // ---------------------------------------------------------------------------
 
 export const VIEW_LABELS = {
-  'briefing':      'Briefing',
-  'my-queue':      'My Queue',
-  'calendar':      'Calendar',
-  'projects':      'Projects',
-  'escalations':   'Escalations',
+  'briefing':      'Home',
+  'my-queue':      'Workspace',
   'alerts':        'Alerts',
-  // 'hr-reports' retired 2026-05-02 — see ALL_VIEWS comment.
-  'knowledge-hub': 'Knowledge Hub',
-  'analytics':     'Analytics',
   'announcements': 'Announcements',
   'approval-queue':'Approval Queue',
   'slack':         'Slack',
   'team':          'Team',
   'feedback':      'Feedback',
   'hr-hub':        'HR Hub',
-  'leader-alerts': 'Leaders Alerts',
+  'leader-alerts': 'Leaders Hub',
   'urgent-assist': 'Urgent Assist',
   'settings':      'Settings',
 };

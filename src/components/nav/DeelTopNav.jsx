@@ -9,76 +9,57 @@ import Avatar from '../ui/Avatar';
 const OWNER_EMAIL = 'mohamed.tantawy@deel.com';
 
 /* Primary tabs always visible in the nav bar.
- * Team sits at the end: for non-owners it's the only secondary surface left
- * (everything else is owner-gated), so promoting it to the primary bar means
- * we can drop the More dropdown entirely for them. */
+ *
+ * Per the 2026-05-03 rebrand:
+ *   • Agents:           Home · Workspace · HR Hub · Urgent Assist · Feedback · Announcements
+ *   • Managers/Admins:  Home · Workspace · HR Hub · Leaders Hub · Urgent Assist · Feedback · Announcements
+ *
+ * The Leaders Hub entry is filtered out for non-managerial users via the
+ * existing `accessControl.MANAGERIAL_ONLY_VIEWS` set + the tabAllowed()
+ * predicate below. Projects / Escalations / Calendar / Knowledge Hub /
+ * Analytics / Team primary tabs were deleted in this rebrand. Team still
+ * exists as a sub-view inside Leaders Hub. Settings is reachable from the
+ * user menu, not the primary nav. */
 const PRIMARY_TABS = [
-  { id: 'briefing',      icon: 'bi-house',            label: 'Home' },
-  { id: 'my-queue',      icon: 'bi-inbox',            label: 'Queue' },
-  { id: 'projects',      icon: 'bi-kanban',           label: 'Projects',      restrictToEmail: OWNER_EMAIL },
-  { id: 'escalations',   icon: 'bi-arrow-up-circle',  label: 'Escalations',   badge: true,                       restrictToEmail: OWNER_EMAIL },
-  // The 'Reports' (hr-reports) tab was retired 2026-05-02 — its scope
-  // (HR reporting / bugs / quality issues) is now part of the HR Hub
-  // tab as the `hr_reporting` flow. The view component, the
-  // CREATE_ACTIONS entry, and the data source have all been removed.
-  { id: 'announcements', icon: 'bi-megaphone',        label: 'Announcements' },
-  // Approval queue and "My Requests" are surfaced inside the Announcements
-  // view (as filter tabs) — we intentionally do not repeat them in the top
-  // nav to avoid the double-entry confusion. The `approval-queue` view route
-  // in App.jsx remains for deep-links / notifications / programmatic nav.
-  { id: 'team',          icon: 'bi-people',           label: 'Team' },
-  // Feedback board — open to every authenticated user so the whole team
-  // can submit bugs + improvement ideas and vote on what matters.
-  { id: 'feedback',      icon: 'bi-lightbulb',        label: 'Feedback' },
-  // HR Hub — single intake for HR Requests, HR Reporting, Escalation
-  // Zero, and Ops Hub Feedback. Open to every authenticated user.
-  { id: 'hr-hub',        icon: 'bi-broadcast-pin',    label: 'HR Hub' },
-  // Urgent Assist — consolidates "HRX Urgent Assist Request" workbench
-  // tasks with manual urgent assists. Open to every authenticated user.
-  { id: 'urgent-assist', icon: 'bi-exclamation-octagon', label: 'Urgent Assist' },
-  // Leaders Alerts — managerial-only surface for posting + acknowledging
-  // alerts across the leadership group. Visibility is gated by
-  // accessControl.MANAGERIAL_ONLY_VIEWS — agents are filtered out via
-  // tabAllowed below.
-  { id: 'leader-alerts', icon: 'bi-broadcast',        label: 'Leaders Alerts' },
+  { id: 'briefing',      icon: 'bi-house',                label: 'Home' },
+  { id: 'my-queue',      icon: 'bi-inbox',                label: 'Workspace' },
+  { id: 'hr-hub',        icon: 'bi-broadcast-pin',        label: 'HR Hub' },
+  { id: 'leader-alerts', icon: 'bi-broadcast',            label: 'Leaders Hub' },
+  { id: 'urgent-assist', icon: 'bi-exclamation-octagon',  label: 'Urgent Assist' },
+  { id: 'feedback',      icon: 'bi-lightbulb',            label: 'Feedback' },
+  { id: 'announcements', icon: 'bi-megaphone',            label: 'Announcements' },
 ];
 
-/* Secondary tabs under More — all owner-only for now, so for non-owners
- * visibleMore is empty and the More button is suppressed entirely. */
-const MORE_TABS = [
-  { id: 'calendar',      icon: 'bi-calendar3',        label: 'Calendar',       restrictToEmail: OWNER_EMAIL },
-  { id: 'knowledge-hub', icon: 'bi-book',             label: 'Knowledge Hub',  restrictToEmail: OWNER_EMAIL },
-  { id: 'analytics',     icon: 'bi-bar-chart-line',   label: 'Analytics',      restrictToEmail: OWNER_EMAIL },
-];
+/* The More dropdown was deleted in the 2026-05-03 rebrand. Calendar,
+ * Knowledge Hub and Analytics are gone from the product. The empty
+ * MORE_TABS keeps the rendering loops below trivial without conditional
+ * removal. */
+const MORE_TABS = [];
 
-/* Quick-create actions in the + menu — each mapped to a required permission */
+/* Quick-create actions — opens from the "Quick Create" menu in the top nav.
+ * Order per the 2026-05-03 rebrand:
+ *   1. HR Hub Request
+ *   2. New Leaders Alert (gated to managers via viewReq)
+ *   3. New Urgent Assist
+ *   4. Ops Hub Feedback
+ *   5. New Announcement
+ *
+ * The deleted actions (New Task / New Escalation / New Project) are gone.
+ * `feedback` action opens HR Hub with the feedback flow preselected — see
+ * App.jsx's onCreateFeedback handler. */
 const CREATE_ACTIONS = [
-  { icon: 'bi-plus-square',       label: 'New Task',         action: 'task',         desc: 'Create a queue task',         perm: 'can_create_task' },
-  { icon: 'bi-arrow-up-circle',   label: 'New Escalation',   action: 'escalation',   desc: 'Raise an escalation',         perm: 'can_create_escalation' },
-  { icon: 'bi-kanban',            label: 'New Project',      action: 'project',       desc: 'Start a project',             perm: 'can_create_project',          restrictToEmail: OWNER_EMAIL },
-  { icon: 'bi-megaphone',         label: 'New Announcement', action: 'announcement',  desc: 'Post to the team' },
-  // 'New Report' moved to HR Hub: use 'Submit to HR Hub' below and
-  // pick `HR Reporting` from the picker.
-  // No `perm` gate — every authenticated user can submit a bug / idea.
-  { icon: 'bi-lightbulb',         label: 'New Feedback',     action: 'feedback',      desc: 'Report a bug or improvement' },
-  // HR Hub intake — opens the 4-card picker. Every authenticated user
-  // can submit; the picker shows the HR Request / HR Reporting /
-  // Escalation Zero / Ops Hub Feedback options.
-  { icon: 'bi-broadcast-pin',     label: 'Submit to HR Hub', action: 'hr-hub',        desc: 'HR Request, Report, Escalation Zero, or Feedback' },
-  // Leaders Alerts intake — opens the single-flow composer modal.
-  // Gated to managers via the `viewReq` check so agents don't see it.
+  { icon: 'bi-broadcast-pin',     label: 'HR Hub Request',    action: 'hr-hub',        desc: 'HR Request, Report, Escalation Zero, or Feedback' },
   { icon: 'bi-broadcast',         label: 'New Leaders Alert', action: 'leader-alerts', desc: 'Quick alert visible to every manager', viewReq: 'leader-alerts' },
-  // Urgent Assist quick-create — captures every column the Urgent Assist
-  // table renders (subject, type, country, assignee, link, status).
   { icon: 'bi-exclamation-octagon', label: 'New Urgent Assist', action: 'urgent-assist', desc: 'Log a manual urgent-assist request' },
+  { icon: 'bi-lightbulb',         label: 'Ops Hub Feedback',  action: 'feedback',      desc: 'Report a bug or improvement' },
+  { icon: 'bi-megaphone',         label: 'New Announcement',  action: 'announcement',  desc: 'Post to the team' },
 ];
 
 const DeelTopNav = ({
   view, setView, user,
   onSearch, notifs, markAllRead, onNotifClick,
-  escalCount, onLogout,
-  onCreateTask, onCreateEscalation, onCreateProject,
-  onCreateAnnouncement, onCreateRequest, onCreateFeedback,
+  onLogout,
+  onCreateAnnouncement, onCreateFeedback,
   onCreateHrHub,
   onCreateLeaderAlert,
   onCreateUrgentAssist,
@@ -125,11 +106,7 @@ const DeelTopNav = ({
 
   const handleCreate = (action) => {
     setShowCreate(false);
-    if (action === 'task')         { onCreateTask?.(); }
-    else if (action === 'escalation') { onCreateEscalation?.(); }
-    else if (action === 'project')    { onCreateProject?.(); }
-    else if (action === 'announcement') { onCreateAnnouncement?.(); setView('announcements'); }
-    else if (action === 'request')    { onCreateRequest?.(); setView('my-queue'); }
+    if (action === 'announcement') { onCreateAnnouncement?.(); setView('announcements'); }
     else if (action === 'feedback')   { setView('feedback'); onCreateFeedback?.(); }
     else if (action === 'hr-hub')     { onCreateHrHub?.(); }
     else if (action === 'leader-alerts') { onCreateLeaderAlert?.(); }
@@ -173,11 +150,10 @@ const DeelTopNav = ({
       <div className="deel-nav-items">
         {visiblePrimary.map(tab => {
           const active = view === tab.id;
-          // Escalations uses `badge` (red pill from escalCount). Approval-queue
-          // counts are surfaced inside the Announcements view instead of in
-          // the top nav — see AnnouncementsView for the pending-approval pill.
+          // Leaders Hub carries an unack-count badge; other primary tabs
+          // currently render no badge. Approval-queue counts are surfaced
+          // inside the Announcements view instead of in the top nav.
           let badge = 0;
-          if (tab.badge && escalCount > 0) badge = escalCount;
           if (tab.id === 'leader-alerts' && leaderAlertsBadge > 0) badge = leaderAlertsBadge;
           return (
             <div key={tab.id} className={`deel-nav-item${active ? ' active' : ''}`}
