@@ -10,7 +10,14 @@
 // Deel admin team renames the task type or introduces a sibling — both
 // sides of the filter pick it up automatically.
 
+// Task-type names taken from Deel admin (taskConfiguration.name). Match is
+// case-insensitive and trim-tolerant — extra variants are kept for safety
+// in case Deel adds aliases or older tasks still carry the legacy strings.
 export const URGENT_ASSIST_TASK_TYPES = [
+  // Active types — confirmed in production via the workbench UI 2026-05-03.
+  'Expedite Request (HRX)',
+  'Urgent Assist',
+  // Legacy / aliases — keep matching so a renamed-back task isn't lost.
   'HRX Urgent Assist Request',
   'HRX Urgent Assist',
 ];

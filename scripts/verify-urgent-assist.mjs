@@ -53,12 +53,14 @@ assert('rejects undefined', isUrgentAssistTaskType(undefined), false);
 // ── Section 2: Workbench / Urgent Assist partition ─────────────────────────
 console.log('\n── Workbench ↔ Urgent Assist partition ──');
 const tasks = [
-  { id: 'wb1', taskType: 'Expedite EOR Onboarding' },
-  { id: 'wb2', taskType: 'HRX Urgent Assist Request' },
-  { id: 'wb3', taskType: 'HRX Urgent Assist' },
-  { id: 'wb4', taskType: 'Compliance Doc Review' },
-  { id: 'wb5', sourceType: 'HRX Urgent Assist' },             // sourceType-only match
-  { id: 'wb6', taskType: 'hrx urgent assist request' },        // case
+  { id: 'wb1', taskType: 'Expedite EOR Onboarding' },          // unrelated workbench task
+  { id: 'wb2', taskType: 'Expedite Request (HRX)' },            // primary current type
+  { id: 'wb3', taskType: 'Urgent Assist' },                     // primary current type
+  { id: 'wb4', taskType: 'Compliance Doc Review' },             // unrelated
+  { id: 'wb5', sourceType: 'Expedite Request (HRX)' },          // sourceType-only match
+  { id: 'wb6', taskType: 'expedite request (hrx)' },            // case-insensitive
+  { id: 'wb7', taskType: 'HRX Urgent Assist Request' },         // legacy alias
+  { id: 'wb8', taskType: 'HRX Urgent Assist' },                 // legacy alias
 ];
 const inWorkbench = tasks.filter(
   t => !isUrgentAssistTaskType(t?.taskType) && !isUrgentAssistTaskType(t?.sourceType)
@@ -67,7 +69,7 @@ const inUrgent = tasks.filter(
   t => isUrgentAssistTaskType(t?.taskType) || isUrgentAssistTaskType(t?.sourceType)
 );
 assert('Workbench tab keeps non-urgent tasks', inWorkbench.map(t => t.id), ['wb1', 'wb4']);
-assert('Urgent Assist tab picks up every variant', inUrgent.map(t => t.id), ['wb2', 'wb3', 'wb5', 'wb6']);
+assert('Urgent Assist tab picks up every variant', inUrgent.map(t => t.id), ['wb2', 'wb3', 'wb5', 'wb6', 'wb7', 'wb8']);
 assert('No task disappears',
   new Set([...inWorkbench, ...inUrgent].map(t => t.id)).size,
   tasks.length,
