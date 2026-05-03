@@ -247,10 +247,17 @@ export default function UrgentAssistView({ user, onCreate }) {
           )}
         </div>
 
-        {/* Scope toggle */}
+        {/* Scope toggle. The "Team Requests" pill is hidden for non-managers
+            so an Agent only sees `My / All` — matching HR Hub's pattern. The
+            2026-05-03 agent audit (A-F20) caught the inconsistency: HR Hub
+            correctly hid the team toggle for Will but Urgent Assist showed
+            it. Agents have no team-of-reports, so the scope is meaningless
+            and clicking it returned 0 records anyway. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14 }}>
           <ScopePill value="mine" current={scope} onChange={setScope} label="My Requests" />
-          <ScopePill value="team" current={scope} onChange={setScope} label="Team Requests" />
+          {isManager && (
+            <ScopePill value="team" current={scope} onChange={setScope} label="Team Requests" />
+          )}
           <ScopePill value="all"  current={scope} onChange={setScope} label="All Requests" />
           <span style={{ marginLeft: 'auto', fontSize: 12, color: '#9e9e9e' }}>
             {loading ? 'Loading…' : `${statusCounts.total} ${statusCounts.total === 1 ? 'request' : 'requests'}`}

@@ -87,7 +87,15 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
   // permissions" modal. Treat this flag as a full announcements admin —
   // they get everything an admin gets for the announcements domain only.
   const isAnnAdmin = perms?.canManageAnnouncements || false;
-  const isLA = perms?.canDo('can_compose_comms')||perms?.canDo('can_compose_announcements')||isApprover(user?.email)||isAnnAdmin||false;
+  // `isLA` (Lead / Approver) gates admin-style columns (Ack Rate, Status as
+  // "Sent"), action icons (edit, send, archive, ack-tracker expand), and
+  // Drafts / Archived sub-tabs. Until 2026-05-03 this also returned true
+  // for anyone with `can_compose_announcements` — but every user has that
+  // power now (the propose-and-approve flow lets agents submit drafts that
+  // an admin reviews). Conflating "can propose" with "manages
+  // announcements" surfaced the entire admin table to agents (A-F25 from
+  // the agent audit). Tightening to approver-or-admin only.
+  const isLA = isApprover(user?.email) || isAnnAdmin;
   const canPin = perms?.canDo('can_pin_announcement')||isAnnAdmin||false;
   // Archive/unarchive: Regional Managers, Directors, and per-user
   // announcements admins. Team Leads keep compose/edit/send/pin but cannot
