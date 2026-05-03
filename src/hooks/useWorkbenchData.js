@@ -28,6 +28,11 @@ export function useWorkbenchData(enabled = true, userEmail = null) {
   const lastFetchRef = useRef(0);
   const inFlightRef = useRef(null);
   const liveReceivedRef = useRef(false);
+  // 3-strike debounce on transient failures (matches the leader-alerts
+  // comment-poll pattern). A single timeout from a slow upstream no longer
+  // flips the badge into error state — only persistent failure does. Reset
+  // on first successful response. F38 in the 2026-05-03 live audit.
+  const failStreakRef = useRef(0);
   // Mirror tasks via ref so refresh() can read the current count without
   // listing tasks.length in its deps. See useOnboardingData for the
   // detailed rationale.
@@ -64,10 +69,16 @@ export function useWorkbenchData(enabled = true, userEmail = null) {
         lastFetchRef.current = now;
         liveReceivedRef.current = true;
         setLastSyncAt(now);
+        failStreakRef.current = 0;
+        if (error) setError(null);
         return fetched;
       } catch (err) {
-        console.warn('[useWorkbenchData] Failed:', err.message);
-        setError(err.message);
+        failStreakRef.current += 1;
+        // Only surface as a UI error after 3 consecutive failures so a single
+        // slow upstream doesn't flip the sync badge red. Console warning still
+        // fires on every miss for diagnostics.
+        console.warn('[useWorkbenchData] Failed:', err.message, `(streak ${failStreakRef.current})`);
+        if (failStreakRef.current >= 3) setError(err.message);
         return null;
       } finally {
         setLoading(false);
