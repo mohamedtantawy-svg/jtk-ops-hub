@@ -63,6 +63,19 @@ function computeSla(createdAt) {
   };
 }
 
+// Strip the workbench-side type suffix from a task name. Deel admin
+// task titles often duplicate the type label as the suffix
+// ("- Expedite Request (HRX)" / "- Urgent Assist") which renders the
+// same string twice in the table — once in Subject, once in Type.
+// Audit F3. The regex tolerates either dash variant + trailing
+// whitespace and is anchored at end-of-string so mid-name occurrences
+// (rare) are preserved.
+const URGENT_ASSIST_NAME_SUFFIX_RE = /\s*[–—-]\s*(Expedite Request \(HRX\)|Urgent Assist|HRX Urgent Assist Request|HRX Urgent Assist)\s*$/i;
+function trimTypeSuffix(name) {
+  if (!name) return '';
+  return String(name).replace(URGENT_ASSIST_NAME_SUFFIX_RE, '').trim();
+}
+
 // Workbench task → unified urgent-assist row.
 function fromWorkbench(task) {
   const status = workbenchStatusToTabStatus(task.status);
@@ -71,7 +84,7 @@ function fromWorkbench(task) {
     id: `wb:${task.id}`,
     rawId: String(task.id || ''),
     source: 'workbench',
-    subject: task.name || 'Untitled Task',
+    subject: trimTypeSuffix(task.name) || 'Untitled Task',
     requestType: task.taskType || 'HRX Urgent Assist',
     country: task.country || '',
     assigneeEmail: (task.assignee?.email || '').toLowerCase(),
