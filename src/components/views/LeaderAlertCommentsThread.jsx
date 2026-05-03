@@ -164,14 +164,25 @@ const LeaderAlertCommentsThread = ({ alertId, initialComments, currentUser, perm
   }, [comments, onCountChange]);
 
   // Initial fetch + 5 s polling. Tail-timestamp cursor + dedup-by-id.
+  // Error display is debounced behind a 3-strike consecutive-failure
+  // threshold so a single transient nginx 503 (deploy pod-warm tail-end,
+  // skill §6.6) doesn't surface "Polling stalled" — the next tick
+  // recovers and the banner never appears. Stage F audit caught this:
+  // the original code also never cleared `error` on success, so a single
+  // transient hit would leave the banner stuck forever. Now `error` is
+  // cleared on every successful response and only set after 3 in a row.
   useEffect(() => {
     let cancelled = false;
+    let consecutiveFailures = 0;
     const tick = async () => {
       const cur = commentsRef.current;
       const lastTs = cur.length ? cur[cur.length - 1].created_at : null;
       try {
         const d = await listLeaderAlertComments(alertId, lastTs ? { since: lastTs } : { limit: 100 });
         if (cancelled) return;
+        // Clear any prior stall banner the moment polling recovers.
+        consecutiveFailures = 0;
+        setError(null);
         const fresh = Array.isArray(d?.comments) ? d.comments : [];
         if (!fresh.length) return;
         setComments(prev => {
@@ -181,7 +192,9 @@ const LeaderAlertCommentsThread = ({ alertId, initialComments, currentUser, perm
           return merged;
         });
       } catch (e) {
-        if (!cancelled) setError(e?.message || null);
+        if (cancelled) return;
+        consecutiveFailures += 1;
+        if (consecutiveFailures >= 3) setError(e?.message || 'Polling failed');
       }
     };
 

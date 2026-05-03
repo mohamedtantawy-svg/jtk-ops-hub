@@ -1012,6 +1012,48 @@ CREATE INDEX IF NOT EXISTS idx_leader_alert_settings_history ON leader_alert_set
 ALTER TABLE team_member_overrides ADD COLUMN IF NOT EXISTS is_leader_alerts_admin BOOLEAN DEFAULT FALSE;
 CREATE INDEX IF NOT EXISTS idx_tmo_is_leader_alerts_admin
   ON team_member_overrides(is_leader_alerts_admin) WHERE is_leader_alerts_admin = true;
+
+-- ── Urgent Assist (2026-05-03) ─────────────────────────────────────────────
+-- New tab that consolidates "HRX Urgent Assist Request" / "HRX Urgent Assist"
+-- workbench tasks with manually-created urgent assists. Workbench rows are
+-- read-only mirrors of the Deel-side task; manual rows live in this table
+-- with full CRUD. SLA is 6 biz hours from createdAt for both sources.
+CREATE TABLE IF NOT EXISTS urgent_assist_request (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  subject           VARCHAR(300) NOT NULL,
+  request_type      VARCHAR(120) NOT NULL DEFAULT 'HRX Urgent Assist Request',
+  country           VARCHAR(8),                                  -- ISO-2 code; nullable for cross-country requests
+  assignee_email    VARCHAR(255),
+  assignee_name     VARCHAR(255),
+  created_by_email  VARCHAR(255) NOT NULL,
+  created_by_name   VARCHAR(255),
+  team_lead_email   VARCHAR(255),                                -- denormalised at create-time for Team toggle scope
+  link_url          TEXT,                                        -- user-supplied "Link to task"
+  description       TEXT,
+  status            VARCHAR(20)  NOT NULL DEFAULT 'new'   CHECK (status IN ('new','in_progress','on_hold','resolved')),
+  priority          VARCHAR(20)  NOT NULL DEFAULT 'high'  CHECK (priority IN ('low','medium','high','critical')),
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  resolved_at       TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_urgent_assist_status_created ON urgent_assist_request(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_urgent_assist_assignee       ON urgent_assist_request(assignee_email, status);
+CREATE INDEX IF NOT EXISTS idx_urgent_assist_creator        ON urgent_assist_request(created_by_email, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_urgent_assist_team_lead      ON urgent_assist_request(team_lead_email, status);
+CREATE INDEX IF NOT EXISTS idx_urgent_assist_country        ON urgent_assist_request(country, status);
+
+CREATE TABLE IF NOT EXISTS urgent_assist_log (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  request_id   UUID NOT NULL REFERENCES urgent_assist_request(id) ON DELETE CASCADE,
+  actor_email  VARCHAR(255),
+  actor_name   VARCHAR(255),
+  event_type   VARCHAR(40) NOT NULL,
+    -- created | status_change | assignee_change | priority_change | field_edit | deleted
+  before_json  JSONB,
+  after_json   JSONB,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_urgent_assist_log_request ON urgent_assist_log(request_id, created_at);
 `;
 
 export async function runMigrations() {

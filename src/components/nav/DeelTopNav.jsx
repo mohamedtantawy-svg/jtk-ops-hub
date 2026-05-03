@@ -33,6 +33,9 @@ const PRIMARY_TABS = [
   // HR Hub — single intake for HR Requests, HR Reporting, Escalation
   // Zero, and Ops Hub Feedback. Open to every authenticated user.
   { id: 'hr-hub',        icon: 'bi-broadcast-pin',    label: 'HR Hub' },
+  // Urgent Assist — consolidates "HRX Urgent Assist Request" workbench
+  // tasks with manual urgent assists. Open to every authenticated user.
+  { id: 'urgent-assist', icon: 'bi-exclamation-octagon', label: 'Urgent Assist' },
   // Leaders Alerts — managerial-only surface for posting + acknowledging
   // alerts across the leadership group. Visibility is gated by
   // accessControl.MANAGERIAL_ONLY_VIEWS — agents are filtered out via
@@ -65,6 +68,9 @@ const CREATE_ACTIONS = [
   // Leaders Alerts intake — opens the single-flow composer modal.
   // Gated to managers via the `viewReq` check so agents don't see it.
   { icon: 'bi-broadcast',         label: 'New Leaders Alert', action: 'leader-alerts', desc: 'Quick alert visible to every manager', viewReq: 'leader-alerts' },
+  // Urgent Assist quick-create — captures every column the Urgent Assist
+  // table renders (subject, type, country, assignee, link, status).
+  { icon: 'bi-exclamation-octagon', label: 'New Urgent Assist', action: 'urgent-assist', desc: 'Log a manual urgent-assist request' },
 ];
 
 const DeelTopNav = ({
@@ -75,6 +81,7 @@ const DeelTopNav = ({
   onCreateAnnouncement, onCreateRequest, onCreateFeedback,
   onCreateHrHub,
   onCreateLeaderAlert,
+  onCreateUrgentAssist,
   leaderAlertsBadge = 0,
   setSelTask, tasks,
 }) => {
@@ -126,6 +133,7 @@ const DeelTopNav = ({
     else if (action === 'feedback')   { setView('feedback'); onCreateFeedback?.(); }
     else if (action === 'hr-hub')     { onCreateHrHub?.(); }
     else if (action === 'leader-alerts') { onCreateLeaderAlert?.(); }
+    else if (action === 'urgent-assist') { onCreateUrgentAssist?.(); }
   };
 
   const unread = notifs ? notifs.filter(n => !n.read).length : 0;

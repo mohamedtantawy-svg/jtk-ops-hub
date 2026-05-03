@@ -36,6 +36,7 @@ import {
   normalizePausedOnboarding,
   normalizeIncentivePlans,
 } from '../../utils/normalizeSourceRows';
+import { isUrgentAssistTaskType } from '../../lib/urgent-assist-task-types';
 
 // ── Live assignee lookup ───────────────────────────────────────────────────
 // Reads the live MEMBERS_BY_EMAIL binding so hydrateRoster() updates reach
@@ -184,7 +185,15 @@ const Queue = ({ user, tasks, subFilter }) => {
   const offboardingRowsAll      = useMemo(() => normalizeOffboarding(offboardingData.items, queueSla), [offboardingData.items, queueSla]);
   const amendmentRowsAll        = useMemo(() => normalizeAmendments(changeRequestData.amendments, queueSla), [changeRequestData.amendments, queueSla]);
   const redlineRowsAll          = useMemo(() => normalizeRedlines(changeRequestData.redlines, queueSla), [changeRequestData.redlines, queueSla]);
-  const workbenchRowsAll        = useMemo(() => normalizeWorkbench(workbenchData.tasks, queueSla), [workbenchData.tasks, queueSla]);
+  // Strip "HRX Urgent Assist Request" / "HRX Urgent Assist" tasks — they
+  // surface on the dedicated Urgent Assist tab and would otherwise double-
+  // list here. Filter happens BEFORE normalize so the row count + SLA
+  // pills + sort order agree with the visible table.
+  const workbenchTasksFiltered = useMemo(
+    () => (workbenchData.tasks || []).filter(t => !isUrgentAssistTaskType(t?.taskType) && !isUrgentAssistTaskType(t?.sourceType)),
+    [workbenchData.tasks],
+  );
+  const workbenchRowsAll        = useMemo(() => normalizeWorkbench(workbenchTasksFiltered, queueSla), [workbenchTasksFiltered, queueSla]);
   const incentivePlanRowsAll    = useMemo(() => normalizeIncentivePlans(incentivePlansData.items, queueSla), [incentivePlansData.items, queueSla]);
 
   const isAdmin = isAdminUser(user);
