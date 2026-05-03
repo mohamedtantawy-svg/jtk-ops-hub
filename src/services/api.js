@@ -16,6 +16,27 @@ const MAX_RETRIES = 2; // up to 3 total attempts
 const BASE_DELAY = 600; // ms
 const DEFAULT_TIMEOUT_MS = 90_000; // 90s — covers cold-cache scans like terminations_v3 ~600 pages
 
+// Module-level streak counter for transient 401 warnings. The 2026-05-03
+// live audit (F40) caught the console flooded with
+// "[apiFetch] 401 but token not expired locally — keeping session
+// (transient failure)" — every API call hitting a momentary 401 emitted a
+// warning, sometimes 3-5 per minute. The session was always healthy; the
+// warning was diagnostic noise. We now debounce: only the FIRST transient
+// 401 in a streak logs, plus every 10th subsequent until a 2xx clears the
+// streak. Keeps the diagnostic value (you'll see the first one) without
+// drowning the rest of the console.
+let _transient401Streak = 0;
+function _maybeWarnTransient401() {
+  _transient401Streak += 1;
+  if (_transient401Streak === 1 || _transient401Streak % 10 === 0) {
+    // eslint-disable-next-line no-console
+    console.warn('[apiFetch] 401 but token not expired locally — keeping session (transient failure, streak=' + _transient401Streak + ')');
+  }
+}
+function _clearTransient401Streak() {
+  if (_transient401Streak > 0) _transient401Streak = 0;
+}
+
 /**
  * Thin wrapper around fetch that:
  * - Prepends the API base URL
@@ -102,7 +123,7 @@ export async function apiFetch(path, options = {}) {
                   localStorage.removeItem('ops_hub_user');
                   window.dispatchEvent(new CustomEvent('ops-hub-session-expired'));
                 } else {
-                  console.warn('[apiFetch] 401 but token not expired locally — keeping session (transient failure)');
+                  _maybeWarnTransient401();
                 }
               }
             } catch {}
@@ -130,6 +151,10 @@ export async function apiFetch(path, options = {}) {
         throw err;
       }
 
+      // Clear the transient-401 streak on the first successful response —
+      // healthy traffic shouldn't keep counting toward the next "every 10th"
+      // log line if we recover. (F40, 2026-05-03 live audit.)
+      _clearTransient401Streak();
       return body;
     } catch (err) {
       lastError = err;
