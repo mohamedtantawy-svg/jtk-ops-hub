@@ -26,6 +26,7 @@ import {
 // visibility for onboarding/offboarding/amendments/redlines).
 import {
   scopeOnboardingPeople,
+  scopePausedOnboarding,
   scopeOffboardingCases,
   scopeAmendmentRequests,
   scopeRedlineRequests,
@@ -147,7 +148,17 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // ── PERMISSIONS-BASED SCOPE ──────────────────────────────────────────
   const perms=useContext(PermissionsContext);
   const settings=useContext(SettingsContext);
-  const { deelData, jiraData, slackData, queueUnified } = useContext(IntegrationsContext);
+  const { deelData, jiraData, slackData, queueUnified, hiddenTasks } = useContext(IntegrationsContext);
+  // Hide-task filter — mirrors the Queue's behaviour so home aggregates
+  // exclude rows the manager has approved to hide. Without this, Home
+  // surfaces a count that includes hidden rows (e.g. 797 workbench) while
+  // Workspace shows the visible-only count (740) — F3 in the 2026-05-03
+  // live audit.
+  const isHiddenKey = useCallback((source, id) => {
+    if (!source || !id) return false;
+    const key = `${String(source).toLowerCase()}:${String(id)}`;
+    return !!(hiddenTasks?.hiddenKeys?.has(key));
+  }, [hiddenTasks?.hiddenKeys]);
 
   // ── Deel API hooks — read the shared, App.jsx-mounted instance ──────────
   // Mounting our own hooks here used to fire 4× initial requests across
@@ -187,13 +198,18 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // SLA table. Falls back to the spec defaults baked into the normalizer
   // until the hook resolves.
   const { sla: queueSla } = useQueueSlaSettings();
-  const onboardingRowsAll = useMemo(() => normalizeOnboarding(onboardingData.items, queueSla), [onboardingData.items, queueSla]);
-  const pausedOnboardingRowsAll = useMemo(() => normalizePausedOnboarding(pausedOnboardingData.items, queueSla), [pausedOnboardingData.items, queueSla]);
-  const offboardingRowsAll = useMemo(() => normalizeOffboarding(offboardingData.items, queueSla), [offboardingData.items, queueSla]);
-  const amendmentRowsAll = useMemo(() => normalizeAmendments(changeRequestData.amendments, queueSla), [changeRequestData.amendments, queueSla]);
-  const redlineRowsAll = useMemo(() => normalizeRedlines(changeRequestData.redlines, queueSla), [changeRequestData.redlines, queueSla]);
-  const workbenchRowsAll = useMemo(() => normalizeWorkbench(workbenchData.tasks, queueSla), [workbenchData.tasks, queueSla]);
-  const incentivePlanRowsAll = useMemo(() => normalizeIncentivePlans(incentivePlansData.items, queueSla), [incentivePlansData.items, queueSla]);
+  // Apply hide-task filter at normalization time — same pattern as Queue.jsx
+  // so Home and Workspace show the same row population per source. The
+  // 2026-05-03 live audit found Home Workbench=797 while Workspace=740
+  // because Briefing wasn't filtering hidden rows; the gap matched the 57
+  // hide-task entries managers had approved.
+  const onboardingRowsAll = useMemo(() => normalizeOnboarding(onboardingData.items, queueSla).filter(r => !isHiddenKey('onboarding', r.id)), [onboardingData.items, queueSla, isHiddenKey]);
+  const pausedOnboardingRowsAll = useMemo(() => normalizePausedOnboarding(pausedOnboardingData.items, queueSla).filter(r => !isHiddenKey('paused_onboarding', r.id) && !isHiddenKey('onboarding', r.id)), [pausedOnboardingData.items, queueSla, isHiddenKey]);
+  const offboardingRowsAll = useMemo(() => normalizeOffboarding(offboardingData.items, queueSla).filter(r => !isHiddenKey('offboarding', r.id)), [offboardingData.items, queueSla, isHiddenKey]);
+  const amendmentRowsAll = useMemo(() => normalizeAmendments(changeRequestData.amendments, queueSla).filter(r => !isHiddenKey('amendments', r.id)), [changeRequestData.amendments, queueSla, isHiddenKey]);
+  const redlineRowsAll = useMemo(() => normalizeRedlines(changeRequestData.redlines, queueSla).filter(r => !isHiddenKey('redlines', r.id)), [changeRequestData.redlines, queueSla, isHiddenKey]);
+  const workbenchRowsAll = useMemo(() => normalizeWorkbench(workbenchData.tasks, queueSla).filter(r => !isHiddenKey('workbench', r.id)), [workbenchData.tasks, queueSla, isHiddenKey]);
+  const incentivePlanRowsAll = useMemo(() => normalizeIncentivePlans(incentivePlansData.items, queueSla).filter(r => !isHiddenKey('incentive_plans', r.id)), [incentivePlansData.items, queueSla, isHiddenKey]);
 
   // Source-row scoping — delegate to the Queue's single source of truth so
   // "Active Requests" here always matches what the user sees in each tab.
@@ -202,7 +218,23 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   //   • Workbench is assignee-only (admin bypasses).
   // Admins/directors (isAllScope) short-circuit through these functions, so
   // they see everything — exec totals roll up correctly.
-  const onboardingRows = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user), [onboardingRowsAll, user]);
+  // Onboarding pill = active onboarding ∪ paused onboarding (de-duped),
+  // matching the Workspace tab's "Onboarding" source which combines both
+  // streams under one pill. Without this Home reported 115 (active only)
+  // while Workspace reported 330 (active + 215 paused) — F3 in the
+  // 2026-05-03 live audit.
+  const onboardingActionRows = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user), [onboardingRowsAll, user]);
+  const pausedOnboardingRows = useMemo(() => scopePausedOnboarding(pausedOnboardingRowsAll, user), [pausedOnboardingRowsAll, user]);
+  const onboardingRows = useMemo(() => {
+    const seen = new Set();
+    const merged = [];
+    for (const r of [...onboardingActionRows, ...pausedOnboardingRows]) {
+      const k = r?.id != null ? String(r.id) : r;
+      if (seen.has(k)) continue;
+      seen.add(k); merged.push(r);
+    }
+    return merged;
+  }, [onboardingActionRows, pausedOnboardingRows]);
   const offboardingRows = useMemo(() => scopeOffboardingCases(offboardingRowsAll, user), [offboardingRowsAll, user]);
   const amendmentRows = useMemo(() => scopeAmendmentRequests(amendmentRowsAll, user), [amendmentRowsAll, user]);
   const redlineRows = useMemo(() => scopeRedlineRequests(redlineRowsAll, user), [redlineRowsAll, user]);
