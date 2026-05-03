@@ -558,6 +558,9 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
       }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="hrhub-create-title"
         onClick={e => e.stopPropagation()}
         style={{
           width: 'min(720px, 92vw)', maxHeight: '85vh',
@@ -580,7 +583,7 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
             ><i className="bi bi-arrow-left" style={{ fontSize: 16 }} /></button>
           )}
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>
+            <div id="hrhub-create-title" style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>
               {flow ? card?.label || 'New request' : 'Submit to HR Hub'}
             </div>
             {!flow && (
