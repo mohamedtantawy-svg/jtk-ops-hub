@@ -616,12 +616,20 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
                     {prefill.banner.subtitle}
                   </div>
                 )}
-                {assigneeName && (
+                {assigneeName ? (
                   <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>
                     <i className="bi-person-fill" style={{ fontSize: 10, marginRight: 4 }} />
                     Assignee: <strong style={{ color: 'var(--text)' }}>{assigneeName}</strong>
                   </div>
-                )}
+                ) : prefill?.banner?.title === 'Escalating from queue' ? (
+                  // No manager in the requester's roster chain — surface this
+                  // explicitly so the user knows the request will land
+                  // unassigned (not silently empty). Audit F1.
+                  <div style={{ fontSize: 11, color: '#b45309', marginTop: 4 }}>
+                    <i className="bi-exclamation-circle" style={{ fontSize: 10, marginRight: 4 }} />
+                    No manager set in your roster chain — the request will land unassigned. Add an assignee in the form below.
+                  </div>
+                ) : null}
               </div>
             </div>
           )}
