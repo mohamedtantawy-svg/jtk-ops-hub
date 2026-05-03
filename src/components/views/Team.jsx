@@ -345,11 +345,24 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
   const ns = useMemo(() => tasks.filter(t => t.source !== 'slack'), [tasks]);
 
   // ── Stat helpers (email-based) ──────────────────────────────────────────
+  // Counts every actionable item across Zendesk + Jira (`ns`) AND the Deel
+  // sources that carry a per-agent assignee (onboarding, offboarding,
+  // workbench). Amendments / Redlines / Incentive Plans have NO per-row
+  // assignee on the upstream so they remain excluded here — the SLA card
+  // footer note explains that. Adding the three Deel buckets means the
+  // Total Open card on the Team / My Team view now matches the agent's
+  // Home Active Requests tile, which combines the same buckets via
+  // `activeRequestsCount` in BriefingView.jsx (A-F3 from the 2026-05-03
+  // agent audit — Will's Home said 179 mine while Team Total Open said 95
+  // because the Deel sources weren't counted).
   const statsByEmails = (emails) => {
     const emailSet = new Set(emails.map(e => e.toLowerCase()));
     const ts = ns.filter(t => emailSet.has((t.assigneeEmail || '').toLowerCase()) && t.status !== 'resolved');
+    const onb = onbAgentRows.filter(r => emailSet.has((r.assigneeEmail || '').toLowerCase()));
+    const off = offAgentRows.filter(r => emailSet.has((r.assigneeEmail || '').toLowerCase()));
+    const wb  = wbAgentRows.filter(r => emailSet.has((r.assigneeEmail || '').toLowerCase()));
     return {
-      total: ts.length,
+      total: ts.length + onb.length + off.length + wb.length,
       n: ts.filter(t => t.status === 'new').length,
       ip: ts.filter(t => t.status === 'in_progress').length,
       w: ts.filter(t => t.status === 'waiting').length,
@@ -964,8 +977,18 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
           {visibleMembers.map(m => renderMemberRow(m, 0))}
         </div>
 
-        {/* ── Parental Leave Tracker ──────────────────────────────────── */}
+        {/* ── Parental Leave Tracker ────────────────────────────────────
+             Manager-only — agents with zero reports landed on this view via
+             the Login-as flow (impersonation) or a deep-link, and saw an
+             org-wide "N currently on leave" count that's not their data
+             to know (A-F9 from the 2026-05-03 agent audit). Show only
+             when the viewer has direct reports OR is an admin / RM. */}
         {(() => {
+          const hasReports = visibleMembers && visibleMembers.length > 0;
+          const isManagerOrHigher = perms?.dataScope === 'all_tasks'
+            || perms?.dataScope === 'regional_tasks'
+            || perms?.dataScope === 'team_tasks';
+          if (!hasReports && !isManagerOrHigher) return null;
           const plData = perms?.dataScope === 'all_tasks' && user?.region && user.region !== 'ALL'
             ? PARENTAL_LEAVE_DATA.filter(p => p.region === user.region)
             : PARENTAL_LEAVE_DATA;
