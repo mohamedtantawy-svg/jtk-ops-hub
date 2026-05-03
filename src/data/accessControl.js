@@ -28,6 +28,7 @@ export const ALL_VIEWS = [
   'feedback',
   'hr-hub',
   'leader-alerts',
+  'urgent-assist',
   'settings',
 ];
 
@@ -111,6 +112,7 @@ export const VIEW_LABELS = {
   'feedback':      'Feedback',
   'hr-hub':        'HR Hub',
   'leader-alerts': 'Leaders Alerts',
+  'urgent-assist': 'Urgent Assist',
   'settings':      'Settings',
 };
 

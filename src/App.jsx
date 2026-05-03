@@ -101,8 +101,10 @@ import Alerts from './components/views/Alerts';
 import FeedbackView from './components/views/FeedbackView';
 import HrHubView from './components/views/HrHubView';
 import LeaderAlertsView from './components/views/LeaderAlertsView';
+import UrgentAssistView from './components/views/UrgentAssistView';
 import CreateHrHubRequestModal from './components/modals/CreateHrHubRequestModal';
 import CreateLeaderAlertModal from './components/modals/CreateLeaderAlertModal';
+import CreateUrgentAssistModal from './components/modals/CreateUrgentAssistModal';
 import { getLeaderAlertsUnackedCount } from './services/leaderAlertsApi';
 import CreateProjectModal from './components/modals/CreateProjectModal';
 import CreateRequestModal from './components/modals/CreateRequestModal';
@@ -652,6 +654,11 @@ const App=()=>{
   // (Stage 7) will preselect a flow.
   const [hrHubCreate,setHrHubCreate]=useState(null);
   const [leaderAlertCreate,setLeaderAlertCreate]=useState(false);
+  // Urgent Assist create modal — boolean toggle. When true the modal is
+  // open; the form posts directly to /api/v1/urgent-assist and bumps the
+  // refresh nonce on success so UrgentAssistView reloads without a remount.
+  const [urgentAssistCreate,setUrgentAssistCreate]=useState(false);
+  const [urgentAssistRefreshNonce,setUrgentAssistRefreshNonce]=useState(0);
   const [leaderAlertsBadge,setLeaderAlertsBadge]=useState(0);
   // Bumped after a successful POST so LeaderAlertsView's fetch effect
   // re-fires and the new alert appears without a manual reload (audit H1).
@@ -1219,7 +1226,7 @@ const App=()=>{
     if(!perms||!user)return;
     if(view&&!perms.canView(view)){
       // Find first allowed view
-      const fallback=['briefing','my-queue','calendar','projects','escalations','knowledge-hub','analytics','announcements','slack','team','hr-hub','settings'].find(v=>perms.canView(v));
+      const fallback=['briefing','my-queue','calendar','projects','escalations','knowledge-hub','analytics','announcements','slack','team','hr-hub','urgent-assist','settings'].find(v=>perms.canView(v));
       setView(fallback||'briefing');
     }
   },[view,perms,user]);
@@ -1311,6 +1318,7 @@ const App=()=>{
         onCreateFeedback={()=>{setView('feedback');setFeedbackCompose(true);}}
         onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}
         onCreateLeaderAlert={()=>setLeaderAlertCreate(true)}
+        onCreateUrgentAssist={()=>setUrgentAssistCreate(true)}
         leaderAlertsBadge={leaderAlertsBadge}
         setSelTask={()=>{}} tasks={tasks}
       />
@@ -1337,11 +1345,13 @@ const App=()=>{
               landing in Stage 2). Backend routes under /api/v1/hr-hub/
               are live and exercised by HrHubView's smoke check. */}
           {view==='hr-hub'        &&perms?.canView('hr-hub')!==false       &&<div className="page-enter"><HrHubView user={effectiveUser} onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}/></div>}
+          {view==='urgent-assist' &&perms?.canView('urgent-assist')!==false&&<div className="page-enter" key={urgentAssistRefreshNonce}><UrgentAssistView user={effectiveUser} onCreate={()=>setUrgentAssistCreate(true)}/></div>}
           {view==='leader-alerts' &&perms?.canView('leader-alerts')!==false&&<div className="page-enter"><LeaderAlertsView user={effectiveUser} perms={perms} refreshNonce={leaderAlertsRefreshNonce}/></div>}
       </div>
       {createModal   &&<CreateTaskModal onConfirm={confirmCreate} onClose={()=>setCreateModal(false)} currentUser={effectiveUser}/>}
       {hrHubCreate   &&<CreateHrHubRequestModal initialFlow={hrHubCreate.initialFlow||null} onClose={()=>setHrHubCreate(null)} onCreated={(id,flow)=>{setHrHubCreate(null);setView('hr-hub');addToast?.({kind:'success',message:`Submitted to HR Hub${flow?` (${flow.replace('_',' ')})`:''}.`});}}/>}
       {leaderAlertCreate&&<CreateLeaderAlertModal onClose={()=>setLeaderAlertCreate(false)} onCreated={(alert)=>{setLeaderAlertCreate(false);setView('leader-alerts');setLeaderAlertsRefreshNonce(n=>n+1);addToast?.({kind:'success',message:`Posted${alert?.title?`: "${alert.title.slice(0,60)}${alert.title.length>60?'…':''}"`:' alert'}.`});}}/>}
+      {urgentAssistCreate&&<CreateUrgentAssistModal currentUser={effectiveUser} onClose={()=>setUrgentAssistCreate(false)} onCreated={(row)=>{setUrgentAssistCreate(false);setView('urgent-assist');setUrgentAssistRefreshNonce(n=>n+1);addToast?.({kind:'success',message:`Urgent Assist created${row?.subject?`: "${row.subject.slice(0,60)}${row.subject.length>60?'…':''}"`:''}.`});}}/>}
       {projectModal  &&<CreateProjectModal onConfirm={confirmProject} onClose={()=>setProjectModal(null)} project={typeof projectModal==='object'?projectModal:null} currentUser={effectiveUser}/>}
       {requestModal  &&<CreateRequestModal onConfirm={confirmRequest} onClose={()=>setRequestModal(false)} currentUser={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks}/>}
       {createEscalModal&&<CreateEscalationModal onConfirm={confirmManualEscal} onClose={()=>setCreateEscalModal(false)} currentUser={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks}/>}
