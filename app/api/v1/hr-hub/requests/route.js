@@ -26,7 +26,8 @@ import {
   writeLog,
 } from '../../../../../src/lib/hr-hub-helpers';
 
-const ALLOWED_FLOWS = new Set(['hr_request', 'hr_reporting', 'escalation_zero', 'feedback']);
+const ALLOWED_FLOWS = new Set(['hr_request', 'hr_reporting', 'escalation_zero', 'feedback', 'hide_task_request']);
+const ALLOWED_HIDE_REASON_CODES = new Set(['internal_deel_employee', 'test_task', 'other']);
 const ALLOWED_STATUSES = new Set(['new', 'in_progress', 'on_hold', 'resolved']);
 const ALLOWED_PRIORITIES = new Set(['low', 'medium', 'high', 'critical']);
 const ALLOWED_SCOPES = new Set(['mine', 'team', 'all']);
@@ -164,9 +165,10 @@ export async function GET(req) {
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const sql = `
     SELECT id, flow, status, priority, function_area, request_type, report_type,
-           title, summary, ideal_solution, links, attachments,
+           title, summary, ideal_solution, resolution_note, links, attachments,
            created_by_email, created_by_name, assignee_email, assignee_name,
-           team_lead_email, cc_email, created_at, updated_at, resolved_at
+           team_lead_email, cc_email, created_at, updated_at, resolved_at,
+           task_source, task_id, task_url, task_subject
       FROM hr_hub_request
       ${whereSql}
      ORDER BY created_at DESC, id DESC
@@ -186,6 +188,7 @@ export async function GET(req) {
     title: row.title,
     summary: row.summary,
     idealSolution: row.ideal_solution,
+    resolutionNote: row.resolution_note,
     links: row.links || [],
     // Don't return full data URIs in the list — just count + first thumbnail
     // shape — keeps payload small. Detail view returns the full attachments.
@@ -199,6 +202,11 @@ export async function GET(req) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     resolvedAt: row.resolved_at,
+    // Hide-task flow only — null on every other flow.
+    taskSource: row.task_source,
+    taskId: row.task_id,
+    taskUrl: row.task_url,
+    taskSubject: row.task_subject,
   }));
   const nextCursor = hasMore
     ? `${new Date(rows[limit - 1].created_at).toISOString()}|${rows[limit - 1].id}`
@@ -248,6 +256,27 @@ export async function POST(req) {
   // Denormalize team_lead_email for fast Team toggle queries.
   const teamLeadEmail = teamLeadEmailFor(callerEmail);
 
+  // Hide-task flow: validate the four task_* fields. We require source +
+  // id + url at minimum so the manager (and the future filter step) have
+  // a stable handle on the queue row. request_type carries the reason
+  // code and must be one of the three documented values.
+  let taskSource = null, taskId = null, taskUrl = null, taskSubject = null;
+  if (flow === 'hide_task_request') {
+    taskSource = clean(body.taskSource, 40);
+    taskId = clean(body.taskId, 200);
+    taskUrl = clean(body.taskUrl, 2000);
+    taskSubject = clean(body.taskSubject, 500);
+    if (!taskSource || !taskId) {
+      return NextResponse.json({ error: 'taskSource and taskId are required for hide_task_request' }, { status: 400 });
+    }
+    if (!ALLOWED_HIDE_REASON_CODES.has(body.requestType)) {
+      return NextResponse.json({ error: `requestType must be one of: ${[...ALLOWED_HIDE_REASON_CODES].join(', ')}` }, { status: 400 });
+    }
+    if (body.requestType === 'other' && !summary) {
+      return NextResponse.json({ error: 'summary (free-text reason) is required when requestType=other' }, { status: 400 });
+    }
+  }
+
   const insert = await query(
     `INSERT INTO hr_hub_request
        (flow, priority,
@@ -255,13 +284,15 @@ export async function POST(req) {
         title, summary, ideal_solution,
         links, attachments,
         created_by_email, created_by_name,
-        team_lead_email, cc_email)
+        team_lead_email, cc_email,
+        task_source, task_id, task_url, task_subject)
      VALUES ($1, $2,
              $3, $4, $5,
              $6, $7, $8,
              $9::jsonb, $10::jsonb,
              $11, $12,
-             $13, $14)
+             $13, $14,
+             $15, $16, $17, $18)
      RETURNING id, status, created_at`,
     [
       flow, priority,
@@ -270,6 +301,7 @@ export async function POST(req) {
       JSON.stringify(links), JSON.stringify(attachments),
       callerEmail, callerName,
       teamLeadEmail || null, ccEmail || null,
+      taskSource, taskId, taskUrl, taskSubject,
     ],
   );
 
