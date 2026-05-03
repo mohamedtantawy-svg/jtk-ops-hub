@@ -26,6 +26,7 @@ import {
 // visibility for onboarding/offboarding/amendments/redlines).
 import {
   scopeOnboardingPeople,
+  scopePausedOnboarding,
   scopeOffboardingCases,
   scopeAmendmentRequests,
   scopeRedlineRequests,
@@ -147,7 +148,17 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // ── PERMISSIONS-BASED SCOPE ──────────────────────────────────────────
   const perms=useContext(PermissionsContext);
   const settings=useContext(SettingsContext);
-  const { deelData, jiraData, slackData, queueUnified } = useContext(IntegrationsContext);
+  const { deelData, jiraData, slackData, queueUnified, hiddenTasks } = useContext(IntegrationsContext);
+  // Hide-task filter — mirrors the Queue's behaviour so home aggregates
+  // exclude rows the manager has approved to hide. Without this, Home
+  // surfaces a count that includes hidden rows (e.g. 797 workbench) while
+  // Workspace shows the visible-only count (740) — F3 in the 2026-05-03
+  // live audit.
+  const isHiddenKey = useCallback((source, id) => {
+    if (!source || !id) return false;
+    const key = `${String(source).toLowerCase()}:${String(id)}`;
+    return !!(hiddenTasks?.hiddenKeys?.has(key));
+  }, [hiddenTasks?.hiddenKeys]);
 
   // ── Deel API hooks — read the shared, App.jsx-mounted instance ──────────
   // Mounting our own hooks here used to fire 4× initial requests across
@@ -187,13 +198,18 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // SLA table. Falls back to the spec defaults baked into the normalizer
   // until the hook resolves.
   const { sla: queueSla } = useQueueSlaSettings();
-  const onboardingRowsAll = useMemo(() => normalizeOnboarding(onboardingData.items, queueSla), [onboardingData.items, queueSla]);
-  const pausedOnboardingRowsAll = useMemo(() => normalizePausedOnboarding(pausedOnboardingData.items, queueSla), [pausedOnboardingData.items, queueSla]);
-  const offboardingRowsAll = useMemo(() => normalizeOffboarding(offboardingData.items, queueSla), [offboardingData.items, queueSla]);
-  const amendmentRowsAll = useMemo(() => normalizeAmendments(changeRequestData.amendments, queueSla), [changeRequestData.amendments, queueSla]);
-  const redlineRowsAll = useMemo(() => normalizeRedlines(changeRequestData.redlines, queueSla), [changeRequestData.redlines, queueSla]);
-  const workbenchRowsAll = useMemo(() => normalizeWorkbench(workbenchData.tasks, queueSla), [workbenchData.tasks, queueSla]);
-  const incentivePlanRowsAll = useMemo(() => normalizeIncentivePlans(incentivePlansData.items, queueSla), [incentivePlansData.items, queueSla]);
+  // Apply hide-task filter at normalization time — same pattern as Queue.jsx
+  // so Home and Workspace show the same row population per source. The
+  // 2026-05-03 live audit found Home Workbench=797 while Workspace=740
+  // because Briefing wasn't filtering hidden rows; the gap matched the 57
+  // hide-task entries managers had approved.
+  const onboardingRowsAll = useMemo(() => normalizeOnboarding(onboardingData.items, queueSla).filter(r => !isHiddenKey('onboarding', r.id)), [onboardingData.items, queueSla, isHiddenKey]);
+  const pausedOnboardingRowsAll = useMemo(() => normalizePausedOnboarding(pausedOnboardingData.items, queueSla).filter(r => !isHiddenKey('paused_onboarding', r.id) && !isHiddenKey('onboarding', r.id)), [pausedOnboardingData.items, queueSla, isHiddenKey]);
+  const offboardingRowsAll = useMemo(() => normalizeOffboarding(offboardingData.items, queueSla).filter(r => !isHiddenKey('offboarding', r.id)), [offboardingData.items, queueSla, isHiddenKey]);
+  const amendmentRowsAll = useMemo(() => normalizeAmendments(changeRequestData.amendments, queueSla).filter(r => !isHiddenKey('amendments', r.id)), [changeRequestData.amendments, queueSla, isHiddenKey]);
+  const redlineRowsAll = useMemo(() => normalizeRedlines(changeRequestData.redlines, queueSla).filter(r => !isHiddenKey('redlines', r.id)), [changeRequestData.redlines, queueSla, isHiddenKey]);
+  const workbenchRowsAll = useMemo(() => normalizeWorkbench(workbenchData.tasks, queueSla).filter(r => !isHiddenKey('workbench', r.id)), [workbenchData.tasks, queueSla, isHiddenKey]);
+  const incentivePlanRowsAll = useMemo(() => normalizeIncentivePlans(incentivePlansData.items, queueSla).filter(r => !isHiddenKey('incentive_plans', r.id)), [incentivePlansData.items, queueSla, isHiddenKey]);
 
   // Source-row scoping — delegate to the Queue's single source of truth so
   // "Active Requests" here always matches what the user sees in each tab.
@@ -202,7 +218,23 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   //   • Workbench is assignee-only (admin bypasses).
   // Admins/directors (isAllScope) short-circuit through these functions, so
   // they see everything — exec totals roll up correctly.
-  const onboardingRows = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user), [onboardingRowsAll, user]);
+  // Onboarding pill = active onboarding ∪ paused onboarding (de-duped),
+  // matching the Workspace tab's "Onboarding" source which combines both
+  // streams under one pill. Without this Home reported 115 (active only)
+  // while Workspace reported 330 (active + 215 paused) — F3 in the
+  // 2026-05-03 live audit.
+  const onboardingActionRows = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user), [onboardingRowsAll, user]);
+  const pausedOnboardingRows = useMemo(() => scopePausedOnboarding(pausedOnboardingRowsAll, user), [pausedOnboardingRowsAll, user]);
+  const onboardingRows = useMemo(() => {
+    const seen = new Set();
+    const merged = [];
+    for (const r of [...onboardingActionRows, ...pausedOnboardingRows]) {
+      const k = r?.id != null ? String(r.id) : r;
+      if (seen.has(k)) continue;
+      seen.add(k); merged.push(r);
+    }
+    return merged;
+  }, [onboardingActionRows, pausedOnboardingRows]);
   const offboardingRows = useMemo(() => scopeOffboardingCases(offboardingRowsAll, user), [offboardingRowsAll, user]);
   const amendmentRows = useMemo(() => scopeAmendmentRequests(amendmentRowsAll, user), [amendmentRowsAll, user]);
   const redlineRows = useMemo(() => scopeRedlineRequests(redlineRowsAll, user), [redlineRowsAll, user]);
@@ -757,7 +789,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
 
   // ── Deel-style card wrapper ──────────────────────────────────────────
   const DeelCard=({children,style,...props})=>(
-    <div style={{background:'white',border:'1px solid #e8e8e8',borderRadius:16,padding:24,transition:'box-shadow .2s',...style}}
+    <div style={{background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16,padding:24,transition:'box-shadow .2s',...style}}
       onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)'}
       onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}
       {...props}>
@@ -849,7 +881,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                     )}
                   </div>
                   {showMocPicker&&(
-                    <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,background:'#ffffff',borderRadius:14,border:'1px solid #e8e8e8',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'6px 0',minWidth:300,maxHeight:360,overflowY:'auto',zIndex:1000}}>
+                    <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,background:'var(--surface)',borderRadius:14,border:'1px solid #e8e8e8',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'6px 0',minWidth:300,maxHeight:360,overflowY:'auto',zIndex:1000}}>
                       <div style={{padding:'6px 16px 8px',fontSize:10,fontWeight:700,color:'#bebebe',letterSpacing:'.04em',textTransform:'uppercase'}}>Select Manager On Call</div>
                       {mocCandidates.map(m=>(
                           <div
@@ -909,7 +941,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   <div style={{fontSize:7,color:'#9e9e9e',fontWeight:600,letterSpacing:'.04em',marginTop:1}}>HEALTH</div>
                 </div>
               </div>
-              {showHealthBreakdown&&healthPopoverPos&&<div style={{position:'fixed',top:healthPopoverPos.top,right:healthPopoverPos.right,width:300,background:'#ffffff',borderRadius:16,border:'1px solid #e8e8e8',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'18px 18px 14px',zIndex:9999,animation:'fadeSlide .2s ease'}}>
+              {showHealthBreakdown&&healthPopoverPos&&<div style={{position:'fixed',top:healthPopoverPos.top,right:healthPopoverPos.right,width:300,background:'var(--surface)',borderRadius:16,border:'1px solid #e8e8e8',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'18px 18px 14px',zIndex:9999,animation:'fadeSlide .2s ease'}}>
                 <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
                   <div style={{width:8,height:8,borderRadius:'50%',background:hColor}}></div>
                   <span style={{fontSize:14,fontWeight:700,color:'#1b1b1b'}}>Health Breakdown</span>
@@ -1027,7 +1059,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
 
                 {/* Right: icon badge */}
                 <div style={{position:'relative',zIndex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:8,flexShrink:0}}>
-                  <div style={{width:56,height:56,borderRadius:16,background:'white',boxShadow:'0 2px 8px rgba(0,0,0,0.06)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                  <div style={{width:56,height:56,borderRadius:16,background:'var(--surface)',boxShadow:'0 2px 8px rgba(0,0,0,0.06)',display:'flex',alignItems:'center',justifyContent:'center'}}>
                     <i className={bt.icon} style={{fontSize:24,color:bt.iconBg}}></i>
                   </div>
                   <div style={{fontSize:10,fontWeight:600,color:bt.accent,textTransform:'uppercase',letterSpacing:'.04em'}}>
@@ -1045,7 +1077,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               {total>1&&(
                 <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:10,padding:'10px 0 2px'}}>
                   {/* Left arrow */}
-                  <button onClick={goPrev} style={{width:30,height:30,borderRadius:'50%',border:'1px solid #e0e0e0',background:'white',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',color:'#616161',fontSize:13,transition:'all .15s'}}
+                  <button onClick={goPrev} style={{width:30,height:30,borderRadius:'50%',border:'1px solid #e0e0e0',background:'var(--surface)',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',color:'#616161',fontSize:13,transition:'all .15s'}}
                     onMouseEnter={e=>{e.currentTarget.style.background='#f5f5f5';}} onMouseLeave={e=>{e.currentTarget.style.background='white';}}>
                     <i className="bi-chevron-left"></i>
                   </button>
@@ -1061,7 +1093,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   </div>
 
                   {/* Right arrow */}
-                  <button onClick={goNext} style={{width:30,height:30,borderRadius:'50%',border:'1px solid #e0e0e0',background:'white',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',color:'#616161',fontSize:13,transition:'all .15s'}}
+                  <button onClick={goNext} style={{width:30,height:30,borderRadius:'50%',border:'1px solid #e0e0e0',background:'var(--surface)',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',color:'#616161',fontSize:13,transition:'all .15s'}}
                     onMouseEnter={e=>{e.currentTarget.style.background='#f5f5f5';}} onMouseLeave={e=>{e.currentTarget.style.background='white';}}>
                     <i className="bi-chevron-right"></i>
                   </button>
@@ -1237,7 +1269,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             const amendmentsPending=wbNew.filter(t=>/(amend|change|update|salary|contract)/i.test(t.subject||t.type||'')).length||Math.max(0,Math.floor(wbNew.length*0.3));
             const complianceDocs=tasks.filter(t=>t.source==='workbench'&&t.status!=='resolved'&&/(compliance|doc|legal|sign)/i.test(t.subject||t.type||'')).length||3;
             return(
-              <div style={{marginTop:16,background:'white',border:'1px solid #e8e8e8',borderRadius:16,padding:'16px 20px',boxShadow:'0 1px 2px rgba(0,0,0,0.04)'}}>
+              <div style={{marginTop:16,background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16,padding:'16px 20px',boxShadow:'0 1px 2px rgba(0,0,0,0.04)'}}>
                 <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14}}>
                   <div style={{width:28,height:28,background:'#f7f5f2',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center'}}>
                     <i className="bi-tools" style={{color:'#616161',fontSize:12}}></i>
@@ -1268,7 +1300,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
           })()}
 
           {/* Volume sparkline for exec */}
-          {settings.briefing_show_volume_trend!==false&&<div style={{display:'flex',alignItems:'center',gap:14,marginTop:16,padding:'10px 16px',borderRadius:12,background:'white',border:'1px solid #e8e8e8'}}>
+          {settings.briefing_show_volume_trend!==false&&<div style={{display:'flex',alignItems:'center',gap:14,marginTop:16,padding:'10px 16px',borderRadius:12,background:'var(--surface)',border:'1px solid #e8e8e8'}}>
             <svg width={spW} height={spH} viewBox={`0 0 ${spW} ${spH}`} style={{overflow:'visible'}}>
               <defs><linearGradient id="spGradEx" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--g)" stopOpacity=".15"/><stop offset="100%" stopColor="var(--g)" stopOpacity="0"/></linearGradient></defs>
               <path d={sparkPath+` L${spW},${spH} L0,${spH} Z`} fill="url(#spGradEx)"/>
@@ -1286,7 +1318,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             LIVE INTEGRATION DATA — shows real counts when APIs are connected
             ═════════════════════════════════════════════════════════════════ */}
         {(deelData?.isAvailable||jiraData?.isAvailable||slackData?.isAvailable)&&(
-          <div style={{marginTop:16,background:'white',border:'1px solid #e8e8e8',borderRadius:16,padding:'16px 20px',boxShadow:'0 1px 2px rgba(0,0,0,0.04)'}}>
+          <div style={{marginTop:16,background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16,padding:'16px 20px',boxShadow:'0 1px 2px rgba(0,0,0,0.04)'}}>
             <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14}}>
               <div style={{width:28,height:28,background:'#dcfce7',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center'}}>
                 <i className="bi-cloud-arrow-down-fill" style={{color:'#16a34a',fontSize:12}}></i>
@@ -1412,7 +1444,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
         {/* ══════════════════════════════════════════════════════════════════
             LEAD METRICS — compact strip
         ══════════════════════════════════════════════════════════════════ */}
-        {isTeamScope&&<div style={{margin:'12px 24px 0',background:'white',border:'1px solid #e8e8e8',borderRadius:16,padding:'12px 20px'}}>
+        {isTeamScope&&<div style={{margin:'12px 24px 0',background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16,padding:'12px 20px'}}>
           {(()=>{
             const inAudLead=(c)=>matchesAudience(c.target,user.team)||(c.author&&c.author.id===user.id);
             const unackedCount=comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='alert'||c.type==='guidance')&&!isAckedByMe(c)&&inAudLead(c)).length;
@@ -1652,7 +1684,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 </div>
                 <div style={{padding:'14px 18px',display:'flex',flexDirection:'column',gap:10}}>
                   {rStats.map((r,ri)=>(
-                    <div key={r.r} style={{display:'flex',alignItems:'center',gap:12,padding:'12px 14px',borderRadius:12,border:'1px solid #e8e8e8',background:'white',transition:'box-shadow .15s'}}
+                    <div key={r.r} style={{display:'flex',alignItems:'center',gap:12,padding:'12px 14px',borderRadius:12,border:'1px solid #e8e8e8',background:'var(--surface)',transition:'box-shadow .15s'}}
                       onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)'} onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}>
                       <div style={{minWidth:56}}>
                         <div style={{display:'flex',alignItems:'center',gap:5}}><i className={regionIcons[r.r]||'bi-globe'} style={{fontSize:12,color:r.wc}}></i><span style={{fontSize:15,fontWeight:700,color:'#1b1b1b'}}>{r.r}</span></div>
@@ -1832,7 +1864,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(95px,1fr))',gap:10}}>
                     {links.map(a=>(
                       <button key={a.v} onClick={()=>setView(a.v)} style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:6,padding:'14px 8px',cursor:'pointer',fontSize:12,fontWeight:600,color:'#1b1b1b',transition:'all .2s',
-                        background:'white',border:'1px solid #e8e8e8',borderRadius:16}}
+                        background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16}}
                         onMouseEnter={e=>{e.currentTarget.style.borderColor=a.c;e.currentTarget.style.color=a.c;e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)';}} onMouseLeave={e=>{e.currentTarget.style.borderColor='#e8e8e8';e.currentTarget.style.color='#1b1b1b';e.currentTarget.style.transform='none';e.currentTarget.style.boxShadow='none';}}>
                         <div style={{width:34,height:34,borderRadius:10,background:a.bg,display:'flex',alignItems:'center',justifyContent:'center'}}>
                           <i className={a.icon} style={{fontSize:15,color:a.c}}></i>

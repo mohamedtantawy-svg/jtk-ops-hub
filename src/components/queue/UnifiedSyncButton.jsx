@@ -353,7 +353,7 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
             position: 'absolute',
             top: 'calc(100% + 6px)', right: 0,
             width: 320,
-            background: 'white',
+            background: 'var(--surface)',
             border: '1px solid #e8e8e8',
             borderRadius: 12,
             boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
@@ -465,7 +465,7 @@ function SourceRow({ source, now }) {
           title={error ? `Retry — ${error}` : 'Refresh this source'}
           style={{
             padding: '2px 6px', borderRadius: 6, border: '1px solid #e8e8e8',
-            background: 'white', color: '#616161',
+            background: 'var(--surface)', color: '#616161',
             fontSize: 10, fontWeight: 600, cursor: isRefreshing ? 'wait' : 'pointer',
             display: 'inline-flex', alignItems: 'center',
           }}>

@@ -406,7 +406,7 @@ const EscalationsView = ({ escalations, setEscalations, currentUser, onNewEscala
                   style={{ height:32, padding:'0 16px', borderRadius:128, border:'none', background:'#1b1b1b', color:'white', fontSize:12, fontWeight:700, cursor:replyText[esc.id]?.trim()?'pointer':'not-allowed', opacity:replyText[esc.id]?.trim()?1:0.45, display:'flex', alignItems:'center', gap:6 }}>
                   <i className="bi-send-fill" style={{ fontSize:10 }}/>Send Response
                 </button>
-                <button onClick={() => setReplyOpen(null)} style={{ height:32, padding:'0 12px', borderRadius:128, border:'1px solid #e8e8e8', background:'white', color:'#616161', fontSize:12, cursor:'pointer' }}>
+                <button onClick={() => setReplyOpen(null)} style={{ height:32, padding:'0 12px', borderRadius:128, border:'1px solid #e8e8e8', background:'var(--surface)', color:'#616161', fontSize:12, cursor:'pointer' }}>
                   Cancel
                 </button>
               </div>
@@ -421,7 +421,7 @@ const EscalationsView = ({ escalations, setEscalations, currentUser, onNewEscala
     <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
 
       {/* Single consolidated filter bar */}
-      <div style={{ padding:'12px 24px', background:'white', borderBottom:'1px solid #e8e8e8', display:'flex', alignItems:'center', gap:12, flexWrap:'wrap', flexShrink:0 }}>
+      <div style={{ padding:'12px 24px', background:'var(--surface)', borderBottom:'1px solid #e8e8e8', display:'flex', alignItems:'center', gap:12, flexWrap:'wrap', flexShrink:0 }}>
         {/* Source filters */}
         <div style={{ display:'flex', gap:4, alignItems:'center' }}>
           {[

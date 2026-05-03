@@ -51,7 +51,7 @@ export default function ProcessingTimeByTool({ tasks = [] }) {
     return (
       <div
         style={{
-          background: '#fff',
+          background: 'var(--surface)',
           border: '1px solid #e8e8e8',
           borderRadius: 16,
           padding: 20,
@@ -68,7 +68,7 @@ export default function ProcessingTimeByTool({ tasks = [] }) {
   return (
     <div
       style={{
-        background: '#fff',
+        background: 'var(--surface)',
         border: '1px solid #e8e8e8',
         borderRadius: 16,
         padding: 20,

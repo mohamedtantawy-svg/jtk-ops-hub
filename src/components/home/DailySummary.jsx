@@ -156,7 +156,7 @@ const DailySummary = ({ tasks = [], escalations = [], scope = 'team' }) => {
               key={item.label}
               title={tooltip}
               style={{
-                flex: 1, background: 'white', borderRadius: 10, padding: '10px 8px',
+                flex: 1, background: 'var(--surface)', borderRadius: 10, padding: '10px 8px',
                 textAlign: 'center', border: '1px solid #E5E7EB'
               }}
             >
@@ -169,7 +169,7 @@ const DailySummary = ({ tasks = [], escalations = [], scope = 'team' }) => {
         {/* Completion gauge — share of today's work that's been resolved. */}
         <div
           style={{
-            flex: 1, background: 'white', borderRadius: 10, padding: '10px 8px',
+            flex: 1, background: 'var(--surface)', borderRadius: 10, padding: '10px 8px',
             textAlign: 'center', border: '1px solid #E5E7EB'
           }}
           title="Share of today's work (incoming + carried over) that's been resolved today"

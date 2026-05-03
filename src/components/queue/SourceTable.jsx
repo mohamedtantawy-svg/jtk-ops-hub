@@ -390,7 +390,7 @@ export default function SourceTable({
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#fafaf9', overflow: 'hidden' }}>
       {/* ── Filter bar ── */}
       {!hideFilterBar && (
-      <div style={{ padding: '10px 24px', background: 'white', borderBottom: '1px solid #f0efed', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+      <div style={{ padding: '10px 24px', background: 'var(--surface)', borderBottom: '1px solid #f0efed', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         {!hideStatusPills && <>
           <StatusPill label="All" count={counts.total} active={!statusFilter} onClick={() => setStatusFilter(null)} color="#1b1b1b" />
           {counts.critical > 0 && <StatusPill label="Critical" count={counts.critical} active={statusFilter === 'critical'} onClick={() => setStatusFilter(statusFilter === 'critical' ? null : 'critical')} color="#d42d35" />}
@@ -438,7 +438,7 @@ export default function SourceTable({
           <div style={{ fontSize: 15, fontWeight: 600, color: '#1b1b1b', marginBottom: 6 }}>Failed to load</div>
           <div style={{ fontSize: 13, color: '#9e9e9e', marginBottom: 16, maxWidth: 480 }}>{error}</div>
           {onRefresh && (
-            <button onClick={onRefresh} style={{ padding: '8px 20px', borderRadius: 128, border: '1px solid #e8e8e8', background: 'white', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#1b1b1b' }}>
+            <button onClick={onRefresh} style={{ padding: '8px 20px', borderRadius: 128, border: '1px solid #e8e8e8', background: 'var(--surface)', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#1b1b1b' }}>
               <i className="bi-arrow-clockwise" style={{ marginRight: 6 }} />Retry
             </button>
           )}
@@ -971,6 +971,6 @@ function SortTh({ col, label, sortCol, sortDir, onSort, style }) {
 }
 
 // ── Styles ──
-const iconBtnStyle = { width: 32, height: 32, borderRadius: 8, border: '1px solid #e8e8e8', background: 'white', color: '#9e9e9e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+const iconBtnStyle = { width: 32, height: 32, borderRadius: 8, border: '1px solid #e8e8e8', background: 'var(--surface)', color: '#9e9e9e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
 const thStyle = { padding: '10px 12px', fontSize: 10, fontWeight: 600, color: '#9e9e9e', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center', whiteSpace: 'nowrap', borderBottom: '1px solid #e8e8e8' };
 const tdStyle = { padding: '8px 12px', textAlign: 'center', verticalAlign: 'middle' };

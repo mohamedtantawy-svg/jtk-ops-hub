@@ -63,7 +63,7 @@ const GlobalSearch=({tasks,setView,setSelTask,onClose})=>{
   return(
     <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',zIndex:800,display:'flex',alignItems:'flex-start',justifyContent:'center',paddingTop:'15vh',backdropFilter:'blur(4px)'}} role="dialog" aria-modal="true" aria-label="Global search" onClick={onClose}>
       <style>{`@keyframes modalIn { from { opacity:0; transform:scale(0.96) translateY(8px); } to { opacity:1; transform:scale(1) translateY(0); } }`}</style>
-      <div style={{background:'white',borderRadius:'var(--radius-2xl)',width:'100%',maxWidth:560,boxShadow:'0 4px 24px rgba(0,0,0,0.15)',overflow:'hidden',display:'flex',flexDirection:'column',maxHeight:'60vh',animation:'modalIn 0.2s cubic-bezier(0.16,1,0.3,1) both'}} onClick={e=>e.stopPropagation()}>
+      <div style={{background:'var(--surface)',borderRadius:'var(--radius-2xl)',width:'100%',maxWidth:560,boxShadow:'0 4px 24px rgba(0,0,0,0.15)',overflow:'hidden',display:'flex',flexDirection:'column',maxHeight:'60vh',animation:'modalIn 0.2s cubic-bezier(0.16,1,0.3,1) both'}} onClick={e=>e.stopPropagation()}>
         <div style={{display:'flex',alignItems:'center',gap:10,padding:'16px 20px',borderBottom:'1px solid #e8e8e8',flexShrink:0}}>
           <i className="bi-search" style={{color:'#9e9e9e',fontSize:16,flexShrink:0}}></i>
           <input

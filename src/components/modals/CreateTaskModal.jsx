@@ -14,7 +14,7 @@ const CreateTaskModal=({onConfirm,onClose,currentUser})=>{
   const countries=Object.keys(FLAGS);
   const sources=Object.entries(TOOLS).filter(([k])=>k!=='slack');
   const valid=form.subject.trim().length>3 && !!form.assigneeId;
-  const sel={width:'100%',padding:'8px 12px',border:'1px solid #e8e8e8',borderRadius:8,fontSize:13,color:'#1b1b1b',background:'white',cursor:'pointer'};
+  const sel={width:'100%',padding:'8px 12px',border:'1px solid #e8e8e8',borderRadius:8,fontSize:13,color:'#1b1b1b',background:'var(--surface)',cursor:'pointer'};
   const labelStyle={fontSize:12,fontWeight:600,color:'#616161',letterSpacing:'0.05em',display:'block',marginBottom:4};
 
   const handleSubmit=()=>{
@@ -30,7 +30,7 @@ const CreateTaskModal=({onConfirm,onClose,currentUser})=>{
   return(
     <div role="dialog" aria-modal="true" aria-label="Create Task" style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',zIndex:10000,display:'flex',alignItems:'center',justifyContent:'center',padding:16,backdropFilter:'blur(4px)'}} onClick={onClose}>
       <style>{`@keyframes modalIn { from { opacity:0; transform:scale(0.96) translateY(8px); } to { opacity:1; transform:scale(1) translateY(0); } }`}</style>
-      <div style={{background:'white',borderRadius:16,width:'100%',maxWidth:520,boxShadow:'0 4px 24px rgba(0,0,0,0.15)',overflow:'hidden',maxHeight:'90vh',display:'flex',flexDirection:'column',animation:'modalIn 0.2s cubic-bezier(0.16,1,0.3,1) both'}} onClick={e=>e.stopPropagation()}>
+      <div style={{background:'var(--surface)',borderRadius:16,width:'100%',maxWidth:520,boxShadow:'0 4px 24px rgba(0,0,0,0.15)',overflow:'hidden',maxHeight:'90vh',display:'flex',flexDirection:'column',animation:'modalIn 0.2s cubic-bezier(0.16,1,0.3,1) both'}} onClick={e=>e.stopPropagation()}>
         <div style={{padding:'24px 24px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0,borderBottom:'1px solid var(--border)',paddingBottom:'var(--space-4)',marginBottom:'var(--space-4)'}}>
           <div style={{display:'flex',alignItems:'center',gap:10}}>
             <div style={{width:36,height:36,background:'#e3f2fd',borderRadius:9,display:'flex',alignItems:'center',justifyContent:'center'}}><i className="bi-plus-circle-fill" style={{color:'#1565c0',fontSize:16}}></i></div>
@@ -72,7 +72,7 @@ const CreateTaskModal=({onConfirm,onClose,currentUser})=>{
           <div><label style={labelStyle}>DETAILS (OPTIONAL)</label><textarea className="note-input" value={form.body} onChange={e=>upd('body',e.target.value)} rows={3} placeholder="Employee name, ticket reference, additional context…"/></div>
         </div>
         <div style={{padding:'0 24px 24px 24px',display:'flex',gap:8,justifyContent:'flex-end',flexShrink:0,borderTop:'1px solid var(--border)',paddingTop:'var(--space-4)',marginTop:'var(--space-4)'}}>
-          <button onClick={onClose} style={{background:'white',border:'1px solid #dedede',color:'#1b1b1b',borderRadius:128,padding:'10px 24px',fontSize:13,fontWeight:500,cursor:'pointer'}}>Cancel</button>
+          <button onClick={onClose} style={{background:'var(--surface)',border:'1px solid #dedede',color:'#1b1b1b',borderRadius:128,padding:'10px 24px',fontSize:13,fontWeight:500,cursor:'pointer'}}>Cancel</button>
           <button disabled={submitting} onClick={handleSubmit} style={{background:valid&&!submitting?'#1b1b1b':'#dedede',color:'white',border:'none',borderRadius:128,padding:'10px 24px',fontSize:13,fontWeight:500,cursor:submitting?'not-allowed':'pointer',display:'flex',alignItems:'center',gap:5,opacity:submitting?.6:1}}><i className="bi-plus-circle-fill" style={{fontSize:13}}></i>{submitting?'Creating…':'Create Task'}</button>
         </div>
       </div>

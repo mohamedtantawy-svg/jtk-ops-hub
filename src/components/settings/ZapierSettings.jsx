@@ -304,13 +304,13 @@ const ZapierSettings = ({ addToast, tasks, setTasks }) => {
             <span style={{ fontSize: 16, fontWeight: 700, color: '#1b1b1b' }}>Zapier Integrations</span>
           </div>
           <div style={{ position: 'relative' }}>
-            <button onClick={() => setShowAddPicker(!showAddPicker)} style={{ width: '100%', height: 36, borderRadius: 10, border: '1px dashed #c4c4c4', background: 'white', color: '#1f74b3', fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, transition: 'all .15s' }}
+            <button onClick={() => setShowAddPicker(!showAddPicker)} style={{ width: '100%', height: 36, borderRadius: 10, border: '1px dashed #c4c4c4', background: 'var(--surface)', color: '#1f74b3', fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, transition: 'all .15s' }}
               onMouseEnter={e => { e.currentTarget.style.background = '#e8f0fe'; e.currentTarget.style.borderColor = '#1f74b3'; }}
               onMouseLeave={e => { e.currentTarget.style.background = 'white'; e.currentTarget.style.borderColor = '#c4c4c4'; }}>
               <i className="bi-plus-lg" style={{ fontSize: 12 }}></i> Add Integration
             </button>
             {showAddPicker && (
-              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4, background: 'white', border: '1px solid #e8e8e8', borderRadius: 12, boxShadow: '0 8px 24px rgba(0,0,0,.12)', zIndex: 50, maxHeight: 320, overflowY: 'auto', padding: '6px 0' }}>
+              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4, background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 12, boxShadow: '0 8px 24px rgba(0,0,0,.12)', zIndex: 50, maxHeight: 320, overflowY: 'auto', padding: '6px 0' }}>
                 {Object.entries(ZAPIER_SOURCES).map(([key, src]) => (
                   <button key={key} onClick={() => { addIntegration(key); setShowAddPicker(false); }}
                     style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '8px 14px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, color: '#1b1b1b', transition: 'background .1s' }}
@@ -395,7 +395,7 @@ const ZapierSettings = ({ addToast, tasks, setTasks }) => {
               ))}
               <div style={{ flex: 1 }}></div>
               <div style={{ display: 'flex', gap: 4, paddingBottom: 6 }}>
-                <button onClick={() => duplicateIntegration(selected)} title="Duplicate" style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #e8e8e8', background: 'white', color: '#616161', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 }}><i className="bi-copy"></i></button>
+                <button onClick={() => duplicateIntegration(selected)} title="Duplicate" style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #e8e8e8', background: 'var(--surface)', color: '#616161', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 }}><i className="bi-copy"></i></button>
                 <button onClick={() => { if (confirm('Delete this integration? This cannot be undone.')) deleteIntegration(selected.id); }} title="Delete" style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #FCA5A5', background: '#ffe2de', color: '#d42d35', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 }}><i className="bi-trash3"></i></button>
               </div>
             </div>
@@ -487,7 +487,7 @@ const GeneralTab = ({ int, update, webhookBaseUrl, copyText, copied, showSecret,
             {showSecret[int.id] ? int.webhookSecret : '••••••••••••••••••••••••'}
           </div>
           <button onClick={() => setShowSecret(prev => ({ ...prev, [int.id]: !prev[int.id] }))}
-            style={{ width: 38, height: 38, borderRadius: 10, border: '1px solid #e8e8e8', background: 'white', color: '#616161', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>
+            style={{ width: 38, height: 38, borderRadius: 10, border: '1px solid #e8e8e8', background: 'var(--surface)', color: '#616161', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>
             <i className={showSecret[int.id] ? 'bi-eye-slash' : 'bi-eye'}></i>
           </button>
           <button onClick={() => copyText(int.webhookSecret, 'secret')}
@@ -495,7 +495,7 @@ const GeneralTab = ({ int, update, webhookBaseUrl, copyText, copied, showSecret,
             <i className={copied === 'secret' ? 'bi-check-lg' : 'bi-clipboard'}></i>
           </button>
           <button onClick={() => { if (confirm('Regenerate secret? Existing Zapier zaps using the old secret will stop working.')) update({ webhookSecret: genSecret() }); }}
-            style={{ height: 38, padding: '0 12px', borderRadius: 10, border: '1px solid #FCA5A5', background: 'white', color: '#d42d35', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
+            style={{ height: 38, padding: '0 12px', borderRadius: 10, border: '1px solid #FCA5A5', background: 'var(--surface)', color: '#d42d35', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}>
             <i className="bi-arrow-clockwise" style={{ fontSize: 11 }}></i>Rotate
           </button>
         </div>
@@ -771,7 +771,7 @@ const MappingTab = ({ int, update }) => {
                 </div>
                 {targetDef?.options ? (
                   <select value={m.defaultValue || ''} onChange={e => updateMapping(idx, 'defaultValue', e.target.value)}
-                    style={{ height: 34, border: '1px solid #e8e8e8', borderRadius: 8, padding: '0 8px', fontSize: 13, outline: 'none', fontFamily: 'inherit', color: m.defaultValue ? '#1b1b1b' : '#9e9e9e', cursor: 'pointer', background: 'white' }}>
+                    style={{ height: 34, border: '1px solid #e8e8e8', borderRadius: 8, padding: '0 8px', fontSize: 13, outline: 'none', fontFamily: 'inherit', color: m.defaultValue ? '#1b1b1b' : '#9e9e9e', cursor: 'pointer', background: 'var(--surface)' }}>
                     <option value="">No default</option>
                     {targetDef.options.map(o => <option key={o} value={o}>{o}</option>)}
                   </select>
@@ -851,19 +851,19 @@ const MappingTab = ({ int, update }) => {
                   <div style={{ flex: 1 }}>
                     <label style={{ fontSize: 11, fontWeight: 600, color: '#6b3fa0', display: 'block', marginBottom: 4 }}>Field label</label>
                     <input value={newFieldName} onChange={e => { setNewFieldName(e.target.value); setNewFieldKey(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')); }}
-                      placeholder="e.g. Employee ID" autoFocus style={{ width: '100%', height: 32, border: '1px solid #d4bfea', borderRadius: 8, padding: '0 10px', fontSize: 13, outline: 'none', fontFamily: 'inherit', color: '#1b1b1b', boxSizing: 'border-box', background: 'white' }} />
+                      placeholder="e.g. Employee ID" autoFocus style={{ width: '100%', height: 32, border: '1px solid #d4bfea', borderRadius: 8, padding: '0 10px', fontSize: 13, outline: 'none', fontFamily: 'inherit', color: '#1b1b1b', boxSizing: 'border-box', background: 'var(--surface)' }} />
                   </div>
                   <div style={{ flex: 1 }}>
                     <label style={{ fontSize: 11, fontWeight: 600, color: '#6b3fa0', display: 'block', marginBottom: 4 }}>Field key <span style={{ fontWeight: 400, color: '#9e9e9e' }}>(auto-generated)</span></label>
                     <input value={newFieldKey} onChange={e => setNewFieldKey(e.target.value.replace(/[^a-zA-Z0-9_]/g, ''))}
-                      placeholder="employee_id" style={{ width: '100%', height: 32, border: '1px solid #d4bfea', borderRadius: 8, padding: '0 10px', fontSize: 13, outline: 'none', fontFamily: 'SFMono-Regular, Menlo, monospace', color: '#1b1b1b', boxSizing: 'border-box', background: 'white' }} />
+                      placeholder="employee_id" style={{ width: '100%', height: 32, border: '1px solid #d4bfea', borderRadius: 8, padding: '0 10px', fontSize: 13, outline: 'none', fontFamily: 'SFMono-Regular, Menlo, monospace', color: '#1b1b1b', boxSizing: 'border-box', background: 'var(--surface)' }} />
                   </div>
                   <button onClick={() => createCustomField(idx)} disabled={!newFieldName.trim()}
                     style={{ height: 32, padding: '0 14px', borderRadius: 8, border: 'none', background: newFieldName.trim() ? '#6b3fa0' : '#d4bfea', color: 'white', fontSize: 12, fontWeight: 600, cursor: newFieldName.trim() ? 'pointer' : 'default', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}>
                     <i className="bi-plus-lg" style={{ fontSize: 10 }}></i>Create
                   </button>
                   <button onClick={() => setShowNewField(null)}
-                    style={{ height: 32, padding: '0 10px', borderRadius: 8, border: '1px solid #e8e8e8', background: 'white', color: '#616161', fontSize: 12, cursor: 'pointer' }}>
+                    style={{ height: 32, padding: '0 10px', borderRadius: 8, border: '1px solid #e8e8e8', background: 'var(--surface)', color: '#616161', fontSize: 12, cursor: 'pointer' }}>
                     Cancel
                   </button>
                 </div>
@@ -875,7 +875,7 @@ const MappingTab = ({ int, update }) => {
 
       <div style={{ display: 'flex', gap: 8 }}>
         <button onClick={addMapping}
-          style={{ height: 36, padding: '0 16px', borderRadius: 10, border: '1px dashed #c4c4c4', background: 'white', color: '#1f74b3', fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+          style={{ height: 36, padding: '0 16px', borderRadius: 10, border: '1px dashed #c4c4c4', background: 'var(--surface)', color: '#1f74b3', fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
           onMouseEnter={e => { e.currentTarget.style.background = '#e8f0fe'; e.currentTarget.style.borderColor = '#1f74b3'; }}
           onMouseLeave={e => { e.currentTarget.style.background = 'white'; e.currentTarget.style.borderColor = '#c4c4c4'; }}>
           <i className="bi-plus-lg" style={{ fontSize: 11 }}></i> Add field mapping
@@ -943,7 +943,7 @@ const RoutingTab = ({ int, update }) => {
           <div style={{ padding: '12px 14px', background: '#fafaf9', borderRadius: 10, border: '1px dashed #e8e8e8', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span style={{ fontSize: 12.5, color: '#9e9e9e' }}><i className="bi-check-circle" style={{ marginRight: 6 }}></i>No filters — all incoming events are processed</span>
             <button onClick={addFilter}
-              style={{ height: 28, padding: '0 12px', borderRadius: 7, border: '1px solid #e8e8e8', background: 'white', color: '#6b3fa0', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+              style={{ height: 28, padding: '0 12px', borderRadius: 7, border: '1px solid #e8e8e8', background: 'var(--surface)', color: '#6b3fa0', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
               <i className="bi-plus-lg" style={{ fontSize: 10 }}></i>Add filter
             </button>
           </div>
@@ -1312,7 +1312,7 @@ const ColumnsTab = ({ int, update }) => {
         </div>
         <button onClick={toggleGlobal}
           style={{ width: 44, height: 24, borderRadius: 12, border: 'none', background: useGlobal ? '#29811e' : '#dedede', cursor: 'pointer', position: 'relative', transition: 'background .2s', flexShrink: 0 }}>
-          <div style={{ width: 18, height: 18, borderRadius: '50%', background: 'white', position: 'absolute', top: 3, left: useGlobal ? 23 : 3, transition: 'left .2s', boxShadow: '0 1px 3px rgba(0,0,0,.15)' }}></div>
+          <div style={{ width: 18, height: 18, borderRadius: '50%', background: 'var(--surface)', position: 'absolute', top: 3, left: useGlobal ? 23 : 3, transition: 'left .2s', boxShadow: '0 1px 3px rgba(0,0,0,.15)' }}></div>
         </button>
       </div>
 
@@ -1326,7 +1326,7 @@ const ColumnsTab = ({ int, update }) => {
             </div>
             <button onClick={() => toggleCol(col.key)}
               style={{ width: 44, height: 24, borderRadius: 12, border: 'none', background: cols[col.key] ? '#29811e' : '#dedede', cursor: 'pointer', position: 'relative', transition: 'background .2s', flexShrink: 0 }}>
-              <div style={{ width: 18, height: 18, borderRadius: '50%', background: 'white', position: 'absolute', top: 3, left: cols[col.key] ? 23 : 3, transition: 'left .2s', boxShadow: '0 1px 3px rgba(0,0,0,.15)' }}></div>
+              <div style={{ width: 18, height: 18, borderRadius: '50%', background: 'var(--surface)', position: 'absolute', top: 3, left: cols[col.key] ? 23 : 3, transition: 'left .2s', boxShadow: '0 1px 3px rgba(0,0,0,.15)' }}></div>
             </button>
           </div>
         ))}
@@ -1351,7 +1351,7 @@ const ActivityTab = ({ int, update }) => {
         </div>
         {logs.length > 0 && (
           <button onClick={() => update({ activityLog: [] })}
-            style={{ height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid #e8e8e8', background: 'white', color: '#616161', fontSize: 12, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
+            style={{ height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid #e8e8e8', background: 'var(--surface)', color: '#616161', fontSize: 12, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
             <i className="bi-x-lg" style={{ fontSize: 10 }}></i>Clear log
           </button>
         )}

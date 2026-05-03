@@ -42,7 +42,7 @@ const StaleTickets = ({ tasks = [], defaultDays = 3 }) => {
   };
 
   return (
-    <div style={{ background: 'white', border: '1px solid #e8e8e8', borderRadius: 16, overflow: 'hidden' }}>
+    <div style={{ background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 16, overflow: 'hidden' }}>
       {/* Header */}
       <div style={{ padding: '14px 20px 10px', borderBottom: '1px solid #e8e8e8', display: 'flex', alignItems: 'center', gap: 10 }}>
         <div style={{ width: 30, height: 30, borderRadius: 9, background: 'linear-gradient(135deg, #FEF3C7, #FDE68A)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

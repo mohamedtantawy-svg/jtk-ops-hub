@@ -317,11 +317,44 @@ export async function listOnboardingPeople(params = {}) {
   // Drop Deel-internal employees ("Deeler" tag on the contract). The upstream
   // onboarding row does NOT include contract.tags — we have to fetch the
   // contract by OID. Cached per OID for an hour and shared across feeds.
-  const items = await dropDeelersByContractOid(merged, (it) => it.oid, 'onboarding');
+  const itemsClean = await dropDeelersByContractOid(merged, (it) => it.oid, 'onboarding');
+
+  // Enrich missing client names via the per-contract REST v2 lookup. The
+  // upstream actionable-queue row does NOT include `organizationName` for
+  // most rows — the 2026-05-03 live audit (F9) found 100% of 330 onboarding
+  // rows showed Organization = `--` because every fallback path returned
+  // empty. Mirror the amendments fix at fetchClientNameForContract +
+  // enrichClientNames(): batched (concurrency 5) lookups by `oid`, 1h
+  // in-memory cache. Same `dropDeelers` cache benefits — both feeds reuse
+  // the same OIDs in many cases. Items already carrying clientName from the
+  // upstream payload are skipped to avoid an unnecessary contract hit.
+  const items = await _enrichOnboardingClientNames(itemsClean);
 
   // Total now reflects the merged count, since the actionable-queue header
   // total only knows about its own bucket.
   return { items, total: Math.max(actionableTotal, items.length), cursor: currentCursor || null };
+}
+
+// Enrich onboarding rows with `clientName` via per-contract REST v2 lookup.
+// Mirrors enrichClientNames() (used by amendments) but keys off `oid` rather
+// than `eorContractId`. Idempotent: rows that already carry a non-empty
+// clientName are skipped. The shared AMEND_CLIENT_CACHE is reused so the
+// same contract OID seen across amendments / onboarding only hits upstream
+// once per hour.
+async function _enrichOnboardingClientNames(items) {
+  const needsLookup = items.filter(i => !i.clientName && i.oid);
+  if (needsLookup.length === 0) return items;
+  const unique = [...new Set(needsLookup.map(i => i.oid))];
+  const resolved = new Map();
+  for (let i = 0; i < unique.length; i += AMEND_CLIENT_CONCURRENCY) {
+    const batch = unique.slice(i, i + AMEND_CLIENT_CONCURRENCY);
+    const results = await Promise.all(batch.map(id => fetchClientNameForContract(id)));
+    batch.forEach((id, idx) => resolved.set(String(id), results[idx] || ''));
+  }
+  return items.map(item => ({
+    ...item,
+    clientName: item.clientName || resolved.get(String(item.oid)) || '',
+  }));
 }
 
 // ── Paused Onboarding (Admin API) ─────────────────────────────────────────────
@@ -395,7 +428,12 @@ export async function listPausedOnboarding() {
 
   // Drop Deel-internal employees ("Deeler" tag on the contract) — same rule
   // as the actionable queue. Resolves contract tags by OID.
-  const items = await dropDeelersByContractOid(mapped, (it) => it.oid, 'paused-onboarding');
+  const itemsClean = await dropDeelersByContractOid(mapped, (it) => it.oid, 'paused-onboarding');
+
+  // Same client-name enrichment as the actionable queue (F9, 2026-05-03
+  // live audit). Without this, paused-onboarding rows show Organization =
+  // `--` for every row that lacks an upstream `organizationName`.
+  const items = await _enrichOnboardingClientNames(itemsClean);
 
   return { items, total: items.length };
 }

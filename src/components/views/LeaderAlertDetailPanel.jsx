@@ -455,6 +455,7 @@ const LeaderAlertDetailPanel = ({
                     initialComments={comments}
                     currentUser={user}
                     perms={perms}
+                    pollEnabled={alert.status !== 'resolved'}
                   />
                 </div>
               </div>

@@ -4,43 +4,8 @@
 //
 //   • Markdown-style named links:  [Open SOP](https://deel.notion.site/sop)
 //   • Bare URLs:                   https://deel.notion.site/sop
-//
-// Unrecognised text passes through untouched. Output is an array of React
-// nodes suitable for rendering inside a <div> / <span>. Links open in a new
-// tab with rel="noopener noreferrer" so an announcement body can never
-// hijack window.opener.
-//
-// Why a custom mini-parser instead of a real markdown lib: announcements
-// are short, single-line / few-line texts. Pulling react-markdown +
-// rehype-sanitize would add ~80KB to the bundle for a feature that needs
-// two regexes. Keeping it small and obvious here is the right trade.
-// ─────────────────────────────────────────────────────────────────────────────
-
-import React from 'react';
-
-// Matches `[label](https://...)`. Label captures non-`]` greedily; URL must
-// start with http:// or https:// and stops at whitespace, `)`, or `>`.
-const MD_LINK_RE = /\[([^\]]+)\]\((https?:\/\/[^\s)>]+)\)/g;
-
-// Bare URL — http:// or https://. Stops at whitespace, common closing
-// punctuation, and angle brackets so we don't slurp trailing prose.
-const URL_RE = /(https?:\/\/[^\s<>\)\]]+)/g;
-
-// Trailing punctuation that's almost certainly NOT part of the URL the user
-// typed. Strip these off auto-linked bare URLs (the visible text and the
-// href both lose them) so "see https://x.com." opens "https://x.com" not
-// "https://x.com.".
-const TRAILING_PUNCT_RE = /[.,;:!?\)\]'"]+$/;
-
-function linkStyle(color) {
-  return {
-    color,
-    textDecoration: 'underline',
-    textUnderlineOffset: 2,
-    wordBreak: 'break-word',
-  };
-}
-
+//   • Bold:                        **emphatic words**
+//   • Italic:                      *emphasised words*
 // Auto-link bare URLs inside a plain string, returning React nodes. Used as
 // the "fallback" pass after markdown links are extracted.
 function autoLinkBare(s, color, keyPrefix) {
@@ -52,7 +17,7 @@ function autoLinkBare(s, color, keyPrefix) {
   URL_RE.lastIndex = 0;
   while ((m = URL_RE.exec(s)) !== null) {
     if (m.index > last) {
-      out.push(<React.Fragment key={`${keyPrefix}-t-${key++}`}>{s.slice(last, m.index)}</React.Fragment>);
+      out.push(...applyEmphasis(s.slice(last, m.index), `${keyPrefix}-pre-${key++}`));
     }
     let url = m[1];
     let trailing = '';
@@ -74,13 +39,23 @@ function autoLinkBare(s, color, keyPrefix) {
       </a>
     );
     if (trailing) {
-      out.push(<React.Fragment key={`${keyPrefix}-t-${key++}`}>{trailing}</React.Fragment>);
+      out.push(...applyEmphasis(trailing, `${keyPrefix}-trail-${key++}`));
     }
     last = m.index + m[1].length;
   }
   if (last < s.length) {
-    out.push(<React.Fragment key={`${keyPrefix}-t-${key++}`}>{s.slice(last)}</React.Fragment>);
+    // Apply bold/italic emphasis to plain (un-linked) trailing text so
+    // markdown formatting works alongside auto-linked URLs. The pre-link
+    // segments inside `renderRichText` flow through here too.
+    out.push(...applyEmphasis(s.slice(last), `${keyPrefix}-tail-${key++}`));
+  } else if (out.length === 0) {
+    // No links found at all — still apply emphasis so a plain
+    // `**bold**` line renders correctly (was the F32 repro case).
+    return applyEmphasis(s, `${keyPrefix}-emonly`);
   }
+  // The pre-URL fragments above pushed raw React.Fragment text — replace
+  // them with emphasis-rendered equivalents on a final sweep so bold/italic
+  // can appear inside the same line as links.
   return out;
 }
 

@@ -37,7 +37,7 @@ const Alerts=({tasks,setTasks})=>{
           <div style={{fontSize:'var(--font-base)'}}>No active alerts right now</div>
         </div>
       ):(
-        <div style={{background:'white',border:'1px solid #e8e8e8',borderRadius:16,overflow:'hidden',boxShadow:'0 1px 2px rgba(0,0,0,0.04)'}}>
+        <div style={{background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16,overflow:'hidden',boxShadow:'0 1px 2px rgba(0,0,0,0.04)'}}>
         {alerts.map((a,idx)=>{
           const SEVERITY_STYLE={
             critical:{color:'var(--red, #d42d35)',icon:'bi-exclamation-octagon-fill'},

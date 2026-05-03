@@ -92,9 +92,13 @@ export async function fetchDeelWorkbench({ limit, bustCache } = {}) {
   if (limit) params.set('limit', String(limit));
   if (bustCache) params.set('bust', '1');
   const qs = params.toString();
-  // Server caps the scan at 30s; give the FE 45s so warming responses arrive
-  // intact instead of being aborted by the default 90s ceiling.
-  return apiFetch(`/integrations/deel/workbench${qs ? `?${qs}` : ''}`, { timeoutMs: 45_000 });
+  // Server caps the scan at 45s and may return `{ _warming: true }` shortly
+  // after when the upstream cursor walk slips past the cap. The 2026-05-03
+  // live audit (F38) caught the FE timing out at 45s in lockstep with the
+  // server, before the warming-payload fallback could fire. Aligning the
+  // FE ceiling with offboarding's 60s gives the warming response a 15s
+  // window to land cleanly instead of being aborted by AbortController.
+  return apiFetch(`/integrations/deel/workbench${qs ? `?${qs}` : ''}`, { timeoutMs: 60_000 });
 }
 
 export async function fetchDeelIncentivePlans({ status, bustCache } = {}) {

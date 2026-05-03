@@ -149,7 +149,7 @@ function aggregateReactions(rawList, myEmail) {
 
 // ── Component ─────────────────────────────────────────────────────────────
 
-const LeaderAlertCommentsThread = ({ alertId, initialComments, currentUser, perms, onCountChange }) => {
+const LeaderAlertCommentsThread = ({ alertId, initialComments, currentUser, perms, onCountChange, pollEnabled = true }) => {
   const [comments, setComments] = useState(() => Array.isArray(initialComments) ? initialComments : []);
   const [error, setError] = useState(null);
 
@@ -171,7 +171,18 @@ const LeaderAlertCommentsThread = ({ alertId, initialComments, currentUser, perm
   // the original code also never cleared `error` on success, so a single
   // transient hit would leave the banner stuck forever. Now `error` is
   // cleared on every successful response and only set after 3 in a row.
+  //
+  // pollEnabled gate: skip polling for resolved alerts. The 2026-05-03
+  // live audit (F17) caught a red "Polling stalled — API 503" banner
+  // showing up under Resolved alerts whose discussion was already final
+  // — there's nothing actionable to fetch on a resolved alert, so the
+  // poll loop only had downside.
   useEffect(() => {
+    if (!pollEnabled) {
+      // Make sure a stale banner from a previous mount doesn't linger.
+      setError(null);
+      return undefined;
+    }
     let cancelled = false;
     let consecutiveFailures = 0;
     const tick = async () => {
@@ -204,7 +215,7 @@ const LeaderAlertCommentsThread = ({ alertId, initialComments, currentUser, perm
 
     const id = setInterval(tick, POLL_MS);
     return () => { cancelled = true; clearInterval(id); };
-  }, [alertId]);
+  }, [alertId, pollEnabled]);
 
   // Patch a single comment in-place after edit / delete / reaction.
   const updateComment = useCallback((updated) => {

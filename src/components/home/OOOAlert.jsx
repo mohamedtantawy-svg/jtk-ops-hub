@@ -87,7 +87,7 @@ const OOOAlert = ({ tasks = [], onLeaveEmails = new Set(), members = [], onReass
                   onClick={() => onReassign(task)}
                   style={{
                     height: 28, padding: '0 12px', borderRadius: 14, border: '1px solid #E53E3E',
-                    background: 'white', color: '#E53E3E', fontSize: 11, fontWeight: 700,
+                    background: 'var(--surface)', color: '#E53E3E', fontSize: 11, fontWeight: 700,
                     cursor: 'pointer', flexShrink: 0, transition: 'all .15s'
                   }}
                   onMouseEnter={e => { e.currentTarget.style.background = '#E53E3E'; e.currentTarget.style.color = 'white'; }}

@@ -683,7 +683,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                 ref={actionMenuRef}
                 style={{
                   position: 'absolute', top: 28, right: 0, zIndex: 100,
-                  background: 'white', border: '1px solid #e8e8e8', borderRadius: 10,
+                  background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 10,
                   boxShadow: '0 4px 16px rgba(0,0,0,0.10)', minWidth: 160,
                   padding: '4px 0', overflow: 'hidden',
                 }}
@@ -754,7 +754,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
               <div
                 style={{
                   position: 'absolute', top: 28, right: 0, zIndex: 110,
-                  background: 'white', border: '1px solid #e8e8e8', borderRadius: 10,
+                  background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 10,
                   boxShadow: '0 4px 16px rgba(0,0,0,0.12)', minWidth: 200,
                   padding: '14px 16px',
                 }}
@@ -766,7 +766,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                     onClick={() => setConfirmRemove(null)}
                     style={{
                       padding: '4px 12px', borderRadius: 128, border: '1px solid #e8e8e8',
-                      background: 'white', fontSize: 11, fontWeight: 600, color: '#616161', cursor: 'pointer',
+                      background: 'var(--surface)', fontSize: 11, fontWeight: 600, color: '#616161', cursor: 'pointer',
                     }}
                   >
                     Cancel
@@ -866,7 +866,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
               style={{
                 padding: '5px 14px', borderRadius: 128,
                 border: '1px solid #e8e8e8',
-                background: 'white',
+                background: 'var(--surface)',
                 color: '#1b1b1b',
                 fontSize: 12, fontWeight: 600,
                 cursor: 'pointer',
@@ -894,7 +894,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
             style={{
               padding: '5px 14px', borderRadius: 128,
               border: '1px solid #e8e8e8',
-              background: 'white',
+              background: 'var(--surface)',
               color: '#1b1b1b',
               fontSize: 12, fontWeight: 600,
               cursor: 'pointer',
@@ -942,7 +942,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
         </div>
 
         {/* Team table */}
-        <div style={{ background: 'white', borderRadius: 16, border: '1px solid #e8e8e8', overflow: 'hidden', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+        <div style={{ background: 'var(--surface)', borderRadius: 16, border: '1px solid #e8e8e8', overflow: 'hidden', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
           <div role="row" style={{ padding: '12px 16px', borderBottom: '1px solid #f2f2f2', display: 'grid', gridTemplateColumns: '1fr 56px 150px 64px 64px 64px 64px 80px 32px', gap: 8, background: '#fafaf9' }}>
             {['Manager / Agent', 'Team', 'Countries', 'Open', 'New', 'In prog', 'Pause', 'Health', ''].map((h, i) => (
               <span
@@ -970,7 +970,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
             ? PARENTAL_LEAVE_DATA.filter(p => p.region === user.region)
             : PARENTAL_LEAVE_DATA;
           return (
-            <div style={{ marginTop: 20, background: 'white', borderRadius: 16, border: '1px solid #e8e8e8', overflow: 'hidden', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+            <div style={{ marginTop: 20, background: 'var(--surface)', borderRadius: 16, border: '1px solid #e8e8e8', overflow: 'hidden', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
               <div
                 onClick={() => setShowParentalLeave(v => !v)}
                 style={{
@@ -1037,7 +1037,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
         })()}
 
         {/* End of Day Summary */}
-        <div style={{ marginTop: 20, background: 'white', borderRadius: 16, border: '1px solid #e8e8e8', overflow: 'hidden', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+        <div style={{ marginTop: 20, background: 'var(--surface)', borderRadius: 16, border: '1px solid #e8e8e8', overflow: 'hidden', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
           <div
             onClick={() => setEodOpen(v => !v)}
             style={{
@@ -1067,7 +1067,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                   { l: 'SLA Breached', v: slaBreached, c: slaBreached > 0 ? '#d42d35' : '#29811e', icon: 'bi-exclamation-triangle-fill', bg: slaBreached > 0 ? '#ffe2de' : '#e8f5e3' },
                 ].map(s => (
                   <div key={s.l} style={{ background: s.bg, borderRadius: 12, padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <div style={{ width: 32, height: 32, background: 'white', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
+                    <div style={{ width: 32, height: 32, background: 'var(--surface)', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.06)' }}>
                       <i className={s.icon} style={{ color: s.c, fontSize: 14 }} />
                     </div>
                     <div>
@@ -1109,7 +1109,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
           <div
             onClick={e => e.stopPropagation()}
             style={{
-              background: 'white', borderRadius: 16, padding: '28px 32px',
+              background: 'var(--surface)', borderRadius: 16, padding: '28px 32px',
               width: 420, maxWidth: '90vw', boxShadow: '0 8px 32px rgba(0,0,0,0.16)',
             }}
           >
@@ -1184,7 +1184,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                     onChange={e => setAddForm(f => ({ ...f, team: e.target.value }))}
                     style={{
                       width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                      fontSize: 13, color: '#1b1b1b', background: 'white', cursor: 'pointer',
+                      fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', cursor: 'pointer',
                     }}
                   >
                     {TEAM_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
@@ -1197,7 +1197,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                     onChange={e => setAddForm(f => ({ ...f, role: e.target.value }))}
                     style={{
                       width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                      fontSize: 13, color: '#1b1b1b', background: 'white', cursor: 'pointer',
+                      fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', cursor: 'pointer',
                     }}
                   >
                     {ROLE_OPTIONS.map(r => (
@@ -1216,7 +1216,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                     onChange={e => setAddForm(f => ({ ...f, managerEmail: e.target.value }))}
                     style={{
                       width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                      fontSize: 13, color: '#1b1b1b', background: 'white', cursor: 'pointer',
+                      fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', cursor: 'pointer',
                     }}
                   >
                     <option value="">— Select a manager —</option>
@@ -1234,7 +1234,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                     onChange={e => setAddForm(f => ({ ...f, service: e.target.value }))}
                     style={{
                       width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                      fontSize: 13, color: '#1b1b1b', background: 'white', cursor: 'pointer',
+                      fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', cursor: 'pointer',
                     }}
                   >
                     {SERVICE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
@@ -1251,7 +1251,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                     onChange={e => setAddForm(f => ({ ...f, region: e.target.value }))}
                     style={{
                       width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                      fontSize: 13, color: '#1b1b1b', background: 'white', cursor: 'pointer',
+                      fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', cursor: 'pointer',
                     }}
                   >
                     {REGION_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
@@ -1289,7 +1289,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                 disabled={addSaving}
                 style={{
                   padding: '8px 18px', borderRadius: 128, border: '1px solid #e8e8e8',
-                  background: 'white', fontSize: 13, fontWeight: 600, color: '#616161',
+                  background: 'var(--surface)', fontSize: 13, fontWeight: 600, color: '#616161',
                   cursor: addSaving ? 'not-allowed' : 'pointer',
                   opacity: addSaving ? 0.6 : 1,
                 }}
@@ -1331,7 +1331,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
             <div
               onClick={e => e.stopPropagation()}
               style={{
-                background: 'white', borderRadius: 16, padding: '28px 32px',
+                background: 'var(--surface)', borderRadius: 16, padding: '28px 32px',
                 width: 460, maxWidth: '90vw', maxHeight: '90vh',
                 boxShadow: '0 8px 32px rgba(0,0,0,0.16)',
                 display: 'flex', flexDirection: 'column',
@@ -1395,7 +1395,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                       onChange={e => setAllocForm(f => ({ ...f, team: e.target.value }))}
                       style={{
                         width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                        fontSize: 13, color: '#1b1b1b', background: 'white', cursor: 'pointer',
+                        fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', cursor: 'pointer',
                       }}
                     >
                       <option value="">— Unassigned —</option>
@@ -1409,7 +1409,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                       onChange={e => setAllocForm(f => ({ ...f, role: e.target.value }))}
                       style={{
                         width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                        fontSize: 13, color: '#1b1b1b', background: 'white', cursor: 'pointer',
+                        fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', cursor: 'pointer',
                       }}
                     >
                       {ROLE_OPTIONS.map(r => (
@@ -1428,7 +1428,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                       onChange={e => setAllocForm(f => ({ ...f, managerEmail: e.target.value }))}
                       style={{
                         width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                        fontSize: 13, color: '#1b1b1b', background: 'white', cursor: 'pointer',
+                        fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', cursor: 'pointer',
                       }}
                     >
                       <option value="">— No manager —</option>
@@ -1448,7 +1448,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                       onChange={e => setAllocForm(f => ({ ...f, service: e.target.value }))}
                       style={{
                         width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                        fontSize: 13, color: '#1b1b1b', background: 'white', cursor: 'pointer',
+                        fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', cursor: 'pointer',
                       }}
                     >
                       {SERVICE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
@@ -1465,7 +1465,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                       onChange={e => setAllocForm(f => ({ ...f, region: e.target.value }))}
                       style={{
                         width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                        fontSize: 13, color: '#1b1b1b', background: 'white', cursor: 'pointer',
+                        fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', cursor: 'pointer',
                       }}
                     >
                       <option value="">— No region —</option>
@@ -1516,7 +1516,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                   disabled={allocSaving}
                   style={{
                     padding: '8px 18px', borderRadius: 128, border: '1px solid #e8e8e8',
-                    background: 'white', fontSize: 13, fontWeight: 600, color: '#616161',
+                    background: 'var(--surface)', fontSize: 13, fontWeight: 600, color: '#616161',
                     cursor: allocSaving ? 'not-allowed' : 'pointer',
                     opacity: allocSaving ? 0.6 : 1,
                   }}
@@ -1558,7 +1558,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
             <div
               onClick={(e) => e.stopPropagation()}
               style={{
-                background: 'white', borderRadius: 16,
+                background: 'var(--surface)', borderRadius: 16,
                 width: 'min(92vw, 460px)',
                 boxShadow: '0 20px 50px rgba(0,0,0,.25)',
                 overflow: 'hidden',
@@ -1638,7 +1638,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                   disabled={permsSaving}
                   style={{
                     padding: '8px 16px', borderRadius: 128, border: '1px solid #e8e8e8',
-                    background: 'white', color: '#1b1b1b', fontSize: 13, fontWeight: 600,
+                    background: 'var(--surface)', color: '#1b1b1b', fontSize: 13, fontWeight: 600,
                     cursor: permsSaving ? 'not-allowed' : 'pointer',
                   }}
                 >
@@ -1782,7 +1782,7 @@ const QueueSlaSettingsCard = () => {
 
   return (
     <div style={{
-      marginTop: 24, background: 'white', border: '1px solid #e8e8e8', borderRadius: 16,
+      marginTop: 24, background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 16,
       overflow: 'hidden',
     }}>
       <div style={{ padding: '16px 22px 12px', borderBottom: '1px solid #f0eeec', display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1977,7 +1977,7 @@ const CapacitySettingsCard = () => {
   }
 
   return (
-    <div style={{ marginTop: 24, background: 'white', border: '1px solid #e8e8e8', borderRadius: 16, overflow: 'hidden' }}>
+    <div style={{ marginTop: 24, background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 16, overflow: 'hidden' }}>
       <div style={{ padding: '16px 22px 12px', borderBottom: '1px solid #f0eeec', display: 'flex', alignItems: 'center', gap: 10 }}>
         <div style={{ width: 32, height: 32, borderRadius: 10, background: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <i className="bi-speedometer2" style={{ fontSize: 14, color: '#1f74b3' }} />

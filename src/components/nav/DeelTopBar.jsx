@@ -28,13 +28,13 @@ const DeelTopBar = ({ view, onSearch, notifs, markAllRead, onCreateTask }) => {
   }, []);
 
   const dropdownBase = {
-    position: 'absolute', top: 'calc(100% + 8px)', background: 'white',
+    position: 'absolute', top: 'calc(100% + 8px)', background: 'var(--surface)',
     border: '1px solid #e8e8e8', boxShadow: '0 4px 20px rgba(0,0,0,0.10)', zIndex: 200,
   };
 
   return (
     <div style={{
-      height: 52, background: 'white', borderBottom: '1px solid #e8e8e8',
+      height: 52, background: 'var(--surface)', borderBottom: '1px solid #e8e8e8',
       display: 'flex', alignItems: 'center', padding: '0 24px',
       gap: 12, flexShrink: 0,
     }}>
