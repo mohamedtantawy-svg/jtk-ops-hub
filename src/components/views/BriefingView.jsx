@@ -1606,11 +1606,22 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               breakpoint (980px) is the width below which the Team Leads inner
               grid (1fr 60px 80px × row padding + avatar/label content) starts
               to overflow its 1fr outer column. */}
+          {/* Agents have only the Personal Checklist in Col 1 while Col 2
+              stacks DailySummary, ApproachingBreach, Team Availability,
+              Recent Activity, and Quick Nav. The 2026-05-03 agent audit
+              (A-F4) caught the resulting ~600 px of dead whitespace
+              under PersonalChecklist on agent home. Switching agents to a
+              single-column layout lets the checklist + the context cards
+              stack naturally without any blank gap. Managers keep the
+              two-column grid because their Col 1 has Team Leads / OOO
+              Alert / TeamRequestsToMe / StaleTickets to match Col 2's
+              height. */}
           <style>{`
             .briefing-main-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; align-items: start; }
+            .briefing-main-grid.is-agent { grid-template-columns: 1fr; }
             @media (max-width: 980px) { .briefing-main-grid { grid-template-columns: 1fr; } }
           `}</style>
-          <div className="briefing-main-grid">
+          <div className={`briefing-main-grid${isOwnScope ? ' is-agent' : ''}`}>
 
             {/* ── COL 1: My To-Do (Personal Checklist, primary variant) ──────
                 Pilar reported that the old "Priority Tasks" column was visually
