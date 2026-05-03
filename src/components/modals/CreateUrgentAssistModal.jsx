@@ -2,7 +2,7 @@
 // Captures every column the Urgent Assist table renders so the manual row
 // drops in fully-formed:
 //   • Subject
-//   • Type (defaults to "HRX Urgent Assist Request"; editable)
+//   • Type (defaults to "Expedite Request (HRX)"; editable)
 //   • Country (ISO-2 code; uses the existing FLAGS map for the picker)
 //   • Assignee (email + display name resolved from the roster)
 //   • Status (defaults to New)
@@ -21,9 +21,17 @@ import { MEMBERS, MEMBERS_BY_EMAIL } from '../../data/members';
 import { FLAGS } from '../../data/constants';
 import { createUrgentAssist } from '../../services/urgentAssistApi';
 
+// Match the canonical workbench task-type labels surfaced on the Urgent
+// Assist tab (`src/utils/normalizeSourceRows.js` recogniser, fixed
+// 2026-05-02 in `fix(urgent-assist): match the real workbench task types`).
+// The 2026-05-03 live audit (F24) caught the manual-entry dropdown
+// offering `HRX Urgent Assist Request` / `HRX Urgent Assist` while every
+// imported row read `Expedite Request (HRX)` — taxonomy drift between
+// sources of the same tab. Aligning the manual options keeps the Type
+// column consistent regardless of where the row originated.
 const REQUEST_TYPES = [
-  'HRX Urgent Assist Request',
-  'HRX Urgent Assist',
+  'Expedite Request (HRX)',
+  'Urgent Assist',
 ];
 
 const STATUSES = [
