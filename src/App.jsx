@@ -17,7 +17,7 @@ import { useQueueSync } from './hooks/useQueueSync';
 import { useQueueUnifiedSync } from './hooks/useQueueUnifiedSync';
 import { useHiddenTasks } from './hooks/useHiddenTasks';
 import { DEFAULT_SETTINGS } from './data/settings';
-import { DEFAULT_ACCESS_TYPES } from './data/accessControl';
+import { DEFAULT_ACCESS_TYPES, ALL_VIEWS } from './data/accessControl';
 import { ADMIN_LIST_VERSION } from './data/adminEmails';
 import { usePermissions } from './hooks/usePermissions';
 import ErrorBoundary from './components/ui/ErrorBoundary';
@@ -1253,8 +1253,17 @@ const App=()=>{
   // first version of this guard.
   useEffect(()=>{
     if(!perms||!user)return;
-    if(view&&!perms.canView(view)){
-      // Find first allowed view
+    // Two reasons we redirect away from the current view:
+    //   1. The view is a real route the caller doesn't have access to
+    //      (e.g. agent landing on ?view=leader-alerts via a stale link).
+    //   2. The view is one of the deleted route ids — projects /
+    //      escalations / calendar / knowledge-hub / analytics / hr-reports.
+    //      `perms.canView` returns truthy for unknown ids by default, so
+    //      we explicitly check membership in ALL_VIEWS too. Without this
+    //      block, deep-links to deleted views landed on a blank content
+    //      area (Audit 2026-05-04 finding F5).
+    const isKnownView = ALL_VIEWS.includes(view);
+    if (view && (!isKnownView || !perms.canView(view))) {
       const fallback=['briefing','my-queue','hr-hub','leader-alerts','urgent-assist','feedback','announcements','slack','settings'].find(v=>perms.canView(v));
       setView(fallback||'briefing');
     }
