@@ -51,11 +51,34 @@ function _clearTransient401Streak() {
  */
 export async function apiFetch(path, options = {}) {
   let token = null;
-  if (typeof window !== 'undefined') { try { token = localStorage.getItem('ops_hub_token'); } catch {} }
+  let impersonateAs = null;
+  if (typeof window !== 'undefined') {
+    try { token = localStorage.getItem('ops_hub_token'); } catch {}
+    // Impersonation propagation. If the admin / RM has the Login-as
+    // session active, every API call goes out with `X-Impersonate-As: <email>`
+    // so the server filters / scopes / audits as the impersonated user.
+    // The middleware ignores the header for callers whose JWT role isn't
+    // admin or regional_manager, so this is safe to ALWAYS attach when
+    // present — no need to gate it client-side. (Stage 2 of the
+    // 2026-05-03 audit fix sweep — A-F17 / A-F19 / A-F22.)
+    try {
+      const raw = sessionStorage.getItem('ops_hub_impersonating');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        // App.jsx writes `{ actor: <admin email>, target: <impersonated email> }`.
+        // The server expects the IMPERSONATED email (the "as" identity), so
+        // read `target` first and fall back to `email` for forward
+        // compatibility if the schema ever changes.
+        const target = parsed && (parsed.target || parsed.email);
+        if (target) impersonateAs = String(target).toLowerCase();
+      }
+    } catch {}
+  }
 
   const headers = {
     ...(options.body ? { 'Content-Type': 'application/json' } : {}),
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...(impersonateAs ? { 'X-Impersonate-As': impersonateAs } : {}),
     ...(options.headers || {}),
   };
 
