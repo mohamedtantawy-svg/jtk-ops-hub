@@ -47,7 +47,7 @@ const Sidebar=({user,view,setView,tasks,setTask,escalCount,onSearch,open,setOpen
 
   // -- COLLAPSED (icon-only, 56px) ---
   if(!open) return(
-    <div style={{width:56,background:'#ffffff',display:'flex',flexDirection:'column',alignItems:'center',padding:'12px 0 8px',flexShrink:0,height:'100%',gap:2}}>
+    <div style={{width:56,background:'var(--surface)',display:'flex',flexDirection:'column',alignItems:'center',padding:'12px 0 8px',flexShrink:0,height:'100%',gap:2}}>
       <div title="Ops Hub" style={{width:32,height:32,background:'var(--g)',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',marginBottom:6,flexShrink:0}}>
         <i className="bi-grid-1x2-fill" style={{color:'#1b1b1b',fontSize:14}}></i>
       </div>
@@ -93,7 +93,7 @@ const Sidebar=({user,view,setView,tasks,setTask,escalCount,onSearch,open,setOpen
 
   // -- EXPANDED (224px) --
   return(
-    <div style={{width:224,background:'#ffffff',display:'flex',flexDirection:'column',flexShrink:0,height:'100%'}}>
+    <div style={{width:224,background:'var(--surface)',display:'flex',flexDirection:'column',flexShrink:0,height:'100%'}}>
       {/* Brand header */}
       <div style={{padding:'14px 14px 12px',borderBottom:'1px solid #dedede'}}>
         <div style={{display:'flex',alignItems:'center',gap:9}}>
@@ -110,7 +110,7 @@ const Sidebar=({user,view,setView,tasks,setTask,escalCount,onSearch,open,setOpen
           onMouseEnter={e=>{e.currentTarget.style.background='#f2f2f2';e.currentTarget.style.borderColor='#bebebe';}} onMouseLeave={e=>{e.currentTarget.style.background='#f7f5f2';e.currentTarget.style.borderColor='#dedede';}}>
           <i className="bi-search" style={{fontSize:12}}></i><span style={{flex:1}}>Search…</span><span style={{background:'#f2f2f2',borderRadius:4,padding:'1px 5px',fontSize:10,fontFamily:'monospace',color:'#616161',border:'1px solid #dedede'}}>⌘K</span>
         </button>
-        {perms?.canDo('can_create_task')!==false&&<button onClick={onCreateTask} title="Create Task" style={{width:34,height:34,borderRadius:8,background:'#ffffff',border:'1px solid #dedede',color:'#1b1b1b',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .15s'}}
+        {perms?.canDo('can_create_task')!==false&&<button onClick={onCreateTask} title="Create Task" style={{width:34,height:34,borderRadius:8,background:'var(--surface)',border:'1px solid #dedede',color:'#1b1b1b',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,transition:'all .15s'}}
           onMouseEnter={e=>{e.currentTarget.style.background='#f7f5f2';e.currentTarget.style.borderColor='#bebebe';}} onMouseLeave={e=>{e.currentTarget.style.background='#ffffff';e.currentTarget.style.borderColor='#dedede';}}>
           <i className="bi-plus-lg" style={{fontSize:14}}></i>
         </button>}

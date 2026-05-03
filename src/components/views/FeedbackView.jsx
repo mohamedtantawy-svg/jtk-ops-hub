@@ -396,7 +396,7 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
         {error && (
           <div style={errorBanner}>
             <i className="bi-exclamation-triangle-fill" style={{ fontSize: 13 }} /> {error}
-            <button onClick={() => refresh()} style={{ marginLeft: 'auto', padding: '4px 10px', borderRadius: 6, border: '1px solid #fca5a5', background: 'white', color: '#991b1b', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>Retry</button>
+            <button onClick={() => refresh()} style={{ marginLeft: 'auto', padding: '4px 10px', borderRadius: 6, border: '1px solid #fca5a5', background: 'var(--surface)', color: '#991b1b', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>Retry</button>
           </div>
         )}
         {loading && items.length === 0 ? (

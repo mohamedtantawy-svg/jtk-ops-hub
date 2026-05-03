@@ -11,7 +11,7 @@ const SLACK_CHANNELS = [
 
 const inputStyle = {
   width:'100%', padding:'9px 12px', border:'1px solid #e8e8e8', borderRadius:12,
-  fontSize:14, color:'#1b1b1b', background:'white', outline:'none',
+  fontSize:14, color:'#1b1b1b', background:'var(--surface)', outline:'none',
   fontFamily:'inherit', boxSizing:'border-box',
 };
 const labelStyle = {
@@ -73,7 +73,7 @@ export default function CreateEscalationModal({ onConfirm, onClose, currentUser,
       }}
     >
       <div style={{
-        background:'white', borderRadius:20, width:'100%', maxWidth:520,
+        background:'var(--surface)', borderRadius:20, width:'100%', maxWidth:520,
         maxHeight:'90vh', overflowY:'auto',
         boxShadow:'0 8px 40px rgba(0,0,0,0.18)',
       }}>
@@ -200,7 +200,7 @@ export default function CreateEscalationModal({ onConfirm, onClose, currentUser,
           <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
             <button onClick={onClose} style={{
               padding:'9px 20px', borderRadius:128, fontSize:14, fontWeight:500,
-              border:'1px solid #e8e8e8', background:'white', color:'#616161', cursor:'pointer',
+              border:'1px solid #e8e8e8', background:'var(--surface)', color:'#616161', cursor:'pointer',
             }}>Cancel</button>
             <button
               onClick={handleSubmit}

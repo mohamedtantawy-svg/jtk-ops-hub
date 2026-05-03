@@ -398,7 +398,7 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
       {/* ── Header ── */}
-      <div style={{ padding: '16px 32px 12px', background: 'white', borderBottom: '1px solid #e8e8e8', flexShrink: 0 }}>
+      <div style={{ padding: '16px 32px 12px', background: 'var(--surface)', borderBottom: '1px solid #e8e8e8', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <i className="bi-megaphone-fill" style={{ fontSize: 18, color: '#6b3fa0' }}></i>
@@ -875,7 +875,7 @@ function WalkthroughOverlay({ comm, remaining, onAcknowledge, onSkip, onExit, on
 
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, maxWidth: 580, width: '100%' }}>
         {/* Main popup card */}
-        <div style={{ backgroundColor: '#fff', borderRadius: 16, width: '100%', maxHeight: '75vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 48px rgba(0,0,0,0.18)', overflow: 'hidden', animation: 'popupFadeIn 0.2s ease-out', position: 'relative', zIndex: 100001 }}>
+        <div style={{ backgroundColor: 'var(--surface)', borderRadius: 16, width: '100%', maxHeight: '75vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 48px rgba(0,0,0,0.18)', overflow: 'hidden', animation: 'popupFadeIn 0.2s ease-out', position: 'relative', zIndex: 100001 }}>
           {/* Top bar */}
           <div style={{ padding: '12px 20px', borderBottom: '1px solid #f2f2f2', display: 'flex', alignItems: 'center', gap: 10, background: '#fafaf9' }}>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: t.bg, color: t.color, border: `1px solid ${t.border}`, borderRadius: 128, padding: '3px 12px', fontSize: 11, fontWeight: 600 }}>
@@ -922,7 +922,7 @@ function WalkthroughOverlay({ comm, remaining, onAcknowledge, onSkip, onExit, on
           {/* Bottom actions */}
           <div style={{ padding: '14px 28px 20px', borderTop: '1px solid #f2f2f2', display: 'flex', gap: 10 }}>
             <button onClick={onSkip}
-              style={{ flex: 1, height: 44, borderRadius: 128, border: '1px solid #e8e8e8', background: 'white', color: '#616161', fontSize: 14, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+              style={{ flex: 1, height: 44, borderRadius: 128, border: '1px solid #e8e8e8', background: 'var(--surface)', color: '#616161', fontSize: 14, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
               <i className="bi-arrow-right" style={{ fontSize: 14 }}></i>
               Skip
             </button>
@@ -1228,7 +1228,7 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
       {floaters.map(f => <FloatingEmoji key={f.id} emoji={f.emoji} id={f.id} onDone={removeFloater} />)}
 
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, maxWidth: 640, width: '100%' }}>
-      <div onClick={e => e.stopPropagation()} style={{ backgroundColor: '#fff', borderRadius: 16, width: '100%', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 40px rgba(0,0,0,0.15)', overflow: 'hidden' }}>
+      <div onClick={e => e.stopPropagation()} style={{ backgroundColor: 'var(--surface)', borderRadius: 16, width: '100%', maxHeight: '80vh', display: 'flex', flexDirection: 'column', boxShadow: '0 20px 40px rgba(0,0,0,0.15)', overflow: 'hidden' }}>
         {/* Header */}
         <div style={{ padding: '16px 24px', borderBottom: '1px solid #f2f2f2', display: 'flex', alignItems: 'flex-start', gap: 12 }}>
           <div style={{ width: 40, height: 40, borderRadius: 12, background: t.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -1294,7 +1294,7 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
                   style={{ width: '100%', height: 32, borderRadius: 8, border: '1px solid #e8e8e8', padding: '0 10px', fontSize: 12, outline: 'none', boxSizing: 'border-box' }}
                 />
                 {linkableComms.length > 0 && (
-                  <div style={{ position: 'absolute', top: 36, left: 0, right: 0, background: 'white', border: '1px solid #e8e8e8', borderRadius: 10, maxHeight: 160, overflowY: 'auto', zIndex: 10, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
+                  <div style={{ position: 'absolute', top: 36, left: 0, right: 0, background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 10, maxHeight: 160, overflowY: 'auto', zIndex: 10, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
                     {linkableComms.slice(0, 6).map(lc => {
                       const lt = COMMS_TYPES[lc.type] || COMMS_TYPES.update;
                       return (

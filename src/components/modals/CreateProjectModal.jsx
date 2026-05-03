@@ -7,7 +7,7 @@ const TEAMS = ['EMEA','APAC','AMER'];
 
 const inputStyle = {
   width:'100%', padding:'9px 12px', border:'1px solid #e8e8e8', borderRadius:12,
-  fontSize:14, color:'#1b1b1b', background:'white', outline:'none',
+  fontSize:14, color:'#1b1b1b', background:'var(--surface)', outline:'none',
   fontFamily:'inherit', boxSizing:'border-box',
 };
 const labelStyle = { fontSize:11, fontWeight:600, color:'#616161', textTransform:'uppercase', letterSpacing:'.05em', marginBottom:6, display:'block' };
@@ -82,7 +82,7 @@ export default function CreateProjectModal({ onConfirm, onClose, project, curren
     >
       <style>{`@keyframes modalIn { from { opacity:0; transform:scale(0.96) translateY(8px); } to { opacity:1; transform:scale(1) translateY(0); } }`}</style>
       <div style={{
-        background:'white', borderRadius:20, width:'100%', maxWidth:520,
+        background:'var(--surface)', borderRadius:20, width:'100%', maxWidth:520,
         maxHeight:'90vh', overflowY:'auto', boxShadow:'0 8px 40px rgba(0,0,0,0.18)',
         display:'flex', flexDirection:'column',
         animation:'modalIn 0.2s cubic-bezier(0.16,1,0.3,1) both',
@@ -265,7 +265,7 @@ export default function CreateProjectModal({ onConfirm, onClose, project, curren
           <div style={{ display:'flex', gap:10, justifyContent:'flex-end', borderTop:'1px solid var(--border)', paddingTop:'var(--space-4)', marginTop:'var(--space-4)' }}>
             <button onClick={onClose} style={{
               padding:'9px 20px', borderRadius:128, fontSize:14, fontWeight:500,
-              border:'1px solid #e8e8e8', background:'white', color:'#616161', cursor:'pointer',
+              border:'1px solid #e8e8e8', background:'var(--surface)', color:'#616161', cursor:'pointer',
             }}>
               Cancel
             </button>

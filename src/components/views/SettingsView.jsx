@@ -177,7 +177,7 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
         </div>
         <div style={{display:'flex',gap:6}}>
           <input value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Add new item..." onKeyDown={e=>{if(e.key==='Enter'&&draft.trim()){onChange([...(items||[]),draft.trim()]);setDraft('');}}} style={{flex:1,border:'1px solid #e8e8e8',borderRadius:8,padding:'5px 10px',fontSize:12,outline:'none',fontFamily:'inherit',color:'#1b1b1b'}}/>
-          <button onClick={()=>{if(draft.trim()){onChange([...(items||[]),draft.trim()]);setDraft('');}}} style={{height:30,padding:'0 12px',borderRadius:8,border:'1px solid #e8e8e8',background:'white',color:'#1b1b1b',fontSize:12,fontWeight:600,cursor:'pointer'}}>Add</button>
+          <button onClick={()=>{if(draft.trim()){onChange([...(items||[]),draft.trim()]);setDraft('');}}} style={{height:30,padding:'0 12px',borderRadius:8,border:'1px solid #e8e8e8',background:'var(--surface)',color:'#1b1b1b',fontSize:12,fontWeight:600,cursor:'pointer'}}>Add</button>
         </div>
       </div>
     );
@@ -200,7 +200,7 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
         </div>
         <div style={{display:'flex',gap:6}}>
           <input value={draft} onChange={e=>setDraft(e.target.value)} placeholder={placeholder||'Add new...'} onKeyDown={e=>{if(e.key==='Enter'&&draft.trim()){onChange([...(items||[]),draft.trim()]);setDraft('');}}} style={{flex:1,border:'1px solid #e8e8e8',borderRadius:8,padding:'5px 10px',fontSize:12,outline:'none',fontFamily:'inherit',color:'#1b1b1b'}}/>
-          <button onClick={()=>{if(draft.trim()){onChange([...(items||[]),draft.trim()]);setDraft('');}}} style={{height:30,padding:'0 12px',borderRadius:8,border:'1px solid #e8e8e8',background:'white',color:'#1b1b1b',fontSize:12,fontWeight:600,cursor:'pointer'}}>Add</button>
+          <button onClick={()=>{if(draft.trim()){onChange([...(items||[]),draft.trim()]);setDraft('');}}} style={{height:30,padding:'0 12px',borderRadius:8,border:'1px solid #e8e8e8',background:'var(--surface)',color:'#1b1b1b',fontSize:12,fontWeight:600,cursor:'pointer'}}>Add</button>
         </div>
       </div>
     );
@@ -242,11 +242,11 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
             {fields.map(f=>(
               <input key={f.key} value={draft[f.key]} onChange={e=>setDraft(prev=>({...prev,[f.key]:e.target.value}))} placeholder={f.label} style={{flex:f.flex||1,minWidth:80,border:'1px solid #e8e8e8',borderRadius:8,padding:'5px 10px',fontSize:12,outline:'none',fontFamily:'inherit',color:'#1b1b1b'}}/>
             ))}
-            <button onClick={()=>{if(fields.some(f=>draft[f.key]?.trim())){onChange([...(items||[]),{...draft}]);setDraft(fields.reduce((a,f)=>({...a,[f.key]:''}),{}));setShowAdd(false);}}} style={{height:30,padding:'0 12px',borderRadius:8,border:'1px solid #e8e8e8',background:'white',color:'#1b1b1b',fontSize:12,fontWeight:600,cursor:'pointer'}}>Save</button>
+            <button onClick={()=>{if(fields.some(f=>draft[f.key]?.trim())){onChange([...(items||[]),{...draft}]);setDraft(fields.reduce((a,f)=>({...a,[f.key]:''}),{}));setShowAdd(false);}}} style={{height:30,padding:'0 12px',borderRadius:8,border:'1px solid #e8e8e8',background:'var(--surface)',color:'#1b1b1b',fontSize:12,fontWeight:600,cursor:'pointer'}}>Save</button>
             <button onClick={()=>setShowAdd(false)} style={{height:30,padding:'0 10px',borderRadius:8,border:'none',background:'none',color:'#9e9e9e',fontSize:12,cursor:'pointer'}}>Cancel</button>
           </div>
         ):(
-          <button onClick={()=>setShowAdd(true)} style={{height:30,padding:'0 12px',borderRadius:8,border:'1px dashed #dedede',background:'white',color:'#616161',fontSize:12,cursor:'pointer',display:'flex',alignItems:'center',gap:4}}><i className="bi-plus" style={{fontSize:14}}></i>Add item</button>
+          <button onClick={()=>setShowAdd(true)} style={{height:30,padding:'0 12px',borderRadius:8,border:'1px dashed #dedede',background:'var(--surface)',color:'#616161',fontSize:12,cursor:'pointer',display:'flex',alignItems:'center',gap:4}}><i className="bi-plus" style={{fontSize:14}}></i>Add item</button>
         )}
       </div>
     );
@@ -325,7 +325,7 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
               <input value={s.source_urls[key]||''} onChange={e=>{const v=e.target.value;if(v.trim().length>0&&/^(javascript|data|vbscript):/i.test(v.trim()))return;setNested('source_urls',key,v);}} style={{width:'100%',border:'1px solid #dedede',borderRadius:5,padding:'4px 8px',fontSize:11,color:'#616161',marginTop:3,boxSizing:'border-box',outline:'none'}} placeholder="Base URL"/>
             </div>
             <button onClick={()=>setNested('sources_enabled',key,!s.sources_enabled[key])} style={{width:40,height:22,borderRadius:11,border:'none',background:s.sources_enabled[key]?'var(--g)':'#dedede',cursor:'pointer',position:'relative',transition:'background .2s',flexShrink:0}}>
-              <div style={{width:16,height:16,borderRadius:'50%',background:'white',position:'absolute',top:3,left:s.sources_enabled[key]?21:3,transition:'left .2s',boxShadow:'0 1px 3px rgba(0,0,0,.15)'}}></div>
+              <div style={{width:16,height:16,borderRadius:'50%',background:'var(--surface)',position:'absolute',top:3,left:s.sources_enabled[key]?21:3,transition:'left .2s',boxShadow:'0 1px 3px rgba(0,0,0,.15)'}}></div>
             </button>
           </div>
         ))}
@@ -407,7 +407,7 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
           <div style={{display:'flex',alignItems:'center',gap:8}}>
             <input type="color" value={s.primary_color} onChange={e=>set('primary_color',e.target.value)} style={{width:36,height:28,border:'1px solid #dedede',borderRadius:6,cursor:'pointer',padding:0}}/>
             <input value={s.primary_color} onChange={e=>set('primary_color',e.target.value)} style={{width:90,border:'1px solid #dedede',borderRadius:6,padding:'5px 8px',fontSize:12,fontFamily:'monospace',color:'#616161',outline:'none'}}/>
-            <button onClick={()=>{set('primary_color','#1f74b3');set('brand_dark','#0a5a99');}} style={{border:'1px solid #dedede',borderRadius:6,padding:'5px 10px',fontSize:11,color:'#616161',cursor:'pointer',background:'white'}}>Reset to Deel</button>
+            <button onClick={()=>{set('primary_color','#1f74b3');set('brand_dark','#0a5a99');}} style={{border:'1px solid #dedede',borderRadius:6,padding:'5px 10px',fontSize:11,color:'#616161',cursor:'pointer',background:'var(--surface)'}}>Reset to Deel</button>
           </div>
         </div>
         <div style={{padding:'14px 0',borderBottom:'1px solid #e8e8e8'}}>
@@ -423,7 +423,7 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
           <div style={{display:'flex',gap:8}}>
             <div style={{height:32,padding:'0 16px',borderRadius:8,background:s.primary_color,color:'white',fontSize:12,fontWeight:700,display:'flex',alignItems:'center'}}>Primary Button</div>
             <div style={{height:32,padding:'0 16px',borderRadius:8,background:s.brand_dark,color:'white',fontSize:12,fontWeight:700,display:'flex',alignItems:'center'}}>Dark Accent</div>
-            <div style={{height:32,padding:'0 16px',borderRadius:8,border:`2px solid ${s.primary_color}`,color:s.primary_color,fontSize:12,fontWeight:700,display:'flex',alignItems:'center',background:'white'}}>Outline</div>
+            <div style={{height:32,padding:'0 16px',borderRadius:8,border:`2px solid ${s.primary_color}`,color:s.primary_color,fontSize:12,fontWeight:700,display:'flex',alignItems:'center',background:'var(--surface)'}}>Outline</div>
           </div>
         </div>
       </div>);
@@ -507,8 +507,8 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
         <Select label="Export format" desc="File format for exports" value={s.export_format} onChange={v=>set('export_format',v)} options={[{value:'csv',label:'CSV'},{value:'xlsx',label:'Excel (.xlsx)'}]}/>
         <NumberInput label="Data retention" desc="Days to keep resolved task data before archiving" value={s.data_retention_days} onChange={v=>set('data_retention_days',v)} min={30} max={365} suffix="days"/>
         <div style={{marginTop:14,display:'flex',gap:8}}>
-          <button onClick={()=>{const rows=(tasks||[]).filter(t=>t.source!=='slack');const hdr='id,source,subject,status,assignee,country,type,received\n';const body=rows.map(t=>[t.id,t.source,'"'+t.subject.replace(/"/g,'""').replace(/^[=+@-]/,'\' $&')+'"',t.status,MEMBERS.find(m=>m.id===t.assigneeId)?.name||'',t.country,t.type,t.receivedAt].join(',')).join('\n');const d=document.createElement('a');d.setAttribute('href','data:text/csv;charset=utf-8,'+encodeURIComponent(hdr+body));d.setAttribute('download','ops-hub-tasks-export.csv');d.click();if(addToast)addToast('success','Exported',rows.length+' tasks exported to CSV');flash();}} style={{height:34,padding:'0 16px',borderRadius:8,border:'1px solid #dedede',background:'white',color:'#1b1b1b',fontSize:12,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:6}}><i className="bi-download" style={{fontSize:11}}></i>Export All Tasks (CSV)</button>
-          <button onClick={()=>{const all=(tasks||[]).filter(t=>t.source!=='slack');const res=all.filter(t=>t.status==='resolved');const opn=all.filter(t=>t.status!=='resolved');const body='metric,value\nTotal Tasks,'+all.length+'\nOpen,'+opn.length+'\nResolved,'+res.length+'\nIn Progress,'+all.filter(t=>t.status==='in_progress').length+'\nAlerts,'+all.filter(t=>t.isAlert&&t.status!=='resolved').length+'\n';const d=document.createElement('a');d.setAttribute('href','data:text/csv;charset=utf-8,'+encodeURIComponent(body));d.setAttribute('download','ops-hub-analytics-report.csv');d.click();if(addToast)addToast('success','Exported','Analytics report downloaded');flash();}} style={{height:34,padding:'0 16px',borderRadius:8,border:'1px solid #dedede',background:'white',color:'#1b1b1b',fontSize:12,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:6}}><i className="bi-file-earmark-spreadsheet" style={{fontSize:11}}></i>Export Analytics Report</button>
+          <button onClick={()=>{const rows=(tasks||[]).filter(t=>t.source!=='slack');const hdr='id,source,subject,status,assignee,country,type,received\n';const body=rows.map(t=>[t.id,t.source,'"'+t.subject.replace(/"/g,'""').replace(/^[=+@-]/,'\' $&')+'"',t.status,MEMBERS.find(m=>m.id===t.assigneeId)?.name||'',t.country,t.type,t.receivedAt].join(',')).join('\n');const d=document.createElement('a');d.setAttribute('href','data:text/csv;charset=utf-8,'+encodeURIComponent(hdr+body));d.setAttribute('download','ops-hub-tasks-export.csv');d.click();if(addToast)addToast('success','Exported',rows.length+' tasks exported to CSV');flash();}} style={{height:34,padding:'0 16px',borderRadius:8,border:'1px solid #dedede',background:'var(--surface)',color:'#1b1b1b',fontSize:12,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:6}}><i className="bi-download" style={{fontSize:11}}></i>Export All Tasks (CSV)</button>
+          <button onClick={()=>{const all=(tasks||[]).filter(t=>t.source!=='slack');const res=all.filter(t=>t.status==='resolved');const opn=all.filter(t=>t.status!=='resolved');const body='metric,value\nTotal Tasks,'+all.length+'\nOpen,'+opn.length+'\nResolved,'+res.length+'\nIn Progress,'+all.filter(t=>t.status==='in_progress').length+'\nAlerts,'+all.filter(t=>t.isAlert&&t.status!=='resolved').length+'\n';const d=document.createElement('a');d.setAttribute('href','data:text/csv;charset=utf-8,'+encodeURIComponent(body));d.setAttribute('download','ops-hub-analytics-report.csv');d.click();if(addToast)addToast('success','Exported','Analytics report downloaded');flash();}} style={{height:34,padding:'0 16px',borderRadius:8,border:'1px solid #dedede',background:'var(--surface)',color:'#1b1b1b',fontSize:12,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:6}}><i className="bi-file-earmark-spreadsheet" style={{fontSize:11}}></i>Export Analytics Report</button>
         </div>
       </div>);
 
@@ -602,7 +602,7 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
               <div style={{fontSize:13,fontWeight:700,color:'#991B1B'}}>Reset all settings to defaults</div>
               <div style={{fontSize:11.5,color:'#B91C1C',marginTop:2}}>This will revert every setting on this page to its factory default.</div>
             </div>
-            <button onClick={()=>{setSettings(DEFAULT_SETTINGS);try{localStorage.removeItem('ops_hub_settings');}catch(e){}flash();}} style={{height:32,padding:'0 14px',borderRadius:128,border:'1px solid #FCA5A5',background:'white',color:'#d42d35',fontSize:12,fontWeight:700,cursor:'pointer',flexShrink:0}}>Reset All</button>
+            <button onClick={()=>{setSettings(DEFAULT_SETTINGS);try{localStorage.removeItem('ops_hub_settings');}catch(e){}flash();}} style={{height:32,padding:'0 14px',borderRadius:128,border:'1px solid #FCA5A5',background:'var(--surface)',color:'#d42d35',fontSize:12,fontWeight:700,cursor:'pointer',flexShrink:0}}>Reset All</button>
           </div>
         </div>
         <div style={{border:'1px solid #FCA5A5',borderRadius:16,padding:16,marginBottom:12,background:'#ffe2de'}}>
@@ -611,7 +611,7 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
               <div style={{fontSize:13,fontWeight:700,color:'#991B1B'}}>Clear all resolved tasks</div>
               <div style={{fontSize:11.5,color:'#B91C1C',marginTop:2}}>Remove all resolved tasks from history. Active tasks are unaffected.</div>
             </div>
-            <button onClick={()=>{if(!perms?.isAdmin)return;if(setTasks){const cnt=(tasks||[]).filter(t=>t.status==='resolved').length;setTasks(prev=>prev.filter(t=>t.status!=='resolved'));if(addToast)addToast('success','Cleared',cnt+' resolved tasks removed');}flash();}} style={{height:32,padding:'0 14px',borderRadius:128,border:'1px solid #FCA5A5',background:'white',color:'#d42d35',fontSize:12,fontWeight:700,cursor:'pointer',flexShrink:0}}>Clear Resolved</button>
+            <button onClick={()=>{if(!perms?.isAdmin)return;if(setTasks){const cnt=(tasks||[]).filter(t=>t.status==='resolved').length;setTasks(prev=>prev.filter(t=>t.status!=='resolved'));if(addToast)addToast('success','Cleared',cnt+' resolved tasks removed');}flash();}} style={{height:32,padding:'0 14px',borderRadius:128,border:'1px solid #FCA5A5',background:'var(--surface)',color:'#d42d35',fontSize:12,fontWeight:700,cursor:'pointer',flexShrink:0}}>Clear Resolved</button>
           </div>
         </div>
         <div style={{border:'1px solid #FCA5A5',borderRadius:16,padding:16,background:'#ffe2de'}}>
@@ -620,7 +620,7 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
               <div style={{fontSize:13,fontWeight:700,color:'#991B1B'}}>Reset onboarding for all users</div>
               <div style={{fontSize:11.5,color:'#B91C1C',marginTop:2}}>Force the welcome wizard to show again for every user on next login.</div>
             </div>
-            <button onClick={()=>{try{localStorage.removeItem('ops_hub_onboarded');}catch(e){}flash();}} style={{height:32,padding:'0 14px',borderRadius:128,border:'1px solid #FCA5A5',background:'white',color:'#d42d35',fontSize:12,fontWeight:700,cursor:'pointer',flexShrink:0}}>Reset Onboarding</button>
+            <button onClick={()=>{try{localStorage.removeItem('ops_hub_onboarded');}catch(e){}flash();}} style={{height:32,padding:'0 14px',borderRadius:128,border:'1px solid #FCA5A5',background:'var(--surface)',color:'#d42d35',fontSize:12,fontWeight:700,cursor:'pointer',flexShrink:0}}>Reset Onboarding</button>
           </div>
         </div>
         </div>{/* end danger wrapper */}
@@ -661,9 +661,9 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
       />
       <div style={{flex:1,display:'flex',overflow:'hidden'}}>
         {/* Category nav */}
-        <div style={{width:220,borderRight:'1px solid #e8e8e8',overflowY:'auto',background:'white',flexShrink:0,padding:'8px',display:'flex',flexDirection:'column'}}>
+        <div style={{width:220,borderRight:'1px solid #e8e8e8',overflowY:'auto',background:'var(--surface)',flexShrink:0,padding:'8px',display:'flex',flexDirection:'column'}}>
           {/* Search bar */}
-          <div style={{padding:'4px 4px 8px',position:'sticky',top:0,background:'white',zIndex:1}}>
+          <div style={{padding:'4px 4px 8px',position:'sticky',top:0,background:'var(--surface)',zIndex:1}}>
             <div style={{position:'relative'}}>
               <i className="bi-search" style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)',fontSize:12,color:'#9e9e9e',pointerEvents:'none'}}></i>
               <input

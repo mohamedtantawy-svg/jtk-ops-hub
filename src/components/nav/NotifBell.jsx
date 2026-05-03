@@ -21,7 +21,7 @@ const NotifBell=({notifs,onMarkAll,collapsed,setView,setSelTask,tasks=[]})=>{
         {unread>0&&<span style={{position:'absolute',top:1,right:1,minWidth:16,height:16,background:'#d42d35',borderRadius:8,fontSize:9,fontWeight:700,color:'white',display:'flex',alignItems:'center',justifyContent:'center',lineHeight:1,padding:'0 3px'}}>{unread>9?'9+':unread}</span>}
       </button>
       {open&&ReactDOM.createPortal(
-        <div className="fade-in" role="dialog" aria-label="Notifications" ref={panelRef} style={{position:'fixed',bottom:pos.bottom,left:pos.left,background:'white',borderRadius:16,boxShadow:'0 4px 16px rgba(0,0,0,.12)',width:330,zIndex:1100,border:'1px solid #dedede',overflow:'hidden',maxHeight:'min(400px, calc(100vh - 80px))'}}>
+        <div className="fade-in" role="dialog" aria-label="Notifications" ref={panelRef} style={{position:'fixed',bottom:pos.bottom,left:pos.left,background:'var(--surface)',borderRadius:16,boxShadow:'0 4px 16px rgba(0,0,0,.12)',width:330,zIndex:1100,border:'1px solid #dedede',overflow:'hidden',maxHeight:'min(400px, calc(100vh - 80px))'}}>
           <div style={{padding:'12px 15px 10px',borderBottom:'1px solid #f7f5f2',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
             <div style={{display:'flex',alignItems:'center',gap:8}}>
               <span style={{fontSize:13.5,fontWeight:700,color:'#1b1b1b'}}>Notifications</span>

@@ -43,7 +43,7 @@ const PreviewPopup = ({ draft, onClose, onConfirmSend }) => {
     >
       <div
         style={{
-          background: 'white', borderRadius: 16, width: '100%', maxWidth: 600,
+          background: 'var(--surface)', borderRadius: 16, width: '100%', maxWidth: 600,
           maxHeight: '90vh', display: 'flex', flexDirection: 'column',
           boxShadow: '0 8px 32px rgba(0,0,0,0.18)', overflow: 'hidden',
           animation: 'modalIn .18s cubic-bezier(.34,1.56,.64,1) forwards',
@@ -77,7 +77,7 @@ const PreviewPopup = ({ draft, onClose, onConfirmSend }) => {
           {/* Simulated popup card */}
           <div style={{
             border: `1.5px solid ${typeInfo.border}`, borderRadius: 12,
-            overflow: 'hidden', background: 'white',
+            overflow: 'hidden', background: 'var(--surface)',
           }}>
             {/* Colored top bar */}
             <div style={{
@@ -198,7 +198,7 @@ const PreviewPopup = ({ draft, onClose, onConfirmSend }) => {
           <button
             onClick={onClose}
             style={{
-              background: 'white', border: '1px solid #dedede', color: '#1b1b1b',
+              background: 'var(--surface)', border: '1px solid #dedede', color: '#1b1b1b',
               borderRadius: 128, padding: '10px 24px', fontSize: 13,
               cursor: 'pointer', fontWeight: 500, transition: 'background .15s',
             }}

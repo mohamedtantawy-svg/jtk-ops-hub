@@ -40,7 +40,7 @@ const REASON_OPTIONS = [
 
 const inputStyle = {
   width: '100%', padding: '9px 12px', border: '1px solid #e8e8e8', borderRadius: 10,
-  fontSize: 13, color: '#1b1b1b', background: 'white', outline: 'none',
+  fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', outline: 'none',
   fontFamily: 'inherit', boxSizing: 'border-box',
 };
 const labelStyle = {
@@ -115,7 +115,7 @@ export default function CreateHideTaskRequestModal({ task, onClose, onSubmitted 
       }}
     >
       <div style={{
-        background: 'white', borderRadius: 20, width: '100%', maxWidth: 540,
+        background: 'var(--surface)', borderRadius: 20, width: '100%', maxWidth: 540,
         maxHeight: '90vh', overflowY: 'auto',
         boxShadow: '0 8px 40px rgba(0,0,0,0.18)',
       }}>
@@ -138,7 +138,7 @@ export default function CreateHideTaskRequestModal({ task, onClose, onSubmitted 
             type="button"
             onClick={onClose}
             aria-label="Close"
-            style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #e8e8e8', background: 'white', color: '#9e9e9e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #e8e8e8', background: 'var(--surface)', color: '#9e9e9e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           >
             <i className="bi-x-lg" style={{ fontSize: 12 }} />
           </button>
@@ -226,7 +226,7 @@ export default function CreateHideTaskRequestModal({ task, onClose, onSubmitted 
               <button
                 type="button"
                 onClick={onClose}
-                style={{ padding: '9px 16px', borderRadius: 10, border: '1px solid #e8e8e8', background: 'white', fontSize: 13, fontWeight: 500, color: '#616161', cursor: 'pointer', fontFamily: 'inherit' }}
+                style={{ padding: '9px 16px', borderRadius: 10, border: '1px solid #e8e8e8', background: 'var(--surface)', fontSize: 13, fontWeight: 500, color: '#616161', cursor: 'pointer', fontFamily: 'inherit' }}
               >
                 Cancel
               </button>

@@ -172,7 +172,7 @@ export default function ProjectsView({ projects, setProjects, user, onNewProject
       <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
 
         {/* Sub-nav tabs */}
-        <div style={{ height:44, background:'white', borderBottom:'1px solid #e8e8e8', display:'flex', alignItems:'stretch', paddingLeft:16 }}>
+        <div style={{ height:44, background:'var(--surface)', borderBottom:'1px solid #e8e8e8', display:'flex', alignItems:'stretch', paddingLeft:16 }}>
           {SUB_TABS.map(tab => {
             const active = subTab === tab;
             return (
@@ -199,7 +199,7 @@ export default function ProjectsView({ projects, setProjects, user, onNewProject
                 placeholder="Search projects…"
                 style={{
                   width:'100%', padding:'7px 10px 7px 32px', border:'1px solid #e8e8e8',
-                  borderRadius:128, fontSize:13, color:'#1b1b1b', background:'white',
+                  borderRadius:128, fontSize:13, color:'#1b1b1b', background:'var(--surface)',
                   outline:'none', boxSizing:'border-box',
                 }}
               />
@@ -235,7 +235,7 @@ export default function ProjectsView({ projects, setProjects, user, onNewProject
               value={sortKey} onChange={e => setSortKey(e.target.value)}
               style={{
                 padding:'7px 12px', border:'1px solid #e8e8e8', borderRadius:128, fontSize:12,
-                color:'#616161', background:'white', outline:'none', cursor:'pointer', fontFamily:'inherit',
+                color:'#616161', background:'var(--surface)', outline:'none', cursor:'pointer', fontFamily:'inherit',
               }}
             >
               <option value="deadline">Sort: Deadline</option>

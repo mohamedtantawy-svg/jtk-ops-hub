@@ -185,7 +185,7 @@ export default function MultiCountryPicker({
             top: 'calc(100% + 6px)',
             [align === 'right' ? 'right' : 'left']: 0,
             width: 320,
-            background: 'white',
+            background: 'var(--surface)',
             border: '1px solid #e8e8e8',
             borderRadius: 12,
             boxShadow: '0 8px 24px rgba(0,0,0,0.14)',
@@ -332,7 +332,7 @@ export default function MultiCountryPicker({
                 padding: '5px 12px',
                 borderRadius: 128,
                 border: '1px solid #e8e8e8',
-                background: 'white',
+                background: 'var(--surface)',
                 fontSize: 11, fontWeight: 600, color: '#616161',
                 cursor: 'pointer',
               }}

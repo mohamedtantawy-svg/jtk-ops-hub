@@ -436,7 +436,7 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
           <>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 24 }}>
               {kpiCards.map(s => (
-                <div key={s.label} style={{ background: 'white', border: '1px solid #e8e8e8', borderRadius: 16, padding: '14px 16px', boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s' }}
+                <div key={s.label} style={{ background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 16, padding: '14px 16px', boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s' }}
                   onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.06)'} onMouseLeave={e => e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)'}>
                   <div style={{ width: 36, height: 36, background: s.iconBg, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 10 }}>
                     <i className={s.icon} style={{ color: s.color, fontSize: 16 }}></i>
@@ -451,7 +451,7 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
             {/* Escalation Rate card (managers / admin only) */}
             {isManager && (
               <div style={{ marginBottom: 24 }}>
-                <div style={{ background: 'white', border: '1px solid #e8e8e8', borderRadius: 16, padding: '20px 20px', boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s', display: 'flex', alignItems: 'center', gap: 20 }}
+                <div style={{ background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 16, padding: '20px 20px', boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s', display: 'flex', alignItems: 'center', gap: 20 }}
                   onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.06)'} onMouseLeave={e => e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)'}>
                   <div style={{ width: 40, height: 40, background: '#fef3ee', borderRadius: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <i className="bi-arrow-up-circle-fill" style={{ color: '#ed5e2a', fontSize: 17 }}></i>
@@ -472,7 +472,7 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
         {/* ── Tasks by Source + Tasks by Function (all roles) ─────────────── */}
         {(activeTab === 'Overview' || activeTab === 'Sources') && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
-            <div style={{ background: 'white', border: '1px solid #e8e8e8', borderRadius: 16, padding: 24, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s' }}
+            <div style={{ background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 16, padding: 24, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s' }}
               onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.06)'} onMouseLeave={e => e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)'}>
               <div style={{ fontWeight: 600, color: '#9e9e9e', fontSize: 13, marginBottom: 16 }}>Tasks by source</div>
               {bySrc.map(x => (
@@ -485,7 +485,7 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
                 </div>
               ))}
             </div>
-            <div style={{ background: 'white', border: '1px solid #e8e8e8', borderRadius: 16, padding: 24, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s' }}
+            <div style={{ background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 16, padding: 24, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s' }}
               onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.06)'} onMouseLeave={e => e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)'}>
               <div style={{ fontWeight: 600, color: '#9e9e9e', fontSize: 13, marginBottom: 16 }}>Tasks by function</div>
               {byFn.map(x => (
@@ -505,7 +505,7 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
         {(activeTab === 'Overview' || activeTab === 'SLA') && isManager && (
           <div style={{ display: 'grid', gridTemplateColumns: isAllScope ? '1fr 1fr' : '1fr', gap: 14, marginBottom: 14 }}>
             {/* Hourly Volume */}
-            <div style={{ background: 'white', border: '1px solid #e8e8e8', borderRadius: 16, padding: 24, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s' }}
+            <div style={{ background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 16, padding: 24, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s' }}
               onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.06)'} onMouseLeave={e => e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)'}>
               <div style={{ fontWeight: 600, color: '#9e9e9e', fontSize: 13, marginBottom: 16 }}>Hourly volume</div>
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: 5, height: 90, marginBottom: 4 }}>
@@ -528,7 +528,7 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
 
             {/* Tasks by Country (regional/admin scope) */}
             {isAllScope && (
-              <div style={{ background: 'white', border: '1px solid #e8e8e8', borderRadius: 16, padding: 24, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s' }}
+              <div style={{ background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 16, padding: 24, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s' }}
                 onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.06)'} onMouseLeave={e => e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)'}>
                 <div style={{ fontWeight: 600, color: '#9e9e9e', fontSize: 13, marginBottom: 16 }}>Tasks by country</div>
                 {byCtry.map(x => (
@@ -578,7 +578,7 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
 
         {/* ── Legacy agent performance table (kept for inline detail, agents don't see this) ── */}
         {isManager && (activeTab === 'Team Performance') && sortedAgents.length > 0 && (
-          <div style={{ background: 'white', border: '1px solid #e8e8e8', borderRadius: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', overflow: 'hidden', marginBottom: 14 }}>
+          <div style={{ background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', overflow: 'hidden', marginBottom: 14 }}>
             <div style={{ padding: '20px 24px 0' }}>
               <div style={{ fontWeight: 700, color: '#1b1b1b', fontSize: 14, marginBottom: 16 }}>Agent Performance Detail</div>
             </div>

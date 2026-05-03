@@ -211,7 +211,7 @@ const KnowledgeHub=({subFilter, user})=>{
                 <div style={{fontSize:13,fontWeight:600,color:'#9e9e9e',letterSpacing:'normal',textTransform:'none',marginBottom:10}}>Knowledge articles ({hits.length})</div>
                 <div style={{display:'flex',flexDirection:'column',gap:8}}>
                   {hits.map(a=>(
-                    <a key={a.id} href={a.url} target="_blank" rel="noreferrer" style={{textDecoration:'none',background:'white',border:'1px solid #e8e8e8',borderRadius:12,padding:'12px 16px',display:'flex',gap:10,alignItems:'flex-start',boxShadow:'0 1px 2px rgba(0,0,0,0.04)',transition:'box-shadow .15s'}}
+                    <a key={a.id} href={a.url} target="_blank" rel="noreferrer" style={{textDecoration:'none',background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:12,padding:'12px 16px',display:'flex',gap:10,alignItems:'flex-start',boxShadow:'0 1px 2px rgba(0,0,0,0.04)',transition:'box-shadow .15s'}}
                       onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)'}
                       onMouseLeave={e=>e.currentTarget.style.boxShadow='0 1px 2px rgba(0,0,0,0.04)'}>
                       <div style={{width:32,height:32,background:'#f3eff8',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
@@ -252,7 +252,7 @@ const KnowledgeHub=({subFilter, user})=>{
           {tab==='processes'&&(
             <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:12}}>
               {flt(PROCESSES,['name','desc']).map(p=>(
-                <a key={p.name} href={p.url} target="_blank" rel="noreferrer" style={{textDecoration:'none',background:'white',border:'1px solid #e8e8e8',borderRadius:16,padding:'16px 18px',display:'flex',gap:12,alignItems:'flex-start',boxShadow:'0 1px 2px rgba(0,0,0,0.04)',transition:'box-shadow .15s'}}
+                <a key={p.name} href={p.url} target="_blank" rel="noreferrer" style={{textDecoration:'none',background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16,padding:'16px 18px',display:'flex',gap:12,alignItems:'flex-start',boxShadow:'0 1px 2px rgba(0,0,0,0.04)',transition:'box-shadow .15s'}}
                   onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)'} onMouseLeave={e=>e.currentTarget.style.boxShadow='0 1px 2px rgba(0,0,0,0.04)'}>
                   <div style={{width:40,height:40,background:`${p.color}18`,borderRadius:16,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><i className={p.icon} style={{color:p.color,fontSize:17}}></i></div>
                   <div style={{flex:1,minWidth:0}}><div style={{fontWeight:600,fontSize:14,color:'#1b1b1b',marginBottom:4}}>{p.name}</div><div style={{fontSize:12,color:'#616161',lineHeight:1.5}}>{p.desc}</div></div>
@@ -277,7 +277,7 @@ const KnowledgeHub=({subFilter, user})=>{
                     </div>
                     <div style={{display:'flex',flexDirection:'column',gap:6}}>
                       {rpts.map(r=>(
-                        <a key={r.name} href={r.url} target="_blank" rel="noreferrer" style={{textDecoration:'none',background:'white',border:'1px solid #e8e8e8',borderRadius:12,padding:'10px 14px',display:'flex',alignItems:'center',gap:10,transition:'box-shadow .15s',boxShadow:'0 1px 2px rgba(0,0,0,0.04)'}}
+                        <a key={r.name} href={r.url} target="_blank" rel="noreferrer" style={{textDecoration:'none',background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:12,padding:'10px 14px',display:'flex',alignItems:'center',gap:10,transition:'box-shadow .15s',boxShadow:'0 1px 2px rgba(0,0,0,0.04)'}}
                           onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)'} onMouseLeave={e=>e.currentTarget.style.boxShadow='0 1px 2px rgba(0,0,0,0.04)'}>
                           <div style={{width:28,height:28,background:'#fff8e6',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><i className="bi-graph-up" style={{color:'#ed8d00',fontSize:12}}></i></div>
                           <span style={{flex:1,fontSize:13,fontWeight:500,color:'#1b1b1b'}}>{r.name}</span>
@@ -303,7 +303,7 @@ const KnowledgeHub=({subFilter, user})=>{
                     <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:8}}>
                       {chs.map(ch=>(
                         <a key={ch.name} href="#" onClick={e=>{e.preventDefault();window.open(`https://deel.slack.com/archives/${ch.name.replace('#','')}`,'_blank');}}
-                          style={{textDecoration:'none',background:'white',border:'1px solid #e8e8e8',borderLeft:`3px solid ${ch.color}`,borderRadius:12,padding:'12px 14px',display:'flex',gap:8,alignItems:'flex-start',cursor:'pointer',boxShadow:'0 1px 2px rgba(0,0,0,0.04)',transition:'box-shadow .15s'}}
+                          style={{textDecoration:'none',background:'var(--surface)',border:'1px solid #e8e8e8',borderLeft:`3px solid ${ch.color}`,borderRadius:12,padding:'12px 14px',display:'flex',gap:8,alignItems:'flex-start',cursor:'pointer',boxShadow:'0 1px 2px rgba(0,0,0,0.04)',transition:'box-shadow .15s'}}
                           onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)'}
                           onMouseLeave={e=>e.currentTarget.style.boxShadow='0 1px 2px rgba(0,0,0,0.04)'}>
                           <i className="bi-hash" style={{color:ch.color,fontSize:14,marginTop:1,flexShrink:0}}></i>
@@ -322,7 +322,7 @@ const KnowledgeHub=({subFilter, user})=>{
           )}
 
           {tab==='sla'&&(
-            <div style={{background:'white',border:'1px solid #e8e8e8',borderRadius:16,overflow:'hidden',boxShadow:'0 1px 2px rgba(0,0,0,0.04)'}}>
+            <div style={{background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16,overflow:'hidden',boxShadow:'0 1px 2px rgba(0,0,0,0.04)'}}>
               <div style={{display:'grid',gridTemplateColumns:'1fr 110px 82px 1fr',gap:10,padding:'12px 16px',background:'#fafaf9',borderBottom:'1px solid #f2f2f2'}}>
                 {['Process','SLA','Priority','Notes'].map(h=><span key={h} role="columnheader" style={{color:'#9e9e9e',fontSize:13,fontWeight:500,textTransform:'none',letterSpacing:'normal'}}>{h}</span>)}
               </div>
@@ -349,7 +349,7 @@ const KnowledgeHub=({subFilter, user})=>{
           {tab==='policies'&&(
             <div style={{display:'flex',flexDirection:'column',gap:10}}>
               {flt(POLICIES,['title','desc']).map(p=>(
-                <a key={p.title} href={p.url} target="_blank" rel="noreferrer" style={{textDecoration:'none',background:'white',border:'1px solid #e8e8e8',borderRadius:16,padding:'16px 18px',display:'flex',gap:12,alignItems:'flex-start',boxShadow:'0 1px 2px rgba(0,0,0,0.04)',transition:'box-shadow .15s'}}
+                <a key={p.title} href={p.url} target="_blank" rel="noreferrer" style={{textDecoration:'none',background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16,padding:'16px 18px',display:'flex',gap:12,alignItems:'flex-start',boxShadow:'0 1px 2px rgba(0,0,0,0.04)',transition:'box-shadow .15s'}}
                   onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)'} onMouseLeave={e=>e.currentTarget.style.boxShadow='0 1px 2px rgba(0,0,0,0.04)'}>
                   <div style={{width:40,height:40,background:`${p.color}15`,borderRadius:16,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><i className={p.icon} style={{color:p.color,fontSize:18}}></i></div>
                   <div style={{flex:1}}><div style={{fontWeight:600,fontSize:14,color:'#1b1b1b',marginBottom:4}}>{p.title}</div><div style={{fontSize:13,color:'#616161',lineHeight:1.55}}>{p.desc}</div></div>
@@ -371,7 +371,7 @@ const KnowledgeHub=({subFilter, user})=>{
               </div>
 
               {showCustomize&&(
-                <div style={{background:'white',border:'1px solid #e8e8e8',borderRadius:16,padding:'18px',marginBottom:20,boxShadow:'0 2px 8px rgba(0,0,0,0.06)'}}>
+                <div style={{background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16,padding:'18px',marginBottom:20,boxShadow:'0 2px 8px rgba(0,0,0,0.06)'}}>
                   <div style={{fontSize:13,fontWeight:700,color:'#1b1b1b',marginBottom:12}}>Your custom links</div>
                   {customLinks.length===0&&(
                     <div style={{fontSize:12,color:'#9e9e9e',marginBottom:14}}>No custom links yet. Add one below.</div>
@@ -398,7 +398,7 @@ const KnowledgeHub=({subFilter, user})=>{
                       </div>
                       <div>
                         <div style={{fontSize:11,color:'#9e9e9e',marginBottom:3}}>Category</div>
-                        <select value={newLinkCat} onChange={e=>setNewLinkCat(e.target.value)} style={{padding:'8px 10px',border:'1px solid #e8e8e8',borderRadius:8,fontSize:13,color:'#1b1b1b',background:'white',outline:'none',cursor:'pointer'}}>
+                        <select value={newLinkCat} onChange={e=>setNewLinkCat(e.target.value)} style={{padding:'8px 10px',border:'1px solid #e8e8e8',borderRadius:8,fontSize:13,color:'#1b1b1b',background:'var(--surface)',outline:'none',cursor:'pointer'}}>
                           {DEFAULT_QUICK_LINKS.map(c=><option key={c.category} value={c.category}>{c.category}</option>)}
                         </select>
                       </div>
@@ -422,7 +422,7 @@ const KnowledgeHub=({subFilter, user})=>{
                   </div>
                   <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10}}>
                     {cat.links.map(link=>(
-                      <a key={link.name} href={link.url} target="_blank" rel="noreferrer" style={{textDecoration:'none',background:'white',border:'1px solid #e8e8e8',borderRadius:16,padding:'16px 16px',display:'flex',gap:10,alignItems:'flex-start',boxShadow:'0 1px 2px rgba(0,0,0,0.04)',transition:'box-shadow .15s',position:'relative'}}
+                      <a key={link.name} href={link.url} target="_blank" rel="noreferrer" style={{textDecoration:'none',background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16,padding:'16px 16px',display:'flex',gap:10,alignItems:'flex-start',boxShadow:'0 1px 2px rgba(0,0,0,0.04)',transition:'box-shadow .15s',position:'relative'}}
                         onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)'}
                         onMouseLeave={e=>e.currentTarget.style.boxShadow='0 1px 2px rgba(0,0,0,0.04)'}>
                         {link._custom&&<span style={{position:'absolute',top:10,right:10,fontSize:9,padding:'1px 6px',borderRadius:128,background:'#e8f4e8',color:'#29811e',fontWeight:700}}>custom</span>}
@@ -450,7 +450,7 @@ const KnowledgeHub=({subFilter, user})=>{
                   </div>
                   <span style={{fontSize:13,fontWeight:600,color:'#9e9e9e',letterSpacing:'normal',textTransform:'none'}}>Country Resources</span>
                 </div>
-                <div style={{background:'white',border:'1px solid #e8e8e8',borderRadius:16,overflow:'hidden',boxShadow:'0 1px 2px rgba(0,0,0,0.04)'}}>
+                <div style={{background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16,overflow:'hidden',boxShadow:'0 1px 2px rgba(0,0,0,0.04)'}}>
                   {COUNTRY_RESOURCES.map((cr,i)=>(
                     <div key={cr.country} style={{display:'flex',alignItems:'center',gap:12,padding:'11px 16px',borderBottom:i<COUNTRY_RESOURCES.length-1?'1px solid #f2f2f2':'none',transition:'background .1s'}}
                       onMouseEnter={e=>e.currentTarget.style.background='#f9f8f6'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>

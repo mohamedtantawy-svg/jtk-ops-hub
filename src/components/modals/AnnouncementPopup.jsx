@@ -130,7 +130,7 @@ export default function AnnouncementPopup({ comm, onAcknowledge }) {
       {/* Card */}
       <div
         style={{
-          backgroundColor: '#fff',
+          backgroundColor: 'var(--surface)',
           borderRadius: 16,
           maxWidth: 560,
           width: '100%',
@@ -317,7 +317,7 @@ export default function AnnouncementPopup({ comm, onAcknowledge }) {
           style={{
             padding: '16px 32px 24px 32px',
             borderTop: '1px solid #f3f4f6',
-            backgroundColor: '#fff',
+            backgroundColor: 'var(--surface)',
           }}
         >
           <button

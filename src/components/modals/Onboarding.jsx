@@ -6,7 +6,7 @@ const Onboarding=({onDismiss})=>{
   useEffect(()=>{const h=e=>{if(e.key==='Escape')handleDismiss();};document.addEventListener('keydown',h);return()=>document.removeEventListener('keydown',h);},[]);
   return(
   <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:800,display:'flex',alignItems:'center',justifyContent:'center'}} role="dialog" aria-modal="true" aria-label="Welcome to Ops Hub" onClick={handleDismiss}>
-    <div style={{background:'white',borderRadius:16,width:'100%',maxWidth:520,overflow:'hidden',boxShadow:'0 4px 24px rgba(0,0,0,0.15)',position:'relative',animation:'modalIn .18s cubic-bezier(.34,1.56,.64,1) forwards'}} onClick={e=>e.stopPropagation()}>
+    <div style={{background:'var(--surface)',borderRadius:16,width:'100%',maxWidth:520,overflow:'hidden',boxShadow:'0 4px 24px rgba(0,0,0,0.15)',position:'relative',animation:'modalIn .18s cubic-bezier(.34,1.56,.64,1) forwards'}} onClick={e=>e.stopPropagation()}>
       {/* Close button */}
       <button onClick={handleDismiss} style={{position:'absolute',top:16,right:16,width:32,height:32,borderRadius:'50%',background:'rgba(0,0,0,.08)',border:'none',color:'rgba(255,255,255,.7)',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',fontSize:14,zIndex:10,transition:'all .15s'}}
         onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,.22)'}

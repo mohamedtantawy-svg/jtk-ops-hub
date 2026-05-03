@@ -77,7 +77,7 @@ const Slack=({tasks,setTasks,onEscalMgr,addToast,user})=>{
           <span style={{width:6,height:6,borderRadius:'50%',background:'#16a34a',display:'inline-block'}}/>
           <span style={{fontWeight:600,color:'#16a34a'}}>Slack API Connected</span>
           <span style={{color:'#616161'}}>— {slackData.channels?.length||0} channels visible{slackData.escalationMessages?`, ${slackData.escalationMessages.length} escalation messages`:''}</span>
-          <button onClick={slackData.refresh} style={{marginLeft:'auto',fontSize:11,color:'#616161',background:'white',border:'1px solid #e8e8e8',borderRadius:6,padding:'2px 8px',cursor:'pointer'}}>Refresh</button>
+          <button onClick={slackData.refresh} style={{marginLeft:'auto',fontSize:11,color:'#616161',background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:6,padding:'2px 8px',cursor:'pointer'}}>Refresh</button>
         </div>
       )}
 
@@ -105,7 +105,7 @@ const Slack=({tasks,setTasks,onEscalMgr,addToast,user})=>{
               const isO=openR===task.id; const isSent=sentIds.has(task.id); const isSending=sendingIds.has(task.id);
               const rt=texts[task.id]??task.suggestedReply;
               return(
-                <div key={task.id} style={{background:'white',border:isO?'1.5px solid #1f74b3':'1px solid var(--border-light)',borderRadius:'var(--radius-xl)',boxShadow:'0 1px 2px rgba(0,0,0,0.04)',transition:'box-shadow .15s, border-color .15s',overflow:'hidden',marginBottom:12,borderBottom:'1px solid var(--border-light)'}}
+                <div key={task.id} style={{background:'var(--surface)',border:isO?'1.5px solid #1f74b3':'1px solid var(--border-light)',borderRadius:'var(--radius-xl)',boxShadow:'0 1px 2px rgba(0,0,0,0.04)',transition:'box-shadow .15s, border-color .15s',overflow:'hidden',marginBottom:12,borderBottom:'1px solid var(--border-light)'}}
                   onMouseEnter={e=>{if(!isO)e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)';}} onMouseLeave={e=>{if(!isO)e.currentTarget.style.boxShadow='0 1px 2px rgba(0,0,0,0.04)';}}>
                   <div style={{padding:'14px 18px 12px',display:'flex',alignItems:'flex-start',gap:12}}>
                     {/* Avatar with dark-mode-safe colours */}
@@ -136,7 +136,7 @@ const Slack=({tasks,setTasks,onEscalMgr,addToast,user})=>{
                       <button onClick={()=>send(task)} disabled={isSending} style={{height:36,padding:'0 18px',borderRadius:128,border:'none',background:'#1b1b1b',color:'white',fontSize:13,cursor:isSending?'default':'pointer',fontWeight:700,display:'flex',alignItems:'center',gap:6,opacity:isSending?.7:1}}>
                         {isSending?<><i className="bi-arrow-repeat" style={{fontSize:11}}></i>Sending...</>:<><i className="bi-send-fill" style={{fontSize:11}}></i>Send in Slack</>}
                       </button>
-                      <button onClick={()=>setOpenR(null)} style={{height:36,padding:'0 14px',borderRadius:128,border:'1px solid #e8e8e8',background:'white',color:'#616161',fontSize:13,cursor:'pointer',fontWeight:500}}>Cancel</button>
+                      <button onClick={()=>setOpenR(null)} style={{height:36,padding:'0 14px',borderRadius:128,border:'1px solid #e8e8e8',background:'var(--surface)',color:'#616161',fontSize:13,cursor:'pointer',fontWeight:500}}>Cancel</button>
                     </div>
                   </div>}
                   {isSent&&<div style={{padding:'10px 18px 12px',borderTop:'1px solid #f2f2f2',display:'flex',alignItems:'center',gap:6,color:'#29811e',fontSize:13,fontWeight:700}}><i className="bi-check-circle-fill"></i> Reply sent · marking as addressed...</div>}
@@ -148,7 +148,7 @@ const Slack=({tasks,setTasks,onEscalMgr,addToast,user})=>{
             <div style={{marginTop:24}}>
               <div style={{fontSize:13,fontWeight:600,color:'#9e9e9e',letterSpacing:'normal',textTransform:'none',marginBottom:10}}>Addressed ({done.length})</div>
               {done.map(task=>(
-                <div key={task.id} style={{background:'white',border:'1px solid #e8e8e8',borderRadius:16,padding:'12px 16px',marginBottom:8,display:'flex',alignItems:'center',gap:10,opacity:.45}}>
+                <div key={task.id} style={{background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16,padding:'12px 16px',marginBottom:8,display:'flex',alignItems:'center',gap:10,opacity:.45}}>
                   <i className="bi-check-circle-fill" style={{color:'#29811e',fontSize:15,flexShrink:0}}></i>
                   <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,color:'#616161',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{task.subject}</div><div style={{fontSize:11,color:'#9e9e9e'}}>{task.sender} · {task.channel} · {rel(task.minutesAgo)}</div></div>
                 </div>
@@ -175,7 +175,7 @@ const Slack=({tasks,setTasks,onEscalMgr,addToast,user})=>{
             {LITIGATION_CHANNELS.map(lit=>{
               const sc=LIT_STATUS_COLORS[lit.status]||LIT_STATUS_COLORS.monitoring;
               return(
-                <div key={lit.id} style={{background:'white',border:'1px solid #e8e8e8',borderRadius:16,boxShadow:'0 1px 2px rgba(0,0,0,0.04)',overflow:'hidden',transition:'box-shadow .15s'}}
+                <div key={lit.id} style={{background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16,boxShadow:'0 1px 2px rgba(0,0,0,0.04)',overflow:'hidden',transition:'box-shadow .15s'}}
                   onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)'} onMouseLeave={e=>e.currentTarget.style.boxShadow='0 1px 2px rgba(0,0,0,0.04)'}>
                   <div style={{padding:'14px 18px',display:'flex',alignItems:'flex-start',gap:12}}>
                     {/* Icon */}

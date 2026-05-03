@@ -93,7 +93,7 @@ export default function ProjectDetail({ project, onClose, onEdit, onUpdateProgre
 
   return (
     <div style={{
-      width:440, flexShrink:0, borderLeft:'1px solid #e8e8e8', background:'white',
+      width:440, flexShrink:0, borderLeft:'1px solid #e8e8e8', background:'var(--surface)',
       display:'flex', flexDirection:'column', height:'100%', overflowY:'auto',
     }}>
       {/* Header */}
@@ -287,7 +287,7 @@ export default function ProjectDetail({ project, onClose, onEdit, onUpdateProgre
           <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
             <button onClick={() => onEdit(project)} style={{
               padding:'8px 16px', borderRadius:128, fontSize:13, fontWeight:500,
-              border:'1px solid #e8e8e8', background:'white', color:'#1b1b1b', cursor:'pointer', display:'flex', alignItems:'center', gap:6,
+              border:'1px solid #e8e8e8', background:'var(--surface)', color:'#1b1b1b', cursor:'pointer', display:'flex', alignItems:'center', gap:6,
             }}>
               <i className="bi-pencil" style={{ fontSize:12 }}/> Edit
             </button>

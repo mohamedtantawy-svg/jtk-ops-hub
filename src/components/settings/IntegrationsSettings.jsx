@@ -187,7 +187,7 @@ export default function IntegrationsSettings({ addToast }) {
                       disabled={testing[integration.key]}
                       style={{
                         height: 32, padding: '0 14px', borderRadius: 128,
-                        border: '1px solid #e8e8e8', background: 'white',
+                        border: '1px solid #e8e8e8', background: 'var(--surface)',
                         color: '#1b1b1b', fontSize: 12, fontWeight: 600,
                         cursor: testing[integration.key] ? 'wait' : 'pointer',
                         opacity: testing[integration.key] ? 0.6 : 1,
@@ -251,7 +251,7 @@ export default function IntegrationsSettings({ addToast }) {
           onClick={() => { refresh(); if (addToast) addToast('info', 'Refreshed', 'Integration status updated'); }}
           style={{
             height: 32, padding: '0 16px', borderRadius: 128,
-            border: '1px solid #e8e8e8', background: 'white',
+            border: '1px solid #e8e8e8', background: 'var(--surface)',
             color: '#616161', fontSize: 12, fontWeight: 600,
             cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
           }}

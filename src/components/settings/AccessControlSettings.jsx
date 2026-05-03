@@ -7,9 +7,9 @@ import { FLAGS } from '../../data/constants';
 const TABS=['Access Types','Access Type Editor','People Directory'];
 
 // ── Styles ───────────────────────────────────────────────────────────────────
-const card={background:'#fff',border:'1px solid #e8e8e8',borderRadius:16,padding:24,marginBottom:16};
+const card={background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16,padding:24,marginBottom:16};
 const btnPrimary={background:'#1b1b1b',color:'#fff',border:'none',borderRadius:12,padding:'8px 18px',fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'inherit'};
-const btnSecondary={background:'#fff',color:'#1b1b1b',border:'1px solid #e8e8e8',borderRadius:12,padding:'8px 18px',fontSize:13,fontWeight:500,cursor:'pointer',fontFamily:'inherit'};
+const btnSecondary={background:'var(--surface)',color:'#1b1b1b',border:'1px solid #e8e8e8',borderRadius:12,padding:'8px 18px',fontSize:13,fontWeight:500,cursor:'pointer',fontFamily:'inherit'};
 const btnDanger={...btnSecondary,color:'#d32f2f',borderColor:'#f5c6c6'};
 const btnSmall={...btnSecondary,padding:'5px 12px',fontSize:12};
 const badge=(bg,color)=>({display:'inline-block',fontSize:11,fontWeight:600,padding:'2px 8px',borderRadius:8,background:bg,color,marginLeft:8});

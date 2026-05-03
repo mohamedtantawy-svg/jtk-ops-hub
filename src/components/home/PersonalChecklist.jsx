@@ -410,7 +410,7 @@ const DescriptionField = ({ value, onChange }) => {
         wordBreak: 'break-word',
         cursor: 'text',
         minHeight: 32,
-        background: 'white',
+        background: 'var(--surface)',
         transition: 'border-color .15s',
       }}
       onMouseEnter={e => e.currentTarget.style.borderColor = '#7c3aed'}
@@ -685,7 +685,7 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
   // Compact variant keeps the existing small-card look for right-column use.
   return (
     <div style={{
-      background: 'white',
+      background: 'var(--surface)',
       border: '1px solid #e8e8e8',
       borderRadius: 16,
       overflow: 'hidden',
@@ -795,7 +795,7 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
                   outline: 'none',
                   fontFamily: 'inherit',
                   color: '#1b1b1b',
-                  background: 'white',
+                  background: 'var(--surface)',
                 }}
                 onFocus={e => e.target.style.borderColor = '#7c3aed'}
                 onBlur={e => e.target.style.borderColor = '#e8e8e8'}
@@ -808,7 +808,7 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
                   padding: primary ? '0 12px' : '0 10px',
                   borderRadius: primary ? 10 : 8,
                   border: '1px solid #e8e8e8',
-                  background: 'white',
+                  background: 'var(--surface)',
                   color: '#616161',
                   fontSize: 11,
                   fontWeight: 600,
@@ -852,7 +852,7 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
             </div>
           </>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: 'white', padding: 10, borderRadius: 10, border: '1px solid #e8e8e8' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: 'var(--surface)', padding: 10, borderRadius: 10, border: '1px solid #e8e8e8' }}>
             <input
               autoFocus
               value={draft.title}

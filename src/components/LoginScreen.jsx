@@ -16,7 +16,7 @@ const main = {
   padding: '40px 20px',
 };
 const card = {
-  background: '#fff',
+  background: 'var(--surface)',
   borderRadius: 24,
   boxShadow: '0 4px 40px rgba(0,0,0,.06), 0 1px 3px rgba(0,0,0,.04)',
   width: '100%',
@@ -40,7 +40,7 @@ const errorStyle = {
 const googleBtnStyle = {
   width: '100%',
   height: 50,
-  background: '#fff',
+  background: 'var(--surface)',
   color: '#1b1b1b',
   border: '1.5px solid #e0ddd8',
   borderRadius: 14,

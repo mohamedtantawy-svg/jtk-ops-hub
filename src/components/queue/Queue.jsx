@@ -569,7 +569,7 @@ const Queue = ({ user, tasks, subFilter }) => {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* ── Single Header ── */}
-      <div data-role="queue-header" style={{ padding: '8px 32px 12px', background: 'white', borderBottom: '1px solid #e8e8e8', flexShrink: 0 }}>
+      <div data-role="queue-header" style={{ padding: '8px 32px 12px', background: 'var(--surface)', borderBottom: '1px solid #e8e8e8', flexShrink: 0 }}>
         {/* Line 1: SLA pills (left) · Title/totals · Sync button (right) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
           <div onClick={() => setFSla(fSla === 'ok' ? null : 'ok')} title="Filter by SLA: On Track" role="button" tabIndex={0} style={{ display: 'flex', alignItems: 'center', gap: 5, background: fSla === 'ok' ? '#dcfce7' : '#f0fdf4', border: `${fSla === 'ok' ? '2' : '1'}px solid ${fSla === 'ok' ? '#15803d' : '#bbf7d0'}`, borderRadius: 128, padding: '5px 14px', cursor: 'pointer', transition: 'all .15s', flexShrink: 0, boxShadow: fSla === 'ok' ? '0 0 0 2px #15803d30' : 'none' }}>
@@ -1242,7 +1242,7 @@ const MultiFilterDropdown = memo(({ icon, label, selected = [], options, onChang
         <i className={open ? 'bi-chevron-up' : 'bi-chevron-down'} style={{ fontSize: 8, marginLeft: 2, opacity: 0.6 }}></i>
       </button>
       {open && (
-        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, background: 'white', border: '1px solid #e8e8e8', borderRadius: 12, boxShadow: '0 8px 24px rgba(0,0,0,.12)', zIndex: 200, minWidth: 260, maxHeight: 360, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 12, boxShadow: '0 8px 24px rgba(0,0,0,.12)', zIndex: 200, minWidth: 260, maxHeight: 360, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {showSearch && (
             <div style={{ padding: '8px 10px', borderBottom: '1px solid #f2f2f2', display: 'flex', alignItems: 'center', gap: 6 }}>
               <i className="bi-search" style={{ fontSize: 11, color: '#9e9e9e' }}></i>

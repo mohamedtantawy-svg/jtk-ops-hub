@@ -641,7 +641,7 @@ function RequestRow({ item, active, onClick, viewerEmail, isAdmin, onApprove, on
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 4,
                 padding: '4px 10px', borderRadius: 8,
-                background: 'white', color: '#d42d35',
+                background: 'var(--surface)', color: '#d42d35',
                 border: '1px solid #fca5a5',
                 fontSize: 11, fontWeight: 600, cursor: 'pointer',
                 userSelect: 'none',

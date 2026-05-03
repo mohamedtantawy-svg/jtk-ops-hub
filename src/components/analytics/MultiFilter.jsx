@@ -29,7 +29,7 @@ const PILL_ACTIVE = {
 
 const PILL_INACTIVE = {
   ...PILL_BASE,
-  background: '#fff',
+  background: 'var(--surface)',
   color: '#616161',
   borderColor: '#e8e8e8',
 };
@@ -39,7 +39,7 @@ const DROPDOWN_STYLE = {
   top: '100%',
   left: 0,
   marginTop: 4,
-  background: '#fff',
+  background: 'var(--surface)',
   border: '1px solid #e8e8e8',
   borderRadius: 12,
   boxShadow: '0 8px 24px rgba(0,0,0,.10)',

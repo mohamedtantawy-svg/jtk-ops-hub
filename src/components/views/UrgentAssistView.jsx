@@ -111,7 +111,7 @@ function StatusSelect({ value, onChange, disabled }) {
       disabled={disabled}
       style={{
         padding: '3px 8px', borderRadius: 8, border: '1px solid #e8e8e8',
-        background: 'white', fontSize: 11, color: '#1b1b1b',
+        background: 'var(--surface)', fontSize: 11, color: '#1b1b1b',
         cursor: disabled ? 'not-allowed' : 'pointer', outline: 'none',
       }}
     >
@@ -217,7 +217,7 @@ export default function UrgentAssistView({ user, onCreate }) {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#fafaf9' }}>
       {/* Hero */}
-      <div style={{ padding: '20px 32px 12px', background: 'white', borderBottom: '1px solid #e8e8e8' }}>
+      <div style={{ padding: '20px 32px 12px', background: 'var(--surface)', borderBottom: '1px solid #e8e8e8' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <div style={{ width: 44, height: 44, borderRadius: 12, background: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <i className="bi-exclamation-octagon-fill" style={{ fontSize: 22, color: '#d42d35' }} />
@@ -292,7 +292,7 @@ export default function UrgentAssistView({ user, onCreate }) {
       </div>
 
       {/* Filter bar */}
-      <div style={{ padding: '10px 32px', background: 'white', borderBottom: '1px solid #f0efed', display: 'flex', gap: 8, alignItems: 'center' }}>
+      <div style={{ padding: '10px 32px', background: 'var(--surface)', borderBottom: '1px solid #f0efed', display: 'flex', gap: 8, alignItems: 'center' }}>
         <div style={{ position: 'relative' }}>
           <i className="bi-search" aria-hidden="true" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: '#9e9e9e' }} />
           <input
@@ -308,7 +308,7 @@ export default function UrgentAssistView({ user, onCreate }) {
           onClick={() => refresh()}
           aria-label="Refresh"
           title="Refresh"
-          style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #e8e8e8', background: 'white', color: loading ? '#ed8d00' : '#9e9e9e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #e8e8e8', background: 'var(--surface)', color: loading ? '#ed8d00' : '#9e9e9e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         >
           <i className={loading ? 'bi-arrow-clockwise spin' : 'bi-arrow-clockwise'} style={{ fontSize: 12 }} />
         </button>

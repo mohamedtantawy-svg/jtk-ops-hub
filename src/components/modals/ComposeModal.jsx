@@ -240,7 +240,7 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
 
   return (
     <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:10000,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={onClose}>
-      <div style={{background:'white',borderRadius:16,width:'100%',maxWidth:620,maxHeight:'90vh',display:'flex',flexDirection:'column',boxShadow:'0 4px 24px rgba(0,0,0,0.15)',overflow:'hidden',animation:'modalIn .18s cubic-bezier(.34,1.56,.64,1) forwards'}} onClick={e=>e.stopPropagation()}>
+      <div style={{background:'var(--surface)',borderRadius:16,width:'100%',maxWidth:620,maxHeight:'90vh',display:'flex',flexDirection:'column',boxShadow:'0 4px 24px rgba(0,0,0,0.15)',overflow:'hidden',animation:'modalIn .18s cubic-bezier(.34,1.56,.64,1) forwards'}} onClick={e=>e.stopPropagation()}>
         <div style={{padding:'24px 24px 0',display:'flex',alignItems:'center',gap:10}}>
           <div style={{width:36,height:36,borderRadius:9,background:'#e3f2fd',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
             <i className="bi-pencil-square" style={{color:'#1565c0',fontSize:16}}></i>
@@ -321,7 +321,7 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
                   </button>
                 </div>
                 <div style={{fontSize:10,color:'#9e9e9e',marginTop:6,lineHeight:1.5}}>
-                  Tip: select text first to turn it into a link, or paste a bare URL — recipients can click it directly. Use <code style={{background:'#fff',padding:'1px 5px',borderRadius:4,border:'1px solid #ebe5f4',fontSize:10}}>[label](https://…)</code> syntax to type one inline.
+                  Tip: select text first to turn it into a link, or paste a bare URL — recipients can click it directly. Use <code style={{background:'var(--surface)',padding:'1px 5px',borderRadius:4,border:'1px solid #ebe5f4',fontSize:10}}>[label](https://…)</code> syntax to type one inline.
                 </div>
               </div>
             )}
@@ -423,7 +423,7 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
             <div style={{display:'flex',alignItems:'center',gap:10}}>
               <div onClick={()=>setIsPopup(!isPopup)}
                 style={{width:40,height:22,borderRadius:12,background:isPopup?'#1b1b1b':'#d1d5db',position:'relative',cursor:'pointer',transition:'background .2s',flexShrink:0}}>
-                <div style={{width:18,height:18,borderRadius:'50%',background:'white',position:'absolute',top:2,left:isPopup?20:2,transition:'left .2s',boxShadow:'0 1px 3px rgba(0,0,0,0.15)'}}/>
+                <div style={{width:18,height:18,borderRadius:'50%',background:'var(--surface)',position:'absolute',top:2,left:isPopup?20:2,transition:'left .2s',boxShadow:'0 1px 3px rgba(0,0,0,0.15)'}}/>
               </div>
               <div>
                 <div style={{fontSize:13,fontWeight:600,color:'#1b1b1b'}}>
@@ -437,7 +437,7 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
               <div style={{marginTop:10,paddingTop:10,borderTop:'1px dashed #e0e0e0',display:'flex',alignItems:'center',gap:10}}>
                 <i className="bi-music-note-beamed" style={{fontSize:13,color:'#616161'}}></i>
                 <div style={{fontSize:12,fontWeight:600,color:'#616161',flexShrink:0}}>Notification Sound</div>
-                <select value={soundKey} onChange={e=>setSoundKey(e.target.value)} style={{flex:1,border:'1px solid #e8e8e8',borderRadius:6,padding:'5px 8px',fontSize:12,outline:'none',fontFamily:'inherit',color:'#1b1b1b',cursor:'pointer',background:'white'}}>
+                <select value={soundKey} onChange={e=>setSoundKey(e.target.value)} style={{flex:1,border:'1px solid #e8e8e8',borderRadius:6,padding:'5px 8px',fontSize:12,outline:'none',fontFamily:'inherit',color:'#1b1b1b',cursor:'pointer',background:'var(--surface)'}}>
                   {Object.entries(SOUND_PRESETS).map(([k,v]) => (
                     <option key={k} value={k}>{v.label}</option>
                   ))}
@@ -451,7 +451,7 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
             <div style={{display:'flex',alignItems:'center',gap:10}}>
               <div onClick={()=>setScheduleLater(!scheduleLater)}
                 style={{width:40,height:22,borderRadius:12,background:scheduleLater?'#1b1b1b':'#d1d5db',position:'relative',cursor:'pointer',transition:'background .2s',flexShrink:0}}>
-                <div style={{width:18,height:18,borderRadius:'50%',background:'white',position:'absolute',top:2,left:scheduleLater?20:2,transition:'left .2s',boxShadow:'0 1px 3px rgba(0,0,0,0.15)'}}/>
+                <div style={{width:18,height:18,borderRadius:'50%',background:'var(--surface)',position:'absolute',top:2,left:scheduleLater?20:2,transition:'left .2s',boxShadow:'0 1px 3px rgba(0,0,0,0.15)'}}/>
               </div>
               <div style={{flex:1}}>
                 <div style={{fontSize:13,fontWeight:600,color:'#1b1b1b'}}>
@@ -499,7 +499,7 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
                     value={urgentOverrideReason}
                     onChange={e=>setUrgentOverrideReason(e.target.value)}
                     placeholder="e.g. Critical payroll outage — must reach agents before next shift"
-                    style={{width:'100%',border:'1px solid #fcd79a',borderRadius:6,padding:'6px 10px',fontSize:12,outline:'none',fontFamily:'inherit',color:'#1b1b1b',background:'#fff'}}
+                    style={{width:'100%',border:'1px solid #fcd79a',borderRadius:6,padding:'6px 10px',fontSize:12,outline:'none',fontFamily:'inherit',color:'#1b1b1b',background:'var(--surface)'}}
                     maxLength={500}
                   />
                   {!urgentReasonOk && (
@@ -523,11 +523,11 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
 
         {/* Footer */}
         <div style={{padding:'16px 24px 24px',display:'flex',gap:8,justifyContent:'flex-end',borderTop:'1px solid #f2f2f2',background:'#fafaf9'}}>
-          <button onClick={handleSaveDraft} disabled={!valid||submitting} style={{background:'white',border:'1px solid #dedede',color:valid?'#1b1b1b':'#dedede',borderRadius:128,padding:'10px 20px',fontSize:13,cursor:valid?'pointer':'not-allowed',fontWeight:500}}>
+          <button onClick={handleSaveDraft} disabled={!valid||submitting} style={{background:'var(--surface)',border:'1px solid #dedede',color:valid?'#1b1b1b':'#dedede',borderRadius:128,padding:'10px 20px',fontSize:13,cursor:valid?'pointer':'not-allowed',fontWeight:500}}>
             Save Draft
           </button>
           {canBypassQueue && (
-            <button onClick={handleSubmitForApproval} disabled={!valid||submitting} style={{background:'white',border:'1px solid #dedede',color:valid?'#1b1b1b':'#dedede',borderRadius:128,padding:'10px 20px',fontSize:13,cursor:valid?'pointer':'not-allowed',fontWeight:500}}>
+            <button onClick={handleSubmitForApproval} disabled={!valid||submitting} style={{background:'var(--surface)',border:'1px solid #dedede',color:valid?'#1b1b1b':'#dedede',borderRadius:128,padding:'10px 20px',fontSize:13,cursor:valid?'pointer':'not-allowed',fontWeight:500}}>
               <i className="bi-inbox" style={{fontSize:11,marginRight:4}}></i>
               Submit for approval
             </button>
