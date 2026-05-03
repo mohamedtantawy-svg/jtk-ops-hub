@@ -38,6 +38,7 @@ import {
 } from '../../utils/normalizeSourceRows';
 import { isUrgentAssistTaskType } from '../../lib/urgent-assist-task-types';
 import CreateHideTaskRequestModal from '../modals/CreateHideTaskRequestModal';
+import CreateHrHubRequestModal from '../modals/CreateHrHubRequestModal';
 
 // ── Live assignee lookup ───────────────────────────────────────────────────
 // Reads the live MEMBERS_BY_EMAIL binding so hydrateRoster() updates reach
@@ -162,6 +163,54 @@ const Queue = ({ user, tasks, subFilter }) => {
   // the modal needs (subject + source + id + url) so the modal stays
   // shape-agnostic across the seven row types.
   const [hideModalTask, setHideModalTask] = useState(null);
+  // Escalate-to-HR-Hub modal state. Same descriptor shape as hide. We
+  // resolve the requester's direct manager (managerEmail in the roster)
+  // and seed it as the assignee so the new HR Hub request lands on the
+  // right person without an extra Triage step. Falls back to the team-
+  // lead chain if the user has no direct manager set.
+  const [escalateModalTask, setEscalateModalTask] = useState(null);
+  const escalatePrefill = useMemo(() => {
+    if (!escalateModalTask) return null;
+    const me = MEMBERS_BY_EMAIL[(user?.email || '').toLowerCase()] || null;
+    const managerEmailRaw = me?.managerEmail || '';
+    let assigneeEmail = managerEmailRaw ? String(managerEmailRaw).toLowerCase() : null;
+    let assigneeName = null;
+    if (assigneeEmail) {
+      assigneeName = MEMBERS_BY_EMAIL[assigneeEmail]?.name || null;
+    } else {
+      // Walk up the chain looking for any TL/RM/admin so the request
+      // doesn't land orphaned when the immediate manager is unset.
+      let cursor = (user?.email || '').toLowerCase();
+      const seen = new Set();
+      for (let i = 0; i < 6 && cursor && !seen.has(cursor); i++) {
+        seen.add(cursor);
+        const m = MEMBERS_BY_EMAIL[cursor];
+        if (!m) break;
+        const a = (m.access || '').toLowerCase();
+        if (i > 0 && (a === 'team_lead' || a === 'regional_manager' || a === 'admin')) {
+          assigneeEmail = cursor;
+          assigneeName = m.name || null;
+          break;
+        }
+        cursor = (m.managerEmail || '').toLowerCase();
+      }
+    }
+    const subj = escalateModalTask.subject || '';
+    return {
+      links: escalateModalTask.url ? [escalateModalTask.url] : [],
+      title: subj ? `Escalation from queue: ${subj}`.slice(0, 280) : 'Escalation from queue',
+      assigneeEmail,
+      assigneeName,
+      banner: {
+        title: 'Escalating from queue',
+        subtitle: subj
+          ? `${TOOLS[escalateModalTask.source]?.label || escalateModalTask.source}${escalateModalTask.country ? ` · ${escalateModalTask.country}` : ''} · ${subj.slice(0, 120)}`
+          : (TOOLS[escalateModalTask.source]?.label || escalateModalTask.source || ''),
+        color: '#7c3aed', bg: '#f5f3ff',
+        icon: 'bi-arrow-up-right-circle-fill',
+      },
+    };
+  }, [escalateModalTask, user?.email]);
 
   // Wire subFilter from parent (BriefingView "View resolved" etc.) to internal filter
   useEffect(() => {
@@ -739,6 +788,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             hideStatusPills
             showClient
             onHide={(row) => setHideModalTask({ source: 'onboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onEscalate={(row) => setEscalateModalTask({ source: 'onboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
           />
         </ErrorBoundary>
       )}
@@ -759,6 +809,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             showClient
             showType
             onHide={(row) => setHideModalTask({ source: 'offboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onEscalate={(row) => setEscalateModalTask({ source: 'offboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             hideFilterBar
           />
         </ErrorBoundary>
@@ -782,6 +833,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             dateField="createdAt"
             dateLabel="Requested Date"
             onHide={(row) => setHideModalTask({ source: 'amendments', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onEscalate={(row) => setEscalateModalTask({ source: 'amendments', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
           />
         </ErrorBoundary>
       )}
@@ -804,6 +856,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             dateField="createdAt"
             dateLabel="Requested Date"
             onHide={(row) => setHideModalTask({ source: 'redlines', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onEscalate={(row) => setEscalateModalTask({ source: 'redlines', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
           />
         </ErrorBoundary>
       )}
@@ -826,6 +879,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             dateField="createdAt"
             dateLabel="Created"
             onHide={(row) => setHideModalTask({ source: 'workbench', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onEscalate={(row) => setEscalateModalTask({ source: 'workbench', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
           />
         </ErrorBoundary>
       )}
@@ -847,6 +901,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             dateField="createdAt"
             dateLabel="Requested Date"
             onHide={(row) => setHideModalTask({ source: 'incentive_plans', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onEscalate={(row) => setEscalateModalTask({ source: 'incentive_plans', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
           />
         </ErrorBoundary>
       )}
@@ -897,7 +952,7 @@ const Queue = ({ user, tasks, subFilter }) => {
                   )}
                   <SortableTh col="status"   label="Status"   width={90}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <th scope="col" style={{ ...thStyle, width: 60 }}>Link</th>
-                  <th scope="col" style={{ ...thStyle, width: 70 }}>Actions</th>
+                  <th scope="col" style={{ ...thStyle, width: 160 }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -918,18 +973,20 @@ const Queue = ({ user, tasks, subFilter }) => {
                     );
                   }
                   const task = it.row;
+                  const taskDescriptor = {
+                    source: task.source,
+                    id: String(task.id),
+                    url: getUrl(task) || null,
+                    subject: task.subject,
+                    country: task.country,
+                  };
                   return <QueueRow
                     key={task.id}
                     task={task}
                     slaAgeClass={slaAgeClass}
                     settings={settings}
-                    onHide={() => setHideModalTask({
-                      source: task.source,
-                      id: String(task.id),
-                      url: getUrl(task) || null,
-                      subject: task.subject,
-                      country: task.country,
-                    })}
+                    onHide={() => setHideModalTask(taskDescriptor)}
+                    onEscalate={() => setEscalateModalTask(taskDescriptor)}
                   />;
                 })}
                 {ticketBottomPad > 0 && (
@@ -954,12 +1011,26 @@ const Queue = ({ user, tasks, subFilter }) => {
           onSubmitted={() => { try { hiddenTasks?.refresh?.(); } catch {} }}
         />
       )}
+
+      {/* Escalate-to-HR-Hub modal — same Submit-to-HR-Hub picker the global
+          + button opens, but pre-populated with the task URL, a suggested
+          title, and the requester's manager as default assignee. The user
+          still picks the flow (HR Request / Reporting / Escalation Zero /
+          Feedback) and fills out the form. */}
+      {escalateModalTask && (
+        <CreateHrHubRequestModal
+          initialFlow={null}
+          prefill={escalatePrefill}
+          onClose={() => setEscalateModalTask(null)}
+          onCreated={() => setEscalateModalTask(null)}
+        />
+      )}
     </div>
   );
 };
 
 // ── Table row component ──
-const QueueRow = memo(({ task, slaAgeClass, settings, onHide }) => {
+const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onEscalate }) => {
   const [hov, setHov] = useState(false);
   const assignee = resolveAssignee(task);
   const sla = slaInfo(task);
@@ -1028,24 +1099,44 @@ const QueueRow = memo(({ task, slaAgeClass, settings, onHide }) => {
       </td>
       {/* Actions */}
       <td style={tdStyle}>
-        <button
-          type="button"
-          onClick={() => onHide?.()}
-          aria-label={`Hide task "${task.subject || task.id}"`}
-          title="Request to hide this task"
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 4,
-            padding: '3px 8px', borderRadius: 6,
-            background: hov ? '#fef2f2' : '#f5f4f2',
-            color: hov ? '#d42d35' : '#9e9e9e',
-            border: hov ? '1px solid #fca5a5' : '1px solid transparent',
-            fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
-            cursor: 'pointer', fontFamily: 'inherit',
-          }}
-        >
-          <i className="bi-eye-slash" style={{ fontSize: 9 }} />
-          Hide
-        </button>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <button
+            type="button"
+            onClick={() => onEscalate?.()}
+            aria-label={`Escalate "${task.subject || task.id}" to HR Hub`}
+            title="Escalate to HR Hub"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: '3px 8px', borderRadius: 6,
+              background: hov ? '#f5f3ff' : '#f5f4f2',
+              color: hov ? '#7c3aed' : '#9e9e9e',
+              border: hov ? '1px solid #d4c4f0' : '1px solid transparent',
+              fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            <i className="bi-arrow-up-right-circle" style={{ fontSize: 9 }} />
+            Escalate
+          </button>
+          <button
+            type="button"
+            onClick={() => onHide?.()}
+            aria-label={`Hide task "${task.subject || task.id}"`}
+            title="Request to hide this task"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: '3px 8px', borderRadius: 6,
+              background: hov ? '#fef2f2' : '#f5f4f2',
+              color: hov ? '#d42d35' : '#9e9e9e',
+              border: hov ? '1px solid #fca5a5' : '1px solid transparent',
+              fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            <i className="bi-eye-slash" style={{ fontSize: 9 }} />
+            Hide
+          </button>
+        </div>
       </td>
     </tr>
   );
