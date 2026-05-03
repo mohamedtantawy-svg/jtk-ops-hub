@@ -56,6 +56,29 @@ function renderTextWithMentions(line, mentionByPrefix) {
   Pending items get a "Start Acknowledging" button that walks through each
   unacknowledged announcement as a popup, one by one.
 */
+
+// Friendly date formatter for the admin table's Date column. The 2026-05-03
+// live audit (F31) caught raw ISO timestamps (e.g. `2026-04-30T17:35:42.389Z`)
+// rendering in the Date cell — unreadable at a glance and ugly when the
+// column compresses on narrow viewports (F36). Falls back to the input on
+// parse failure so legacy YYYY-MM-DD shorts still render.
+function formatFriendlyDate(iso) {
+  if (!iso) return '';
+  const ms = new Date(iso).getTime();
+  if (!Number.isFinite(ms)) return iso;
+  const diffSec = (Date.now() - ms) / 1000;
+  if (diffSec < 60) return 'just now';
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
+  if (diffSec < 7 * 86400) return `${Math.floor(diffSec / 86400)}d ago`;
+  return new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+// Note: announcement body bold/italic is handled by renderRichText in
+// `src/utils/renderRichText.jsx` (extended 2026-05-03 to support `**bold**`
+// and `*italic*` for F32). All call sites that already use renderRichText
+// pick up the formatting automatically.
+
 const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComms, addToast, tasks, apiAcknowledge, apiCreate, apiSend, apiUpdate, apiArchive, apiRemove, apiTogglePin, openCompose, onComposeOpened, apiUnarchive, apiComments, apiSetComments, apiLoadComments, apiAddComment, apiDeleteComment, apiLinks, apiLoadLinks, apiLinkAnnouncement, apiUnlinkAnnouncement, apiReact }) => {
   const perms = useContext(PermissionsContext);
   const settings = useContext(SettingsContext);
@@ -525,7 +548,7 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
                     {/* Author */}
                     <td style={{ ...tdStyle, color: '#616161' }}>{comm.author?.name || '—'}</td>
                     {/* Date */}
-                    <td style={{ ...tdStyle, color: '#9e9e9e', fontSize: 12 }}>{comm.sentAt || '—'}</td>
+                    <td style={{ ...tdStyle, color: '#9e9e9e', fontSize: 12 }}>{formatFriendlyDate(comm.sentAt) || '—'}</td>
                     {/* Target */}
                     <td style={tdStyle}>
                       <span style={{ fontSize: 11, color: '#616161' }}>{comm.target === 'all' ? 'All' : comm.target}</span>
