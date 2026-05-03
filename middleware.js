@@ -182,6 +182,34 @@ export async function middleware(request) {
   requestHeaders.set('x-user-role', payload.role || '');
   requestHeaders.set('x-user-name', payload.name || '');
 
+  // Impersonation propagation. The FE Login-as feature lets admins / RMs
+  // view the app as another user — but until 2026-05-03 the swap was
+  // FE-only, so every API call still ran with the impersonator's email.
+  // The agent audit (A-F17 / A-F19 / A-F22) caught this surfacing as
+  // "My Requests" showing the admin's data while impersonating Will, and
+  // votes failing because the token email didn't match the rendered user.
+  //
+  // Now: if the caller has an admin or regional-manager JWT AND sends
+  // `X-Impersonate-As: <email>`, the downstream `x-user-*` headers reflect
+  // the impersonated identity. Non-privileged callers (agents, TLs) cannot
+  // self-impersonate — the header is ignored unless the JWT role allows it.
+  // We pass-through the original impersonator email/role on
+  // `x-impersonator-email` / `x-impersonator-role` so audit-log writes can
+  // still attribute actions to the human pressing the button.
+  const impersonateAs = request.headers.get('x-impersonate-as');
+  if (impersonateAs) {
+    const role = String(payload.role || '').toLowerCase();
+    if (role === 'admin' || role === 'regional_manager') {
+      requestHeaders.set('x-impersonator-email', payload.email || '');
+      requestHeaders.set('x-impersonator-role', payload.role || '');
+      requestHeaders.set('x-user-email', String(impersonateAs).toLowerCase());
+      // Keep x-user-id / x-user-name on the JWT issuer; routes that need
+      // the impersonated id can resolve it from the email via the team
+      // directory. Most routes only care about email which is the natural
+      // identity key per skill mistake #4.
+    }
+  }
+
   return NextResponse.next({
     request: { headers: requestHeaders },
   });

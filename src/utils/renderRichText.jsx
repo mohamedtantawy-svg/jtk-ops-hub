@@ -6,6 +6,67 @@
 //   • Bare URLs:                   https://deel.notion.site/sop
 //   • Bold:                        **emphatic words**
 //   • Italic:                      *emphasised words*
+//
+// Unrecognised text passes through untouched. Output is an array of React
+// nodes suitable for rendering inside a <div> / <span>. Links open in a new
+// tab with rel="noopener noreferrer" so an announcement body can never
+// hijack window.opener.
+//
+// Why a custom mini-parser instead of a real markdown lib: announcements
+// are short, single-line / few-line texts. Pulling react-markdown +
+// rehype-sanitize would add ~80KB to the bundle for a feature that needs
+// two regexes. Keeping it small and obvious here is the right trade.
+// ─────────────────────────────────────────────────────────────────────────────
+
+import React from 'react';
+
+// Matches `[label](https://...)`. Label captures non-`]` greedily; URL must
+// start with http:// or https:// and stops at whitespace, `)`, or `>`.
+const MD_LINK_RE = /\[([^\]]+)\]\((https?:\/\/[^\s)>]+)\)/g;
+
+// Bare URL — http:// or https://. Stops at whitespace, common closing
+// punctuation, and angle brackets so we don't slurp trailing prose.
+const URL_RE = /(https?:\/\/[^\s<>\)\]]+)/g;
+
+// Trailing punctuation that's almost certainly NOT part of the URL the user
+// typed. Strip these off auto-linked bare URLs (the visible text and the
+// href both lose them) so "see https://x.com." opens "https://x.com" not
+// "https://x.com.".
+const TRAILING_PUNCT_RE = /[.,;:!?\)\]'"]+$/;
+
+function linkStyle(color) {
+  return {
+    color,
+    textDecoration: 'underline',
+    textUnderlineOffset: 2,
+    wordBreak: 'break-word',
+  };
+}
+
+// Inline emphasis (bold / italic). The 2026-05-03 live audit (F32) caught
+// announcement bodies rendering literal `**On-Platform**` because authors
+// wrote markdown but the renderer only handled links. Splits on
+// `**…**` / `*…*` and wraps in <strong> / <em>. Anything else passes through
+// unchanged. Bold MUST be checked before italic so `**word**` doesn't get
+// misinterpreted as `*` italic + `word*` text.
+function applyEmphasis(text, keyPrefix) {
+  if (!text) return [];
+  const tokens = String(text).split(/(\*\*[^*]+\*\*|\*[^*\s][^*]*[^*\s]\*|\*[^*\s]\*)/g);
+  const out = [];
+  tokens.forEach((tok, i) => {
+    if (!tok) return;
+    const k = `${keyPrefix}-em-${i}`;
+    if (/^\*\*[^*]+\*\*$/.test(tok)) {
+      out.push(<strong key={k}>{tok.slice(2, -2)}</strong>);
+    } else if (/^\*[^*\s][^*]*[^*\s]\*$|^\*[^*\s]\*$/.test(tok)) {
+      out.push(<em key={k}>{tok.slice(1, -1)}</em>);
+    } else {
+      out.push(<React.Fragment key={k}>{tok}</React.Fragment>);
+    }
+  });
+  return out;
+}
+
 // Auto-link bare URLs inside a plain string, returning React nodes. Used as
 // the "fallback" pass after markdown links are extracted.
 function autoLinkBare(s, color, keyPrefix) {
@@ -53,9 +114,6 @@ function autoLinkBare(s, color, keyPrefix) {
     // `**bold**` line renders correctly (was the F32 repro case).
     return applyEmphasis(s, `${keyPrefix}-emonly`);
   }
-  // The pre-URL fragments above pushed raw React.Fragment text — replace
-  // them with emphasis-rendered equivalents on a final sweep so bold/italic
-  // can appear inside the same line as links.
   return out;
 }
 

@@ -39,7 +39,16 @@ export const ALL_VIEWS = [
 // their base type is at least Team Lead. Used to derive `VIEWS_AGENT` and
 // to keep the at_*_admin types from accidentally unlocking managerial
 // surfaces. Update whenever a new managerial-only tab lands.
-const MANAGERIAL_ONLY_VIEWS = new Set(['leader-alerts']);
+//
+// 2026-05-03: 'team' added per the agent-side audit (A-F2). Although the
+// `'team'` route is just a sub-toggle inside Leaders Hub, the Home quick-
+// action tile in BriefingView calls `setView('team')` directly — which
+// previously bypassed the topnav gating and let agents land on Leaders
+// Hub via the side door. Putting `'team'` in this set means agents'
+// `perms.canView('team')` now returns false everywhere (topnav, quick-
+// tile, and direct URL deep-link `?view=team`), matching the strict rule
+// "Agents must NEVER access the Team tab or Leaders Alerts".
+const MANAGERIAL_ONLY_VIEWS = new Set(['leader-alerts', 'team']);
 
 export const ALL_ACTIONS = [
   // Task actions
