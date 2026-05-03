@@ -63,6 +63,19 @@ function computeSla(createdAt) {
   };
 }
 
+// Strip the workbench-side type suffix from a task name. Deel admin
+// task titles often duplicate the type label as the suffix
+// ("- Expedite Request (HRX)" / "- Urgent Assist") which renders the
+// same string twice in the table — once in Subject, once in Type.
+// Audit F3. The regex tolerates either dash variant + trailing
+// whitespace and is anchored at end-of-string so mid-name occurrences
+// (rare) are preserved.
+const URGENT_ASSIST_NAME_SUFFIX_RE = /\s*[–—-]\s*(Expedite Request \(HRX\)|Urgent Assist|HRX Urgent Assist Request|HRX Urgent Assist)\s*$/i;
+function trimTypeSuffix(name) {
+  if (!name) return '';
+  return String(name).replace(URGENT_ASSIST_NAME_SUFFIX_RE, '').trim();
+}
+
 // Workbench task → unified urgent-assist row.
 function fromWorkbench(task) {
   const status = workbenchStatusToTabStatus(task.status);
@@ -71,7 +84,7 @@ function fromWorkbench(task) {
     id: `wb:${task.id}`,
     rawId: String(task.id || ''),
     source: 'workbench',
-    subject: task.name || 'Untitled Task',
+    subject: trimTypeSuffix(task.name) || 'Untitled Task',
     requestType: task.taskType || 'HRX Urgent Assist',
     country: task.country || '',
     assigneeEmail: (task.assignee?.email || '').toLowerCase(),
@@ -184,44 +197,32 @@ export function useUrgentAssistData({
     const tasks = Array.isArray(workbenchData.tasks) ? workbenchData.tasks : [];
     const matched = tasks.filter(t => isUrgentAssistTaskType(t?.taskType) || isUrgentAssistTaskType(t?.sourceType));
     if (scope === 'all') {
-      if (isAdmin) return matched;
-      // Non-admin "all" — narrow to their visible chain so we don't surface
-      // tickets they have no operational relationship with.
-      if (visibleEmails) {
-        return matched.filter(t => {
-          const ae = (t.assignee?.email || '').toLowerCase();
-          if (ae && visibleEmails.has(ae)) return true;
-          const ce = (t.creator?.email || '').toLowerCase();
-          if (ce && visibleEmails.has(ce)) return true;
-          return false;
-        });
-      }
+      // 2026-05-04 spec: "All Requests" is literal — every urgent-assist
+      // row across the org. Returning `matched` for every role matches
+      // the user's intent and aligns with the manual rows API which
+      // already returns everything for `all` (no predicate). Earlier
+      // implementation narrowed non-admins by visibleEmails (audit F7);
+      // that drift caused RM/TL "All" totals to differ from admin's,
+      // contradicting the label.
       return matched;
     }
+    // Per the 2026-05-03 spec: "my requests = any request where I'm
+    // assigned" — workbench-sourced rows now match on `assignee.email`
+    // ONLY (no creator-OR fallback). Same rule for Team (assignee in
+    // the manager's team subtree) and the role-collapsed agent path.
     if (scope === 'team') {
       if (!isManager) {
         // Agents asking for team collapse to mine — same rule the API uses.
-        return matched.filter(t => {
-          const ae = (t.assignee?.email || '').toLowerCase();
-          const ce = (t.creator?.email || '').toLowerCase();
-          return (ae && ae === lcUser) || (ce && ce === lcUser);
-        });
+        return matched.filter(t => (t.assignee?.email || '').toLowerCase() === lcUser);
       }
       const team = teamEmails || new Set();
       return matched.filter(t => {
         const ae = (t.assignee?.email || '').toLowerCase();
-        const ce = (t.creator?.email || '').toLowerCase();
-        if (ae && (ae === lcUser || team.has(ae))) return true;
-        if (ce && (ce === lcUser || team.has(ce))) return true;
-        return false;
+        return ae && (ae === lcUser || team.has(ae));
       });
     }
-    // mine
-    return matched.filter(t => {
-      const ae = (t.assignee?.email || '').toLowerCase();
-      const ce = (t.creator?.email || '').toLowerCase();
-      return (ae && ae === lcUser) || (ce && ce === lcUser);
-    });
+    // mine — assignee match only, per spec.
+    return matched.filter(t => (t.assignee?.email || '').toLowerCase() === lcUser);
   }, [workbenchData.tasks, scope, lcUser, isManager, isAdmin, teamEmails, visibleEmails]);
 
   const items = useMemo(() => {

@@ -103,14 +103,20 @@ export async function GET(req) {
   }
 
   if (effectiveScope === 'mine') {
-    // Show rows the caller created OR is assigned to.
-    where.push(`(LOWER(created_by_email) = $${p} OR LOWER(COALESCE(assignee_email,'')) = $${p})`);
+    // Spec (2026-05-03): "My Requests = any request where I'm assigned" —
+    // drop the creator-side OR. Manual rows live or die by the
+    // assignee_email column; workbench rows do the same on the FE side
+    // (see useUrgentAssistData).
+    where.push(`LOWER(COALESCE(assignee_email,'')) = $${p}`);
     params.push(callerEmail);
     p++;
   } else if (effectiveScope === 'team') {
-    // Manager view — anyone whose team_lead_email is the caller, plus rows
-    // the caller themselves created/owns.
-    where.push(`(LOWER(team_lead_email) = $${p} OR LOWER(created_by_email) = $${p} OR LOWER(COALESCE(assignee_email,'')) = $${p})`);
+    // Manager view — denormalised team_lead_email captures "assignee is in
+    // my team" because the POST route stamps team_lead_email from the
+    // assignee at create-time. We also keep the caller-self path so a
+    // manager who is themselves the assignee on a row still sees it under
+    // Team (consistent with how mine narrows to assignee).
+    where.push(`(LOWER(team_lead_email) = $${p} OR LOWER(COALESCE(assignee_email,'')) = $${p})`);
     params.push(callerEmail);
     p++;
   }

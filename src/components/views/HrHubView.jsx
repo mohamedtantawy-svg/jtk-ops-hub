@@ -476,11 +476,15 @@ export default function HrHubView({ user, onCreateHrHub }) {
                 active={detailId === item.id}
                 onClick={() => setDetailId(item.id)}
                 viewerEmail={user?.email}
+                isManager={isManager}
                 isAdmin={isManager && (user?.role === 'admin' || (user?.access || '').toLowerCase().includes('admin'))}
                 onApprove={async (it) => {
                   setDecisionError(null);
                   try {
                     await approveHideTask(it.id);
+                    // Refresh the global hide list so the queue render path
+                    // picks up the new entry on the next render. Then reload
+                    // this view so the row flips to "resolved" status.
                     try { integrations?.hiddenTasks?.refresh?.(); } catch {}
                     loadFirstPage();
                   } catch (err) {
@@ -550,7 +554,7 @@ const HIDE_REASON_LABELS = {
 // status pill — visible only while the request is unresolved. The buttons
 // stop propagation so the row click (→ open detail) still works for the
 // rest of the row surface.
-function RequestRow({ item, active, onClick, viewerEmail, isAdmin, onApprove, onDeny }) {
+function RequestRow({ item, active, onClick, viewerEmail, isManager, isAdmin, onApprove, onDeny }) {
   const flow = FLOW_VISUALS[item.flow] || FLOW_VISUALS.hr_request;
   const status = STATUS_BY_VALUE[item.status] || STATUS_BY_VALUE.new;
   const priColor = PRIORITY_DOT[item.priority] || PRIORITY_DOT.medium;
@@ -561,13 +565,19 @@ function RequestRow({ item, active, onClick, viewerEmail, isAdmin, onApprove, on
   const meta = isHide
     ? hideMeta
     : [item.functionArea, item.requestType || item.reportType].filter(Boolean).join(' · ');
-  // Manager-side decision affordance: visible only on hide_task_request
-  // rows that are still pending and the viewer is the requester's TL or
-  // admin. Self-decision blocked.
+  // Manager-side decision affordance: visible on every pending hide
+  // request to ANY manager (TL / RM / admin). The denormalised
+  // `team_lead_email` is the routing target, but live audit 2026-05-04
+  // showed the row stuck pending whenever the requester's TL was unset
+  // or the routing was wrong, with no fallback path. Broadening the gate
+  // to any manager guarantees a human can always action the request.
+  // Self-decision is the one hard block — true 4-eyes principle, applied
+  // uniformly across roles (no admin override). Backend mirrors this rule
+  // (see /api/v1/hide-task/[id]/{approve,deny}).
   const viewerLc = (viewerEmail || '').toLowerCase();
   const canDecide = isHide
     && item.status !== 'resolved'
-    && (isAdmin || (item.teamLeadEmail || '').toLowerCase() === viewerLc)
+    && !!isManager
     && (item.createdByEmail || '').toLowerCase() !== viewerLc;
 
   return (

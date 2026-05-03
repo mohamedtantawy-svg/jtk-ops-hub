@@ -24,7 +24,11 @@ const PRIMARY_TABS = [
   { id: 'briefing',      icon: 'bi-house',                label: 'Home' },
   { id: 'my-queue',      icon: 'bi-inbox',                label: 'Workspace' },
   { id: 'hr-hub',        icon: 'bi-broadcast-pin',        label: 'HR Hub' },
-  { id: 'leader-alerts', icon: 'bi-broadcast',            label: 'Leaders Hub' },
+  // managerialOnly — hard block for agents in addition to MANAGERIAL_ONLY_VIEWS
+  // gating in accessControl. Belt-and-braces because Leaders Hub also embeds
+  // the Team admin surface; no path through the UI should reach it for an
+  // agent (audit 2026-05-04 + spec hardening request).
+  { id: 'leader-alerts', icon: 'bi-broadcast',            label: 'Leaders Hub', managerialOnly: true },
   { id: 'urgent-assist', icon: 'bi-exclamation-octagon',  label: 'Urgent Assist' },
   { id: 'feedback',      icon: 'bi-lightbulb',            label: 'Feedback' },
   { id: 'announcements', icon: 'bi-megaphone',            label: 'Announcements' },
@@ -39,17 +43,22 @@ const MORE_TABS = [];
 /* Quick-create actions — opens from the "Quick Create" menu in the top nav.
  * Order per the 2026-05-03 rebrand:
  *   1. HR Hub Request
- *   2. New Leaders Alert (gated to managers via viewReq)
+ *   2. New Leaders Alert (gated to managers via viewReq + managerialOnly)
  *   3. New Urgent Assist
  *   4. Ops Hub Feedback
  *   5. New Announcement
  *
  * The deleted actions (New Task / New Escalation / New Project) are gone.
  * `feedback` action opens HR Hub with the feedback flow preselected — see
- * App.jsx's onCreateFeedback handler. */
+ * App.jsx's onCreateFeedback handler.
+ *
+ * `managerialOnly: true` is a hard block — even if perms.canView returns a
+ * truthy value for managerial views (e.g. due to a stale memoised hook
+ * snapshot), agents never see the action. Defense-in-depth complement to
+ * the existing viewReq check (audit F9). */
 const CREATE_ACTIONS = [
   { icon: 'bi-broadcast-pin',     label: 'HR Hub Request',    action: 'hr-hub',        desc: 'HR Request, Report, Escalation Zero, or Feedback' },
-  { icon: 'bi-broadcast',         label: 'New Leaders Alert', action: 'leader-alerts', desc: 'Quick alert visible to every manager', viewReq: 'leader-alerts' },
+  { icon: 'bi-broadcast',         label: 'New Leaders Alert', action: 'leader-alerts', desc: 'Quick alert visible to every manager', viewReq: 'leader-alerts', managerialOnly: true },
   { icon: 'bi-exclamation-octagon', label: 'New Urgent Assist', action: 'urgent-assist', desc: 'Log a manual urgent-assist request' },
   { icon: 'bi-lightbulb',         label: 'Ops Hub Feedback',  action: 'feedback',      desc: 'Report a bug or improvement' },
   { icon: 'bi-megaphone',         label: 'New Announcement',  action: 'announcement',  desc: 'Post to the team' },
@@ -116,17 +125,31 @@ const DeelTopNav = ({
   const unread = notifs ? notifs.filter(n => !n.read).length : 0;
   const notifCount = unread;
 
-  // Filter tabs by user permissions — hide views the user can't access
+  // Filter tabs by user permissions — hide views the user can't access.
+  // Role-level fail-safe (audit F9 + 2026-05-04 hardening request):
+  // agents must NEVER see Leaders Hub or Team. We treat the access type
+  // id as the source of truth — `at_agent` is hard-blocked from any tab
+  // or quick-action that's flagged `managerialOnly`. This complements the
+  // perms.canView gate so a stale memoised `perms` snapshot or a future
+  // permission-table edit can't accidentally unlock the surface.
   const emailLc = (user?.email || '').toLowerCase();
+  const accessTypeId = perms?.accessTypeId || perms?.raw?.id || '';
+  const isAgentTier = accessTypeId === 'at_agent'
+    || (perms?.accessTypeName || '').toLowerCase() === 'agent';
   const tabAllowed = (t) => {
     if (t.restrictToEmail) return emailLc === t.restrictToEmail.toLowerCase();
     if (t.approverOnly && !isApprover(user?.email)) return false;
-    return !perms || perms.canView(t.id) !== false;
+    if (t.managerialOnly && isAgentTier) return false;
+    // Strict gate: only allow when canView returns truthy. The previous
+    // `!== false` was lax — undefined / null slipped through and surfaced
+    // managerial views in stale-perms windows.
+    return !perms || perms.canView(t.id) === true;
   };
   const visiblePrimary = PRIMARY_TABS.filter(tabAllowed);
   const visibleMore = MORE_TABS.filter(tabAllowed);
   const visibleCreate = CREATE_ACTIONS.filter(ca => {
     if (ca.restrictToEmail && emailLc !== ca.restrictToEmail.toLowerCase()) return false;
+    if (ca.managerialOnly && isAgentTier) return false;
     if (ca.perm && !perms?.canDo(ca.perm)) return false;
     if (ca.viewReq && !perms?.canView(ca.viewReq)) return false;
     return true;

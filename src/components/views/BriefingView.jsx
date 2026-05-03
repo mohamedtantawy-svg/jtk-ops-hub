@@ -1118,25 +1118,18 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             const inAudExec=(c)=>matchesAudience(c.target,user.team)||(c.author&&c.author.id===user.id);
             const execUnackedCount=comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='alert'||c.type==='guidance')&&!isAckedByMe(c)&&inAudExec(c)).length;
             return(
-              <div style={{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:10,marginBottom:16}}>
+              <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:10,marginBottom:16}}>
                 {[
-                  // Active Requests is now clickable → opens Queue. Was a dead
-                  // card per the 2026-05-01 audit (every other KPI navigated
-                  // somewhere; this one didn't). The "org-wide" sub-label is
-                  // also scope-aware — admins see "org-wide", Team Leads "team",
-                  // Agents "mine" — matches what activeRequestsCount actually
-                  // represents per the per-role calc above.
-                  {icon:'bi-inbox-fill',label:'Active Requests',value:activeRequestsCount,color:'var(--g)',sub:isOwnScope?'mine':isTeamScope?'team':'org-wide',nav:()=>setView('my-queue')},
-                  {icon:'bi-calendar-event',label:'Meetings',value:todayMeetingsCount,color:'#1f74b3',sub:'today',nav:()=>setView('calendar')},
-                  {icon:'bi-kanban',label:'Projects',value:projectsAssignedCount,color:'#8b6dca',sub:'assigned',nav:()=>setView('projects')},
-                  // Escalations card pre-filters the destination to "mine" so
-                  // clicking "0 mine" lands on the user's own escalations
-                  // instead of all 3 the org has open.
-                  {icon:'bi-exclamation-triangle-fill',label:'Escalations',value:myEscalationsCount,color:myEscalationsCount>0?'#d42d35':'#616161',alert:myEscalationsCount>0,nav:()=>{setSubFilter && setSubFilter('mine'); setView('escalations');},accent:myEscalationsCount>0?'#ffe2de':null,sub:'mine'},
+                  // 2026-05-04 rebrand cleanup (audit F6 + F10): dropped
+                  // the dead Meetings / Projects / Escalations / My To-Do
+                  // tiles — those features were deleted from the product
+                  // and the tiles either showed 0 forever or pointed at
+                  // routes that no longer rendered. "Active Requests"
+                  // renamed to "Open Tasks" to disambiguate from HR Hub
+                  // Requests; the underlying count is unchanged (sum of
+                  // open items across every queue source).
+                  {icon:'bi-inbox-fill',label:'Open Tasks',value:activeRequestsCount,color:'var(--g)',sub:isOwnScope?'mine':isTeamScope?'team':'org-wide',nav:()=>setView('my-queue')},
                   {icon:'bi-megaphone-fill',label:'Announcements',value:execUnackedCount,color:execUnackedCount>0?'#ed8d00':'#616161',alert:execUnackedCount>0,nav:()=>setView('announcements'),accent:execUnackedCount>0?'#fff8e6':null,sub:'unacked'},
-                  // My To-Do is now clickable → opens the Settings ▸ Personal
-                  // checklist where these items live. Was a dead card.
-                  {icon:'bi-check2-square',label:'My To-Do',value:checklistCount,color:checklistCount>0?'#7c3aed':'#616161',sub:'open items',nav:()=>setView('personal-checklist')},
                 ].map(m=>(
                   <DeelCard key={m.label}
                     onClick={m.nav}
@@ -1384,17 +1377,16 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             if(workbenchRows.length)   srcMap.workbench   =(srcMap.workbench   ||0)+workbenchRows.length;
             const srcBreakdown=Object.entries(srcMap).sort((a,b)=>b[1]-a[1]);
             return(<>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:10}}>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:10}}>
             {[
-              // Active Requests sub-label is scope-aware so an agent sees
-              // "mine" rather than "avg 437.0" (the team-average string the
-              // 2026-05-01 audit found leaking onto Trish's Home).
-              {icon:'bi-inbox-fill',label:'Active Requests',value:activeRequestsCount,color:'var(--g)',sub:isOwnScope?'mine':isTeamScope?`team · avg ${teamAvg.toFixed(1)}`:`avg ${teamAvg.toFixed(1)}`,tr:trend(),expandKey:'active-breakdown'},
-              {icon:'bi-calendar-event',label:'Meetings',value:todayMeetingsCount,color:'#1f74b3',sub:'today',nav:()=>setView('calendar')},
-              {icon:'bi-kanban',label:'Projects',value:projectsAssignedCount,color:'#8b6dca',sub:'assigned',nav:()=>setView('projects')},
-              {icon:'bi-exclamation-triangle-fill',label:'Escalations',value:myEscalationsCount,color:myEscalationsCount>0?'#d42d35':'#616161',alert:myEscalationsCount>0,nav:()=>{setSubFilter && setSubFilter('mine'); setView('escalations');},accent:myEscalationsCount>0?'#ffe2de':null,sub:'mine'},
+              // Open Tasks (was "Active Requests") renamed to disambiguate
+              // from HR Hub Requests after the 2026-05-03 rebrand. The
+              // underlying activeRequestsCount is the cross-queue open
+              // count (Pilar's rule). Meetings / Projects / Escalations /
+              // My To-Do tiles dropped per audit F6 + F10 — features
+              // deleted from the product.
+              {icon:'bi-inbox-fill',label:'Open Tasks',value:activeRequestsCount,color:'var(--g)',sub:isOwnScope?'mine':isTeamScope?`team · avg ${teamAvg.toFixed(1)}`:`avg ${teamAvg.toFixed(1)}`,tr:trend(),expandKey:'active-breakdown'},
               {icon:'bi-megaphone-fill',label:'Announcements',value:unackedCount,color:unackedCount>0?'#ed8d00':'#616161',alert:unackedCount>0,nav:()=>setView('announcements'),accent:unackedCount>0?'#fff8e6':null,sub:'unacked'},
-              {icon:'bi-check2-square',label:'My To-Do',value:checklistCount,color:checklistCount>0?'#7c3aed':'#616161',sub:'open items',nav:()=>setView('personal-checklist')},
             ].map((m,i)=>(
               <DeelCard key={m.label}
                 onClick={m.expandKey?()=>setExpandedSla(expandedSla===m.expandKey?null:m.expandKey):m.nav?m.nav:undefined}

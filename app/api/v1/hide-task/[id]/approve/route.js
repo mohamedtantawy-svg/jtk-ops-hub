@@ -51,15 +51,23 @@ export async function POST(req, { params }) {
     return NextResponse.json({ error: 'Request is missing task identity — cannot approve' }, { status: 422 });
   }
 
-  // Permission: requester's TL or admin. Self-approval blocked.
+  // Permission gate (rebalanced 2026-05-04 audit + user directive):
+  // any manager — TL / RM / admin — may approve a hide request. The
+  // denormalised team_lead_email continues to drive the FE highlight,
+  // but live testing showed routing breaks (admin requesters with empty
+  // managerEmail, deleted-account TLs) leaving requests stuck pending
+  // with no resolution path. Broadening to "any manager" matches the
+  // FE's canDecide and keeps the workflow movable.
+  // Self-approval remains hard-blocked for ALL roles, including admin —
+  // true 4-eyes principle. Mirrors the FE gate.
   const me = memberByEmail(callerEmail);
-  const isAdmin = me?.access === 'admin';
-  const isTl = (r.team_lead_email || '').toLowerCase() === callerEmail;
-  if (!isAdmin && !isTl) {
-    return NextResponse.json({ error: 'Forbidden — only the requester\'s team lead or an admin can approve' }, { status: 403 });
+  const access = (me?.access || '').toLowerCase();
+  const isManager = access === 'admin' || access === 'regional_manager' || access === 'team_lead';
+  if (!isManager) {
+    return NextResponse.json({ error: 'Forbidden — only managers (TL/RM/admin) can approve hide requests' }, { status: 403 });
   }
-  if ((r.created_by_email || '').toLowerCase() === callerEmail && !isAdmin) {
-    return NextResponse.json({ error: 'You cannot approve your own hide request' }, { status: 403 });
+  if ((r.created_by_email || '').toLowerCase() === callerEmail) {
+    return NextResponse.json({ error: 'You cannot approve your own hide request — another manager must review it (4-eyes).' }, { status: 403 });
   }
 
   // Run the resolve + insert + log inside one transaction — if either side

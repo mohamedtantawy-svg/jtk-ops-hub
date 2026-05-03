@@ -17,7 +17,7 @@ import { useQueueSync } from './hooks/useQueueSync';
 import { useQueueUnifiedSync } from './hooks/useQueueUnifiedSync';
 import { useHiddenTasks } from './hooks/useHiddenTasks';
 import { DEFAULT_SETTINGS } from './data/settings';
-import { DEFAULT_ACCESS_TYPES } from './data/accessControl';
+import { DEFAULT_ACCESS_TYPES, ALL_VIEWS } from './data/accessControl';
 import { ADMIN_LIST_VERSION } from './data/adminEmails';
 import { usePermissions } from './hooks/usePermissions';
 import ErrorBoundary from './components/ui/ErrorBoundary';
@@ -1253,8 +1253,17 @@ const App=()=>{
   // first version of this guard.
   useEffect(()=>{
     if(!perms||!user)return;
-    if(view&&!perms.canView(view)){
-      // Find first allowed view
+    // Two reasons we redirect away from the current view:
+    //   1. The view is a real route the caller doesn't have access to
+    //      (e.g. agent landing on ?view=leader-alerts via a stale link).
+    //   2. The view is one of the deleted route ids — projects /
+    //      escalations / calendar / knowledge-hub / analytics / hr-reports.
+    //      `perms.canView` returns truthy for unknown ids by default, so
+    //      we explicitly check membership in ALL_VIEWS too. Without this
+    //      block, deep-links to deleted views landed on a blank content
+    //      area (Audit 2026-05-04 finding F5).
+    const isKnownView = ALL_VIEWS.includes(view);
+    if (view && (!isKnownView || !perms.canView(view))) {
       const fallback=['briefing','my-queue','hr-hub','leader-alerts','urgent-assist','feedback','announcements','slack','settings'].find(v=>perms.canView(v));
       setView(fallback||'briefing');
     }
@@ -1361,13 +1370,19 @@ const App=()=>{
           {view==='hr-hub'        &&perms?.canView('hr-hub')!==false       &&<div className="page-enter"><HrHubView user={effectiveUser} onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}/></div>}
           {view==='urgent-assist' &&perms?.canView('urgent-assist')!==false&&<div className="page-enter" key={urgentAssistRefreshNonce}><UrgentAssistView user={effectiveUser} onCreate={()=>setUrgentAssistCreate(true)}/></div>}
           {/* Leaders Hub — wraps the alerts view + the team admin surface
-              behind a single sub-toggle. Default sub-tab is alerts. */}
-          {view==='leader-alerts' &&perms?.canView('leader-alerts')!==false&&<div className="page-enter"><LeadersHubView user={effectiveUser} perms={perms} refreshNonce={leaderAlertsRefreshNonce} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
+              behind a single sub-toggle. Default sub-tab is alerts. The
+              `=== true` strict gate complements the route-level fallback
+              effect — agents whose perms.canView('leader-alerts')
+              evaluates to undefined / null (e.g. mid-impersonation
+              hand-off) get an empty render instead of leaking the view
+              while perms re-hydrate (audit 2026-05-04 hardening). */}
+          {view==='leader-alerts' && perms?.canView('leader-alerts') === true &&<div className="page-enter"><LeadersHubView user={effectiveUser} perms={perms} refreshNonce={leaderAlertsRefreshNonce} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
           {/* Legacy direct route — keeps deep-links to ?view=team working
               by sending the user to Leaders Hub (which contains the Team
               sub-view). Avoids 404s on bookmarks/notifications from the
-              pre-2026-05-03 nav. */}
-          {view==='team'          &&perms?.canView('team')!==false         &&<div className="page-enter"><LeadersHubView user={effectiveUser} perms={perms} refreshNonce={leaderAlertsRefreshNonce} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
+              pre-2026-05-03 nav. Same strict canView gate as Leaders Hub
+              above; agents never get past this even via legacy URL. */}
+          {view==='team'          && perms?.canView('team') === true       &&<div className="page-enter"><LeadersHubView user={effectiveUser} perms={perms} refreshNonce={leaderAlertsRefreshNonce} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
       </div>
       {createModal   &&<CreateTaskModal onConfirm={confirmCreate} onClose={()=>setCreateModal(false)} currentUser={effectiveUser}/>}
       {hrHubCreate   &&<CreateHrHubRequestModal initialFlow={hrHubCreate.initialFlow||null} onClose={()=>setHrHubCreate(null)} onCreated={(id,flow)=>{setHrHubCreate(null);setView('hr-hub');addToast?.({kind:'success',message:`Submitted to HR Hub${flow?` (${flow.replace('_',' ')})`:''}.`});}}/>}
