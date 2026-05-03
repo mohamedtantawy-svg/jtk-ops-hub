@@ -134,14 +134,29 @@ export default function HrHubView({ user, onCreateHrHub }) {
     const seq = ++reqSeqRef.current;
     setLoading(true);
     setError(null);
+    // Retry-once-on-5xx — the 2026-05-03 live audit (F12) caught HR Hub
+    // wedging on "Loading…" with a transient 503 from the deploy pod-warm
+    // tail-end (skill §6.6). One immediate retry gives the upstream pod
+    // ~600ms to recover before we surface the error and clear cached items.
+    const tryFetch = async () => listHrHubRequests({
+      flow: flowQuery,
+      scope,
+      status: statusFilter || undefined,
+      search: debouncedSearch || undefined,
+      limit: 25,
+    });
     try {
-      const res = await listHrHubRequests({
-        flow: flowQuery,
-        scope,
-        status: statusFilter || undefined,
-        search: debouncedSearch || undefined,
-        limit: 25,
-      });
+      let res;
+      try {
+        res = await tryFetch();
+      } catch (err) {
+        const msg = String(err?.message || '');
+        const transient = /\b(5\d\d|timeout|abort|network)\b/i.test(msg);
+        if (!transient) throw err;
+        await new Promise(r => setTimeout(r, 600));
+        if (seq !== reqSeqRef.current) return;
+        res = await tryFetch();
+      }
       if (seq !== reqSeqRef.current) return;
       setItems(res?.items || []);
       setCursor(res?.nextCursor || null);
@@ -641,7 +656,7 @@ function RequestRow({ item, active, onClick, viewerEmail, isAdmin, onApprove, on
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 4,
                 padding: '4px 10px', borderRadius: 8,
-                background: 'var(--surface)', color: '#d42d35',
+                background: 'white', color: '#d42d35',
                 border: '1px solid #fca5a5',
                 fontSize: 11, fontWeight: 600, cursor: 'pointer',
                 userSelect: 'none',
