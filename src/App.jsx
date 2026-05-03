@@ -885,6 +885,29 @@ const App=()=>{
 
   const perms = usePermissions(effectiveUser, accessTypes, userAccessMap);
 
+  // ── URL-gating for views the user can't access ───────────────────────────
+  // The view useState reads `?view=...` from the URL on mount (skill
+  // mistake #31 — read URL params in the initialiser, not a useEffect, so
+  // the first paint is correct). That respects valid deep-links but also
+  // happily takes a route id like `analytics` / `escalations` / `projects`
+  // / `team` / `leader-alerts` from someone who's not allowed there. The
+  // 2026-05-03 agent audit (A-F2 / A-F31 / A-F32 / A-F33) caught Will
+  // (Agent) reaching Leaders Hub via the Home quick-tile and Analytics /
+  // Escalations / Projects via direct URL — the page shells rendered, even
+  // though no real data leaked, because nothing redirected the agent off
+  // a forbidden route.
+  //
+  // This effect closes the gap: the moment `view` lands on a route
+  // `perms.canView()` rejects, snap back to `briefing`. Runs on every
+  // view change including the initial mount, so the first non-permitted
+  // paint flips back to home before the user notices. Light enough that
+  // it doesn't replace the existing `RESTRICTED_VIEWS` owner gate (that
+  // one is for not-yet-shipped views; this one is for role-based access).
+  React.useEffect(() => {
+    if (!perms || typeof perms.canView !== 'function') return;
+    if (perms.canView(view) === false) setView('briefing');
+  }, [view, perms]);
+
   // ── Live integrations (Deel, Jira, Slack) ─────────────────────────────────
   const integrations = useIntegrations();
   const deelData = useDeelData(integrations.isConfigured('deel'));
