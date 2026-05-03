@@ -37,6 +37,7 @@ import {
   normalizeIncentivePlans,
 } from '../../utils/normalizeSourceRows';
 import { isUrgentAssistTaskType } from '../../lib/urgent-assist-task-types';
+import CreateHideTaskRequestModal from '../modals/CreateHideTaskRequestModal';
 
 // ── Live assignee lookup ───────────────────────────────────────────────────
 // Reads the live MEMBERS_BY_EMAIL binding so hydrateRoster() updates reach
@@ -149,7 +150,18 @@ const Queue = ({ user, tasks, subFilter }) => {
 
   const perms = useContext(PermissionsContext);
   const settings = useContext(SettingsContext);
-  const { queueSync, queueUnified } = useContext(IntegrationsContext);
+  const { queueSync, queueUnified, hiddenTasks } = useContext(IntegrationsContext);
+  const isHiddenKey = useCallback((source, id) => {
+    if (!source || !id) return false;
+    const key = `${String(source).toLowerCase()}:${String(id)}`;
+    return !!(hiddenTasks?.hiddenKeys?.has(key));
+  }, [hiddenTasks?.hiddenKeys]);
+
+  // Hide-task modal state — opened from the Actions column in either the
+  // ZD/Jira table or any Source panel. The descriptor carries everything
+  // the modal needs (subject + source + id + url) so the modal stays
+  // shape-agnostic across the seven row types.
+  const [hideModalTask, setHideModalTask] = useState(null);
 
   // Wire subFilter from parent (BriefingView "View resolved" etc.) to internal filter
   useEffect(() => {
@@ -179,12 +191,16 @@ const Queue = ({ user, tasks, subFilter }) => {
   } = unified;
 
   // ── Normalized rows for SourceTable ──
+  // Each *RowsAll memo applies the global hide list as a final filter so
+  // approved hides drop off every panel + the ZD/Jira table without each
+  // call site having to remember to do it. We use the row's `id` against
+  // the corresponding `task_source` key the hide flow stores.
   const { sla: queueSla } = useQueueSlaSettings();
-  const onboardingRowsAll       = useMemo(() => normalizeOnboarding(onboardingData.items, queueSla), [onboardingData.items, queueSla]);
-  const pausedOnboardingRowsAll = useMemo(() => normalizePausedOnboarding(pausedOnboardingData.items, queueSla), [pausedOnboardingData.items, queueSla]);
-  const offboardingRowsAll      = useMemo(() => normalizeOffboarding(offboardingData.items, queueSla), [offboardingData.items, queueSla]);
-  const amendmentRowsAll        = useMemo(() => normalizeAmendments(changeRequestData.amendments, queueSla), [changeRequestData.amendments, queueSla]);
-  const redlineRowsAll          = useMemo(() => normalizeRedlines(changeRequestData.redlines, queueSla), [changeRequestData.redlines, queueSla]);
+  const onboardingRowsAll       = useMemo(() => normalizeOnboarding(onboardingData.items, queueSla).filter(r => !isHiddenKey('onboarding', r.id)), [onboardingData.items, queueSla, isHiddenKey]);
+  const pausedOnboardingRowsAll = useMemo(() => normalizePausedOnboarding(pausedOnboardingData.items, queueSla).filter(r => !isHiddenKey('paused_onboarding', r.id) && !isHiddenKey('onboarding', r.id)), [pausedOnboardingData.items, queueSla, isHiddenKey]);
+  const offboardingRowsAll      = useMemo(() => normalizeOffboarding(offboardingData.items, queueSla).filter(r => !isHiddenKey('offboarding', r.id)), [offboardingData.items, queueSla, isHiddenKey]);
+  const amendmentRowsAll        = useMemo(() => normalizeAmendments(changeRequestData.amendments, queueSla).filter(r => !isHiddenKey('amendments', r.id)), [changeRequestData.amendments, queueSla, isHiddenKey]);
+  const redlineRowsAll          = useMemo(() => normalizeRedlines(changeRequestData.redlines, queueSla).filter(r => !isHiddenKey('redlines', r.id)), [changeRequestData.redlines, queueSla, isHiddenKey]);
   // Strip "HRX Urgent Assist Request" / "HRX Urgent Assist" tasks — they
   // surface on the dedicated Urgent Assist tab and would otherwise double-
   // list here. Filter happens BEFORE normalize so the row count + SLA
@@ -193,12 +209,12 @@ const Queue = ({ user, tasks, subFilter }) => {
     () => (workbenchData.tasks || []).filter(t => !isUrgentAssistTaskType(t?.taskType) && !isUrgentAssistTaskType(t?.sourceType)),
     [workbenchData.tasks],
   );
-  const workbenchRowsAll        = useMemo(() => normalizeWorkbench(workbenchTasksFiltered, queueSla), [workbenchTasksFiltered, queueSla]);
-  const incentivePlanRowsAll    = useMemo(() => normalizeIncentivePlans(incentivePlansData.items, queueSla), [incentivePlansData.items, queueSla]);
+  const workbenchRowsAll        = useMemo(() => normalizeWorkbench(workbenchTasksFiltered, queueSla).filter(r => !isHiddenKey('workbench', r.id)), [workbenchTasksFiltered, queueSla, isHiddenKey]);
+  const incentivePlanRowsAll    = useMemo(() => normalizeIncentivePlans(incentivePlansData.items, queueSla).filter(r => !isHiddenKey('incentive_plans', r.id)), [incentivePlansData.items, queueSla, isHiddenKey]);
 
   const isAdmin = isAdminUser(user);
   const isLead = perms?.dataScope === 'team_tasks';
-  const ns = (tasks || []).filter(t => t.source !== 'slack' && t.source !== 'calendar');
+  const ns = (tasks || []).filter(t => t.source !== 'slack' && t.source !== 'calendar' && !isHiddenKey(t.source, t.id));
 
   // Emails the current viewer "owns" — their email + every teammate below
   // them in the hierarchy (used to classify each Jira ticket as Actionable
@@ -479,7 +495,8 @@ const Queue = ({ user, tasks, subFilter }) => {
     }
     return out;
   }, [active, snoozed, done]);
-  const ticketColSpan = settings.sla_enabled !== false ? 9 : 8;
+  // Add 1 for the new Actions column we render at the end of the row.
+  const ticketColSpan = (settings.sla_enabled !== false ? 9 : 8) + 1;
   const { startIdx: ticketStart, endIdx: ticketEnd, topPad: ticketTopPad, bottomPad: ticketBottomPad } = useVirtualRows({
     rowCount: ticketVirtualItems.length,
     rowHeight: TICKET_ROW_HEIGHT,
@@ -721,6 +738,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             showPausedSla
             hideStatusPills
             showClient
+            onHide={(row) => setHideModalTask({ source: 'onboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
           />
         </ErrorBoundary>
       )}
@@ -740,6 +758,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             dateLabel="End Date"
             showClient
             showType
+            onHide={(row) => setHideModalTask({ source: 'offboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             hideFilterBar
           />
         </ErrorBoundary>
@@ -762,6 +781,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             hideUpdated
             dateField="createdAt"
             dateLabel="Requested Date"
+            onHide={(row) => setHideModalTask({ source: 'amendments', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
           />
         </ErrorBoundary>
       )}
@@ -783,6 +803,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             hideContract
             dateField="createdAt"
             dateLabel="Requested Date"
+            onHide={(row) => setHideModalTask({ source: 'redlines', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
           />
         </ErrorBoundary>
       )}
@@ -804,6 +825,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             hideStatusPills
             dateField="createdAt"
             dateLabel="Created"
+            onHide={(row) => setHideModalTask({ source: 'workbench', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
           />
         </ErrorBoundary>
       )}
@@ -824,6 +846,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             hideUpdated
             dateField="createdAt"
             dateLabel="Requested Date"
+            onHide={(row) => setHideModalTask({ source: 'incentive_plans', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
           />
         </ErrorBoundary>
       )}
@@ -874,6 +897,7 @@ const Queue = ({ user, tasks, subFilter }) => {
                   )}
                   <SortableTh col="status"   label="Status"   width={90}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <th scope="col" style={{ ...thStyle, width: 60 }}>Link</th>
+                  <th scope="col" style={{ ...thStyle, width: 70 }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -894,7 +918,19 @@ const Queue = ({ user, tasks, subFilter }) => {
                     );
                   }
                   const task = it.row;
-                  return <QueueRow key={task.id} task={task} slaAgeClass={slaAgeClass} settings={settings} />;
+                  return <QueueRow
+                    key={task.id}
+                    task={task}
+                    slaAgeClass={slaAgeClass}
+                    settings={settings}
+                    onHide={() => setHideModalTask({
+                      source: task.source,
+                      id: String(task.id),
+                      url: getUrl(task) || null,
+                      subject: task.subject,
+                      country: task.country,
+                    })}
+                  />;
                 })}
                 {ticketBottomPad > 0 && (
                   <tr style={{ height: ticketBottomPad }} aria-hidden="true">
@@ -906,12 +942,24 @@ const Queue = ({ user, tasks, subFilter }) => {
           )}
         </div>
       )}
+
+      {/* Hide-task request modal — opens from any row's Hide button. The
+          local refresh nonce on success calls hiddenTasks.refresh() so the
+          requester sees the row stay (still pending) until the manager
+          approves. */}
+      {hideModalTask && (
+        <CreateHideTaskRequestModal
+          task={hideModalTask}
+          onClose={() => setHideModalTask(null)}
+          onSubmitted={() => { try { hiddenTasks?.refresh?.(); } catch {} }}
+        />
+      )}
     </div>
   );
 };
 
 // ── Table row component ──
-const QueueRow = memo(({ task, slaAgeClass, settings }) => {
+const QueueRow = memo(({ task, slaAgeClass, settings, onHide }) => {
   const [hov, setHov] = useState(false);
   const assignee = resolveAssignee(task);
   const sla = slaInfo(task);
@@ -977,6 +1025,27 @@ const QueueRow = memo(({ task, slaAgeClass, settings }) => {
           <i className="bi-box-arrow-up-right" style={{ fontSize: 9 }}></i>
           <span style={{ fontSize: 10 }}>{task.id ? `${task.id}` : TOOLS[task.source]?.label || 'Open'}</span>
         </a>
+      </td>
+      {/* Actions */}
+      <td style={tdStyle}>
+        <button
+          type="button"
+          onClick={() => onHide?.()}
+          aria-label={`Hide task "${task.subject || task.id}"`}
+          title="Request to hide this task"
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            padding: '3px 8px', borderRadius: 6,
+            background: hov ? '#fef2f2' : '#f5f4f2',
+            color: hov ? '#d42d35' : '#9e9e9e',
+            border: hov ? '1px solid #fca5a5' : '1px solid transparent',
+            fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
+            cursor: 'pointer', fontFamily: 'inherit',
+          }}
+        >
+          <i className="bi-eye-slash" style={{ fontSize: 9 }} />
+          Hide
+        </button>
       </td>
     </tr>
   );

@@ -1054,6 +1054,63 @@ CREATE TABLE IF NOT EXISTS urgent_assist_log (
   created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_urgent_assist_log_request ON urgent_assist_log(request_id, created_at);
+
+-- ── Hide Task (2026-05-03) ─────────────────────────────────────────────────
+-- Lets a team member request to hide a queue row that "shouldn't be there"
+-- (Internal Deel Employee, Test Task, Other). Request goes to the user's
+-- TL via the existing HR Hub flow ('hide_task_request'); on approval, the
+-- (task_source, task_id) lands in hidden_task and every queue surface
+-- filters it out from then on.
+--
+-- Phase 1 — extend hr_hub_request.flow to allow the new flow value, and
+-- add four nullable columns that carry the queue task identity (only used
+-- when flow='hide_task_request'). Idempotent across re-runs: drop any
+-- pre-existing CHECK + add the v2 with the wider enum.
+ALTER TABLE hr_hub_request DROP CONSTRAINT IF EXISTS hr_hub_request_flow_check;
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conrelid = 'hr_hub_request'::regclass
+       AND conname  = 'hr_hub_request_flow_check_v2'
+  ) THEN
+    ALTER TABLE hr_hub_request
+      ADD CONSTRAINT hr_hub_request_flow_check_v2
+      CHECK (flow IN ('hr_request','hr_reporting','escalation_zero','feedback','hide_task_request'));
+  END IF;
+END $$;
+
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS task_source   VARCHAR(40);
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS task_id       VARCHAR(200);
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS task_url      TEXT;
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS task_subject  VARCHAR(500);
+CREATE INDEX IF NOT EXISTS idx_hr_hub_request_task_pair
+  ON hr_hub_request(task_source, task_id) WHERE task_source IS NOT NULL;
+
+-- Phase 2 — the active hide list. Manager-approved entries land here and
+-- every queue's render path checks (task_source, task_id) against this
+-- table. UNIQUE so a duplicate approval can't double-insert.
+CREATE TABLE IF NOT EXISTS hidden_task (
+  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_source          VARCHAR(40)  NOT NULL,                  -- zendesk | jira | workbench | onboarding | offboarding | amendments | redlines | incentive_plans | urgent_assist
+  task_id              VARCHAR(200) NOT NULL,                  -- source-side id (zd ticket id, jira key, deel uuid)
+  task_url             TEXT,                                   -- the link the user attached (per spec: identifier could be the task link)
+  task_subject         VARCHAR(500),                           -- denormalised for display in admin list
+  request_id           UUID REFERENCES hr_hub_request(id) ON DELETE SET NULL,
+  reason_code          VARCHAR(40)  NOT NULL CHECK (reason_code IN ('internal_deel_employee','test_task','other')),
+  reason_text          TEXT,                                   -- required when reason_code = 'other'
+  hidden_by_email      VARCHAR(255) NOT NULL,                  -- original requester
+  hidden_by_name       VARCHAR(255),
+  approved_by_email    VARCHAR(255) NOT NULL,                  -- manager who approved
+  approved_by_name     VARCHAR(255),
+  hidden_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  unhidden_at          TIMESTAMPTZ                              -- soft-undo (admin can unhide later)
+);
+-- Active hides are unique per task. Soft-unhidden rows (unhidden_at IS NOT NULL)
+-- are kept for audit but excluded from the unique constraint via the partial.
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_hidden_task_active
+  ON hidden_task(task_source, task_id) WHERE unhidden_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_hidden_task_request ON hidden_task(request_id);
+CREATE INDEX IF NOT EXISTS idx_hidden_task_hidden_by ON hidden_task(hidden_by_email, hidden_at DESC);
 `;
 
 export async function runMigrations() {

@@ -45,7 +45,8 @@ export async function GET(req, { params }) {
               title, summary, ideal_solution, resolution_note,
               links, attachments,
               created_by_email, created_by_name, assignee_email, assignee_name,
-              team_lead_email, cc_email, created_at, updated_at, resolved_at
+              team_lead_email, cc_email, created_at, updated_at, resolved_at,
+              task_source, task_id, task_url, task_subject
          FROM hr_hub_request WHERE id = $1`,
       [id],
     ),
@@ -100,6 +101,10 @@ export async function GET(req, { params }) {
       createdAt: r.created_at,
       updatedAt: r.updated_at,
       resolvedAt: r.resolved_at,
+      taskSource: r.task_source,
+      taskId: r.task_id,
+      taskUrl: r.task_url,
+      taskSubject: r.task_subject,
     },
     comments: commentsRes.rows.map(c => ({
       id: c.id,

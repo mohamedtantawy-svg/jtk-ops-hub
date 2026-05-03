@@ -21,9 +21,11 @@ import {
   listHrHubRequests,
   getHrHubRequest,
 } from '../../services/hrHubApi';
+import { approveHideTask } from '../../services/hideTaskApi';
 import HrHubDetailPanel from '../hr-hub/HrHubDetailPanel';
 import HrHubSettingsPanel from '../hr-hub/HrHubSettingsPanel';
-import { PermissionsContext } from '../../App';
+import DenyHideTaskModal from '../modals/DenyHideTaskModal';
+import { PermissionsContext, IntegrationsContext } from '../../App';
 
 // Single source of truth for status visuals — same shape as Feedback's
 // STATUS_FILTERS so the four buttons feel identical across the two tabs.
@@ -39,17 +41,19 @@ const STATUS_BY_VALUE = Object.fromEntries(STATUS_FILTERS.map(s => [s.value, s])
 // consistent — same icon + accent across the picker, the row chip, and
 // the flow filter pill.
 const FLOW_VISUALS = {
-  hr_request:      { label: 'HR Request',       short: 'Request',     icon: 'bi-send-fill',         color: '#1f74b3', bg: '#e0f2fe' },
-  hr_reporting:    { label: 'HR Reporting',     short: 'Reporting',   icon: 'bi-megaphone-fill',    color: '#dc2626', bg: '#fef2f2' },
-  escalation_zero: { label: 'Escalation Zero',  short: 'Escalation',  icon: 'bi-stars',             color: '#7c3aed', bg: '#f3eff8' },
-  feedback:        { label: 'Ops Hub Feedback', short: 'Feedback',    icon: 'bi-lightbulb-fill',    color: '#d97706', bg: '#fff8e6' },
+  hr_request:        { label: 'HR Request',       short: 'Request',     icon: 'bi-send-fill',         color: '#1f74b3', bg: '#e0f2fe' },
+  hr_reporting:      { label: 'HR Reporting',     short: 'Reporting',   icon: 'bi-megaphone-fill',    color: '#dc2626', bg: '#fef2f2' },
+  escalation_zero:   { label: 'Escalation Zero',  short: 'Escalation',  icon: 'bi-stars',             color: '#7c3aed', bg: '#f3eff8' },
+  feedback:          { label: 'Ops Hub Feedback', short: 'Feedback',    icon: 'bi-lightbulb-fill',    color: '#d97706', bg: '#fff8e6' },
+  hide_task_request: { label: 'Hide Task',        short: 'Hide Task',   icon: 'bi-eye-slash-fill',    color: '#d42d35', bg: '#fef2f2' },
 };
 const FLOW_FILTERS = [
-  { value: 'all',             label: 'All flows', icon: 'bi-grid-fill',       color: 'var(--text)' },
-  { value: 'hr_request',      label: 'Requests',  icon: 'bi-send-fill',        color: '#1f74b3' },
-  { value: 'hr_reporting',    label: 'Reporting', icon: 'bi-megaphone-fill',   color: '#dc2626' },
-  { value: 'escalation_zero', label: 'Escalations', icon: 'bi-stars',           color: '#7c3aed' },
-  { value: 'feedback',        label: 'Feedback',  icon: 'bi-lightbulb-fill',   color: '#d97706' },
+  { value: 'all',                label: 'All flows',  icon: 'bi-grid-fill',         color: 'var(--text)' },
+  { value: 'hr_request',         label: 'Requests',   icon: 'bi-send-fill',          color: '#1f74b3' },
+  { value: 'hr_reporting',       label: 'Reporting',  icon: 'bi-megaphone-fill',     color: '#dc2626' },
+  { value: 'escalation_zero',    label: 'Escalations', icon: 'bi-stars',             color: '#7c3aed' },
+  { value: 'feedback',           label: 'Feedback',   icon: 'bi-lightbulb-fill',     color: '#d97706' },
+  { value: 'hide_task_request',  label: 'Hide Task',  icon: 'bi-eye-slash-fill',     color: '#d42d35' },
 ];
 
 const PRIORITY_DOT = {
@@ -91,7 +95,10 @@ function isManagerRole(user) {
 
 export default function HrHubView({ user, onCreateHrHub }) {
   const perms = useContext(PermissionsContext);
+  const integrations = useContext(IntegrationsContext);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [denyModalReq, setDenyModalReq] = useState(null);
+  const [decisionError, setDecisionError] = useState(null);
   const initialReqId = (() => {
     try {
       const url = typeof window !== 'undefined' ? new URL(window.location.href) : null;
@@ -440,6 +447,11 @@ export default function HrHubView({ user, onCreateHrHub }) {
         {!loading && !error && sortedItems.length === 0 && (
           <EmptyState scope={scope} flowFilter={flowFilter} statusFilter={statusFilter} />
         )}
+        {decisionError && (
+          <div role="alert" style={{ padding: '8px 12px', marginBottom: 8, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, color: '#991b1b', fontSize: 12 }}>
+            <i className="bi-exclamation-triangle-fill" style={{ marginRight: 6 }} />{decisionError}
+          </div>
+        )}
         {sortedItems.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {sortedItems.map(item => (
@@ -448,6 +460,19 @@ export default function HrHubView({ user, onCreateHrHub }) {
                 item={item}
                 active={detailId === item.id}
                 onClick={() => setDetailId(item.id)}
+                viewerEmail={user?.email}
+                isAdmin={isManager && (user?.role === 'admin' || (user?.access || '').toLowerCase().includes('admin'))}
+                onApprove={async (it) => {
+                  setDecisionError(null);
+                  try {
+                    await approveHideTask(it.id);
+                    try { integrations?.hiddenTasks?.refresh?.(); } catch {}
+                    loadFirstPage();
+                  } catch (err) {
+                    setDecisionError(err?.message || 'Approval failed');
+                  }
+                }}
+                onDeny={(it) => setDenyModalReq(it)}
               />
             ))}
             {cursor && (
@@ -480,19 +505,55 @@ export default function HrHubView({ user, onCreateHrHub }) {
           onItemUpdated={onItemUpdated}
         />
       )}
+      {denyModalReq && (
+        <DenyHideTaskModal
+          request={denyModalReq}
+          onClose={() => setDenyModalReq(null)}
+          onDenied={() => {
+            setDenyModalReq(null);
+            loadFirstPage();
+          }}
+        />
+      )}
     </div>
   );
 }
+
+// Reason-code → short label, used by the hide-task row meta line.
+const HIDE_REASON_LABELS = {
+  internal_deel_employee: 'Internal Deel Employee',
+  test_task: 'Test Task',
+  other: 'Other',
+};
 
 // ── Row ────────────────────────────────────────────────────────────────────
 // Single-line layout matching Feedback's row density: priority dot on
 // the far left, flow chip + status pill + meta line in the middle, a
 // metadata cluster on the right (attachments / time / chevron).
-function RequestRow({ item, active, onClick }) {
+//
+// Hide-task flow rows ALSO render inline Approve/Deny buttons next to the
+// status pill — visible only while the request is unresolved. The buttons
+// stop propagation so the row click (→ open detail) still works for the
+// rest of the row surface.
+function RequestRow({ item, active, onClick, viewerEmail, isAdmin, onApprove, onDeny }) {
   const flow = FLOW_VISUALS[item.flow] || FLOW_VISUALS.hr_request;
   const status = STATUS_BY_VALUE[item.status] || STATUS_BY_VALUE.new;
   const priColor = PRIORITY_DOT[item.priority] || PRIORITY_DOT.medium;
-  const meta = [item.functionArea, item.requestType || item.reportType].filter(Boolean).join(' · ');
+  const isHide = item.flow === 'hide_task_request';
+  const hideMeta = isHide
+    ? [HIDE_REASON_LABELS[item.requestType] || item.requestType, item.taskSubject].filter(Boolean).join(' · ')
+    : '';
+  const meta = isHide
+    ? hideMeta
+    : [item.functionArea, item.requestType || item.reportType].filter(Boolean).join(' · ');
+  // Manager-side decision affordance: visible only on hide_task_request
+  // rows that are still pending and the viewer is the requester's TL or
+  // admin. Self-decision blocked.
+  const viewerLc = (viewerEmail || '').toLowerCase();
+  const canDecide = isHide
+    && item.status !== 'resolved'
+    && (isAdmin || (item.teamLeadEmail || '').toLowerCase() === viewerLc)
+    && (item.createdByEmail || '').toLowerCase() !== viewerLc;
 
   return (
     <button
@@ -545,6 +606,52 @@ function RequestRow({ item, active, onClick }) {
 
       {/* Right: status pill + meta cluster */}
       <span style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+        {canDecide && (
+          <span
+            // Render the two buttons as a plain span (NOT nested button) —
+            // wrapping <button> inside a <button>.hrhub-row is invalid HTML
+            // and React 19 logs a warning. We split out Approve/Deny as
+            // standalone clickables and stop propagation so the row click
+            // (→ open detail) still fires for the surrounding surface.
+            role="group"
+            aria-label="Approve or deny hide request"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => { e.stopPropagation(); e.preventDefault(); onApprove?.(item); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); e.preventDefault(); onApprove?.(item); } }}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '4px 10px', borderRadius: 8,
+                background: '#15803d', color: 'white',
+                fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                userSelect: 'none',
+              }}
+              title="Approve and hide this task globally"
+            >
+              <i className="bi-check2" style={{ fontSize: 11 }} />Approve
+            </span>
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => { e.stopPropagation(); e.preventDefault(); onDeny?.(item); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); e.preventDefault(); onDeny?.(item); } }}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '4px 10px', borderRadius: 8,
+                background: 'white', color: '#d42d35',
+                border: '1px solid #fca5a5',
+                fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                userSelect: 'none',
+              }}
+              title="Deny — task stays in the queue"
+            >
+              <i className="bi-x" style={{ fontSize: 11 }} />Deny
+            </span>
+          </span>
+        )}
         <span style={{
           display: 'inline-flex', alignItems: 'center', gap: 4,
           fontSize: 11, fontWeight: 700,

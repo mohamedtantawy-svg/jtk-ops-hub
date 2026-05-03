@@ -15,6 +15,7 @@ import UpdateBanner from './components/ui/UpdateBanner';
 import { AnnouncementRequestsProvider } from './hooks/useAnnouncementRequests';
 import { useQueueSync } from './hooks/useQueueSync';
 import { useQueueUnifiedSync } from './hooks/useQueueUnifiedSync';
+import { useHiddenTasks } from './hooks/useHiddenTasks';
 import { DEFAULT_SETTINGS } from './data/settings';
 import { DEFAULT_ACCESS_TYPES } from './data/accessControl';
 import { ADMIN_LIST_VERSION } from './data/adminEmails';
@@ -335,6 +336,10 @@ const App=()=>{
     enabled: !!user,
     userEmail: user?.email || null,
   });
+  // Pre-warm the global hide list on auth so every queue render starts
+  // with the right Set<source:id> in memory. The hook polls every 30s and
+  // a manual refresh fires after Approve/Deny in HR Hub.
+  const hiddenTasks = useHiddenTasks(!!user);
   const [feed,setFeed]=useState(FEED_EVENTS);
   const [notes,setNotes]=useState(INITIAL_NOTES);
   const [escalations,setEscalations]=useState([
@@ -884,7 +889,7 @@ const App=()=>{
   const deelData = useDeelData(integrations.isConfigured('deel'));
   const jiraData = useJiraData(integrations.isConfigured('jira'));
   const slackData = useSlackData(integrations.isConfigured('slack'));
-  const integrationsCtx = { integrations, deelData, jiraData, slackData, queueSync, queueUnified };
+  const integrationsCtx = { integrations, deelData, jiraData, slackData, queueSync, queueUnified, hiddenTasks };
 
   // ── Toast helpers ──────────────────────────────────────────────────────────
   const addToast=useCallback((type,title,body,onUndo)=>{

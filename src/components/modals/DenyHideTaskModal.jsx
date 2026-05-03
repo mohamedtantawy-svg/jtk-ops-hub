@@ -1,0 +1,132 @@
+// ── DenyHideTaskModal ────────────────────────────────────────────────────
+// Manager (or admin) denies a hide_task_request. Captures the reason
+// (required) so the requester gets a meaningful notification + audit
+// trail. Calls /api/v1/hide-task/[id]/deny.
+
+import { useEffect, useRef, useState } from 'react';
+import { denyHideTask } from '../../services/hideTaskApi';
+
+const inputStyle = {
+  width: '100%', padding: '9px 12px', border: '1px solid #e8e8e8', borderRadius: 10,
+  fontSize: 13, color: '#1b1b1b', background: 'white', outline: 'none',
+  fontFamily: 'inherit', boxSizing: 'border-box',
+};
+const labelStyle = {
+  fontSize: 11, fontWeight: 600, color: '#616161', textTransform: 'uppercase',
+  letterSpacing: '.05em', marginBottom: 6, display: 'block',
+};
+
+export default function DenyHideTaskModal({ request, onClose, onDenied }) {
+  const backdropRef = useRef(null);
+  const [reason, setReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const h = e => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }, [onClose]);
+
+  const trimmed = reason.trim();
+  const canSubmit = trimmed.length > 0 && trimmed.length <= 2000 && !submitting;
+
+  const handleSubmit = async (e) => {
+    e?.preventDefault?.();
+    if (!canSubmit) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await denyHideTask(request.id, trimmed);
+      onDenied?.(trimmed);
+    } catch (err) {
+      setError(err?.message || 'Failed to deny request');
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      ref={backdropRef}
+      onClick={ev => { if (ev.target === backdropRef.current) onClose(); }}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="deny-hide-title"
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 1010,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+      }}
+    >
+      <div style={{
+        background: 'white', borderRadius: 18, width: '100%', maxWidth: 480,
+        maxHeight: '90vh', overflowY: 'auto',
+        boxShadow: '0 8px 40px rgba(0,0,0,0.18)',
+      }}>
+        <div style={{ padding: '16px 18px', borderBottom: '1px solid #f0efed', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ width: 32, height: 32, borderRadius: 9, background: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <i className="bi-x-octagon-fill" style={{ fontSize: 15, color: '#d42d35' }} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div id="deny-hide-title" style={{ fontSize: 15, fontWeight: 700, color: '#1b1b1b' }}>Deny hide request</div>
+            <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 2 }}>
+              {request?.taskSubject ? <span><strong style={{ color: '#1b1b1b' }}>{request.taskSubject}</strong></span> : 'Provide a reason — the requester will be notified.'}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{ width: 28, height: 28, borderRadius: 7, border: '1px solid #e8e8e8', background: 'white', color: '#9e9e9e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <i className="bi-x-lg" style={{ fontSize: 11 }} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div>
+            <label htmlFor="deny-reason" style={labelStyle}>Reason for denial *</label>
+            <textarea
+              id="deny-reason"
+              value={reason}
+              onChange={e => setReason(e.target.value)}
+              rows={4}
+              maxLength={2000}
+              autoFocus
+              placeholder="Why should this task remain visible?"
+              style={{ ...inputStyle, resize: 'vertical' }}
+            />
+          </div>
+
+          {error && (
+            <div role="alert" style={{ padding: '8px 12px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, color: '#991b1b', fontSize: 12 }}>
+              <i className="bi-exclamation-triangle-fill" style={{ marginRight: 6 }} />{error}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 2 }}>
+            <button
+              type="button"
+              onClick={onClose}
+              style={{ padding: '8px 14px', borderRadius: 9, border: '1px solid #e8e8e8', background: 'white', fontSize: 12, fontWeight: 500, color: '#616161', cursor: 'pointer', fontFamily: 'inherit' }}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!canSubmit}
+              style={{
+                padding: '8px 16px', borderRadius: 9, border: 'none',
+                background: canSubmit ? '#d42d35' : '#9e9e9e',
+                color: 'white', fontSize: 12, fontWeight: 600,
+                cursor: canSubmit ? 'pointer' : 'not-allowed',
+                fontFamily: 'inherit',
+              }}
+            >
+              {submitting ? 'Denying…' : 'Deny request'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
