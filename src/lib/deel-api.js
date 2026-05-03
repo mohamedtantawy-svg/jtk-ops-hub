@@ -317,7 +317,6 @@ export async function listOnboardingPeople(params = {}) {
   // Drop Deel-internal employees ("Deeler" tag on the contract). The upstream
   // onboarding row does NOT include contract.tags — we have to fetch the
   // contract by OID. Cached per OID for an hour and shared across feeds.
-<<<<<<< HEAD
   const itemsClean = await dropDeelersByContractOid(merged, (it) => it.oid, 'onboarding');
 
   // Enrich missing client names via the per-contract REST v2 lookup. The
@@ -356,13 +355,6 @@ async function _enrichOnboardingClientNames(items) {
     ...item,
     clientName: item.clientName || resolved.get(String(item.oid)) || '',
   }));
-=======
-  const items = await dropDeelersByContractOid(merged, (it) => it.oid, 'onboarding');
-
-  // Total now reflects the merged count, since the actionable-queue header
-  // total only knows about its own bucket.
-  return { items, total: Math.max(actionableTotal, items.length), cursor: currentCursor || null };
->>>>>>> nexus/dev
 }
 
 // ── Paused Onboarding (Admin API) ─────────────────────────────────────────────
