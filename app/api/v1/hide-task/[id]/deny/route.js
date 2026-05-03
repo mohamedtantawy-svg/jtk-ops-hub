@@ -45,14 +45,16 @@ export async function POST(req, { params }) {
   if (r.flow !== 'hide_task_request') return NextResponse.json({ error: 'Not a hide task request' }, { status: 400 });
   if (r.status === 'resolved') return NextResponse.json({ error: 'Already resolved' }, { status: 409 });
 
+  // Same permission gate as the approve route — any manager (TL/RM/admin)
+  // may deny, self-decision hard-blocked for everyone (4-eyes).
   const me = memberByEmail(callerEmail);
-  const isAdmin = me?.access === 'admin';
-  const isTl = (r.team_lead_email || '').toLowerCase() === callerEmail;
-  if (!isAdmin && !isTl) {
-    return NextResponse.json({ error: 'Forbidden — only the requester\'s team lead or an admin can deny' }, { status: 403 });
+  const access = (me?.access || '').toLowerCase();
+  const isManager = access === 'admin' || access === 'regional_manager' || access === 'team_lead';
+  if (!isManager) {
+    return NextResponse.json({ error: 'Forbidden — only managers (TL/RM/admin) can deny hide requests' }, { status: 403 });
   }
-  if ((r.created_by_email || '').toLowerCase() === callerEmail && !isAdmin) {
-    return NextResponse.json({ error: 'You cannot deny your own hide request' }, { status: 403 });
+  if ((r.created_by_email || '').toLowerCase() === callerEmail) {
+    return NextResponse.json({ error: 'You cannot deny your own hide request — another manager must review it (4-eyes).' }, { status: 403 });
   }
 
   await withTransaction(async (client) => {
