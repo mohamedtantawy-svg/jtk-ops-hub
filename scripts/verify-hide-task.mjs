@@ -93,7 +93,10 @@ const denySrc = readFileSync(new URL('../app/api/v1/hide-task/[id]/deny/route.js
 assert('approve writes to hidden_task',  approveSrc.includes('insertHiddenTask('), true);
 assert('approve resolves the hr_hub_request',
   /UPDATE hr_hub_request[\s\S]+SET status\s*=\s*'resolved'/.test(approveSrc), true);
-assert('approve blocks self-approval',  approveSrc.includes("'You cannot approve your own hide request'"), true);
+// Both approve + deny block self-decision uniformly (true 4-eyes after the
+// 2026-05-04 hide-task fix — admin self-approve is no longer an exception).
+assert('approve blocks self-approval',  /You cannot approve your own hide request/.test(approveSrc), true);
+assert('deny blocks self-deny',         /You cannot deny your own hide request/.test(denySrc), true);
 assert('approve busts the hidden-list cache', approveSrc.includes("cacheDel('hidden_task_list')"), true);
 assert('deny requires a reason', denySrc.includes("'reason is required'"), true);
 assert('deny does NOT insert into hidden_task', denySrc.includes('insertHiddenTask') === false, true);
