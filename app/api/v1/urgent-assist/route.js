@@ -17,6 +17,7 @@ import { getAuthUser } from '../../../../src/lib/auth-helpers';
 import { query } from '../../../../src/lib/db';
 import { ensureRosterHydrated } from '../../../../src/lib/roster-server';
 import { memberByEmail, teamLeadEmailFor, writeLog } from '../../../../src/lib/urgent-assist-helpers';
+import { MEMBERS_BY_EMAIL, getDirectReports, getAllReports } from '../../../../src/data/members';
 
 const ALLOWED_STATUSES = new Set(['new', 'in_progress', 'on_hold', 'resolved']);
 const ALLOWED_PRIORITIES = new Set(['low', 'medium', 'high', 'critical']);
@@ -111,14 +112,40 @@ export async function GET(req) {
     params.push(callerEmail);
     p++;
   } else if (effectiveScope === 'team') {
-    // Manager view — denormalised team_lead_email captures "assignee is in
-    // my team" because the POST route stamps team_lead_email from the
-    // assignee at create-time. We also keep the caller-self path so a
-    // manager who is themselves the assignee on a row still sees it under
-    // Team (consistent with how mine narrows to assignee).
-    where.push(`(LOWER(team_lead_email) = $${p} OR LOWER(COALESCE(assignee_email,'')) = $${p})`);
-    params.push(callerEmail);
-    p++;
+    // Manager view (2026-05-04 follow-up): the previous filter relied on
+    // the denormalised team_lead_email column matching the caller — but
+    // teamLeadEmailFor() returns the FIRST managerial ancestor (TL > RM
+    // > admin), so an RM never appears as anyone's team_lead. Melissa's
+    // RM view returned 0 rows even when her subtree had assignments.
+    //
+    // Fix: walk the caller's report subtree on the server using the
+    // hydrated roster, then filter by `assignee_email IN (subtree)`.
+    // RM = full subtree (getAllReports), TL = direct reports
+    // (getDirectReports), admin = full subtree. The caller's own email
+    // is always included so a manager who's themselves the assignee on a
+    // row still sees it in Team scope (matches the FE counterpart).
+    const me = MEMBERS_BY_EMAIL[callerEmail];
+    const access = (me?.access || '').toLowerCase();
+    const teamSet = new Set([callerEmail]);
+    if (access === 'admin' || access === 'regional_manager') {
+      for (const e of getAllReports(callerEmail)) teamSet.add(e);
+    } else if (access === 'team_lead') {
+      for (const r of getDirectReports(callerEmail)) teamSet.add(r.email);
+    }
+    if (teamSet.size === 1) {
+      // No reports → nothing to surface beyond the caller's own assignments.
+      where.push(`LOWER(COALESCE(assignee_email,'')) = $${p}`);
+      params.push(callerEmail);
+      p++;
+    } else {
+      // Build a parameterised IN list. Postgres handles 1k+ entries fine.
+      const placeholders = [];
+      for (const e of teamSet) {
+        placeholders.push(`$${p++}`);
+        params.push(e);
+      }
+      where.push(`LOWER(COALESCE(assignee_email,'')) IN (${placeholders.join(', ')})`);
+    }
   }
   // `all` → no extra predicate.
 
