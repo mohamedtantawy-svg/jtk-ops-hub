@@ -571,14 +571,23 @@ function RequestRow({ item, active, onClick, viewerEmail, isManager, isAdmin, on
   // showed the row stuck pending whenever the requester's TL was unset
   // or the routing was wrong, with no fallback path. Broadening the gate
   // to any manager guarantees a human can always action the request.
-  // Self-decision is the one hard block — true 4-eyes principle, applied
-  // uniformly across roles (no admin override). Backend mirrors this rule
-  // (see /api/v1/hide-task/[id]/{approve,deny}).
+  //
+  // Self-decision rules (2026-05-04 second pass):
+  //   • TL / RM: blocked from self-approving — true 4-eyes.
+  //   • Admin:  CAN self-approve. Admin requesters typically have no
+  //             manager in their chain (managerEmail is empty), so
+  //             enforcing 4-eyes on admins meant their hide requests
+  //             stuck pending forever with no path to resolution.
+  //             The pragmatic exception keeps the workflow movable —
+  //             admins are the org's senior trust tier, audit log on
+  //             every approve catches misuse.
+  // Backend mirrors this rule (see /api/v1/hide-task/[id]/{approve,deny}).
   const viewerLc = (viewerEmail || '').toLowerCase();
+  const isSelf = (item.createdByEmail || '').toLowerCase() === viewerLc;
   const canDecide = isHide
     && item.status !== 'resolved'
     && !!isManager
-    && (item.createdByEmail || '').toLowerCase() !== viewerLc;
+    && (!isSelf || !!isAdmin);
 
   return (
     <button
