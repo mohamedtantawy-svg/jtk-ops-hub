@@ -17,6 +17,18 @@
 
 import { cacheGet, cacheSet } from './server-cache';
 
+// In-flight dedupe map, keyed by cacheKey. When two requests miss cache
+// at the same moment, the second one piggybacks on the first request's
+// builder Promise instead of spawning a parallel scan. Without this,
+// every concurrent miss spawned its own ~5,000-row Deel admin walk —
+// 4 concurrent users could pile 4 scans worth of memory on the heap
+// before any of them finished, which was the dominant cause of the
+// hourly OOM-restart pattern (2026-05-04 incident).
+//
+// Cleared automatically when the underlying Promise settles (success or
+// failure), so a stuck-forever scan can't poison the slot indefinitely.
+const _inFlight = new Map();
+
 /**
  * Run `builder()` with a `timeoutMs` ceiling. On timeout, return the
  * stale cache value (or surface the timeout as a structured error if
@@ -36,21 +48,29 @@ export async function buildWithTimeout(cacheKey, builder, opts = {}) {
   const timeoutMs = Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0 ? opts.timeoutMs : 45_000;
   const staleTtl = Number.isFinite(opts.staleTtl) && opts.staleTtl > 0 ? opts.staleTtl : 60 * 60_000;
 
+  // Dedupe: if a build for this cacheKey is already running, reuse it.
+  // Otherwise spawn a new builder and cache the Promise so concurrent
+  // callers can join the same flight.
+  let buildPromise = _inFlight.get(cacheKey);
+  if (!buildPromise) {
+    buildPromise = (async () => {
+      try {
+        const result = await builder();
+        cacheSet(cacheKey, result);
+        return result;
+      } catch (err) {
+        throw err;
+      }
+    })();
+    _inFlight.set(cacheKey, buildPromise);
+    // Always clear the slot when the Promise settles so a stuck/failed
+    // build can't keep callers piggybacking on a dead Promise forever.
+    buildPromise.finally(() => {
+      if (_inFlight.get(cacheKey) === buildPromise) _inFlight.delete(cacheKey);
+    });
+  }
+
   let timedOut = false;
-  const buildPromise = (async () => {
-    try {
-      const result = await builder();
-      // Always populate the cache with the latest successful build, even
-      // if the user-facing request already moved on to stale fallback —
-      // the next caller benefits.
-      cacheSet(cacheKey, result);
-      return result;
-    } catch (err) {
-      // Builder failure is propagated so the route can decide whether to
-      // surface as 500 or fall back to stale cache.
-      throw err;
-    }
-  })();
 
   const timeoutPromise = new Promise((resolve) => {
     setTimeout(() => { timedOut = true; resolve('__TIMEOUT__'); }, timeoutMs);

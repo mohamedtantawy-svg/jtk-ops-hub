@@ -21,12 +21,19 @@ database:
   enabled: true
 
 resources:
+  # Bumped 2026-05-04: 512Mi was tight enough that the workbench (5,000-
+  # task scan) + offboarding (2,651-task scan) jobs running on a 5 min
+  # cadence pushed memory past the limit roughly every hour, which
+  # surfaced as OOM-killed pod restarts (the "app keeps crashing every
+  # hour" symptom). Raising the limit to 1Gi gives the cache + scan
+  # working set ~3x headroom; cpu request bumped slightly so the runtime
+  # doesn't get throttled while cleaning up after a scan.
   requests:
-    cpu: 100m
-    memory: 256Mi
-  limits:
-    cpu: 500m
+    cpu: 200m
     memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
 
 autoscaling:
   enabled: false
