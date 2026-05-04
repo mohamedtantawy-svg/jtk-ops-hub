@@ -506,9 +506,14 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   }).sort((a, b) => b.tc - a.tc);
 
   // Team avg — informational only (used by some legacy cards, kept for now).
-  const scopeAgents = isOwnScope ? allAgents.filter(a => a.team === user.team)
-                    : isTeamScope ? allAgents.filter(a => a.team === user.team)
-                    : allAgents;
+  // For managers we trust `allAgents` directly: it's already scoped via
+  // `scopeIds` (= perms.scopeMembers, which walks the user's reports chain
+  // through getVisibleEmailsForAccess). The literal `m.team === user.team`
+  // re-filter broke for any TL whose team string spans regions (e.g. Megan's
+  // team is 'LATAM + NAM' while her agents are tagged 'LATAM' or 'NAM'),
+  // and was a no-op anyway since allAgents was pre-filtered. Own scope
+  // keeps the team filter so an agent's "team avg" stays peer-comparable.
+  const scopeAgents = isOwnScope ? allAgents.filter(a => a.team === user.team) : allAgents;
   const teamAvg = scopeAgents.length > 0 ? scopeAgents.reduce((s, a) => s + a.tc, 0) / scopeAgents.length : 0;
 
   // Workload band classifier — director-tunable thresholds. The "Good"
@@ -714,7 +719,12 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     return {...ld,ag,tt,tb,avg,wl:r>=1.4?'High':r>=0.7?'Medium':'Low',wc:r>=1.4?'#d42d35':r>=0.7?'#ed8d00':'#29811e'};
   });
   const helpers=isOwnScope?allAgentsWL.filter(m=>m.team===user.team&&m.id!==user.id&&m.tc<personal.length).slice(0,3):[];
-  const hmMembers=isTeamScope?allAgentsWL.filter(m=>m.team===user.team):isAllScope?allAgentsWL:[];
+  // Team Summary — render for every manager. allAgentsWL is already scoped
+  // via scopeIds, so no team-string re-filter is needed (and it actively
+  // broke for multi-region TLs whose team didn't equal any agent.team, and
+  // for regional managers whose dataScope='regional_tasks' fell through
+  // both branches of the previous ternary and got an empty list).
+  const hmMembers = isManager ? allAgentsWL : [];
   const regions=['EMEA','APAC','LATAM','NAM'];
   const regionIcons={EMEA:'bi-globe-europe-africa',APAC:'bi-globe-asia-australia',LATAM:'bi-globe-americas',NAM:'bi-globe-americas'};
   const rStats=regions.map(r=>{
