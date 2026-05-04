@@ -21,7 +21,15 @@ const SOURCE_LABEL = {
   incentive_plans: 'Incentive Plans',
 };
 
-export default function ReassignTaskModal({ task, onClose, onReassigned }) {
+export default function ReassignTaskModal({ task, tasks, onClose, onReassigned }) {
+  // Single-task callers pass `task`; bulk callers pass `tasks` (array).
+  // Both shapes flow through the same picker — the only difference is the
+  // header label and that submit fans out N POSTs.
+  const taskList = Array.isArray(tasks) && tasks.length > 0
+    ? tasks
+    : task ? [task] : [];
+  const isBulk = taskList.length > 1;
+  const headTask = taskList[0] || null;
   const backdropRef = useRef(null);
   const inputRef = useRef(null);
   const listRef = useRef(null);
@@ -59,25 +67,42 @@ export default function ReassignTaskModal({ task, onClose, onReassigned }) {
   }, [activeIdx]);
 
   const submit = async (target) => {
-    if (!target?.email || submitting) return;
+    if (!target?.email || submitting || taskList.length === 0) return;
     setSubmitting(true);
     setError(null);
     try {
-      const original = task?.assigneeEmail
-        ? { email: task.assigneeEmail, name: task.assigneeName || (MEMBERS_BY_EMAIL[task.assigneeEmail.toLowerCase()]?.name || null) }
-        : null;
-      await reassignSourceTask({
-        source: task.source,
-        taskId: String(task.id),
-        taskUrl: task.url || null,
-        taskSubject: task.subject || null,
-        taskCountry: task.country || null,
-        assigneeEmail: target.email,
-        assigneeName: target.name || null,
-        originalAssigneeEmail: original?.email || null,
-        originalAssigneeName: original?.name || null,
+      const results = await Promise.allSettled(taskList.map(t => {
+        const original = t?.assigneeEmail
+          ? { email: t.assigneeEmail, name: t.assigneeName || (MEMBERS_BY_EMAIL[t.assigneeEmail.toLowerCase()]?.name || null) }
+          : null;
+        return reassignSourceTask({
+          source: t.source,
+          taskId: String(t.id),
+          taskUrl: t.url || null,
+          taskSubject: t.subject || null,
+          taskCountry: t.country || null,
+          assigneeEmail: target.email,
+          assigneeName: target.name || null,
+          originalAssigneeEmail: original?.email || null,
+          originalAssigneeName: original?.name || null,
+        });
+      }));
+      const fulfilled = results.filter(r => r.status === 'fulfilled');
+      const rejected = results.filter(r => r.status === 'rejected');
+      if (fulfilled.length === 0) {
+        const firstErr = rejected[0]?.reason?.message || 'Could not reassign';
+        throw new Error(firstErr);
+      }
+      // Partial success — still close the modal but warn via the parent so
+      // users know which (if any) rows didn't go through.
+      onReassigned?.({
+        count: fulfilled.length,
+        failed: rejected.length,
+        firstFailedReason: rejected[0]?.reason?.message || null,
+        // For single-task back-compat, surface the new assignee on the task
+        // descriptor so old call sites that read it still work.
+        ...(headTask ? { ...headTask, assigneeEmail: target.email, assigneeName: target.name } : {}),
       });
-      onReassigned?.({ ...task, assigneeEmail: target.email, assigneeName: target.name });
     } catch (err) {
       setError(err?.message || 'Could not reassign');
       setSubmitting(false);
@@ -85,12 +110,14 @@ export default function ReassignTaskModal({ task, onClose, onReassigned }) {
   };
 
   const clearOverride = async () => {
-    if (submitting) return;
+    if (submitting || taskList.length === 0) return;
     setSubmitting(true);
     setError(null);
     try {
-      await clearSourceReassignment({ source: task.source, taskId: String(task.id) });
-      onReassigned?.({ ...task, _cleared: true });
+      await Promise.allSettled(
+        taskList.map(t => clearSourceReassignment({ source: t.source, taskId: String(t.id) })),
+      );
+      onReassigned?.({ ...(headTask || {}), _cleared: true, count: taskList.length });
     } catch (err) {
       setError(err?.message || 'Could not reset');
       setSubmitting(false);
@@ -111,7 +138,11 @@ export default function ReassignTaskModal({ task, onClose, onReassigned }) {
     }
   };
 
-  const sourceLabel = SOURCE_LABEL[task?.source] || task?.source || '';
+  // For mixed-source bulk selections (theoretically possible if a future
+  // caller wires this from the combined "All" view) we collapse to "tasks"
+  // — single-source bulk gets the proper label.
+  const sourceLabels = [...new Set(taskList.map(t => SOURCE_LABEL[t?.source] || t?.source).filter(Boolean))];
+  const sourceLabel = sourceLabels.length === 1 ? sourceLabels[0] : '';
 
   return (
     <div
@@ -137,12 +168,13 @@ export default function ReassignTaskModal({ task, onClose, onReassigned }) {
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div id="reassign-title" style={{ fontSize: 15, fontWeight: 700, color: '#1b1b1b' }}>
-              Reassign task
+              {isBulk ? `Reassign ${taskList.length} tasks` : 'Reassign task'}
             </div>
             <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {sourceLabel}
-              {task?.subject ? <> · <strong style={{ color: '#616161' }}>{task.subject}</strong></> : null}
-              {task?.country ? <> · {task.country}</> : null}
+              {!isBulk && headTask?.subject ? <> · <strong style={{ color: '#616161' }}>{headTask.subject}</strong></> : null}
+              {!isBulk && headTask?.country ? <> · {headTask.country}</> : null}
+              {isBulk ? <> · One assignee will apply to all {taskList.length} tasks</> : null}
             </div>
           </div>
           <button
@@ -188,7 +220,7 @@ export default function ReassignTaskModal({ task, onClose, onReassigned }) {
             </div>
           ) : filtered.map((m, idx) => {
             const isActive = idx === activeIdx;
-            const isCurrent = task?.assigneeEmail && (task.assigneeEmail.toLowerCase() === (m.email || '').toLowerCase());
+            const isCurrent = !isBulk && headTask?.assigneeEmail && (headTask.assigneeEmail.toLowerCase() === (m.email || '').toLowerCase());
             return (
               <button
                 key={m.email}
@@ -241,7 +273,7 @@ export default function ReassignTaskModal({ task, onClose, onReassigned }) {
               ↑↓ to navigate &middot; Enter to assign &middot; Esc to close
             </span>
           )}
-          {task?.hasOverride && (
+          {taskList.some(t => t?.hasOverride) && (
             <button
               type="button"
               onClick={clearOverride}
