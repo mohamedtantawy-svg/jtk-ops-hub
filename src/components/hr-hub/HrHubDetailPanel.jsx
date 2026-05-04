@@ -361,24 +361,180 @@ function PickerPriority({ value, onChange, disabled }) {
 }
 
 function PickerAssignee({ value, valueName, onChange, disabled }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [activeIdx, setActiveIdx] = useState(0);
+  const wrapRef = useRef(null);
+  const inputRef = useRef(null);
+  const listRef = useRef(null);
+
+  const sortedMembers = useMemo(
+    () => [...MEMBERS].sort((a, b) => (a.name || '').localeCompare(b.name || '')),
+    [],
+  );
+
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? sortedMembers.filter(m => (m.name || '').toLowerCase().includes(q))
+    : sortedMembers;
+
+  // Build the flat option list once: a synthetic Unassigned row at index 0,
+  // then the (filtered) members. ActiveIdx walks this combined array so
+  // arrow / enter handling stays a single switch.
+  const options = useMemo(() => [
+    { email: '', name: 'Unassigned', _unassigned: true },
+    ...filtered,
+  ], [filtered]);
+
+  // Reset highlight when the search changes so users don't enter on a hidden row.
+  useEffect(() => { setActiveIdx(0); }, [query]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  // Focus the search input on every open so typing immediately filters.
+  useEffect(() => {
+    if (open) inputRef.current?.focus();
+  }, [open]);
+
+  const select = (email, name) => {
+    onChange(email || null, name || null);
+    setOpen(false);
+    setQuery('');
+    setActiveIdx(0);
+  };
+
+  const onKey = (e) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIdx(i => Math.min(options.length - 1, i + 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIdx(i => Math.max(0, i - 1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const opt = options[activeIdx];
+      if (opt) select(opt.email, opt._unassigned ? null : opt.name);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setOpen(false);
+    }
+  };
+
+  // Keep the highlighted row scrolled into view during keyboard nav.
+  useEffect(() => {
+    if (!open || !listRef.current) return;
+    const node = listRef.current.querySelector(`[data-idx="${activeIdx}"]`);
+    node?.scrollIntoView({ block: 'nearest' });
+  }, [activeIdx, open]);
+
+  const currentName = value
+    ? (MEMBERS_BY_EMAIL[value]?.name || valueName || value)
+    : null;
+
   return (
-    <select
-      value={value || ''}
-      onChange={e => {
-        const email = e.target.value || null;
-        const name = email ? (MEMBERS_BY_EMAIL[email]?.name || email) : null;
-        onChange(email, name);
-      }}
-      disabled={disabled}
-      style={pickerStyle('#f3f3f3', '#1b1b1b')}
-    >
-      <option value="">Unassigned</option>
-      {MEMBERS.map(m => (
-        <option key={m.email} value={m.email}>
-          {`Assignee: ${m.name}`}
-        </option>
-      ))}
-    </select>
+    <div ref={wrapRef} style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen(o => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        style={{
+          ...pickerStyle('#f3f3f3', '#1b1b1b'),
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          opacity: disabled ? 0.6 : 1,
+          maxWidth: 220, overflow: 'hidden',
+          whiteSpace: 'nowrap', textOverflow: 'ellipsis',
+        }}
+      >
+        <i className="bi bi-person" style={{ fontSize: 12, flexShrink: 0 }} />
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {currentName || 'Unassigned'}
+        </span>
+        <i className="bi bi-chevron-down" style={{ fontSize: 10, marginLeft: 2, flexShrink: 0 }} />
+      </button>
+      {open && (
+        <div
+          style={{
+            position: 'absolute', top: 'calc(100% + 4px)', left: 0,
+            zIndex: 30,
+            width: 280,
+            background: 'var(--surface, #fff)',
+            border: '1px solid var(--border)',
+            borderRadius: 10,
+            boxShadow: '0 10px 30px rgba(0,0,0,.12)',
+            overflow: 'hidden',
+            display: 'flex', flexDirection: 'column',
+          }}
+        >
+          <div style={{ padding: 8, borderBottom: '1px solid var(--border)' }}>
+            <input
+              ref={inputRef}
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              onKeyDown={onKey}
+              placeholder="Search by name…"
+              style={{
+                width: '100%',
+                padding: '6px 10px',
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                fontSize: 13,
+                outline: 'none',
+                fontFamily: 'inherit',
+                background: 'var(--surface, #fff)',
+                color: 'var(--text)',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+          <div ref={listRef} role="listbox" style={{ overflowY: 'auto', maxHeight: 260 }}>
+            {options.length === 1 && q && (
+              <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--text-muted)' }}>
+                No matches
+              </div>
+            )}
+            {options.map((opt, idx) => {
+              const isActive = idx === activeIdx;
+              const isSelected = opt._unassigned ? !value : opt.email === value;
+              return (
+                <button
+                  key={opt._unassigned ? '__unassigned__' : opt.email}
+                  type="button"
+                  data-idx={idx}
+                  role="option"
+                  aria-selected={isSelected}
+                  onMouseEnter={() => setActiveIdx(idx)}
+                  onClick={() => select(opt.email, opt._unassigned ? null : opt.name)}
+                  style={{
+                    display: 'block', width: '100%',
+                    textAlign: 'left',
+                    padding: '8px 12px',
+                    border: 'none',
+                    background: isActive ? '#fef3ee' : 'transparent',
+                    color: 'var(--text)',
+                    fontSize: 13,
+                    fontWeight: isSelected ? 600 : 400,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                    fontStyle: opt._unassigned ? 'italic' : 'normal',
+                  }}
+                >
+                  {opt.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
