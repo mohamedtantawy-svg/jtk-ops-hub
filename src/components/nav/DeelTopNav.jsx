@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useContext } from 'react';
 import { PermissionsContext } from '../../App';
 import { isApprover } from '../../data/approvers';
 import Avatar from '../ui/Avatar';
+import NotificationPanel from './NotificationPanel';
 
 // Temporary gate: these surfaces are hidden from everyone except the owner
 // until the underlying features are production-ready. Remove the
@@ -66,7 +67,7 @@ const CREATE_ACTIONS = [
 
 const DeelTopNav = ({
   view, setView, user,
-  onSearch, notifs, markAllRead, onNotifClick,
+  onSearch, notifs, markAllRead, markRead, onNotifClick,
   onLogout,
   onCreateAnnouncement, onCreateFeedback,
   onCreateHrHub,
@@ -292,48 +293,39 @@ const DeelTopNav = ({
             )}
           </button>
           {showNotifs && (
-            <div style={{ ...dropdown, right: 0, borderRadius: 16, width: 380, maxHeight: 440, overflowY: 'auto' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px 14px', borderBottom: '1px solid var(--border)' }}>
-                <span style={{ fontSize: 16, fontWeight: 700 }}>Notifications</span>
-                {notifCount > 0 && (
-                  <button onClick={markAllRead} style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 13, fontWeight: 500, cursor: 'pointer', padding: 0 }}>Mark all read</button>
-                )}
-              </div>
-              {notifs && notifs.length > 0 ? notifs.slice(0, 15).map(n => {
-                const handleNotifClick = () => {
-                  setShowNotifs(false);
-                  // App-level handler owns routing for server-persisted notifs
-                  // (mentions, etc) — those carry richer link metadata than the
-                  // legacy in-memory popups can express.
-                  if (typeof onNotifClick === 'function') {
-                    onNotifClick(n);
-                    return;
+            <NotificationPanel
+              notifs={notifs || []}
+              unreadCount={notifCount}
+              onClose={() => setShowNotifs(false)}
+              markAllRead={markAllRead}
+              markRead={markRead}
+              onNotifClick={(group) => {
+                // The panel passes a *group* (collection of related notifications
+                // for the same task). Route via the App-level handler when one is
+                // wired — it owns deep-linking. Fall back to the legacy view-flip
+                // routing for in-memory rows that don't carry link metadata.
+                setShowNotifs(false);
+                const head = group?.items?.[0];
+                if (typeof onNotifClick === 'function' && head) {
+                  onNotifClick(head);
+                  return;
+                }
+                if (!head) return;
+                markAllRead?.();
+                const navType = head.navType || head.type;
+                if (navType === 'task' || navType === 'new_task' || navType === 'sla') {
+                  if (head.taskId && setSelTask && tasks) {
+                    const t = tasks.find(tk => tk.id === head.taskId);
+                    if (t) setSelTask(t);
                   }
-                  markAllRead?.();
-                  const navType = n.navType || n.type;
-                  if (navType === 'task' || navType === 'new_task' || navType === 'sla') { if (n.taskId && setSelTask && tasks) { const t = tasks.find(tk => tk.id === n.taskId); if (t) setSelTask(t); } setView('my-queue'); }
-                  else if (navType === 'escalation') { setView('escalations'); }
-                  else { setView('briefing'); }
-                };
-                return (
-                <div key={n.id} onClick={handleNotifClick}
-                  onMouseEnter={e => e.currentTarget.style.background = n.read ? 'var(--surface-2)' : 'var(--surface-3)'}
-                  onMouseLeave={e => e.currentTarget.style.background = n.read ? 'var(--surface)' : 'var(--surface-2)'}
-                  style={{ display: 'flex', gap: 12, padding: '12px 20px', borderBottom: '1px solid var(--border-light)', background: n.read ? 'var(--surface)' : 'var(--surface-2)', cursor: 'pointer', transition: 'background .15s', alignItems: 'flex-start' }}>
-                  <div style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, marginTop: 6, background: n.read ? 'transparent' : n.type === 'escalation' ? 'var(--red-solid)' : n.type === 'success' ? 'var(--success)' : 'var(--accent)' }}></div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: n.read ? 400 : 600, color: 'var(--text)', lineHeight: '18px' }}>{n.title}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>{n.body}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{n.time}</div>
-                  </div>
-                </div>
-              );}) : (
-                <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>
-                  <i className="bi bi-bell-slash" style={{ fontSize: 28, display: 'block', marginBottom: 8, color: 'var(--text-disabled)' }}></i>
-                  No notifications yet
-                </div>
-              )}
-            </div>
+                  setView('my-queue');
+                } else if (navType === 'escalation') {
+                  setView('escalations');
+                } else {
+                  setView('briefing');
+                }
+              }}
+            />
           )}
         </div>
 

@@ -14,6 +14,74 @@ import { NextResponse } from 'next/server';
 import { getAuthUser, requireRole } from '../../../../../src/lib/auth-helpers';
 import { query } from '../../../../../src/lib/db';
 
+// Notify the submitter (and previous commenters) when a feedback request
+// transitions status — same fan-out shape the comment route uses, kept
+// inline here to avoid a circular import on the helper file. Best-effort:
+// a notify failure must never bubble out and 500 the PATCH.
+async function notifyFeedbackStatusChange({ id, requestTitle, prev, next, actor }) {
+  if (!next || prev === next) return;
+  try {
+    const submitter = await query(
+      `SELECT LOWER(submitter_email) AS email FROM feedback_requests WHERE id = $1`,
+      [id],
+    );
+    const submitterEmail = submitter.rows[0]?.email || null;
+    const followers = await query(
+      `SELECT DISTINCT LOWER(author_email) AS email
+         FROM feedback_comments
+        WHERE request_id = $1 AND author_email IS NOT NULL`,
+      [id],
+    );
+    const recipients = Array.from(new Set([
+      submitterEmail,
+      ...followers.rows.map(r => r.email),
+    ].filter(Boolean)));
+    const exclude = (actor?.email || '').toLowerCase();
+    const filtered = recipients.filter(e => e !== exclude);
+    if (filtered.length === 0) return;
+
+    const STATUS_LABEL = {
+      new: 'New', triaged: 'Triaged', in_progress: 'In progress',
+      done: 'Resolved', wont_do: "Won't do", duplicate: 'Marked duplicate',
+    };
+    const TERMINAL = new Set(['done', 'wont_do', 'duplicate']);
+    const APPROVED = new Set(['done']);
+    const DENIED = new Set(['wont_do', 'duplicate']);
+    const type = APPROVED.has(next) ? 'approved'
+              : DENIED.has(next)   ? 'denied'
+              : TERMINAL.has(next) ? 'decision'
+              : 'status_change';
+    const title = `Status: ${STATUS_LABEL[next] || next}`;
+    const actorName = actor?.name || actor?.email || 'Ops Hub';
+    const body = `${actorName} changed the status to “${STATUS_LABEL[next] || next}”${prev ? ` (was “${STATUS_LABEL[prev] || prev}”)` : ''}.`.slice(0, 500);
+    const placeholders = [];
+    const values = [];
+    let p = 1;
+    for (const r of filtered) {
+      placeholders.push(`($${p++}, $${p++}, $${p++}, $${p++}, 'feedback', $${p++}, 'feedback_status_change', $${p++}, $${p++}, $${p++})`);
+      values.push(
+        r,
+        type,
+        `${title}: ${requestTitle}`.slice(0, 300),
+        body,
+        String(id),
+        String(id),
+        actor?.email || null,
+        actor?.name || null,
+      );
+    }
+    await query(
+      `INSERT INTO user_notifications
+         (recipient_email, type, title, body, link_view, link_id, source_type, source_id, actor_email, actor_name)
+       VALUES ${placeholders.join(', ')}
+       ON CONFLICT DO NOTHING`,
+      values,
+    );
+  } catch (err) {
+    console.warn('[feedback/patch] status-change notify failed:', err.message);
+  }
+}
+
 const ALLOWED_STATUS = new Set(['new', 'triaged', 'in_progress', 'done', 'wont_do', 'duplicate']);
 const ALLOWED_PRIORITY = new Set(['low', 'medium', 'high', 'critical']);
 const ALLOWED_TYPE = new Set(['bug', 'improvement', 'question']);
@@ -151,9 +219,31 @@ export async function PATCH(req, { params }) {
   const sql = `UPDATE feedback_requests SET ${sets.join(', ')} WHERE id = $${values.length} RETURNING id`;
 
   try {
+    // Capture the prior status before the UPDATE so the status-change
+    // notification can include "(was X)" without an extra round-trip.
+    let prevStatus = null;
+    let prevTitle = null;
+    if (body.status !== undefined) {
+      const prior = await query(
+        `SELECT status, title FROM feedback_requests WHERE id = $1`,
+        [id],
+      );
+      prevStatus = prior.rows[0]?.status || null;
+      prevTitle = prior.rows[0]?.title || null;
+    }
     const result = await query(sql, values);
     if (result.rowCount === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     const { rows } = await query(SELECT_WITH_AGGS, [id, user.id || -1]);
+
+    if (body.status !== undefined && prevStatus !== body.status) {
+      await notifyFeedbackStatusChange({
+        id,
+        requestTitle: prevTitle || rows[0]?.title || '(feedback request)',
+        prev: prevStatus,
+        next: body.status,
+        actor: { email: (user.email || '').toLowerCase(), name: user.name || null },
+      });
+    }
     return NextResponse.json({ item: rowToShape(rows[0]) });
   } catch (err) {
     console.error('[feedback/patch]', err.message);
