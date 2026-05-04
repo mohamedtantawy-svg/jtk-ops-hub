@@ -13,6 +13,10 @@
 
 export const ALL_VIEWS = [
   'briefing',
+  // 'lead-home' is a draft TL-focused homepage — preview-only, gated to
+  // managerial tiers via MANAGERIAL_ONLY_VIEWS below. Reached via
+  // ?view=lead-home, no nav entry yet.
+  'lead-home',
   // 'my-queue' is the route id; users see "Workspace" in the nav.
   'my-queue',
   // Removed 2026-05-03: projects, escalations, calendar, knowledge-hub,
@@ -48,7 +52,7 @@ export const ALL_VIEWS = [
 // `perms.canView('team')` now returns false everywhere (topnav, quick-
 // tile, and direct URL deep-link `?view=team`), matching the strict rule
 // "Agents must NEVER access the Team tab or Leaders Alerts".
-const MANAGERIAL_ONLY_VIEWS = new Set(['leader-alerts', 'team']);
+const MANAGERIAL_ONLY_VIEWS = new Set(['leader-alerts', 'team', 'lead-home']);
 
 export const ALL_ACTIONS = [
   // Task actions
