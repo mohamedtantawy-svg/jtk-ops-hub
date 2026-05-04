@@ -155,8 +155,17 @@ export async function PATCH(req, { params }) {
   const isOwner = existing.created_by_email?.toLowerCase() === callerEmail;
   const isAssignee = existing.assignee_email?.toLowerCase() === callerEmail;
   const admin = await isHrHubAdmin(user);
-  if (!isOwner && !isAssignee && !admin) {
-    return NextResponse.json({ error: 'Forbidden — not creator, assignee, or HR Hub Admin' }, { status: 403 });
+  // 2026-05-04 user directive: "any manager can change the status — doesn't
+  // have to be the assignee". Open the gate to TL / RM / Admin in addition
+  // to the request's own creator / assignee. Non-managerial roster members
+  // who aren't the creator / assignee still get the 403.
+  const callerMember = memberByEmail(callerEmail);
+  const callerAccess = (callerMember?.access || '').toLowerCase();
+  const isManagerCaller = callerAccess === 'admin'
+    || callerAccess === 'regional_manager'
+    || callerAccess === 'team_lead';
+  if (!isOwner && !isAssignee && !admin && !isManagerCaller) {
+    return NextResponse.json({ error: 'Forbidden — not creator, assignee, manager, or HR Hub Admin' }, { status: 403 });
   }
 
   const updates = [];
@@ -170,10 +179,13 @@ export async function PATCH(req, { params }) {
       return NextResponse.json({ error: `Invalid status: ${patch.status}` }, { status: 400 });
     }
     if (patch.status !== existing.status) {
-      // Non-admins can only move forward; admins / assignee can move freely.
-      if (!admin && !isAssignee) {
+      // Status direction guard: only HR Hub Admin / assignee / any manager
+      // (TL/RM/Admin) can move a status backwards. Owners (creators who
+      // aren't also managers) can still move forward but not back —
+      // matches the original intent.
+      if (!admin && !isAssignee && !isManagerCaller) {
         if (STATUS_ORDER[patch.status] < STATUS_ORDER[existing.status]) {
-          return NextResponse.json({ error: 'Only HR Hub Admin or assignee can move a status backwards' }, { status: 403 });
+          return NextResponse.json({ error: 'Only HR Hub Admin, assignee, or a manager can move a status backwards' }, { status: 403 });
         }
       }
       updates.push(`status = $${p++}`); values.push(patch.status);

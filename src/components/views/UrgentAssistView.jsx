@@ -17,9 +17,10 @@
 // Deel admin task — drive that surface via the row's "Open" deep link).
 
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { PermissionsContext } from '../../App';
+import { PermissionsContext, IntegrationsContext } from '../../App';
 import { useUrgentAssistData } from '../../hooks/useUrgentAssistData';
-import { updateUrgentAssist, deleteUrgentAssist } from '../../services/urgentAssistApi';
+import { updateUrgentAssist, deleteUrgentAssist, listUrgentAssist } from '../../services/urgentAssistApi';
+import { isUrgentAssistTaskType } from '../../lib/urgent-assist-task-types';
 import { getDirectReports, getAllReports, getVisibleEmailsForAccess } from '../../data/members';
 import { getFlag, getCountryName } from '../../data/constants';
 import Avatar from '../ui/Avatar';
@@ -168,6 +169,62 @@ export default function UrgentAssistView({ user, onCreate }) {
     visibleEmails,
   });
 
+  // Per-scope active counts (My / Team / All) — rendered as small pills on
+  // each ScopePill. "Active" = status NOT resolved. Manual rows fetched
+  // per scope (3 light requests, mirrors HR Hub); workbench rows pulled
+  // from already-warm context and partitioned client-side using the same
+  // predicates as useUrgentAssistData. Re-runs when teamEmails, isAdmin,
+  // visibleEmails, or the workbench data shifts.
+  const integrationsCtx = useContext(IntegrationsContext);
+  const allWorkbenchTasks = integrationsCtx?.queueUnified?.workbenchData?.tasks || [];
+  const [scopeCounts, setScopeCounts] = useState({ mine: null, team: null, all: null });
+  useEffect(() => {
+    if (!lcEmail) return undefined;
+    let cancelled = false;
+    const wantTeam = isManager;
+    const scopes = wantTeam ? ['mine', 'team', 'all'] : ['mine', 'all'];
+    (async () => {
+      const next = { mine: 0, team: wantTeam ? 0 : null, all: 0 };
+      // 1) Manual rows — one fetch per scope. Backend already filters per
+      // scope, so we just count non-resolved.
+      for (const sc of scopes) {
+        try {
+          const r = await listUrgentAssist({ scope: sc, limit: 200 });
+          if (cancelled) return;
+          const itemsRes = Array.isArray(r?.items) ? r.items : [];
+          next[sc] = itemsRes.filter(it => it?.status !== 'resolved').length;
+        } catch { /* swallow — leave as 0 */ }
+      }
+      if (cancelled) return;
+      // 2) Workbench rows — counted client-side using the same scope
+      // predicates the data hook uses, gated to actionable statuses
+      // (TO_DO / IN_PROGRESS / ON_HOLD / ESCALATED → mapped to
+      // non-resolved on the tab side).
+      const NON_RESOLVED_UPSTREAM = new Set(['TO_DO', 'IN_PROGRESS', 'ON_HOLD', 'ESCALATED']);
+      const matched = allWorkbenchTasks.filter(t =>
+        isUrgentAssistTaskType(t?.taskType) || isUrgentAssistTaskType(t?.sourceType));
+      const team = teamEmails || new Set();
+      let mineWb = 0, teamWb = 0, allWb = 0;
+      for (const t of matched) {
+        if (!NON_RESOLVED_UPSTREAM.has(t.status)) continue;
+        const ae = (t.assignee?.email || '').toLowerCase();
+        // mine: assignee = me
+        if (ae && ae === lcEmail) mineWb++;
+        // team: assignee in caller's team set (manager-only)
+        if (wantTeam && ae && team.has(ae)) teamWb++;
+        // all: every actionable urgent-assist row globally
+        allWb++;
+      }
+      if (cancelled) return;
+      setScopeCounts({
+        mine: next.mine + mineWb,
+        team: wantTeam ? (next.team || 0) + teamWb : null,
+        all:  next.all + allWb,
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [lcEmail, isManager, allWorkbenchTasks, teamEmails]);
+
   // Apply status + search filters client-side. Status pills come from the
   // hook's pre-scoping count, so the four cards stay accurate when the user
   // narrows search (search is purely a row-level filter).
@@ -263,11 +320,11 @@ export default function UrgentAssistView({ user, onCreate }) {
             it. Agents have no team-of-reports, so the scope is meaningless
             and clicking it returned 0 records anyway. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14 }}>
-          <ScopePill value="mine" current={scope} onChange={setScope} label="My Requests" />
+          <ScopePill value="mine" current={scope} onChange={setScope} label="My Requests" count={scopeCounts.mine ?? undefined} />
           {isManager && (
-            <ScopePill value="team" current={scope} onChange={setScope} label="Team Requests" />
+            <ScopePill value="team" current={scope} onChange={setScope} label="Team Requests" count={scopeCounts.team ?? undefined} />
           )}
-          <ScopePill value="all"  current={scope} onChange={setScope} label="All Requests" />
+          <ScopePill value="all"  current={scope} onChange={setScope} label="All Requests" count={scopeCounts.all ?? undefined} />
           <span style={{ marginLeft: 'auto', fontSize: 12, color: '#9e9e9e' }}>
             {loading ? 'Loading…' : `${statusCounts.total} ${statusCounts.total === 1 ? 'request' : 'requests'}`}
           </span>
@@ -494,7 +551,7 @@ function UrgentRow({ row, onStatusChange, onDelete }) {
   );
 }
 
-function ScopePill({ value, current, onChange, label }) {
+function ScopePill({ value, current, onChange, label, count }) {
   const active = current === value;
   return (
     <button
@@ -509,9 +566,22 @@ function ScopePill({ value, current, onChange, label }) {
         fontSize: 12, fontWeight: active ? 600 : 500,
         cursor: 'pointer', whiteSpace: 'nowrap',
         fontFamily: 'inherit',
+        display: 'inline-flex', alignItems: 'center', gap: 6,
       }}
     >
       {label}
+      {typeof count === 'number' && (
+        <span
+          aria-label={`${count} active`}
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            minWidth: 18, height: 18, padding: '0 6px', borderRadius: 999,
+            fontSize: 10, fontWeight: 700,
+            background: active ? 'rgba(255,255,255,0.18)' : '#f5f4f2',
+            color: active ? 'white' : '#616161',
+          }}
+        >{count}</span>
+      )}
     </button>
   );
 }

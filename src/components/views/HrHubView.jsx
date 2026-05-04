@@ -82,9 +82,19 @@ function relTime(iso) {
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-function isManagerRole(user) {
+function isManagerRole(user, perms) {
   if (!user) return false;
+  // Canonical: read perms.dataScope when available — the resolved access
+  // type after roleToAt mapping. Avoids substring traps where labels like
+  // "Manager" or "Senior Director" don't include "lead"/"regional"/"admin"
+  // (audit 2026-05-04: managers were missing the Team Requests toggle
+  // because their access label slipped through the substring check).
+  const scope = perms?.dataScope;
+  if (scope === 'all_tasks' || scope === 'regional_tasks' || scope === 'team_tasks') return true;
   if (user.role === 'admin') return true;
+  // Fallback substring scan — lighter than pulling the access map but
+  // less reliable than perms.dataScope. Only fires when perms isn't
+  // hydrated yet (very early renders).
   const access = user.access || user.accessTypeName || '';
   if (typeof access === 'string') {
     const lc = access.toLowerCase();
@@ -107,7 +117,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
   })();
 
   // ── Filters & toggles ─────────────────────────────────────────────────────
-  const isManager = isManagerRole(user);
+  const isManager = isManagerRole(user, perms);
   const [scope, setScope] = useState('mine');
   const [flowFilter, setFlowFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState(null);          // null = all statuses
@@ -224,6 +234,10 @@ export default function HrHubView({ user, onCreateHrHub }) {
   }, [flowQuery, scope, debouncedSearch]);
 
   // Scope counts run once per flow change — three small queries.
+  // 2026-05-04: counts exclude resolved per the user spec ("if it's
+  // resolved, then it's out of counting"). The badge on each scope pill
+  // should reflect "things still pending action", not the historical
+  // total. Same rule applied across Urgent Assist + Leaders Hub.
   useEffect(() => {
     let cancelled = false;
     const scopes = isManager ? ['mine', 'team', 'all'] : ['mine', 'all'];
@@ -233,7 +247,8 @@ export default function HrHubView({ user, onCreateHrHub }) {
         try {
           const r = await listHrHubRequests({ flow: flowQuery, scope: sc, limit: 100 });
           if (cancelled) return;
-          out[sc] = (r?.items || []).length;
+          const items = r?.items || [];
+          out[sc] = items.filter(i => i.status !== 'resolved').length;
         } catch { /* swallow */ }
       }
       if (!cancelled) setScopeCounts(out);
