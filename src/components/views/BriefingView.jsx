@@ -41,6 +41,14 @@ import TeamRequestsToMe from '../home/TeamRequestsToMe';
 import DailySummary from '../home/DailySummary';
 import StaleTickets from '../home/StaleTickets';
 import ApproachingBreach from '../home/ApproachingBreach';
+import {
+  TriageStrip,
+  DecisionsStrip,
+  AccessBadge,
+  LastLoginPill,
+  CountriesCell,
+  LoginAsButton,
+} from '../briefing/ManagerStrips';
 
 const SOURCE_COLOURS = {
   gmail: '#ea4335', zendesk: '#03363d', jira: '#0052cc',
@@ -50,11 +58,53 @@ const SOURCE_COLOURS = {
   amendments: '#ed8d00', redlines: '#7c3aed',
 };
 
-const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSubFilter,requests=[],projects=[],managerOnCall=null,onChangeManagerOnCall})=>{
+const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSubFilter,requests=[],projects=[],managerOnCall=null,onChangeManagerOnCall,realUser=null,onImpersonate=null,impersonating=null})=>{
   // Live roster for the Manager-on-call picker so admins see managers added
   // via the Team tab (not just the baked-in baseline). Filter out
   // soft-deleted rows so we don't offer to impersonate a disabled account.
-  const { members: liveMembers } = useTeamMembers();
+  const {
+    members: liveMembers,
+    membersByEmail: liveMembersByEmail,
+    setCountries: liveSetCountries,
+    getAllReports: liveGetAllReports,
+    loading: rosterLoading,
+  } = useTeamMembers();
+  // ── Login-as gate (mirrors Team.jsx::canLoginAs) ─────────────────────────
+  // Only TL/RM/admin can impersonate. Target must be in the caller's
+  // reporting subtree, not deactivated, and not currently impersonated.
+  const canLoginAs = useCallback((targetEmail) => {
+    if (!onImpersonate || !realUser?.email) return false;
+    const realEmail = realUser.email.toLowerCase();
+    const realMember = (liveMembersByEmail && liveMembersByEmail[realEmail]) || MEMBERS_BY_EMAIL[realEmail];
+    if (!realMember) return false;
+    const access = (realMember.access || '').toLowerCase();
+    if (!['admin', 'regional_manager', 'team_lead'].includes(access)) return false;
+    const te = (targetEmail || '').toLowerCase();
+    if (!te) return false;
+    if (te === (impersonating || '').toLowerCase()) return false;
+    const target = (liveMembersByEmail && liveMembersByEmail[te]) || MEMBERS_BY_EMAIL[te];
+    if (!target || target.isDeleted) return false;
+    const reports = liveGetAllReports ? liveGetAllReports(realEmail) : (getAllReports(realEmail) || []);
+    return new Set(reports).has(te);
+  }, [onImpersonate, realUser?.email, impersonating, liveMembersByEmail, liveGetAllReports]);
+  // Country edit gate — admin / RM / per-user Access Admin / TL editing only
+  // their direct reports' countries. Mirrors the server-side check at
+  // app/api/v1/team-members/[email]/countries/route.js so the inline picker
+  // doesn't bait users into a 403.
+  const canEditMemberCountries = useCallback((memberEmail) => {
+    if (!realUser?.email) return false;
+    const realEmail = realUser.email.toLowerCase();
+    const realMember = (liveMembersByEmail && liveMembersByEmail[realEmail]) || MEMBERS_BY_EMAIL[realEmail];
+    if (!realMember) return false;
+    const access = (realMember.access || '').toLowerCase();
+    if (access === 'admin' || access === 'regional_manager') return true;
+    if (realMember.isAccessAdmin === true) return true;
+    if (access === 'team_lead') {
+      const reports = liveGetAllReports ? liveGetAllReports(realEmail) : (getAllReports(realEmail) || []);
+      return new Set(reports).has((memberEmail || '').toLowerCase());
+    }
+    return false;
+  }, [realUser?.email, liveMembersByEmail, liveGetAllReports]);
   const mocCandidates = useMemo(() => (liveMembers || TEAM_MEMBERS)
     .filter(m => !m.isDeleted)
     .filter(m => m.access === 'team_lead' || m.access === 'regional_manager' || m.access === 'admin'),
@@ -1500,82 +1550,35 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
         </div>}
 
         {/* ══════════════════════════════════════════════════════════════════
-            LEAD METRICS — compact strip
+            LEAD METRICS — Decisions strip
+            Replaces the legacy 6-tile (Active Requests / Meetings / Projects
+            / Escalations / Announcements / My To-Do) for any manager. Surfaces
+            the four signals a TL/RM/admin actually decides on: hide-task
+            approvals, unacked Leader Alerts, Urgent Assist, HR Hub pending.
+            Click any tile to land on the relevant view.
         ══════════════════════════════════════════════════════════════════ */}
-        {isTeamScope&&<div style={{margin:'12px 24px 0',background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16,padding:'12px 20px'}}>
-          {(()=>{
-            const inAudLead=(c)=>matchesAudience(c.target,user.team)||(c.author&&c.author.id===user.id);
-            const unackedCount=comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='alert'||c.type==='guidance')&&!isAckedByMe(c)&&inAudLead(c)).length;
-            // Breakdown spans every queue the team has open items in —
-            // Zendesk/Jira from `scope`, plus the country/assignee-scoped Deel
-            // rows so the total matches Active Requests.
-            const leadSrcMap=scope.reduce((a,t)=>{a[t.source]=(a[t.source]||0)+1;return a;},{});
-            if(onboardingRows.length)  leadSrcMap.onboarding  =(leadSrcMap.onboarding  ||0)+onboardingRows.length;
-            if(offboardingRows.length) leadSrcMap.offboarding =(leadSrcMap.offboarding ||0)+offboardingRows.length;
-            if(amendmentRows.length)   leadSrcMap.amendments  =(leadSrcMap.amendments  ||0)+amendmentRows.length;
-            if(redlineRows.length)     leadSrcMap.redlines    =(leadSrcMap.redlines    ||0)+redlineRows.length;
-            if(workbenchRows.length)   leadSrcMap.workbench   =(leadSrcMap.workbench   ||0)+workbenchRows.length;
-            const leadSrcBreakdown=Object.entries(leadSrcMap).sort((a,b)=>b[1]-a[1]);
-            return(<>
-          <div style={{display:'flex',alignItems:'center',gap:0}}>
-          {[
-            {l:'Active Requests',v:activeRequestsCount,c:'var(--g)',sub:`${personal.length} yours`,tr:trend(),expandKey:'active-breakdown'},
-            {l:'Meetings',v:todayMeetingsCount,c:'#1f74b3',sub:'today',nav:()=>setView('calendar')},
-            {l:'Projects',v:projectsAssignedCount,c:'#8b6dca',sub:'assigned',nav:()=>setView('projects')},
-            {l:'Escalations',v:myEscalationsCount,c:myEscalationsCount>0?'#d42d35':'#616161',alert:myEscalationsCount>0,sub:'mine',nav:()=>setView('escalations')},
-            {l:'Announcements',v:unackedCount,c:unackedCount>0?'#ed8d00':'#616161',alert:unackedCount>0,sub:'unacked',nav:()=>setView('announcements')},
-            {l:'My To-Do',v:checklistCount,c:checklistCount>0?'#7c3aed':'#616161',sub:'open items'},
-          ].map((m,i,arr)=>(
-            <div key={m.l} className={`metric-cell count-up count-up-${i+1}`}
-              onClick={m.expandKey?()=>setExpandedSla(expandedSla===m.expandKey?null:m.expandKey):m.nav?m.nav:undefined}
-              style={{flex:1,textAlign:'center',padding:'8px 6px',borderRight:i<arr.length-1?'1px solid #f0f0f0':'none',position:'relative',
-                cursor:(m.expandKey||m.nav)?'pointer':'default',borderRadius:(m.expandKey||m.nav)?8:0,transition:'background .15s'}}
-              onMouseEnter={e=>{if(m.expandKey||m.nav)e.currentTarget.style.background='#fafaf9';}}
-              onMouseLeave={e=>{if(m.expandKey||m.nav)e.currentTarget.style.background='transparent';}}>
-              {m.alert&&m.v>0&&<span className="pulse" style={{position:'absolute',top:2,right:'calc(50% - 22px)',width:6,height:6,borderRadius:'50%',background:'#d42d35'}}></span>}
-              <div style={{fontSize:24,fontWeight:700,color:(m.expandKey||m.nav)?'#1f74b3':m.c,lineHeight:1,fontVariantNumeric:'tabular-nums'}}>{m.v}</div>
-              <div style={{fontSize:10,color:'#9e9e9e',fontWeight:600,marginTop:5,display:'flex',alignItems:'center',justifyContent:'center',gap:3}}>
-                {m.l}{m.expandKey&&<i className={expandedSla===m.expandKey?'bi-chevron-up':'bi-chevron-down'} style={{fontSize:7,color:'#9e9e9e'}}></i>}
-                {m.sub?<span style={{color:'#bebebe'}}>({m.sub})</span>:null}
-                {m.tr&&m.tr.pct>0&&<span style={{fontSize:9,fontWeight:700,color:m.tr.c,marginLeft:2}}>{m.tr.dir}{m.tr.pct}%</span>}
-              </div>
-            </div>
-          ))}
-          <div style={{width:100,paddingLeft:14,borderLeft:'1px solid #f0f0f0',display:'flex',flexDirection:'column',alignItems:'center'}}>
-            <svg width={spW} height={spH} viewBox={`0 0 ${spW} ${spH}`} style={{overflow:'visible'}}>
-              <defs><linearGradient id="spGradLd" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--g)" stopOpacity=".15"/><stop offset="100%" stopColor="var(--g)" stopOpacity="0"/></linearGradient></defs>
-              <path d={sparkPath+` L${spW},${spH} L0,${spH} Z`} fill="url(#spGradLd)"/>
-              <path d={sparkPath} fill="none" stroke="var(--g)" strokeWidth="1.5" className="spark-line"/>
-              <circle cx={spW} cy={spH-((sparkData[sparkData.length-1]-spMin)/((spMax-spMin)||1))*spH} r="3" fill="var(--g)"/>
-            </svg>
-            <div style={{fontSize:9,color:'#9e9e9e',fontWeight:600,marginTop:3}}>Volume</div>
-          </div>
-          </div>
-          {expandedSla==='active-breakdown'&&isTeamScope&&<div style={{marginTop:10,padding:'0 4px'}}>
-            <div style={{background:'#fafaf9',border:'1px solid #e8e8e8',borderRadius:12,padding:'12px 16px',animation:'fadeSlide .2s ease'}}>
-              {leadSrcBreakdown.length===0?<div style={{fontSize:11,color:'#9e9e9e',padding:'12px 0',textAlign:'center'}}>No active tasks</div>:
-              leadSrcBreakdown.map(([src,cnt])=>{
-                const tl=TOOLS[src];const color=SOURCE_COLOURS[src]||tl?.color||'#bebebe';
-                return(
-                  <div key={src} onClick={()=>setView('my-queue')}
-                    style={{display:'flex',alignItems:'center',gap:10,padding:'8px 4px',cursor:'pointer',borderRadius:8,transition:'background .15s'}}
-                    onMouseEnter={e=>e.currentTarget.style.background='#f0f0f0'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                    <div style={{width:24,height:24,borderRadius:6,background:tl?.bg||'#f7f5f2',display:'flex',alignItems:'center',justifyContent:'center'}}>
-                      <i className={tl?.icon||'bi-circle'} style={{fontSize:10,color}}></i>
-                    </div>
-                    <span style={{fontSize:13,color:'#1b1b1b',flex:1,fontWeight:500}}>{tl?.label||src.charAt(0).toUpperCase()+src.slice(1)}</span>
-                    <span style={{fontSize:16,fontWeight:700,color:'#1f74b3',fontVariantNumeric:'tabular-nums'}}>{cnt} {cnt===1?'task':'tasks'}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>}
-            </>);
-          })()}
+        {isManager&&<div style={{margin:'12px 24px 0'}}>
+          <DecisionsStrip onNavigate={(v)=>setView(v)} />
         </div>}
 
         {/* ── MAIN CONTENT ────────────────────────────────────────────────── */}
         <div style={{padding:'12px 24px 20px'}}>
+
+          {/* ── TRIAGE STRIP — what's on fire across my team's queue ────── */}
+          {/* 4 KPI tiles: Breached / At-Risk / Paused / Synth-only.       */}
+          {/* Sits ABOVE Team Summary so a manager sees "team status" first */}
+          {/* and then drills into the per-member roster underneath.        */}
+          {isManager && (
+            <TriageStrip
+              queueUnified={queueUnified}
+              hiddenTasks={hiddenTasks}
+              queueSla={queueSla}
+              tasks={tasks}
+              scopeEmails={new Set((scopeMembers || []).map(m => (m?.email || '').toLowerCase()).filter(Boolean))}
+              isAdmin={isAllScope}
+              onNavigate={(v) => setView(v)}
+            />
+          )}
 
           {/* ── TEAM SUMMARY TABLE (managers only) ──────────────────────── */}
           {isManager&&hmMembers.length>0&&<DeelCard style={{padding:0,overflow:'hidden',marginBottom:20}}>
@@ -1591,6 +1594,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 <thead>
                   <tr style={{background:'#fafaf9',borderBottom:'1px solid #e8e8e8'}}>
                     <th style={{padding:'12px 24px',textAlign:'left',fontWeight:600,color:'#9e9e9e',fontSize:12}}>Full Name</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="Country ownership — controls who sees rows for this country in the country-OR-assignee queues. Click to edit.">Countries</th>
                     <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="Total = Open + Paused across Zendesk, Jira, Workbench, Onboarding, Offboarding, Amendments, Redlines">Total</th>
                     <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="Actionable rows across all 7 sources">Open</th>
                     <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="Paused / waiting rows across all 7 sources">Paused</th>
@@ -1598,24 +1602,48 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                     <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="SLA-breached rows across all 7 sources">Breaches</th>
                     <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="Baseline 30 tasks = healthy workload. capacity% = total / 30.">Capacity %</th>
                     <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="<20 Low · 20-50 Medium · >50 High">Workload</th>
+                    <th style={{padding:'12px 16px',textAlign:'right',fontWeight:600,color:'#9e9e9e',fontSize:12,whiteSpace:'nowrap'}}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {(() => {
+                    // Resolve the live roster row (lastLoginAt / countries /
+                    // access flags) for an agent or manager. Falls back to the
+                    // baked-in MEMBERS_BY_EMAIL when the live fetch hasn't
+                    // landed yet so the row never blank-flashes.
+                    const liveOf = (email) => {
+                      const lc = (email || '').toLowerCase();
+                      if (!lc) return null;
+                      return (liveMembersByEmail && liveMembersByEmail[lc]) || MEMBERS_BY_EMAIL[lc] || null;
+                    };
+
                     // Single source of truth for an agent row — used by both
                     // the flat (TL) and grouped (RM/admin) renderings.
-                    const agentRow = (m, key, indent) => (
+                    const agentRow = (m, key, indent) => {
+                      const live = liveOf(m.email);
+                      return (
                       <tr key={key} style={{borderBottom:'1px solid #f0f0f0',transition:'background .15s'}}
                         onMouseEnter={e=>e.currentTarget.style.background='#fafaf9'}
                         onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
                         <td style={{padding:'14px 24px',paddingLeft: indent ? 56 : 24}}>
                           <div style={{display:'flex',alignItems:'center',gap:10}}>
                             <Avatar name={m.name} size={32}/>
-                            <div>
-                              <div style={{fontWeight:600,color:'#1b1b1b'}}>{m.name}</div>
+                            <div style={{minWidth:0}}>
+                              <div style={{fontWeight:600,color:'#1b1b1b',display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                                {m.name}
+                                <AccessBadge access={live?.access || m.access || 'agent'} />
+                                <LastLoginPill iso={live?.lastLoginAt} loading={!!rosterLoading} />
+                              </div>
                               <div style={{fontSize:11,color:'#9e9e9e'}}>{FLAGS[m.country]} {m.team}</div>
                             </div>
                           </div>
+                        </td>
+                        <td style={{padding:'10px 12px',verticalAlign:'middle'}}>
+                          <CountriesCell
+                            member={live || { email: m.email, countries: [] }}
+                            setCountries={liveSetCountries}
+                            canEdit={canEditMemberCountries(m.email)}
+                          />
                         </td>
                         <td style={{padding:'14px 16px',textAlign:'center',fontWeight:700,fontSize:16,color:'#1b1b1b'}}>{m.tc}</td>
                         <td style={{padding:'14px 16px',textAlign:'center',fontWeight:600,color:'#1f74b3'}}>{m.open}</td>
@@ -1642,28 +1670,45 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                         <td style={{padding:'14px 16px',textAlign:'center'}}>
                           <span style={{fontSize:11,fontWeight:700,color:m.wc,padding:'3px 12px',borderRadius:128,background:m.wc+'15'}}>{m.wl}</span>
                         </td>
+                        <td style={{padding:'12px 16px',textAlign:'right',whiteSpace:'nowrap'}}>
+                          <LoginAsButton
+                            targetEmail={m.email}
+                            targetName={m.name}
+                            onImpersonate={onImpersonate}
+                            canImpersonate={canLoginAs(m.email)}
+                          />
+                        </td>
                       </tr>
-                    );
+                      );
+                    };
 
                     // Group header — manager (TL or RM) with aggregate stats
                     // for their full subtree. capPct + workload band are
                     // computed off the average per agent to stay comparable
                     // with the per-agent rows below.
-                    const groupHeader = (g) => (
+                    const groupHeader = (g) => {
+                      const live = liveOf(g.manager.email);
+                      return (
                       <tr key={`grp-${g.manager.email}`} style={{background:'#f3eff8',borderTop:'2px solid #e8e8e8'}}>
                         <td style={{padding:'12px 24px'}}>
                           <div style={{display:'flex',alignItems:'center',gap:10}}>
                             <Avatar name={g.manager.name} size={32}/>
-                            <div>
-                              <div style={{fontWeight:700,color:'#1b1b1b',display:'flex',alignItems:'center',gap:8}}>
+                            <div style={{minWidth:0}}>
+                              <div style={{fontWeight:700,color:'#1b1b1b',display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
                                 {g.manager.name}
-                                <span style={{fontSize:10,fontWeight:700,color:'#7c3aed',background:'#EDE9FE',padding:'2px 8px',borderRadius:128,letterSpacing:'0.02em',textTransform:'uppercase'}}>
-                                  {ROLE_LABEL[g.manager.access] || g.manager.access}
-                                </span>
+                                <AccessBadge access={live?.access || g.manager.access} />
+                                <LastLoginPill iso={live?.lastLoginAt} loading={!!rosterLoading} />
                               </div>
                               <div style={{fontSize:11,color:'#9e9e9e'}}>{g.manager.team} &middot; {g.headcount} {g.headcount === 1 ? 'agent' : 'agents'}</div>
                             </div>
                           </div>
+                        </td>
+                        <td style={{padding:'10px 12px',verticalAlign:'middle'}}>
+                          <CountriesCell
+                            member={live || { email: g.manager.email, countries: [] }}
+                            setCountries={liveSetCountries}
+                            canEdit={canEditMemberCountries(g.manager.email)}
+                          />
                         </td>
                         <td style={{padding:'12px 16px',textAlign:'center',fontWeight:700,fontSize:16,color:'#1b1b1b'}}>{g.tc}</td>
                         <td style={{padding:'12px 16px',textAlign:'center',fontWeight:700,color:'#1f74b3'}}>{g.open}</td>
@@ -1690,15 +1735,24 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                         <td style={{padding:'12px 16px',textAlign:'center'}}>
                           <span style={{fontSize:11,fontWeight:700,color:g.wc,padding:'3px 12px',borderRadius:128,background:g.wc+'15'}}>{g.wl}</span>
                         </td>
+                        <td style={{padding:'12px 16px',textAlign:'right',whiteSpace:'nowrap'}}>
+                          <LoginAsButton
+                            targetEmail={g.manager.email}
+                            targetName={g.manager.name}
+                            onImpersonate={onImpersonate}
+                            canImpersonate={canLoginAs(g.manager.email)}
+                          />
+                        </td>
                       </tr>
-                    );
+                      );
+                    };
 
                     // Banner row used to label the trailing "Direct reports"
                     // section when the user has agents reporting to them
                     // without an intermediate TL.
                     const sectionLabel = (label) => (
                       <tr key={`label-${label}`} style={{background:'#fafaf9',borderTop:'2px solid #e8e8e8'}}>
-                        <td colSpan={8} style={{padding:'10px 24px',fontSize:11,fontWeight:700,color:'#9e9e9e',letterSpacing:'0.04em',textTransform:'uppercase'}}>{label}</td>
+                        <td colSpan={10} style={{padding:'10px 24px',fontSize:11,fontWeight:700,color:'#9e9e9e',letterSpacing:'0.04em',textTransform:'uppercase'}}>{label}</td>
                       </tr>
                     );
 
