@@ -116,6 +116,7 @@ import CreateTaskModal from './components/modals/CreateTaskModal';
 import GlobalSearch from './components/modals/GlobalSearch';
 import Onboarding from './components/modals/Onboarding';
 import WhatsNewTour, { WHATS_NEW_KEY } from './components/modals/WhatsNewTour';
+import ManagerTour, { MANAGER_TOUR_KEY } from './components/modals/ManagerTour';
 import AnnouncementPopup from './components/modals/AnnouncementPopup';
 import Toasts from './components/ui/Toasts';
 import LoginScreen from './components/LoginScreen';
@@ -670,6 +671,12 @@ const App=()=>{
   // We defer-show until AFTER the welcome Onboarding modal so first-time
   // users don't get two stacked dialogs.
   const [showWhatsNew,setShowWhatsNew]=useState(()=>{ try{ return !localStorage.getItem(WHATS_NEW_KEY); }catch(e){ return false; } });
+  // Manager-only release tour. Same show-once contract (key
+  // `ops_hub_whats_new_mgr_v1`), gated below on `perms.dataScope` so agents
+  // never see it. Renders AFTER both the welcome Onboarding and the general
+  // WhatsNewTour finish, so a brand-new manager gets the full sequence on
+  // first refresh, in order.
+  const [showMgrTour,setShowMgrTour]=useState(()=>{ try{ return !localStorage.getItem(MANAGER_TOUR_KEY); }catch(e){ return false; } });
   const [sidebarOpen,setSidebarOpen]=useState(true);
   const [subFilter,setSubFilter]=useState(null);
   const [createModal,setCreateModal]=useState(false);
@@ -1417,6 +1424,11 @@ const App=()=>{
           we never stack two modals. The tour itself writes its seen-flag
           on finish/skip so it never re-prompts. */}
       {!showOnboard && showWhatsNew &&<WhatsNewTour onDismiss={()=>setShowWhatsNew(false)}/>}
+      {/* Manager-only tour — chains after WhatsNewTour and the welcome
+          Onboarding so we never stack dialogs. Gated on `perms.dataScope`
+          (anything other than 'own_tasks_only' is a TL/RM/Admin); agents
+          never see it. */}
+      {!showOnboard && !showWhatsNew && showMgrTour && perms?.dataScope && perms.dataScope !== 'own_tasks_only' &&<ManagerTour onDismiss={()=>setShowMgrTour(false)}/>}
       {popupQueue.length>0&&<AnnouncementPopup key={popupQueue[0].id} comm={popupQueue[0]} onAcknowledge={handlePopupAcknowledge}/>}
       <Toasts toasts={toasts} dismiss={dismissToast}/>
     </div>
