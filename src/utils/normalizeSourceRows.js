@@ -259,17 +259,20 @@ export function resolveEmailByName(name) {
   return '';
 }
 
-// ── Test-data filter ────────────────────────────────────────────────────────
-// Catches obvious QA / sandbox rows that occasionally leak into the Deel
-// admin payload and pollute the Q tab in production. Examples seen across
-// the 2026-05-01 launch audits:
-//   "VIA Test", "VIA THREE", "VIA TWO", "Kirce TEST-TWO", "Global Test",
-//   "Global Test New", "Dan Man", "michele wrfgrw" (keyboard-mash),
-//   "Yoram Gondwetest" (test embedded in surname).
+// ── Test-data filter (DISABLED 2026-05-04) ────────────────────────────────
+// Originally caught QA / sandbox rows that leaked into the Deel admin
+// payload (e.g. "VIA THREE", "Global Test", "Yoram Gondwetest", keyboard
+// mash like "michele wrfgrw"). Same anti-pattern as the Deeler-tag filter
+// we removed earlier in this PR cycle: silently dropping rows broke the
+// "platform total = picker count" trust contract — an Incentive Plans
+// audit found 11 of 43 rows being stripped (`\w{2,}test\b` and
+// `\btest\w{0,4}\b` were over-matching real customer surnames like
+// "Testa", "Tester"). Junk now flows through the same hide-task workflow
+// every other suppression uses, which is auditable and reversible.
 //
-// We err on the side of false-negatives (leaving real rows visible) rather
-// than false-positives — anything ambiguous stays in the queue. Bypass via
-// `localStorage.ops_hub_show_test_rows = '1'`.
+// The detection heuristics below are kept for reference (and the
+// localStorage override still works for ad-hoc debugging in dev), but
+// `dropTestRows` no longer filters by default.
 
 // Number-words used in QA naming patterns ("VIA THREE", "Test Two").
 const NUMBER_WORDS_RX = /(?:one|two|three|four|five|six|seven|eight|nine|ten)/i;
@@ -330,14 +333,19 @@ function isLikelyTestRow(name) {
   return false;
 }
 
-// Allow flag-flip override from the browser console for debugging.
-function testRowsAllowed() {
+// Optional ad-hoc filter — only applied when localStorage flag
+// `ops_hub_drop_test_rows = '1'` is explicitly set (was the inverse
+// before: drop by default, opt-out via flag). Default behaviour is
+// pass-through so nothing is silently filtered. Reuse the helper +
+// `isLikelyTestRow` heuristics if/when we want to surface a one-click
+// "hide test rows" toggle in the UI.
+function testRowsDropEnabled() {
   if (typeof window === 'undefined') return false;
-  try { return window.localStorage?.getItem('ops_hub_show_test_rows') === '1'; } catch { return false; }
+  try { return window.localStorage?.getItem('ops_hub_drop_test_rows') === '1'; } catch { return false; }
 }
 
 function dropTestRows(items, getNames) {
-  if (testRowsAllowed()) return items;
+  if (!testRowsDropEnabled()) return items || [];
   return (items || []).filter(item => {
     const names = getNames(item).filter(Boolean);
     return !names.some(n => isLikelyTestRow(n));
