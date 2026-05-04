@@ -105,10 +105,18 @@ export default function WorkspaceHome({
   }, [save, headlineDraft, messageDraft]);
 
   // ── Live counts ─────────────────────────────────────────────────────────
+  // Per Mohamed 2026-05-01 spec: "exclude Jira from the SLA calculation
+  // and the breach count on home page". Step 1's "Clear all breaches"
+  // tile counts ZD + every Deel-source breach but NOT Jira — Jira's
+  // SLA model differs and double-counting it would distort the rule
+  // "clear breaches first across every queue".
   const breachedCount = useMemo(() => {
     let n = 0;
     for (const r of sourceRowsAll) if (rowSlaSeverity(r) === 'breached') n++;
-    for (const t of ticketRows) if (ticketSeverity(t) === 'breached') n++;
+    for (const t of ticketRows) {
+      if (t.source === 'jira') continue;
+      if (ticketSeverity(t) === 'breached') n++;
+    }
     return n;
   }, [sourceRowsAll, ticketRows]);
 

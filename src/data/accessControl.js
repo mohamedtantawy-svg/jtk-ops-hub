@@ -17,6 +17,10 @@ export const ALL_VIEWS = [
   // managerial tiers via MANAGERIAL_ONLY_VIEWS below. Reached via
   // ?view=lead-home, no nav entry yet.
   'lead-home',
+  // 'agent-home' is the draft replacement for the agent path of Briefing.
+  // Open to every signed-in user (so admins can preview); shipping it as
+  // the default agent landing is a follow-up patch.
+  'agent-home',
   // 'my-queue' is the route id; users see "Workspace" in the nav.
   'my-queue',
   // Removed 2026-05-03: projects, escalations, calendar, knowledge-hub,

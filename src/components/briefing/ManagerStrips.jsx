@@ -107,9 +107,19 @@ export function TriageStrip({ sourceRows = [], tickets = [], onNavigate }) {
       if (r.assigneeIsSynthetic) synth++;
     }
     for (const t of tickets) {
-      const sev = ticketSeverity(t);
-      if (sev === 'breached') { breached++; bump(breachedBy, t.source); }
-      else if (sev === 'at_risk') { atRisk++; bump(atRiskBy, t.source); }
+      // Per Mohamed 2026-05-01 spec: "exclude Jira from the SLA calculation
+      // and the breach count on home page". Jira tickets still surface in
+      // the Paused / No-real-owner counts and per-source chips, but they
+      // don't add to Breached or At-Risk totals — Jira's SLA model differs
+      // from ZD/Deel and double-counting it would distort the manager's
+      // triage view. Same exclusion rule lives in BriefingView's health
+      // score (see slaPoolNonJira / breachedNonJira).
+      const isJira = t.source === 'jira';
+      if (!isJira) {
+        const sev = ticketSeverity(t);
+        if (sev === 'breached') { breached++; bump(breachedBy, t.source); }
+        else if (sev === 'at_risk') { atRisk++; bump(atRiskBy, t.source); }
+      }
       if (t.status === 'waiting') paused++;
       // ZD/Jira: a ticket with no assignee is a true "no real owner"
       // signal (the synth-fallback only exists on Deel feeds).
