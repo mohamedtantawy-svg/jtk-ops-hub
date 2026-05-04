@@ -27,7 +27,14 @@ import {
   bumpVersion,
 } from '../../../../../src/lib/queue-reassignments';
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Dot-segmented regex with non-overlapping character classes to dodge
+// js/polynomial-redos: `[^\s@.]+` cannot match a dot, so the literal `@`
+// and `\.` boundaries leave the engine exactly one way to slice a given
+// string — no ambiguous backtracking on inputs like `!@!.!.!.!.!.`. We
+// also gate by length (RFC 5321 caps emails at 254 chars) so any
+// pathological input is dropped before the regex runs at all.
+const EMAIL_MAX_LEN = 254;
+const EMAIL_RE = /^[^\s@.]+(?:\.[^\s@.]+)*@[^\s@.]+(?:\.[^\s@.]+)+$/;
 
 function normSource(s) {
   return String(s || '').toLowerCase().trim();
@@ -140,7 +147,7 @@ export async function POST(req) {
   }
 
   const assigneeEmail = String(assigneeEmailRaw).toLowerCase().trim();
-  if (!EMAIL_RE.test(assigneeEmail)) {
+  if (assigneeEmail.length > EMAIL_MAX_LEN || !EMAIL_RE.test(assigneeEmail)) {
     return NextResponse.json({ error: 'Invalid assigneeEmail' }, { status: 400 });
   }
 
