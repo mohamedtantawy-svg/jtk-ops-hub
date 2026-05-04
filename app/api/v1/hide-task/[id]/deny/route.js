@@ -46,14 +46,16 @@ export async function POST(req, { params }) {
   if (r.status === 'resolved') return NextResponse.json({ error: 'Already resolved' }, { status: 409 });
 
   // Same permission gate as the approve route — any manager (TL/RM/admin)
-  // may deny, self-decision hard-blocked for everyone (4-eyes).
+  // may deny. Self-decision blocked for TL/RM (4-eyes) but admins may
+  // self-deny since they often have no other manager in their chain.
   const me = memberByEmail(callerEmail);
   const access = (me?.access || '').toLowerCase();
-  const isManager = access === 'admin' || access === 'regional_manager' || access === 'team_lead';
+  const isAdmin = access === 'admin';
+  const isManager = isAdmin || access === 'regional_manager' || access === 'team_lead';
   if (!isManager) {
     return NextResponse.json({ error: 'Forbidden — only managers (TL/RM/admin) can deny hide requests' }, { status: 403 });
   }
-  if ((r.created_by_email || '').toLowerCase() === callerEmail) {
+  if ((r.created_by_email || '').toLowerCase() === callerEmail && !isAdmin) {
     return NextResponse.json({ error: 'You cannot deny your own hide request — another manager must review it (4-eyes).' }, { status: 403 });
   }
 

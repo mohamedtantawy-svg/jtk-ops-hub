@@ -52,21 +52,22 @@ export async function POST(req, { params }) {
   }
 
   // Permission gate (rebalanced 2026-05-04 audit + user directive):
-  // any manager — TL / RM / admin — may approve a hide request. The
-  // denormalised team_lead_email continues to drive the FE highlight,
-  // but live testing showed routing breaks (admin requesters with empty
-  // managerEmail, deleted-account TLs) leaving requests stuck pending
-  // with no resolution path. Broadening to "any manager" matches the
-  // FE's canDecide and keeps the workflow movable.
-  // Self-approval remains hard-blocked for ALL roles, including admin —
-  // true 4-eyes principle. Mirrors the FE gate.
+  // any manager — TL / RM / admin — may approve a hide request.
+  // Self-approval rules:
+  //   • TL / RM: 4-eyes — must NOT be self.
+  //   • Admin:  may self-approve. Admin requesters often have no
+  //             manager in their chain so a strict 4-eyes rule left
+  //             admin-created requests stuck pending forever. Audit
+  //             log captures the (caller=requester) case for review.
+  // FE mirrors this rule (see HrHubView canDecide).
   const me = memberByEmail(callerEmail);
   const access = (me?.access || '').toLowerCase();
-  const isManager = access === 'admin' || access === 'regional_manager' || access === 'team_lead';
+  const isAdmin = access === 'admin';
+  const isManager = isAdmin || access === 'regional_manager' || access === 'team_lead';
   if (!isManager) {
     return NextResponse.json({ error: 'Forbidden — only managers (TL/RM/admin) can approve hide requests' }, { status: 403 });
   }
-  if ((r.created_by_email || '').toLowerCase() === callerEmail) {
+  if ((r.created_by_email || '').toLowerCase() === callerEmail && !isAdmin) {
     return NextResponse.json({ error: 'You cannot approve your own hide request — another manager must review it (4-eyes).' }, { status: 403 });
   }
 
