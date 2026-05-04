@@ -41,6 +41,7 @@ import CreateHideTaskRequestModal from '../modals/CreateHideTaskRequestModal';
 import ReassignTaskModal from '../modals/ReassignTaskModal';
 import CreateHrHubRequestModal from '../modals/CreateHrHubRequestModal';
 import HiddenTasksPanel from './HiddenTasksPanel';
+import WorkspaceHome from './WorkspaceHome';
 
 // ── Live assignee lookup ───────────────────────────────────────────────────
 // Reads the live MEMBERS_BY_EMAIL binding so hydrateRoster() updates reach
@@ -970,8 +971,35 @@ const Queue = ({ user, tasks, subFilter }) => {
         </ErrorBoundary>
       )}
 
+      {/* ── Workspace Home — default landing ──────────────────────────────
+          Renders when nothing is selected and no filters are active. Shows
+          the admin-editable Priority of the Day banner + the 4-step
+          working-order guide (Breaches → Zendesk → Workbench → Rest).
+          As soon as the user picks a tool / source / filter, the existing
+          merged ZD/Jira table or source panel takes over. */}
+      {!workSource && !fTool && !hasActiveFilters && (
+        <ErrorBoundary>
+          <WorkspaceHome
+            user={user}
+            onSelectTool={(t) => { setWorkSource(null); setFTool(t); }}
+            onSelectSource={(s) => { setFTool(null); setWorkSource(s); }}
+            onFilterBreached={() => { setFSla('breached'); }}
+            zdCount={baseVis.filter(t => t.source === 'zendesk').length}
+            jiraCount={baseVis.filter(t => t.source === 'jira').length}
+            ticketRows={baseVis.filter(t => t.source === 'zendesk' || t.source === 'jira')}
+            onboardingCount={onboardingRows.length}
+            offboardingCount={offboardingRows.length}
+            amendmentsCount={amendmentRows.length}
+            redlinesCount={redlineRows.length}
+            workbenchCount={workbenchRows.length}
+            incentivePlansCount={incentivePlanRows.length}
+            sourceRowsAll={allSourceRows}
+          />
+        </ErrorBoundary>
+      )}
+
       {/* ── Main ZD/JR table (when no work source is active) ── */}
-      {!workSource && (
+      {!workSource && (fTool || hasActiveFilters) && (
         <div ref={ticketScrollerRef} style={{ flex: 1, overflowY: 'auto', background: '#fafaf9' }}>
           {all.length === 0 ? (
             hasActiveFilters
