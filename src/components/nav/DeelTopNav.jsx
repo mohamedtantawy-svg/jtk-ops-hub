@@ -73,6 +73,7 @@ const DeelTopNav = ({
   onCreateLeaderAlert,
   onCreateUrgentAssist,
   leaderAlertsBadge = 0,
+  urgentAssistBadge = 0,
   setSelTask, tasks,
 }) => {
   // Manager on Call was previously rendered here as a pill in the right-side
@@ -173,11 +174,14 @@ const DeelTopNav = ({
       <div className="deel-nav-items">
         {visiblePrimary.map(tab => {
           const active = view === tab.id;
-          // Leaders Hub carries an unack-count badge; other primary tabs
-          // currently render no badge. Approval-queue counts are surfaced
-          // inside the Announcements view instead of in the top nav.
+          // Leaders Hub carries an unack-count badge; Urgent Assist
+          // shows a "things assigned to me, still open" red number
+          // (audit 2026-05-04 follow-up — counts items in My Requests
+          // scope across new / in_progress / on_hold). Approval-queue
+          // counts are surfaced inside Announcements instead of here.
           let badge = 0;
           if (tab.id === 'leader-alerts' && leaderAlertsBadge > 0) badge = leaderAlertsBadge;
+          if (tab.id === 'urgent-assist' && urgentAssistBadge > 0) badge = urgentAssistBadge;
           return (
             <div key={tab.id} className={`deel-nav-item${active ? ' active' : ''}`}
               role="button"

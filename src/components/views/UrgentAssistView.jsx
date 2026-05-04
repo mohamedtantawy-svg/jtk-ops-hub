@@ -132,18 +132,27 @@ export default function UrgentAssistView({ user, onCreate }) {
 
   // Compute the manager's team email set + the viewer's full visible chain
   // once. The hook uses these to scope workbench-sourced rows on the FE.
+  // Live audit follow-up (2026-05-04): the previous substring match on
+  // `user.access` ("admin" / "regional" / "lead") missed managers whose
+  // access label is "Manager" (which roleToAt maps to at_regional_mgr but
+  // doesn't contain the substring "regional"). Source the scope from
+  // `perms.dataScope` instead — it's the canonical resolved value:
+  //   • all_tasks       → admin
+  //   • regional_tasks  → manager / regional manager — full subtree
+  //   • team_tasks      → team lead — direct reports
+  //   • own_tasks_only  → agent — self only
   const lcEmail = (user?.email || '').toLowerCase();
+  const dataScope = perms?.dataScope || 'own_tasks_only';
   const teamEmails = useMemo(() => {
     if (!lcEmail) return new Set();
-    const access = (user?.access || user?.accessTypeName || '').toLowerCase();
     const out = new Set([lcEmail]);
-    if (access.includes('admin') || access.includes('regional')) {
+    if (dataScope === 'all_tasks' || dataScope === 'regional_tasks') {
       for (const e of getAllReports(lcEmail)) out.add(e);
-    } else if (access.includes('lead')) {
+    } else if (dataScope === 'team_tasks') {
       for (const r of getDirectReports(lcEmail)) out.add(r.email);
     }
     return out;
-  }, [lcEmail, user?.access, user?.accessTypeName]);
+  }, [lcEmail, dataScope]);
 
   const visibleEmails = useMemo(() => {
     if (!lcEmail) return new Set();

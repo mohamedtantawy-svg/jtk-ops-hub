@@ -16,6 +16,7 @@ import { AnnouncementRequestsProvider } from './hooks/useAnnouncementRequests';
 import { useQueueSync } from './hooks/useQueueSync';
 import { useQueueUnifiedSync } from './hooks/useQueueUnifiedSync';
 import { useHiddenTasks } from './hooks/useHiddenTasks';
+import { useUrgentAssistBadge } from './hooks/useUrgentAssistBadge';
 import { DEFAULT_SETTINGS } from './data/settings';
 import { DEFAULT_ACCESS_TYPES, ALL_VIEWS } from './data/accessControl';
 import { ADMIN_LIST_VERSION } from './data/adminEmails';
@@ -341,6 +342,16 @@ const App=()=>{
   // with the right Set<source:id> in memory. The hook polls every 30s and
   // a manual refresh fires after Approve/Deny in HR Hub.
   const hiddenTasks = useHiddenTasks(!!user);
+  // Top-nav badge for Urgent Assist — counts unresolved items where
+  // assignee = effectiveUser (covers impersonation correctly). Sources
+  // both manual rows (via the API) and workbench-sourced rows from the
+  // already-pre-warmed queueUnified data, so no extra network round-trip
+  // for the workbench side.
+  const urgentAssistBadge = useUrgentAssistBadge({
+    enabled: !!user,
+    userEmail: user?.email || '',
+    workbenchTasks: queueUnified?.workbenchData?.tasks || [],
+  });
   const [feed,setFeed]=useState(FEED_EVENTS);
   const [notes,setNotes]=useState(INITIAL_NOTES);
   const [escalations,setEscalations]=useState([
@@ -1354,6 +1365,7 @@ const App=()=>{
         onCreateLeaderAlert={()=>setLeaderAlertCreate(true)}
         onCreateUrgentAssist={()=>setUrgentAssistCreate(true)}
         leaderAlertsBadge={leaderAlertsBadge}
+        urgentAssistBadge={urgentAssistBadge}
         setSelTask={()=>{}} tasks={tasks}
       />
       <div style={{height:(impersonating?104:68)+(versionHasUpdate?44:0),flexShrink:0}}/>
