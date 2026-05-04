@@ -4,14 +4,19 @@ import { listPausedOnboarding, isDeelConfigured } from '../../../../../../src/li
 import { cacheGet, cacheSet } from '../../../../../../src/lib/server-cache';
 import { scopePausedOnboarding } from '../../../../../../src/lib/queue-scoping';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
+import { getReassignmentMap, applyReassignments } from '../../../../../../src/lib/queue-reassignments';
 
 const CACHE_KEY = 'deel_onboarding_paused';
 const CACHE_TTL = 5 * 60 * 1000;
 const STALE_TTL = 30 * 60 * 1000;
 
-function scoped(data, user) {
+// Paused-onboarding shares the 'onboarding' override namespace with the
+// active queue so a user reassigning a row from the unified Onboarding tab
+// doesn't have to think about which sub-stream a task lives in.
+function scoped(data, user, overrideMap) {
   if (!data?.items) return data;
-  const items = scopePausedOnboarding(data.items, user);
+  const overlaid = applyReassignments(data.items, overrideMap);
+  const items = scopePausedOnboarding(overlaid, user);
   return { ...data, items, total: items.length };
 }
 
@@ -25,10 +30,11 @@ export async function GET(req) {
   }
 
   await ensureRosterHydrated();
+  const overrideMap = await getReassignmentMap('onboarding');
 
   try {
     const fresh = cacheGet(CACHE_KEY, CACHE_TTL);
-    if (fresh) return NextResponse.json(scoped(fresh, user));
+    if (fresh) return NextResponse.json(scoped(fresh, user, overrideMap));
 
     let responseData;
     try {
@@ -39,12 +45,12 @@ export async function GET(req) {
       const stale = cacheGet(CACHE_KEY, STALE_TTL);
       if (stale) {
         console.warn('[onboarding-paused] Fetch failed, returning stale cache:', fetchErr.message);
-        return NextResponse.json({ ...scoped(stale, user), _stale: true });
+        return NextResponse.json({ ...scoped(stale, user, overrideMap), _stale: true });
       }
       throw fetchErr;
     }
 
-    return NextResponse.json(scoped(responseData, user));
+    return NextResponse.json(scoped(responseData, user, overrideMap));
   } catch (err) {
     console.error('[integrations/deel/onboarding-paused]', err.message);
     return NextResponse.json({ error: 'Internal server error' }, { status: err.status || 500 });

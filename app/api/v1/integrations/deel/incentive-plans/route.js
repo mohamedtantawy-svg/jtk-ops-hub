@@ -10,6 +10,7 @@ import { cacheGet, cacheSet } from '../../../../../../src/lib/server-cache';
 import { scopeIncentivePlans } from '../../../../../../src/lib/queue-scoping';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
 import { buildWithTimeout } from '../../../../../../src/lib/scan-timeout';
+import { getReassignmentMap, applyReassignments } from '../../../../../../src/lib/queue-reassignments';
 
 const DEFAULT_STATUSES = ['PENDING_IP_PREPARATION'];
 const CACHE_KEY = 'deel_incentive_plans_v1';
@@ -17,9 +18,10 @@ const CACHE_TTL = 5 * 60 * 1000;     // 5 minutes
 const STALE_TTL = 30 * 60 * 1000;    // 30 minutes
 const SCAN_TIMEOUT_MS = 45_000;
 
-function scoped(data, user) {
+function scoped(data, user, overrideMap) {
   if (!data?.items) return data;
-  const items = scopeIncentivePlans(data.items, user);
+  const overlaid = applyReassignments(data.items, overrideMap);
+  const items = scopeIncentivePlans(overlaid, user);
   return { ...data, items, total: items.length };
 }
 
@@ -33,6 +35,7 @@ export async function GET(req) {
   }
 
   await ensureRosterHydrated();
+  const overrideMap = await getReassignmentMap('incentive_plans');
 
   try {
     const { searchParams } = new URL(req.url);
@@ -46,7 +49,7 @@ export async function GET(req) {
 
     if (!bustCache) {
       const fresh = cacheGet(cacheKeyFull, CACHE_TTL);
-      if (fresh) return NextResponse.json(scoped(fresh, user));
+      if (fresh) return NextResponse.json(scoped(fresh, user, overrideMap));
     }
 
     let responseData;
@@ -67,19 +70,19 @@ export async function GET(req) {
       }
       if (r.timedOut) {
         console.warn('[incentive-plans] Live build exceeded %dms — serving stale cache', SCAN_TIMEOUT_MS);
-        return NextResponse.json({ ...scoped(r.result, user), _stale: true, _stale_reason: 'timeout' });
+        return NextResponse.json({ ...scoped(r.result, user, overrideMap), _stale: true, _stale_reason: 'timeout' });
       }
       responseData = r.result;
     } catch (fetchErr) {
       const stale = cacheGet(cacheKeyFull, STALE_TTL);
       if (stale) {
         console.warn('[incentive-plans] Fetch failed, returning stale cache:', fetchErr.message);
-        return NextResponse.json({ ...scoped(stale, user), _stale: true, _stale_reason: 'error' });
+        return NextResponse.json({ ...scoped(stale, user, overrideMap), _stale: true, _stale_reason: 'error' });
       }
       throw fetchErr;
     }
 
-    return NextResponse.json(scoped(responseData, user));
+    return NextResponse.json(scoped(responseData, user, overrideMap));
   } catch (err) {
     console.error('[integrations/deel/incentive-plans]', err.message);
     return NextResponse.json({ error: 'Internal server error' }, { status: err.status || 500 });

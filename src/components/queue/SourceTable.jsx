@@ -201,6 +201,7 @@ export default function SourceTable({
   viewerEmail = '',          // signed-in user's email — splits the table into Mine vs Others
   onHide,                    // (row) => void — called when the row's Hide button is clicked
   onEscalate,                // (row) => void — called when the row's Escalate button is clicked
+  onReassign,                // (row) => void — called when the row's Reassign button is clicked (Onb / Amend / Redline / IP only)
 }) {
   const [searchTerm, setSearchTerm] = useState('');
   // Default sort = SLA tier oldest-first across every panel — the per-PR-2
@@ -384,7 +385,7 @@ export default function SourceTable({
     + 1 // Status
     + 1 // Task
     + (hideContract ? 0 : 1)
-    + ((onHide || onEscalate) ? 1 : 0); // Actions column when the parent provides any row action
+    + ((onHide || onEscalate || onReassign) ? 1 : 0); // Actions column when the parent provides any row action
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#fafaf9', overflow: 'hidden' }}>
@@ -476,7 +477,7 @@ export default function SourceTable({
                 <SortTh col="status"    label="Status"     sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 115 }} />
                 <th style={{ ...thStyle, width: 55 }}>Task</th>
                 {!hideContract && <th style={{ ...thStyle, width: 55 }}>Contract</th>}
-                {(onHide || onEscalate) && <th style={{ ...thStyle, width: 160 }}>Actions</th>}
+                {(onHide || onEscalate || onReassign) && <th style={{ ...thStyle, width: 200 }}>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -528,6 +529,7 @@ export default function SourceTable({
                     hideContract={hideContract}
                     onHide={onHide ? () => onHide(row) : null}
                     onEscalate={onEscalate ? () => onEscalate(row) : null}
+                    onReassign={onReassign ? () => onReassign(row) : null}
                   />
                 );
               })}
@@ -545,7 +547,7 @@ export default function SourceTable({
 }
 
 // ── Row component ──
-const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, dateField = 'startDate', showClient = false, showType = false, hideUpdated = false, hideContract = false, onHide = null, onEscalate = null }) {
+const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, dateField = 'startDate', showClient = false, showType = false, hideUpdated = false, hideContract = false, onHide = null, onEscalate = null, onReassign = null }) {
   const [hov, setHov] = useState(false);
   const sev = row.status?.severity || 'info';
   const isUrgent = sev === 'critical';
@@ -789,9 +791,11 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
         </td>
       )}
 
-      {/* Actions — Escalate + Hide buttons. Cell only renders when the
-          parent passed at least one handler so the column is opt-in. */}
-      {(onHide || onEscalate) && (
+      {/* Actions — Escalate + Reassign + Hide buttons. Cell only renders
+          when the parent passed at least one handler so the column is
+          opt-in. Reassign is wired in only on queues whose source rows
+          can't be re-routed upstream (Onb / Amend / Redline / IP). */}
+      {(onHide || onEscalate || onReassign) && (
         <td style={tdStyle}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             {onEscalate && (
@@ -812,6 +816,26 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
               >
                 <i className="bi-arrow-up-right-circle" style={{ fontSize: 9 }} />
                 Escalate
+              </button>
+            )}
+            {onReassign && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onReassign(); }}
+                aria-label={`Reassign "${row.subject || row.id}" to another team member`}
+                title="Reassign to another team member"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '3px 8px', borderRadius: 6,
+                  background: hov ? '#eff6ff' : '#f5f4f2',
+                  color: hov ? '#1d4ed8' : '#9e9e9e',
+                  border: hov ? '1px solid #bfdbfe' : '1px solid transparent',
+                  fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
+                  cursor: 'pointer', fontFamily: 'inherit',
+                }}
+              >
+                <i className="bi-arrow-left-right" style={{ fontSize: 9 }} />
+                Reassign
               </button>
             )}
             {onHide && (
