@@ -115,6 +115,7 @@ import CreateEscalationModal from './components/modals/CreateEscalationModal';
 import CreateTaskModal from './components/modals/CreateTaskModal';
 import GlobalSearch from './components/modals/GlobalSearch';
 import Onboarding from './components/modals/Onboarding';
+import WhatsNewTour, { WHATS_NEW_KEY } from './components/modals/WhatsNewTour';
 import AnnouncementPopup from './components/modals/AnnouncementPopup';
 import Toasts from './components/ui/Toasts';
 import LoginScreen from './components/LoginScreen';
@@ -662,6 +663,13 @@ const App=()=>{
   const [showSearch,setShowSearch]=useState(false);
   const [showOnboard,setShowOnboard]=useState(()=>{ try{ return !localStorage.getItem('ops_hub_onboarded'); }catch(e){ return true; } });
   // Onboard overlay shows once; dismissible with Escape or click
+  // May 2026 release tour — multi-step walkthrough of HR Hub, Workspace,
+  // Hide Task, Escalate, Urgent Assist, Quick Create. Shows once per
+  // browser (localStorage `ops_hub_whats_new_v1`); future releases bump
+  // the version key to re-prompt without invalidating this run's flags.
+  // We defer-show until AFTER the welcome Onboarding modal so first-time
+  // users don't get two stacked dialogs.
+  const [showWhatsNew,setShowWhatsNew]=useState(()=>{ try{ return !localStorage.getItem(WHATS_NEW_KEY); }catch(e){ return false; } });
   const [sidebarOpen,setSidebarOpen]=useState(true);
   const [subFilter,setSubFilter]=useState(null);
   const [createModal,setCreateModal]=useState(false);
@@ -1405,6 +1413,10 @@ const App=()=>{
       {createEscalModal&&<CreateEscalationModal onConfirm={confirmManualEscal} onClose={()=>setCreateEscalModal(false)} currentUser={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks}/>}
       {showSearch    &&<GlobalSearch tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={()=>{}} onClose={()=>setShowSearch(false)}/>}
       {showOnboard   &&<Onboarding onDismiss={(dontShow)=>{setShowOnboard(false);if(dontShow){try{localStorage.setItem('ops_hub_onboarded','1');}catch(e){}}}}/>}
+      {/* What's-new tour — only renders once Onboarding is dismissed so
+          we never stack two modals. The tour itself writes its seen-flag
+          on finish/skip so it never re-prompts. */}
+      {!showOnboard && showWhatsNew &&<WhatsNewTour onDismiss={()=>setShowWhatsNew(false)}/>}
       {popupQueue.length>0&&<AnnouncementPopup key={popupQueue[0].id} comm={popupQueue[0]} onAcknowledge={handlePopupAcknowledge}/>}
       <Toasts toasts={toasts} dismiss={dismissToast}/>
     </div>
