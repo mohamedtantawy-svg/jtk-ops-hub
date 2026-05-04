@@ -9,6 +9,7 @@ import { listAmendmentRequests, isDeelConfigured } from '../../../../../../src/l
 import { cacheGet, cacheSet } from '../../../../../../src/lib/server-cache';
 import { scopeAmendmentRequests } from '../../../../../../src/lib/queue-scoping';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
+import { getReassignmentMap, applyReassignments } from '../../../../../../src/lib/queue-reassignments';
 
 // Default status set: Action Needed (AmendmentRequested + WaitingHrxAction)
 // + all three Paused reasons (LegalReview, PausedByHRX, MobilityInput).
@@ -24,9 +25,10 @@ const CACHE_KEY = 'deel_amendments_v2';
 const CACHE_TTL = 5 * 60 * 1000;    // fresh for 5 minutes
 const STALE_TTL = 30 * 60 * 1000;   // serve stale up to 30 minutes
 
-function scoped(data, user) {
+function scoped(data, user, overrideMap) {
   if (!data?.items) return data;
-  const items = scopeAmendmentRequests(data.items, user);
+  const overlaid = applyReassignments(data.items, overrideMap);
+  const items = scopeAmendmentRequests(overlaid, user);
   return { ...data, items, total: items.length };
 }
 
@@ -40,6 +42,7 @@ export async function GET(req) {
   }
 
   await ensureRosterHydrated();
+  const overrideMap = await getReassignmentMap('amendments');
 
   try {
     const { searchParams } = new URL(req.url);
@@ -54,7 +57,7 @@ export async function GET(req) {
 
     if (!bustCache) {
       const fresh = cacheGet(cacheKeyFull, CACHE_TTL);
-      if (fresh) return NextResponse.json(scoped(fresh, user));
+      if (fresh) return NextResponse.json(scoped(fresh, user, overrideMap));
     }
 
     let responseData;
@@ -73,12 +76,12 @@ export async function GET(req) {
       const stale = cacheGet(cacheKeyFull, STALE_TTL);
       if (stale) {
         console.warn('[amendments] Fetch failed, returning stale cache:', fetchErr.message);
-        return NextResponse.json({ ...scoped(stale, user), _stale: true });
+        return NextResponse.json({ ...scoped(stale, user, overrideMap), _stale: true });
       }
       throw fetchErr;
     }
 
-    return NextResponse.json(scoped(responseData, user));
+    return NextResponse.json(scoped(responseData, user, overrideMap));
   } catch (err) {
     console.error('[integrations/deel/amendments]', err.message);
     return NextResponse.json({ error: 'Internal server error' }, { status: err.status || 500 });

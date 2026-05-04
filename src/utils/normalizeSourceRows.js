@@ -404,6 +404,8 @@ export function normalizeOnboarding(items = [], slaConfig = null) {
       assignee: assigneeName,
       assigneeEmail,
       assigneeIsSynthetic,
+      reassignedFromEmail: p.reassignedFromEmail || null,
+      reassignedAt: p.reassignedAt || null,
       createdAt,
       updatedAt: p.taskCreatedAt || '',
       status: p.action || { label: 'In Progress', severity: 'active', color: '#1d4ed8' },
@@ -455,6 +457,8 @@ export function normalizePausedOnboarding(items = [], slaConfig = null) {
       assignee: assigneeName,
       assigneeEmail,
       assigneeIsSynthetic,
+      reassignedFromEmail: p.reassignedFromEmail || null,
+      reassignedAt: p.reassignedAt || null,
       createdAt,
       updatedAt: pausedAt,
       pausedAt,
@@ -542,7 +546,11 @@ export function normalizeAmendments(items = [], slaConfig = null) {
     // No upstream assignee — synthesize from country owners so the row
     // attributes to a specific person in Briefing capacity / Team SLA dot /
     // Analytics. Multi-owner countries split deterministically by row id.
-    const synth = syntheticOwnerForCountry(a.country, a.id);
+    // An in-app reassignment (queue_reassignments) overlays a real assignee
+    // on `a.assigneeEmail` server-side; if present, it wins over the
+    // country-owner synth so the new assignee shows up everywhere.
+    const overrideEmail = (a.assigneeEmail || '').toLowerCase();
+    const synth = overrideEmail ? null : syntheticOwnerForCountry(a.country, a.id);
 
     return {
       id: String(a.id || ''),
@@ -551,9 +559,11 @@ export function normalizeAmendments(items = [], slaConfig = null) {
       function: changesSummary || `${a.type || 'Amendment'} Amendment`,
       country: a.country || '',
       clientName: a.clientName || '',
-      assignee: synth?.name || '',
-      assigneeEmail: synth?.email || '',
-      assigneeIsSynthetic: !!synth,
+      assignee: overrideEmail ? (a.assignee || overrideEmail) : (synth?.name || ''),
+      assigneeEmail: overrideEmail || synth?.email || '',
+      assigneeIsSynthetic: !overrideEmail && !!synth,
+      reassignedFromEmail: a.reassignedFromEmail || null,
+      reassignedAt: a.reassignedAt || null,
       createdAt: a.createdAt || '',
       updatedAt: a.updatedAt || a.createdAt || '',
       status: a.displayStatus || { label: 'Amendment', severity: 'active', color: '#1d4ed8' },
@@ -605,9 +615,11 @@ export function normalizeRedlines(items = [], slaConfig = null) {
 
     // Same synthetic-owner pattern as amendments. Country comes from
     // r.countryCode first; falls back to the first listed country for
-    // template redlines that span several.
+    // template redlines that span several. An in-app reassignment overlays
+    // a real assignee on r.assigneeEmail server-side and wins over synth.
     const country = r.countryCode || (r.countries?.[0] || '');
-    const synth = syntheticOwnerForCountry(country, r.id);
+    const overrideEmail = (r.assigneeEmail || '').toLowerCase();
+    const synth = overrideEmail ? null : syntheticOwnerForCountry(country, r.id);
 
     return {
       id: String(r.id || ''),
@@ -618,9 +630,11 @@ export function normalizeRedlines(items = [], slaConfig = null) {
       // Client Name column: always the creating org (template redlines) or
       // the employee's employer org if available.
       clientName: r.orgName || '',
-      assignee: synth?.name || '',
-      assigneeEmail: synth?.email || '',
-      assigneeIsSynthetic: !!synth,
+      assignee: overrideEmail ? (r.assignee || overrideEmail) : (synth?.name || ''),
+      assigneeEmail: overrideEmail || synth?.email || '',
+      assigneeIsSynthetic: !overrideEmail && !!synth,
+      reassignedFromEmail: r.reassignedFromEmail || null,
+      reassignedAt: r.reassignedAt || null,
       createdAt: r.createdAt || '',
       updatedAt: r.updatedAt || r.createdAt || '',
       status: r.displayStatus || { label: 'Redline Review', severity: 'warning', color: '#ed8d00' },
@@ -655,8 +669,10 @@ export function normalizeIncentivePlans(items = [], slaConfig = null) {
       pausedAt: p.pausedAt || null,
     });
     // No upstream assignee — synthesize from country owners (mirrors
-    // amendments / redlines).
-    const synth = syntheticOwnerForCountry(p.country, p.id);
+    // amendments / redlines). An in-app reassignment overlays a real
+    // assignee on p.assigneeEmail server-side and wins over synth.
+    const overrideEmail = (p.assigneeEmail || '').toLowerCase();
+    const synth = overrideEmail ? null : syntheticOwnerForCountry(p.country, p.id);
 
     return {
       id: String(p.id || ''),
@@ -668,9 +684,11 @@ export function normalizeIncentivePlans(items = [], slaConfig = null) {
       function: 'Incentive Plan Preparation',
       country: p.country || '',
       clientName: p.orgName || '',
-      assignee: synth?.name || '',
-      assigneeEmail: synth?.email || '',
-      assigneeIsSynthetic: !!synth,
+      assignee: overrideEmail ? (p.assignee || overrideEmail) : (synth?.name || ''),
+      assigneeEmail: overrideEmail || synth?.email || '',
+      assigneeIsSynthetic: !overrideEmail && !!synth,
+      reassignedFromEmail: p.reassignedFromEmail || null,
+      reassignedAt: p.reassignedAt || null,
       startDate: p.startDate || '',
       createdAt: p.createdAt || '',
       updatedAt: p.updatedAt || p.createdAt || '',

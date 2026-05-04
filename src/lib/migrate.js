@@ -1111,6 +1111,40 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_hidden_task_active
   ON hidden_task(task_source, task_id) WHERE unhidden_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_hidden_task_request ON hidden_task(request_id);
 CREATE INDEX IF NOT EXISTS idx_hidden_task_hidden_by ON hidden_task(hidden_by_email, hidden_at DESC);
+
+-- Source-row reassignments. The Onboarding / Amendments / Redlines /
+-- Incentive Plans queues come from the Deel admin API and we cannot push an
+-- assignee change back upstream. This table stores override assignments
+-- keyed by (task_source, task_id); each source's API route overlays the
+-- override on the row's assigneeEmail before scoping so the new assignee
+-- (and their manager chain) immediately sees the row in their Workspace.
+-- task_url is stored alongside the source/id pair as a stable identifier
+-- the user can recognise (per Jose's spec: "remember it using the task
+-- link"). The original assignee is captured so we never lose the upstream
+-- attribution — re-assigning to NULL "unsets" the override and the row
+-- reverts to whatever Deel currently says.
+CREATE TABLE IF NOT EXISTS queue_reassignments (
+  id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_source             VARCHAR(40)  NOT NULL,                  -- onboarding | amendments | redlines | incentive_plans
+  task_id                 VARCHAR(200) NOT NULL,                  -- upstream id (matches normalized row.id)
+  task_url                TEXT,                                   -- stable link the user reassigned against
+  task_subject            VARCHAR(500),
+  task_country            VARCHAR(8),
+  original_assignee_email VARCHAR(255),                           -- captured at reassign time
+  original_assignee_name  VARCHAR(255),
+  assignee_email          VARCHAR(255) NOT NULL,                  -- new assignee (lowercased)
+  assignee_name           VARCHAR(255),
+  reassigned_by_email     VARCHAR(255) NOT NULL,
+  reassigned_by_name      VARCHAR(255),
+  created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_queue_reassignments_pair
+  ON queue_reassignments(task_source, task_id);
+CREATE INDEX IF NOT EXISTS idx_queue_reassignments_source
+  ON queue_reassignments(task_source);
+CREATE INDEX IF NOT EXISTS idx_queue_reassignments_assignee
+  ON queue_reassignments(LOWER(assignee_email));
 `;
 
 export async function runMigrations() {
