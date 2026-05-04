@@ -40,6 +40,7 @@ import { isUrgentAssistTaskType } from '../../lib/urgent-assist-task-types';
 import CreateHideTaskRequestModal from '../modals/CreateHideTaskRequestModal';
 import ReassignTaskModal from '../modals/ReassignTaskModal';
 import CreateHrHubRequestModal from '../modals/CreateHrHubRequestModal';
+import HiddenTasksPanel from './HiddenTasksPanel';
 
 // ── Live assignee lookup ───────────────────────────────────────────────────
 // Reads the live MEMBERS_BY_EMAIL binding so hydrateRoster() updates reach
@@ -81,6 +82,13 @@ const WORK_SOURCES = [
   { id: 'jira',           label: 'Jira',           icon: 'bi-kanban-fill',        color: '#1f74b3', bg: '#e8f0fe' },
   { id: 'zendesk',        label: 'Zendesk',        icon: 'bi-headset',            color: '#29811e', bg: '#e8f5e9' },
 ];
+
+// Admin-only synthetic source. Appended at render time when the viewer's
+// access === 'admin'. Renders HiddenTasksPanel instead of a SourceTable
+// because the data shape (hidden_task rows) is different from queue rows
+// — it carries hidden_by, approved_by, reason, etc. that no other panel
+// uses. Count comes from hiddenTasks.items.length (global hide list).
+const HIDDEN_TAB = { id: 'hidden', label: 'Hidden', icon: 'bi-eye-slash-fill', color: '#d42d35', bg: '#fef2f2' };
 
 const PRIORITY_DOT = { critical: '#dc2626', high: '#d97706', medium: '#0369a1', low: '#9b928a' };
 
@@ -500,6 +508,9 @@ const Queue = ({ user, tasks, subFilter }) => {
     if (workSource === 'redlines')        return tallyDeelSla(visRedlineRows);
     if (workSource === 'workbench')       return tallyDeelSla(visWorkbenchRows);
     if (workSource === 'incentive_plans') return tallyDeelSla(visIncentivePlanRows);
+    // Admin Hidden tab — no SLA semantics. Pills sit at zero so they don't
+    // borrow numbers from the underlying ZD/Jira queue.
+    if (workSource === 'hidden') return { atRiskCount: 0, breachedCount: 0, onTrackCount: 0 };
     let slaBase;
     if (workSource === 'jira') slaBase = visPreSla.filter(t => t.source === 'jira');
     else if (workSource === 'zendesk') slaBase = visPreSla.filter(t => t.source === 'zendesk');
@@ -521,6 +532,7 @@ const Queue = ({ user, tasks, subFilter }) => {
     if (workSource === 'redlines')        return { open: tblRedlineRows.length,       paused: 0, resolved: 0 };
     if (workSource === 'workbench')       return { open: tblWorkbenchRows.length,     paused: 0, resolved: 0 };
     if (workSource === 'incentive_plans') return { open: tblIncentivePlanRows.length, paused: 0, resolved: 0 };
+    if (workSource === 'hidden') return { open: hiddenTasks?.items?.length ?? 0, paused: 0, resolved: 0 };
     const sourceOpen = fTool ? 0 : (
       tblOnboardingRows.length + tblOffboardingRows.length + tblAmendmentRows.length
       + tblRedlineRows.length + tblWorkbenchRows.length + tblIncentivePlanRows.length
@@ -530,7 +542,7 @@ const Queue = ({ user, tasks, subFilter }) => {
       paused: snoozed.length,
       resolved: done.length,
     };
-  }, [workSource, fTool, active, snoozed, done, tblOnboardingRows, tblOffboardingRows, tblAmendmentRows, tblRedlineRows, tblWorkbenchRows, tblIncentivePlanRows]);
+  }, [workSource, fTool, active, snoozed, done, tblOnboardingRows, tblOffboardingRows, tblAmendmentRows, tblRedlineRows, tblWorkbenchRows, tblIncentivePlanRows, hiddenTasks?.items]);
 
   const rawCounts = useMemo(() => {
     if (workSource === 'onboarding')      return { open: onboardingRows.length };
@@ -539,12 +551,13 @@ const Queue = ({ user, tasks, subFilter }) => {
     if (workSource === 'redlines')        return { open: redlineRows.length };
     if (workSource === 'workbench')       return { open: workbenchRows.length };
     if (workSource === 'incentive_plans') return { open: incentivePlanRows.length };
+    if (workSource === 'hidden') return { open: hiddenTasks?.items?.length ?? 0 };
     const base = fTool ? baseVis.filter(t => t.source === fTool) : baseVis;
     const srcExtra = fTool ? 0 : allSourceRows.length;
     return {
       open: base.filter(t => t.status !== 'resolved' && t.status !== 'waiting').length + srcExtra,
     };
-  }, [workSource, fTool, baseVis, allSourceRows, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, incentivePlanRows]);
+  }, [workSource, fTool, baseVis, allSourceRows, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, incentivePlanRows, hiddenTasks?.items]);
   const hiddenByFilters = Math.max(0, rawCounts.open - headerCounts.open);
 
   // Persist filters to localStorage — user-scoped so two people on the
@@ -620,7 +633,7 @@ const Queue = ({ user, tasks, subFilter }) => {
           </div>
 
           {(isAdmin || isLead) && (() => {
-            const sourceLabels = { onboarding: 'Onboarding', offboarding: 'Offboarding', amendments: 'Amendments', redlines: 'Redlines', workbench: 'Workbench', incentive_plans: 'Incentive Plans' };
+            const sourceLabels = { onboarding: 'Onboarding', offboarding: 'Offboarding', amendments: 'Amendments', redlines: 'Redlines', workbench: 'Workbench', incentive_plans: 'Incentive Plans', hidden: 'Hidden (admin)' };
             const toolLabels = { zendesk: 'Zendesk', jira: 'Jira' };
             const viewLabel = sourceLabels[workSource] || toolLabels[fTool] || (isAdmin ? 'All Tasks' : user.team);
             return <span style={{ fontSize: 13, fontWeight: 600, color: '#616161', marginLeft: 6 }}>{viewLabel}</span>;
@@ -689,7 +702,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             // wrap also gives narrow desktops / tablets a usable layout instead
             // of a horizontal-scroll filter row.
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', overflow: 'visible', paddingBottom: 2 }}>
-              {WORK_SOURCES.map(ws => {
+              {(isAdmin ? [...WORK_SOURCES, HIDDEN_TAB] : WORK_SOURCES).map(ws => {
                 const isQueueFilter = ws.id === 'zendesk' || ws.id === 'jira';
                 const isActive = isQueueFilter ? (fTool === ws.id && !workSource) : workSource === ws.id;
                 const count = ws.id === 'onboarding' ? visOnboardingRows.length
@@ -700,6 +713,7 @@ const Queue = ({ user, tasks, subFilter }) => {
                   : ws.id === 'incentive_plans' ? visIncentivePlanRows.length
                   : ws.id === 'jira' ? jiraCount
                   : ws.id === 'zendesk' ? zdCount
+                  : ws.id === 'hidden' ? (hiddenTasks?.items?.length ?? 0)
                   : 0;
                 const handleClick = () => {
                   if (isQueueFilter) {
@@ -948,6 +962,11 @@ const Queue = ({ user, tasks, subFilter }) => {
             onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'incentive_plans')))}
             onBulkReassign={canReassign ? (rows) => setBulkReassignTasks(rows.map(r => buildTaskDescriptor(r, 'incentive_plans'))) : null}
           />
+        </ErrorBoundary>
+      )}
+      {workSource === 'hidden' && isAdmin && (
+        <ErrorBoundary>
+          <HiddenTasksPanel hiddenTasks={hiddenTasks} />
         </ErrorBoundary>
       )}
 
