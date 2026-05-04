@@ -321,6 +321,20 @@ const App=()=>{
   React.useEffect(() => {
     if (!isOwner && RESTRICTED_VIEWS.has(view)) setView('briefing');
   }, [isOwner, view, RESTRICTED_VIEWS]);
+  // Mirror the active view into ?view=... so browser refresh lands the user
+  // back on the same tab. replaceState (not pushState) keeps tab clicks out
+  // of the back/forward history, which is what users expect for a SPA tab
+  // bar — nobody wants ten history entries from clicking around the nav.
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || !view) return;
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get('view') !== view) {
+        url.searchParams.set('view', view);
+        window.history.replaceState({}, '', url.toString());
+      }
+    } catch {}
+  }, [view]);
   // ── Live queue sync (Zendesk + Jira) ─────────────────────────────────────
   const queueSync = useQueueSync({ enabled: !!user, userEmail: user?.email || null });
   const tasks = queueSync.tasks;
