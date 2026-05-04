@@ -1,6 +1,6 @@
-import { useState, useMemo, useEffect, useRef, useContext, useCallback } from 'react';
+import { useState, useMemo, useEffect, useRef, useContext, useCallback, Fragment } from 'react';
 import { TOOLS, STATUSES, FUNCTIONS, FLAGS } from '../../data/constants';
-import { MEMBERS, TEAM_MEMBERS } from '../../data/members';
+import { MEMBERS, MEMBERS_BY_EMAIL, TEAM_MEMBERS, getDirectReports, getAllReports } from '../../data/members';
 import { useTeamMembers } from '../../hooks/useTeamMembers';
 import { matchesAudience } from '../../data/comms';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
@@ -725,6 +725,62 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // for regional managers whose dataScope='regional_tasks' fell through
   // both branches of the previous ternary and got an empty list).
   const hmMembers = isManager ? allAgentsWL : [];
+
+  // Hierarchical view of the team: for each direct manager-report under the
+  // user (TL or RM), build a group with aggregated stats + the agents
+  // transitively below. Admins see RM groups; RMs see TL groups; TLs (whose
+  // direct reports are all agents) get an empty groups list and the table
+  // falls back to the flat agent list — same behaviour as before.
+  // Per Mohamed: a regional manager should see "their team-leads with their
+  // teams under them is a proper table" rather than one flat list.
+  const teamSummaryGroups = useMemo(() => {
+    if (!isManager || !user?.email) return [];
+    const directs = getDirectReports(user.email);
+    const managerRows = directs.filter(m => m.access && m.access !== 'agent');
+    if (managerRows.length === 0) return [];
+    const allAgentsByEmail = new Map(
+      allAgentsWL.map(a => [(a.email || '').toLowerCase(), a])
+    );
+    return managerRows.map(mgr => {
+      const subtree = new Set([mgr.email, ...getAllReports(mgr.email)].map(e => e.toLowerCase()));
+      const agents = allAgentsWL.filter(a => subtree.has((a.email || '').toLowerCase()));
+      const tc        = agents.reduce((s, a) => s + (a.tc || 0), 0);
+      const open      = agents.reduce((s, a) => s + (a.open || 0), 0);
+      const paused    = agents.reduce((s, a) => s + (a.paused || 0), 0);
+      const escalated = agents.reduce((s, a) => s + (a.escalated || 0), 0);
+      const br        = agents.reduce((s, a) => s + (a.br || 0), 0);
+      const headcount = Math.max(agents.length, 1);
+      const avgTc    = tc / headcount;
+      const capPct   = Math.min(200, Math.round((avgTc / BASELINE_CAPACITY) * 100));
+      const band     = classifyWorkload(avgTc);
+      return {
+        manager: { ...mgr, _self: allAgentsByEmail.get(mgr.email.toLowerCase()) || null },
+        agents,
+        tc, open, paused, escalated, br, capPct, wl: band.wl, wc: band.wc,
+        headcount: agents.length,
+      };
+    }).filter(g => g.agents.length > 0);
+  }, [isManager, user?.email, allAgentsWL]);
+
+  // Agents who report directly to the user with no intermediate manager
+  // (e.g. an RM who carries an agent without a TL in between). Rendered as
+  // a "Direct reports" group so they aren't dropped from the summary.
+  const directAgentRows = useMemo(() => {
+    if (!isManager || teamSummaryGroups.length === 0 || !user?.email) return [];
+    const claimed = new Set();
+    for (const g of teamSummaryGroups) {
+      for (const a of g.agents) claimed.add((a.email || '').toLowerCase());
+    }
+    const userEmail = user.email.toLowerCase();
+    return allAgentsWL.filter(a => {
+      const e = (a.email || '').toLowerCase();
+      if (claimed.has(e)) return false;
+      const m = MEMBERS_BY_EMAIL[e];
+      return m && (m.managerEmail || '').toLowerCase() === userEmail;
+    });
+  }, [isManager, teamSummaryGroups, allAgentsWL, user?.email]);
+
+  const ROLE_LABEL = { regional_manager: 'Regional Manager', team_lead: 'Team Lead', admin: 'Admin' };
   const regions=['EMEA','APAC','LATAM','NAM'];
   const regionIcons={EMEA:'bi-globe-europe-africa',APAC:'bi-globe-asia-australia',LATAM:'bi-globe-americas',NAM:'bi-globe-americas'};
   const rStats=regions.map(r=>{
@@ -1545,54 +1601,127 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   </tr>
                 </thead>
                 <tbody>
-                  {hmMembers.map((m,i) => (
-                    <tr key={m.id} style={{borderBottom:'1px solid #f0f0f0',transition:'background .15s'}}
-                      onMouseEnter={e=>e.currentTarget.style.background='#fafaf9'}
-                      onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                      <td style={{padding:'14px 24px'}}>
-                        <div style={{display:'flex',alignItems:'center',gap:10}}>
-                          <Avatar name={m.name} size={32}/>
-                          <div>
-                            <div style={{fontWeight:600,color:'#1b1b1b'}}>{m.name}</div>
-                            <div style={{fontSize:11,color:'#9e9e9e'}}>{FLAGS[m.country]} {m.team}</div>
+                  {(() => {
+                    // Single source of truth for an agent row — used by both
+                    // the flat (TL) and grouped (RM/admin) renderings.
+                    const agentRow = (m, key, indent) => (
+                      <tr key={key} style={{borderBottom:'1px solid #f0f0f0',transition:'background .15s'}}
+                        onMouseEnter={e=>e.currentTarget.style.background='#fafaf9'}
+                        onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                        <td style={{padding:'14px 24px',paddingLeft: indent ? 56 : 24}}>
+                          <div style={{display:'flex',alignItems:'center',gap:10}}>
+                            <Avatar name={m.name} size={32}/>
+                            <div>
+                              <div style={{fontWeight:600,color:'#1b1b1b'}}>{m.name}</div>
+                              <div style={{fontSize:11,color:'#9e9e9e'}}>{FLAGS[m.country]} {m.team}</div>
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                      <td style={{padding:'14px 16px',textAlign:'center',fontWeight:700,fontSize:16,color:'#1b1b1b'}}>{m.tc}</td>
-                      <td style={{padding:'14px 16px',textAlign:'center',fontWeight:600,color:'#1f74b3'}}>{m.open}</td>
-                      <td style={{padding:'14px 16px',textAlign:'center',fontWeight:600,color:'#ed8d00'}}>{m.paused}</td>
-                      <td style={{padding:'14px 16px',textAlign:'center',fontWeight:600,color:'#7c3aed'}}>{m.escalated}</td>
-                      <td style={{padding:'14px 16px',textAlign:'center'}}>
-                        {m.br > 0
-                          ? <span style={{fontWeight:700,color:'#d42d35',background:'#fef2f2',padding:'3px 10px',borderRadius:128}}>{m.br}</span>
-                          : <span style={{color:'#29811e',fontWeight:600}}>0</span>}
-                      </td>
-                      <td style={{padding:'14px 16px',textAlign:'center'}} title={m.capPct > 100 ? `${m.capPct}% — ${m.capPct - 100} percentage points over baseline (${BASELINE_CAPACITY} tasks). Capped to 100% in the bar; overflow shown with the "+X over" badge.` : `${m.capPct}% of baseline (${BASELINE_CAPACITY} tasks).`}>
-                        <div style={{display:'flex',alignItems:'center',gap:6,justifyContent:'center'}}>
-                          <div style={{width:40,height:5,borderRadius:3,background:'#f0f0f0'}}>
-                            <div style={{width:`${Math.min(m.capPct,100)}%`,height:5,borderRadius:3,background:m.wc}}></div>
+                        </td>
+                        <td style={{padding:'14px 16px',textAlign:'center',fontWeight:700,fontSize:16,color:'#1b1b1b'}}>{m.tc}</td>
+                        <td style={{padding:'14px 16px',textAlign:'center',fontWeight:600,color:'#1f74b3'}}>{m.open}</td>
+                        <td style={{padding:'14px 16px',textAlign:'center',fontWeight:600,color:'#ed8d00'}}>{m.paused}</td>
+                        <td style={{padding:'14px 16px',textAlign:'center',fontWeight:600,color:'#7c3aed'}}>{m.escalated}</td>
+                        <td style={{padding:'14px 16px',textAlign:'center'}}>
+                          {m.br > 0
+                            ? <span style={{fontWeight:700,color:'#d42d35',background:'#fef2f2',padding:'3px 10px',borderRadius:128}}>{m.br}</span>
+                            : <span style={{color:'#29811e',fontWeight:600}}>0</span>}
+                        </td>
+                        <td style={{padding:'14px 16px',textAlign:'center'}} title={m.capPct > 100 ? `${m.capPct}% — ${m.capPct - 100} percentage points over baseline (${BASELINE_CAPACITY} tasks). Capped to 100% in the bar; overflow shown with the "+X over" badge.` : `${m.capPct}% of baseline (${BASELINE_CAPACITY} tasks).`}>
+                          <div style={{display:'flex',alignItems:'center',gap:6,justifyContent:'center'}}>
+                            <div style={{width:40,height:5,borderRadius:3,background:'#f0f0f0'}}>
+                              <div style={{width:`${Math.min(m.capPct,100)}%`,height:5,borderRadius:3,background:m.wc}}></div>
+                            </div>
+                            <span style={{fontSize:11,fontWeight:600,color:'#616161'}}>{Math.min(m.capPct, 100)}%</span>
+                            {m.capPct > 100 && (
+                              <span style={{fontSize:9,fontWeight:700,color:'#d42d35',background:'#fef2f2',padding:'1px 6px',borderRadius:128,letterSpacing:'0.02em'}}>
+                                +{m.capPct - 100} over
+                              </span>
+                            )}
                           </div>
-                          {/* Cap the displayed value at 100% — anything beyond is
-                              shown as a "+X over" overflow chip so the column
-                              stays scannable. The 2026-05-01 audit found 4 of 6
-                              top agents reading "200%" with no visual clue that
-                              it was overflow vs target. */}
-                          <span style={{fontSize:11,fontWeight:600,color:'#616161'}}>{Math.min(m.capPct, 100)}%</span>
-                          {m.capPct > 100 && (
-                            <span style={{fontSize:9,fontWeight:700,color:'#d42d35',background:'#fef2f2',padding:'1px 6px',borderRadius:128,letterSpacing:'0.02em'}}>
-                              +{m.capPct - 100} over
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td style={{padding:'14px 16px',textAlign:'center'}}>
-                        <span style={{fontSize:11,fontWeight:700,color:m.wc,padding:'3px 12px',borderRadius:128,background:m.wc+'15'}}>{m.wl}</span>
-                      </td>
-                      {/* Meetings column removed 2026-05-01 — never wired and
-                          read "—" for every row, taking horizontal space and
-                          adding noise. Re-add when per-user calendar sync ships. */}
-                    </tr>
-                  ))}
+                        </td>
+                        <td style={{padding:'14px 16px',textAlign:'center'}}>
+                          <span style={{fontSize:11,fontWeight:700,color:m.wc,padding:'3px 12px',borderRadius:128,background:m.wc+'15'}}>{m.wl}</span>
+                        </td>
+                      </tr>
+                    );
+
+                    // Group header — manager (TL or RM) with aggregate stats
+                    // for their full subtree. capPct + workload band are
+                    // computed off the average per agent to stay comparable
+                    // with the per-agent rows below.
+                    const groupHeader = (g) => (
+                      <tr key={`grp-${g.manager.email}`} style={{background:'#f3eff8',borderTop:'2px solid #e8e8e8'}}>
+                        <td style={{padding:'12px 24px'}}>
+                          <div style={{display:'flex',alignItems:'center',gap:10}}>
+                            <Avatar name={g.manager.name} size={32}/>
+                            <div>
+                              <div style={{fontWeight:700,color:'#1b1b1b',display:'flex',alignItems:'center',gap:8}}>
+                                {g.manager.name}
+                                <span style={{fontSize:10,fontWeight:700,color:'#7c3aed',background:'#EDE9FE',padding:'2px 8px',borderRadius:128,letterSpacing:'0.02em',textTransform:'uppercase'}}>
+                                  {ROLE_LABEL[g.manager.access] || g.manager.access}
+                                </span>
+                              </div>
+                              <div style={{fontSize:11,color:'#9e9e9e'}}>{g.manager.team} &middot; {g.headcount} {g.headcount === 1 ? 'agent' : 'agents'}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td style={{padding:'12px 16px',textAlign:'center',fontWeight:700,fontSize:16,color:'#1b1b1b'}}>{g.tc}</td>
+                        <td style={{padding:'12px 16px',textAlign:'center',fontWeight:700,color:'#1f74b3'}}>{g.open}</td>
+                        <td style={{padding:'12px 16px',textAlign:'center',fontWeight:700,color:'#ed8d00'}}>{g.paused}</td>
+                        <td style={{padding:'12px 16px',textAlign:'center',fontWeight:700,color:'#7c3aed'}}>{g.escalated}</td>
+                        <td style={{padding:'12px 16px',textAlign:'center'}}>
+                          {g.br > 0
+                            ? <span style={{fontWeight:700,color:'#d42d35',background:'#fef2f2',padding:'3px 10px',borderRadius:128}}>{g.br}</span>
+                            : <span style={{color:'#29811e',fontWeight:700}}>0</span>}
+                        </td>
+                        <td style={{padding:'12px 16px',textAlign:'center'}} title={`Average across ${g.headcount} agent${g.headcount === 1 ? '' : 's'}: ${g.capPct}% of baseline.`}>
+                          <div style={{display:'flex',alignItems:'center',gap:6,justifyContent:'center'}}>
+                            <div style={{width:40,height:5,borderRadius:3,background:'#e8e1f3'}}>
+                              <div style={{width:`${Math.min(g.capPct,100)}%`,height:5,borderRadius:3,background:g.wc}}></div>
+                            </div>
+                            <span style={{fontSize:11,fontWeight:700,color:'#616161'}}>{Math.min(g.capPct, 100)}%</span>
+                            {g.capPct > 100 && (
+                              <span style={{fontSize:9,fontWeight:700,color:'#d42d35',background:'#fef2f2',padding:'1px 6px',borderRadius:128,letterSpacing:'0.02em'}}>
+                                +{g.capPct - 100} over
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td style={{padding:'12px 16px',textAlign:'center'}}>
+                          <span style={{fontSize:11,fontWeight:700,color:g.wc,padding:'3px 12px',borderRadius:128,background:g.wc+'15'}}>{g.wl}</span>
+                        </td>
+                      </tr>
+                    );
+
+                    // Banner row used to label the trailing "Direct reports"
+                    // section when the user has agents reporting to them
+                    // without an intermediate TL.
+                    const sectionLabel = (label) => (
+                      <tr key={`label-${label}`} style={{background:'#fafaf9',borderTop:'2px solid #e8e8e8'}}>
+                        <td colSpan={8} style={{padding:'10px 24px',fontSize:11,fontWeight:700,color:'#9e9e9e',letterSpacing:'0.04em',textTransform:'uppercase'}}>{label}</td>
+                      </tr>
+                    );
+
+                    if (teamSummaryGroups.length === 0) {
+                      return hmMembers.map(m => agentRow(m, m.id, false));
+                    }
+                    return (
+                      <>
+                        {teamSummaryGroups.map(g => (
+                          <Fragment key={g.manager.email}>
+                            {groupHeader(g)}
+                            {g.agents.map(a => agentRow(a, `${g.manager.email}-${a.id}`, true))}
+                          </Fragment>
+                        ))}
+                        {directAgentRows.length > 0 && (
+                          <Fragment key="direct-reports">
+                            {sectionLabel('Direct reports')}
+                            {directAgentRows.map(a => agentRow(a, `direct-${a.id}`, true))}
+                          </Fragment>
+                        )}
+                      </>
+                    );
+                  })()}
                 </tbody>
               </table>
             </div>
