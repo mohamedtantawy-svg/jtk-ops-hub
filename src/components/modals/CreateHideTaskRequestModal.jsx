@@ -48,13 +48,25 @@ const labelStyle = {
   letterSpacing: '.05em', marginBottom: 6, display: 'block',
 };
 
-export default function CreateHideTaskRequestModal({ task, onClose, onSubmitted }) {
+export default function CreateHideTaskRequestModal({ task, tasks, onClose, onSubmitted }) {
+  // Normalise the input — `task` (single) and `tasks` (array) are both
+  // accepted so existing single-row callers don't need to change. When
+  // both are passed `tasks` wins. Bulk submit fires N hide requests with
+  // the same reason; the manager sees them as separate approval rows on
+  // their HR Hub queue (per Pilar — they want to be able to deny one of
+  // a batch without rejecting the whole batch).
+  const taskList = Array.isArray(tasks) && tasks.length > 0
+    ? tasks
+    : task ? [task] : [];
+  const isBulk = taskList.length > 1;
+  const headTask = taskList[0] || null;
   const backdropRef = useRef(null);
   const [reasonCode, setReasonCode] = useState(null);
   const [reasonText, setReasonText] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [submittedId, setSubmittedId] = useState(null);
+  const [submittedCount, setSubmittedCount] = useState(0);
 
   useEffect(() => {
     const h = e => { if (e.key === 'Escape') onClose(); };
@@ -72,7 +84,7 @@ export default function CreateHideTaskRequestModal({ task, onClose, onSubmitted 
   // filter has a clean key.
   const handleSubmit = async (e) => {
     e?.preventDefault?.();
-    if (!canSubmit) return;
+    if (!canSubmit || taskList.length === 0) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -80,22 +92,40 @@ export default function CreateHideTaskRequestModal({ task, onClose, onSubmitted 
       const computedSummary = otherSelected
         ? reasonText.trim()
         : reasonLabel;
-      const computedTitle = `Request to hide task — ${reasonLabel}${task?.subject ? `: ${task.subject}` : ''}`.slice(0, 300);
-      const payload = {
+
+      const buildPayload = (t) => ({
         flow: 'hide_task_request',
         requestType: reasonCode,
-        title: computedTitle,
+        title: `Request to hide task — ${reasonLabel}${t?.subject ? `: ${t.subject}` : ''}`.slice(0, 300),
         summary: computedSummary,
         priority: 'medium',
-        links: task?.url ? [task.url] : [],
-        taskSource: task?.source,
-        taskId: task?.id ? String(task.id) : null,
-        taskUrl: task?.url || null,
-        taskSubject: task?.subject || null,
-      };
-      const res = await createHrHubRequest(payload);
-      setSubmittedId(res?.id || 'unknown');
-      onSubmitted?.(res);
+        links: t?.url ? [t.url] : [],
+        taskSource: t?.source,
+        taskId: t?.id ? String(t.id) : null,
+        taskUrl: t?.url || null,
+        taskSubject: t?.subject || null,
+      });
+
+      // Bulk submit fires the requests in parallel — each becomes its own
+      // approval row so the manager can approve some and deny others. We
+      // surface a partial-failure count rather than aborting the whole
+      // batch; better to land 9/10 hides than 0/10 because the 10th was
+      // already hidden upstream.
+      const results = await Promise.allSettled(
+        taskList.map(t => createHrHubRequest(buildPayload(t)))
+      );
+      const fulfilled = results.filter(r => r.status === 'fulfilled');
+      const rejected = results.filter(r => r.status === 'rejected');
+      if (fulfilled.length === 0) {
+        const firstErr = rejected[0]?.reason?.message || 'Failed to submit hide request';
+        throw new Error(firstErr);
+      }
+      setSubmittedCount(fulfilled.length);
+      setSubmittedId(fulfilled[0]?.value?.id || 'unknown');
+      if (rejected.length > 0) {
+        setError(`${rejected.length} of ${taskList.length} request${taskList.length === 1 ? '' : 's'} failed: ${rejected[0]?.reason?.message || 'unknown error'}`);
+      }
+      onSubmitted?.({ id: fulfilled[0]?.value?.id, count: fulfilled.length, failed: rejected.length });
     } catch (err) {
       setError(err?.message || 'Failed to submit hide request');
       setSubmitting(false);
@@ -126,12 +156,16 @@ export default function CreateHideTaskRequestModal({ task, onClose, onSubmitted 
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div id="hide-task-title" style={{ fontSize: 16, fontWeight: 700, color: '#1b1b1b' }}>
-              {submittedId ? 'Hide request submitted' : 'Hide this task'}
+              {submittedId
+                ? (isBulk ? `${submittedCount} hide requests submitted` : 'Hide request submitted')
+                : (isBulk ? `Hide ${taskList.length} tasks` : 'Hide this task')}
             </div>
             <div style={{ fontSize: 12, color: '#9e9e9e', marginTop: 2 }}>
-              {task?.subject
-                ? <span><strong style={{ color: '#1b1b1b' }}>{task.subject}</strong>{task.country ? ` · ${task.country}` : ''}</span>
-                : 'Why should this task be removed from the queue?'}
+              {isBulk
+                ? <span>One reason will apply to all <strong style={{ color: '#1b1b1b' }}>{taskList.length}</strong> selected tasks. Each lands as a separate approval for your manager.</span>
+                : headTask?.subject
+                  ? <span><strong style={{ color: '#1b1b1b' }}>{headTask.subject}</strong>{headTask.country ? ` · ${headTask.country}` : ''}</span>
+                  : 'Why should this task be removed from the queue?'}
             </div>
           </div>
           <button

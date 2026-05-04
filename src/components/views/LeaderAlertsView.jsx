@@ -113,6 +113,20 @@ const LeaderAlertsView = ({ user, perms, refreshNonce = 0 }) => {
   const [openAlertId, setOpenAlertId] = useState(() => readAlertIdFromUrl());
   const [showSettings, setShowSettings] = useState(false);
 
+  // Bell deep-link: App.jsx fires `leader-alerts:openDetail` with the
+  // alert id when the user clicks a notification. Set the open alert
+  // id, which the existing detail-drawer logic already responds to.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = (e) => {
+      const id = e?.detail?.id;
+      if (!id) return;
+      setOpenAlertId(String(id));
+    };
+    window.addEventListener('leader-alerts:openDetail', handler);
+    return () => window.removeEventListener('leader-alerts:openDetail', handler);
+  }, []);
+
   // Settings — categories + statuses reference list. Re-fetches on
   // refreshTick (manual button) and refreshNonce (post-create signal
   // from App.jsx). AbortController on cleanup so a stale fetch can't

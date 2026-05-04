@@ -142,6 +142,27 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openCompose]);
 
+  // Bell deep-link handler. App.jsx fires `feedback:openDetail` with the
+  // feedback id (and optionally a comment id) when the user clicks a
+  // notification linked to this board. We expand the row + scroll it
+  // into view. The (optional) comment id is forwarded as an attribute on
+  // the row container so a future "scroll-to-comment" affordance can read
+  // it without another listener round-trip.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = (e) => {
+      const id = e?.detail?.id;
+      if (!id) return;
+      setExpandedId(String(id));
+      requestAnimationFrame(() => {
+        const node = document.querySelector(`[data-feedback-row="${String(id)}"]`);
+        if (node) node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    };
+    window.addEventListener('feedback:openDetail', handler);
+    return () => window.removeEventListener('feedback:openDetail', handler);
+  }, []);
+
   const { items, loading, error, lastSyncAt, refresh, create, patch, remove, vote } = useFeedback({
     enabled: !!user,
     userEmail: user?.email || null,
@@ -495,6 +516,7 @@ function FeedbackRow({ item, expanded, onToggle, onVote, onStatusChange, onPrior
 
   return (
     <li
+      data-feedback-row={item.id}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{

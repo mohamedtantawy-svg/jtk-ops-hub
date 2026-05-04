@@ -2,7 +2,7 @@
 // Unified table for all work sources (onboarding, offboarding, amendments,
 // redlines, workbench, and the combined "All" view).
 // Expects normalized rows with a common shape.
-import { useState, useMemo, useRef, memo } from 'react';
+import { useState, useMemo, useRef, useEffect, memo } from 'react';
 import { TOOLS, getFlag, getCountryName } from '../../data/constants';
 import Avatar from '../ui/Avatar';
 import { useVirtualRows } from '../../hooks/useVirtualRows';
@@ -201,7 +201,26 @@ export default function SourceTable({
   viewerEmail = '',          // signed-in user's email — splits the table into Mine vs Others
   onHide,                    // (row) => void — called when the row's Hide button is clicked
   onEscalate,                // (row) => void — called when the row's Escalate button is clicked
+  onReassign,                // (row) => void — called when the row's Reassign button is clicked (Onb / Amend / Redline / IP only)
+  onBulkHide,                // (rows[]) => void — bulk variant; enables checkboxes + bulk-bar Hide button
+  onBulkEscalate,            // (rows[]) => void — bulk variant; enables checkboxes + bulk-bar Escalate button
+  onBulkReassign,            // (rows[]) => void — bulk variant; enables checkboxes + bulk-bar Reassign button
 }) {
+  // Selection state — opt-in. Only mounts the checkbox column + bulk-bar
+  // when the parent passes at least one bulk handler. Selection key = row.id
+  // (already string-coerced by every normalizer); sticky across re-renders
+  // but cleared when the source-set changes (see effect below) so a newly-
+  // synced refresh doesn't carry stale ids selected.
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const canBulk = !!(onBulkHide || onBulkEscalate || onBulkReassign);
+  const clearSelection = () => setSelectedIds(new Set());
+  const toggleRowSelection = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
   const [searchTerm, setSearchTerm] = useState('');
   // Default sort = SLA tier oldest-first across every panel — the per-PR-2
   // spec ("All Qs default sort should be by SLA old to new"). Callers can
@@ -327,6 +346,53 @@ export default function SourceTable({
 
   const hasMineSection = mineActive.length + minePaused.length > 0;
 
+  // Selection bookkeeping derived from the filtered+sorted view. Selecting
+  // "All" only affects rows the user can currently see (respects search +
+  // status filter). Drop selection of rows that disappear from the view
+  // (e.g. status filter narrows, row hidden upstream) so a stale id can't
+  // get picked up later by toggleAllVisible / bulk action.
+  const visibleIds = useMemo(() => sorted.map(r => String(r.id)), [sorted]);
+  const visibleIdSet = useMemo(() => new Set(visibleIds), [visibleIds]);
+  useEffect(() => {
+    if (!canBulk || selectedIds.size === 0) return;
+    let dirty = false;
+    const next = new Set();
+    for (const id of selectedIds) {
+      if (visibleIdSet.has(id)) next.add(id); else dirty = true;
+    }
+    if (dirty) setSelectedIds(next);
+    // Cheap guard: only re-run when the visible set or the selection changes.
+  }, [visibleIdSet, selectedIds, canBulk]);
+  const visibleSelectedCount = useMemo(() => {
+    if (selectedIds.size === 0) return 0;
+    let n = 0;
+    for (const id of visibleIds) if (selectedIds.has(id)) n++;
+    return n;
+  }, [visibleIds, selectedIds]);
+  const allVisibleSelected = visibleIds.length > 0 && visibleSelectedCount === visibleIds.length;
+  const someVisibleSelected = visibleSelectedCount > 0 && !allVisibleSelected;
+  const toggleAllVisible = () => {
+    setSelectedIds(prev => {
+      // If everything visible is already selected, deselect those — but
+      // keep selections for rows outside the current view.
+      if (allVisibleSelected) {
+        const next = new Set(prev);
+        for (const id of visibleIds) next.delete(id);
+        return next;
+      }
+      const next = new Set(prev);
+      for (const id of visibleIds) next.add(id);
+      return next;
+    });
+  };
+  // Build the actual row objects for the bulk action handlers — the parent
+  // wants the full row, not just ids, so it can read taskUrl / subject /
+  // country without re-walking the rows array.
+  const selectedRows = useMemo(() => {
+    if (selectedIds.size === 0) return [];
+    return sorted.filter(r => selectedIds.has(String(r.id)));
+  }, [sorted, selectedIds]);
+
   // Flatten into a single virtual list. Section ordering:
   //   1. Mine — Active   (header "MINE" when there are also Others/Paused sections)
   //   2. Mine — Paused   (header "MINE — PAUSED" only when minePaused exists)
@@ -384,7 +450,8 @@ export default function SourceTable({
     + 1 // Status
     + 1 // Task
     + (hideContract ? 0 : 1)
-    + ((onHide || onEscalate) ? 1 : 0); // Actions column when the parent provides any row action
+    + ((onHide || onEscalate || onReassign) ? 1 : 0) // Actions column when the parent provides any row action
+    + (canBulk ? 1 : 0); // Selection checkbox column when any bulk handler is wired
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#fafaf9', overflow: 'hidden' }}>
@@ -421,6 +488,50 @@ export default function SourceTable({
 
         <span aria-live="polite" aria-atomic="true" style={{ fontSize: 11, color: '#9e9e9e' }}>{sorted.length} {sorted.length === 1 ? 'task' : 'tasks'}</span>
       </div>
+      )}
+
+      {/* ── Bulk action bar — appears whenever ≥1 row is selected.
+           Sits between the filter bar and the table so it can scroll with
+           neither (sticky to the top of the source-panel). Buttons only
+           render for actions whose handler is provided by the parent, so
+           any future bulk action drops in by adding a new prop. */}
+      {canBulk && selectedIds.size > 0 && (
+        <div role="toolbar" aria-label={`${selectedIds.size} tasks selected`}
+          style={{
+            padding: '10px 24px', background: '#1b1b1b', color: 'white',
+            display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+            position: 'sticky', top: 0, zIndex: 3,
+          }}>
+          <span style={{ fontSize: 12, fontWeight: 700 }}>
+            {selectedIds.size} {selectedIds.size === 1 ? 'task' : 'tasks'} selected
+          </span>
+          <div style={{ flex: 1 }} />
+          {onBulkEscalate && (
+            <button type="button" onClick={() => onBulkEscalate(selectedRows)}
+              style={bulkBtnStyle('#7c3aed')}>
+              <i className="bi-arrow-up-right-circle" style={{ fontSize: 11 }} />
+              Escalate {selectedIds.size}
+            </button>
+          )}
+          {onBulkReassign && (
+            <button type="button" onClick={() => onBulkReassign(selectedRows)}
+              style={bulkBtnStyle('#1d4ed8')}>
+              <i className="bi-arrow-left-right" style={{ fontSize: 11 }} />
+              Reassign {selectedIds.size}
+            </button>
+          )}
+          {onBulkHide && (
+            <button type="button" onClick={() => onBulkHide(selectedRows)}
+              style={bulkBtnStyle('#d42d35')}>
+              <i className="bi-eye-slash" style={{ fontSize: 11 }} />
+              Hide {selectedIds.size}
+            </button>
+          )}
+          <button type="button" onClick={clearSelection}
+            style={{ background: 'transparent', color: 'rgba(255,255,255,0.7)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8, padding: '5px 12px', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+            Clear
+          </button>
+        </div>
       )}
 
       {/* ── Loading ── */}
@@ -464,6 +575,18 @@ export default function SourceTable({
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: '#f5f4f2', position: 'sticky', top: 0, zIndex: 2 }}>
+                {canBulk && (
+                  <th style={{ ...thStyle, width: 36, padding: '8px 12px' }}>
+                    <input
+                      type="checkbox"
+                      aria-label={allVisibleSelected ? 'Deselect all visible tasks' : 'Select all visible tasks'}
+                      checked={allVisibleSelected}
+                      ref={el => { if (el) el.indeterminate = someVisibleSelected; }}
+                      onChange={toggleAllVisible}
+                      style={{ cursor: 'pointer', width: 14, height: 14, accentColor: '#1d4ed8' }}
+                    />
+                  </th>
+                )}
                 {showSourceColumn && <th style={{ ...thStyle, width: 70 }}>Source</th>}
                 <SortTh col="subject"   label="Employee"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, textAlign: 'left', minWidth: 150, maxWidth: 180 }} />
                 {showClient && <SortTh col="clientName" label="Organization" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, textAlign: 'left', minWidth: 120, maxWidth: 150 }} />}
@@ -476,7 +599,7 @@ export default function SourceTable({
                 <SortTh col="status"    label="Status"     sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 115 }} />
                 <th style={{ ...thStyle, width: 55 }}>Task</th>
                 {!hideContract && <th style={{ ...thStyle, width: 55 }}>Contract</th>}
-                {(onHide || onEscalate) && <th style={{ ...thStyle, width: 160 }}>Actions</th>}
+                {(onHide || onEscalate || onReassign) && <th style={{ ...thStyle, width: 200 }}>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -528,6 +651,10 @@ export default function SourceTable({
                     hideContract={hideContract}
                     onHide={onHide ? () => onHide(row) : null}
                     onEscalate={onEscalate ? () => onEscalate(row) : null}
+                    onReassign={onReassign ? () => onReassign(row) : null}
+                    isSelectable={canBulk}
+                    isSelected={canBulk && selectedIds.has(String(row.id))}
+                    onToggleSelection={canBulk ? () => toggleRowSelection(String(row.id)) : null}
                   />
                 );
               })}
@@ -545,7 +672,7 @@ export default function SourceTable({
 }
 
 // ── Row component ──
-const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, dateField = 'startDate', showClient = false, showType = false, hideUpdated = false, hideContract = false, onHide = null, onEscalate = null }) {
+const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, dateField = 'startDate', showClient = false, showType = false, hideUpdated = false, hideContract = false, onHide = null, onEscalate = null, onReassign = null, isSelectable = false, isSelected = false, onToggleSelection = null }) {
   const [hov, setHov] = useState(false);
   const sev = row.status?.severity || 'info';
   const isUrgent = sev === 'critical';
@@ -582,11 +709,25 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
         // row and the cumulative scroll position skews on long lists.
         height: 44,
         borderBottom: '1px solid #f0efed',
-        background: hov ? '#faf8ff' : rowBg,
+        background: isSelected ? '#eff6ff' : hov ? '#faf8ff' : rowBg,
         transition: 'background .1s',
         borderLeft: isUrgent ? '3px solid #d42d35' : isWarning ? '3px solid #ed8d00' : '3px solid transparent',
       }}
     >
+      {/* Selection checkbox — only when the table is in bulk mode */}
+      {isSelectable && (
+        <td style={{ ...tdStyle, padding: '8px 12px', width: 36 }}>
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => onToggleSelection?.()}
+            onClick={e => e.stopPropagation()}
+            aria-label={isSelected ? `Deselect "${row.subject || row.id}"` : `Select "${row.subject || row.id}"`}
+            style={{ cursor: 'pointer', width: 14, height: 14, accentColor: '#1d4ed8' }}
+          />
+        </td>
+      )}
+
       {/* Source */}
       {showSource && (
         <td style={tdStyle}>
@@ -789,9 +930,11 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
         </td>
       )}
 
-      {/* Actions — Escalate + Hide buttons. Cell only renders when the
-          parent passed at least one handler so the column is opt-in. */}
-      {(onHide || onEscalate) && (
+      {/* Actions — Escalate + Reassign + Hide buttons. Cell only renders
+          when the parent passed at least one handler so the column is
+          opt-in. Reassign is wired in only on queues whose source rows
+          can't be re-routed upstream (Onb / Amend / Redline / IP). */}
+      {(onHide || onEscalate || onReassign) && (
         <td style={tdStyle}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             {onEscalate && (
@@ -812,6 +955,26 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
               >
                 <i className="bi-arrow-up-right-circle" style={{ fontSize: 9 }} />
                 Escalate
+              </button>
+            )}
+            {onReassign && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onReassign(); }}
+                aria-label={`Reassign "${row.subject || row.id}" to another team member`}
+                title="Reassign to another team member"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '3px 8px', borderRadius: 6,
+                  background: hov ? '#eff6ff' : '#f5f4f2',
+                  color: hov ? '#1d4ed8' : '#9e9e9e',
+                  border: hov ? '1px solid #bfdbfe' : '1px solid transparent',
+                  fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
+                  cursor: 'pointer', fontFamily: 'inherit',
+                }}
+              >
+                <i className="bi-arrow-left-right" style={{ fontSize: 9 }} />
+                Reassign
               </button>
             )}
             {onHide && (
@@ -972,5 +1135,14 @@ function SortTh({ col, label, sortCol, sortDir, onSort, style }) {
 
 // ── Styles ──
 const iconBtnStyle = { width: 32, height: 32, borderRadius: 8, border: '1px solid #e8e8e8', background: 'var(--surface)', color: '#9e9e9e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+// Bulk-bar action button — solid colour fill on the dark bar so the action
+// stands out against the "12 tasks selected" label. Color is the action's
+// brand hue (purple = escalate, blue = reassign, red = hide).
+const bulkBtnStyle = (color) => ({
+  display: 'inline-flex', alignItems: 'center', gap: 5,
+  background: color, color: 'white', border: '1px solid transparent',
+  borderRadius: 8, padding: '6px 12px',
+  fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+});
 const thStyle = { padding: '10px 12px', fontSize: 10, fontWeight: 600, color: '#9e9e9e', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center', whiteSpace: 'nowrap', borderBottom: '1px solid #e8e8e8' };
 const tdStyle = { padding: '8px 12px', textAlign: 'center', verticalAlign: 'middle' };

@@ -321,6 +321,20 @@ const App=()=>{
   React.useEffect(() => {
     if (!isOwner && RESTRICTED_VIEWS.has(view)) setView('briefing');
   }, [isOwner, view, RESTRICTED_VIEWS]);
+  // Mirror the active view into ?view=... so browser refresh lands the user
+  // back on the same tab. replaceState (not pushState) keeps tab clicks out
+  // of the back/forward history, which is what users expect for a SPA tab
+  // bar — nobody wants ten history entries from clicking around the nav.
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || !view) return;
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get('view') !== view) {
+        url.searchParams.set('view', view);
+        window.history.replaceState({}, '', url.toString());
+      }
+    } catch {}
+  }, [view]);
   // ── Live queue sync (Zendesk + Jira) ─────────────────────────────────────
   const queueSync = useQueueSync({ enabled: !!user, userEmail: user?.email || null });
   const tasks = queueSync.tasks;
@@ -791,6 +805,7 @@ const App=()=>{
   const mergedNotifs = React.useMemo(() => {
     const fromServer = (serverNotifs.items || []).map(n => {
       const ts = n.createdAt ? new Date(n.createdAt) : null;
+      const tsMs = ts && !Number.isNaN(ts.getTime()) ? ts.getTime() : Date.now();
       const time = ts && !Number.isNaN(ts.getTime())
         ? ts.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
         : '';
@@ -802,6 +817,11 @@ const App=()=>{
         title: n.title,
         body: n.body || '',
         time,
+        // Numeric ms-since-epoch — used by NotificationPanel to group + sort
+        // and by `timeAgo` for "5m / 2h / 3d" labels. Falls back to the
+        // string time if `createdAt` was unparseable.
+        timestamp: tsMs,
+        createdAt: n.createdAt,
         read: !!n.readAt,
         linkView: n.linkView,
         linkId: n.linkId,
@@ -850,6 +870,31 @@ const App=()=>{
           window.history.replaceState({}, '', url.toString());
         } catch {}
         setView('hr-hub');
+      } else if ((n.linkView === 'leader-alerts' || n.linkView === 'leader_alerts') && n.linkId) {
+        // Leaders Hub deep-link: flip the view + dispatch an open event
+        // that LeaderAlertsView listens for to slide the detail panel in
+        // and scroll the originating comment / status change into view.
+        setView('leader-alerts');
+        const detail = {
+          id: n.linkId,
+          commentId: (n.sourceType || '').endsWith('comment') ? n.sourceId : null,
+        };
+        setTimeout(() => {
+          try { window.dispatchEvent(new CustomEvent('leader-alerts:openDetail', { detail })); }
+          catch {}
+        }, 60);
+      } else if (n.linkView === 'feedback' && n.linkId) {
+        // Feedback board deep-link: flip the view + ask FeedbackView to
+        // expand the row + scroll its comment thread into view.
+        setView('feedback');
+        const detail = {
+          id: n.linkId,
+          commentId: (n.sourceType || '').endsWith('comment') ? n.sourceId : null,
+        };
+        setTimeout(() => {
+          try { window.dispatchEvent(new CustomEvent('feedback:openDetail', { detail })); }
+          catch {}
+        }, 60);
       }
       return;
     }
@@ -1372,7 +1417,7 @@ const App=()=>{
       {impersonating && <style>{`.deel-topnav{top:36px!important;}`}</style>}
       <DeelTopNav
         view={view} setView={setView} user={effectiveUser} setUser={setUser}
-        onSearch={()=>setShowSearch(true)} notifs={mergedNotifs} markAllRead={markAllRead} onNotifClick={handleNotifClick}
+        onSearch={()=>setShowSearch(true)} notifs={mergedNotifs} markAllRead={markAllRead} markRead={(serverId)=>serverNotifs.markRead(serverId)} onNotifClick={handleNotifClick}
         onLogout={handleLogout}
         onCreateAnnouncement={()=>{setView('announcements');setAnnounceCompose(true);}}
         onCreateFeedback={()=>{setView('feedback');setFeedbackCompose(true);}}

@@ -38,6 +38,7 @@ import {
 } from '../../utils/normalizeSourceRows';
 import { isUrgentAssistTaskType } from '../../lib/urgent-assist-task-types';
 import CreateHideTaskRequestModal from '../modals/CreateHideTaskRequestModal';
+import ReassignTaskModal from '../modals/ReassignTaskModal';
 import CreateHrHubRequestModal from '../modals/CreateHrHubRequestModal';
 
 // ── Live assignee lookup ───────────────────────────────────────────────────
@@ -163,6 +164,31 @@ const Queue = ({ user, tasks, subFilter }) => {
   // the modal needs (subject + source + id + url) so the modal stays
   // shape-agnostic across the seven row types.
   const [hideModalTask, setHideModalTask] = useState(null);
+  // Reassign modal state — only opens for source rows whose upstream
+  // doesn't support reassignment (onboarding / amendments / redlines /
+  // incentive plans). Same descriptor shape as hide + the row's current
+  // assignee so the modal can show "Current" next to that name and offer
+  // a "Reset to original" affordance.
+  const [reassignModalTask, setReassignModalTask] = useState(null);
+  // Bulk variants of the same modals — populated when the user clicks a
+  // bulk-bar button on SourceTable. ReassignTaskModal /
+  // CreateHideTaskRequestModal both accept a `tasks` array and submit one
+  // POST per task; partial failures surface inline rather than aborting
+  // the whole batch.
+  const [bulkReassignTasks, setBulkReassignTasks] = useState(null);
+  const [bulkHideTasks, setBulkHideTasks] = useState(null);
+  // Build a uniform task descriptor from a normalized SourceTable row, so
+  // the bulk modal sees the same shape the per-row modal has always seen.
+  const buildTaskDescriptor = useCallback((row, sourceKey) => ({
+    source: sourceKey,
+    id: String(row.id),
+    url: row.taskUrl || null,
+    subject: row.subject,
+    country: row.country,
+    assigneeEmail: row.assigneeEmail || null,
+    assigneeName: row.assignee || null,
+    hasOverride: !!row.reassignedFromEmail,
+  }), []);
   // Escalate-to-HR-Hub modal state. Same descriptor shape as hide. We
   // resolve the requester's direct manager (managerEmail in the roster)
   // and seed it as the assignee so the new HR Hub request lands on the
@@ -263,6 +289,11 @@ const Queue = ({ user, tasks, subFilter }) => {
 
   const isAdmin = isAdminUser(user);
   const isLead = perms?.dataScope === 'team_tasks';
+  // Reassign is gated to admin/regional_manager/team_lead — agents must
+  // route through their TL. Mirrors the role gate enforced server-side at
+  // /api/v1/queue/source-reassign so the button never appears for agents
+  // (otherwise the click would 403 from middleware).
+  const canReassign = perms?.dataScope && perms.dataScope !== 'own_tasks_only';
   const ns = (tasks || []).filter(t => t.source !== 'slack' && t.source !== 'calendar' && !isHiddenKey(t.source, t.id));
 
   // Emails the current viewer "owns" — their email + every teammate below
@@ -789,6 +820,9 @@ const Queue = ({ user, tasks, subFilter }) => {
             showClient
             onHide={(row) => setHideModalTask({ source: 'onboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'onboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onReassign={canReassign ? (row) => setReassignModalTask({ source: 'onboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country, assigneeEmail: row.assigneeEmail || null, assigneeName: row.assignee || null, hasOverride: !!row.reassignedFromEmail }) : null}
+            onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'onboarding')))}
+            onBulkReassign={canReassign ? (rows) => setBulkReassignTasks(rows.map(r => buildTaskDescriptor(r, 'onboarding'))) : null}
           />
         </ErrorBoundary>
       )}
@@ -810,6 +844,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             showType
             onHide={(row) => setHideModalTask({ source: 'offboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'offboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'offboarding')))}
             hideFilterBar
           />
         </ErrorBoundary>
@@ -834,6 +869,9 @@ const Queue = ({ user, tasks, subFilter }) => {
             dateLabel="Requested Date"
             onHide={(row) => setHideModalTask({ source: 'amendments', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'amendments', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onReassign={canReassign ? (row) => setReassignModalTask({ source: 'amendments', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country, assigneeEmail: row.assigneeEmail || null, assigneeName: row.assignee || null, hasOverride: !!row.reassignedFromEmail }) : null}
+            onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'amendments')))}
+            onBulkReassign={canReassign ? (rows) => setBulkReassignTasks(rows.map(r => buildTaskDescriptor(r, 'amendments'))) : null}
           />
         </ErrorBoundary>
       )}
@@ -857,6 +895,9 @@ const Queue = ({ user, tasks, subFilter }) => {
             dateLabel="Requested Date"
             onHide={(row) => setHideModalTask({ source: 'redlines', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'redlines', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onReassign={canReassign ? (row) => setReassignModalTask({ source: 'redlines', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country, assigneeEmail: row.assigneeEmail || null, assigneeName: row.assignee || null, hasOverride: !!row.reassignedFromEmail }) : null}
+            onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'redlines')))}
+            onBulkReassign={canReassign ? (rows) => setBulkReassignTasks(rows.map(r => buildTaskDescriptor(r, 'redlines'))) : null}
           />
         </ErrorBoundary>
       )}
@@ -880,6 +921,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             dateLabel="Created"
             onHide={(row) => setHideModalTask({ source: 'workbench', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'workbench', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'workbench')))}
           />
         </ErrorBoundary>
       )}
@@ -902,6 +944,9 @@ const Queue = ({ user, tasks, subFilter }) => {
             dateLabel="Requested Date"
             onHide={(row) => setHideModalTask({ source: 'incentive_plans', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'incentive_plans', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onReassign={canReassign ? (row) => setReassignModalTask({ source: 'incentive_plans', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country, assigneeEmail: row.assigneeEmail || null, assigneeName: row.assignee || null, hasOverride: !!row.reassignedFromEmail }) : null}
+            onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'incentive_plans')))}
+            onBulkReassign={canReassign ? (rows) => setBulkReassignTasks(rows.map(r => buildTaskDescriptor(r, 'incentive_plans'))) : null}
           />
         </ErrorBoundary>
       )}
@@ -1023,6 +1068,48 @@ const Queue = ({ user, tasks, subFilter }) => {
           prefill={escalatePrefill}
           onClose={() => setEscalateModalTask(null)}
           onCreated={() => setEscalateModalTask(null)}
+        />
+      )}
+
+      {/* Source-row reassign modal — only opens for the four queues whose
+          upstream source we cannot push assignments back to (Onboarding /
+          Amendments / Redlines / Incentive Plans). On success we trigger
+          syncRefreshAll so the row immediately moves to the new assignee's
+          chain and any "Mine vs Others" buckets recompute. */}
+      {reassignModalTask && (
+        <ReassignTaskModal
+          task={reassignModalTask}
+          onClose={() => setReassignModalTask(null)}
+          onReassigned={() => {
+            setReassignModalTask(null);
+            try { syncRefreshAll && syncRefreshAll(); } catch {}
+          }}
+        />
+      )}
+
+      {/* Bulk reassign — same modal in `tasks` (array) mode. One assignee
+          fans out to N reassignments via Promise.allSettled; partial
+          failures show inline. Refresh on close so the rows visually move
+          to the new owner without a manual refetch. */}
+      {bulkReassignTasks && bulkReassignTasks.length > 0 && (
+        <ReassignTaskModal
+          tasks={bulkReassignTasks}
+          onClose={() => setBulkReassignTasks(null)}
+          onReassigned={() => {
+            setBulkReassignTasks(null);
+            try { syncRefreshAll && syncRefreshAll(); } catch {}
+          }}
+        />
+      )}
+
+      {/* Bulk hide — same modal in `tasks` mode. The reason applies to
+          every task; each becomes a separate approval row so a manager
+          can deny one of a batch without rejecting the whole set. */}
+      {bulkHideTasks && bulkHideTasks.length > 0 && (
+        <CreateHideTaskRequestModal
+          tasks={bulkHideTasks}
+          onClose={() => setBulkHideTasks(null)}
+          onSubmitted={() => { try { hiddenTasks?.refresh?.(); } catch {} }}
         />
       )}
     </div>
