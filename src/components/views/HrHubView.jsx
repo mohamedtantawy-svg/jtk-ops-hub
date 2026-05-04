@@ -224,6 +224,10 @@ export default function HrHubView({ user, onCreateHrHub }) {
   }, [flowQuery, scope, debouncedSearch]);
 
   // Scope counts run once per flow change — three small queries.
+  // 2026-05-04: counts exclude resolved per the user spec ("if it's
+  // resolved, then it's out of counting"). The badge on each scope pill
+  // should reflect "things still pending action", not the historical
+  // total. Same rule applied across Urgent Assist + Leaders Hub.
   useEffect(() => {
     let cancelled = false;
     const scopes = isManager ? ['mine', 'team', 'all'] : ['mine', 'all'];
@@ -233,7 +237,8 @@ export default function HrHubView({ user, onCreateHrHub }) {
         try {
           const r = await listHrHubRequests({ flow: flowQuery, scope: sc, limit: 100 });
           if (cancelled) return;
-          out[sc] = (r?.items || []).length;
+          const items = r?.items || [];
+          out[sc] = items.filter(i => i.status !== 'resolved').length;
         } catch { /* swallow */ }
       }
       if (!cancelled) setScopeCounts(out);

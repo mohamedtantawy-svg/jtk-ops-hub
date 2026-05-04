@@ -197,6 +197,35 @@ const LeaderAlertsView = ({ user, perms, refreshNonce = 0 }) => {
     return () => ac.abort();
   }, [scope, severityFilter, categoryFilter, search, refreshTick, refreshNonce]);
 
+  // Per-scope active counts (My / All) — small badges on each scope pill.
+  // Active = NOT resolved (per the 2026-05-04 spec). Re-uses the same
+  // listLeaderAlerts endpoint with status filters that match the
+  // non-resolved set; sums across the three buckets so the count
+  // reflects "things still pending action".
+  const [scopeCounts, setScopeCounts] = useState({ mine: null, all: null });
+  useEffect(() => {
+    const ac = new AbortController();
+    const NON_RESOLVED = ['new', 'in_progress', 'on_hold'];
+    const scopes = SCOPES.map(s => s.id);   // ['all', 'mine']
+    (async () => {
+      const next = {};
+      for (const sc of scopes) {
+        try {
+          const results = await Promise.all(NON_RESOLVED.map(st =>
+            listLeaderAlerts({ scope: sc, status: st, limit: 50, signal: ac.signal })
+              .then(r => Array.isArray(r?.alerts) ? r.alerts.length : 0)
+              .catch(() => 0)
+          ));
+          if (ac.signal.aborted) return;
+          next[sc] = results.reduce((acc, n) => acc + n, 0);
+        } catch { /* swallow */ }
+      }
+      if (ac.signal.aborted) return;
+      setScopeCounts({ mine: next.mine ?? 0, all: next.all ?? 0 });
+    })();
+    return () => ac.abort();
+  }, [refreshTick, refreshNonce]);
+
   // Local sort — backend always returns newest-first; we resort client-side
   // for the secondary sort options.
   const sortedAlerts = useMemo(() => {
@@ -274,6 +303,7 @@ const LeaderAlertsView = ({ user, perms, refreshNonce = 0 }) => {
         }}>
           {SCOPES.map(s => {
             const active = scope === s.id;
+            const cnt = scopeCounts[s.id];
             return (
               <button
                 key={s.id}
@@ -287,9 +317,22 @@ const LeaderAlertsView = ({ user, perms, refreshNonce = 0 }) => {
                   cursor: 'pointer',
                   boxShadow: active ? 'var(--shadow-sm)' : 'none',
                   transition: 'all .12s',
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
                 }}
               >
                 {s.label}
+                {typeof cnt === 'number' && (
+                  <span
+                    aria-label={`${cnt} active`}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      minWidth: 18, height: 18, padding: '0 6px', borderRadius: 999,
+                      fontSize: 10, fontWeight: 700,
+                      background: active ? 'var(--surface-2)' : 'var(--surface-3)',
+                      color: active ? 'var(--text)' : 'var(--text-secondary)',
+                    }}
+                  >{cnt}</span>
+                )}
               </button>
             );
           })}
