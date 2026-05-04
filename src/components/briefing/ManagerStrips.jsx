@@ -17,13 +17,9 @@
 // CountriesCell) are also exported here — BriefingView's team table reuses
 // them so the Briefing rows match the Team-tab look-and-feel exactly.
 
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { TOOLS } from '../../data/constants';
 import { slaInfo } from '../../utils/helpers';
-import {
-  normalizeOnboarding, normalizePausedOnboarding, normalizeOffboarding,
-  normalizeAmendments, normalizeRedlines, normalizeWorkbench, normalizeIncentivePlans,
-} from '../../utils/normalizeSourceRows';
 import MultiCountryPicker from '../team/MultiCountryPicker';
 
 // ── Pure helpers (mirrored from Team.jsx so the look matches) ──────────────
@@ -81,88 +77,46 @@ function ticketSeverity(t) {
   return 'ok';
 }
 
-// ── Build the manager's queue from IntegrationsContext data ──────────────
-//
-// `scopeEmails` is the lowercased email set the manager owns (own + reports).
-// Admins get all rows (skip the team filter).
-function useManagerQueue({ queueUnified, hiddenTasks, queueSla, tasks, scopeEmails, isAdmin }) {
-  const isHidden = useCallback((source, id) => {
-    if (!source || !id) return false;
-    return !!(hiddenTasks?.hiddenKeys?.has(`${String(source).toLowerCase()}:${String(id)}`));
-  }, [hiddenTasks?.hiddenKeys]);
-
-  const onb = queueUnified?.onboardingData || { items: [] };
-  const pob = queueUnified?.pausedOnboardingData || { items: [] };
-  const off = queueUnified?.offboardingData || { items: [] };
-  const cr = queueUnified?.changeRequestData || { amendments: [], redlines: [] };
-  const wb = queueUnified?.workbenchData || { tasks: [] };
-  const ip = queueUnified?.incentivePlansData || { items: [] };
-
-  const sourceRows = useMemo(() => {
-    const a = normalizeOnboarding(onb.items, queueSla).filter(r => !isHidden('onboarding', r.id));
-    const b = normalizePausedOnboarding(pob.items, queueSla).filter(r => !isHidden('paused_onboarding', r.id) && !isHidden('onboarding', r.id));
-    const c = normalizeOffboarding(off.items, queueSla).filter(r => !isHidden('offboarding', r.id));
-    const d = normalizeAmendments(cr.amendments, queueSla).filter(r => !isHidden('amendments', r.id));
-    const e = normalizeRedlines(cr.redlines, queueSla).filter(r => !isHidden('redlines', r.id));
-    const f = normalizeWorkbench(wb.tasks, queueSla).filter(r => !isHidden('workbench', r.id));
-    const g = normalizeIncentivePlans(ip.items, queueSla).filter(r => !isHidden('incentive_plans', r.id));
-    return [...a, ...b, ...c, ...d, ...e, ...f, ...g];
-  }, [onb.items, pob.items, off.items, cr.amendments, cr.redlines, wb.tasks, ip.items, queueSla, isHidden]);
-
-  const ticketRows = useMemo(() => (tasks || [])
-    .filter(t => t.source === 'zendesk' || t.source === 'jira')
-    .filter(t => !isHidden(t.source, t.id))
-    .filter(t => t.status !== 'resolved'),
-  [tasks, isHidden]);
-
-  const teamSourceRows = useMemo(() => {
-    if (isAdmin) return sourceRows;
-    return sourceRows.filter(r => {
-      const ae = (r.assigneeEmail || '').toLowerCase();
-      return ae && scopeEmails.has(ae);
-    });
-  }, [sourceRows, scopeEmails, isAdmin]);
-
-  const teamTickets = useMemo(() => {
-    if (isAdmin) return ticketRows;
-    return ticketRows.filter(t => {
-      const ae = (t.assigneeEmail || '').toLowerCase();
-      return ae && scopeEmails.has(ae);
-    });
-  }, [ticketRows, scopeEmails, isAdmin]);
-
-  return { teamSourceRows, teamTickets };
-}
-
 // ── TriageStrip ──────────────────────────────────────────────────────────
+//
+// Renders breach / risk / pause / synth counts off rows that BriefingView
+// has ALREADY scoped via the canonical scopeOnboarding / scopeOffboarding /
+// scopeAmendmentRequests / scopeRedlineRequests / scopeWorkbenchTasks /
+// scopeIncentivePlans (country-OR-assignee for Deel feeds, assignee-only
+// for ZD/Jira/Workbench). Re-scoping here would diverge from the Workspace
+// view — and a previous draft did exactly that, under-counting rows that
+// were country-visible but assigned outside the manager's subtree.
+// Tickets come from the manager's `scope` (already filtered ZD/Jira/WB by
+// scopeTicketsByAssignee in BriefingView).
+//
+// Props
+//   sourceRows : Array  — concatenation of every scoped Deel-feed row set
+//   tickets    : Array  — scoped ZD/Jira tickets (status !== 'resolved')
+//   onNavigate : (view) => void
 
-export function TriageStrip({ queueUnified, hiddenTasks, queueSla, tasks, scopeEmails, isAdmin, onNavigate }) {
-  const { teamSourceRows, teamTickets } = useManagerQueue({
-    queueUnified, hiddenTasks, queueSla, tasks, scopeEmails, isAdmin,
-  });
-
+export function TriageStrip({ sourceRows = [], tickets = [], onNavigate }) {
   const tally = useMemo(() => {
     let breached = 0, atRisk = 0, paused = 0, synth = 0;
-    const breakdown = (key) => ({ breached: 0, atRisk: 0 }[key] === undefined ? null : null);
     const breachedBy = {}, atRiskBy = {};
     const bump = (m, k) => { m[k] = (m[k] || 0) + 1; };
-    for (const r of teamSourceRows) {
+    for (const r of sourceRows) {
       const sev = rowSlaSeverity(r);
       if (sev === 'breached') { breached++; bump(breachedBy, r.source); }
       else if (sev === 'at_risk') { atRisk++; bump(atRiskBy, r.source); }
       if (r.isPaused) paused++;
       if (r.assigneeIsSynthetic) synth++;
     }
-    for (const t of teamTickets) {
+    for (const t of tickets) {
       const sev = ticketSeverity(t);
       if (sev === 'breached') { breached++; bump(breachedBy, t.source); }
       else if (sev === 'at_risk') { atRisk++; bump(atRiskBy, t.source); }
       if (t.status === 'waiting') paused++;
+      // ZD/Jira: a ticket with no assignee is a true "no real owner"
+      // signal (the synth-fallback only exists on Deel feeds).
       if (!t.assigneeEmail) synth++;
     }
-    void breakdown;
     return { breached, atRisk, paused, synth, breachedBy, atRiskBy };
-  }, [teamSourceRows, teamTickets]);
+  }, [sourceRows, tickets]);
 
   const tile = (props) => (
     <button
@@ -239,18 +193,51 @@ export function DecisionsStrip({ onNavigate }) {
       catch { return null; }
     };
     (async () => {
-      const [approvals, alerts, urgent, hr] = await Promise.all([
-        safe('/api/v1/hr-hub/requests?flow=hide_task_request&status=pending'),
+      // Count semantics (each tile answers "what's waiting on me?"):
+      //
+      //   • approvalsCount  — HR-Hub requests of flow=hide_task_request that
+      //                       are still in `new` (not yet resolved) AND were
+      //                       created by someone in my reports chain. The
+      //                       endpoint maps `?scope=team` to the caller's
+      //                       full subtree (admin/RM = getAllReports, TL =
+      //                       direct reports).
+      //   • leaderAlerts    — sidebar-badge unacked count, server filters by
+      //                       severity threshold + caller's ack rows.
+      //   • urgentAssist    — open Urgent-Assist where someone in my subtree
+      //                       is the assignee. Endpoint takes a single
+      //                       status; we make 3 parallel calls and sum.
+      //   • hrHubPending    — broader "open HR Hub items in my team" across
+      //                       every flow (NOT scoped to hide_task only).
+      //                       Some overlap with approvalsCount is expected.
+      const [
+        approvals,
+        alerts,
+        urgentNew, urgentInProg, urgentOnHold,
+        hrNew, hrInProg, hrOnHold,
+      ] = await Promise.all([
+        safe('/api/v1/hr-hub/requests?flow=hide_task_request&status=new&scope=team&limit=100'),
         safe('/api/v1/leader-alerts/unacked-count'),
-        safe('/api/v1/urgent-assist'),
-        safe('/api/v1/hr-hub/requests?status=pending'),
+        safe('/api/v1/urgent-assist?scope=team&status=new&limit=200'),
+        safe('/api/v1/urgent-assist?scope=team&status=in_progress&limit=200'),
+        safe('/api/v1/urgent-assist?scope=team&status=on_hold&limit=200'),
+        safe('/api/v1/hr-hub/requests?status=new&scope=team&limit=100'),
+        safe('/api/v1/hr-hub/requests?status=in_progress&scope=team&limit=100'),
+        safe('/api/v1/hr-hub/requests?status=on_hold&scope=team&limit=100'),
       ]);
       if (cancelled) return;
-      const lenOf = (j) => Array.isArray(j?.items) ? j.items.length : (j?.total ?? 0);
+      const lenOf = (j) => Array.isArray(j?.items) ? j.items.length : 0;
       if (approvals) setApprovalsCount(lenOf(approvals));
-      if (alerts) setLeaderAlerts(alerts?.count ?? alerts?.total ?? 0);
-      if (urgent) setUrgentAssist(lenOf(urgent));
-      if (hr) setHrHubPending(lenOf(hr));
+      if (alerts) setLeaderAlerts(alerts?.count ?? 0);
+      // Sum the three open buckets — endpoint paginates beyond ~200 but
+      // 200/bucket × 3 = 600 ceiling is comfortably above every team.
+      const urgentSum = (urgentNew || urgentInProg || urgentOnHold)
+        ? lenOf(urgentNew) + lenOf(urgentInProg) + lenOf(urgentOnHold)
+        : null;
+      if (urgentSum != null) setUrgentAssist(urgentSum);
+      const hrSum = (hrNew || hrInProg || hrOnHold)
+        ? lenOf(hrNew) + lenOf(hrInProg) + lenOf(hrOnHold)
+        : null;
+      if (hrSum != null) setHrHubPending(hrSum);
     })();
     return () => { cancelled = true; };
   }, []);

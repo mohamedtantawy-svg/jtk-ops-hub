@@ -1564,18 +1564,23 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
         {/* ── MAIN CONTENT ────────────────────────────────────────────────── */}
         <div style={{padding:'12px 24px 20px'}}>
 
-          {/* ── TRIAGE STRIP — what's on fire across my team's queue ────── */}
-          {/* 4 KPI tiles: Breached / At-Risk / Paused / Synth-only.       */}
-          {/* Sits ABOVE Team Summary so a manager sees "team status" first */}
-          {/* and then drills into the per-member roster underneath.        */}
+          {/* ── TRIAGE STRIP — what's on fire across my team's queue ──────
+              4 KPI tiles: Breached / At-Risk / Paused / No-real-owner.
+              Reads pre-scoped row sets (onboarding…incentivePlanRows already
+              run scopeOnboarding etc., and `scope` is already filterByAssignee
+              on ZD/Jira). Counts therefore agree with what the manager sees
+              in Workspace, including country-OR-assignee visibility.        */}
           {isManager && (
             <TriageStrip
-              queueUnified={queueUnified}
-              hiddenTasks={hiddenTasks}
-              queueSla={queueSla}
-              tasks={tasks}
-              scopeEmails={new Set((scopeMembers || []).map(m => (m?.email || '').toLowerCase()).filter(Boolean))}
-              isAdmin={isAllScope}
+              sourceRows={[
+                ...onboardingRows,
+                ...offboardingRows,
+                ...amendmentRows,
+                ...redlineRows,
+                ...workbenchRows,
+                ...incentivePlanRows,
+              ]}
+              tickets={scope}
               onNavigate={(v) => setView(v)}
             />
           )}
