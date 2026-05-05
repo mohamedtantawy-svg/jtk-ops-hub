@@ -104,6 +104,7 @@ import Slack from './components/views/Slack';
 import Alerts from './components/views/Alerts';
 import FeedbackView from './components/views/FeedbackView';
 import HrHubView from './components/views/HrHubView';
+import NotificationsView from './components/views/NotificationsView';
 import LeaderAlertsView from './components/views/LeaderAlertsView';
 import LeadersHubView from './components/views/LeadersHubView';
 import UrgentAssistView from './components/views/UrgentAssistView';
@@ -1429,6 +1430,7 @@ const App=()=>{
       <DeelTopNav
         view={view} setView={setView} user={effectiveUser} setUser={setUser}
         onSearch={()=>setShowSearch(true)} notifs={mergedNotifs} markAllRead={markAllRead} markRead={(serverId)=>serverNotifs.markRead(serverId)} onNotifClick={handleNotifClick}
+        onViewAllNotifications={()=>setView('notifications')}
         onLogout={handleLogout}
         onCreateAnnouncement={()=>{setView('announcements');setAnnounceCompose(true);}}
         onCreateFeedback={()=>{setView('feedback');setFeedbackCompose(true);}}
@@ -1453,6 +1455,7 @@ const App=()=>{
           {view==='alerts'        &&perms?.canView('alerts')!==false       &&<div className="page-enter"><Alerts tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setTasks={setTasks}/></div>}
           {view==='feedback'      &&perms?.canView('feedback')!==false     &&<div className="page-enter"><FeedbackView user={effectiveUser} addToast={addToast} openCompose={feedbackCompose} onComposeOpened={()=>setFeedbackCompose(false)}/></div>}
           {view==='hr-hub'        &&perms?.canView('hr-hub')!==false       &&<div className="page-enter"><HrHubView user={effectiveUser} onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}/></div>}
+          {view==='notifications' &&<div className="page-enter"><NotificationsView notifs={mergedNotifs} unreadCount={mergedNotifs.filter(n=>!n.read).length} markAllRead={markAllRead} markRead={(serverId)=>serverNotifs.markRead(serverId)} onNotifClick={handleNotifClick}/></div>}
           {view==='urgent-assist' &&perms?.canView('urgent-assist')!==false&&<div className="page-enter" key={urgentAssistRefreshNonce}><UrgentAssistView user={effectiveUser} onCreate={()=>setUrgentAssistCreate(true)}/></div>}
           {/* Leaders Hub — wraps the alerts view + the team admin surface
               behind a single sub-toggle. Default sub-tab is alerts. The
