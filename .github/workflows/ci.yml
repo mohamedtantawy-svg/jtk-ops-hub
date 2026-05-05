@@ -88,4 +88,21 @@ jobs:
           git config user.email "deployer@users.noreply.github.com"
           git add values.yaml
           git diff --cached --quiet || git commit -m "[skip ci]: update image tag to ${{ needs.build.outputs.image_tag }}"
-          git push
+          # Rebase-on-push to handle the race where another commit lands on
+          # main between the workflow's checkout and this push (e.g. two
+          # deploys overlapping, or a values.yaml hotfix landing mid-build).
+          # Without this the second push is rejected as non-fast-forward and
+          # the deploy fails after a successful image build.
+          # Retry up to 3 times in case the same race repeats during the
+          # rebase window — beyond that, fail loud so the operator notices.
+          for attempt in 1 2 3; do
+            if git push; then
+              break
+            fi
+            if [ "$attempt" = "3" ]; then
+              echo "::error::Push to main rejected after 3 rebase attempts — manual intervention needed"
+              exit 1
+            fi
+            echo "Push rejected (non-fast-forward), rebasing on origin/main and retrying ($attempt/3)…"
+            git pull --rebase origin main
+          done
