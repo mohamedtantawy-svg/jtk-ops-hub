@@ -63,16 +63,18 @@ const CREATE_ACTIONS = [
   { icon: 'bi-exclamation-octagon', label: 'New Urgent Assist', action: 'urgent-assist', desc: 'Log a manual urgent-assist request' },
   { icon: 'bi-lightbulb',         label: 'Ops Hub Feedback',  action: 'feedback',      desc: 'Report a bug or improvement' },
   { icon: 'bi-megaphone',         label: 'New Announcement',  action: 'announcement',  desc: 'Post to the team' },
+  { icon: 'bi-tags',               label: 'New Tag Group',     action: 'mention-group', desc: 'Slack-style @-handle that pings a group at once' },
 ];
 
 const DeelTopNav = ({
   view, setView, user,
-  onSearch, notifs, markAllRead, markRead, onNotifClick,
+  onSearch, notifs, markAllRead, markRead, onNotifClick, onViewAllNotifications,
   onLogout,
   onCreateAnnouncement, onCreateFeedback,
   onCreateHrHub,
   onCreateLeaderAlert,
   onCreateUrgentAssist,
+  onManageMentionGroups,
   leaderAlertsBadge = 0,
   urgentAssistBadge = 0,
   setSelTask, tasks,
@@ -122,6 +124,7 @@ const DeelTopNav = ({
     else if (action === 'hr-hub')     { onCreateHrHub?.(); }
     else if (action === 'leader-alerts') { onCreateLeaderAlert?.(); }
     else if (action === 'urgent-assist') { onCreateUrgentAssist?.(); }
+    else if (action === 'mention-group') { onManageMentionGroups?.(); }
   };
 
   const unread = notifs ? notifs.filter(n => !n.read).length : 0;
@@ -299,6 +302,7 @@ const DeelTopNav = ({
               onClose={() => setShowNotifs(false)}
               markAllRead={markAllRead}
               markRead={markRead}
+              onViewAll={onViewAllNotifications}
               onNotifClick={(group) => {
                 // The panel passes a *group* (collection of related notifications
                 // for the same task). Route via the App-level handler when one is

@@ -17,6 +17,7 @@ import {
   writeLog,
   writeNotifications,
 } from '../../../../../../../src/lib/hr-hub-helpers';
+import { loadGroupsByHandle } from '../../../../../../../src/lib/mention-groups';
 
 const MAX_BODY_BYTES = 20000;
 const MAX_ATTACHMENTS = 5;
@@ -129,7 +130,11 @@ export async function POST(req, { params }) {
 
   const callerEmail = String(user.email).toLowerCase();
   const callerName = user.name || memberByEmail(callerEmail)?.name || callerEmail;
-  const mentionEmails = parseMentions(text);
+  // Load group handles once per POST so `@hrxtools` expands to every
+  // member email and they all become followers + get notified, exactly
+  // as if the author had typed each member individually.
+  const groupsByHandle = await loadGroupsByHandle();
+  const mentionEmails = parseMentions(text, groupsByHandle);
 
   const insert = await query(
     `INSERT INTO hr_hub_comment

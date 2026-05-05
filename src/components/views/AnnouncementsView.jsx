@@ -5,6 +5,7 @@ import { MEMBERS } from '../../data/members';
 import { scopeAckMembers } from '../../utils/permissions';
 import { renderRichText } from '../../utils/renderRichText';
 import Avatar from '../ui/Avatar';
+import AnnouncementMedia from '../ui/AnnouncementMedia';
 import EmptyState from '../ui/EmptyState';
 import ComposeModal from '../modals/ComposeModal';
 import AnnouncementPopup from '../modals/AnnouncementPopup';
@@ -929,7 +930,7 @@ function WalkthroughOverlay({ comm, remaining, onAcknowledge, onSkip, onExit, on
             </div>
             {comm.imageUrl && (
               <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid #e8e8e8', marginBottom: 16, background: '#fafaf9', textAlign: 'center' }}>
-                <img src={comm.imageUrl} alt="" style={{ maxWidth: '100%', maxHeight: 400, objectFit: 'contain', display: 'block', margin: '0 auto' }} />
+                <AnnouncementMedia src={comm.imageUrl} style={{ maxWidth: '100%', maxHeight: 400, objectFit: 'contain', display: 'block', margin: '0 auto' }} />
               </div>
             )}
             {comm.body && (
@@ -1287,7 +1288,7 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
         <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
           {comm.imageUrl && (
             <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid #e8e8e8', marginBottom: 16, background: '#fafaf9', textAlign: 'center' }}>
-              <img src={comm.imageUrl} alt="" style={{ maxWidth: '100%', maxHeight: 320, objectFit: 'contain', display: 'block', margin: '0 auto' }} />
+              <AnnouncementMedia src={comm.imageUrl} style={{ maxWidth: '100%', maxHeight: 320, objectFit: 'contain', display: 'block', margin: '0 auto' }} />
             </div>
           )}
           {comm.body && (

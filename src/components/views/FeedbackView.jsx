@@ -17,6 +17,7 @@ import { MEMBERS, MEMBERS_BY_EMAIL } from '../../data/members';
 import { useFeedback } from '../../hooks/useFeedback';
 import Avatar from '../ui/Avatar';
 import EmptyState from '../ui/EmptyState';
+import ImageLightbox from '../ui/ImageLightbox';
 import CreateFeedbackModal from '../modals/CreateFeedbackModal';
 
 // ── Visual config ──────────────────────────────────────────────────────
@@ -714,6 +715,7 @@ function FeedbackRow({ item, expanded, onToggle, onVote, onStatusChange, onPrior
 
 // ── Expanded detail (description, screenshot full-size, status changer) ──
 function ExpandedDetail({ item, isPriv, onStatusChange, onPriorityChange, onAssigneeChange }) {
+  const [lightbox, setLightbox] = useState(null);
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 240px', gap: 16 }}>
       {/* Left: long-form text + screenshot */}
@@ -755,10 +757,15 @@ function ExpandedDetail({ item, isPriv, onStatusChange, onPriorityChange, onAssi
                       <video src={a.dataUri} controls preload="metadata"
                         style={{ display: 'block', width: '100%', maxHeight: 320, borderRadius: 10, border: '1px solid var(--border)', background: '#000' }} />
                     ) : (
-                      <a href={a.dataUri} target="_blank" rel="noopener noreferrer" style={{ display: 'block' }}>
+                      <button
+                        type="button"
+                        onClick={() => setLightbox({ src: a.dataUri, name: a.name || `Attachment ${idx + 1}` })}
+                        title="Open"
+                        style={{ display: 'block', width: '100%', padding: 0, border: 'none', background: 'transparent', cursor: 'zoom-in' }}
+                      >
                         <img src={a.dataUri} alt={a.name || `Attachment ${idx + 1}`}
                           style={{ display: 'block', width: '100%', maxHeight: 320, objectFit: 'contain', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface-2)' }} />
-                      </a>
+                      </button>
                     )}
                     {a.name && (
                       <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</div>
@@ -826,6 +833,11 @@ function ExpandedDetail({ item, isPriv, onStatusChange, onPriorityChange, onAssi
           <span style={{ fontSize: 12, color: 'var(--text)' }}>{item.upvotes}↑  {item.downvotes}↓</span>
         </ActionRow>
       </aside>
+      <ImageLightbox
+        src={lightbox?.src}
+        name={lightbox?.name}
+        onClose={() => setLightbox(null)}
+      />
     </div>
   );
 }

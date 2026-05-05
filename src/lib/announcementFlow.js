@@ -109,7 +109,15 @@ export function normalizePayload(raw) {
     target,
     priority: (raw?.priority || 'medium').toString(),
     isPopup: Boolean(raw?.isPopup),
-    imageUrl: raw?.imageUrl ? String(raw.imageUrl).slice(0, 2000) : null,
+    // Media URL holds either an http(s) link (~bytes) or an inline data URI
+    // for an image/video (typically 100KB–10MB after FE compression). The
+    // 2000-char slice that lived here truncated every data URI to its
+    // first 2KB, leaving every uploaded image as a corrupt header that
+    // the browser silently dropped — that was the "image cut out once
+    // sent" bug. 15MB is a defensive cap (ingress already limits the
+    // request body well below this); the image_url column is TEXT in
+    // Postgres so the column itself has no length ceiling.
+    imageUrl: raw?.imageUrl ? String(raw.imageUrl).slice(0, 15 * 1024 * 1024) : null,
     link: raw?.link ? String(raw.link).slice(0, 2000) : null,
     soundKey: (raw?.soundKey || 'chime').toString().slice(0, 32),
   };

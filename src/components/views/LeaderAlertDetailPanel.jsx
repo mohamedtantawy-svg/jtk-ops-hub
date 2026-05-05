@@ -15,6 +15,7 @@ import {
 import { MEMBERS } from '../../data/members';
 import { FLAGS, getCountryName } from '../../data/constants';
 import LeaderAlertCommentsThread from './LeaderAlertCommentsThread';
+import ImageLightbox from '../ui/ImageLightbox';
 
 // ── Constants (mirror LeaderAlertsView) ───────────────────────────────────
 
@@ -93,6 +94,7 @@ const LeaderAlertDetailPanel = ({
   const [error, setError]     = useState(null);
   const [busy, setBusy]       = useState(false);         // ack/patch in flight
   const [showLog, setShowLog] = useState(false);
+  const [lightbox, setLightbox] = useState(null);
   const [showAcks, setShowAcks] = useState(false);
 
   const fetchTickRef = useRef(0);
@@ -412,24 +414,26 @@ const LeaderAlertDetailPanel = ({
                   <SectionLabel>Attachments</SectionLabel>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
                     {alert.attachments.map((a, i) => (
-                      <a
-                        key={i}
-                        href={a.dataUri}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{ display: 'block' }}
-                      >
-                        {a.kind === 'image'
-                          ? <img src={a.dataUri} alt={a.name || ''} style={{ maxWidth: 200, maxHeight: 140, borderRadius: 10, border: '1px solid var(--border)' }} />
-                          : <div style={{
-                              padding: '10px 14px', borderRadius: 10,
-                              background: 'var(--surface-2)', border: '1px solid var(--border)',
-                              fontSize: 12, color: 'var(--text-secondary)',
-                            }}>
-                              <i className="bi-camera-video" style={{ marginRight: 6 }} />
-                              {a.name || 'Video'}
-                            </div>}
-                      </a>
+                      a.kind === 'image' ? (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => setLightbox({ src: a.dataUri, name: a.name })}
+                          title="Open"
+                          style={{ display: 'block', padding: 0, border: 'none', background: 'transparent', cursor: 'zoom-in' }}
+                        >
+                          <img src={a.dataUri} alt={a.name || ''} style={{ display: 'block', maxWidth: 200, maxHeight: 140, borderRadius: 10, border: '1px solid var(--border)' }} />
+                        </button>
+                      ) : (
+                        <div key={i} style={{
+                          padding: '10px 14px', borderRadius: 10,
+                          background: 'var(--surface-2)', border: '1px solid var(--border)',
+                          fontSize: 12, color: 'var(--text-secondary)',
+                        }}>
+                          <i className="bi-camera-video" style={{ marginRight: 6 }} />
+                          {a.name || 'Video'}
+                        </div>
+                      )
                     ))}
                   </div>
                 </div>
@@ -509,6 +513,11 @@ const LeaderAlertDetailPanel = ({
           onClose={() => setShowAcks(false)}
         />
       )}
+      <ImageLightbox
+        src={lightbox?.src}
+        name={lightbox?.name}
+        onClose={() => setLightbox(null)}
+      />
     </div>
   );
 };

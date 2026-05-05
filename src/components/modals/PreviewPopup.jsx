@@ -1,5 +1,6 @@
 import { COMMS_TYPES } from '../../data/comms';
 import { renderRichText } from '../../utils/renderRichText';
+import AnnouncementMedia from '../ui/AnnouncementMedia';
 
 const PreviewPopup = ({ draft, onClose, onConfirmSend }) => {
   const typeInfo = COMMS_TYPES[draft.type] || COMMS_TYPES.announce;
@@ -135,10 +136,10 @@ const PreviewPopup = ({ draft, onClose, onConfirmSend }) => {
                 {renderBody(draft.body)}
               </div>
 
-              {/* Image */}
+              {/* Media (image or video) */}
               {draft.imageUrl && (
                 <div style={{ marginBottom: 16 }}>
-                  <img
+                  <AnnouncementMedia
                     src={draft.imageUrl}
                     alt="Attachment"
                     style={{ width: '100%', borderRadius: 8, border: '1px solid #e8e8e8', maxHeight: 240, objectFit: 'cover' }}

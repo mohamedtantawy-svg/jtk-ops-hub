@@ -104,10 +104,12 @@ import Slack from './components/views/Slack';
 import Alerts from './components/views/Alerts';
 import FeedbackView from './components/views/FeedbackView';
 import HrHubView from './components/views/HrHubView';
+import NotificationsView from './components/views/NotificationsView';
 import LeaderAlertsView from './components/views/LeaderAlertsView';
 import LeadersHubView from './components/views/LeadersHubView';
 import UrgentAssistView from './components/views/UrgentAssistView';
 import CreateHrHubRequestModal from './components/modals/CreateHrHubRequestModal';
+import ManageMentionGroupsModal from './components/modals/ManageMentionGroupsModal';
 import CreateLeaderAlertModal from './components/modals/CreateLeaderAlertModal';
 import CreateUrgentAssistModal from './components/modals/CreateUrgentAssistModal';
 import { getLeaderAlertsUnackedCount } from './services/leaderAlertsApi';
@@ -701,6 +703,7 @@ const App=()=>{
   // (initialFlow=null) lets the user choose; deep-links from queue rows
   // (Stage 7) will preselect a flow.
   const [hrHubCreate,setHrHubCreate]=useState(null);
+  const [mentionGroupsOpen,setMentionGroupsOpen]=useState(false);
   const [leaderAlertCreate,setLeaderAlertCreate]=useState(false);
   // Urgent Assist create modal — boolean toggle. When true the modal is
   // open; the form posts directly to /api/v1/urgent-assist and bumps the
@@ -863,15 +866,24 @@ const App=()=>{
         }, 60);
       } else if (n.linkView === 'hr_hub' && n.linkId) {
         // HR Hub deep-link: route to the HR Hub view and open the detail
-        // drawer for this request id. The view reads ?req=<uuid> from the
-        // URL on mount, so set it before flipping the view to keep the
-        // drawer open across navigations.
+        // drawer for this request id. URL is updated for share/F5 deep-link
+        // restore; the openDetail event covers the case where the user is
+        // already on hr-hub (setView is a no-op then, so HrHubView wouldn't
+        // re-read the URL on its own).
         try {
           const url = new URL(window.location.href);
           url.searchParams.set('req', n.linkId);
           window.history.replaceState({}, '', url.toString());
         } catch {}
         setView('hr-hub');
+        const detail = {
+          id: n.linkId,
+          commentId: (n.sourceType || '').endsWith('comment') ? n.sourceId : null,
+        };
+        setTimeout(() => {
+          try { window.dispatchEvent(new CustomEvent('hr-hub:openDetail', { detail })); }
+          catch {}
+        }, 60);
       } else if ((n.linkView === 'leader-alerts' || n.linkView === 'leader_alerts') && n.linkId) {
         // Leaders Hub deep-link: flip the view + dispatch an open event
         // that LeaderAlertsView listens for to slide the detail panel in
@@ -980,6 +992,19 @@ const App=()=>{
     if (!perms || typeof perms.canView !== 'function') return;
     if (perms.canView(view) === false) setView('briefing');
   }, [view, perms]);
+
+  // Agents land on the dedicated AgentHome — not the manager-style
+  // BriefingView. Catches every path that ends up at 'briefing' (Home
+  // tab click, ?view=briefing deep-link, programmatic setView from
+  // another component) and canonicalises the URL via the existing
+  // ?view= mirror so F5 returns the same surface. The render-site
+  // guard on the BriefingView line below blocks the one-frame paint
+  // before this effect commits. agent-home is open in
+  // accessControl.js so canView passes for the agent tier.
+  React.useEffect(() => {
+    const access = String(effectiveUser?.access || '').toLowerCase();
+    if (access === 'agent' && view === 'briefing') setView('agent-home');
+  }, [effectiveUser?.access, view]);
 
   // ── Live integrations (Deel, Jira, Slack) ─────────────────────────────────
   const integrations = useIntegrations();
@@ -1420,12 +1445,14 @@ const App=()=>{
       <DeelTopNav
         view={view} setView={setView} user={effectiveUser} setUser={setUser}
         onSearch={()=>setShowSearch(true)} notifs={mergedNotifs} markAllRead={markAllRead} markRead={(serverId)=>serverNotifs.markRead(serverId)} onNotifClick={handleNotifClick}
+        onViewAllNotifications={()=>setView('notifications')}
         onLogout={handleLogout}
         onCreateAnnouncement={()=>{setView('announcements');setAnnounceCompose(true);}}
         onCreateFeedback={()=>{setView('feedback');setFeedbackCompose(true);}}
         onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}
         onCreateLeaderAlert={()=>setLeaderAlertCreate(true)}
         onCreateUrgentAssist={()=>setUrgentAssistCreate(true)}
+        onManageMentionGroups={()=>setMentionGroupsOpen(true)}
         leaderAlertsBadge={leaderAlertsBadge}
         urgentAssistBadge={urgentAssistBadge}
         setSelTask={()=>{}} tasks={tasks}
@@ -1433,7 +1460,7 @@ const App=()=>{
       <div style={{height:(impersonating?104:68)+(versionHasUpdate?44:0),flexShrink:0}}/>
       <DeelSubNav view={view} subFilter={subFilter} setSubFilter={setSubFilter} tasks={tasks} user={effectiveUser}/>
       <div className="deel-content" data-region="main-content" aria-label="Main content" style={{display:'flex',overflowX:'hidden',overflowY:'auto',position:'relative',flex:1}}>
-          {view==='briefing'      &&perms?.canView('briefing')!==false     &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={()=>{}} comms={comms} escalations={[]} setSubFilter={setSubFilter} requests={[]} projects={[]} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
+          {view==='briefing'      &&perms?.canView('briefing')!==false &&String(effectiveUser?.access||'').toLowerCase()!=='agent' &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={()=>{}} comms={comms} escalations={[]} setSubFilter={setSubFilter} requests={[]} projects={[]} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
           {view==='lead-home' &&<div className="page-enter"><TeamLeadHome user={effectiveUser} tasks={tasks} setView={setView} managerOnCall={managerOnCall}/></div>}
           {view==='agent-home' &&<div className="page-enter"><AgentHome user={effectiveUser} tasks={tasks} setView={setView} comms={comms}/></div>}
           {view==='my-queue'      &&perms?.canView('my-queue')!==false     &&<div className="page-enter"><Queue user={effectiveUser} tasks={tasks} subFilter={subFilter}/></div>}
@@ -1444,6 +1471,7 @@ const App=()=>{
           {view==='alerts'        &&perms?.canView('alerts')!==false       &&<div className="page-enter"><Alerts tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setTasks={setTasks}/></div>}
           {view==='feedback'      &&perms?.canView('feedback')!==false     &&<div className="page-enter"><FeedbackView user={effectiveUser} addToast={addToast} openCompose={feedbackCompose} onComposeOpened={()=>setFeedbackCompose(false)}/></div>}
           {view==='hr-hub'        &&perms?.canView('hr-hub')!==false       &&<div className="page-enter"><HrHubView user={effectiveUser} onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}/></div>}
+          {view==='notifications' &&<div className="page-enter"><NotificationsView notifs={mergedNotifs} unreadCount={mergedNotifs.filter(n=>!n.read).length} markAllRead={markAllRead} markRead={(serverId)=>serverNotifs.markRead(serverId)} onNotifClick={handleNotifClick}/></div>}
           {view==='urgent-assist' &&perms?.canView('urgent-assist')!==false&&<div className="page-enter" key={urgentAssistRefreshNonce}><UrgentAssistView user={effectiveUser} onCreate={()=>setUrgentAssistCreate(true)}/></div>}
           {/* Leaders Hub — wraps the alerts view + the team admin surface
               behind a single sub-toggle. Default sub-tab is alerts. The
@@ -1462,6 +1490,7 @@ const App=()=>{
       </div>
       {createModal   &&<CreateTaskModal onConfirm={confirmCreate} onClose={()=>setCreateModal(false)} currentUser={effectiveUser}/>}
       {hrHubCreate   &&<CreateHrHubRequestModal initialFlow={hrHubCreate.initialFlow||null} onClose={()=>setHrHubCreate(null)} onCreated={(id,flow)=>{setHrHubCreate(null);setView('hr-hub');addToast?.({kind:'success',message:`Submitted to HR Hub${flow?` (${flow.replace('_',' ')})`:''}.`});}}/>}
+      {mentionGroupsOpen&&<ManageMentionGroupsModal onClose={()=>setMentionGroupsOpen(false)}/>}
       {leaderAlertCreate&&<CreateLeaderAlertModal onClose={()=>setLeaderAlertCreate(false)} onCreated={(alert)=>{setLeaderAlertCreate(false);setView('leader-alerts');setLeaderAlertsRefreshNonce(n=>n+1);addToast?.({kind:'success',message:`Posted${alert?.title?`: "${alert.title.slice(0,60)}${alert.title.length>60?'…':''}"`:' alert'}.`});}}/>}
       {urgentAssistCreate&&<CreateUrgentAssistModal currentUser={effectiveUser} onClose={()=>setUrgentAssistCreate(false)} onCreated={(row)=>{setUrgentAssistCreate(false);setView('urgent-assist');setUrgentAssistRefreshNonce(n=>n+1);addToast?.({kind:'success',message:`Urgent Assist created${row?.subject?`: "${row.subject.slice(0,60)}${row.subject.length>60?'…':''}"`:''}.`});}}/>}
       {projectModal  &&<CreateProjectModal onConfirm={confirmProject} onClose={()=>setProjectModal(null)} project={typeof projectModal==='object'?projectModal:null} currentUser={effectiveUser}/>}

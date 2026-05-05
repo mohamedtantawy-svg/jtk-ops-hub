@@ -227,14 +227,28 @@ function UrlListEditor({ list, onChange }) {
     borderRadius: 8, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box',
   };
   const add = () => {
-    const t = draft.trim();
+    let t = draft.trim();
     if (!t) return;
-    if (!/^https?:\/\//i.test(t)) {
-      setDraft('https://' + t);
-      return;
-    }
+    // Auto-prefix bare URLs (e.g. "jtk.dp.com/…") instead of bouncing the
+    // user back to fix it manually. The previous `setDraft + return`
+    // prefixed but never called onChange — typing a bare URL + Enter
+    // silently dropped the entry, which was the "links provided don't
+    // show" report on 2026-05-05.
+    if (!/^https?:\/\//i.test(t)) t = 'https://' + t;
     onChange([...list, t]);
     setDraft('');
+  };
+  // Heuristic for the blur-flush: looks-like-URL accepts already-prefixed
+  // URLs OR bare domains with at least one dot and no whitespace. Stops
+  // accidental partial typing ("abc") from being banked as "https://abc".
+  const looksLikeUrl = (s) => {
+    const t = (s || '').trim();
+    if (!t) return false;
+    if (/^https?:\/\//i.test(t)) return true;
+    return /^[^\s]+\.[^\s]{2,}/.test(t);
+  };
+  const handleBlur = () => {
+    if (looksLikeUrl(draft)) add();
   };
   return (
     <div>
@@ -243,6 +257,7 @@ function UrlListEditor({ list, onChange }) {
           value={draft}
           onChange={e => setDraft(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
+          onBlur={handleBlur}
           placeholder="Paste a URL and press Enter…"
           style={inputStyle}
         />
@@ -498,8 +513,19 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
 
   const fields = useMemo(() => {
     const raw = settings?.fields?.value || settings?.fields || [];
-    return Array.isArray(raw) ? raw : [];
-  }, [settings]);
+    const arr = Array.isArray(raw) ? raw : [];
+    // Product rule: HR Request flow must always carry a Relevant Link.
+    // Workspace-triggered escalations prefill the originating task URL
+    // (Queue.jsx::escalatePrefill) so the existing array-length validator
+    // auto-satisfies the requirement; manual requests force the user to
+    // paste at least one URL before submit. Settings panel still shows
+    // the seed value (read-only today) — Stage 7 will surface this as a
+    // toggle.
+    if (flow === 'hr_request') {
+      return arr.map(f => f.id === 'links' ? { ...f, required: true } : f);
+    }
+    return arr;
+  }, [settings, flow]);
 
   // The form's current value for a field id (uniform shape: string,
   // string-array, etc.) — defaults from settings if present.

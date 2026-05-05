@@ -24,6 +24,7 @@ import {
 } from '../../../src/services/hrHubApi';
 import { MEMBERS, MEMBERS_BY_EMAIL } from '../../../src/data/members';
 import HrHubComposer from './HrHubComposer';
+import ImageLightbox from '../ui/ImageLightbox';
 
 const STATUS_OPTIONS = [
   { id: 'new',         label: 'New',         color: '#0369a1', bg: '#e0f2fe' },
@@ -192,14 +193,25 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
                 Submitted by <strong>{request.createdByName || request.createdByEmail}</strong> · {formatRelative(request.createdAt)}
               </div>
 
-              {/* Status / Priority / Assignee row */}
+              {/* Status / Priority / Assignee row.
+                  Each picker carries an uppercase caption so managers can
+                  tell at a glance which control is which — the assignee
+                  picker on its own just says the person's name, and on a
+                  busy drawer that read like "is this the requestor?" to
+                  Melissa (2026-05-05 dashboard clarity report). */}
               <div style={{
-                marginTop: 14, display: 'flex', alignItems: 'center', gap: 10,
+                marginTop: 14, display: 'flex', alignItems: 'flex-end', gap: 14,
                 flexWrap: 'wrap',
               }}>
-                <PickerStatus value={request.status} onChange={v => updateField({ status: v })} disabled={savingField === 'status'} />
-                <PickerPriority value={request.priority} onChange={v => updateField({ priority: v })} disabled={savingField === 'priority'} />
-                <PickerAssignee value={request.assigneeEmail} valueName={request.assigneeName} onChange={(email, name) => updateField({ assigneeEmail: email, assigneeName: name })} disabled={savingField === 'assigneeEmail'} />
+                <LabeledPicker label="Status">
+                  <PickerStatus value={request.status} onChange={v => updateField({ status: v })} disabled={savingField === 'status'} />
+                </LabeledPicker>
+                <LabeledPicker label="Priority">
+                  <PickerPriority value={request.priority} onChange={v => updateField({ priority: v })} disabled={savingField === 'priority'} />
+                </LabeledPicker>
+                <LabeledPicker label="Assignee">
+                  <PickerAssignee value={request.assigneeEmail} valueName={request.assigneeName} onChange={(email, name) => updateField({ assigneeEmail: email, assigneeName: name })} disabled={savingField === 'assigneeEmail'} />
+                </LabeledPicker>
               </div>
 
               {/* Fields */}
@@ -331,6 +343,18 @@ function FollowButton({ isFollowing, onToggle }) {
       <i className={`bi ${isFollowing ? 'bi-bell-fill' : 'bi-bell'}`} style={{ fontSize: 12 }} />
       {isFollowing ? 'Following' : 'Follow'}
     </button>
+  );
+}
+
+function LabeledPicker({ label, children }) {
+  return (
+    <div style={{ display: 'inline-flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+      <span style={{
+        fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
+        textTransform: 'uppercase', color: 'var(--text-muted)',
+      }}>{label}</span>
+      {children}
+    </div>
   );
 }
 
@@ -563,6 +587,7 @@ function FieldRow({ label, value, multiline }) {
 }
 
 function AttachmentsGrid({ attachments }) {
+  const [lightbox, setLightbox] = useState(null);
   return (
     <div>
       <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6 }}>
@@ -573,29 +598,43 @@ function AttachmentsGrid({ attachments }) {
         gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))',
         gap: 8,
       }}>
-        {attachments.map((a, i) => (
-          <a
-            key={i}
-            href={a.dataUri}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              display: 'block',
-              borderRadius: 8,
-              overflow: 'hidden',
-              border: '1px solid var(--border)',
-              background: 'var(--surface-2)',
-              aspectRatio: '4 / 3',
-            }}
-          >
-            {a.kind === 'image' ? (
-              <img src={a.dataUri} alt={a.name || ''} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            ) : (
-              <video src={a.dataUri} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-            )}
-          </a>
-        ))}
+        {attachments.map((a, i) => {
+          const tileStyle = {
+            display: 'block',
+            borderRadius: 8,
+            overflow: 'hidden',
+            border: '1px solid var(--border)',
+            background: 'var(--surface-2)',
+            aspectRatio: '4 / 3',
+            padding: 0,
+            cursor: a.kind === 'image' ? 'zoom-in' : 'default',
+            width: '100%',
+          };
+          if (a.kind === 'image') {
+            return (
+              <button
+                key={i}
+                type="button"
+                onClick={() => setLightbox({ src: a.dataUri, name: a.name })}
+                style={tileStyle}
+                title="Open"
+              >
+                <img src={a.dataUri} alt={a.name || ''} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              </button>
+            );
+          }
+          return (
+            <div key={i} style={tileStyle}>
+              <video src={a.dataUri} controls preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            </div>
+          );
+        })}
       </div>
+      <ImageLightbox
+        src={lightbox?.src}
+        name={lightbox?.name}
+        onClose={() => setLightbox(null)}
+      />
     </div>
   );
 }

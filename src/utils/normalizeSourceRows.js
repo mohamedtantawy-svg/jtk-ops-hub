@@ -543,7 +543,15 @@ export function normalizeAmendments(items = [], slaConfig = null) {
       : '';
 
     // SLA: configurable active window (24h default), paused 48h default.
-    const sla = computeSlaWindow(activeMs, a.createdAt, {
+    // Anchor on actionableSince (earliest entry into AmendmentRequested /
+    // WaitingHrxAction) rather than upstream createdAt. createdAt is the
+    // moment Deel persisted the record — often weeks/months before the
+    // client confirms and the row lands in HRX's queue. Anchoring on it
+    // painted just-received amendments as "181 days breached". Fall back
+    // to clientConfirmedAt then createdAt for rows whose status history
+    // didn't make it into the payload.
+    const slaAnchor = a.actionableSince || a.clientConfirmedAt || a.createdAt;
+    const sla = computeSlaWindow(activeMs, slaAnchor, {
       pausedMs: a.isPaused ? pausedMs : null,
       pausedAt: a.pausedAt,
     });

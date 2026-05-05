@@ -297,6 +297,23 @@ export default function HrHubView({ user, onCreateHrHub }) {
     } catch {}
   }, [detailId, loadDetail]);
 
+  // Bell deep-link handler. App.jsx fires `hr-hub:openDetail` with the
+  // request id when the user clicks a notification linked here. Without
+  // this listener, clicking a notification while already on the HR Hub
+  // tab is a no-op (setView('hr-hub') doesn't re-mount the view, so the
+  // ?req= URL change isn't picked up). Mirrors the FeedbackView /
+  // LeaderAlertsView / AnnouncementsView pattern.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = (e) => {
+      const id = e?.detail?.id;
+      if (!id) return;
+      setDetailId(String(id));
+    };
+    window.addEventListener('hr-hub:openDetail', handler);
+    return () => window.removeEventListener('hr-hub:openDetail', handler);
+  }, []);
+
   const refreshDetail = useCallback(() => {
     if (detailId) loadDetail(detailId);
   }, [detailId, loadDetail]);
@@ -648,8 +665,25 @@ function RequestRow({ item, active, onClick, viewerEmail, isManager, isAdmin, on
         <span style={{ fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           <span style={{ fontWeight: 600, color: flow.color }}>{flow.short}</span>
           {meta ? ` · ${meta}` : ''}
-          {item.assigneeName ? ` · ${item.assigneeName}` : ''}
-          {item.createdByName && !item.assigneeName ? ` · ${item.createdByName}` : ''}
+          {/* Always label the creator so managers can tell at a glance who
+              raised the request. When an assignee is set and differs from
+              the creator, append it with a routing arrow so creator and
+              assignee are unambiguously separated — this row line was the
+              dashboard clarity gap Melissa flagged 2026-05-05. */}
+          {item.createdByName && (
+            <>
+              {' · '}
+              <span style={{ color: 'var(--text-muted)' }}>From </span>
+              <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{item.createdByName}</span>
+            </>
+          )}
+          {item.assigneeName && item.assigneeName !== item.createdByName && (
+            <>
+              {' '}
+              <span style={{ color: 'var(--text-muted)' }}>→</span>{' '}
+              <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{item.assigneeName}</span>
+            </>
+          )}
         </span>
       </span>
 

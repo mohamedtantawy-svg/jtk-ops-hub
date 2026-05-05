@@ -18,6 +18,7 @@ import {
   writeNotifications,
   readAllSettings,
 } from '../../../../../../../src/lib/leader-alerts-helpers';
+import { loadGroupsByHandle } from '../../../../../../../src/lib/mention-groups';
 
 export async function GET(req, { params }) {
   const user = getAuthUser(req);
@@ -92,7 +93,8 @@ export async function POST(req, { params }) {
 
     const member = memberByEmail(user.email);
     const authorName = member?.name || user.name || user.email;
-    const mentions = parseMentions(body);
+    const groupsByHandle = await loadGroupsByHandle();
+    const mentions = parseMentions(body, groupsByHandle);
 
     const created = await withTransaction(async (client) => {
       const insert = await client.query(

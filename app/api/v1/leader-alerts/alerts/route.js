@@ -31,6 +31,7 @@ import {
   memberByEmail,
   readAllSettings,
 } from '../../../../../src/lib/leader-alerts-helpers';
+import { loadGroupsByHandle } from '../../../../../src/lib/mention-groups';
 
 export async function GET(req) {
   const user = getAuthUser(req);
@@ -177,9 +178,14 @@ export async function POST(req) {
   // as followers + notified. Stage 4 also writes the bell entry per
   // notification policy; for Stage 1 we just collect them so the audit
   // log captures the intent.
+  // Load group handles once so `@hrxtools` in title/body expands to
+  // every member email (each becomes a follower + notified, mirroring
+  // the per-user mention path). Empty Map on DB error so a transient
+  // groups-table issue never blocks alert creation.
+  const groupsByHandle = await loadGroupsByHandle();
   const mentions = Array.from(new Set([
-    ...parseMentions(title),
-    ...parseMentions(body),
+    ...parseMentions(title, groupsByHandle),
+    ...parseMentions(body, groupsByHandle),
   ]));
 
   try {

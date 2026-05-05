@@ -1145,6 +1145,37 @@ CREATE INDEX IF NOT EXISTS idx_queue_reassignments_source
   ON queue_reassignments(task_source);
 CREATE INDEX IF NOT EXISTS idx_queue_reassignments_assignee
   ON queue_reassignments(LOWER(assignee_email));
+
+-- Mention groups: Slack-style @-handles that expand to a list of members.
+-- Used by every comment surface that runs the @mention parser (HR Hub,
+-- Leaders Alerts, Feedback). Mentioning a group in a comment body, e.g.
+-- @hrxtools, fans out a notification to every member and adds them as
+-- followers of the request, exactly as if each member had been tagged
+-- individually. Anyone authenticated can create or edit groups (matches
+-- the openness of HR Hub creation). Handle is the lowercased token typed
+-- after the @, kept distinct from any users email localpart to avoid
+-- ambiguity (server-side parser tries group first, falls back to user).
+CREATE TABLE IF NOT EXISTS mention_group (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  handle            VARCHAR(80)  NOT NULL,                        -- lowercase, hyphen-or-dot-separated; the @-token
+  name              VARCHAR(200),                                  -- human label, optional
+  description       TEXT,
+  created_by_email  VARCHAR(255) NOT NULL,
+  created_by_name   VARCHAR(255),
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_mention_group_handle
+  ON mention_group(LOWER(handle));
+
+CREATE TABLE IF NOT EXISTS mention_group_member (
+  group_id      UUID NOT NULL REFERENCES mention_group(id) ON DELETE CASCADE,
+  member_email  VARCHAR(255) NOT NULL,
+  added_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (group_id, member_email)
+);
+CREATE INDEX IF NOT EXISTS idx_mention_group_member_email
+  ON mention_group_member(LOWER(member_email));
 `;
 
 export async function runMigrations() {

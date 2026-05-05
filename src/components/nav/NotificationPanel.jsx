@@ -23,7 +23,7 @@
 import { useMemo, useState } from 'react';
 import Avatar from '../ui/Avatar';
 
-const VIEW_LABELS = {
+export const VIEW_LABELS = {
   hr_hub: 'HR Hub',
   'leader-alerts': 'Leaders Hub',
   leader_alerts: 'Leaders Hub',
@@ -33,7 +33,7 @@ const VIEW_LABELS = {
   briefing: 'Home',
 };
 
-const TYPE_META = {
+export const TYPE_META = {
   comment:        { icon: 'bi-chat-square-text-fill', color: '#1d4ed8', label: 'comment' },
   mention:        { icon: 'bi-at',                    color: '#7c3aed', label: 'mention' },
   status_change:  { icon: 'bi-flag-fill',             color: '#ed8d00', label: 'status' },
@@ -50,14 +50,14 @@ const TYPE_META = {
   info:           { icon: 'bi-bell-fill',             color: '#1f74b3', label: 'update' },
 };
 
-function metaFor(type) {
+export function metaFor(type) {
   return TYPE_META[type] || TYPE_META.info;
 }
 
 // Group notifications by (linkView, linkId) so the same task collapses to
 // one card. Notifications without link metadata get their own group keyed
 // on id (legacy in-memory items + ungrouped one-offs).
-function groupNotifications(notifs) {
+export function groupNotifications(notifs) {
   const groups = new Map();
   for (const n of notifs) {
     const hasLink = n.linkView && n.linkId;
@@ -104,7 +104,7 @@ function groupNotifications(notifs) {
   return [...groups.values()].sort((a, b) => b.latestTime - a.latestTime);
 }
 
-function timeAgo(ts) {
+export function timeAgo(ts) {
   if (!ts) return '';
   const ms = Date.now() - ts;
   if (ms < 60_000) return 'just now';
@@ -119,7 +119,7 @@ function timeAgo(ts) {
   return new Date(ts).toLocaleDateString();
 }
 
-function pluralize(n, singular, plural) {
+export function pluralize(n, singular, plural) {
   return `${n} ${n === 1 ? singular : (plural || singular + 's')}`;
 }
 
@@ -130,6 +130,7 @@ export default function NotificationPanel({
   markAllRead,
   markRead,
   onClose,
+  onViewAll,
 }) {
   const [filter, setFilter] = useState('all'); // 'all' | 'unread' | 'mentions'
 
@@ -271,11 +272,34 @@ export default function NotificationPanel({
           canMarkRead={!!markRead && g.unreadCount > 0}
         />)}
       </div>
+
+      {/* Footer — opens the dedicated full-page notifications view */}
+      {onViewAll && (
+        <button
+          type="button"
+          onClick={() => { onClose?.(); onViewAll(); }}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+            padding: '11px 18px',
+            borderTop: '1px solid var(--border-light, #f0efed)',
+            background: 'var(--surface-2, #fafaf9)',
+            border: 'none', borderBottomLeftRadius: 16, borderBottomRightRadius: 16,
+            color: 'var(--text)', fontSize: 12.5, fontWeight: 600,
+            cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0,
+            transition: 'background .12s',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-3, #efeeec)'; }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'var(--surface-2, #fafaf9)'; }}
+        >
+          View all notifications
+          <i className="bi-arrow-right" style={{ fontSize: 12 }} />
+        </button>
+      )}
     </div>
   );
 }
 
-function NotificationGroupCard({ group, onClick, onMarkRead, canMarkRead }) {
+export function NotificationGroupCard({ group, onClick, onMarkRead, canMarkRead }) {
   const [hov, setHov] = useState(false);
   const m = metaFor(group.latestType || 'info');
   const surfaceLabel = VIEW_LABELS[group.linkView] || '';

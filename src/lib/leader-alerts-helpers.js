@@ -147,11 +147,20 @@ export function listManagerEmails() {
 
 const MENTION_TOKEN = /(?:^|[^\w])@([a-z][a-z0-9._-]{1,80})/gi;
 
-export function parseMentions(body) {
+export function parseMentions(body, groupsByHandle = null) {
   if (!body) return [];
   const found = new Set();
   for (const m of String(body).matchAll(MENTION_TOKEN)) {
     const token = m[1].toLowerCase();
+    // Group handles win over user-localparts so an explicit `@hrxtools`
+    // routes to the group everyone opted into. Mirror of the resolution
+    // order in src/lib/hr-hub-helpers.js::parseMentions.
+    if (groupsByHandle && groupsByHandle.has(token)) {
+      for (const e of groupsByHandle.get(token) || []) {
+        if (e) found.add(String(e).toLowerCase());
+      }
+      continue;
+    }
     let hit = null;
     if (MEMBERS_BY_EMAIL[token]) hit = token;
     else if (MEMBERS_BY_EMAIL[`${token}@deel.com`]) hit = `${token}@deel.com`;

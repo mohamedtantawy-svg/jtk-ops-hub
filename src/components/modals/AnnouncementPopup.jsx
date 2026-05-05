@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { SOUND_PRESETS } from '../../data/comms';
 import { renderRichText } from '../../utils/renderRichText';
+import AnnouncementMedia from '../ui/AnnouncementMedia';
 
 const TYPE_CONFIG = {
   alert:    { label: 'Alert',        icon: 'bi-exclamation-triangle-fill', color: '#d42d35', bg: '#ffe2de', border: '#FCA5A5' },
@@ -234,12 +235,11 @@ export default function AnnouncementPopup({ comm, onAcknowledge }) {
             )}
           </div>
 
-          {/* Image */}
+          {/* Media (image or video) */}
           {comm.imageUrl && (
             <div style={{ marginBottom: 20 }}>
-              <img
+              <AnnouncementMedia
                 src={comm.imageUrl}
-                alt=""
                 style={{
                   width: '100%',
                   borderRadius: 10,
