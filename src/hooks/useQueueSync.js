@@ -85,6 +85,13 @@ function normalizeQueueItem(item) {
     receivedAt,
     status: item.status || 'new',
     zdStatus: item.zdStatus || null,
+    // Raw Jira status name (e.g. "HRX Review", "Client Approval", "PRM
+    // Review", "EOR Signing"). The bucket on `status` flattens these to
+    // new/in_progress/waiting/resolved for tier-based scoping; the raw
+    // name is surfaced as a sub-status in the queue's StatusBadge so
+    // managers can tell apart "PRM sent the final payslip" from
+    // "still waiting on legal" without opening every ticket.
+    jiraStatus: item.jiraStatus || null,
     type: item.type || 'Policy Query',
     priority: item.priority || 'medium',
     isAlert: item.priority === 'critical',

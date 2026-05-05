@@ -1217,8 +1217,17 @@ const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onEscalate }) => {
       <td style={{ ...tdStyle, fontSize: 12, color: '#616161', whiteSpace: 'nowrap' }}>{relTime(task.minutesAgo)}</td>
       {/* SLA */}
       {settings.sla_enabled !== false && <td style={tdStyle}><SlaBadge sla={sla} status={task.status}/></td>}
-      {/* Status */}
-      <td style={tdStyle}><StatusBadge status={task.status}/></td>
+      {/* Status — Jira tickets surface the raw status name as a sub-label
+          (HRX Review / PRM Review / Client Approval / etc.) so managers
+          can see exactly which workflow stage each ticket is in without
+          opening it. The bucket (in_progress / waiting / etc.) still
+          drives the colour + tier-based scoping. */}
+      <td style={tdStyle}>
+        <StatusBadge
+          status={task.status}
+          subStatus={task.source === 'jira' ? task.jiraStatus : null}
+        />
+      </td>
       {/* External link */}
       <td style={tdStyle}>
         <a href={url} target="_blank" rel="noreferrer"

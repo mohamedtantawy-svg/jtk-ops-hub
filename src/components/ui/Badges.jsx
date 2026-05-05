@@ -32,10 +32,22 @@ const STATUS_TOOLTIPS={
   resolved:'Zendesk: Solved | Jira: Done | Workbench: Completed',
 };
 
-export const StatusBadge=memo(({status})=>{
+export const StatusBadge=memo(({status, subStatus})=>{
   const s=STATUS_STYLES[status];
   if(!s)return null;
-  return <span title={STATUS_TOOLTIPS[status]||''} style={{...badgeBase,...s}}>{STATUS_LABELS[status]||status}</span>;
+  const label=STATUS_LABELS[status]||status;
+  const tooltip=STATUS_TOOLTIPS[status]||'';
+  const fullTooltip=subStatus?`${tooltip}${tooltip?'\n':''}Status: ${subStatus}`:tooltip;
+  return (
+    <span title={fullTooltip} style={{...badgeBase,...s}}>
+      {label}
+      {subStatus && (
+        <span style={{opacity:0.7,fontWeight:500}}>
+          {' · '}{subStatus}
+        </span>
+      )}
+    </span>
+  );
 });
 
 // Format `rem` (minutes) for the SLA pill. Caps long durations at days /
