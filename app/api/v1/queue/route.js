@@ -474,7 +474,7 @@ async function fetchZendeskQueue() {
 // a normal GET. fetchJiraQueue unions the per-query results and dedups by
 // issue key, so user-visible behavior is identical to a single OR.
 //
-// ── Why we ALSO chunk the email IN-list (2026-04-23) ───────────────────────
+// ── Why we ALSO chunk the email IN-list (2026-04-23, revised 2026-05-05) ──
 // Previously we ran one query per role with ALL ~104 emails in a single IN
 // clause, capped at 300 issues/clause. Across 104 people that cap is far
 // below the actual volume of in-flight work, so the query truncated —
@@ -482,10 +482,17 @@ async function fetchZendeskQueue() {
 // CLIENT APPROVAL / EOR SIGNING / PRM REVIEW / "pending another team"
 // buckets (they sit stale for weeks waiting on externals), so agents like
 // Susana and Anne saw wildly under-counted queues ("84 expected, 15 shown").
-// The fix: chunk ADMIN_EMAILS_LIST into groups small enough that each
-// sub-query stays well under the 300 cap in typical team-wide volume.
-// With EMAIL_CHUNK_SIZE=20 and a 300/clause cap, each agent's 15-50
-// tickets comfortably fit whether they're freshly updated or months stale.
+// The fix: chunk ADMIN_EMAILS_LIST + cap each sub-query at a count that
+// comfortably exceeds typical chunk volume. Combined cap math:
+//
+//   With EMAIL_CHUNK_SIZE=20 and ~50 active tickets per agent, a chunk
+//   carries up to ~1000 tickets. The original 300 cap was below that
+//   ceiling, so the same "oldest paused dropped first" failure mode
+//   resurfaced — Anne reported "4 paused but only 2 appear" on
+//   2026-05-05 because two of her older client-approval rows fell off
+//   the 300-tail of the assignee chunk she sat in. Bumping
+//   MAX_ISSUES_PER_CLAUSE to 2000 keeps the runaway-pagination guard
+//   (50 + 1 pages of 100) without truncating real data.
 //
 // ── Why we filter by statusCategory, not by status-name list (2026-04-23) ──
 // Earlier iteration used `status NOT IN ("Done", "Closed", ...)` — a hand-
@@ -565,7 +572,13 @@ async function fetchJiraQueue() {
     const allIssues = [];
     const seenKeys = new Set();       // dedup across clauses — same key never lands twice
     const pageSize = 100;
-    const MAX_ISSUES_PER_CLAUSE = 300; // safety cap per clause
+    // Safety cap per clause. Was 300 — bumped 2026-05-05 because at
+    // EMAIL_CHUNK_SIZE=20 a busy chunk can carry well over 300 active
+    // tickets and `ORDER BY updated DESC` was silently dropping the
+    // oldest paused/Client-Approval/EOR-Signing rows. 2000 covers
+    // realistic chunk volumes; the runaway-pagination guard via
+    // MAX_PAGES below still bounds total fetches.
+    const MAX_ISSUES_PER_CLAUSE = 2000;
 
     const fieldsToFetch = [
       'summary', 'status', 'assignee', 'reporter', 'priority',
