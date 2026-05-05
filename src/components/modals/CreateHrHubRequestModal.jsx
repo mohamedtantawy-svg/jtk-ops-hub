@@ -498,8 +498,19 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
 
   const fields = useMemo(() => {
     const raw = settings?.fields?.value || settings?.fields || [];
-    return Array.isArray(raw) ? raw : [];
-  }, [settings]);
+    const arr = Array.isArray(raw) ? raw : [];
+    // Product rule: HR Request flow must always carry a Relevant Link.
+    // Workspace-triggered escalations prefill the originating task URL
+    // (Queue.jsx::escalatePrefill) so the existing array-length validator
+    // auto-satisfies the requirement; manual requests force the user to
+    // paste at least one URL before submit. Settings panel still shows
+    // the seed value (read-only today) — Stage 7 will surface this as a
+    // toggle.
+    if (flow === 'hr_request') {
+      return arr.map(f => f.id === 'links' ? { ...f, required: true } : f);
+    }
+    return arr;
+  }, [settings, flow]);
 
   // The form's current value for a field id (uniform shape: string,
   // string-array, etc.) — defaults from settings if present.
