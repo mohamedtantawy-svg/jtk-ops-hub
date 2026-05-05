@@ -14,9 +14,42 @@
 // and re-runs the seed exactly once per version bump. Existing manual
 // edits to keys we *don't* touch are preserved.
 
-import { query } from './db';
+import { query, withTransaction } from './db';
 
-export const HR_HUB_SEED_VERSION = 1;
+export const HR_HUB_SEED_VERSION = 2;
+
+// Per-version deltas — applied additively on each version bump so live
+// envs pick up new dropdown options without clobbering admin edits.
+// Each delta only ADDS missing items; if an admin removed an item we
+// don't ship in a delta, that removal stays. If an admin already added
+// one of the items we're shipping (e.g. they pre-seeded "Quotes" via
+// the Settings panel), the union dedupes silently.
+//
+// Bump HR_HUB_SEED_VERSION + add a new entry here when you need to
+// extend the cold-boot dropdown list in production. Keep cold-boot
+// FLOWS in sync so a fresh DB lands on the same place as a delta-
+// patched one.
+const SEED_DELTAS = {
+  2: {
+    hr_request: {
+      'dropdowns.function_area_add': [
+        'Quotes', 'Benefits', 'Pension', 'Time-Off - PTO',
+        'Redlines', 'Global Mobility',
+      ],
+      // request_type cascades for the new function-areas. Only set when
+      // the function-area key is missing from the existing object — we
+      // never override an admin-customised cascade.
+      'dropdowns.request_type_add': {
+        Quotes:            ['Other Requests'],
+        Benefits:          ['Other Requests'],
+        Pension:           ['Other Requests'],
+        'Time-Off - PTO':  ['Other Requests'],
+        Redlines:          ['Other Requests'],
+        'Global Mobility': ['Other Requests'],
+      },
+    },
+  },
+};
 
 // Status lifecycle is uniform across all 4 flows (decision 2026-05-02
 // — see HR_HUB_PLAN.md). Adding a status here also requires a
@@ -44,16 +77,31 @@ const FLOWS = {
       { id: 'attachments',   label: 'Attachments',      kind: 'attachments', required: false },
     ],
     dropdowns: {
+      // Function-area menu mirrors the wider taxonomy operators used on
+      // Slack request workflows so HR Hub is at least as expressive.
+      // Order intentionally puts the workflow-specific menu first
+      // (Quotes…Global Mobility per the 2026-05-05 ticket) and keeps the
+      // legacy options at the end so historical requests don't orphan.
       function_area: [
-        'Onboarding', 'Amendments', 'Termination', 'Resignation',
+        'Quotes', 'Onboarding', 'Resignation', 'Termination',
+        'Benefits', 'Pension', 'Time-Off - PTO', 'Amendments',
+        'Redlines', 'Global Mobility',
         'Country Specific', 'Collaboration with Teams', 'Looker',
       ],
       // Cascading: each function_area key maps to the request_type options.
+      // New menu entries default to ['Other Requests']; admins can refine
+      // per-area types via the Settings panel without touching this file.
       request_type: {
-        Onboarding:   ['Countersign EA', 'Deposit Increase', 'Other Requests'],
-        Amendments:   ['Deposit Increase', 'Other Requests'],
-        Termination:  ['Cancel / re-start offboarding (edit end date)', 'Other Requests'],
-        Resignation:  ['Cancel / re-start offboarding (edit end date)'],
+        Quotes:                     ['Other Requests'],
+        Onboarding:                 ['Countersign EA', 'Deposit Increase', 'Other Requests'],
+        Resignation:                ['Cancel / re-start offboarding (edit end date)'],
+        Termination:                ['Cancel / re-start offboarding (edit end date)', 'Other Requests'],
+        Benefits:                   ['Other Requests'],
+        Pension:                    ['Other Requests'],
+        'Time-Off - PTO':           ['Other Requests'],
+        Amendments:                 ['Deposit Increase', 'Other Requests'],
+        Redlines:                   ['Other Requests'],
+        'Global Mobility':          ['Other Requests'],
         'Country Specific':         ['Other Requests'],
         'Collaboration with Teams': ['Other Requests'],
         Looker:                     ['Generate a report'],
@@ -163,10 +211,93 @@ async function setSeedVersion(version) {
 }
 
 /**
+ * Apply a single SEED_DELTAS entry to one flow's `dropdowns` row.
+ * Purely additive: union arrays, fill in missing object keys. Admin
+ * removals + customisations are preserved. Writes a row to
+ * hr_hub_settings_history with actor='system:seed-vN' for audit.
+ *
+ * Returns 1 if the row changed, 0 otherwise (no-op if every item is
+ * already present, e.g. on a re-run after a partial deploy).
+ */
+async function applyDropdownDelta(client, flow, delta, version) {
+  const { rows } = await client.query(
+    `SELECT value_json FROM hr_hub_settings WHERE flow = $1 AND key = 'dropdowns'`,
+    [flow],
+  );
+  if (rows.length === 0) {
+    // No dropdowns row yet — the cold-boot INSERT pass will land the
+    // full FLOWS map (which already includes the new items).
+    return 0;
+  }
+
+  const before = rows[0].value_json || {};
+  const after = { ...before };
+  let changed = false;
+
+  // function_area: array union, preserving original order, then
+  // appending only the missing additions in delta order.
+  const faAdd = delta['dropdowns.function_area_add'];
+  if (Array.isArray(faAdd) && faAdd.length > 0) {
+    const existing = Array.isArray(after.function_area) ? after.function_area : [];
+    const present = new Set(existing);
+    const toAdd = faAdd.filter(item => !present.has(item));
+    if (toAdd.length > 0) {
+      after.function_area = [...existing, ...toAdd];
+      changed = true;
+    }
+  }
+
+  // request_type: object key fill — only set when the function-area
+  // key is missing. Admin-customised cascades stay untouched.
+  const rtAdd = delta['dropdowns.request_type_add'];
+  if (rtAdd && typeof rtAdd === 'object') {
+    const existing = (after.request_type && typeof after.request_type === 'object')
+      ? { ...after.request_type } : {};
+    let rtChanged = false;
+    for (const [fa, types] of Object.entries(rtAdd)) {
+      if (!(fa in existing)) {
+        existing[fa] = types;
+        rtChanged = true;
+      }
+    }
+    if (rtChanged) {
+      after.request_type = existing;
+      changed = true;
+    }
+  }
+
+  if (!changed) return 0;
+
+  await client.query(
+    `UPDATE hr_hub_settings
+        SET value_json = $1::jsonb,
+            updated_at = NOW()
+      WHERE flow = $2 AND key = 'dropdowns'`,
+    [JSON.stringify(after), flow],
+  );
+  await client.query(
+    `INSERT INTO hr_hub_settings_history
+       (flow, key, before_json, after_json, actor_email, actor_name)
+     VALUES ($1, 'dropdowns', $2::jsonb, $3::jsonb, $4, $5)`,
+    [
+      flow,
+      JSON.stringify(before),
+      JSON.stringify(after),
+      `system:seed-v${version}`,
+      'HR Hub Seed',
+    ],
+  );
+  return 1;
+}
+
+/**
  * Insert default settings rows (statuses / fields / dropdowns / auto_assign)
  * for every flow. Existing rows are preserved — admin edits never get
  * clobbered. A version marker in app_settings prevents repeat work across
  * pod boots.
+ *
+ * On version bump, applies SEED_DELTAS additively to existing rows so
+ * production picks up new dropdown options without a destructive reseed.
  */
 export async function seedHrHubSettingsIfNeeded() {
   const installedVersion = await getSeedVersion();
@@ -175,25 +306,40 @@ export async function seedHrHubSettingsIfNeeded() {
   }
 
   let inserted = 0;
-  for (const [flow, cfg] of Object.entries(FLOWS)) {
-    const rows = [
-      { key: 'statuses',    value: DEFAULT_STATUSES },
-      { key: 'fields',      value: cfg.fields },
-      { key: 'dropdowns',   value: cfg.dropdowns },
-      { key: 'auto_assign', value: cfg.auto_assign },
-      { key: 'meta',        value: { label: cfg.label, description: cfg.description } },
-    ];
-    for (const r of rows) {
-      const result = await query(
-        `INSERT INTO hr_hub_settings (flow, key, value_json, updated_by_email)
-         VALUES ($1, $2, $3::jsonb, NULL)
-         ON CONFLICT (flow, key) DO NOTHING`,
-        [flow, r.key, JSON.stringify(r.value)],
-      );
-      if (result.rowCount > 0) inserted++;
+  let updated = 0;
+  await withTransaction(async (client) => {
+    // Pass 1 — cold-boot baseline. INSERT … ON CONFLICT DO NOTHING so
+    // existing rows stay intact (admin edits preserved).
+    for (const [flow, cfg] of Object.entries(FLOWS)) {
+      const rows = [
+        { key: 'statuses',    value: DEFAULT_STATUSES },
+        { key: 'fields',      value: cfg.fields },
+        { key: 'dropdowns',   value: cfg.dropdowns },
+        { key: 'auto_assign', value: cfg.auto_assign },
+        { key: 'meta',        value: { label: cfg.label, description: cfg.description } },
+      ];
+      for (const r of rows) {
+        const result = await client.query(
+          `INSERT INTO hr_hub_settings (flow, key, value_json, updated_by_email)
+           VALUES ($1, $2, $3::jsonb, NULL)
+           ON CONFLICT (flow, key) DO NOTHING`,
+          [flow, r.key, JSON.stringify(r.value)],
+        );
+        if (result.rowCount > 0) inserted++;
+      }
     }
-  }
+
+    // Pass 2 — versioned deltas. Walk every version between installed+1
+    // and current, applying each delta additively to existing rows.
+    for (let v = installedVersion + 1; v <= HR_HUB_SEED_VERSION; v++) {
+      const delta = SEED_DELTAS[v];
+      if (!delta) continue;
+      for (const [flow, flowDelta] of Object.entries(delta)) {
+        updated += await applyDropdownDelta(client, flow, flowDelta, v);
+      }
+    }
+  });
 
   await setSeedVersion(HR_HUB_SEED_VERSION);
-  return { skipped: false, version: HR_HUB_SEED_VERSION, inserted };
+  return { skipped: false, version: HR_HUB_SEED_VERSION, inserted, updated };
 }
