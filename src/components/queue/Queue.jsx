@@ -142,6 +142,28 @@ const Queue = ({ user, tasks, subFilter }) => {
     if (typeof saved.fJiraRaised === 'boolean') setFJiraRaised(saved.fJiraRaised);
     if (saved.fUnassigned) setFUnassigned(true);
   }, [user?.email]);
+
+  // Cross-view filter intent — fires when a Briefing/AgentHome card asks the
+  // Queue to land on a specific SLA tier (e.g. "Show breaches"). The Queue
+  // applies the requested filter and clears the rest so the user lands on a
+  // clean view. The CustomEvent pattern matches the existing
+  // `<feature>:openDetail` events dispatched by App.jsx for deep-links.
+  useEffect(() => {
+    const handler = (e) => {
+      const sla = e?.detail?.sla;
+      if (sla !== 'breached' && sla !== 'at_risk' && sla !== 'ok' && sla !== null) return;
+      setFSla(sla);
+      // Clear other filters so the user actually sees what they asked for.
+      // Keep the source-tab choice (workSource) untouched — if they asked
+      // from inside a source view we honour the context.
+      setFTool(null);
+      setFStatus([]);
+      setFUnassigned(false);
+      setSearch('');
+    };
+    window.addEventListener('queue:setSlaFilter', handler);
+    return () => window.removeEventListener('queue:setSlaFilter', handler);
+  }, []);
   const [workSource, setWorkSource] = useState(null);
   // ── Column sort for the ZD/Jira table ─────────────────────────────────────
   // Default = SLA tier (Breached → At-Risk → On Track), oldest-first within
@@ -1001,29 +1023,115 @@ const Queue = ({ user, tasks, subFilter }) => {
       {/* ── Main ZD/JR table (when no work source is active) ── */}
       {!workSource && (fTool || hasActiveFilters) && (
         <div ref={ticketScrollerRef} style={{ flex: 1, overflowY: 'auto', background: '#fafaf9' }}>
+          {/* Breaches-across-sources hand-off panel. Renders whenever the
+              breached filter is on and nothing source-specific is selected,
+              so the user lands somewhere they can see + click into the
+              breaches that live in Deel sources. Without this, fSla='breached'
+              looked empty for users whose breaches were all in Workbench /
+              Onboarding etc., because the merged ticket table only renders
+              ZD + Jira rows. */}
+          {fSla === 'breached' && !fTool && (() => {
+            const breachSummary = [
+              { id: 'workbench',       label: 'Workbench',       icon: 'bi-grid-3x3-gap-fill', color: '#0369a1', bg: '#eff6ff', count: tblWorkbenchRows.length },
+              { id: 'onboarding',      label: 'Onboarding',      icon: 'bi-person-plus-fill',  color: '#7c3aed', bg: '#f3eff8', count: tblOnboardingRows.length },
+              { id: 'offboarding',     label: 'Offboarding',     icon: 'bi-person-dash-fill',  color: '#d42d35', bg: '#fef2f2', count: tblOffboardingRows.length },
+              { id: 'amendments',      label: 'Amendments',      icon: 'bi-pencil-square',     color: '#ed8d00', bg: '#fff8e6', count: tblAmendmentRows.length },
+              { id: 'redlines',        label: 'Redlines',        icon: 'bi-file-earmark-diff', color: '#7c3aed', bg: '#f3eff8', count: tblRedlineRows.length },
+              { id: 'incentive_plans', label: 'Incentive Plans', icon: 'bi-cash-coin',         color: '#0e7490', bg: '#ecfeff', count: tblIncentivePlanRows.length },
+            ].filter(s => s.count > 0);
+            if (breachSummary.length === 0) return null;
+            const total = breachSummary.reduce((n, s) => n + s.count, 0);
+            return (
+              <div style={{
+                margin: '16px 16px 12px', padding: '14px 16px',
+                background: '#fff', border: '1px solid #fecaca', borderRadius: 12,
+                boxShadow: '0 1px 2px rgba(212, 45, 53, 0.06)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                  <i className="bi-exclamation-octagon-fill" style={{ fontSize: 14, color: '#d42d35' }} />
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#1b1b1b' }}>
+                    {total} breached {total === 1 ? 'item' : 'items'} in other queues
+                  </span>
+                  <span style={{ fontSize: 11, color: '#9e9e9e', fontWeight: 500 }}>
+                    — click a queue to drill in
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {breachSummary.map(s => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => { setWorkSource(s.id); }}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 8,
+                        padding: '8px 14px', borderRadius: 10,
+                        border: `1px solid ${s.color}33`, background: s.bg,
+                        cursor: 'pointer', transition: 'all .12s',
+                        fontFamily: 'inherit',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.borderColor = s.color; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = `${s.color}33`; e.currentTarget.style.transform = 'translateY(0)'; }}
+                      title={`Open ${s.label} filtered to breached items`}
+                    >
+                      <i className={s.icon} style={{ fontSize: 13, color: s.color }} />
+                      <span style={{ fontSize: 12, fontWeight: 600, color: '#1b1b1b' }}>{s.label}</span>
+                      <span style={{
+                        padding: '1px 8px', borderRadius: 128, fontSize: 11, fontWeight: 700,
+                        background: '#d42d35', color: '#fff', fontVariantNumeric: 'tabular-nums',
+                      }}>{s.count}</span>
+                      <i className="bi-arrow-right" style={{ fontSize: 11, color: s.color }} />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
           {all.length === 0 ? (
             hasActiveFilters
-              ? <div style={{ textAlign: 'center', padding: '60px 20px', color: 'var(--text-muted)' }}>
-                  <i className="bi bi-inbox" style={{ fontSize: 32, display: 'block', marginBottom: 12, opacity: 0.3 }}/>
-                  <div style={{ fontSize: 15, fontWeight: 600, color: '#616161', marginBottom: 4 }}>No tasks found</div>
-                  {hiddenByFilters > 0 ? (
-                    <>
-                      <div style={{ fontSize: 13, color: '#9e9e9e', marginBottom: 16 }}>
-                        Your active filters are hiding {hiddenByFilters} {hiddenByFilters === 1 ? 'task' : 'tasks'} in your scope.
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => { setFTool(null); setFStatus([]); setFSla(null); setFUnassigned(false); setSearch(''); setFJiraActionable(true); setFJiraRaised(false); }}
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 8, border: '1px solid #1f74b3', background: '#1f74b3', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
-                      >
-                        <i className="bi-x-circle" style={{ fontSize: 12 }}></i>
-                        Clear filters
-                      </button>
-                    </>
-                  ) : (
-                    <div style={{ fontSize: 13, color: '#9e9e9e' }}>Try adjusting your filters</div>
-                  )}
-                </div>
+              ? (() => {
+                  // If breached filter is on and Deel sources have breaches,
+                  // the panel above already explained where to go. Tone the
+                  // ticket empty state down so the user doesn't think "no
+                  // tasks found" contradicts the "3 breached items" CTA they
+                  // just clicked.
+                  const otherSourceBreaches = fSla === 'breached' && !fTool
+                    ? tblWorkbenchRows.length + tblOnboardingRows.length + tblOffboardingRows.length + tblAmendmentRows.length + tblRedlineRows.length + tblIncentivePlanRows.length
+                    : 0;
+                  return (
+                    <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
+                      <i className="bi bi-inbox" style={{ fontSize: 32, display: 'block', marginBottom: 12, opacity: 0.3 }}/>
+                      {fSla === 'breached' && otherSourceBreaches > 0 ? (
+                        <>
+                          <div style={{ fontSize: 15, fontWeight: 600, color: '#616161', marginBottom: 4 }}>No breached tickets</div>
+                          <div style={{ fontSize: 13, color: '#9e9e9e' }}>
+                            All ZD &amp; Jira tickets are within SLA. Check the queues above for the {otherSourceBreaches} {otherSourceBreaches === 1 ? 'breach' : 'breaches'} in other sources.
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div style={{ fontSize: 15, fontWeight: 600, color: '#616161', marginBottom: 4 }}>No tasks found</div>
+                          {hiddenByFilters > 0 ? (
+                            <>
+                              <div style={{ fontSize: 13, color: '#9e9e9e', marginBottom: 16 }}>
+                                Your active filters are hiding {hiddenByFilters} {hiddenByFilters === 1 ? 'task' : 'tasks'} in your scope.
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => { setFTool(null); setFStatus([]); setFSla(null); setFUnassigned(false); setSearch(''); setFJiraActionable(true); setFJiraRaised(false); }}
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 8, border: '1px solid #1f74b3', background: '#1f74b3', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+                              >
+                                <i className="bi-x-circle" style={{ fontSize: 12 }}></i>
+                                Clear filters
+                              </button>
+                            </>
+                          ) : (
+                            <div style={{ fontSize: 13, color: '#9e9e9e' }}>Try adjusting your filters</div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  );
+                })()
               : <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, padding: 40, textAlign: 'center', minHeight: 300 }}>
                   <i className="bi-inbox" style={{ fontSize: 48, color: '#c0c0c0', display: 'block', marginBottom: 16 }}></i>
                   <div style={{ fontSize: 17, fontWeight: 600, color: '#1b1b1b', marginBottom: 6 }}>Queue is clear</div>
