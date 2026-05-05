@@ -1211,7 +1211,7 @@ export async function runMigrations() {
   try {
     const seedResult = await seedHrHubSettingsIfNeeded();
     if (!seedResult?.skipped) {
-      console.log(`[db] HR Hub settings seeded to v${seedResult.version}: ${seedResult.inserted} rows`);
+      console.log(`[db] HR Hub settings seeded to v${seedResult.version}: ${seedResult.inserted} rows inserted, ${seedResult.updated || 0} dropdown row(s) merged`);
     }
   } catch (err) {
     console.warn('[db] HR Hub settings seed failed:', err?.message);
