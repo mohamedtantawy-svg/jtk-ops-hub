@@ -20,6 +20,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { TOOLS } from '../../data/constants';
 import { slaInfo } from '../../utils/helpers';
+import { apiFetch } from '../../services/api';
 import MultiCountryPicker from '../team/MultiCountryPicker';
 
 // ── Pure helpers (mirrored from Team.jsx so the look matches) ──────────────
@@ -198,8 +199,14 @@ export function DecisionsStrip({ onNavigate }) {
 
   useEffect(() => {
     let cancelled = false;
+    // Use apiFetch so calls carry the JWT (Authorization: Bearer ...) and
+    // the X-Impersonate-As header. The previous raw `fetch(path, {
+    // credentials: 'include' })` sent NO Authorization header — the API
+    // routes treat that as anonymous and return 401, which is why every
+    // tile rendered "—" for every manager (admins included). Path is
+    // relative to /api/v1 since apiFetch prepends API_BASE.
     const safe = async (path) => {
-      try { const r = await fetch(path, { credentials: 'include' }); if (!r.ok) return null; return r.json(); }
+      try { return await apiFetch(path); }
       catch { return null; }
     };
     (async () => {
@@ -220,23 +227,32 @@ export function DecisionsStrip({ onNavigate }) {
       //                       every flow (NOT scoped to hide_task only).
       //                       Some overlap with approvalsCount is expected.
       const [
-        approvals,
+        approvalsNew, approvalsInProg, approvalsOnHold,
         alerts,
         urgentNew, urgentInProg, urgentOnHold,
         hrNew, hrInProg, hrOnHold,
       ] = await Promise.all([
-        safe('/api/v1/hr-hub/requests?flow=hide_task_request&status=new&scope=team&limit=100'),
-        safe('/api/v1/leader-alerts/unacked-count'),
-        safe('/api/v1/urgent-assist?scope=team&status=new&limit=200'),
-        safe('/api/v1/urgent-assist?scope=team&status=in_progress&limit=200'),
-        safe('/api/v1/urgent-assist?scope=team&status=on_hold&limit=200'),
-        safe('/api/v1/hr-hub/requests?status=new&scope=team&limit=100'),
-        safe('/api/v1/hr-hub/requests?status=in_progress&scope=team&limit=100'),
-        safe('/api/v1/hr-hub/requests?status=on_hold&scope=team&limit=100'),
+        safe('/hr-hub/requests?flow=hide_task_request&status=new&scope=team&limit=100'),
+        safe('/hr-hub/requests?flow=hide_task_request&status=in_progress&scope=team&limit=100'),
+        safe('/hr-hub/requests?flow=hide_task_request&status=on_hold&scope=team&limit=100'),
+        safe('/leader-alerts/unacked-count'),
+        safe('/urgent-assist?scope=team&status=new&limit=200'),
+        safe('/urgent-assist?scope=team&status=in_progress&limit=200'),
+        safe('/urgent-assist?scope=team&status=on_hold&limit=200'),
+        safe('/hr-hub/requests?status=new&scope=team&limit=100'),
+        safe('/hr-hub/requests?status=in_progress&scope=team&limit=100'),
+        safe('/hr-hub/requests?status=on_hold&scope=team&limit=100'),
       ]);
       if (cancelled) return;
       const lenOf = (j) => Array.isArray(j?.items) ? j.items.length : 0;
-      if (approvals) setApprovalsCount(lenOf(approvals));
+      // Hide-task approvals — sum every status below resolved so the
+      // tile reflects "anything still actionable in my team's hide-task
+      // pipeline" (not just `new`). Mirrors the HR Hub + Urgent Assist
+      // tiles' 3-status sum semantics.
+      const approvalsSum = (approvalsNew || approvalsInProg || approvalsOnHold)
+        ? lenOf(approvalsNew) + lenOf(approvalsInProg) + lenOf(approvalsOnHold)
+        : null;
+      if (approvalsSum != null) setApprovalsCount(approvalsSum);
       if (alerts) setLeaderAlerts(alerts?.count ?? 0);
       // Sum the three open buckets — endpoint paginates beyond ~200 but
       // 200/bucket × 3 = 600 ceiling is comfortably above every team.
