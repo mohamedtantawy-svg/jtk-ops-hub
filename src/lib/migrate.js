@@ -1146,14 +1146,14 @@ CREATE INDEX IF NOT EXISTS idx_queue_reassignments_source
 CREATE INDEX IF NOT EXISTS idx_queue_reassignments_assignee
   ON queue_reassignments(LOWER(assignee_email));
 
--- Mention groups — Slack-style @-handles that expand to a list of members.
+-- Mention groups: Slack-style @-handles that expand to a list of members.
 -- Used by every comment surface that runs the @mention parser (HR Hub,
--- Leaders Alerts, Feedback). Mentioning a group in a comment body
--- (`@hrxtools`) fans out a notification to every member and adds them as
+-- Leaders Alerts, Feedback). Mentioning a group in a comment body, e.g.
+-- @hrxtools, fans out a notification to every member and adds them as
 -- followers of the request, exactly as if each member had been tagged
--- individually. Anyone authenticated can create + edit groups (matches
+-- individually. Anyone authenticated can create or edit groups (matches
 -- the openness of HR Hub creation). Handle is the lowercased token typed
--- after the @ — kept distinct from any user's email localpart to avoid
+-- after the @, kept distinct from any users email localpart to avoid
 -- ambiguity (server-side parser tries group first, falls back to user).
 CREATE TABLE IF NOT EXISTS mention_group (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
