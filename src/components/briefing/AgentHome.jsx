@@ -339,104 +339,193 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
 
   const goWorkspace = useCallback(() => setView?.('my-queue'), [setView]);
 
+  // Region label for the hero meta line — same source BriefingView reads
+  // (`user.region`). For agents it's frequently empty; fall back to team
+  // so the line still carries a locator instead of a bare date.
+  const localityLine = useMemo(() => {
+    const parts = [todayLabel];
+    if (user?.region) parts.push(user.region);
+    else if (user?.team) parts.push(user.team);
+    return parts.join(' · ');
+  }, [todayLabel, user?.region, user?.team]);
+
+  // Total tracked items in the SLA tiles (Breached + At-risk + On-track) —
+  // matches `tally.total` since every open assignment lands in one bucket.
+  const slaTracked = tally.total;
+
   return (
     <div style={{
       flex: 1, overflow: 'auto', background: '#fafaf9',
-      padding: '20px 32px 64px',
+      padding: '24px 32px 80px',
     }}>
-      {/* ── Greeting strip + KPI badges ─────────────────────────
-          Mirrors the admin Briefing's top-right quartet so an agent
-          opens the page and immediately reads their state:
-          Health · Workload · SLA % · Resolved Today. */}
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, marginBottom: 18, flexWrap: 'wrap' }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 22, fontWeight: 800, color: '#1b1b1b', letterSpacing: '-0.01em' }}>
-            {greeting}, {myFirstName}.
+      {/* Inline responsive grid rules — Workspace uses the same pattern.
+          We can't put media queries in inline `style={{}}`, so the
+          breakpoint logic for the 3-up + 2-col blocks lives here. */}
+      <style>{`
+        .agent-home-grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+        .agent-home-grid-2col { display: grid; grid-template-columns: 1.5fr 1fr; gap: 16px; align-items: start; }
+        .agent-home-hero { display: flex; gap: 28px; align-items: stretch; flex-wrap: wrap; }
+        .agent-home-hero-left { flex: 1 1 360px; min-width: 0; }
+        .agent-home-hero-right { display: flex; flex-direction: column; gap: 12px; align-items: stretch; min-width: 0; }
+        .agent-home-kpi-row { display: grid; grid-template-columns: repeat(4, minmax(72px, 96px)); gap: 8px; }
+        @media (max-width: 1100px) {
+          .agent-home-hero-right { align-items: stretch; flex: 1 1 100%; }
+          .agent-home-kpi-row { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+        }
+        @media (max-width: 980px) {
+          .agent-home-grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+          .agent-home-grid-2col { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 720px) {
+          .agent-home-grid-3 { grid-template-columns: 1fr; }
+          .agent-home-kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+      `}</style>
+
+      {/* ── Hero — Greeting + KPIs + Open Workspace ───────────────────
+          Mirrors the Workspace "Priority of the Day" hero (same dark
+          purple radial gradient + decorative grain/glows) so the two
+          landings feel like the same product. Personalised for the
+          agent: greeting + day/region + N-open, plus the four KPI
+          badges and the Open Workspace CTA. */}
+      <div style={{
+        position: 'relative',
+        borderRadius: 24,
+        overflow: 'hidden',
+        background: 'radial-gradient(circle at 0% 0%, #2d1b69 0%, #1a103f 35%, #0e0628 70%, #050211 100%)',
+        boxShadow: '0 20px 60px -20px rgba(45, 27, 105, 0.55), 0 8px 24px -8px rgba(0,0,0,0.25)',
+        marginBottom: 28,
+      }}>
+        <div aria-hidden style={{
+          position: 'absolute', inset: 0, pointerEvents: 'none',
+          backgroundImage:
+            'radial-gradient(800px 320px at 12% -10%, rgba(124,58,237,0.55), transparent 60%),' +
+            'radial-gradient(700px 360px at 92% 110%, rgba(236,72,153,0.32), transparent 65%),' +
+            'radial-gradient(500px 240px at 68% 0%, rgba(56,189,248,0.18), transparent 70%)',
+        }} />
+        <div aria-hidden style={{
+          position: 'absolute', inset: 0, pointerEvents: 'none', opacity: 0.06,
+          backgroundImage: 'url("data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'140\' height=\'140\'><filter id=\'n\'><feTurbulence type=\'fractalNoise\' baseFrequency=\'0.85\' numOctaves=\'2\'/><feColorMatrix values=\'0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.55 0\'/></filter><rect width=\'100%\' height=\'100%\' filter=\'url(%23n)\'/></svg>")',
+        }} />
+
+        <div className="agent-home-hero" style={{ position: 'relative', padding: '28px 36px 32px', color: 'white' }}>
+          <div className="agent-home-hero-left">
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: 8, padding: '4px 10px', borderRadius: 128,
+              background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
+              fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.85)',
+              letterSpacing: '0.12em', textTransform: 'uppercase',
+            }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#34d399', boxShadow: '0 0 12px #34d399' }} />
+              {greeting}
+            </div>
+            <h1 style={{
+              fontSize: 36, fontWeight: 800, letterSpacing: '-0.015em',
+              lineHeight: 1.1, margin: '14px 0 0',
+              background: 'linear-gradient(180deg, #ffffff 0%, rgba(255,255,255,0.78) 100%)',
+              WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
+            }}>
+              {greeting}, {myFirstName}.
+            </h1>
+            <div style={{
+              fontSize: 14, lineHeight: 1.55, color: 'rgba(255,255,255,0.75)',
+              margin: '12px 0 0',
+            }}>
+              {localityLine} · <strong style={{ color: 'rgba(255,255,255,0.95)', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{tally.total}</strong> open in your queue
+            </div>
           </div>
-          <div style={{ fontSize: 13, color: '#616161', marginTop: 4 }}>
-            {todayLabel}{user?.team ? ` · ${user.team}` : ''} · <strong style={{ color: '#1b1b1b' }}>{tally.total}</strong> open in your queue
+
+          <div className="agent-home-hero-right">
+            <div className="agent-home-kpi-row">
+              <KpiBadgeGlass
+                label="Health"
+                value={`${healthScore}`}
+                color={healthTone.color}
+                sub={healthScore >= 80 ? 'Strong' : healthScore >= 50 ? 'Watch it' : 'At risk'}
+              />
+              <KpiBadgeGlass
+                label="Workload"
+                value={workloadBand.label}
+                color={workloadBand.color}
+                sub={`${tally.total} open`}
+              />
+              <KpiBadgeGlass
+                label="SLA %"
+                value={`${slaCompPct}%`}
+                color={slaCompPct >= 90 ? '#34d399' : slaCompPct >= 70 ? '#fbbf24' : '#fb7185'}
+                sub="Non-Jira"
+              />
+              <KpiBadgeGlass
+                label="Resolved"
+                value={`${myResolvedToday.length}`}
+                color="#34d399"
+                sub="today"
+              />
+            </div>
+            <button
+              onClick={goWorkspace}
+              style={{
+                alignSelf: 'flex-end',
+                padding: '9px 16px', borderRadius: 10,
+                border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(255,255,255,0.08)',
+                color: 'white', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                backdropFilter: 'blur(6px)',
+                transition: 'background .15s, transform .12s',
+                fontFamily: 'inherit',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.16)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; e.currentTarget.style.transform = 'translateY(0)'; }}
+            >
+              <i className="bi-collection-fill" style={{ fontSize: 11 }} />
+              Open Workspace
+            </button>
           </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <KpiBadge
-            label="Health"
-            value={`${healthScore}`}
-            color={healthTone.color}
-            sub={healthScore >= 80 ? 'Strong' : healthScore >= 50 ? 'Watch it' : 'At risk'}
-          />
-          <KpiBadge
-            label="Workload"
-            value={workloadBand.label}
-            color={workloadBand.color}
-            sub={`${tally.total} open`}
-          />
-          <KpiBadge
-            label="SLA %"
-            value={`${slaCompPct}%`}
-            color={slaCompPct >= 90 ? '#15803d' : slaCompPct >= 70 ? '#ed8d00' : '#d42d35'}
-            sub="Non-Jira"
-          />
-          <KpiBadge
-            label="Resolved"
-            value={`${myResolvedToday.length}`}
-            color="#15803d"
-            sub="today"
-          />
-          <button
-            onClick={goWorkspace}
-            style={{
-              marginLeft: 4,
-              padding: '8px 14px', borderRadius: 10,
-              border: '1px solid #e8e8e8', background: 'white',
-              color: '#1b1b1b', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-              display: 'inline-flex', alignItems: 'center', gap: 6,
-            }}
-          >
-            <i className="bi-collection-fill" style={{ fontSize: 11 }} />
-            Open Workspace
-          </button>
         </div>
       </div>
 
-      {/* ── Pending acknowledgements carousel ──────────────────────────────
-          The Priority of the Day banner lives on the Workspace landing,
-          so we don't double up here. Instead, surface anything a comms
-          author has just sent that this agent hasn't acked yet — the
-          same single-banner carousel BriefingView's "Pending
-          Acknowledgements" block uses, extracted into PendingAcksBanner.
-          Self-hides when there's nothing to ack. */}
+      {/* ── Pending acknowledgements carousel ──────────────────────────
+          Surfaces anything a comms author has sent that this agent hasn't
+          acked yet. Self-hides when nothing's pending. */}
       <PendingAcksBanner user={user} comms={comms} setView={setView} isAckedByMe={isAckedByMeProp} noPadding />
-      <div style={{ height: 16 }} aria-hidden />
+      <div style={{ height: 12 }} aria-hidden />
 
-      {/* ── Your SLA status — 3 compact tiles ─────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 18 }}>
+      {/* ── Your SLA status section ──────────────────────────────────── */}
+      <SectionTitle
+        title="Your SLA status"
+        hint="Your assignments only · Jira excluded per spec"
+        rightPill={`${slaTracked.toLocaleString()} ${slaTracked === 1 ? 'item tracked' : 'items tracked'}`}
+      />
+      <div className="agent-home-grid-3" style={{ marginBottom: 24 }}>
         <SlaTile
-          label="Breached"
           eyebrow="ACTION NOW"
+          label="Breached"
           color="#d42d35"
           accent="linear-gradient(135deg, #f43f5e 0%, #ec4899 100%)"
           bgLight="#fff1f2"
-          icon="bi-x-circle-fill"
+          icon="bi-x-octagon-fill"
           count={tally.breached}
           subText={tally.breached === 0 ? 'Nothing breached — keep it that way.' : 'Pick the oldest first.'}
-          ctaLabel="Show breaches"
+          ctaLabel={tally.breached === 0 ? 'All clear' : 'Show breaches'}
+          ctaDisabledOk={tally.breached === 0}
           onClick={() => setView?.('my-queue')}
         />
         <SlaTile
+          eyebrow="DON'T LET SLIP"
           label="At risk"
-          eyebrow="DON'T LET IT SLIP"
           color="#ed8d00"
           accent="linear-gradient(135deg, #f59e0b 0%, #ef4444 100%)"
           bgLight="#fff8e6"
-          icon="bi-exclamation-circle-fill"
+          icon="bi-exclamation-triangle-fill"
           count={tally.atRisk}
           subText={tally.atRisk === 0 ? 'Comfortable buffer on every item.' : '<25% of SLA window left.'}
           ctaLabel="Show at-risk"
           onClick={() => setView?.('my-queue')}
         />
         <SlaTile
-          label="On track"
           eyebrow="HEALTHY"
+          label="On track"
           color="#15803d"
           accent="linear-gradient(135deg, #29811e 0%, #16a34a 100%)"
           bgLight="#dcfce7"
@@ -454,12 +543,12 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
         />
       </div>
 
-      {/* ── Things waiting on you — HR Hub / Urgent Assist / Announcements ──
-          The SLA tiles cover queue items; this strip surfaces inboxes
-          that don't sit in any queue feed but matter to an agent's day.
-          Each tile clicks through to its own view. Counts are best-effort
-          via apiFetch — null shows "—", 0 shows "0" honestly. */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 18 }}>
+      {/* ── Things waiting on you ───────────────────────────────────── */}
+      <SectionTitle
+        title="Things waiting on you"
+        hint="Inboxes outside the queue feeds"
+      />
+      <div className="agent-home-grid-3" style={{ marginBottom: 24 }}>
         <InboxTile
           icon="bi-clipboard-check-fill"
           color="#0e7490"
@@ -477,7 +566,7 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
           accent="linear-gradient(135deg, #f59e0b 0%, #ed8d00 100%)"
           bgLight="#fff8e6"
           label="Urgent Assist"
-          hint="assigned to you"
+          hint="open requests assigned to you"
           count={urgentMine}
           ctaLabel="Open Urgent Assist"
           onClick={() => setView?.('urgent-assist')}
@@ -495,13 +584,12 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
         />
       </div>
 
-      {/* ── Two-column block: Focus list + Your queues ─────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: 16, marginBottom: 20, alignItems: 'start' }}>
+      {/* ── Two-column: Your focus + Your queues ───────────────────── */}
+      <div className="agent-home-grid-2col" style={{ marginBottom: 24 }}>
         <div style={CARD}>
-          <SectionHeader
-            icon="bi-lightning-charge-fill"
+          <CardHeader
             title="Your focus"
-            subtitle="The 5 most-urgent items in your queue right now"
+            subtitle="Top 5 most-urgent items"
             chip={focusList.length > 0 ? `${focusList.length} of ${tally.breached + tally.atRisk}` : null}
             chipColor="#d42d35"
           />
@@ -529,8 +617,7 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
         </div>
 
         <div style={CARD}>
-          <SectionHeader
-            icon="bi-collection-fill"
+          <CardHeader
             title="Your queues"
             subtitle="Where your work lives — click to open"
             chip={null}
@@ -561,16 +648,17 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
                     background: meta?.bg || '#f3f3f3',
                     color: meta?.color || '#616161',
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    flexShrink: 0,
                   }}>
                     <i className={meta?.icon || 'bi-circle'} style={{ fontSize: 12 }} />
                   </span>
-                  <span style={{ flex: 1, minWidth: 0 }}>
+                  <span style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                     <span style={{ fontWeight: 600 }}>{meta?.label || id}</span>
                     {id === 'jira' && (
                       <span
                         title="Per spec: Jira breaches are excluded from the SLA tiles above. Click to open your Jira queue."
                         style={{
-                          marginLeft: 6, fontSize: 9, fontWeight: 700,
+                          fontSize: 9, fontWeight: 700,
                           color: '#9e9e9e', background: '#f7f5f2',
                           padding: '1px 6px', borderRadius: 128,
                           letterSpacing: '0.04em', textTransform: 'uppercase',
@@ -581,8 +669,8 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
                     )}
                   </span>
                   <span style={{
-                    fontSize: 13, fontWeight: 800, color: meta?.color || '#1b1b1b',
-                    fontVariantNumeric: 'tabular-nums',
+                    fontSize: 14, fontWeight: 800, color: meta?.color || '#1b1b1b',
+                    fontVariantNumeric: 'tabular-nums', minWidth: 24, textAlign: 'right',
                   }}>{count}</span>
                   <i className="bi-arrow-right" style={{ fontSize: 11, color: '#9e9e9e' }} />
                 </button>
@@ -592,23 +680,24 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
         </div>
       </div>
 
-      {/* ── Personal Checklist — full width ──────────────────────────────
-          Resolved-today + workload now live in the header KPI badges, so
-          the Progress Today block was redundant. PersonalChecklist gets
-          the full width for clarity. */}
+      {/* ── Personal Checklist — full width ────────────────────────── */}
       <div>
         <PersonalChecklist user={user} variant="primary" />
       </div>
 
-      {/* ── Footer hint ─────────────────────────────────────────── */}
+      {/* ── Footer hint ─────────────────────────────────────────────── */}
       <div style={{
-        marginTop: 24, padding: '10px 14px', borderRadius: 10,
+        marginTop: 24, padding: '12px 16px', borderRadius: 12,
         background: 'white', border: '1px solid #e8e8e8',
-        fontSize: 11, color: '#616161',
         display: 'flex', alignItems: 'center', gap: 10,
+        fontSize: 12, color: '#616161',
       }}>
-        <i className="bi-info-circle-fill" style={{ fontSize: 12, color: '#0e7490' }} />
-        Agent home preview · ?view=agent-home · all numbers are live and scoped to your assignments only.
+        <i className="bi-info-circle-fill" style={{ fontSize: 13, color: '#0e7490' }} />
+        <span>Click any card to jump straight in. All numbers are live and scoped to your assignments only.</span>
+        <span style={{ flex: 1 }} />
+        {user?.email && (
+          <span style={{ color: '#9e9e9e' }}>Signed in as <strong style={{ color: '#1b1b1b' }}>{user.name || user.email}</strong></span>
+        )}
       </div>
     </div>
   );
@@ -617,17 +706,48 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
 const CARD = {
   background: 'white',
   border: '1px solid #e8e8e8',
-  borderRadius: 14,
-  padding: 16,
+  borderRadius: 18,
+  padding: 18,
+  boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
 };
 
-function SectionHeader({ icon, iconColor = '#1b1b1b', title, subtitle, chip, chipColor }) {
+// Page-level section title — sits between major blocks (e.g. "Your SLA
+// status") and mirrors WorkspaceHome's "How to work your queues today"
+// row: bold title + grey hint + right-aligned counter pill.
+function SectionTitle({ title, hint, rightPill }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-      <i className={icon} style={{ fontSize: 14, color: iconColor }} />
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 12, padding: '0 4px' }}>
+      <h2 style={{
+        fontSize: 18, fontWeight: 800, color: '#1b1b1b',
+        letterSpacing: '-0.01em', margin: 0,
+      }}>{title}</h2>
+      {hint && (
+        <span style={{ fontSize: 12, color: '#9e9e9e', fontWeight: 500 }}>
+          {hint}
+        </span>
+      )}
+      <span style={{ flex: 1 }} />
+      {rightPill && (
+        <span style={{
+          fontSize: 11, fontWeight: 700, color: '#616161',
+          background: 'white', border: '1px solid #e8e8e8',
+          padding: '4px 10px', borderRadius: 128,
+          fontVariantNumeric: 'tabular-nums',
+        }}>{rightPill}</span>
+      )}
+    </div>
+  );
+}
+
+// Card-internal header — used inside the Focus / Queues cards. Smaller
+// than SectionTitle and stacks the title above the subtitle, matching
+// the existing AgentHome rhythm.
+function CardHeader({ title, subtitle, chip, chipColor }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 800, color: '#1b1b1b', letterSpacing: '-0.01em' }}>{title}</div>
-        {subtitle && <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 1 }}>{subtitle}</div>}
+        <div style={{ fontSize: 14, fontWeight: 800, color: '#1b1b1b', letterSpacing: '-0.01em' }}>{title}</div>
+        {subtitle && <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 2 }}>{subtitle}</div>}
       </div>
       {chip && (
         <span style={{
@@ -640,33 +760,36 @@ function SectionHeader({ icon, iconColor = '#1b1b1b', title, subtitle, chip, chi
   );
 }
 
-// SlaTile — clean Workspace step-card aesthetic. White background by
-// default; thin 3-px gradient bar at the top carries the colour signal.
-// Soft accent shadow + border tint on hover. The tile NEVER goes
-// fully tinted — saturated backgrounds were too loud and made the
-// page feel "folksy" (Mohamed 2026-05-05 feedback).
-function SlaTile({ label, eyebrow, color, accent, bgLight, icon, count, subText, ctaLabel, onClick }) {
+// SlaTile — Workspace step-card aesthetic. White background; 4-px
+// gradient bar at the top carries the colour signal. Soft accent shadow
+// + border tint on hover. When the count is 0 AND `ctaDisabledOk` is
+// set, the tile renders an "all clear" state (green check + text)
+// instead of the action CTA so the agent gets a clear positive signal.
+function SlaTile({ label, eyebrow, color, accent, bgLight, icon, count, subText, ctaLabel, ctaDisabledOk = false, onClick }) {
+  const isAllClear = ctaDisabledOk && count === 0;
   return (
     <button
-      onClick={onClick}
+      onClick={isAllClear ? undefined : onClick}
       style={{
         position: 'relative',
         textAlign: 'left',
         background: 'white',
         border: '1px solid #e8e8e8',
-        borderRadius: 14,
-        padding: '14px 16px 12px',
-        cursor: 'pointer',
+        borderRadius: 18,
+        padding: '20px 18px 16px',
+        cursor: isAllClear ? 'default' : 'pointer',
         overflow: 'hidden',
-        transition: 'transform .15s ease, box-shadow .15s ease, border-color .15s ease',
+        transition: 'transform .18s ease, box-shadow .18s ease, border-color .18s ease',
         boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
         display: 'flex', flexDirection: 'column',
-        minHeight: 132,
+        minHeight: 168,
+        opacity: isAllClear ? 0.94 : 1,
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.transform = 'translateY(-2px)';
-        e.currentTarget.style.boxShadow = `0 10px 24px -12px ${color}30, 0 2px 6px -2px rgba(0,0,0,0.04)`;
-        e.currentTarget.style.borderColor = `${color}40`;
+        if (isAllClear) return;
+        e.currentTarget.style.transform = 'translateY(-3px)';
+        e.currentTarget.style.boxShadow = `0 12px 30px -10px ${color}40, 0 4px 12px -4px rgba(0,0,0,0.08)`;
+        e.currentTarget.style.borderColor = `${color}55`;
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.transform = 'translateY(0)';
@@ -674,39 +797,54 @@ function SlaTile({ label, eyebrow, color, accent, bgLight, icon, count, subText,
         e.currentTarget.style.borderColor = '#e8e8e8';
       }}
     >
-      {/* Top accent bar (3px) */}
+      {/* Top accent bar (4px) — matches WorkspaceHome.StepCard */}
       <div aria-hidden style={{
-        position: 'absolute', top: 0, left: 0, right: 0, height: 3,
+        position: 'absolute', top: 0, left: 0, right: 0, height: 4,
         background: accent,
       }} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
+        <span style={{
+          fontSize: 10, fontWeight: 800, letterSpacing: '0.12em',
+          color, textTransform: 'uppercase',
+        }}>{eyebrow}</span>
         <div style={{
-          width: 26, height: 26, borderRadius: 8,
+          width: 30, height: 30, borderRadius: 8,
           background: bgLight, color,
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           flexShrink: 0,
         }}>
-          <i className={icon} style={{ fontSize: 12 }} />
+          <i className={icon} style={{ fontSize: 14 }} />
         </div>
-        <span style={{
-          fontSize: 9, fontWeight: 800, letterSpacing: '0.12em',
-          color, textTransform: 'uppercase',
-        }}>{eyebrow}</span>
       </div>
-      <div style={{ fontSize: 14, fontWeight: 700, color: '#1b1b1b', marginTop: 8, letterSpacing: '-0.01em' }}>{label}</div>
+      <div style={{ fontSize: 18, fontWeight: 800, color: '#1b1b1b', letterSpacing: '-0.01em', marginBottom: 4, lineHeight: 1.2 }}>{label}</div>
+      <div style={{ fontSize: 12, color: '#616161', lineHeight: 1.45, marginBottom: 12, minHeight: 32 }}>{subText}</div>
       <div style={{ flex: 1 }} />
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 6 }}>
+        <span style={{
+          fontSize: 32, fontWeight: 800, lineHeight: 1,
+          color: isAllClear ? '#15803d' : (count > 0 ? color : '#1b1b1b'),
+          fontVariantNumeric: 'tabular-nums',
+        }}>
+          {isAllClear ? '✓' : count.toLocaleString()}
+        </span>
+      </div>
       <div style={{
-        fontSize: 30, fontWeight: 800, lineHeight: 1,
-        color: count > 0 ? color : '#1b1b1b',
-        fontVariantNumeric: 'tabular-nums', marginTop: 8,
-      }}>{count}</div>
-      <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 4, lineHeight: 1.35 }}>{subText}</div>
-      <div style={{
-        marginTop: 8, display: 'inline-flex', alignItems: 'center', gap: 4,
-        fontSize: 11, fontWeight: 700, color,
+        marginTop: 4,
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        fontSize: 12, fontWeight: 700,
+        color: isAllClear ? '#15803d' : color,
       }}>
-        {ctaLabel}
-        <i className="bi-arrow-right" style={{ fontSize: 10 }} />
+        {isAllClear ? (
+          <>
+            <i className="bi-check-circle-fill" style={{ fontSize: 12 }} />
+            {ctaLabel}
+          </>
+        ) : (
+          <>
+            {ctaLabel}
+            <i className="bi-arrow-right" style={{ fontSize: 12 }} />
+          </>
+        )}
       </div>
     </button>
   );
@@ -773,38 +911,42 @@ function FocusRow({ row }) {
   );
 }
 
-// ── KpiBadge — small header pill for Health / Workload / SLA / Resolved.
-// Restrained: white background, faint colored left-bar instead of a
-// fully-tinted block so the four badges don't shout at the agent. The
-// number itself carries the only saturated color (and only when the
-// signal warrants it — neutral grey for healthy values).
-function KpiBadge({ label, value, sub, color }) {
+// ── KpiBadgeGlass — KPI mini-card sized for the dark hero. White text
+// on a glass / blurred background; the saturated `color` is reserved
+// for the value so the four badges read as a quartet rather than a
+// rainbow. Light-mode accessible (white on dark gradient) and dark-mode
+// neutral (the hero is intentionally always dark).
+function KpiBadgeGlass({ label, value, sub, color }) {
   return (
     <div
       style={{
         position: 'relative',
-        minWidth: 88,
-        padding: '8px 12px 8px 14px', borderRadius: 12,
-        background: 'white',
-        border: '1px solid #e8e8e8',
+        padding: '8px 12px 9px', borderRadius: 12,
+        background: 'rgba(255,255,255,0.06)',
+        border: '1px solid rgba(255,255,255,0.14)',
+        backdropFilter: 'blur(6px)',
         display: 'flex', flexDirection: 'column',
         alignItems: 'flex-start', gap: 1,
         overflow: 'hidden',
+        minWidth: 0,
       }}
       title={`${label}${sub ? ` — ${sub}` : ''}`}
     >
-      <span aria-hidden style={{
-        position: 'absolute', left: 0, top: 0, bottom: 0, width: 3,
-        background: color,
-      }} />
-      <span style={{ fontSize: 9, fontWeight: 700, color: '#9e9e9e', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+      <span style={{
+        fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.6)',
+        letterSpacing: '0.1em', textTransform: 'uppercase',
+      }}>
         {label}
       </span>
-      <span style={{ fontSize: 20, fontWeight: 800, color, lineHeight: 1, fontVariantNumeric: 'tabular-nums', marginTop: 2 }}>
+      <span style={{
+        fontSize: 22, fontWeight: 800, color, lineHeight: 1,
+        fontVariantNumeric: 'tabular-nums', marginTop: 2,
+        textShadow: '0 1px 2px rgba(0,0,0,0.25)',
+      }}>
         {value}
       </span>
       {sub && (
-        <span style={{ fontSize: 9, fontWeight: 500, color: '#9e9e9e' }}>
+        <span style={{ fontSize: 10, fontWeight: 500, color: 'rgba(255,255,255,0.55)' }}>
           {sub}
         </span>
       )}
@@ -812,35 +954,37 @@ function KpiBadge({ label, value, sub, color }) {
   );
 }
 
-// ── InboxTile — clean step-card aesthetic. White background, thin
-// top accent gradient, smaller circle icon, big tabular count on the
-// right. Hover lifts and tints the border in the accent colour, but
-// the resting state stays neutral so three of these in a row don't
-// drown the page in colour.
+// ── InboxTile — Workspace step-card aesthetic, same column rhythm as
+// the SLA tiles above so the two 3-up rows feel like one block. White
+// background with 4-px gradient bar at the top; eyebrow + icon row,
+// title + hint, then big tabular count + CTA at the bottom. `count==null`
+// (real fetch failure) renders as `—`; `0` renders as a literal 0 so
+// the agent isn't told "—" when we know the inbox is empty.
 function InboxTile({ icon, color, accent, bgLight, label, hint, count, ctaLabel, onClick }) {
-  // null = real fetch failure → show '—'. 0 = loaded empty → show 0.
-  const display = count == null ? '—' : count;
+  const isPending = count == null;
+  const display = isPending ? '—' : count.toLocaleString();
   return (
     <button
       onClick={onClick}
       style={{
         position: 'relative',
         textAlign: 'left',
-        padding: '14px 16px 12px',
-        borderRadius: 14,
+        padding: '20px 18px 16px',
+        borderRadius: 18,
         border: '1px solid #e8e8e8',
         background: 'white',
         cursor: 'pointer',
-        display: 'flex', alignItems: 'center', gap: 12,
+        display: 'flex', flexDirection: 'column',
         overflow: 'hidden',
-        transition: 'transform .15s ease, box-shadow .15s ease, border-color .15s ease',
+        transition: 'transform .18s ease, box-shadow .18s ease, border-color .18s ease',
         boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
-        minHeight: 80,
+        minHeight: 168,
+        fontFamily: 'inherit',
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.transform = 'translateY(-2px)';
-        e.currentTarget.style.boxShadow = `0 10px 24px -12px ${color}30, 0 2px 6px -2px rgba(0,0,0,0.04)`;
-        e.currentTarget.style.borderColor = `${color}40`;
+        e.currentTarget.style.transform = 'translateY(-3px)';
+        e.currentTarget.style.boxShadow = `0 12px 30px -10px ${color}40, 0 4px 12px -4px rgba(0,0,0,0.08)`;
+        e.currentTarget.style.borderColor = `${color}55`;
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.transform = 'translateY(0)';
@@ -850,31 +994,37 @@ function InboxTile({ icon, color, accent, bgLight, label, hint, count, ctaLabel,
     >
       {accent && (
         <div aria-hidden style={{
-          position: 'absolute', top: 0, left: 0, right: 0, height: 3,
+          position: 'absolute', top: 0, left: 0, right: 0, height: 4,
           background: accent,
         }} />
       )}
-      <div style={{
-        width: 32, height: 32, borderRadius: 8,
-        background: bgLight || '#f7f5f2', color,
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-      }}>
-        <i className={icon} style={{ fontSize: 14 }} />
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: '#1b1b1b', letterSpacing: '-0.01em' }}>{label}</div>
-        {hint && <div style={{ fontSize: 10, color: '#9e9e9e', marginTop: 2 }}>{hint}</div>}
-        <div style={{ marginTop: 6, fontSize: 11, fontWeight: 700, color, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-          {ctaLabel}
-          <i className="bi-arrow-right" style={{ fontSize: 10 }} />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', marginBottom: 10 }}>
+        <div style={{
+          width: 30, height: 30, borderRadius: 8,
+          background: bgLight || '#f7f5f2', color,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        }}>
+          <i className={icon} style={{ fontSize: 14 }} />
         </div>
       </div>
+      <div style={{ fontSize: 18, fontWeight: 800, color: '#1b1b1b', letterSpacing: '-0.01em', marginBottom: 4, lineHeight: 1.2 }}>{label}</div>
+      {hint && <div style={{ fontSize: 12, color: '#616161', lineHeight: 1.45, marginBottom: 12, minHeight: 32 }}>{hint}</div>}
+      <div style={{ flex: 1 }} />
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 6 }}>
+        <span style={{
+          fontSize: 32, fontWeight: 800, lineHeight: 1,
+          color: !isPending && count > 0 ? color : '#9e9e9e',
+          fontVariantNumeric: 'tabular-nums',
+        }}>{display}</span>
+      </div>
       <div style={{
-        fontSize: 26, fontWeight: 800, lineHeight: 1,
-        color: typeof count === 'number' && count > 0 ? color : '#9e9e9e',
-        minWidth: 36, textAlign: 'right',
-        fontVariantNumeric: 'tabular-nums',
-      }}>{display}</div>
+        marginTop: 4,
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        fontSize: 12, fontWeight: 700, color,
+      }}>
+        {ctaLabel}
+        <i className="bi-arrow-right" style={{ fontSize: 12 }} />
+      </div>
     </button>
   );
 }
