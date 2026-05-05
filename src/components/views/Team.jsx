@@ -1,4 +1,5 @@
 import { useState, useContext, useMemo, useRef, useEffect } from 'react';
+import ReactDOM from 'react-dom';
 import { PermissionsContext, IntegrationsContext } from '../../App';
 import { FLAGS } from '../../data/constants';
 import { slaInfo } from '../../utils/helpers';
@@ -162,6 +163,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
   const [addError, setAddError] = useState(null);
   const [addSaving, setAddSaving] = useState(false);
   const [actionMenuOpen, setActionMenuOpen] = useState(null); // email of member whose menu is open
+  const [actionMenuPos, setActionMenuPos] = useState({ top: 0, left: 0 }); // viewport coords for the portaled menu/confirm
   const [editAllocEmail, setEditAllocEmail] = useState(null); // email of member being re-allocated (modal)
   const [permsModalEmail, setPermsModalEmail] = useState(null); // email of member whose permissions modal is open
   const [permsDraft, setPermsDraft] = useState({ isAnnouncementsAdmin: false, isAccessAdmin: false });
@@ -184,6 +186,20 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
     if (actionMenuOpen) document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [actionMenuOpen]);
+
+  // Dismiss on scroll/resize — the menu is portaled with position:fixed, so
+  // the row underneath would slide out from under it without this. Capture
+  // phase catches scroll on the inner team-view scroll container too.
+  useEffect(() => {
+    if (!actionMenuOpen && !confirmRemove) return;
+    const dismiss = () => { setActionMenuOpen(null); setConfirmRemove(null); };
+    window.addEventListener('scroll', dismiss, true);
+    window.addEventListener('resize', dismiss);
+    return () => {
+      window.removeEventListener('scroll', dismiss, true);
+      window.removeEventListener('resize', dismiss);
+    };
+  }, [actionMenuOpen, confirmRemove]);
 
   // ── Add Member handler ──────────────────────────────────────────────────
   const handleAddMember = async () => {
@@ -674,11 +690,26 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
           </div>
 
           {/* Action menu (three dots) — visible only to roster managers so
-              users without permission don't get baited into 403-ing clicks. */}
+              users without permission don't get baited into 403-ing clicks.
+              The dropdown is portaled to document.body with position:fixed
+              so it escapes the row and the manager-expand wrapper's
+              `overflow:hidden` (which otherwise clips it on every sub-row). */}
           <div style={{ position: 'relative', display: 'flex', justifyContent: 'center' }} onClick={e => e.stopPropagation()}>
             {canManageRoster && (
             <button
-              onClick={() => setActionMenuOpen(isMenuOpen ? null : email)}
+              onClick={(e) => {
+                if (isMenuOpen) {
+                  setActionMenuOpen(null);
+                  return;
+                }
+                const r = e.currentTarget.getBoundingClientRect();
+                const menuWidth = 180;
+                setActionMenuPos({
+                  top: r.bottom + 4,
+                  left: Math.max(8, Math.min(window.innerWidth - menuWidth - 8, r.right - menuWidth)),
+                });
+                setActionMenuOpen(email);
+              }}
               style={{
                 width: 24, height: 24, borderRadius: 6, border: 'none',
                 background: isMenuOpen ? '#f3eff8' : (isHovered ? '#f7f5f2' : 'transparent'),
@@ -691,13 +722,13 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
               <i className="bi-three-dots-vertical" />
             </button>
             )}
-            {canManageRoster && isMenuOpen && (
+            {canManageRoster && isMenuOpen && ReactDOM.createPortal(
               <div
                 ref={actionMenuRef}
                 style={{
-                  position: 'absolute', top: 28, right: 0, zIndex: 100,
+                  position: 'fixed', top: actionMenuPos.top, left: actionMenuPos.left, zIndex: 1100,
                   background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 10,
-                  boxShadow: '0 4px 16px rgba(0,0,0,0.10)', minWidth: 160,
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.10)', minWidth: 180,
                   padding: '4px 0', overflow: 'hidden',
                 }}
               >
@@ -759,16 +790,20 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                   <i className="bi-person-x" style={{ fontSize: 12 }} />
                   Remove
                 </button>
-              </div>
+              </div>,
+              document.body
             )}
 
-            {/* Confirm remove dialog */}
-            {confirmRemove === email && (
+            {/* Confirm remove dialog — also portaled so it isn't clipped by
+                the manager-expand wrapper's overflow:hidden. Reuses the
+                kebab's stored coords so it appears in the same spot the
+                action menu just vacated. */}
+            {confirmRemove === email && ReactDOM.createPortal(
               <div
                 style={{
-                  position: 'absolute', top: 28, right: 0, zIndex: 110,
+                  position: 'fixed', top: actionMenuPos.top, left: actionMenuPos.left, zIndex: 1110,
                   background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 10,
-                  boxShadow: '0 4px 16px rgba(0,0,0,0.12)', minWidth: 200,
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.12)', minWidth: 220,
                   padding: '14px 16px',
                 }}
               >
@@ -797,7 +832,8 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                     {removeSaving ? 'Removing…' : 'Remove'}
                   </button>
                 </div>
-              </div>
+              </div>,
+              document.body
             )}
           </div>
         </div>
