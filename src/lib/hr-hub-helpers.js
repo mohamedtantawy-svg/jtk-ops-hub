@@ -68,19 +68,29 @@ const MENTION_TOKEN = /(?:^|[^\w])@([a-z][a-z0-9._-]{1,80})/gi;
 
 /**
  * Pull every plausible @mention out of a body and resolve to a unique
- * lowercased email list. Tokens that don't match a real member are
- * silently dropped — typos shouldn't add ghost followers.
+ * lowercased email list. Tokens that don't match a real member or group
+ * are silently dropped — typos shouldn't add ghost followers.
  *
- * Resolution strategy:
- *   1. exact email match (`@firstname.lastname@deel.com` rarely typed but supported)
- *   2. localpart match against MEMBERS_BY_EMAIL keys
- *   3. dotted name → email match (e.g. `@trish.lee` → trish.lee@deel.com)
+ * Resolution strategy (in order):
+ *   1. group handle match (`@hrxtools` → expand to member emails) when
+ *      `groupsByHandle` is provided. Groups win over users so a handle
+ *      collision with a localpart still routes to the group everyone
+ *      explicitly opted into.
+ *   2. exact email match (`@firstname.lastname@deel.com`)
+ *   3. localpart match against MEMBERS_BY_EMAIL keys
+ *   4. dotted name → email match (e.g. `@trish.lee` → trish.lee@deel.com)
  */
-export function parseMentions(body) {
+export function parseMentions(body, groupsByHandle = null) {
   if (!body) return [];
   const found = new Set();
   for (const m of String(body).matchAll(MENTION_TOKEN)) {
     const token = m[1].toLowerCase();
+    if (groupsByHandle && groupsByHandle.has(token)) {
+      for (const e of groupsByHandle.get(token) || []) {
+        if (e) found.add(String(e).toLowerCase());
+      }
+      continue;
+    }
     const candidates = [
       token,
       `${token}@deel.com`,

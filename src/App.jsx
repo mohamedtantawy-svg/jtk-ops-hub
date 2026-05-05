@@ -109,6 +109,7 @@ import LeaderAlertsView from './components/views/LeaderAlertsView';
 import LeadersHubView from './components/views/LeadersHubView';
 import UrgentAssistView from './components/views/UrgentAssistView';
 import CreateHrHubRequestModal from './components/modals/CreateHrHubRequestModal';
+import ManageMentionGroupsModal from './components/modals/ManageMentionGroupsModal';
 import CreateLeaderAlertModal from './components/modals/CreateLeaderAlertModal';
 import CreateUrgentAssistModal from './components/modals/CreateUrgentAssistModal';
 import { getLeaderAlertsUnackedCount } from './services/leaderAlertsApi';
@@ -702,6 +703,7 @@ const App=()=>{
   // (initialFlow=null) lets the user choose; deep-links from queue rows
   // (Stage 7) will preselect a flow.
   const [hrHubCreate,setHrHubCreate]=useState(null);
+  const [mentionGroupsOpen,setMentionGroupsOpen]=useState(false);
   const [leaderAlertCreate,setLeaderAlertCreate]=useState(false);
   // Urgent Assist create modal — boolean toggle. When true the modal is
   // open; the form posts directly to /api/v1/urgent-assist and bumps the
@@ -1450,6 +1452,7 @@ const App=()=>{
         onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}
         onCreateLeaderAlert={()=>setLeaderAlertCreate(true)}
         onCreateUrgentAssist={()=>setUrgentAssistCreate(true)}
+        onManageMentionGroups={()=>setMentionGroupsOpen(true)}
         leaderAlertsBadge={leaderAlertsBadge}
         urgentAssistBadge={urgentAssistBadge}
         setSelTask={()=>{}} tasks={tasks}
@@ -1487,6 +1490,7 @@ const App=()=>{
       </div>
       {createModal   &&<CreateTaskModal onConfirm={confirmCreate} onClose={()=>setCreateModal(false)} currentUser={effectiveUser}/>}
       {hrHubCreate   &&<CreateHrHubRequestModal initialFlow={hrHubCreate.initialFlow||null} onClose={()=>setHrHubCreate(null)} onCreated={(id,flow)=>{setHrHubCreate(null);setView('hr-hub');addToast?.({kind:'success',message:`Submitted to HR Hub${flow?` (${flow.replace('_',' ')})`:''}.`});}}/>}
+      {mentionGroupsOpen&&<ManageMentionGroupsModal onClose={()=>setMentionGroupsOpen(false)}/>}
       {leaderAlertCreate&&<CreateLeaderAlertModal onClose={()=>setLeaderAlertCreate(false)} onCreated={(alert)=>{setLeaderAlertCreate(false);setView('leader-alerts');setLeaderAlertsRefreshNonce(n=>n+1);addToast?.({kind:'success',message:`Posted${alert?.title?`: "${alert.title.slice(0,60)}${alert.title.length>60?'…':''}"`:' alert'}.`});}}/>}
       {urgentAssistCreate&&<CreateUrgentAssistModal currentUser={effectiveUser} onClose={()=>setUrgentAssistCreate(false)} onCreated={(row)=>{setUrgentAssistCreate(false);setView('urgent-assist');setUrgentAssistRefreshNonce(n=>n+1);addToast?.({kind:'success',message:`Urgent Assist created${row?.subject?`: "${row.subject.slice(0,60)}${row.subject.length>60?'…':''}"`:''}.`});}}/>}
       {projectModal  &&<CreateProjectModal onConfirm={confirmProject} onClose={()=>setProjectModal(null)} project={typeof projectModal==='object'?projectModal:null} currentUser={effectiveUser}/>}

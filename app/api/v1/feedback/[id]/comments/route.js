@@ -11,16 +11,28 @@ import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { query } from '../../../../../../src/lib/db';
 import { MEMBERS_BY_EMAIL } from '../../../../../../src/data/members';
+import { loadGroupsByHandle } from '../../../../../../src/lib/mention-groups';
 
 // Parse @first.last mentions out of the comment body. Same loose rule HR
 // Hub uses — surface lowercased emails for known members; unknown handles
 // are dropped silently so a typo can't ghost-notify someone.
-function parseMentions(text) {
+//
+// `groupsByHandle` (optional) maps lowercased handles → member-email lists.
+// When provided, a token whose value matches a handle expands to the
+// group's full member set — same fan-out as if the user had typed each
+// member individually. Group resolution wins over user resolution.
+function parseMentions(text, groupsByHandle = null) {
   if (typeof text !== 'string' || !text) return [];
   const matches = text.match(/@([a-zA-Z0-9._-]+)/g) || [];
   const handles = matches.map(m => m.slice(1).toLowerCase());
   const found = new Set();
   for (const handle of handles) {
+    if (groupsByHandle && groupsByHandle.has(handle)) {
+      for (const e of groupsByHandle.get(handle) || []) {
+        if (e) found.add(String(e).toLowerCase());
+      }
+      continue;
+    }
     for (const email of Object.keys(MEMBERS_BY_EMAIL)) {
       const local = email.split('@')[0];
       if (local === handle || email === handle || email === `${handle}@deel.com`) {
@@ -131,7 +143,8 @@ export async function POST(req, { params }) {
     const submitterEmail = (parent.rows[0].submitter_email || '').toLowerCase();
     const requestTitle = parent.rows[0].title || '(feedback request)';
 
-    const mentionEmails = parseMentions(text);
+    const groupsByHandle = await loadGroupsByHandle();
+    const mentionEmails = parseMentions(text, groupsByHandle);
 
     const { rows } = await query(
       `INSERT INTO feedback_comments (request_id, author_id, author_email, author_name, body)
