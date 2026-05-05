@@ -863,15 +863,24 @@ const App=()=>{
         }, 60);
       } else if (n.linkView === 'hr_hub' && n.linkId) {
         // HR Hub deep-link: route to the HR Hub view and open the detail
-        // drawer for this request id. The view reads ?req=<uuid> from the
-        // URL on mount, so set it before flipping the view to keep the
-        // drawer open across navigations.
+        // drawer for this request id. URL is updated for share/F5 deep-link
+        // restore; the openDetail event covers the case where the user is
+        // already on hr-hub (setView is a no-op then, so HrHubView wouldn't
+        // re-read the URL on its own).
         try {
           const url = new URL(window.location.href);
           url.searchParams.set('req', n.linkId);
           window.history.replaceState({}, '', url.toString());
         } catch {}
         setView('hr-hub');
+        const detail = {
+          id: n.linkId,
+          commentId: (n.sourceType || '').endsWith('comment') ? n.sourceId : null,
+        };
+        setTimeout(() => {
+          try { window.dispatchEvent(new CustomEvent('hr-hub:openDetail', { detail })); }
+          catch {}
+        }, 60);
       } else if ((n.linkView === 'leader-alerts' || n.linkView === 'leader_alerts') && n.linkId) {
         // Leaders Hub deep-link: flip the view + dispatch an open event
         // that LeaderAlertsView listens for to slide the detail panel in

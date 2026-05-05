@@ -297,6 +297,23 @@ export default function HrHubView({ user, onCreateHrHub }) {
     } catch {}
   }, [detailId, loadDetail]);
 
+  // Bell deep-link handler. App.jsx fires `hr-hub:openDetail` with the
+  // request id when the user clicks a notification linked here. Without
+  // this listener, clicking a notification while already on the HR Hub
+  // tab is a no-op (setView('hr-hub') doesn't re-mount the view, so the
+  // ?req= URL change isn't picked up). Mirrors the FeedbackView /
+  // LeaderAlertsView / AnnouncementsView pattern.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = (e) => {
+      const id = e?.detail?.id;
+      if (!id) return;
+      setDetailId(String(id));
+    };
+    window.addEventListener('hr-hub:openDetail', handler);
+    return () => window.removeEventListener('hr-hub:openDetail', handler);
+  }, []);
+
   const refreshDetail = useCallback(() => {
     if (detailId) loadDetail(detailId);
   }, [detailId, loadDetail]);
