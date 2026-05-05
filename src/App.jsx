@@ -1017,7 +1017,15 @@ const App=()=>{
     const dataScope = perms?.raw?.dataScope;
     if (!dataScope) return; // wait for accessType to resolve
     const isManagerial = dataScope === 'all_tasks' || dataScope === 'regional_tasks' || dataScope === 'team_tasks';
+    // Forward: agent-tier user landing on briefing → flip to agent-home.
     if (!isManagerial && view === 'briefing') setView('agent-home');
+    // Reverse: managerial user stuck on agent-home (e.g. admin who was
+    // impersonating an agent and just clicked "Stop impersonating" — view
+    // stays at 'agent-home' from the impersonation, but effectiveUser is
+    // now the admin again so they should be on BriefingView). Without
+    // this, the admin sees AgentHome rendered with their own data until
+    // they manually click the Home tab.
+    if (isManagerial && view === 'agent-home') setView('briefing');
   }, [effectiveUser, perms?.raw?.dataScope, view]);
 
   // ── Live integrations (Deel, Jira, Slack) ─────────────────────────────────
