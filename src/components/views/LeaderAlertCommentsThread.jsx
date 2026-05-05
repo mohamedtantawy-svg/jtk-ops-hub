@@ -22,6 +22,7 @@ import {
   reactToComment, unreactComment,
 } from '../../services/leaderAlertsApi';
 import { MEMBERS } from '../../data/members';
+import ImageLightbox from '../ui/ImageLightbox';
 
 // ── Constants ─────────────────────────────────────────────────────────────
 
@@ -281,6 +282,7 @@ const CommentRow = ({ comment, currentUser, perms, onUpdate }) => {
   const [editBody, setEditBody] = useState(comment.body);
   const [showPicker, setShowPicker] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [lightbox, setLightbox] = useState(null);
 
   const myEmailLc = (currentUser?.email || '').toLowerCase();
   const isAuthor = (comment.author_email || '').toLowerCase() === myEmailLc;
@@ -415,17 +417,30 @@ const CommentRow = ({ comment, currentUser, perms, onUpdate }) => {
         {!editing && Array.isArray(comment.attachments) && comment.attachments.length > 0 && (
           <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
             {comment.attachments.map((a, i) => (
-              <a key={i} href={a.dataUri} target="_blank" rel="noreferrer">
-                {a.kind === 'image'
-                  ? <img src={a.dataUri} alt={a.name || ''} style={{ maxWidth: 180, maxHeight: 120, borderRadius: 8, border: '1px solid var(--border)' }} />
-                  : <div style={{ padding: '6px 10px', borderRadius: 8, background: 'var(--surface-2)', border: '1px solid var(--border)', fontSize: 12 }}>
-                      <i className="bi-camera-video" style={{ marginRight: 4 }} />
-                      {a.name || 'Video'}
-                    </div>}
-              </a>
+              a.kind === 'image' ? (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => setLightbox({ src: a.dataUri, name: a.name })}
+                  title="Open"
+                  style={{ padding: 0, border: 'none', background: 'transparent', cursor: 'zoom-in' }}
+                >
+                  <img src={a.dataUri} alt={a.name || ''} style={{ display: 'block', maxWidth: 180, maxHeight: 120, borderRadius: 8, border: '1px solid var(--border)' }} />
+                </button>
+              ) : (
+                <div key={i} style={{ padding: '6px 10px', borderRadius: 8, background: 'var(--surface-2)', border: '1px solid var(--border)', fontSize: 12 }}>
+                  <i className="bi-camera-video" style={{ marginRight: 4 }} />
+                  {a.name || 'Video'}
+                </div>
+              )
             ))}
           </div>
         )}
+        <ImageLightbox
+          src={lightbox?.src}
+          name={lightbox?.name}
+          onClose={() => setLightbox(null)}
+        />
 
         {/* Reaction chips */}
         {!editing && reactions.length > 0 && (
