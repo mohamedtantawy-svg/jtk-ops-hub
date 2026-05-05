@@ -192,14 +192,25 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
                 Submitted by <strong>{request.createdByName || request.createdByEmail}</strong> · {formatRelative(request.createdAt)}
               </div>
 
-              {/* Status / Priority / Assignee row */}
+              {/* Status / Priority / Assignee row.
+                  Each picker carries an uppercase caption so managers can
+                  tell at a glance which control is which — the assignee
+                  picker on its own just says the person's name, and on a
+                  busy drawer that read like "is this the requestor?" to
+                  Melissa (2026-05-05 dashboard clarity report). */}
               <div style={{
-                marginTop: 14, display: 'flex', alignItems: 'center', gap: 10,
+                marginTop: 14, display: 'flex', alignItems: 'flex-end', gap: 14,
                 flexWrap: 'wrap',
               }}>
-                <PickerStatus value={request.status} onChange={v => updateField({ status: v })} disabled={savingField === 'status'} />
-                <PickerPriority value={request.priority} onChange={v => updateField({ priority: v })} disabled={savingField === 'priority'} />
-                <PickerAssignee value={request.assigneeEmail} valueName={request.assigneeName} onChange={(email, name) => updateField({ assigneeEmail: email, assigneeName: name })} disabled={savingField === 'assigneeEmail'} />
+                <LabeledPicker label="Status">
+                  <PickerStatus value={request.status} onChange={v => updateField({ status: v })} disabled={savingField === 'status'} />
+                </LabeledPicker>
+                <LabeledPicker label="Priority">
+                  <PickerPriority value={request.priority} onChange={v => updateField({ priority: v })} disabled={savingField === 'priority'} />
+                </LabeledPicker>
+                <LabeledPicker label="Assignee">
+                  <PickerAssignee value={request.assigneeEmail} valueName={request.assigneeName} onChange={(email, name) => updateField({ assigneeEmail: email, assigneeName: name })} disabled={savingField === 'assigneeEmail'} />
+                </LabeledPicker>
               </div>
 
               {/* Fields */}
@@ -331,6 +342,18 @@ function FollowButton({ isFollowing, onToggle }) {
       <i className={`bi ${isFollowing ? 'bi-bell-fill' : 'bi-bell'}`} style={{ fontSize: 12 }} />
       {isFollowing ? 'Following' : 'Follow'}
     </button>
+  );
+}
+
+function LabeledPicker({ label, children }) {
+  return (
+    <div style={{ display: 'inline-flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+      <span style={{
+        fontSize: 10, fontWeight: 700, letterSpacing: '0.06em',
+        textTransform: 'uppercase', color: 'var(--text-muted)',
+      }}>{label}</span>
+      {children}
+    </div>
   );
 }
 
