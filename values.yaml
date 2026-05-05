@@ -18,7 +18,7 @@ ingress:
 sandboxName: jtk-ops-hub-v2
 
 database:
-  enabled: true
+  enabled: false
 
 resources:
   requests:
