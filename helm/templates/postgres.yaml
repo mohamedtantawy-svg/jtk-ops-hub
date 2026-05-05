@@ -4,6 +4,8 @@ kind: Cluster
 metadata:
   name: {{ .Values.sandboxName }}-pg
   namespace: {{ .Values.sandboxName }}
+  annotations:
+    helm.sh/resource-policy: keep
   labels:
     helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
     app.kubernetes.io/name: {{ .Values.sandboxName }}
