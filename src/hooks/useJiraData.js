@@ -27,7 +27,7 @@ export function useJiraData(enabled = true, { jql } = {}) {
   const [error, setError] = useState(null);
   const lastFetch = useRef(cached ? cached.ts : 0);
 
-  const defaultJql = jql || 'project = HROP AND status != Done ORDER BY updated DESC';
+  const defaultJql = jql || 'project IN (COHD, OSHD) AND status != Done ORDER BY updated DESC';
 
   const refresh = useCallback(async (force = false) => {
     if (!enabled) return;

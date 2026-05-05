@@ -21,6 +21,13 @@ import { searchIssues, isJiraConfigured, resolveHrxOwnerFields, emailsFromJiraFi
 const HRX_OWNER_FIELD_NAMES = [
   'hrx responsible',
 ];
+
+// Project allow-list — the queue surfaces ONLY tickets in these Jira
+// projects. Without this filter, HRX team members assigned/reporting on
+// (e.g.) the EOR Compliance project (key `EC`) drag those tickets into the
+// ops queue even though they're owned by another team. The role-based JQL
+// alone can't exclude them, so we narrow the project up front.
+const JIRA_PROJECT_KEYS = ['COHD', 'OSHD'];
 import { ADMIN_EMAILS_LIST } from '../../../../src/data/adminEmails';
 import { cacheGet, cacheSet } from '../../../../src/lib/server-cache';
 import { filterByAssignee } from '../../../../src/lib/queue-scoping';
@@ -519,6 +526,12 @@ function chunkArray(arr, size) {
 }
 
 function buildJiraJqlQueries(ownerFieldIds = {}) {
+  // Project allow-list — the queue is restricted to JIRA_PROJECT_KEYS
+  // (COHD, OSHD). Anything outside (EOR Compliance / EC, etc.) never
+  // enters the result set even when an HRX teammate is the assignee or
+  // reporter on it. This is the single front-door filter that prevents
+  // off-team projects bleeding into the ops queue.
+  const projectFilter = `project IN (${JIRA_PROJECT_KEYS.join(', ')})`;
   // statusCategory is Jira's universal 3-value taxonomy (New/Indeterminate/
   // Done) that every custom status is mapped to — drops "Done: Work
   // Completed" and any other creative name without us maintaining a list.
@@ -547,8 +560,8 @@ function buildJiraJqlQueries(ownerFieldIds = {}) {
   for (const roleField of roleFields) {
     for (const chunk of emailChunks) {
       const emailsList = chunk.map(e => `"${e}"`).join(', ');
-      queries.push(`${roleField} IN (${emailsList}) AND ${statusFilter} ORDER BY updated DESC`);
-      queries.push(`${roleField} IN (${emailsList}) AND ${resolvedFilter} ORDER BY resolved DESC`);
+      queries.push(`${projectFilter} AND ${roleField} IN (${emailsList}) AND ${statusFilter} ORDER BY updated DESC`);
+      queries.push(`${projectFilter} AND ${roleField} IN (${emailsList}) AND ${resolvedFilter} ORDER BY resolved DESC`);
     }
   }
   return queries;
