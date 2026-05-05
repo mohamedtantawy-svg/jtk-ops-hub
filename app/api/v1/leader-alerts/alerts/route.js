@@ -215,6 +215,19 @@ export async function POST(req) {
         [row.id, user.email.toLowerCase()],
       );
 
+      // Auto-ack the creator. The author posted the alert, so they
+      // already know about it — asking them to click "Acknowledge" on
+      // their own post is theatre, and skipping it leaves the missing-
+      // managers count off-by-one until they tap it. The 'created' log
+      // entry already captures this in the timeline; no separate
+      // ack_added row needed.
+      await client.query(
+        `INSERT INTO leader_alert_ack (alert_id, email, name)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (alert_id, email) DO NOTHING`,
+        [row.id, user.email.toLowerCase(), createdByName],
+      );
+
       // Auto-follow each tagged user
       for (const m of mentions) {
         if (m === user.email.toLowerCase()) continue;
