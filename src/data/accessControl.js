@@ -39,6 +39,14 @@ export const ALL_VIEWS = [
   // 'leader-alerts' is the route id; users see "Leaders Hub" in the nav.
   'leader-alerts',
   'urgent-assist',
+  // 'notifications' is the full-page sibling of the bell dropdown
+  // (src/components/views/NotificationsView.jsx). Open to every signed-in
+  // user — the data is server-scoped to the JWT email so role gating is
+  // structural. Without this entry the URL-gate effect in App.jsx
+  // redirects every ?view=notifications visit (and every bell-footer
+  // click that calls setView('notifications')) back to 'briefing',
+  // which is the regression caught in the 2026-05-05 live audit.
+  'notifications',
   'settings',
 ];
 
@@ -126,6 +134,7 @@ export const VIEW_LABELS = {
   'hr-hub':        'HR Hub',
   'leader-alerts': 'Leaders Hub',
   'urgent-assist': 'Urgent Assist',
+  'notifications': 'Notifications',
   'settings':      'Settings',
 };
 
