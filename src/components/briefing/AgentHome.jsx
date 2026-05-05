@@ -509,7 +509,14 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
           subText={tally.breached === 0 ? 'Nothing breached — keep it that way.' : 'Pick the oldest first.'}
           ctaLabel={tally.breached === 0 ? 'All clear' : 'Show breaches'}
           ctaDisabledOk={tally.breached === 0}
-          onClick={() => setView?.('my-queue')}
+          onClick={() => {
+            // Tell the Queue to apply the breached filter on landing —
+            // the Queue listens for this event and clears conflicting
+            // filters so the user actually sees their breaches, including
+            // the per-source hand-off panel for Deel-source breaches.
+            try { window.dispatchEvent(new CustomEvent('queue:setSlaFilter', { detail: { sla: 'breached' } })); } catch (_) {}
+            setView?.('my-queue');
+          }}
         />
         <SlaTile
           eyebrow="DON'T LET SLIP"
@@ -521,7 +528,10 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
           count={tally.atRisk}
           subText={tally.atRisk === 0 ? 'Comfortable buffer on every item.' : '<25% of SLA window left.'}
           ctaLabel="Show at-risk"
-          onClick={() => setView?.('my-queue')}
+          onClick={() => {
+            try { window.dispatchEvent(new CustomEvent('queue:setSlaFilter', { detail: { sla: 'at_risk' } })); } catch (_) {}
+            setView?.('my-queue');
+          }}
         />
         <SlaTile
           eyebrow="HEALTHY"

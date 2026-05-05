@@ -132,7 +132,19 @@ export function TriageStrip({ sourceRows = [], tickets = [], onNavigate }) {
   const tile = (props) => (
     <button
       key={props.label}
-      onClick={() => onNavigate?.('my-queue')}
+      onClick={() => {
+        // Pre-set the Queue's SLA filter so a manager who clicks Breached /
+        // At-Risk lands on a view scoped to that tier (including the per-
+        // source hand-off panel for Deel-source breaches). Falls back to a
+        // plain navigation if the event isn't handled (Queue listens via a
+        // useEffect added in the same fix).
+        if (props.k === 'breached') {
+          try { window.dispatchEvent(new CustomEvent('queue:setSlaFilter', { detail: { sla: 'breached' } })); } catch (_) {}
+        } else if (props.k === 'atRisk') {
+          try { window.dispatchEvent(new CustomEvent('queue:setSlaFilter', { detail: { sla: 'at_risk' } })); } catch (_) {}
+        }
+        onNavigate?.('my-queue');
+      }}
       style={{
         flex: 1,
         border: tally[props.k] > 0 ? `1.5px solid ${props.color}` : '1px solid #e8e8e8',
