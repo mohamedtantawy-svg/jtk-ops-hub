@@ -991,6 +991,19 @@ const App=()=>{
     if (perms.canView(view) === false) setView('briefing');
   }, [view, perms]);
 
+  // Agents land on the dedicated AgentHome — not the manager-style
+  // BriefingView. Catches every path that ends up at 'briefing' (Home
+  // tab click, ?view=briefing deep-link, programmatic setView from
+  // another component) and canonicalises the URL via the existing
+  // ?view= mirror so F5 returns the same surface. The render-site
+  // guard on the BriefingView line below blocks the one-frame paint
+  // before this effect commits. agent-home is open in
+  // accessControl.js so canView passes for the agent tier.
+  React.useEffect(() => {
+    const access = String(effectiveUser?.access || '').toLowerCase();
+    if (access === 'agent' && view === 'briefing') setView('agent-home');
+  }, [effectiveUser?.access, view]);
+
   // ── Live integrations (Deel, Jira, Slack) ─────────────────────────────────
   const integrations = useIntegrations();
   const deelData = useDeelData(integrations.isConfigured('deel'));
@@ -1444,7 +1457,7 @@ const App=()=>{
       <div style={{height:(impersonating?104:68)+(versionHasUpdate?44:0),flexShrink:0}}/>
       <DeelSubNav view={view} subFilter={subFilter} setSubFilter={setSubFilter} tasks={tasks} user={effectiveUser}/>
       <div className="deel-content" data-region="main-content" aria-label="Main content" style={{display:'flex',overflowX:'hidden',overflowY:'auto',position:'relative',flex:1}}>
-          {view==='briefing'      &&perms?.canView('briefing')!==false     &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={()=>{}} comms={comms} escalations={[]} setSubFilter={setSubFilter} requests={[]} projects={[]} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
+          {view==='briefing'      &&perms?.canView('briefing')!==false &&String(effectiveUser?.access||'').toLowerCase()!=='agent' &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={()=>{}} comms={comms} escalations={[]} setSubFilter={setSubFilter} requests={[]} projects={[]} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
           {view==='lead-home' &&<div className="page-enter"><TeamLeadHome user={effectiveUser} tasks={tasks} setView={setView} managerOnCall={managerOnCall}/></div>}
           {view==='agent-home' &&<div className="page-enter"><AgentHome user={effectiveUser} tasks={tasks} setView={setView} comms={comms}/></div>}
           {view==='my-queue'      &&perms?.canView('my-queue')!==false     &&<div className="page-enter"><Queue user={effectiveUser} tasks={tasks} subFilter={subFilter}/></div>}
