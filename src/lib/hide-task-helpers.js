@@ -57,8 +57,20 @@ export function hideKey(taskSource, taskId) {
 /**
  * Insert into hidden_task (idempotent — UNIQUE active partial index
  * prevents a second insert for the same (task_source, task_id) while the
- * first is still active). Returns the row, or `null` if the unique
- * constraint fired (already hidden — caller treats as success).
+ * first is still active). Returns the row, or `null` when an active hide
+ * already exists (the second approver lost the race — caller treats as
+ * success).
+ *
+ * Uses ON CONFLICT ... WHERE ... DO NOTHING so the duplicate case is
+ * handled WITHOUT raising 23505. Critical when this runs inside a caller
+ * transaction (approve route): a raised-then-caught 23505 still leaves
+ * the transaction in an aborted state, so the next statement (writeLog)
+ * fails with 25P02 ("current transaction is aborted, commands ignored
+ * until end of transaction block"). Live audit on 2026-05-05 caught this:
+ * every Approve click on a request whose task was already hidden by a
+ * concurrent approver returned a 500 because the txn was poisoned.
+ * ON CONFLICT keeps the txn alive so the rest of the approve flow
+ * (writeLog, COMMIT, notification) proceeds.
  */
 export async function insertHiddenTask({
   taskSource, taskId, taskUrl, taskSubject,
@@ -68,35 +80,29 @@ export async function insertHiddenTask({
   approvedByEmail, approvedByName,
 }, client = null) {
   const runner = client || { query };
-  try {
-    const { rows } = await runner.query(
-      `INSERT INTO hidden_task
-         (task_source, task_id, task_url, task_subject,
-          request_id,
-          reason_code, reason_text,
-          hidden_by_email, hidden_by_name,
-          approved_by_email, approved_by_name)
-       VALUES ($1, $2, $3, $4,
-               $5,
-               $6, $7,
-               $8, $9,
-               $10, $11)
-       RETURNING *`,
-      [
-        taskSource, taskId, taskUrl || null, taskSubject || null,
-        requestId || null,
-        reasonCode, reasonText || null,
-        hiddenByEmail, hiddenByName || null,
-        approvedByEmail, approvedByName || null,
-      ],
-    );
-    return rows[0] || null;
-  } catch (err) {
-    // 23505 = unique_violation. Means the task is already hidden — treat
-    // as a no-op success (the second approver lost the race).
-    if (err?.code === '23505') return null;
-    throw err;
-  }
+  const { rows } = await runner.query(
+    `INSERT INTO hidden_task
+       (task_source, task_id, task_url, task_subject,
+        request_id,
+        reason_code, reason_text,
+        hidden_by_email, hidden_by_name,
+        approved_by_email, approved_by_name)
+     VALUES ($1, $2, $3, $4,
+             $5,
+             $6, $7,
+             $8, $9,
+             $10, $11)
+     ON CONFLICT (task_source, task_id) WHERE unhidden_at IS NULL DO NOTHING
+     RETURNING *`,
+    [
+      taskSource, taskId, taskUrl || null, taskSubject || null,
+      requestId || null,
+      reasonCode, reasonText || null,
+      hiddenByEmail, hiddenByName || null,
+      approvedByEmail, approvedByName || null,
+    ],
+  );
+  return rows[0] || null;
 }
 
 /**
