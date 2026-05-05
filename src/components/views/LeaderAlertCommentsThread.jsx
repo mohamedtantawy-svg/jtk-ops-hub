@@ -576,13 +576,16 @@ const CommentComposer = ({ alertId, currentUser, onPosted }) => {
 
   const canSubmit = body.trim().length > 0 && !submitting;
 
-  // Build mention candidates from MEMBERS — limit to managers + the
-  // creator's collaborators for noise control. Per the plan default,
-  // autocomplete is managerial-roster-only.
-  const mentionCandidates = useMemo(() => MEMBERS.filter(m => {
-    const a = String(m.access || '').toLowerCase();
-    return a === 'team_lead' || a === 'regional_manager' || a === 'admin' || a === 'agent';
-  }), []);
+  // Build mention candidates from MEMBERS. Earlier this filtered by
+  // `m.access` against the four tier strings — silently a no-op (every
+  // tier was allowed) AND broken: `_buildMembers` in src/data/members.js
+  // exports rows with `role` instead of `access`, so `m.access` was
+  // undefined for every row → filter excluded EVERYTHING → picker
+  // popover never rendered. Same data-shape gotcha is annotated in
+  // LeaderAlertDetailPanel.jsx (which already does `m.access || m.role`).
+  // Drop the filter — every roster row is a valid mention target. Match
+  // HrHubComposer's pattern (which doesn't pre-filter and works fine).
+  const mentionCandidates = useMemo(() => MEMBERS.filter(m => m && m.email && m.name), []);
 
   const filteredMentions = useMemo(() => {
     if (!mentionState) return [];
