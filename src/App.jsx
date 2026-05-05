@@ -1001,10 +1001,24 @@ const App=()=>{
   // guard on the BriefingView line below blocks the one-frame paint
   // before this effect commits. agent-home is open in
   // accessControl.js so canView passes for the agent tier.
+  //
+  // Routing key: `perms.raw.dataScope` (NOT the raw `effectiveUser.access`
+  // string). dataScope is computed by usePermissions through the access-
+  // type resolver so it's the canonical agent signal regardless of how
+  // the user object stores `access` (custom role string, stackable
+  // admin grant on an agent base, override-only roster member, stale
+  // /me payload, etc.). The previous string-equality on `access` was
+  // too narrow — any account whose FE `access` value didn't land on the
+  // exact lowercase literal `'agent'` slipped past the redirect and
+  // ended up rendering BriefingView. Treat anything outside the three
+  // managerial scopes as agent-tier so all agent-shape users land here.
   React.useEffect(() => {
-    const access = String(effectiveUser?.access || '').toLowerCase();
-    if (access === 'agent' && view === 'briefing') setView('agent-home');
-  }, [effectiveUser?.access, view]);
+    if (!effectiveUser) return;
+    const dataScope = perms?.raw?.dataScope;
+    if (!dataScope) return; // wait for accessType to resolve
+    const isManagerial = dataScope === 'all_tasks' || dataScope === 'regional_tasks' || dataScope === 'team_tasks';
+    if (!isManagerial && view === 'briefing') setView('agent-home');
+  }, [effectiveUser, perms?.raw?.dataScope, view]);
 
   // ── Live integrations (Deel, Jira, Slack) ─────────────────────────────────
   const integrations = useIntegrations();
@@ -1460,7 +1474,7 @@ const App=()=>{
       <div style={{height:(impersonating?104:68)+(versionHasUpdate?44:0),flexShrink:0}}/>
       <DeelSubNav view={view} subFilter={subFilter} setSubFilter={setSubFilter} tasks={tasks} user={effectiveUser}/>
       <div className="deel-content" data-region="main-content" aria-label="Main content" style={{display:'flex',overflowX:'hidden',overflowY:'auto',position:'relative',flex:1}}>
-          {view==='briefing'      &&perms?.canView('briefing')!==false &&String(effectiveUser?.access||'').toLowerCase()!=='agent' &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={()=>{}} comms={comms} escalations={[]} setSubFilter={setSubFilter} requests={[]} projects={[]} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
+          {view==='briefing'      &&perms?.canView('briefing')!==false &&(perms?.raw?.dataScope==='all_tasks'||perms?.raw?.dataScope==='regional_tasks'||perms?.raw?.dataScope==='team_tasks') &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={()=>{}} comms={comms} escalations={[]} setSubFilter={setSubFilter} requests={[]} projects={[]} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
           {view==='lead-home' &&<div className="page-enter"><TeamLeadHome user={effectiveUser} tasks={tasks} setView={setView} managerOnCall={managerOnCall}/></div>}
           {view==='agent-home' &&<div className="page-enter"><AgentHome user={effectiveUser} tasks={tasks} setView={setView} comms={comms}/></div>}
           {view==='my-queue'      &&perms?.canView('my-queue')!==false     &&<div className="page-enter"><Queue user={effectiveUser} tasks={tasks} subFilter={subFilter}/></div>}
