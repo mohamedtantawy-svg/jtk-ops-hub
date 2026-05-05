@@ -18,6 +18,7 @@ import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { query } from '../../../../../src/lib/db';
 import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
+import { getVisibleEmailsForAccess } from '../../../../../src/data/members';
 import {
   memberByEmail,
   managerEmailFor,
@@ -148,8 +149,34 @@ export async function GET(req) {
     where.push(`LOWER(created_by_email) = $${p++}`);
     params.push(callerEmail);
   } else if (effectiveScope === 'team') {
-    where.push(`LOWER(team_lead_email) = $${p++}`);
-    params.push(callerEmail);
+    // "Team" = creator is anyone in caller's management chain (excluding
+    // self — those go under 'mine'). The denormalised team_lead_email
+    // column was the original primitive but it has two failure modes that
+    // hid managers' team requests:
+    //   (a) Org-chart drift after creation. team_lead_email is stamped at
+    //       insert time; if the requester later reassigns to a different
+    //       manager, the row still points at the old TL and the new
+    //       manager's Team toggle returns 0.
+    //   (b) Multi-hop chains for RMs. teamLeadEmailFor() returns the
+    //       FIRST manager up the chain, so an agent-with-an-immediate-TL
+    //       under an RM stamps the TL, never the RM. The RM's Team toggle
+    //       then misses every report whose chain includes a TL hop.
+    // Compute the visible set live from the hydrated roster instead:
+    //   - Admin   → ALL_EMAILS_SET (effectively same as 'all')
+    //   - RM      → self + transitive subtree
+    //   - TL      → self + direct reports
+    //   - Agent   → self only (already folded to 'mine' above, never hits
+    //               this branch)
+    // Excluding self keeps the segmentation clean against 'mine'.
+    const visible = getVisibleEmailsForAccess(callerEmail);
+    const teamEmails = Array.from(visible).filter(e => e && e !== callerEmail);
+    if (teamEmails.length === 0) {
+      // No reports → nothing under Team. `FALSE` keeps the SQL well-formed.
+      where.push(`FALSE`);
+    } else {
+      where.push(`LOWER(created_by_email) = ANY($${p++}::text[])`);
+      params.push(teamEmails);
+    }
   }
   // 'all' → no extra predicate. Rule 1: every user has full read access.
 
