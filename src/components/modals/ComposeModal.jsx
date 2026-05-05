@@ -2,16 +2,39 @@ import { useState, useRef } from 'react';
 import { COMMS_TYPES, AUDIENCES, AUDIENCE_LABELS, SOUND_PRESETS } from '../../data/comms';
 import { isApprover } from '../../data/approvers';
 import PreviewPopup from './PreviewPopup';
+import AnnouncementMedia, { isAnnouncementVideo } from '../ui/AnnouncementMedia';
 
+// Accept image AND video data URLs — the same DB field carries both, the
+// popup renderer picks `<video>` vs `<img>` based on the prefix.
 const sanitizeImageUrl=(url)=>{
   if(!url)return '';
   try{
     const parsed=new URL(url.trim());
     if(parsed.protocol==='http:'||parsed.protocol==='https:')return parsed.href;
-    if(parsed.protocol==='data:'&&parsed.href.startsWith('data:image/'))return parsed.href;
+    if(parsed.protocol==='data:'){
+      if(parsed.href.startsWith('data:image/')) return parsed.href;
+      if(parsed.href.startsWith('data:video/')) return parsed.href;
+    }
   }catch(e){}
   return '';
 };
+
+const MEDIA_MAX_BYTES = 10 * 1024 * 1024;
+const VIDEO_MIMES = new Set(['video/mp4', 'video/webm', 'video/quicktime', 'video/x-m4v']);
+
+// Video can't be canvas-compressed like images. Just enforce the size cap
+// and read it as a data URL. Returns null for unsupported types so the
+// drop/upload handlers can surface a clean error.
+function videoFileToDataUrl(file) {
+  return new Promise((resolve) => {
+    if (!file || !VIDEO_MIMES.has(file.type)) { resolve(null); return; }
+    if (file.size > MEDIA_MAX_BYTES) { resolve(null); return; }
+    const r = new FileReader();
+    r.onerror = () => resolve(null);
+    r.onload = () => resolve(r.result || null);
+    r.readAsDataURL(file);
+  });
+}
 
 // Resize + compress an uploaded image before embedding it as a data URL.
 // Why: the backend receives the image inline inside a JSON body, and the
@@ -327,10 +350,10 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
             )}
           </div>
 
-          {/* Image (upload or URL) */}
+          {/* Media (image or video — upload or URL) */}
           <div style={{marginBottom:12}}>
             <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
-              <div style={{fontSize:11,fontWeight:700,color:'#616161',letterSpacing:'.05em'}}>IMAGE <span style={{fontWeight:400,color:'#9e9e9e'}}>(optional)</span></div>
+              <div style={{fontSize:11,fontWeight:700,color:'#616161',letterSpacing:'.05em'}}>MEDIA <span style={{fontWeight:400,color:'#9e9e9e'}}>(optional · image or video)</span></div>
               {imageUrl&&(
                 <button onClick={()=>{setImageUrl('');if(fileInputRef.current)fileInputRef.current.value='';}} style={{marginLeft:'auto',background:'none',border:'none',cursor:'pointer',color:'#d42d35',fontSize:10,fontWeight:600,display:'flex',alignItems:'center',gap:3,padding:0}}>
                   <i className="bi-trash" style={{fontSize:10}}></i>Remove
@@ -341,35 +364,45 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
               <div
                 onDragOver={e=>{e.preventDefault();setDragActive(true);}}
                 onDragLeave={()=>setDragActive(false)}
-                onDrop={e=>{
+                onDrop={async e=>{
                   e.preventDefault();setDragActive(false);
                   const file=e.dataTransfer.files?.[0];
-                  if(file&&file.type.startsWith('image/')){
-                    if(file.size>10*1024*1024){alert('Image must be under 10MB');return;}
+                  if(!file)return;
+                  if(file.type.startsWith('image/')){
+                    if(file.size>MEDIA_MAX_BYTES){alert('Image must be under 10MB');return;}
                     compressImageFile(file).then(setImageUrl).catch(()=>{
                       const reader=new FileReader();
                       reader.onload=ev=>setImageUrl(ev.target.result);
                       reader.readAsDataURL(file);
                     });
+                  } else if(file.type.startsWith('video/')){
+                    const dataUrl=await videoFileToDataUrl(file);
+                    if(!dataUrl){alert('Video must be MP4 / WebM / MOV under 10MB');return;}
+                    setImageUrl(dataUrl);
                   }
                 }}
                 style={{border:`2px dashed ${dragActive?'#6b3fa0':'#e0e0e0'}`,borderRadius:12,padding:'20px 16px',textAlign:'center',background:dragActive?'#f9f5ff':'#fafaf9',cursor:'pointer',transition:'all .15s'}}
                 onClick={()=>fileInputRef.current?.click()}
               >
-                <input ref={fileInputRef} type="file" accept="image/*" style={{display:'none'}} onChange={e=>{
+                <input ref={fileInputRef} type="file" accept="image/*,video/mp4,video/webm,video/quicktime,video/x-m4v" style={{display:'none'}} onChange={async e=>{
                   const file=e.target.files?.[0];
-                  if(file&&file.type.startsWith('image/')){
-                    if(file.size>10*1024*1024){alert('Image must be under 10MB');return;}
+                  if(!file)return;
+                  if(file.type.startsWith('image/')){
+                    if(file.size>MEDIA_MAX_BYTES){alert('Image must be under 10MB');return;}
                     compressImageFile(file).then(setImageUrl).catch(()=>{
                       const reader=new FileReader();
                       reader.onload=ev=>setImageUrl(ev.target.result);
                       reader.readAsDataURL(file);
                     });
+                  } else if(file.type.startsWith('video/')){
+                    const dataUrl=await videoFileToDataUrl(file);
+                    if(!dataUrl){alert('Video must be MP4 / WebM / MOV under 10MB');return;}
+                    setImageUrl(dataUrl);
                   }
                 }}/>
                 <i className="bi-cloud-arrow-up" style={{fontSize:24,color:dragActive?'#6b3fa0':'#b5b5b5',display:'block',marginBottom:6}}></i>
                 <div style={{fontSize:12,fontWeight:600,color:'#616161'}}>Click to upload or drag & drop</div>
-                <div style={{fontSize:11,color:'#9e9e9e',marginTop:3}}>PNG, JPG, GIF, WebP up to 10MB — we'll compress it for you</div>
+                <div style={{fontSize:11,color:'#9e9e9e',marginTop:3}}>PNG, JPG, GIF, WebP, MP4, WebM, MOV up to 10MB</div>
                 <div style={{display:'flex',alignItems:'center',gap:8,justifyContent:'center',marginTop:10}}>
                   <div style={{height:1,flex:1,background:'#e8e8e8'}}></div>
                   <span style={{fontSize:10,color:'#9e9e9e',fontWeight:600}}>OR</span>
@@ -384,7 +417,11 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
               </div>
             ):(
               <div style={{position:'relative',borderRadius:12,overflow:'hidden',border:'1px solid #e8e8e8',background:'#fafaf9'}}>
-                <img src={sanitizeImageUrl(imageUrl)} alt="Preview" style={{width:'100%',objectFit:'contain',maxHeight:240,display:'block',margin:'0 auto'}} onError={()=>setImageUrl('')} />
+                <AnnouncementMedia
+                  src={sanitizeImageUrl(imageUrl)}
+                  alt="Preview"
+                  style={{width:'100%',objectFit:'contain',maxHeight:240,display:'block',margin:'0 auto'}}
+                />
               </div>
             )}
           </div>
