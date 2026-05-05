@@ -1283,6 +1283,26 @@ function resolvePausedAt(amendmentStatuses = []) {
 }
 
 /**
+ * Earliest timestamp at which the amendment entered an HRX-actionable status
+ * (AmendmentRequested / WaitingHrxAction). This is the right SLA anchor —
+ * Deel's `createdAt` is the moment the amendment record was first persisted
+ * upstream (often weeks or months before the client confirms and the row
+ * lands in HRX's queue), so SLA computed from `createdAt` paints
+ * just-arrived rows as "181 days breached". Earliest of the two
+ * actionable statuses keeps the clock honest across re-entry loops
+ * (Paused → Unpaused returns to AmendmentRequested but the original
+ * actionable timestamp is still the SLA start).
+ */
+function resolveActionableSince(amendmentStatuses = []) {
+  const entries = amendmentStatuses
+    .filter(s => /\.(AmendmentRequested|WaitingHrxAction)$/.test(s.name || ''))
+    .map(s => s.AmendmentFlowStatus?.createdAt || s.updatedAt || '')
+    .filter(Boolean);
+  if (entries.length === 0) return '';
+  return entries.sort()[0];
+}
+
+/**
  * Fetches amendment requests from the admin API.
  * Uses /admin/eor-experience/amendments-requests — same as admin.deel.network.
  *
@@ -1325,6 +1345,7 @@ export async function listAmendmentRequests(params = {}) {
   const items = rawItems.map(a => {
     const currentStatus = resolveCurrentStatus(a.amendmentStatuses);
     const pausedAt = resolvePausedAt(a.amendmentStatuses);
+    const actionableSince = resolveActionableSince(a.amendmentStatuses);
     return {
       id:                a.id || '',
       eorContractId:     a.eorContractId || '',
@@ -1337,6 +1358,10 @@ export async function listAmendmentRequests(params = {}) {
       createdAt:         a.createdAt || '',
       updatedAt:         a.updatedAt || '',
       clientConfirmedAt: a.changeRequest?.clientConfirmedAt || '',
+      // Earliest moment HRX became responsible — used as the SLA anchor in
+      // normalizeAmendments. Distinct from `createdAt` (record creation
+      // upstream) which can predate HRX involvement by months.
+      actionableSince,
       pausedAt,
       isPaused:          /^PreparingDocuments\.Paused(\.|$)/.test(currentStatus),
       // Amendment items — what's being changed
