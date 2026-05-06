@@ -1,4 +1,4 @@
-class Pool { constructor() { throw new Error('db client temporarily removed for Nexus tech scan'); } }
+import { Pool } from 'pg';
 
 let pool;
 
