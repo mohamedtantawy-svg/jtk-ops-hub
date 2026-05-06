@@ -18,7 +18,7 @@ ingress:
 sandboxName: jtk-ops-hub-v2
 
 database:
-  enabled: true
+  enabled: false
 
 resources:
   # Bumped 2026-05-04: 512Mi was tight enough that the workbench (5,000-
