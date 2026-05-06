@@ -4,13 +4,24 @@
 // auditing the Deel "Countries by Person Role" spreadsheet against the
 // HRX roster — and reconciles the DB to match.
 //
-// Versioned re-seed:
+// Versioned ADDITIVE seed (changed 2026-05-06):
 //   • A copy of the seed version is stored in app_settings.
 //   • On boot, if the stored version is below the current SEED_VERSION, we
-//     wipe team_member_countries and re-insert from the JSON. This is the
-//     ONLY codepath that re-seeds — manual edits via the Team-tab picker
-//     between deploys are preserved as long as SEED_VERSION isn't bumped.
-//   • To roll out a corrected ownership map: bump SEED_VERSION and ship.
+//     INSERT any (email, country_code) pairs from the JSON that don't
+//     already exist in team_member_countries. We DO NOT delete or update
+//     existing rows — manager edits made via the Team-tab picker are
+//     preserved across version bumps.
+//   • To add a new ownership mapping: edit the JSON, bump SEED_VERSION,
+//     ship. Any new pair gets added; existing rows untouched.
+//   • To remove or change a mapping: do it in the Team-tab UI. The seed
+//     JSON is no longer authoritative for removals — it's a baseline-only
+//     backstop.
+//
+// Why the change: the previous DELETE+INSERT semantics destroyed every
+// manual country edit on every SEED_VERSION bump. That's exactly the
+// failure mode that bit the May 6 incident on a different table
+// (team_member_overrides). Source-of-truth for a table with a write
+// surface should be the DB, not a static JSON.
 //
 // Earlier versions seeded by fuzzy-matching CSV "Country Owner" names
 // against members. v2 onwards is email-keyed so there's no ambiguity
@@ -19,9 +30,11 @@
 import { query } from './db';
 import seed from '../data/csv_country_owners_seed.json' with { type: 'json' };
 
-// Bump this when the seed JSON is materially updated (added owners,
-// removed owners, fixed wrong assignments). The next deploy will detect
-// the bump, wipe team_member_countries, and re-insert from the JSON.
+// Bump this when new mappings are added to the seed JSON. The next deploy
+// will detect the bump and INSERT only the new (email, country_code)
+// pairs; existing rows in team_member_countries are untouched. To remove
+// or change a mapping post-deploy, edit it via the Team-tab UI — the seed
+// no longer overrides curated state.
 const SEED_VERSION = 2;
 const VERSION_KEY = 'country_owners_seed_version';
 
@@ -95,23 +108,34 @@ export async function seedCountryOwnersIfEmpty() {
     return { reseeded: false, version: SEED_VERSION };
   }
 
-  // Single transaction: wipe existing rows then re-insert from the seed.
-  // Lock the table to prevent racing with a Team-tab PUT mid-reseed.
+  // Additive merge: insert any (email, country_code) pairs from the seed
+  // that don't already exist. Existing rows are untouched (preserves
+  // manager edits via Team-tab picker).
+  //
+  // No table-level lock needed: ON CONFLICT (email, country_code) DO NOTHING
+  // makes concurrent Team-tab PUTs safe to interleave — each insert is
+  // independently idempotent.
   await query('BEGIN');
   try {
-    await query('LOCK TABLE team_member_countries IN ACCESS EXCLUSIVE MODE');
-    await query('DELETE FROM team_member_countries');
     const valuesSql = rows.map((_, i) => `($${i * 2 + 1}, $${i * 2 + 2})`).join(', ');
     const params = rows.flatMap(r => [r.email, r.cc]);
-    await query(
+    const insertResult = await query(
       `INSERT INTO team_member_countries (email, country_code) VALUES ${valuesSql}
-        ON CONFLICT (email, country_code) DO NOTHING`,
+        ON CONFLICT (email, country_code) DO NOTHING
+        RETURNING email`,
       params,
     );
+    const insertedCount = insertResult.rowCount ?? insertResult.rows.length;
+    const skippedCount = rows.length - insertedCount;
     await setStoredVersion(SEED_VERSION);
     await query('COMMIT');
-    console.log(`[country-owners-seed] re-seeded to v${SEED_VERSION}: ${rows.length} (email, country) pairs across ${Object.keys(seed).length} countries (was v${currentVersion})`);
-    return { reseeded: true, inserted: rows.length, version: SEED_VERSION };
+    console.log(
+      `[country-owners-seed] additive merge to v${SEED_VERSION}: ` +
+      `${insertedCount} new (email, country) pair(s) added, ` +
+      `${skippedCount} already present; existing manager edits preserved ` +
+      `(was v${currentVersion})`,
+    );
+    return { reseeded: true, inserted: insertedCount, version: SEED_VERSION };
   } catch (err) {
     try { await query('ROLLBACK'); } catch {}
     console.error('[country-owners-seed] re-seed failed:', err?.message);

@@ -89,6 +89,21 @@ export async function GET(req) {
         // 3. Touch last_login_at so existing JWT sessions backfill the
         //    "Never logged in" badge. INSERT bumps count=1, UPDATE only
         //    refreshes the timestamp so /me hits don't inflate the counter.
+        //    Dual-write: member_logins is the new canonical store
+        //    (2026-05-06); legacy write to team_member_overrides is kept
+        //    during the read-path migration window.
+        try {
+          await query(
+            `INSERT INTO member_logins (email, last_login_at, login_count)
+             VALUES ($1, NOW(), 1)
+             ON CONFLICT (email) DO UPDATE
+             SET last_login_at = NOW(),
+                 updated_at    = NOW()`,
+            [emailLc]
+          );
+        } catch (touchErr) {
+          console.warn('[me] last_login touch (member_logins) failed:', touchErr.message);
+        }
         try {
           await query(
             `INSERT INTO team_member_overrides (email, last_login_at, login_count)
@@ -99,7 +114,7 @@ export async function GET(req) {
             [emailLc]
           );
         } catch (touchErr) {
-          console.warn('[me] last_login touch failed:', touchErr.message);
+          console.warn('[me] last_login touch (team_member_overrides legacy) failed:', touchErr.message);
         }
 
         // 4. Lazy-backfill `members` from the merged profile so other code
