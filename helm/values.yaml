@@ -17,9 +17,17 @@ app:
 podAnnotations: {}
 database:
   enabled: true
-  instances: 1
+  # Bumped to 2 on 2026-05-06: was 1 (single instance, no replica). Now
+  # primary + 1 hot standby, so a single-pod failure or node drain doesn't
+  # take the DB down. Adds a second copy of the data on a separate node
+  # (CNPG default anti-affinity) and gives us a read-replica for free.
+  instances: 2
   postgresVersion: "16"
   backup: true
+  # Backup retention on the barman-cloud ObjectStore. "90d" keeps base
+  # backups + WAL for 90 days, then prunes older. Set to "" to retain
+  # forever (unbounded S3 cost). Added 2026-05-06.
+  backupRetention: "90d"
   recovery:
     enabled: false
     source: ""
@@ -27,6 +35,18 @@ database:
     email: "admin@deel.tools"
   storage:
     size: "8Gi"
+    # OPT-IN: a Retain-policy StorageClass is created at deploy time —
+    # see helm/templates/storageclass.yaml. To use it for new PVCs (e.g.
+    # for replicas added by bumping `instances`, or for a fresh cluster
+    # after a recreate), set:
+    #     storageClass: jtk-ops-hub-v2-pg-retain
+    # Doing this on an EXISTING cluster won't help — CNPG treats
+    # spec.storage.storageClass as immutable. The setting only affects
+    # NEW PVCs going forward. To convert an EXISTING PV to retain policy,
+    # patch the PV directly:
+    #     kubectl patch pv <pv-name> \
+    #       -p '{"spec":{"persistentVolumeReclaimPolicy":"Retain"}}'
+    # storageClass: ""
   bootstrapDatabase: "app"
   bootstrapOwner: "app"
   nodeSelector:

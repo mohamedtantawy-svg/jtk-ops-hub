@@ -81,6 +81,12 @@ kind: ObjectStore
 metadata:
   name: s3-store
 spec:
+  {{- if .Values.database.backupRetention }}
+  # Retention policy: barman-cloud prunes basebackups + WAL older than
+  # this window. Set in helm/values.yaml as database.backupRetention.
+  # Format examples: "30d", "12w", "1y", or "" to disable (retain forever).
+  retentionPolicy: {{ .Values.database.backupRetention | quote }}
+  {{- end }}
   configuration:
     destinationPath: s3://{{ .Values.s3.bucket }}/{{ .Values.sandboxName }}/db_backup/
     s3Credentials:
