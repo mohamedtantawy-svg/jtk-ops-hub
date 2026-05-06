@@ -97,9 +97,26 @@ async function findMemberByEmail(email) {
  * Best-effort; failures here never block the login.
  */
 async function recordLogin(email) {
+  if (!process.env.DATABASE_URL) return;
+  const { query } = await import('../../../../../../src/lib/db');
+  // Dual-write: member_logins is the new canonical store (2026-05-06);
+  // team_member_overrides write is kept during the read-path migration
+  // window and dropped in a follow-up PR. Both are best-effort —
+  // login proceeds even if either fails.
   try {
-    if (!process.env.DATABASE_URL) return;
-    const { query } = await import('../../../../../../src/lib/db');
+    await query(
+      `INSERT INTO member_logins (email, last_login_at, login_count)
+       VALUES ($1, NOW(), 1)
+       ON CONFLICT (email) DO UPDATE
+       SET last_login_at = NOW(),
+           login_count   = member_logins.login_count + 1,
+           updated_at    = NOW()`,
+      [email]
+    );
+  } catch (err) {
+    console.warn('[auth/google/callback] recordLogin (member_logins) failed:', err.message);
+  }
+  try {
     await query(
       `INSERT INTO team_member_overrides (email, last_login_at, login_count)
        VALUES ($1, NOW(), 1)
@@ -110,7 +127,7 @@ async function recordLogin(email) {
       [email]
     );
   } catch (err) {
-    console.warn('[auth/google/callback] recordLogin failed:', err.message);
+    console.warn('[auth/google/callback] recordLogin (team_member_overrides legacy) failed:', err.message);
   }
 }
 
