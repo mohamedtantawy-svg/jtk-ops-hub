@@ -53,12 +53,13 @@ spec:
             - name: S3_PREFIX
               value: {{ .Values.sandboxName }}
             {{- end }}
+            {{- if .Values.database.enabled }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.sandboxName }}-pg-app
                   key: uri
-                  optional: true
+            {{- end }}
             {{- if .Values.redis.enabled }}
             - name: REDIS_URL
               value: "redis://{{ .Values.sandboxName }}-redis:6379"
