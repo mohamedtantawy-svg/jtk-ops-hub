@@ -30,3 +30,9 @@ backend/node_modules
 *.njsproj
 *.sln
 *.sw?
+
+# Database backup tarballs (CNPG basebackups, manual exports)
+# These can be 50MB+ and contain user data — never commit to source.
+*.tar.gz
+*.dump
+*.pgdump
