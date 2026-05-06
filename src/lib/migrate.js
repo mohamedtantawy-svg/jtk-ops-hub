@@ -1176,6 +1176,61 @@ CREATE TABLE IF NOT EXISTS mention_group_member (
 );
 CREATE INDEX IF NOT EXISTS idx_mention_group_member_email
   ON mention_group_member(LOWER(member_email));
+
+-- ── Member logins (2026-05-06) ───────────────────────────────────────────────
+-- Dedicated login-tracking table. Replaces writing login_count/last_login_at
+-- to team_member_overrides (which used to create "shell rows" — bare emails
+-- with NULL name/access/manager — for every authenticated user, even those
+-- not in the static TEAM_MEMBERS baseline).
+--
+-- Why a separate table: when a backup restore runs INSERT ... ON CONFLICT
+-- (email) DO NOTHING against team_member_overrides, those shell rows are
+-- preserved over the backup data -- exactly what bit the May 5 wipe
+-- recovery (Olga + 22 others appearing missing because their shell rows
+-- shadowed backup curated rows). Splitting login tracking off keeps
+-- team_member_overrides as a roster-state-only table — easier to reason
+-- about during disaster recovery.
+--
+-- For now this table is dual-written by the auth flows (auth/login,
+-- auth/google/callback, me) alongside the existing team_member_overrides
+-- writes. A follow-up PR will migrate the read paths
+-- (team-members route, team-members/[email], countries/export,
+-- roster-server) to JOIN against member_logins, then drop the
+-- team_member_overrides write side.
+CREATE TABLE IF NOT EXISTS member_logins (
+  email          VARCHAR(255) PRIMARY KEY,
+  last_login_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  login_count    INTEGER     NOT NULL DEFAULT 1,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_member_logins_last_login
+  ON member_logins(last_login_at DESC NULLS LAST);
+
+-- One-time backfill from team_member_overrides — capture all historical
+-- login activity so member_logins is the complete record from day 1.
+-- Idempotent via ON CONFLICT (email) DO NOTHING; subsequent boots no-op
+-- because the canonical write path is the auth endpoints, not this seed.
+-- Conditional on the source columns existing so the migration is safe to
+-- re-run on environments where team_member_overrides hasn't been created
+-- yet (fresh installs running the schema in one shot).
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'team_member_overrides' AND column_name = 'last_login_at'
+  ) THEN
+    INSERT INTO member_logins (email, last_login_at, login_count, created_at, updated_at)
+    SELECT email,
+           last_login_at,
+           COALESCE(login_count, 1),
+           COALESCE(created_at, NOW()),
+           COALESCE(updated_at, NOW())
+      FROM team_member_overrides
+     WHERE last_login_at IS NOT NULL
+    ON CONFLICT (email) DO NOTHING;
+  END IF;
+END $$;
 `;
 
 export async function runMigrations() {

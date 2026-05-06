@@ -80,7 +80,25 @@ export async function POST(req) {
       user.isAnnouncementsAdmin = false;
     }
 
-    // Record login for the Team-tab last-login badge (best-effort)
+    // Record login for the Team-tab last-login badge (best-effort).
+    // Dual-writes to member_logins (the new canonical store as of
+    // 2026-05-06) AND to the legacy team_member_overrides columns.
+    // The team_member_overrides write is preserved during the read-path
+    // migration window; a follow-up PR drops it once team-members /
+    // roster routes JOIN against member_logins instead.
+    try {
+      await query(
+        `INSERT INTO member_logins (email, last_login_at, login_count)
+         VALUES ($1, NOW(), 1)
+         ON CONFLICT (email) DO UPDATE
+         SET last_login_at = NOW(),
+             login_count   = member_logins.login_count + 1,
+             updated_at    = NOW()`,
+        [trimmed]
+      );
+    } catch (err) {
+      console.warn('[auth/login] recordLogin (member_logins) failed:', err.message);
+    }
     try {
       await query(
         `INSERT INTO team_member_overrides (email, last_login_at, login_count)
@@ -92,7 +110,7 @@ export async function POST(req) {
         [trimmed]
       );
     } catch (err) {
-      console.warn('[auth/login] recordLogin failed:', err.message);
+      console.warn('[auth/login] recordLogin (team_member_overrides legacy) failed:', err.message);
     }
 
     // Issue signed JWT
