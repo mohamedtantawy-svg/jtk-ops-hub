@@ -2,7 +2,6 @@
 const nextConfig = {
   output: "standalone",
   instrumentationHook: true,
-  serverExternalPackages: ["pg"],
   poweredByHeader: false,
   env: {
     // Nexus injects GOOGLE_CLIENT_ID server-side; expose it to the client
