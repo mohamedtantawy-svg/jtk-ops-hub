@@ -1,3 +1,92 @@
+// ── Boot-time wipe alarm ────────────────────────────────────────────────────
+// Tables that should never be empty in a healthy production boot. Every boot
+// we read current row counts, compare to the snapshot stored in
+// app_settings.boot_row_counts_snapshot, and log a LOUD warning if any table
+// dropped by ≥ 50% (or non-zero → zero). This is observability only — never
+// fails boot, never deletes anything. It's an early-warning system so that
+// a silent wipe (like the 2026-05-05 CNPG-recreation incident) is screaming
+// in the pod logs within seconds of pod start, instead of being discovered
+// by a confused user a day later.
+//
+// Rationale: a "table emptied by mistake" failure mode is what bit us hardest
+// during the May 6 recovery — the pod came up, login worked, the UI rendered,
+// but the queue/announcements/HR Hub were silently empty. A cheap 5-query
+// SELECT count(*) at boot would have caught it immediately.
+const WIPE_ALARM_TABLES = [
+  'announcements',
+  'hr_hub_request',
+  'team_member_overrides',
+  'feedback_requests',
+  'members',
+];
+
+async function checkForWipe(query) {
+  const current = {};
+  for (const t of WIPE_ALARM_TABLES) {
+    try {
+      const { rows } = await query(`SELECT count(*)::bigint AS c FROM public.${t}`);
+      current[t] = parseInt(rows[0]?.c ?? 0, 10);
+    } catch (err) {
+      // Table may not exist yet on a brand-new env mid-migration; just skip.
+      current[t] = null;
+    }
+  }
+
+  let previous = null;
+  try {
+    const { rows } = await query(
+      `SELECT value FROM app_settings WHERE key = 'boot_row_counts_snapshot' LIMIT 1`,
+    );
+    if (rows[0]?.value) previous = rows[0].value;
+  } catch {
+    // app_settings not ready yet — first boot of a fresh env. Move on.
+  }
+
+  if (previous && typeof previous === 'object') {
+    const dropped = [];
+    for (const t of WIPE_ALARM_TABLES) {
+      const prev = Number(previous[t] ?? 0);
+      const curr = Number(current[t] ?? 0);
+      if (current[t] === null) continue; // skipped table — don't compare
+      // Trigger if previous was non-trivial AND current is < half OR exactly 0.
+      if (prev >= 5 && (curr === 0 || curr < prev * 0.5)) {
+        dropped.push({ table: t, before: prev, now: curr });
+      }
+    }
+    if (dropped.length > 0) {
+      const banner = '━'.repeat(72);
+      console.error(banner);
+      console.error('🚨 [boot-wipe-alarm] DATA LOSS DETECTED on this boot 🚨');
+      console.error('   Tables that shrank sharply since the previous boot:');
+      for (const d of dropped) {
+        console.error(`     - ${d.table}: ${d.before} → ${d.now} rows (lost ${d.before - d.now})`);
+      }
+      console.error('   This usually means the underlying CNPG PVC was');
+      console.error('   recreated empty (database.enabled flip, storage class');
+      console.error('   reclaim, manual delete, etc.). DO NOT continue making');
+      console.error('   destructive changes — see docs/runbook-data-recovery.md');
+      console.error('   for the restore procedure.');
+      console.error(banner);
+    } else {
+      console.log('[boot-wipe-alarm] OK — no sharp row-count drops since last boot.');
+    }
+  } else {
+    console.log('[boot-wipe-alarm] No prior snapshot; baseline established for next boot.');
+  }
+
+  // Persist current snapshot for next boot's comparison. Best-effort.
+  try {
+    await query(
+      `INSERT INTO app_settings (key, value, updated_at)
+       VALUES ('boot_row_counts_snapshot', $1::jsonb, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      [JSON.stringify(current)],
+    );
+  } catch (err) {
+    console.warn('[boot-wipe-alarm] Failed to update snapshot:', err?.message);
+  }
+}
+
 export async function register() {
   // Only run migrations on the server, not during build
   if (process.env.NEXT_RUNTIME === 'nodejs' && process.env.DATABASE_URL) {
@@ -6,6 +95,16 @@ export async function register() {
       await runMigrations();
 
       const { query } = await import('./src/lib/db');
+
+      // Detect data loss BEFORE the seed step below — seeding members/tasks
+      // when their tables are empty masks a wipe by re-creating demo content.
+      // We want the alarm to fire on the original empty state, not the post-
+      // seed state.
+      try {
+        await checkForWipe(query);
+      } catch (alarmErr) {
+        console.warn('[boot-wipe-alarm] checkForWipe failed (non-fatal):', alarmErr?.message);
+      }
 
       // Seed members if table is empty
       const { rows: memberRows } = await query('SELECT COUNT(*) as count FROM members');
