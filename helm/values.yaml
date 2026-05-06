@@ -9,14 +9,14 @@ app:
   port: 3000
   resources:
     requests:
-      memory: "128Mi"
-      cpu: "300m"
+      memory: "2Gi"
+      cpu: "500m"
     limits:
-      memory: "1024Mi"
+      memory: "4Gi"
   env: []
 podAnnotations: {}
 database:
-  enabled: false
+  enabled: true
   instances: 1
   postgresVersion: "16"
   backup: true
@@ -45,7 +45,6 @@ redis:
       cpu: "100m"
     limits:
       memory: "256Mi"
-  podAnnotations: {}
   nodeSelector:
     karpenter.sh/nodepool: playgrounds-v1
 ingress:
@@ -57,6 +56,7 @@ ingress:
   annotations: {}
   tls: []
   aliasHost: ""
+
 
 publicIngress:
   enabled: false
