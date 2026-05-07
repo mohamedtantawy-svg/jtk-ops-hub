@@ -26,8 +26,53 @@ function _slaAnchorMs(task) {
   return null;
 }
 
+// Friendly labels for Zendesk's SLA metric IDs — used when `task.nextSlaMetric`
+// is set so the pill / tooltip reads "Reply" / "Next Reply" / etc. instead
+// of the raw enum.
+const ZD_SLA_METRIC_LABEL = {
+  first_reply_time:     'First reply',
+  next_reply_time:      'Next reply',
+  requester_wait_time:  'Requester wait',
+  periodic_update_time: 'Periodic update',
+  agent_work_time:      'Agent work',
+  pausable_update_time: 'Update',
+};
+
 export const slaInfo=(task,customThresholds)=>{
   if(!task||task.status==='resolved'||task.status==='waiting')return null;
+
+  // ── Authoritative Zendesk path (2026-05-07) ──────────────────────────
+  // When the queue route surfaces `nextSlaBreachAt` (the nearest active
+  // breach across Zendesk's own SLA policy_metrics), trust it over our
+  // computed anchor + threshold. Zendesk already accounts for business
+  // hours, holiday schedules, and per-priority policies via its SLA app
+  // — recomputing locally just produces drift. Mohamed's spec:
+  //   "take the SLA directly from Zendesk … nearest SLA always"
+  // The pill bands track the same elapsed/remaining math so existing
+  // consumers (Queue header pills, BriefingView health, Team agent dot,
+  // Analytics KPI) keep their visual rhythm.
+  if (task.source === 'zendesk' && task.nextSlaBreachAt) {
+    const breachMs = Date.parse(task.nextSlaBreachAt);
+    if (Number.isFinite(breachMs)) {
+      const remMin = Math.round((breachMs - Date.now()) / 60000);
+      const metricLabel = ZD_SLA_METRIC_LABEL[task.nextSlaMetric] || null;
+      if (remMin <= 0) {
+        const overdueLabel = metricLabel ? `${metricLabel} breached` : 'SLA Breached';
+        return { label: overdueLabel, short: 'BREACHED', color: '#d42d35', bg: '#ffe2de', breach: true, remain: remMin };
+      }
+      // "At-risk" tier — within 25% of the breach window. We don't know the
+      // policy's full window from policy_metrics alone, so use a wall-clock
+      // heuristic: ≤4h to breach is at-risk. Matches Zendesk's own
+      // "warn-when-near-breach" UX without needing to read the policy.
+      if (remMin <= 240) {
+        const h = Math.floor(remMin / 60), m = remMin % 60;
+        const s = h > 0 ? `${h}h${m > 0 ? ' ' + m + 'm' : ''}` : `${m}m`;
+        return { label: `${s} to ${metricLabel || 'SLA'}`, short: s + ' left', color: '#ed5e2a', bg: '#fff3ee', breach: false, remain: remMin };
+      }
+      return { label: metricLabel ? `${metricLabel} OK` : 'OK', short: 'OK', color: '#15803d', bg: '#f0fdf4', breach: false, remain: remMin, ok: true };
+    }
+  }
+
   // SLA uses task-type-specific thresholds from SLA_MINS (or custom overrides).
   // Per-task `slaMinsOverride` wins over everything — e.g. Jira tickets are
   // pinned at 48h from the latest update regardless of the type detected

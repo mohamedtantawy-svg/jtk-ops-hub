@@ -8,7 +8,7 @@
 
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../src/lib/auth-helpers';
-import { searchTickets, showManyUsers, isZendeskConfigured } from '../../../../src/lib/zendesk-api';
+import { searchTickets, showManyUsers, fetchPolicyMetrics, isZendeskConfigured } from '../../../../src/lib/zendesk-api';
 import { searchIssues, isJiraConfigured, resolveHrxOwnerFields, emailsFromJiraFieldValue } from '../../../../src/lib/jira-api';
 
 // Jira custom fields (by display-name substring) that, together with the
@@ -424,6 +424,21 @@ async function fetchZendeskQueue() {
     // the next refresh recovers.
     const customFieldMeta = await resolveCustomFieldIds();
 
+    // ── Authoritative SLA from Zendesk (2026-05-07) ──────────────────
+    // Mohamed's ask: "take the SLA directly from Zendesk … you should
+    // be able to see the SLA for first reply, Next reply, requester
+    // wait time. Priority should be to show the nearest SLA always."
+    // Search doesn't sideload `slas`, so we run a follow-up batch
+    // (show_many?include=slas → per-ticket fallback). Keys by ticket
+    // id, value is the policy_metrics array. Best-effort: a Zendesk
+    // hiccup degrades to the metric_set-derived anchor below — every
+    // existing pill / count consumer keeps working.
+    const policyMetricsByTicketId = await fetchPolicyMetrics(allTickets.map(t => t.id))
+      .catch(err => {
+        console.warn('[queue] Zendesk SLA policy_metrics fetch failed:', err.message);
+        return new Map();
+      });
+
     // Normalize tickets
     const items = allTickets.map(t => {
       const assignee = userMap[t.assignee_id] || {};
@@ -484,6 +499,45 @@ async function fetchZendeskQueue() {
         ? (pausedAnchorMs ? new Date(pausedAnchorMs).toISOString() : t.created_at)
         : (activeAnchorMs ? new Date(activeAnchorMs).toISOString() : t.created_at);
 
+      // ── Authoritative SLA from Zendesk policy_metrics (2026-05-07) ────
+      // The metric_set anchor above is the fallback. When Zendesk's own
+      // SLA app is configured, prefer its breach times — they already
+      // know about business hours, holiday schedules, and per-priority
+      // policies. We surface the NEAREST active breach so the pill always
+      // reflects "the next thing about to fire" — Mohamed's spec:
+      // "priority should be to show the nearest SLA always".
+      //
+      // Stages we consider "active" (still ticking against a breach):
+      //   active, paused (clock paused but breach_at is the resume target)
+      // Stages we ignore: achieved, paused_to_breach (already done /
+      // permanently paused). Resolved tickets bypass this entirely.
+      const policyMetrics = policyMetricsByTicketId.get(t.id) || null;
+      let nextSlaBreachAt = null;
+      let nextSlaMetric = null;
+      let nextSlaMs = null;
+      if (Array.isArray(policyMetrics) && policyMetrics.length > 0 && appStatus !== 'resolved') {
+        const ACTIVE_STAGES = new Set(['active', 'paused']);
+        const candidates = policyMetrics
+          .filter(pm => pm && ACTIVE_STAGES.has(String(pm.stage || '').toLowerCase()))
+          .map(pm => ({
+            metric: pm.metric || null,
+            stage: pm.stage || null,
+            breachAt: pm.breach_at || null,
+            ms: pm.breach_at ? Date.parse(pm.breach_at) : NaN,
+            businessHours: !!pm.business_hours,
+          }))
+          .filter(x => Number.isFinite(x.ms));
+        if (candidates.length > 0) {
+          // Sort by absolute proximity to now — already-breached metrics
+          // (negative remain) outrank a far-future breach. Same priority
+          // logic Zendesk's tooltip uses.
+          candidates.sort((a, b) => a.ms - b.ms);
+          nextSlaBreachAt = new Date(candidates[0].ms).toISOString();
+          nextSlaMetric = candidates[0].metric;
+          nextSlaMs = candidates[0].ms;
+        }
+      }
+
       return {
         id: `ZD-${t.id}`,
         source: 'zendesk',
@@ -515,8 +569,18 @@ async function fetchZendeskQueue() {
         // Per-ticket SLA window from app_settings.queue_sla_thresholds.zendesk
         // (default 24h active / 48h paused, configurable via the Team-tab
         // SLA settings table). slaInfo() reads this override before falling
-        // back to type-based SLA_MINS.
+        // back to type-based SLA_MINS — but only when Zendesk's own SLA
+        // policy isn't available (`nextSlaBreachAt` is null).
         slaMinsOverride: isPausedStatus ? zendeskPausedMins : zendeskActiveMins,
+        // Authoritative Zendesk SLA — the nearest active policy breach.
+        // FE's slaInfo() prefers this over the metric_set anchor when
+        // present, so the pill matches what Zendesk shows on its own
+        // ticket page. `slaPolicyMetrics` carries the full per-metric
+        // array so the Detail page can render the same tooltip Zendesk
+        // does (Reply / Next Reply / Periodic Update / Requester Wait).
+        nextSlaBreachAt,
+        nextSlaMetric,
+        slaPolicyMetrics: policyMetrics,
         // Phase 2 — values for the 4 ops-hub-tracked Zendesk custom fields.
         // Detail.jsx renders these as editable selects; PUT through
         // /queue/[id]/custom-fields persists changes back to Zendesk.
