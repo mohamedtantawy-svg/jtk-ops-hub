@@ -212,13 +212,39 @@ export async function showManyUsers(ids) {
   return zendeskFetch(`/users/show_many.json?ids=${batch.join(',')}`);
 }
 
-// 2026-05-07 — fetchPolicyMetrics() (added in PR #477) was removed
-// because it OOM'd the pod at scale. With ~2k Zendesk tickets in the
-// queue, the show_many?include=slas batch (21 calls × 1-5MB responses)
-// on top of the metric_sets sideload + parallel workbench/offboarding
-// scans pushed the V8 heap past the 2GB ceiling. Re-introduce only via
-// a background cron + DB cache so the queue route stays cheap — see
-// queue/route.js for the rationale.
+// ── Per-batch ticket+SLA fetch (used by the background SLA sync) ──────
+// Fetches `tickets/show_many.json?ids=...&include=slas` in chunks of
+// `chunkSize` (Zendesk caps show_many at 100). For each chunk the caller
+// gets the parsed response and decides what to do with it; the helper
+// itself does NOT accumulate all chunks in memory — the caller streams
+// each batch out to its sink (DB upsert) before requesting the next.
+//
+// Why this is safe at scale: PR #477 was reverted (#480) because it
+// kicked off ~21 batches in `Promise.all`, holding 21 × 1-5 MB of parsed
+// JSON in V8 plus the existing search calls + parallel scans → OOM at
+// ~2GB. The contract here is the opposite — sequential batches, with the
+// caller bounded to one batch's payload at a time. The cron sync
+// (zendesk-sla-sync.js) is what consumes this, well off the queue
+// route's hot path.
+export async function* iterateTicketsWithSlas(ids, { chunkSize = 100 } = {}) {
+  if (!Array.isArray(ids) || ids.length === 0) return;
+  const cap = Math.max(1, Math.min(100, chunkSize));
+  for (let i = 0; i < ids.length; i += cap) {
+    const batch = ids.slice(i, i + cap);
+    if (batch.length === 0) continue;
+    // include=slas attaches the policy_metrics array to each ticket. We
+    // do NOT request other sideloads here — they bloat the payload and
+    // the cron only cares about SLA times.
+    const res = await zendeskFetch(
+      `/tickets/show_many.json?ids=${batch.join(',')}&include=slas`,
+    );
+    yield {
+      tickets: Array.isArray(res?.tickets) ? res.tickets : [],
+      batchStart: i,
+      batchSize: batch.length,
+    };
+  }
+}
 
 // ── Resolve email → Zendesk user ID (cached 1h) ───────────────────────
 // Used by the reply path to set comment.author_id so the team member's

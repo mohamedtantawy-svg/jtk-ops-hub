@@ -9,6 +9,7 @@
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../src/lib/auth-helpers';
 import { searchTickets, showManyUsers, isZendeskConfigured } from '../../../../src/lib/zendesk-api';
+import { loadSlaRowsForTicketIds } from '../../../../src/lib/zendesk-sla-sync';
 import { searchIssues, isJiraConfigured, resolveHrxOwnerFields, emailsFromJiraFieldValue } from '../../../../src/lib/jira-api';
 
 // Jira custom fields (by display-name substring) that, together with the
@@ -629,11 +630,60 @@ async function fetchZendeskQueue() {
           ? `https://${ZD_SUBDOMAIN}.zendesk.com/agent/tickets/${t.id}`
           : '',
         tags: t.tags || [],
+        // Provenance — flips to 'zendesk_policy' below if the SLA cache
+        // has a row for this ticket. The FE's slaInfo() reads slaSource
+        // to decide whether to honour slaBreachAt directly (Zendesk's
+        // truth) or fall back to the local biz-day computation against
+        // slaMinsOverride (this branch).
+        slaSource: 'local_metric_set',
+        // Will be filled in below from the SLA cache when present. Null
+        // here means "no Zendesk-policy data yet (cron hasn't reached
+        // this ticket); use the local logic". Distinct from the cached
+        // row that has activeStage=null (which means Zendesk says the
+        // assignee has caught up) — that case is handled by setting
+        // slaMetric to null AND slaSource to 'zendesk_policy'.
+        slaBreachAt: null,
+        slaFrtBreachAt: null,
+        slaNrtBreachAt: null,
       };
     });
 
     if (_missingMetricSet > 0) {
       console.log(`[queue] Zendesk: ${_missingMetricSet}/${allTickets.length} tickets missing metric_set sideload — fallback applied`);
+    }
+
+    // ── Merge the SLA cache (background-synced from Zendesk policy_metrics) ──
+    // Single SELECT keyed on ticket_id; falls back to local logic when the
+    // cache hasn't seen a ticket yet (brand-new ticket between cron runs,
+    // or sync still warming up after a fresh deploy). Never throws — the
+    // helper already swallows DB errors and returns an empty Map.
+    if (items.length > 0) {
+      const idNums = items
+        .map(it => Number(it.externalId))
+        .filter(Number.isFinite);
+      const slaMap = await loadSlaRowsForTicketIds(idNums);
+      if (slaMap.size > 0) {
+        let _enriched = 0;
+        for (const it of items) {
+          const id = Number(it.externalId);
+          const row = slaMap.get(id);
+          if (!row) continue;
+          _enriched++;
+          // Zendesk's policy is the truth — overwrite the local FRT/NRT
+          // detection. activeStage may be null (assignee caught up); that
+          // path is intentional and slaInfo() short-circuits to OK on it.
+          it.slaSource      = 'zendesk_policy';
+          it.slaMetric      = row.activeStage;
+          it.slaBreachAt    = row.activeBreachAt;
+          it.slaFrtBreachAt = row.frtBreachAt;
+          it.slaFrtMinutes  = row.frtMinutes;
+          it.slaNrtBreachAt = row.nrtBreachAt;
+          it.slaNrtMinutes  = row.nrtMinutes;
+        }
+        if (_enriched > 0) {
+          console.log(`[queue] Zendesk SLA cache: ${_enriched}/${items.length} tickets enriched from policy_metrics`);
+        }
+      }
     }
 
     return { items, status: 'ok', count: items.length, error: null };

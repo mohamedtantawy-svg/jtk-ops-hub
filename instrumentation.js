@@ -211,6 +211,41 @@ export async function register() {
 
         console.log('[db] All seed data inserted.');
       }
+
+      // ── Zendesk SLA background sync ─────────────────────────────────
+      // Pulls policy_metrics (real FRT/NRT breach times) into our local
+      // `zendesk_ticket_sla` table so the queue route's per-row pills
+      // reflect Zendesk's actual SLA — not our local "anchor + 24h"
+      // approximation. Runs out-of-band so the queue stays cheap.
+      //
+      // Schedule: 30 s after boot (priming kick), then every 10 min.
+      // Multi-pod safe via the DB lock in zendesk-sla-sync.js — only
+      // one pod runs at a time; the others no-op until the lock or the
+      // soft TTL frees.
+      //
+      // Disable knob: set OPS_HUB_DISABLE_ZD_SLA_SYNC=1 to skip the
+      // scheduler (for the cron-driven deploys where an external
+      // CronJob hits /api/v1/cron/zendesk-sla-sync instead).
+      if (!process.env.OPS_HUB_DISABLE_ZD_SLA_SYNC) {
+        try {
+          const { runZendeskSlaSync } = await import('./src/lib/zendesk-sla-sync');
+          // Don't await — the sync can take 20-40 s on a cold cache and
+          // we don't want it delaying the rest of the boot path.
+          setTimeout(() => {
+            runZendeskSlaSync().catch(err => {
+              console.warn('[zd-sla-sync] priming run failed:', err?.message);
+            });
+          }, 30_000);
+          setInterval(() => {
+            runZendeskSlaSync().catch(err => {
+              console.warn('[zd-sla-sync] scheduled run failed:', err?.message);
+            });
+          }, 10 * 60 * 1000).unref?.();
+          console.log('[zd-sla-sync] scheduled — priming in 30 s, then every 10 min');
+        } catch (err) {
+          console.warn('[zd-sla-sync] could not schedule:', err?.message);
+        }
+      }
     } catch (err) {
       console.error('[db] Startup migration/seed error:', err.message);
       // Don't crash — app falls back to mock data

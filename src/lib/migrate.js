@@ -207,6 +207,26 @@ CREATE TABLE IF NOT EXISTS app_settings (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Cached per-ticket SLA from Zendesk's policy_metrics. The queue route
+-- joins this on ticket_id so per-row pills reflect Zendesk's actual SLA
+-- breach times (factoring business hours, paused/on-hold time, and the
+-- specific policy attached to each ticket) instead of our local 24h
+-- default applied to a metric_set anchor. Refreshed by a background job
+-- (see src/lib/zendesk-sla-sync.js) so the queue route stays cheap.
+-- All breach_at values are absolute UTC timestamps from Zendesk.
+CREATE TABLE IF NOT EXISTS zendesk_ticket_sla (
+  ticket_id BIGINT PRIMARY KEY,
+  active_stage TEXT,                    -- 'frt' | 'nrt' | null (clock currently running)
+  active_breach_at TIMESTAMPTZ,         -- breach_at of the active stage
+  frt_breach_at TIMESTAMPTZ,            -- First Reply Time breach
+  frt_minutes INT,                      -- FRT target minutes (business or calendar)
+  nrt_breach_at TIMESTAMPTZ,            -- Next Reply Time breach
+  nrt_minutes INT,                      -- NRT target minutes
+  policy_id BIGINT,                     -- Zendesk SLA policy id
+  fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 -- Migrations tracking
 CREATE TABLE IF NOT EXISTS _migrations (
   id SERIAL PRIMARY KEY,
@@ -228,6 +248,12 @@ CREATE INDEX IF NOT EXISTS idx_task_activity_task ON task_activity(task_id, occu
 CREATE INDEX IF NOT EXISTS idx_escalations_status ON escalations(status);
 CREATE INDEX IF NOT EXISTS idx_escalations_manager ON escalations(manager_id);
 CREATE INDEX IF NOT EXISTS idx_escalations_created ON escalations(created_at DESC);
+
+-- zendesk_ticket_sla — used by the cron sweeper (filter by fetched_at to find
+-- stale rows) and by the queue route (point lookups via ticket_id PK already
+-- indexed). active_breach_at index supports "approaching breach" surfaces.
+CREATE INDEX IF NOT EXISTS idx_zd_sla_fetched_at ON zendesk_ticket_sla(fetched_at);
+CREATE INDEX IF NOT EXISTS idx_zd_sla_active_breach_at ON zendesk_ticket_sla(active_breach_at) WHERE active_breach_at IS NOT NULL;
 
 -- Escalations identity + audit columns (additive, preserves all existing rows)
 ALTER TABLE escalations ADD COLUMN IF NOT EXISTS escalated_by_email VARCHAR(255);
