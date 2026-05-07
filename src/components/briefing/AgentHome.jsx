@@ -134,14 +134,41 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
   const myResolvedToday = useMemo(() => {
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const todayMs = today.getTime();
-    return (tasks || [])
+    // Zendesk + Jira from the unified `tasks` array. The queue route
+    // already pulls solved-within-24h Zendesk tickets; this filter narrows
+    // to today's local-midnight cutoff and the current viewer.
+    const ticketResolved = (tasks || [])
       .filter(t => (t.assigneeEmail || '').toLowerCase() === myEmail)
       .filter(t => t.status === 'resolved')
-      .filter(t => {
-        const d = t.updatedAt || t.resolvedAt;
-        return d && new Date(d).getTime() >= todayMs;
-      });
-  }, [tasks, myEmail]);
+      .map(t => {
+        const ms = (() => {
+          const d = t.updatedAt || t.resolvedAt;
+          return d ? new Date(d).getTime() : 0;
+        })();
+        return { row: t, ms, source: t.source || 'zendesk', kind: 'ticket' };
+      })
+      .filter(x => x.ms >= todayMs);
+    // Workbench — server pulls COMPLETED rows within the last 24h via
+    // deel-api.listWorkbenchTasks(includeCompleted=true). Read the RAW
+    // `wb.tasks` (not the normalised SourceTable rows) because
+    // normalizeWorkbench replaces t.status with a display-object — counting
+    // resolved on that loses the raw bucket. Hala El Khalfaoui's 2026-05-07
+    // feedback: "the resolved cases on the top right of the Hub doesn't
+    // reflect the resolved cases that I worked on." She works mostly on
+    // Workbench, which the previous tasks-only count silently dropped.
+    const wbResolved = (wb.tasks || [])
+      .filter(t => (t?.assignee?.email || '').toLowerCase() === myEmail)
+      .filter(t => String(t?.status || '').toUpperCase() === 'COMPLETED')
+      .map(t => {
+        const ms = (() => {
+          const d = t.completedAt || t.updatedAt;
+          return d ? new Date(d).getTime() : 0;
+        })();
+        return { row: t, ms, source: 'workbench', kind: 'workbench' };
+      })
+      .filter(x => x.ms >= todayMs);
+    return [...ticketResolved, ...wbResolved].sort((a, b) => b.ms - a.ms);
+  }, [tasks, wb.tasks, myEmail]);
 
   // ── SLA tally (only the user's open work) ──────────────────────────
   // `total` counts EVERY open assignment (incl. Jira) so the greeting
@@ -338,6 +365,7 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
   const todayLabel = useMemo(() => new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' }), []);
 
   const goWorkspace = useCallback(() => setView?.('my-queue'), [setView]);
+  const [resolvedListOpen, setResolvedListOpen] = useState(false);
 
   // Region label for the hero meta line — same source BriefingView reads
   // (`user.region`). For agents it's frequently empty; fall back to team
@@ -461,6 +489,7 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
                 value={`${myResolvedToday.length}`}
                 color="#34d399"
                 sub="today"
+                onClick={myResolvedToday.length > 0 ? () => setResolvedListOpen(true) : null}
               />
             </div>
             <button
@@ -709,6 +738,9 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
           <span style={{ color: '#9e9e9e' }}>Signed in as <strong style={{ color: '#1b1b1b' }}>{user.name || user.email}</strong></span>
         )}
       </div>
+      {resolvedListOpen && (
+        <ResolvedTodayModal items={myResolvedToday} onClose={() => setResolvedListOpen(false)} />
+      )}
     </div>
   );
 }
@@ -926,9 +958,15 @@ function FocusRow({ row }) {
 // for the value so the four badges read as a quartet rather than a
 // rainbow. Light-mode accessible (white on dark gradient) and dark-mode
 // neutral (the hero is intentionally always dark).
-function KpiBadgeGlass({ label, value, sub, color }) {
+function KpiBadgeGlass({ label, value, sub, color, onClick }) {
+  // Render a button when onClick is supplied so the tile gets keyboard
+  // focus + screen-reader semantics; otherwise stay as a presentational
+  // <div> (the other three KPIs aren't drillable).
+  const Tag = onClick ? 'button' : 'div';
   return (
-    <div
+    <Tag
+      onClick={onClick || undefined}
+      type={onClick ? 'button' : undefined}
       style={{
         position: 'relative',
         padding: '8px 12px 9px', borderRadius: 12,
@@ -939,8 +977,14 @@ function KpiBadgeGlass({ label, value, sub, color }) {
         alignItems: 'flex-start', gap: 1,
         overflow: 'hidden',
         minWidth: 0,
+        cursor: onClick ? 'pointer' : 'default',
+        textAlign: 'left',
+        fontFamily: 'inherit',
+        transition: 'background .12s, transform .12s',
       }}
-      title={`${label}${sub ? ` — ${sub}` : ''}`}
+      title={onClick ? `${label}${sub ? ` — ${sub}` : ''} (click to view)` : `${label}${sub ? ` — ${sub}` : ''}`}
+      onMouseEnter={onClick ? (e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; e.currentTarget.style.transform = 'translateY(-1px)'; } : undefined}
+      onMouseLeave={onClick ? (e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; e.currentTarget.style.transform = 'translateY(0)'; } : undefined}
     >
       <span style={{
         fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.6)',
@@ -960,6 +1004,118 @@ function KpiBadgeGlass({ label, value, sub, color }) {
           {sub}
         </span>
       )}
+    </Tag>
+  );
+}
+
+// ── ResolvedTodayModal — popover list of tasks the viewer resolved
+// today (Zendesk + Jira tickets + Workbench tasks). Triggered from the
+// Resolved KPI tile on the AgentHome hero. Each row links to the
+// upstream system so the agent can drill into the original record.
+function ResolvedTodayModal({ items, onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div
+      onClick={(e) => { if (e.target === e.currentTarget) onClose?.(); }}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1000,
+        background: 'rgba(15,23,42,0.42)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 24,
+      }}
+    >
+      <div style={{
+        width: 'min(640px, 100%)', maxHeight: '80vh',
+        background: 'var(--surface)', color: 'var(--text)',
+        border: '1px solid var(--border)', borderRadius: 14,
+        boxShadow: 'var(--shadow-lg)',
+        display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      }}>
+        <div style={{
+          padding: '16px 20px', borderBottom: '1px solid var(--border-light)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>Resolved today</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+              {items.length} item{items.length === 1 ? '' : 's'} closed since midnight
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              width: 28, height: 28, borderRadius: 8,
+              border: '1px solid var(--border)', background: 'var(--surface)',
+              color: 'var(--text-secondary)', cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: 'inherit',
+            }}
+          >
+            <i className="bi-x-lg" style={{ fontSize: 12 }} />
+          </button>
+        </div>
+        <div style={{ flex: 1, overflow: 'auto' }}>
+          {items.length === 0 ? (
+            <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
+              Nothing resolved yet today.
+            </div>
+          ) : (
+            <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+              {items.map((entry, idx) => {
+                const t = entry.row || {};
+                const subject = t.subject || t.name || '(no subject)';
+                const url = entry.kind === 'ticket'
+                  ? getUrl(t)
+                  : (t.id ? `https://admin.deel.network/ops-workbench/${t.id}` : null);
+                const ts = entry.ms ? new Date(entry.ms) : null;
+                const timeLabel = ts ? ts.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
+                const sourceLabel = entry.source === 'zendesk' ? 'Zendesk'
+                  : entry.source === 'jira' ? 'Jira'
+                  : entry.source === 'workbench' ? 'Workbench'
+                  : entry.source;
+                return (
+                  <li key={`${entry.kind}-${t.id || idx}`} style={{ borderBottom: '1px solid var(--border-light)' }}>
+                    <a
+                      href={url || '#'}
+                      target={url ? '_blank' : undefined}
+                      rel={url ? 'noreferrer noopener' : undefined}
+                      onClick={url ? undefined : (e) => e.preventDefault()}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 12,
+                        padding: '12px 20px',
+                        textDecoration: 'none', color: 'var(--text)',
+                        transition: 'background .12s',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-2)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <span style={{
+                        flex: '0 0 auto', width: 8, height: 8, borderRadius: '50%',
+                        background: '#15803d',
+                      }} />
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ display: 'block', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {subject}
+                        </span>
+                        <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                          {sourceLabel}{timeLabel ? ` · resolved ${timeLabel}` : ''}
+                        </span>
+                      </span>
+                      {url && <i className="bi-box-arrow-up-right" style={{ fontSize: 12, color: 'var(--text-muted)' }} />}
+                    </a>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
