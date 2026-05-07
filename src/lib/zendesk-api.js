@@ -212,76 +212,13 @@ export async function showManyUsers(ids) {
   return zendeskFetch(`/users/show_many.json?ids=${batch.join(',')}`);
 }
 
-// ── SLA policy metrics (per ticket) ────────────────────────────────────
-// Fetches each ticket's active SLA policy_metrics so the queue can show
-// the same breach times Zendesk shows on its own ticket page (First
-// Reply Time, Next Reply Time, Periodic Update, Requester Wait Time,
-// etc.). Returns Map<ticketId, policy_metrics[]>.
-//
-// Zendesk's Search API doesn't sideload SLAs. show_many also doesn't
-// document `include=slas`, but we try it first because if it works it
-// batches 100 tickets per call. Falls back to per-ticket fetches with
-// concurrency 5 when show_many returns nothing useful (handles both
-// "ZD silently dropped the include" and "ZD rejected the include").
-//
-// `policy_metrics` shape (from the per-ticket /tickets/{id}.json?include=slas
-// endpoint):
-//   [{ policy_id, metric, stage, breach_at, business_hours }, …]
-// where metric ∈ {first_reply_time, next_reply_time, requester_wait_time,
-// periodic_update_time, agent_work_time, pausable_update_time} and
-// stage ∈ {active, paused, achieved, ...}.
-export async function fetchPolicyMetrics(ticketIds) {
-  const map = new Map();
-  if (!ticketIds || ticketIds.length === 0) return map;
-  const ids = [...new Set(ticketIds.map(id => String(id)))];
-
-  // Path 1 — try show_many?include=slas (one call per 100 IDs).
-  for (let i = 0; i < ids.length; i += 100) {
-    const batch = ids.slice(i, i + 100);
-    try {
-      const res = await zendeskFetch(`/tickets/show_many.json?ids=${batch.join(',')}&include=slas`);
-      // The slas sideload (when supported) returns a sibling array keyed
-      // by ticket_id. Per-ticket arrays carry policy_metrics.
-      if (Array.isArray(res?.slas)) {
-        for (const s of res.slas) {
-          const pm = s?.policy_metrics;
-          if (s?.ticket_id != null && Array.isArray(pm)) map.set(s.ticket_id, pm);
-        }
-      }
-      // Some Zendesk shapes attach `slas` to each ticket directly. Cover
-      // both so a Zendesk silent change to either layout keeps working.
-      for (const t of (res?.tickets || [])) {
-        if (t && t.id != null && t.slas?.policy_metrics && !map.has(t.id)) {
-          map.set(t.id, t.slas.policy_metrics);
-        }
-      }
-    } catch (err) {
-      console.warn(`[zendesk] show_many SLA batch ${i}-${i + batch.length} failed (will fall back):`, err.message);
-    }
-  }
-  if (map.size > 0) return map;
-
-  // Path 2 — per-ticket fallback with concurrency 5. Caps at 200 tickets
-  // so a runaway scan can't exhaust the rate budget.
-  const capped = ids.slice(0, 200);
-  const concurrency = 5;
-  let cursor = 0;
-  async function worker() {
-    while (cursor < capped.length) {
-      const idx = cursor++;
-      const id = capped[idx];
-      try {
-        const res = await zendeskFetch(`/tickets/${id}.json?include=slas`);
-        const pm = res?.slas?.policy_metrics;
-        if (Array.isArray(pm)) map.set(Number(id), pm);
-      } catch (err) {
-        console.warn(`[zendesk] per-ticket SLA fetch failed for ${id}:`, err.message);
-      }
-    }
-  }
-  await Promise.all(Array.from({ length: concurrency }, () => worker()));
-  return map;
-}
+// 2026-05-07 — fetchPolicyMetrics() (added in PR #477) was removed
+// because it OOM'd the pod at scale. With ~2k Zendesk tickets in the
+// queue, the show_many?include=slas batch (21 calls × 1-5MB responses)
+// on top of the metric_sets sideload + parallel workbench/offboarding
+// scans pushed the V8 heap past the 2GB ceiling. Re-introduce only via
+// a background cron + DB cache so the queue route stays cheap — see
+// queue/route.js for the rationale.
 
 // ── Resolve email → Zendesk user ID (cached 1h) ───────────────────────
 // Used by the reply path to set comment.author_id so the team member's
