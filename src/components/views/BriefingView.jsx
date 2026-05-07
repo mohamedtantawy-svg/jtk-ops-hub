@@ -343,11 +343,14 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
         return { row: t, ms, source: t.source || 'zendesk', kind: 'ticket' };
       })
       .filter(x => x.ms >= cutoffMs);
-    // Raw workbench tasks (un-normalized) so we can read t.status === 'COMPLETED'
-    // and t.completedAt directly. The normaliser replaces t.status with a
-    // display-object, which would lose the bucket.
+    // Raw workbench tasks (un-normalized) so we can read t.status and
+    // t.completedAt directly. The normaliser replaces t.status with a
+    // display-object, which would lose the bucket. Both terminal states
+    // (COMPLETED + CLOSED) are counted — an agent who archives via
+    // CLOSED would otherwise silently drop off this count.
+    const WB_DONE = new Set(['COMPLETED', 'CLOSED']);
     const wbResolved = (workbenchData?.tasks || [])
-      .filter(t => String(t?.status || '').toUpperCase() === 'COMPLETED')
+      .filter(t => WB_DONE.has(String(t?.status || '').toUpperCase()))
       .filter(t => inResolvedScope(t?.assignee?.email))
       .map(t => {
         const d = t.completedAt || t.updatedAt;
