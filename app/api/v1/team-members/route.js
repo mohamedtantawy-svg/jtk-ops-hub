@@ -29,11 +29,11 @@ export async function GET(req) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const [overridesRes, countriesRes] = await Promise.all([
+    const [overridesRes, countriesRes, loginsRes] = await Promise.all([
       query(
         `SELECT email, name, initials, title, access, manager_email, team, region,
                 service, country, avatar_url, start_date, is_new, is_deleted,
-                on_leave, last_login_at, login_count, is_announcements_admin,
+                on_leave, is_announcements_admin,
                 is_access_admin,
                 created_at, updated_at
            FROM team_member_overrides`,
@@ -47,9 +47,21 @@ export async function GET(req) {
         console.warn('[team-members GET] countries query failed:', err?.message);
         return { rows: [] };
       }),
+      // member_logins is the canonical source of last_seen_at / last_login_at
+      // / login_count. Pulled separately so the merge can attach activity to
+      // EVERY merged member — including baseline users without an override
+      // row. Empty result on a brand-new env where the table or backfill
+      // hasn't run yet means every member shows "Never seen" until first
+      // heartbeat / login.
+      query(
+        `SELECT email, last_seen_at, last_login_at, login_count FROM member_logins`,
+      ).catch(err => {
+        console.warn('[team-members GET] member_logins query failed:', err?.message);
+        return { rows: [] };
+      }),
     ]);
 
-    const merged = mergeTeamMembers(overridesRes.rows);
+    const merged = mergeTeamMembers(overridesRes.rows, loginsRes.rows);
 
     // Group countries by lowercase email so the UI can render every member
     // with their owned set inline. Junction rows that don't match a current
@@ -211,7 +223,8 @@ export async function POST(req) {
     return NextResponse.json({
       email, name, initials, title, access, managerEmail, team, region,
       service, country, avatarUrl, startDate,
-      isNew: true, isDeleted: false, onLeave: false, lastLoginAt: null, loginCount: 0,
+      isNew: true, isDeleted: false, onLeave: false,
+      lastSeenAt: null, lastLoginAt: null, loginCount: 0,
     }, { status: 201 });
   } catch (err) {
     console.error('[team-members POST]', err.message);

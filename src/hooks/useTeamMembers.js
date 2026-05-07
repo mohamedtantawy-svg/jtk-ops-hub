@@ -4,8 +4,8 @@
 // baseline if the API is unreachable so the view never renders empty.
 //
 // Performance: the previous fetch is cached in localStorage so subsequent
-// mounts paint with the real "last login" timestamps instantly instead of
-// flashing "Never logged in" for every row until the network round-trip
+// mounts paint with the real "last seen" timestamps instantly instead of
+// flashing "Never seen" for every row until the network round-trip
 // returns. Cache is user-scoped so different signed-in users on the same
 // machine don't see each other's snapshot.
 
@@ -22,6 +22,7 @@ function baselineAsMerged() {
     isNew: false,
     isDeleted: false,
     onLeave: false,
+    lastSeenAt: null,
     lastLoginAt: null,
     loginCount: 0,
   }));
@@ -56,7 +57,7 @@ function writeCache(items) {
 
 export function useTeamMembers() {
   // Initial state: cached items if present (instant paint with real
-  // lastLoginAt values), otherwise the static baseline. The fetch in the
+  // lastSeenAt values), otherwise the static baseline. The fetch in the
   // mount effect below revalidates either way.
   const [members, setMembers] = useState(() => readCache() || baselineAsMerged());
   // `loading` is true only when we don't have cached data — the first paint
@@ -169,6 +170,7 @@ export function useTeamMembers() {
       isNew: true,
       isDeleted: false,
       onLeave: false,
+      lastSeenAt: null,
       lastLoginAt: null,
       loginCount: 0,
     };

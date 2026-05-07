@@ -18,15 +18,17 @@ import {
 import Avatar from '../ui/Avatar';
 import PageHeader from '../ui/PageHeader';
 
-// ── Last-login badge helper ─────────────────────────────────────────────────
+// ── Last-seen badge helper ──────────────────────────────────────────────────
 // Renders a small pill next to each member that's accurate to the last hour.
-// "Never logged in" (amber) if the DB has no row; "Today", "Yesterday",
-// "X days ago", or the short date otherwise. Tooltip shows the full ISO time
-// for anyone who needs an exact timestamp (ops / audit).
-function formatLastLogin(iso) {
-  if (!iso) return { label: 'Never logged in', tone: 'never' };
+// Reflects REAL activity (mouse / keyboard / scroll / touch) — not just
+// "tab open." Idle tabs in the background never count. Source of truth is
+// member_logins.last_seen_at, bumped by the FE heartbeat in
+// src/hooks/useActivityHeartbeat.js. Tooltip shows the full ISO time for
+// anyone who needs an exact timestamp (ops / audit).
+function formatLastSeen(iso) {
+  if (!iso) return { label: 'Never seen', tone: 'never' };
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return { label: 'Never logged in', tone: 'never' };
+  if (Number.isNaN(d.getTime())) return { label: 'Never seen', tone: 'never' };
 
   const now = new Date();
   const diffMs = now.getTime() - d.getTime();
@@ -45,11 +47,11 @@ function formatLastLogin(iso) {
   return { label: d.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }), tone: 'stale', iso };
 }
 
-const LAST_LOGIN_TONE = {
-  fresh:  { bg: '#e8f5e3', color: '#29811e' }, // green — active user
-  recent: { bg: '#e8f0fe', color: '#1f74b3' }, // blue — logged in this week
+const LAST_SEEN_TONE = {
+  fresh:  { bg: '#e8f5e3', color: '#29811e' }, // green — active in the last day
+  recent: { bg: '#e8f0fe', color: '#1f74b3' }, // blue — active this week
   stale:  { bg: '#f7f5f2', color: '#616161' }, // grey — hasn't been here in a while
-  never:  { bg: '#ffe2de', color: '#d42d35' }, // red — never signed in
+  never:  { bg: '#ffe2de', color: '#d42d35' }, // red — never seen
 };
 
 // ── Parental Leave mock data ────────────────────────────────────────────────
@@ -499,8 +501,8 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
     const badge = ACCESS_BADGE[member.access] || ACCESS_BADGE.agent;
     const isHovered = hoveredRow === email;
     const isOnLeave = member.onLeave === true;
-    const lastLogin = formatLastLogin(member.lastLoginAt);
-    const lastLoginTone = LAST_LOGIN_TONE[lastLogin.tone] || LAST_LOGIN_TONE.never;
+    const lastSeen = formatLastSeen(member.lastSeenAt);
+    const lastSeenTone = LAST_SEEN_TONE[lastSeen.tone] || LAST_SEEN_TONE.never;
 
     // Stats: for managers, aggregate self + all reports; for agents, just self
     const reportEmails = hasSubReports ? [email, ...localGetAllReports(email)] : [email];
@@ -549,13 +551,13 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
               <div style={{ fontSize: 13, fontWeight: isManager ? 700 : 500, color: '#1b1b1b', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                 {member.name}
                 <span style={{ background: badge.bg, color: badge.color, fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 128 }}>{badge.label}</span>
-                {/* Last-login pill. While the roster is still loading and we
+                {/* Last-seen pill. While the roster is still loading and we
                     have no cached value for this row, render a shimmer so
-                    we don't flash a misleading "Never logged in" badge on
+                    we don't flash a misleading "Never seen" badge on
                     every member during the initial fetch. */}
-                {rosterLoading && !member.lastLoginAt ? (
+                {rosterLoading && !member.lastSeenAt ? (
                   <span
-                    title="Loading last login…"
+                    title="Loading last-seen…"
                     style={{
                       background: '#f5f4f2',
                       color: '#9e9e9e',
@@ -574,10 +576,10 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                   </span>
                 ) : (
                   <span
-                    title={lastLogin.iso ? `Last login: ${new Date(lastLogin.iso).toLocaleString()}` : 'This user has never signed in to Ops Hub'}
+                    title={lastSeen.iso ? `Last seen: ${new Date(lastSeen.iso).toLocaleString()}` : 'This user has never been active in Ops Hub'}
                     style={{
-                      background: lastLoginTone.bg,
-                      color: lastLoginTone.color,
+                      background: lastSeenTone.bg,
+                      color: lastSeenTone.color,
                       fontSize: 10,
                       fontWeight: 700,
                       padding: '2px 8px',
@@ -588,8 +590,8 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    <i className={lastLogin.tone === 'never' ? 'bi-person-slash' : 'bi-clock-history'} style={{ fontSize: 9 }} />
-                    {lastLogin.tone === 'never' ? 'Never logged in' : lastLogin.label}
+                    <i className={lastSeen.tone === 'never' ? 'bi-person-slash' : 'bi-clock-history'} style={{ fontSize: 9 }} />
+                    {lastSeen.tone === 'never' ? 'Never seen' : lastSeen.label}
                   </span>
                 )}
                 {member.isAnnouncementsAdmin && (
@@ -1548,12 +1550,12 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                   </div>
                 </div>
 
-                {/* Last-login read-only info */}
+                {/* Last-seen read-only info — actual user activity, not idle tabs */}
                 <div style={{ padding: '10px 14px', background: '#f9f8f6', borderRadius: 10, fontSize: 11, color: '#616161', display: 'flex', alignItems: 'center', gap: 10 }}>
                   <i className="bi-clock-history" style={{ fontSize: 14, color: '#7c3aed' }} />
                   <div>
                     <div style={{ fontWeight: 600, color: '#1b1b1b', fontSize: 12 }}>
-                      {target.lastLoginAt ? `Last logged in: ${new Date(target.lastLoginAt).toLocaleString()}` : 'Has never signed in to Ops Hub'}
+                      {target.lastSeenAt ? `Last seen: ${new Date(target.lastSeenAt).toLocaleString()}` : 'Has never been active in Ops Hub'}
                     </div>
                     {target.loginCount > 0 && (
                       <div>Total logins: {target.loginCount}</div>

@@ -99,16 +99,19 @@ async function findMemberByEmail(email) {
 async function recordLogin(email) {
   if (!process.env.DATABASE_URL) return;
   const { query } = await import('../../../../../../src/lib/db');
-  // Dual-write: member_logins is the new canonical store (2026-05-06);
-  // team_member_overrides write is kept during the read-path migration
-  // window and dropped in a follow-up PR. Both are best-effort —
-  // login proceeds even if either fails.
+  // member_logins is the canonical store. Sets BOTH last_login_at
+  // (auth-event timestamp) AND last_seen_at (real-activity timestamp)
+  // — a fresh sign-in IS real activity. Idle /me pings don't bump
+  // last_seen_at; only this route, the email-login route, and the
+  // FE heartbeat do. Legacy dual-write to team_member_overrides is
+  // preserved during the read-path migration. Best-effort either way.
   try {
     await query(
-      `INSERT INTO member_logins (email, last_login_at, login_count)
-       VALUES ($1, NOW(), 1)
+      `INSERT INTO member_logins (email, last_login_at, last_seen_at, login_count)
+       VALUES ($1, NOW(), NOW(), 1)
        ON CONFLICT (email) DO UPDATE
        SET last_login_at = NOW(),
+           last_seen_at  = NOW(),
            login_count   = member_logins.login_count + 1,
            updated_at    = NOW()`,
       [email]

@@ -212,13 +212,49 @@ export async function showManyUsers(ids) {
   return zendeskFetch(`/users/show_many.json?ids=${batch.join(',')}`);
 }
 
-// 2026-05-07 — fetchPolicyMetrics() (added in PR #477) was removed
-// because it OOM'd the pod at scale. With ~2k Zendesk tickets in the
-// queue, the show_many?include=slas batch (21 calls × 1-5MB responses)
-// on top of the metric_sets sideload + parallel workbench/offboarding
-// scans pushed the V8 heap past the 2GB ceiling. Re-introduce only via
-// a background cron + DB cache so the queue route stays cheap — see
-// queue/route.js for the rationale.
+// ── Per-ticket SLA policy_metrics fetch (background SLA sync) ─────────
+// Hits Zendesk's dedicated per-ticket endpoint
+// `GET /tickets/{id}/slas/policy_metrics.json` — returns ONLY the
+// policy_metrics array (~600 bytes per ticket) rather than the full
+// ticket payload. Real response shape (verified live 2026-05-07):
+//
+//   {
+//     "policy_metrics": [
+//       { "breach_at": "2026-05-08T14:29:34Z", "stage": "active",
+//         "metric": "next_reply_time",     "hours": 21 },
+//       { "breach_at": "2025-12-18T03:07:32Z", "stage": "achieved",
+//         "metric": "first_reply_time",    "days": -141 },
+//       { "breach_at": "2026-05-14T09:03:29Z", "stage": "active",
+//         "metric": "periodic_update_time", "days": 7 },
+//       ...
+//     ]
+//   }
+//
+// Why this endpoint instead of `tickets/show_many?include=slas`:
+//   • Payload per ticket is ~600 bytes vs 1-5 MB for show_many. With
+//     ~2k active tickets, total bytes pulled per cycle drops from ~50 MB
+//     to ~1.2 MB — eliminates the OOM risk that killed PR #477 entirely.
+//   • Trade-off is one HTTP call per ticket. With sequential pacing
+//     (~150 ms each, comfortably under Zendesk's 700 req/min Enterprise
+//     limit) ~2k tickets sync in ~5 minutes — within the 10-min cron
+//     window. Concurrency is intentionally NOT used here so we don't
+//     blow the rate limit on noisy days.
+//   • Returns nothing extraneous — no ticket bodies, no comments, no
+//     metric_sets — so V8 has nothing else to keep alive while parsing.
+//
+// Returns the raw `{ policy_metrics: [...] }` payload, or `null` if
+// Zendesk returned a 404 (ticket not found / SLA never applied). The
+// caller should treat null as "no SLA data for this ticket" and skip
+// the upsert (don't blank-out an existing cache row).
+export async function fetchTicketSlaPolicyMetrics(ticketId) {
+  if (!ticketId) return null;
+  try {
+    return await zendeskFetch(`/tickets/${ticketId}/slas/policy_metrics.json`);
+  } catch (err) {
+    if (err?.status === 404) return null;
+    throw err;
+  }
+}
 
 // ── Resolve email → Zendesk user ID (cached 1h) ───────────────────────
 // Used by the reply path to set comment.author_id so the team member's

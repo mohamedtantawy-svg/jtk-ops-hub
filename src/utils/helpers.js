@@ -29,16 +29,70 @@ function _slaAnchorMs(task) {
 export const slaInfo=(task,customThresholds)=>{
   if(!task||task.status==='resolved'||task.status==='waiting')return null;
 
-  // ── Zendesk FRT / NRT path (2026-05-07) ──────────────────────────────
-  // The queue route stamps `slaMetric` per ticket from the already-
-  // sideloaded metric_set (zero extra Zendesk fetches — see route).
-  //   • 'frt' → first agent reply outstanding; anchor = created_at
-  //   • 'nrt' → requester replied after assignee; anchor = requester_updated_at
-  //   • null  → assignee has caught up, no clock running
-  // When null on an active Zendesk ticket, short-circuit to OK so the
-  // pill doesn't tick against a stale anchor for a ticket the assignee
-  // has already responded to. The labelled metric flows into the pill
-  // copy ("First reply breached" / "12h to next reply" etc.).
+  // Friendly metric name for Zendesk pills — used by both the
+  // policy-cache path below and the local-fallback path. For Jira /
+  // Deel sources and unstamped Zendesk rows the generic "SLA" copy
+  // applies.
+  const metricLabel = task.source === 'zendesk'
+    ? (task.slaMetric === 'frt' ? 'first reply'
+      : task.slaMetric === 'nrt' ? 'next reply'
+      : null)
+    : null;
+
+  // ── Zendesk policy-cache path (2026-05-07) ──────────────────────────
+  // When the queue route enriched this ticket from `zendesk_ticket_sla`
+  // (background-synced from Zendesk's policy_metrics), `slaSource ===
+  // 'zendesk_policy'` and we trust Zendesk's own breach_at. This bypasses
+  // our local biz-day math entirely — Zendesk's policy already factors
+  // business hours, paused time, on-hold time, and the specific SLA
+  // policy attached to the ticket. Fixes the "-3mo / -6w" overflows we
+  // were producing by applying a flat 24h default to ancient anchors on
+  // tickets whose policy clock had legitimately reset via agent activity.
+  //
+  //   • slaMetric ('frt' | 'nrt'): clock running → use slaBreachAt
+  //   • slaMetric === null:        no clock running (caught up) → OK
+  if (task.source === 'zendesk' && task.slaSource === 'zendesk_policy') {
+    if (task.slaMetric === null) {
+      return { label: 'OK', short: 'OK', color: '#15803d', bg: '#f0fdf4', breach: false, remain: null, ok: true };
+    }
+    const breachMs = task.slaBreachAt ? new Date(task.slaBreachAt).getTime() : null;
+    if (Number.isFinite(breachMs)) {
+      const remMs = breachMs - Date.now();
+      const rem = Math.round(remMs / 60000); // minutes; negative = past breach
+      if (rem <= 0) {
+        const breachedLabel = metricLabel ? `${metricLabel.charAt(0).toUpperCase()}${metricLabel.slice(1)} breached` : 'SLA Breached';
+        return { label: breachedLabel, short: 'BREACHED', color: '#d42d35', bg: '#ffe2de', breach: true, remain: rem };
+      }
+      // At-risk band — Zendesk targets are typically 24h FRT / NRT but the
+      // policy can vary by ticket. Use slaTargetMins (frt/nrt minutes from
+      // the cache) when available; otherwise treat anything ≤ 6h remaining
+      // as at-risk (a sensible default for the most common policy windows).
+      const targetMins = task.slaMetric === 'frt' && Number.isFinite(task.slaFrtMinutes) && task.slaFrtMinutes > 0
+        ? task.slaFrtMinutes
+        : (task.slaMetric === 'nrt' && Number.isFinite(task.slaNrtMinutes) && task.slaNrtMinutes > 0
+          ? task.slaNrtMinutes
+          : null);
+      const atRiskCutoffMins = targetMins ? Math.max(15, Math.floor(targetMins / 4)) : 6 * 60;
+      if (rem <= atRiskCutoffMins) {
+        const h = Math.floor(rem / 60), m = rem % 60;
+        const s = h > 0 ? `${h}h${m > 0 ? ' ' + m + 'm' : ''}` : `${m}m`;
+        return { label: `${s} to ${metricLabel || 'SLA'}`, short: s + ' left', color: '#ed5e2a', bg: '#fff3ee', breach: false, remain: rem };
+      }
+      return { label: 'OK', short: 'OK', color: '#15803d', bg: '#f0fdf4', breach: false, remain: rem, ok: true };
+    }
+    // slaSource was 'zendesk_policy' but breach_at missing → treat as OK
+    // rather than falling through to the local "anchor + 24h" math, which
+    // is exactly the false-positive breach we're trying to eliminate.
+    return { label: 'OK', short: 'OK', color: '#15803d', bg: '#f0fdf4', breach: false, remain: null, ok: true };
+  }
+
+  // ── Zendesk local FRT / NRT fallback path ───────────────────────────
+  // When the SLA cache hasn't seen this ticket yet (brand-new ticket,
+  // cron warming up after a deploy), fall through to the existing
+  // local logic that derives FRT/NRT from the metric_set sideload (PR
+  // #482 / #486 / #488). slaMetric is set by the queue route from
+  // metric_set — null means "first reply done AND requester hasn't
+  // replied since" → OK.
   if (task.source === 'zendesk' && task.slaMetric === null
       && task.status !== 'resolved' && task.status !== 'waiting') {
     return { label: 'OK', short: 'OK', color: '#15803d', bg: '#f0fdf4', breach: false, remain: null, ok: true };
@@ -61,14 +115,6 @@ export const slaInfo=(task,customThresholds)=>{
   const lim = Number.isFinite(task.slaMinsOverride) && task.slaMinsOverride > 0
     ? task.slaMinsOverride
     : (thresholds[task.type] || SLA_MINS[task.type] || 1440);
-  // Friendly metric name for Zendesk pills — only used when the queue
-  // route stamped slaMetric ('frt' | 'nrt'). For Jira / Deel sources
-  // and unstamped Zendesk rows we keep the generic "SLA" copy.
-  const metricLabel = task.source === 'zendesk'
-    ? (task.slaMetric === 'frt' ? 'first reply'
-      : task.slaMetric === 'nrt' ? 'next reply'
-      : null)
-    : null;
   const rem = lim - elapsed;
   if(rem<=0){
     const breachedLabel = metricLabel ? `${metricLabel.charAt(0).toUpperCase()}${metricLabel.slice(1)} breached` : 'SLA Breached';
