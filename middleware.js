@@ -177,7 +177,12 @@ export async function middleware(request) {
 
   // Forward user claims to route handlers via headers
   const requestHeaders = new Headers(request.headers);
-  requestHeaders.set('x-user-id', String(payload.sub || ''));
+  // Preserve a numeric `0` sub. Users seeded only in team_member_overrides
+  // (no `members` row yet — common after the 2026-05-06 recovery) sign in
+  // with `sub: 0`. The previous `payload.sub || ''` coerced 0 to empty
+  // string, downstream `requireRole` then read x-user-id as null and
+  // returned 401 'Unauthorized' to a perfectly valid admin/RM session.
+  requestHeaders.set('x-user-id', payload.sub != null ? String(payload.sub) : '');
   requestHeaders.set('x-user-email', payload.email || '');
   requestHeaders.set('x-user-role', payload.role || '');
   requestHeaders.set('x-user-name', payload.name || '');
