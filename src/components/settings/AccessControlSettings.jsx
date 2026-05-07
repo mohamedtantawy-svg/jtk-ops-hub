@@ -3,6 +3,19 @@ import { ALL_VIEWS, ALL_ACTIONS, ALL_ADMIN_POWERS, DATA_SCOPES, VIEW_LABELS, ACT
 import { MEMBERS } from '../../data/members';
 import { TITLES, REGIONS, TEAMS, DEPARTMENTS } from '../../data/orgConfig';
 import { FLAGS } from '../../data/constants';
+import { useTeamMembers } from '../../hooks/useTeamMembers';
+
+// Map a Settings access-type pick to the canonical base role persisted in
+// team_member_overrides.access. Custom IDs (at_hr_hub_admin, at_<custom>)
+// are stackable grants on top of an agent baseline — they don't change the
+// base role, so we default to 'agent' when no canonical mapping applies.
+const ACCESS_TYPE_TO_ROLE = {
+  at_admin: 'admin',
+  at_regional_mgr: 'regional_manager',
+  at_lead: 'team_lead',
+  at_agent: 'agent',
+};
+const deriveBaseRole = (accessTypeId) => ACCESS_TYPE_TO_ROLE[accessTypeId] || 'agent';
 
 const TABS=['Access Types','Access Type Editor','People Directory'];
 
@@ -37,6 +50,17 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
   const [newUser,setNewUser]=useState({email:'',name:'',accessTypeId:'at_agent',title:'',startDate:'',managerEmail:'',region:'',team:'',department:'HR Experience',country:'',status:'active'});
   const [dirFilter,setDirFilter]=useState({region:'all',team:'all',accessType:'all',status:'all'});
   const [dirSort,setDirSort]=useState('name');
+  const [savingUser,setSavingUser]=useState(false);
+
+  // ── Persistence bridge to /api/v1/team-members ──────────────────────────
+  // Settings → Access Control historically only mutated the local
+  // userAccessMap (browser localStorage). New users vanished from every
+  // other surface (Team table, Home team summary, Queue scoping) because
+  // those read the merged baseline + team_member_overrides roster from the
+  // DB. Wire the user-CRUD operations through the same hook that the Team
+  // tab uses so additions/edits/removals land in the DB and ripple to all
+  // surfaces via roster hydration.
+  const { addMember, updateMember, removeMember } = useTeamMembers();
 
   // --- helpers ---
   const userCountByType=useMemo(()=>{
@@ -104,12 +128,28 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
     addToast('success','Deleted',`"${t.name}" deleted`);
   };
 
-  // User CRUD
-  const saveNewUser=()=>{
+  // User CRUD — every mutation persists to team_member_overrides so the
+  // change shows up in Team table, Home summary, Queue scoping, etc.
+  const saveNewUser=async()=>{
     const email=newUser.email.trim().toLowerCase();
     if(!email||!email.includes('@')){addToast('error','Error','Enter a valid email');return;}
+    if(!email.endsWith('@deel.com')){addToast('error','Error','Email must be a valid @deel.com address');return;}
     if(!newUser.name.trim()){addToast('error','Error','Name is required');return;}
     if(userAccessMap[email]){addToast('error','Error','This email already exists');return;}
+    setSavingUser(true);
+    const result=await addMember({
+      email,
+      name:newUser.name.trim(),
+      access:deriveBaseRole(newUser.accessTypeId),
+      title:newUser.title||'HR Experience Specialist',
+      managerEmail:newUser.managerEmail||null,
+      team:newUser.team||null,
+      region:newUser.region||newUser.team||null,
+      country:newUser.country||null,
+      service:'EOR',
+    });
+    setSavingUser(false);
+    if(!result.ok){addToast('error','Failed to add user',result.error||'Please try again.');return;}
     const initials=newUser.name.trim().split(' ').map(p=>p.charAt(0).toUpperCase()).slice(0,2).join('');
     setUserAccessMap(prev=>({...prev,[email]:{...newUser,email:undefined,initials}}));
     addToast('success','User Added',`${newUser.name} added to the directory`);
@@ -117,9 +157,25 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
     setAddingUser(false);
   };
 
-  const saveEditUser=(email)=>{
+  const saveEditUser=async(email)=>{
     const existing=userAccessMap[email];
     if(!existing)return;
+    setSavingUser(true);
+    // Persist allocation edits to team_member_overrides. Per-field optimistic
+    // updates already touched userAccessMap via updateUserField; this PATCH
+    // makes them durable. Custom (non-canonical) accessTypeIds keep living
+    // in localStorage userAccessMap — only the base role lands in the DB.
+    const result=await updateMember(email,{
+      name:existing.name,
+      title:existing.title,
+      access:deriveBaseRole(existing.accessTypeId),
+      managerEmail:existing.managerEmail||null,
+      team:existing.team||null,
+      region:existing.region||existing.team||null,
+      country:existing.country||null,
+    });
+    setSavingUser(false);
+    if(!result.ok){addToast('error','Failed to save',result.error||'Please try again.');return;}
     setUserAccessMap(prev=>({...prev,[email]:{...existing}}));
     addToast('success','Updated',`${existing.name||email} updated`);
     setEditingUser(null);
@@ -129,10 +185,14 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
     setUserAccessMap(prev=>({...prev,[email]:{...prev[email],[field]:value}}));
   };
 
-  const removeUser=(email)=>{
+  const removeUser=async(email)=>{
     if(email===user?.email){addToast('error','Error','Cannot remove your own account');return;}
     const name=userAccessMap[email]?.name||email;
     if(!window.confirm(`Remove ${name} from the directory?`))return;
+    setSavingUser(true);
+    const result=await removeMember(email);
+    setSavingUser(false);
+    if(!result.ok){addToast('error','Failed to remove',result.error||'Please try again.');return;}
     setUserAccessMap(prev=>{const next={...prev};delete next[email];return next;});
     addToast('success','Removed',`${name} removed`);
   };
@@ -384,8 +444,8 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
               <div><label style={labelStyle}>Country Code</label><input style={inputStyle} value={newUser.country} onChange={e=>setNewUser(p=>({...p,country:e.target.value.toUpperCase()}))} placeholder="e.g. UK, US, DE" maxLength={3}/></div>
             </div>
             <div style={{display:'flex',gap:10,marginTop:8}}>
-              <button style={btnPrimary} onClick={saveNewUser}>Add Person</button>
-              <button style={btnSecondary} onClick={()=>setAddingUser(false)}>Cancel</button>
+              <button style={{...btnPrimary,opacity:savingUser?0.6:1,cursor:savingUser?'wait':'pointer'}} onClick={saveNewUser} disabled={savingUser}>{savingUser?'Adding…':'Add Person'}</button>
+              <button style={btnSecondary} onClick={()=>setAddingUser(false)} disabled={savingUser}>Cancel</button>
             </div>
           </div>
         )}
@@ -494,9 +554,9 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
                           <div/>
                         </div>
                         <div style={{display:'flex',gap:10,marginTop:8}}>
-                          <button style={btnPrimary} onClick={()=>saveEditUser(u.email)}>Done</button>
-                          <button style={btnSecondary} onClick={()=>setEditingUser(null)}>Cancel</button>
-                          {u.email!==user?.email&&<button style={btnDanger} onClick={()=>{removeUser(u.email);setEditingUser(null);}}>Remove</button>}
+                          <button style={{...btnPrimary,opacity:savingUser?0.6:1,cursor:savingUser?'wait':'pointer'}} onClick={()=>saveEditUser(u.email)} disabled={savingUser}>{savingUser?'Saving…':'Done'}</button>
+                          <button style={btnSecondary} onClick={()=>setEditingUser(null)} disabled={savingUser}>Cancel</button>
+                          {u.email!==user?.email&&<button style={{...btnDanger,opacity:savingUser?0.6:1,cursor:savingUser?'wait':'pointer'}} onClick={()=>{removeUser(u.email);setEditingUser(null);}} disabled={savingUser}>Remove</button>}
                         </div>
                       </div>
                     </td>
