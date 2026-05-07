@@ -8,18 +8,20 @@
 //              assigneeEmail, assigneeName?,
 //              originalAssigneeEmail?, originalAssigneeName? }
 // PUT  body (clear): { source, taskId, assigneeEmail: null }
-// GET  ?source=... → list current reassignments (admin/manager scope-filtered)
+// GET  ?source=... → list current reassignments (visible to every authed user)
 //
-// Role gate: admin | regional_manager | team_lead — same as
-// /tasks/[id]/assign and /queue/reassign.
-// Target validation: assignee must be in caller's hierarchy unless caller
-// is admin (mirrors task-scope-guard.canAssignTo behaviour).
+// Role gate: any authenticated @deel.com user. The role-restricted version
+// (admin/RM/TL only) was opened up 2026-05-07 per HR ops feedback —
+// agents need to reassign their own cases without round-tripping through
+// a TL. Persistence is unaffected: every override is stored in the
+// queue_reassignments table and overlaid via applyReassignments AFTER
+// each upstream sync, so reassignments survive sync cycles indefinitely.
+// Target validation still requires a known active member in the directory.
 
 import { NextResponse } from 'next/server';
 import { query } from '../../../../../src/lib/db';
-import { requireRole } from '../../../../../src/lib/auth-helpers';
+import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { MEMBERS_BY_EMAIL } from '../../../../../src/data/members';
-import { getVisibleMemberEmails, isAdmin } from '../../../../../src/lib/scope-helpers';
 import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
 import {
   ALLOWED_REASSIGN_SOURCES,
@@ -41,14 +43,13 @@ function normSource(s) {
 }
 
 export async function GET(req) {
-  const { authorized, user, status, error } = requireRole(req, 'admin', 'regional_manager', 'team_lead');
-  if (!authorized) return NextResponse.json({ error }, { status });
+  const user = getAuthUser(req);
+  if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   await ensureRosterHydrated();
 
   const { searchParams } = new URL(req.url);
   const source = normSource(searchParams.get('source'));
-  const visibleEmails = isAdmin(user) ? null : getVisibleMemberEmails(user);
 
   try {
     const filterParams = [];
@@ -69,12 +70,11 @@ export async function GET(req) {
          LIMIT 1000`,
       filterParams,
     );
+    // Reassignment rows are not sensitive — they're "this row was routed
+    // from X to Y". The hierarchy filter that used to live here was a
+    // hangover from the role-gated era; with all roles able to reassign
+    // it would hide their own outgoing assignments from non-managers.
     const items = rows
-      .filter(r => {
-        if (!visibleEmails) return true; // admin
-        const target = (r.assignee_email || '').toLowerCase();
-        return visibleEmails.has(target);
-      })
       .map(r => ({
         source: r.task_source,
         taskId: r.task_id,
@@ -98,8 +98,8 @@ export async function GET(req) {
 }
 
 export async function POST(req) {
-  const { authorized, user, status, error } = requireRole(req, 'admin', 'regional_manager', 'team_lead');
-  if (!authorized) return NextResponse.json({ error }, { status });
+  const user = getAuthUser(req);
+  if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   await ensureRosterHydrated();
 
@@ -151,20 +151,17 @@ export async function POST(req) {
     return NextResponse.json({ error: 'Invalid assigneeEmail' }, { status: 400 });
   }
 
-  // Target must be a known directory member, active, and in caller's
-  // hierarchy unless caller is admin. Same constraints as /tasks/assign.
+  // Target must be a known directory member and active. The hierarchy
+  // scope check that used to live here was removed 2026-05-07 — every
+  // role can now reassign to anyone in the directory. Directory + active
+  // checks remain so we still can't park rows on a ghost or deactivated
+  // address.
   const target = MEMBERS_BY_EMAIL[assigneeEmail];
   if (!target) {
     return NextResponse.json({ error: 'Assignee not in directory' }, { status: 400 });
   }
   if (target.isDeleted === true) {
     return NextResponse.json({ error: 'Assignee is deactivated' }, { status: 400 });
-  }
-  if (!isAdmin(user)) {
-    const visible = getVisibleMemberEmails(user);
-    if (!visible.has(assigneeEmail)) {
-      return NextResponse.json({ error: 'Assignee outside your scope', reason: 'assignee_scope' }, { status: 403 });
-    }
   }
 
   try {

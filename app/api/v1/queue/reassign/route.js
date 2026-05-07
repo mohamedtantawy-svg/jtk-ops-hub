@@ -2,7 +2,11 @@
 // Pushes a reassignment to the original ticketing system (Zendesk or Jira).
 // Body: { ticketId: "ZD-12345" | "PROJ-123", assigneeEmail: "someone@deel.com" }
 //
-// - Role-gated: admin | regional_manager | team_lead (matches /tasks/[id]/assign).
+// - Open to any authenticated user (2026-05-07): the role gate
+//   (admin/RM/TL) was lifted per HR ops feedback so agents can reassign
+//   their own cases without round-tripping through a TL. The change
+//   is pushed UPSTREAM to Zendesk/Jira on success, so persistence is
+//   in the source of truth — subsequent syncs read the new assignee.
 // - Busts the persistent `/queue` cache on success so the next poll reflects
 //   the new assignee instead of serving a 3-minute-stale response.
 // - Upserts a shadow task row keyed by external_id so activity can be logged
@@ -10,12 +14,13 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { NextResponse } from 'next/server';
-import { requireRole } from '../../../../../src/lib/auth-helpers';
+import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { reassignTicket } from '../../../../../src/lib/zendesk-api';
 import { reassignIssue } from '../../../../../src/lib/jira-api';
 import { query } from '../../../../../src/lib/db';
 import { cacheDelMany } from '../../../../../src/lib/server-cache';
-import { canAssignTo } from '../../../../../src/lib/task-scope-guard';
+import { MEMBERS_BY_EMAIL } from '../../../../../src/data/members';
+import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
 
 async function upsertShadowAndLog({ ticketId, source, assigneeEmail, actorName }) {
   try {
@@ -49,8 +54,10 @@ async function upsertShadowAndLog({ ticketId, source, assigneeEmail, actorName }
 }
 
 export async function POST(req) {
-  const { authorized, user, status, error } = requireRole(req, 'admin', 'regional_manager', 'team_lead');
-  if (!authorized) return NextResponse.json({ error }, { status });
+  const user = getAuthUser(req);
+  if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  await ensureRosterHydrated();
 
   let body;
   try {
@@ -77,13 +84,23 @@ export async function POST(req) {
     );
   }
 
-  // Target assignee must be an active, known member within the caller's
-  // hierarchy. Prevents a TL parking a ticket on someone in another region
-  // and blocks assignment to a deactivated / unknown email.
-  if (!canAssignTo(user, assigneeEmail)) {
+  // Target assignee must be a known active member of the directory. The
+  // hierarchy scope check (canAssignTo) was lifted 2026-05-07 — every
+  // role can now reassign to anyone in the directory. Directory + active
+  // checks remain so we still can't park tickets on a ghost or
+  // deactivated row.
+  const lc = String(assigneeEmail).toLowerCase();
+  const target = MEMBERS_BY_EMAIL[lc];
+  if (!target) {
     return NextResponse.json(
-      { error: 'Assignee is outside your scope or not a valid member', reason: 'assignee_scope' },
-      { status: 403 },
+      { error: 'Assignee is not a valid member', reason: 'assignee_unknown' },
+      { status: 400 },
+    );
+  }
+  if (target.isDeleted === true) {
+    return NextResponse.json(
+      { error: 'Assignee is deactivated', reason: 'assignee_inactive' },
+      { status: 400 },
     );
   }
 

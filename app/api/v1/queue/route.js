@@ -302,18 +302,47 @@ function adfToText(node) {
 }
 
 // ── Paginated Zendesk search helper ──────────────────────────────────────────
+// Sideloads `metric_sets` so each ticket carries a `metric_set` field with
+// the SLA-relevant timestamps (requester_updated_at, assignee_updated_at,
+// assigned_at). Without metric_sets the only available anchor is
+// `updated_at`, which silently masks SLA breaches because it bumps on
+// every assignee action (internal notes, field edits, status flips) — not
+// just on a real requester reply. See fetchZendeskQueue's normalize step
+// for the anchor formula.
 async function paginatedZendeskSearch(query, { maxPages = 10, perPage = 100 } = {}) {
   const allResults = [];
+  const metricsByTicketId = new Map();
   let page = 1;
 
   while (page <= maxPages) {
-    const res = await searchTickets(query, { per_page: perPage, page, sort_by: 'updated_at', sort_order: 'desc' });
+    const res = await searchTickets(query, {
+      per_page: perPage,
+      page,
+      sort_by: 'updated_at',
+      sort_order: 'desc',
+      include: 'metric_sets',
+    });
     const results = res?.results || [];
+    const metrics = res?.metric_sets || [];
+    for (const m of metrics) {
+      if (m && m.ticket_id != null) metricsByTicketId.set(m.ticket_id, m);
+    }
     allResults.push(...results);
 
     // Stop if we got fewer than perPage (last page) or no next_page
     if (results.length < perPage || !res?.next_page) break;
     page++;
+  }
+
+  // Attach the metric_set sideload to each ticket so the normaliser can
+  // read SLA timestamps without managing the join. Tickets without a
+  // matching metric_set (race window between creation and metric
+  // computation) fall through with `metric_set` undefined; downstream
+  // anchor logic falls back to created_at.
+  for (const t of allResults) {
+    if (t && t.id != null && metricsByTicketId.has(t.id)) {
+      t.metric_set = metricsByTicketId.get(t.id);
+    }
   }
 
   return allResults;
@@ -408,6 +437,53 @@ async function fetchZendeskQueue() {
       // own SLA pill ticking against the paused window.
       const isPausedStatus = appStatus === 'waiting';
 
+      // ── SLA anchor (2026-05-07 fix) ────────────────────────────────
+      // The previous code anchored on `t.updated_at`, which bumps on
+      // ANY ticket activity — including the assignee's own internal
+      // notes, custom-field edits, tag changes, or status flips. So the
+      // moment the assignee touched the ticket without actually replying
+      // to the requester, the SLA clock silently reset and the breach
+      // was masked. (Reported symptom: Zendesk fires a breach notification
+      // but Ops Hub still shows the row as OK.)
+      //
+      // Use the Zendesk metric_set sideload instead. metric_sets carry
+      // per-actor timestamps that ONLY bump on the relevant party's
+      // activity:
+      //   • requester_updated_at — last requester reply
+      //   • assignee_updated_at — last assignee action (any kind)
+      //   • assigned_at         — when the current assignee was assigned
+      //
+      // Active SLA anchor (status=new/open) — "assignee owes a response":
+      //   max(requester_updated_at, assigned_at) || created_at
+      // This matches the user's two rules:
+      //   (a) "once assigned, reply within 24h" → assigned_at
+      //   (b) "if requester replies, respond within 24h" → requester_updated_at
+      //
+      // Paused SLA anchor (status=pending/hold) — "waiting on requester":
+      //   assignee_updated_at || updated_at || created_at
+      // Closest proxy for "when the ticket entered pending" since Zendesk
+      // doesn't surface the status-transition timestamp directly; the
+      // assignee's last action is typically the reply that flipped status.
+      const metric = t.metric_set || {};
+      const tsMs = (s) => {
+        if (!s) return null;
+        const n = Date.parse(s);
+        return Number.isFinite(n) && n > 0 ? n : null;
+      };
+      const requesterMs = tsMs(metric.requester_updated_at);
+      const assigneeMs  = tsMs(metric.assignee_updated_at);
+      const assignedMs  = tsMs(metric.assigned_at);
+      const createdMs   = tsMs(t.created_at);
+      const updatedMs   = tsMs(t.updated_at);
+
+      const activeAnchorMs = Math.max(requesterMs || 0, assignedMs || 0)
+        || createdMs
+        || null;
+      const pausedAnchorMs = assigneeMs || updatedMs || createdMs || null;
+      const slaAnchorIso = isPausedStatus
+        ? (pausedAnchorMs ? new Date(pausedAnchorMs).toISOString() : t.created_at)
+        : (activeAnchorMs ? new Date(activeAnchorMs).toISOString() : t.created_at);
+
       return {
         id: `ZD-${t.id}`,
         source: 'zendesk',
@@ -426,16 +502,16 @@ async function fetchZendeskQueue() {
         assigneeName: assignee.name || null,
         requesterName: requester.name || 'Unknown',
         requesterEmail: requester.email || null,
-        lastCustomerResponseAt: t.updated_at, // Zendesk updated_at tracks last activity; this is a reasonable proxy
+        // SLA anchor — see metric_set logic above. The FE's _slaAnchorMs
+        // (src/utils/helpers.js) reads this field first.
+        lastCustomerResponseAt: slaAnchorIso,
         createdAt: t.created_at,
         updatedAt: t.updated_at,
-        // Best-available pausedAt anchor for waiting tickets. Zendesk
-        // doesn't surface the precise pending-transition timestamp, so
-        // `updated_at` is the closest proxy (last activity that flipped
-        // status or replied). Only populated when the ticket is currently
-        // paused — keeps the FE's paused-SLA pill anchored to the right
-        // event.
-        pausedAt: isPausedStatus ? t.updated_at : null,
+        // Paused-state anchor for the dedicated Paused section pill.
+        // Uses metric.assignee_updated_at (the assignee's last action,
+        // typically the reply that flipped status to pending) — falls back
+        // to updated_at then created_at if the metric_set didn't side-load.
+        pausedAt: isPausedStatus ? slaAnchorIso : null,
         // Per-ticket SLA window from app_settings.queue_sla_thresholds.zendesk
         // (default 24h active / 48h paused, configurable via the Team-tab
         // SLA settings table). slaInfo() reads this override before falling

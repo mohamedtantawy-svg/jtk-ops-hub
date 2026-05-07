@@ -767,6 +767,17 @@ CREATE INDEX IF NOT EXISTS idx_user_notifications_source
 ALTER TABLE feedback_requests
   ADD COLUMN IF NOT EXISTS attachments JSONB NOT NULL DEFAULT '[]'::jsonb;
 
+-- ── Feedback audience scoping (2026-05-07, Sarah Suge feedback) ─────────────
+-- Submitters can now restrict a feedback request's visibility to a region
+-- (emea / apac / americas / nam / latam) or to managers-only. Backwards
+-- compatible: existing rows default to 'global' so the board behaves as
+-- before. Index is partial — only non-global rows need lookup acceleration;
+-- the global-default common case stays index-free.
+ALTER TABLE feedback_requests
+  ADD COLUMN IF NOT EXISTS audience VARCHAR(20) NOT NULL DEFAULT 'global';
+CREATE INDEX IF NOT EXISTS idx_feedback_audience
+  ON feedback_requests(audience) WHERE audience <> 'global';
+
 -- ── Country-ownership junction (2026-04-30) ─────────────────────────────────
 -- Replaces the static src/data/countryOwners.js map with a DB-backed source
 -- of truth. Each row says "this email owns this country" — the Queue's

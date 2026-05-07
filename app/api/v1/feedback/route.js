@@ -11,12 +11,32 @@
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../src/lib/auth-helpers';
 import { query } from '../../../../src/lib/db';
+import { MEMBERS_BY_EMAIL } from '../../../../src/data/members';
+import { matchesAudience } from '../../../../src/data/comms';
+import { ensureRosterHydrated } from '../../../../src/lib/roster-server';
 
 const ALLOWED_SORT = new Set(['top', 'new', 'oldest', 'recently_updated']);
 
 const ALLOWED_STATUS = new Set(['new', 'triaged', 'in_progress', 'done', 'wont_do', 'duplicate']);
 const ALLOWED_PRIORITY = new Set(['low', 'medium', 'high', 'critical']);
 const ALLOWED_TYPE = new Set(['bug', 'improvement', 'question']);
+// Audience scope (Sarah Suge 2026-05-07 ask): submitters can restrict who
+// sees a feedback request. 'global' = everyone; the regional values
+// (emea / apac / americas / nam / latam) match member.team via
+// matchesAudience(); 'managers' restricts to admin / regional_manager /
+// team_lead regardless of team. Author + admin always see their own row,
+// so no one accidentally locks themselves out.
+const ALLOWED_AUDIENCE = new Set(['global', 'emea', 'apac', 'americas', 'nam', 'latam', 'managers']);
+
+function feedbackAudienceVisible(audience, viewer) {
+  const a = String(audience || 'global').toLowerCase();
+  if (!a || a === 'global' || a === 'all') return true;
+  if (a === 'managers') {
+    const role = String(viewer?.role || viewer?.access || '').toLowerCase();
+    return role === 'admin' || role === 'regional_manager' || role === 'team_lead';
+  }
+  return matchesAudience(a, viewer?.team);
+}
 
 // Hard cap on screenshot payload size (base64 data URI). Postgres TEXT is
 // effectively 1 GB but writes that big are slow + wasteful — agents
@@ -102,6 +122,7 @@ function rowToShape(row) {
     priority: row.priority,
     category: row.category,
     type: row.type,
+    audience: row.audience || 'global',
     submitterId: row.submitter_id,
     submitterEmail: row.submitter_email,
     submitterName: row.submitter_name,
@@ -185,7 +206,21 @@ export async function GET(req) {
 
   try {
     const { rows } = await query(sql, params);
-    return NextResponse.json({ items: rows.map(rowToShape) });
+    // Audience filter — runs AFTER the SQL filter so the existing 500-row
+    // LIMIT can't be subverted by a viewer who'd otherwise drop below the
+    // cap once their team's rows are excluded. Author + admin always see
+    // their own / all so no one accidentally locks themselves out.
+    await ensureRosterHydrated();
+    const lcEmail = String(user.email || '').toLowerCase();
+    const member = MEMBERS_BY_EMAIL[lcEmail] || null;
+    const role = String(user.role || '').toLowerCase();
+    const isAdmin = role === 'admin';
+    const items = rows.map(rowToShape).filter(item => {
+      if (isAdmin) return true;
+      if ((item.submitterEmail || '').toLowerCase() === lcEmail) return true;
+      return feedbackAudienceVisible(item.audience, { team: member?.team, role });
+    });
+    return NextResponse.json({ items });
   } catch (err) {
     console.error('[feedback/list]', err.message);
     return NextResponse.json({ error: 'Failed to load feedback' }, { status: 500 });
@@ -219,16 +254,19 @@ export async function POST(req) {
   const priority = ALLOWED_PRIORITY.has(body.priority) ? body.priority : 'medium';
   const type = ALLOWED_TYPE.has(body.type) ? body.type : 'bug';
   const category = clean(body.category, 50);
+  const audience = ALLOWED_AUDIENCE.has(String(body.audience || '').toLowerCase())
+    ? String(body.audience).toLowerCase()
+    : 'global';
   const submitterId = user.id || null;
 
   try {
     const { rows } = await query(
       `INSERT INTO feedback_requests
-         (title, issue, proposed_resolution, screenshot, attachments, priority, type, category,
+         (title, issue, proposed_resolution, screenshot, attachments, priority, type, category, audience,
           submitter_id, submitter_email, submitter_name)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12)
        RETURNING *`,
-      [title, issue, proposedResolution, screenshot, JSON.stringify(attachments), priority, type, category,
+      [title, issue, proposedResolution, screenshot, JSON.stringify(attachments), priority, type, category, audience,
        submitterId, user.email, user.name || null],
     );
     const created = rows[0];

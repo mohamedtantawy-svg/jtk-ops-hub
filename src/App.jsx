@@ -17,6 +17,7 @@ import { useQueueSync } from './hooks/useQueueSync';
 import { useQueueUnifiedSync } from './hooks/useQueueUnifiedSync';
 import { useHiddenTasks } from './hooks/useHiddenTasks';
 import { useUrgentAssistBadge } from './hooks/useUrgentAssistBadge';
+import { useHrHubBadge } from './hooks/useHrHubBadge';
 import { DEFAULT_SETTINGS } from './data/settings';
 import { DEFAULT_ACCESS_TYPES, ALL_VIEWS } from './data/accessControl';
 import { ADMIN_LIST_VERSION } from './data/adminEmails';
@@ -371,6 +372,13 @@ const App=()=>{
     enabled: !!user,
     userEmail: user?.email || '',
     workbenchTasks: queueUnified?.workbenchData?.tasks || [],
+  });
+  // Top-nav badge for HR Hub — same shape as Urgent Assist / Leaders Hub.
+  // Counts hr_hub_request rows where assignee_email = effectiveUser AND
+  // status != resolved.
+  const hrHubBadge = useHrHubBadge({
+    enabled: !!user,
+    userEmail: user?.email || '',
   });
   const [feed,setFeed]=useState(FEED_EVENTS);
   const [notes,setNotes]=useState(INITIAL_NOTES);
@@ -1477,6 +1485,7 @@ const App=()=>{
         onManageMentionGroups={()=>setMentionGroupsOpen(true)}
         leaderAlertsBadge={leaderAlertsBadge}
         urgentAssistBadge={urgentAssistBadge}
+        hrHubBadge={hrHubBadge}
         setSelTask={()=>{}} tasks={tasks}
       />
       <div style={{height:(impersonating?104:68)+(versionHasUpdate?44:0),flexShrink:0}}/>
