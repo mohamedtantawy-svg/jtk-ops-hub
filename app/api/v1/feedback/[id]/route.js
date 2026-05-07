@@ -13,6 +13,9 @@
 import { NextResponse } from 'next/server';
 import { getAuthUser, requireRole } from '../../../../../src/lib/auth-helpers';
 import { query } from '../../../../../src/lib/db';
+import { MEMBERS_BY_EMAIL } from '../../../../../src/data/members';
+import { matchesAudience } from '../../../../../src/data/comms';
+import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
 
 // Notify the submitter (and previous commenters) when a feedback request
 // transitions status — same fan-out shape the comment route uses, kept
@@ -85,7 +88,18 @@ async function notifyFeedbackStatusChange({ id, requestTitle, prev, next, actor 
 const ALLOWED_STATUS = new Set(['new', 'triaged', 'in_progress', 'done', 'wont_do', 'duplicate']);
 const ALLOWED_PRIORITY = new Set(['low', 'medium', 'high', 'critical']);
 const ALLOWED_TYPE = new Set(['bug', 'improvement', 'question']);
+const ALLOWED_AUDIENCE = new Set(['global', 'emea', 'apac', 'americas', 'nam', 'latam', 'managers']);
 const TERMINAL_STATUS = new Set(['done', 'wont_do', 'duplicate']);
+
+function feedbackAudienceVisible(audience, viewer) {
+  const a = String(audience || 'global').toLowerCase();
+  if (!a || a === 'global' || a === 'all') return true;
+  if (a === 'managers') {
+    const role = String(viewer?.role || '').toLowerCase();
+    return role === 'admin' || role === 'regional_manager' || role === 'team_lead';
+  }
+  return matchesAudience(a, viewer?.team);
+}
 
 // Mirror buildAttachments from /feedback/route.js — legacy rows fall back to
 // the single `screenshot` column so old submissions render alongside new
@@ -111,6 +125,7 @@ function rowToShape(row) {
     priority: row.priority,
     category: row.category,
     type: row.type,
+    audience: row.audience || 'global',
     submitterId: row.submitter_id,
     submitterEmail: row.submitter_email,
     submitterName: row.submitter_name,
@@ -165,7 +180,23 @@ export async function GET(req, { params }) {
   try {
     const { rows } = await query(SELECT_WITH_AGGS, [id, user.id || -1]);
     if (rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-    return NextResponse.json({ item: rowToShape(rows[0]) });
+    const item = rowToShape(rows[0]);
+
+    // Audience gate. Author + admin always see; anyone else needs to
+    // match the audience scope. Returns 404 (not 403) when out of scope
+    // so we don't leak the existence of audience-scoped rows.
+    const lcEmail = String(user.email || '').toLowerCase();
+    const role = String(user.role || '').toLowerCase();
+    const isAdmin = role === 'admin';
+    const isAuthor = (item.submitterEmail || '').toLowerCase() === lcEmail;
+    if (!isAdmin && !isAuthor) {
+      await ensureRosterHydrated();
+      const member = MEMBERS_BY_EMAIL[lcEmail] || null;
+      if (!feedbackAudienceVisible(item.audience, { team: member?.team, role })) {
+        return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+    }
+    return NextResponse.json({ item });
   } catch (err) {
     console.error('[feedback/get]', err.message);
     return NextResponse.json({ error: 'Failed to load feedback request' }, { status: 500 });
@@ -201,6 +232,11 @@ export async function PATCH(req, { params }) {
     push('type', body.type);
   }
   if (body.category !== undefined) push('category', body.category ? String(body.category).slice(0, 50) : null);
+  if (body.audience !== undefined) {
+    const a = String(body.audience || 'global').toLowerCase();
+    if (!ALLOWED_AUDIENCE.has(a)) return NextResponse.json({ error: 'invalid audience' }, { status: 400 });
+    push('audience', a);
+  }
   if (body.assigneeId !== undefined) {
     const aid = body.assigneeId == null || body.assigneeId === '' ? null : Number(body.assigneeId);
     if (aid != null && !Number.isFinite(aid)) return NextResponse.json({ error: 'invalid assigneeId' }, { status: 400 });

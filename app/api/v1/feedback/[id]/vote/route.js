@@ -10,6 +10,9 @@
 
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
+import { MEMBERS_BY_EMAIL } from '../../../../../../src/data/members';
+import { matchesAudience } from '../../../../../../src/data/comms';
+import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
 import { query } from '../../../../../../src/lib/db';
 
 function rowToShape(row) {
@@ -78,6 +81,39 @@ export async function POST(req, { params }) {
   const vote = Number(body.vote);
   if (![1, -1, 0].includes(vote)) {
     return NextResponse.json({ error: 'vote must be 1, -1 or 0' }, { status: 400 });
+  }
+
+  // Audience gate (Sarah Suge 2026-05-07). Voting requires the same
+  // visibility as reading — otherwise an agent with a row id from a
+  // stale link could vote on private feedback. Returns 404 to avoid
+  // leaking the existence of audience-scoped rows.
+  try {
+    const { rows: scopeRows } = await query(
+      `SELECT audience, submitter_email FROM feedback_requests WHERE id = $1`,
+      [id],
+    );
+    if (scopeRows.length === 0) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+    const aud = String(scopeRows[0].audience || 'global').toLowerCase();
+    if (aud !== 'global' && aud !== 'all') {
+      const lcEmail = String(user.email || '').toLowerCase();
+      const role = String(user.role || '').toLowerCase();
+      const isAdmin = role === 'admin';
+      const isAuthor = String(scopeRows[0].submitter_email || '').toLowerCase() === lcEmail;
+      if (!isAdmin && !isAuthor) {
+        await ensureRosterHydrated();
+        const member = MEMBERS_BY_EMAIL[lcEmail] || null;
+        const team = member?.team;
+        const ok = aud === 'managers'
+          ? (role === 'admin' || role === 'regional_manager' || role === 'team_lead')
+          : matchesAudience(aud, team);
+        if (!ok) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+      }
+    }
+  } catch (err) {
+    console.error('[feedback/vote audience-gate]', err.message);
+    return NextResponse.json({ error: 'Failed to record vote' }, { status: 500 });
   }
 
   try {

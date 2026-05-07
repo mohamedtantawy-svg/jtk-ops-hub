@@ -44,6 +44,19 @@ const TYPE_CONFIG = {
   question:    { label: 'Question',    icon: 'bi-question-circle', color: '#0369a1', bg: '#e0f2fe' },
 };
 
+// Short label for the audience-scope badge on rows. The full descriptions
+// live in CreateFeedbackModal's AUDIENCE_OPTIONS — this just needs a glance-
+// friendly tag so the row tells you "this is private to EMEA" without
+// crowding the pill row.
+const AUDIENCE_BADGE_LABEL = {
+  managers: 'Managers only',
+  emea:     'EMEA only',
+  apac:     'APAC only',
+  americas: 'Americas only',
+  nam:      'NAM only',
+  latam:    'LATAM only',
+};
+
 const SORTS = [
   { value: 'top', label: 'Most upvoted' },
   { value: 'new', label: 'Newest' },
@@ -586,6 +599,15 @@ function FeedbackRow({ item, expanded, onToggle, onVote, onStatusChange, onPrior
             </span>
             {item.category && (
               <span style={mutedPill}>{item.category}</span>
+            )}
+            {item.audience && item.audience !== 'global' && (
+              <span
+                style={{ ...mutedPill, gap: 4, background: '#f3eff8', color: '#7c3aed', borderColor: '#c4b1f9' }}
+                title={`Visible to ${AUDIENCE_BADGE_LABEL[item.audience] || item.audience} only`}
+              >
+                <i className="bi-eye" style={{ fontSize: 10 }} />
+                {AUDIENCE_BADGE_LABEL[item.audience] || item.audience}
+              </span>
             )}
             {assignee && (
               <span style={{ ...mutedPill, gap: 4 }}>

@@ -11,7 +11,34 @@ import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { query } from '../../../../../../src/lib/db';
 import { MEMBERS_BY_EMAIL } from '../../../../../../src/data/members';
+import { matchesAudience } from '../../../../../../src/data/comms';
+import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
 import { loadGroupsByHandle } from '../../../../../../src/lib/mention-groups';
+
+// Audience gate (Sarah Suge 2026-05-07). Returns true when the viewer is
+// allowed to read/comment on the feedback row. Author + admin always pass.
+// Returns false when the row's audience excludes the viewer; callers
+// surface this as 404 so the row's existence isn't leaked.
+async function viewerCanSeeFeedback(rowId, user) {
+  const { rows } = await query(
+    `SELECT audience, submitter_email FROM feedback_requests WHERE id = $1`,
+    [rowId],
+  );
+  if (rows.length === 0) return { exists: false, allowed: false };
+  const aud = String(rows[0].audience || 'global').toLowerCase();
+  const lcEmail = String(user?.email || '').toLowerCase();
+  const role = String(user?.role || '').toLowerCase();
+  if (aud === 'global' || aud === 'all') return { exists: true, allowed: true };
+  if (role === 'admin') return { exists: true, allowed: true };
+  if (String(rows[0].submitter_email || '').toLowerCase() === lcEmail) return { exists: true, allowed: true };
+  await ensureRosterHydrated();
+  const member = MEMBERS_BY_EMAIL[lcEmail] || null;
+  if (aud === 'managers') {
+    const isManager = role === 'admin' || role === 'regional_manager' || role === 'team_lead';
+    return { exists: true, allowed: isManager };
+  }
+  return { exists: true, allowed: matchesAudience(aud, member?.team) };
+}
 
 // Parse @first.last mentions out of the comment body. Same loose rule HR
 // Hub uses — surface lowercased emails for known members; unknown handles
@@ -108,6 +135,10 @@ export async function GET(req, { params }) {
   const { id } = await params;
 
   try {
+    const gate = await viewerCanSeeFeedback(id, user);
+    if (!gate.exists || !gate.allowed) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
     const { rows } = await query(
       'SELECT * FROM feedback_comments WHERE request_id = $1 ORDER BY created_at ASC',
       [id],
@@ -123,6 +154,18 @@ export async function POST(req, { params }) {
   const user = getAuthUser(req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { id } = await params;
+
+  // Audience gate — same as GET. A user who can't read the row mustn't
+  // post comments on it either.
+  try {
+    const gate = await viewerCanSeeFeedback(id, user);
+    if (!gate.exists || !gate.allowed) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+  } catch (err) {
+    console.error('[feedback/comments/post audience-gate]', err.message);
+    return NextResponse.json({ error: 'Failed to add comment' }, { status: 500 });
+  }
 
   let body;
   try { body = await req.json(); } catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }); }

@@ -39,6 +39,19 @@ const TYPES = [
 
 const CATEGORIES = ['Queue', 'Briefing', 'Team', 'Announcements', 'Calendar', 'Settings', 'Auth', 'Performance', 'Other'];
 
+// Visibility scope (Sarah Suge 2026-05-07): submitters can restrict who
+// sees a request. Mirrors the server's ALLOWED_AUDIENCE whitelist; keep
+// in sync with app/api/v1/feedback/route.js.
+const AUDIENCE_OPTIONS = [
+  { value: 'global',   label: 'Everyone',           desc: 'Visible to all team members' },
+  { value: 'managers', label: 'Managers only',      desc: 'Team Leads, Regional Managers, and Admins' },
+  { value: 'emea',     label: 'EMEA team',          desc: 'Members on the EMEA team' },
+  { value: 'apac',     label: 'APAC team',          desc: 'Members on the APAC team' },
+  { value: 'americas', label: 'Americas (NAM + LATAM)', desc: 'NAM, LATAM, and LATAM + NAM members' },
+  { value: 'nam',      label: 'NAM team',           desc: 'Members on the NAM team' },
+  { value: 'latam',    label: 'LATAM team',         desc: 'Members on the LATAM team' },
+];
+
 function fileToDataUri(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -92,6 +105,7 @@ export default function CreateFeedbackModal({ onClose, onSubmit, currentUser }) 
   const [priority, setPriority] = useState('medium');
   const [type, setType] = useState('bug');
   const [category, setCategory] = useState('Queue');
+  const [audience, setAudience] = useState('global');
   // Each attachment: { id, kind: 'image' | 'video', dataUri, name }
   // The id is a client-only nonce so the gallery's keyed map stays stable
   // when the user removes one.
@@ -253,6 +267,7 @@ export default function CreateFeedbackModal({ onClose, onSubmit, currentUser }) 
         priority,
         type,
         category,
+        audience,
         // Strip the client-only `id` before posting; the server only persists
         // kind / dataUri / name. Keep `screenshot` populated with the first
         // image (if any) so legacy renderers — old client builds mid-deploy,
@@ -373,6 +388,25 @@ export default function CreateFeedbackModal({ onClose, onSubmit, currentUser }) 
                 <select value={category} onChange={e => setCategory(e.target.value)} style={{ ...selectInput, marginTop: 4 }}>
                   {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
+              </div>
+            </div>
+
+            {/* Visibility scope (Sarah Suge 2026-05-07): restrict who can see
+                the feedback. Default 'Everyone' preserves the pre-fix
+                behaviour for the common case. */}
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <label style={fieldLabel}>
+                  <i className="bi-eye" style={{ marginRight: 6, fontSize: 12, opacity: 0.7 }} />
+                  Visibility
+                </label>
+                <select value={audience} onChange={e => setAudience(e.target.value)} style={{ ...selectInput, marginTop: 4 }}>
+                  {AUDIENCE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.3 }}>
+                  {(AUDIENCE_OPTIONS.find(o => o.value === audience)?.desc) || ''}
+                  {audience !== 'global' && ' · You and admins can always see your own request.'}
+                </div>
               </div>
             </div>
           </div>
