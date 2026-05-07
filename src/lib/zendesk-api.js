@@ -119,6 +119,10 @@ export async function searchTickets(query, params = {}) {
   if (params.sort_order) qs.set('sort_order', params.sort_order);
   if (params.page) qs.set('page', String(params.page));
   if (params.per_page) qs.set('per_page', String(params.per_page));
+  // Sideload extra resources (e.g. `metric_sets` for accurate SLA anchors).
+  // Zendesk returns each requested type as a top-level array on the response;
+  // callers join by ticket_id.
+  if (params.include) qs.set('include', params.include);
   return zendeskFetch(`/search.json?${qs.toString()}`);
 }
 
