@@ -325,7 +325,14 @@ async function paginatedZendeskSearch(query, { maxPages = 10, perPage = 100 } = 
     const results = res?.results || [];
     const metrics = res?.metric_sets || [];
     for (const m of metrics) {
-      if (m && m.ticket_id != null) metricsByTicketId.set(m.ticket_id, m);
+      if (m && m.ticket_id != null) {
+        // String-normalise the key — Zendesk has been observed to
+        // return ticket_id as a number in some places and a string in
+        // others. A type-mismatched Map.get() would silently miss the
+        // join and the downstream FRT/NRT logic would treat the
+        // ticket as if it had no metric_set (false-positive breach).
+        metricsByTicketId.set(String(m.ticket_id), m);
+      }
     }
     allResults.push(...results);
 
@@ -336,12 +343,15 @@ async function paginatedZendeskSearch(query, { maxPages = 10, perPage = 100 } = 
 
   // Attach the metric_set sideload to each ticket so the normaliser can
   // read SLA timestamps without managing the join. Tickets without a
-  // matching metric_set (race window between creation and metric
-  // computation) fall through with `metric_set` undefined; downstream
-  // anchor logic falls back to created_at.
+  // matching metric_set fall through with `metric_set` undefined;
+  // downstream anchor logic has a defensive fallback (see
+  // fetchZendeskQueue's normalize step) so a missing sideload doesn't
+  // false-positive a 3-month breach for a ticket that's been actively
+  // replied to.
   for (const t of allResults) {
-    if (t && t.id != null && metricsByTicketId.has(t.id)) {
-      t.metric_set = metricsByTicketId.get(t.id);
+    if (t && t.id != null) {
+      const m = metricsByTicketId.get(String(t.id));
+      if (m) t.metric_set = m;
     }
   }
 
@@ -435,8 +445,16 @@ async function fetchZendeskQueue() {
     // policy_metrics via a background cron + DB cache so the queue
     // route stays cheap.
 
+    // Diagnostic: count tickets that came back without a metric_set
+    // sideload. If this number is non-trivial relative to allTickets.length
+    // we'll know Zendesk is silently dropping the include for some subset
+    // and can investigate (plan limit, ticket age, etc.). One log line per
+    // request — keeps signal high without spamming.
+    let _missingMetricSet = 0;
+
     // Normalize tickets
     const items = allTickets.map(t => {
+      if (!t.metric_set) _missingMetricSet++;
       const assignee = userMap[t.assignee_id] || {};
       const requester = userMap[t.requester_id] || {};
       // Read the per-ticket values for our 4 fields from t.custom_fields.
@@ -521,21 +539,44 @@ async function fetchZendeskQueue() {
       let slaMetric = null; // 'frt' | 'nrt' | null
       let activeAnchorMs = null;
       if (!isPausedStatus && appStatus !== 'resolved') {
+        const hasMetricSet = !!t.metric_set;
         const rtm = metric.reply_time_in_minutes;
         const replyMins = (rtm && typeof rtm === 'object') ? rtm.calendar : rtm;
-        if (replyMins == null) {
-          // FRT — first reply hasn't happened yet. Anchor on the later
-          // of creation OR assignment so a ticket that sat unassigned
-          // for 3 days and was just routed gets a fresh 24h clock.
+        if (hasMetricSet && replyMins == null) {
+          // FRT — Zendesk metrics confirm no first agent reply yet.
+          // Anchor on the later of creation OR assignment so a ticket
+          // that sat unassigned for days and was just routed gets a
+          // fresh 24h clock, not an instant breach.
           slaMetric = 'frt';
           activeAnchorMs = Math.max(createdMs || 0, assignedMs || 0) || createdMs;
         } else if (requesterMs && (!assigneeMs || requesterMs > assigneeMs)) {
-          // NRT — requester replied after assignee's last action
+          // NRT — requester replied after assignee's last action.
           slaMetric = 'nrt';
           activeAnchorMs = requesterMs;
+        } else if (!hasMetricSet) {
+          // Defensive fallback (Mohamed's ZD-5871989 case 2026-05-07):
+          // when Zendesk doesn't sideload metric_set for a ticket, we
+          // can't tell if FRT is satisfied. The previous code defaulted
+          // to FRT with anchor=created_at — for a 4-month-old ticket
+          // that produced "First reply breached by 3 months" even
+          // though the agent had been actively replying.
+          //
+          // Use t.updated_at as a proxy for "last activity": if it's
+          // within the active threshold (24h biz minutes ≈ 1440 min)
+          // assume someone is engaged — pill OK. If it's stale, run a
+          // generic NRT clock from updated_at so the row still shows
+          // up as breached (rather than being silently OK).
+          if (updatedMs && (Date.now() - updatedMs) < zendeskActiveMins * 60 * 1000) {
+            // Recent activity — assume caught up; pill = OK.
+            slaMetric = null;
+          } else {
+            slaMetric = 'nrt';
+            activeAnchorMs = updatedMs || createdMs;
+          }
         }
-        // Else: assignee has caught up. slaMetric stays null;
-        // FE's slaInfo treats this as OK regardless of anchor staleness.
+        // Else: metric_set present, first reply done, requester has
+        // not replied since assignee's last action → caught up,
+        // slaMetric stays null, pill = OK.
       }
       const slaAnchorIso = isPausedStatus
         ? (pausedAnchorMs ? new Date(pausedAnchorMs).toISOString() : t.created_at)
@@ -590,6 +631,10 @@ async function fetchZendeskQueue() {
         tags: t.tags || [],
       };
     });
+
+    if (_missingMetricSet > 0) {
+      console.log(`[queue] Zendesk: ${_missingMetricSet}/${allTickets.length} tickets missing metric_set sideload — fallback applied`);
+    }
 
     return { items, status: 'ok', count: items.length, error: null };
   } catch (err) {
