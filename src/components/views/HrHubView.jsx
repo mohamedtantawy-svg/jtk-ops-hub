@@ -211,7 +211,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
   // scope/flow, then count locally. Cheap because the page size is 25 +
   // the four status totals fit a single round-trip.
   const [statusCounts, setStatusCounts] = useState({ new: 0, in_progress: 0, on_hold: 0, resolved: 0, total: 0 });
-  const [scopeCounts, setScopeCounts] = useState({ mine: null, team: null, all: null });
+  const [scopeCounts, setScopeCounts] = useState({ mine: null, assigned: null, team: null, all: null });
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -233,16 +233,18 @@ export default function HrHubView({ user, onCreateHrHub }) {
     return () => { cancelled = true; };
   }, [flowQuery, scope, debouncedSearch]);
 
-  // Scope counts run once per flow change — three small queries.
+  // Scope counts run once per flow change — small queries per segment.
   // 2026-05-04: counts exclude resolved per the user spec ("if it's
   // resolved, then it's out of counting"). The badge on each scope pill
   // should reflect "things still pending action", not the historical
   // total. Same rule applied across Urgent Assist + Leaders Hub.
+  // 2026-05-07: 'assigned' segment added (assignee_email = caller); shown
+  // for every role so non-managers also see what's been routed to them.
   useEffect(() => {
     let cancelled = false;
-    const scopes = isManager ? ['mine', 'team', 'all'] : ['mine', 'all'];
+    const scopes = isManager ? ['mine', 'assigned', 'team', 'all'] : ['mine', 'assigned', 'all'];
     (async () => {
-      const out = { mine: null, team: null, all: null };
+      const out = { mine: null, assigned: null, team: null, all: null };
       for (const sc of scopes) {
         try {
           const r = await listHrHubRequests({ flow: flowQuery, scope: sc, limit: 100 });
@@ -358,12 +360,12 @@ export default function HrHubView({ user, onCreateHrHub }) {
         </button>
       </div>
 
-      {/* Scope toggle (My / Team / All) with count badges */}
+      {/* Scope toggle (My / Team / All / Assigned to me) with count badges */}
       <div style={scopeRow}>
         <div role="tablist" aria-label="Request scope" style={segmentedControl}>
           {(isManager
-            ? [{ value: 'mine', label: 'My Requests' }, { value: 'team', label: 'Team Requests' }, { value: 'all', label: 'All Requests' }]
-            : [{ value: 'mine', label: 'My Requests' }, { value: 'all', label: 'All Requests' }]
+            ? [{ value: 'mine', label: 'My Requests' }, { value: 'team', label: 'Team Requests' }, { value: 'all', label: 'All Requests' }, { value: 'assigned', label: 'Assigned to me' }]
+            : [{ value: 'mine', label: 'My Requests' }, { value: 'all', label: 'All Requests' }, { value: 'assigned', label: 'Assigned to me' }]
           ).map(seg => {
             const active = scope === seg.value;
             const cnt = scopeCounts[seg.value];

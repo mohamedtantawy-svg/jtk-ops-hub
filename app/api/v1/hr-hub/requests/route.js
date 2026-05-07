@@ -31,7 +31,10 @@ const ALLOWED_FLOWS = new Set(['hr_request', 'hr_reporting', 'escalation_zero', 
 const ALLOWED_HIDE_REASON_CODES = new Set(['internal_deel_employee', 'test_task', 'other']);
 const ALLOWED_STATUSES = new Set(['new', 'in_progress', 'on_hold', 'resolved']);
 const ALLOWED_PRIORITIES = new Set(['low', 'medium', 'high', 'critical']);
-const ALLOWED_SCOPES = new Set(['mine', 'team', 'all']);
+// `assigned` = items where assignee_email matches the caller. Distinct from
+// `mine` (which keys off created_by_email) — a manager who triages a request
+// they didn't submit needs the "Assigned to me" filter to surface it.
+const ALLOWED_SCOPES = new Set(['mine', 'team', 'all', 'assigned']);
 
 // Same caps as the existing Feedback route — keeps the migration in
 // Stage 5 a straight shape-match. Tweak in one place across both routes
@@ -130,6 +133,8 @@ export async function GET(req) {
   const callerMember = memberByEmail(callerEmail);
   const isManager = callerMember && (callerMember.access === 'team_lead' || callerMember.access === 'regional_manager' || callerMember.access === 'admin');
   // Agents asking for `team` get folded into `mine` — they have no team.
+  // `assigned` is available to every role — anyone can have something
+  // assigned to them and needs to see their queue.
   const effectiveScope = (scope === 'team' && !isManager) ? 'mine' : scope;
 
   const where = [];
@@ -147,6 +152,9 @@ export async function GET(req) {
 
   if (effectiveScope === 'mine') {
     where.push(`LOWER(created_by_email) = $${p++}`);
+    params.push(callerEmail);
+  } else if (effectiveScope === 'assigned') {
+    where.push(`LOWER(assignee_email) = $${p++}`);
     params.push(callerEmail);
   } else if (effectiveScope === 'team') {
     // "Team" = creator is anyone in caller's management chain (excluding

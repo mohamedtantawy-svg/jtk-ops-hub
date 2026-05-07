@@ -77,6 +77,7 @@ const DeelTopNav = ({
   onManageMentionGroups,
   leaderAlertsBadge = 0,
   urgentAssistBadge = 0,
+  hrHubBadge = 0,
   setSelTask, tasks,
 }) => {
   // Manager on Call was previously rendered here as a pill in the right-side
@@ -186,6 +187,7 @@ const DeelTopNav = ({
           let badge = 0;
           if (tab.id === 'leader-alerts' && leaderAlertsBadge > 0) badge = leaderAlertsBadge;
           if (tab.id === 'urgent-assist' && urgentAssistBadge > 0) badge = urgentAssistBadge;
+          if (tab.id === 'hr-hub' && hrHubBadge > 0) badge = hrHubBadge;
           return (
             <div key={tab.id} className={`deel-nav-item${active ? ' active' : ''}`}
               role="button"
