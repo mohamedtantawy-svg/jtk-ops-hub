@@ -119,9 +119,10 @@ export async function POST(req, { params }) {
   const parentId = body.parentCommentId && isUuid(body.parentCommentId) ? body.parentCommentId : null;
 
   // Confirm the request exists (cheap; lets us echo a clean 404 without a
-  // post-insert FK error).
+  // post-insert FK error). `status` is read so we can auto-advance new →
+  // in_progress when a manager comments (see end of this handler).
   const reqCheck = await query(
-    `SELECT id, title, summary FROM hr_hub_request WHERE id = $1`, [id],
+    `SELECT id, title, summary, status FROM hr_hub_request WHERE id = $1`, [id],
   );
   if (reqCheck.rows.length === 0) {
     return NextResponse.json({ error: 'Request not found' }, { status: 404 });
@@ -190,6 +191,51 @@ export async function POST(req, { params }) {
     });
   }
 
+  // Auto-advance new → in_progress when a manager (TL / RM / Admin)
+  // comments. Mirrors the manual PATCH-status flow's audit-log shape so
+  // the request history reads identically whether the move was manual
+  // or comment-triggered. Idempotent via the `AND status = 'new'`
+  // predicate — concurrent comments from two managers can't double-fire
+  // the transition, and a request that's already moved on (in_progress,
+  // on_hold, resolved) is left alone. We deliberately don't fan out a
+  // separate `status_change` notification here: the comment
+  // notification already alerted every follower that "something happened
+  // on this request", and the status pill flip is visible inline. Adding
+  // a second push for the same event would just be noise.
+  const callerMember = memberByEmail(callerEmail);
+  const isManager = !!callerMember && (
+    callerMember.access === 'admin' ||
+    callerMember.access === 'regional_manager' ||
+    callerMember.access === 'team_lead'
+  );
+  let autoAdvancedStatus = null;
+  if (isManager && reqRow.status === 'new') {
+    try {
+      const upd = await query(
+        `UPDATE hr_hub_request
+            SET status = 'in_progress', updated_at = NOW()
+          WHERE id = $1 AND status = 'new'`,
+        [id],
+      );
+      if (upd.rowCount > 0) {
+        autoAdvancedStatus = 'in_progress';
+        await writeLog(
+          id,
+          { email: callerEmail, name: callerName },
+          'status_change',
+          { status: 'new' },
+          { status: 'in_progress', auto: true, trigger: 'manager_comment' },
+        );
+      }
+    } catch (err) {
+      // Audit-log failure must never reject the comment itself — the
+      // primary write (the comment) has already succeeded and is the
+      // user-visible action. Surface the auto-advance miss in server
+      // logs so we can investigate without breaking the UX.
+      console.warn('[hr-hub/comments] auto-advance failed:', err.message);
+    }
+  }
+
   return NextResponse.json({
     id: commentId,
     requestId: id,
@@ -200,5 +246,6 @@ export async function POST(req, { params }) {
     mentionEmails,
     attachments,
     createdAt: insert.rows[0].created_at,
+    autoAdvancedStatus,
   }, { status: 201 });
 }

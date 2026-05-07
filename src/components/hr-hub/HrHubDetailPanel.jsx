@@ -315,6 +315,15 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
                 // followers + comment_added log entry the server just
                 // wrote — without this they read stale until manual reload.
                 setComments(prev => [...prev, created]);
+                // Server-side auto-advance: when a manager comments on a
+                // 'new' request, the route flips status to 'in_progress'
+                // and echoes `autoAdvancedStatus`. Mirror it into the
+                // parent list immediately so the row's status pill +
+                // header status dropdown both reflect the move without
+                // waiting on the next list refresh.
+                if (created?.autoAdvancedStatus) {
+                  onItemUpdated?.({ id: requestId, status: created.autoAdvancedStatus });
+                }
                 onRefresh?.();
               }}
             />
