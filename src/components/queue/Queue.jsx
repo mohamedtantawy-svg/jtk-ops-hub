@@ -320,11 +320,13 @@ const Queue = ({ user, tasks, subFilter }) => {
 
   const isAdmin = isAdminUser(user);
   const isLead = perms?.dataScope === 'team_tasks';
-  // Reassign is gated to admin/regional_manager/team_lead — agents must
-  // route through their TL. Mirrors the role gate enforced server-side at
-  // /api/v1/queue/source-reassign so the button never appears for agents
-  // (otherwise the click would 403 from middleware).
-  const canReassign = perms?.dataScope && perms.dataScope !== 'own_tasks_only';
+  // Reassign is open to every authenticated user (2026-05-07): the
+  // server-side role gate on /api/v1/queue/source-reassign and
+  // /api/v1/queue/reassign was lifted alongside this — agents need to
+  // reassign their own cases without round-tripping through a TL.
+  // The directory + active-member checks on the server still prevent
+  // parking rows on a ghost / deactivated email.
+  const canReassign = !!user;
   const ns = (tasks || []).filter(t => t.source !== 'slack' && t.source !== 'calendar' && !isHiddenKey(t.source, t.id));
 
   // Emails the current viewer "owns" — their email + every teammate below
