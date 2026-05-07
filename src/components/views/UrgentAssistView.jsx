@@ -121,12 +121,29 @@ function StatusSelect({ value, onChange, disabled }) {
   );
 }
 
-export default function UrgentAssistView({ user, onCreate }) {
+export default function UrgentAssistView({ user, onCreate, managerOnCall, onChangeManagerOnCall }) {
   const perms = useContext(PermissionsContext);
   const isAdmin = isAdminRole(user) || perms?.dataScope === 'all_tasks';
   const isManager = isManagerRole(user) || perms?.dataScope === 'team_tasks' || perms?.dataScope === 'regional_tasks';
 
-  const [scope, setScope] = useState('mine');
+  // Role-based default scope (Mohamed 2026-05-07): managers land on
+  // "Assigned to my team" so they triage their team's incoming work
+  // first; everyone else lands on "Assigned to me" so they see the
+  // queue routed to them. The user can still flip via the segmented
+  // toggle. The "All: Manager on Call View" stays accessible to every
+  // role per the same spec.
+  const [scope, setScope] = useState(() => (isManager ? 'team' : 'mine'));
+
+  // Listen for the "open Manager on Call view" custom event fired by
+  // the global MOC alert popup in App.jsx — when a fresh MOC clicks
+  // "Open Manager on Call View" we land them on the All scope so they
+  // can see every active urgent assist across the org.
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const onOpenAll = () => setScope('all');
+    window.addEventListener('ops-hub:urgent-assist-open-all', onOpenAll);
+    return () => window.removeEventListener('ops-hub:urgent-assist-open-all', onOpenAll);
+  }, []);
   const [statusFilter, setStatusFilter] = useState(null);
   const [search, setSearch] = useState('');
   const [actionError, setActionError] = useState(null);
@@ -313,22 +330,35 @@ export default function UrgentAssistView({ user, onCreate }) {
           )}
         </div>
 
-        {/* Scope toggle. The "Team Requests" pill is hidden for non-managers
-            so an Agent only sees `My / All` — matching HR Hub's pattern. The
-            2026-05-03 agent audit (A-F20) caught the inconsistency: HR Hub
-            correctly hid the team toggle for Will but Urgent Assist showed
-            it. Agents have no team-of-reports, so the scope is meaningless
-            and clicking it returned 0 records anyway. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14 }}>
-          <ScopePill value="mine" current={scope} onChange={setScope} label="My Requests" count={scopeCounts.mine ?? undefined} />
+        {/* Scope toggle. Renamed 2026-05-07 (Mohamed):
+              • "Assigned to me"            — default for non-managers
+              • "Assigned to my team"       — manager-only; default for managers
+              • "All: Manager on Call View" — visible to everyone
+            The "Manager on Call view" name signals to anyone (incl.
+            agents) that this is the queue the rotating MOC works from.
+            The MOC pill below this row makes it clickable / changeable. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
+          <ScopePill value="mine" current={scope} onChange={setScope} label="Assigned to me" count={scopeCounts.mine ?? undefined} />
           {isManager && (
-            <ScopePill value="team" current={scope} onChange={setScope} label="Team Requests" count={scopeCounts.team ?? undefined} />
+            <ScopePill value="team" current={scope} onChange={setScope} label="Assigned to my team" count={scopeCounts.team ?? undefined} />
           )}
-          <ScopePill value="all"  current={scope} onChange={setScope} label="All Requests" count={scopeCounts.all ?? undefined} />
+          <ScopePill value="all"  current={scope} onChange={setScope} label="All: Manager on Call View" count={scopeCounts.all ?? undefined} />
           <span style={{ marginLeft: 'auto', fontSize: 12, color: '#9e9e9e' }}>
             {loading ? 'Loading…' : `${statusCounts.total} ${statusCounts.total === 1 ? 'request' : 'requests'}`}
           </span>
         </div>
+
+        {/* Manager on Call pill — same shape as the BriefingView hero MOC.
+            Anyone can change it (server-side gate was opened up in the
+            same PR). When changed, the new MOC gets a popup alert via
+            App.jsx's MocAlertModal — see App.jsx for the assignment
+            detection logic. */}
+        {managerOnCall && (
+          <UrgentAssistMocPill
+            managerOnCall={managerOnCall}
+            onChangeManagerOnCall={onChangeManagerOnCall}
+          />
+        )}
 
         {/* Status cards */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10, marginTop: 12 }}>
@@ -604,3 +634,99 @@ function Th({ label, width, minWidth, align }) {
 
 const thStyle = { padding: '10px 12px', fontSize: 10, fontWeight: 600, color: '#9e9e9e', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center', whiteSpace: 'nowrap', borderBottom: '1px solid #e8e8e8' };
 const tdStyle = { padding: '10px 12px', textAlign: 'center', verticalAlign: 'middle' };
+
+// ── Manager on Call pill (mirrors BriefingView hero) ────────────────
+// Surfaces the current MOC inline on the Urgent Assist tab so anyone
+// landing on "All: Manager on Call View" knows who's the rotating
+// owner. The pencil opens a directory picker; clicking a row in the
+// picker fires onChangeManagerOnCall() which round-trips to
+// /api/v1/settings/manager-on-call and triggers the global popup
+// for the new MOC (see App.jsx::MocAlertModal).
+function UrgentAssistMocPill({ managerOnCall, onChangeManagerOnCall }) {
+  const [showPicker, setShowPicker] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!showPicker) return undefined;
+    const onDocClick = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setShowPicker(false);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [showPicker]);
+
+  // Directory shown in the picker — sourced from the live MEMBERS
+  // roster so admin/manager promotions are reflected immediately.
+  // Lazy-import to avoid pulling the whole module-graph cost on
+  // first render.
+  const candidates = useMemo(() => {
+    try {
+      // eslint-disable-next-line global-require
+      const { MEMBERS_BY_EMAIL } = require('../../data/members');
+      return Object.values(MEMBERS_BY_EMAIL || {})
+        .filter(m => m && !m.isDeleted)
+        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    } catch { return []; }
+  }, []);
+
+  return (
+    <div ref={ref} style={{ marginTop: 10, display: 'inline-flex', position: 'relative' }}>
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '5px 12px 5px 5px', borderRadius: 128, background: 'var(--surface)', border: '1px solid var(--border)' }}>
+        <Avatar name={managerOnCall.name} initials={managerOnCall.initials} src={managerOnCall.avatarUrl} size={22} />
+        <div style={{ fontSize: 12, lineHeight: '16px', whiteSpace: 'nowrap' }}>
+          <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>Manager On Call:</span>{' '}
+          <span style={{ fontWeight: 700, color: 'var(--text)' }}>{managerOnCall.name}</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowPicker(p => !p)}
+          aria-label="Change manager on call"
+          title="Anyone can rotate the manager on call"
+          style={{ width: 22, height: 22, padding: 0, border: 'none', background: 'transparent', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background .12s' }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-2)'; }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+        >
+          <i className="bi bi-pencil" style={{ fontSize: 11, color: 'var(--text-muted)' }} />
+        </button>
+      </div>
+      {showPicker && (
+        <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, background: 'var(--surface)', borderRadius: 14, border: '1px solid var(--border)', boxShadow: 'var(--shadow-lg)', padding: '6px 0', minWidth: 300, maxHeight: 360, overflowY: 'auto', zIndex: 1000 }}>
+          <div style={{ padding: '6px 16px 8px', fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.04em', textTransform: 'uppercase' }}>Select Manager On Call</div>
+          {candidates.length === 0 ? (
+            <div style={{ padding: '12px 16px', fontSize: 12, color: 'var(--text-muted)' }}>No members available.</div>
+          ) : (
+            candidates.map(m => {
+              const selected = (managerOnCall.email || '').toLowerCase() === (m.email || '').toLowerCase();
+              return (
+                <div
+                  key={m.email}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => {
+                    onChangeManagerOnCall?.({ name: m.name, initials: m.initials, email: m.email, avatarUrl: m.avatarUrl });
+                    setShowPicker(false);
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      onChangeManagerOnCall?.({ name: m.name, initials: m.initials, email: m.email, avatarUrl: m.avatarUrl });
+                      setShowPicker(false);
+                    }
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-2)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = selected ? 'var(--surface-2)' : 'transparent'; }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', cursor: 'pointer', transition: 'background .12s', background: selected ? 'var(--surface-2)' : 'transparent' }}
+                >
+                  <Avatar name={m.name} initials={m.initials} src={m.avatarUrl} size={28} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: selected ? 600 : 400, color: selected ? '#7c3aed' : 'var(--text)', lineHeight: '17px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: '15px' }}>{m.team}</div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

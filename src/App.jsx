@@ -111,6 +111,7 @@ import LeadersHubView from './components/views/LeadersHubView';
 import UrgentAssistView from './components/views/UrgentAssistView';
 import CreateHrHubRequestModal from './components/modals/CreateHrHubRequestModal';
 import ManageMentionGroupsModal from './components/modals/ManageMentionGroupsModal';
+import MocAlertModal from './components/modals/MocAlertModal';
 import CreateLeaderAlertModal from './components/modals/CreateLeaderAlertModal';
 import CreateUrgentAssistModal from './components/modals/CreateUrgentAssistModal';
 import { getLeaderAlertsUnackedCount } from './services/leaderAlertsApi';
@@ -1300,6 +1301,44 @@ const App=()=>{
     }).catch(err => console.warn('[managerOnCall] Failed to save:', err.message));
   }, []);
 
+  // ── MOC assignment alert (Mohamed 2026-05-07) ────────────────────────────
+  // When the current user becomes the Manager on Call — either via this
+  // tab or another teammate flipping the assignment — fire a
+  // red/scary popup with a CTA to open the All: Manager on Call View.
+  // De-dupe via lastAcknowledgedMocAt in localStorage so the same
+  // assignment doesn't flash on every 15s poll. The acknowledgement
+  // key is per-email so two teammates sharing a browser don't suppress
+  // each other's alerts.
+  const [mocAlert, setMocAlert] = useState(null); // null | { mocUpdatedAt, mocName }
+  useEffect(() => {
+    if (!user?.email || !managerOnCall) return;
+    const myEmail = String(user.email || '').toLowerCase();
+    const mocEmail = String(managerOnCall.email || '').toLowerCase();
+    const updatedAt = managerOnCall.updatedAt || null;
+    if (!updatedAt || mocEmail !== myEmail) return;
+    let lastAck = null;
+    try {
+      lastAck = localStorage.getItem(`ops_hub_moc_ack:${myEmail}`);
+    } catch {}
+    if (lastAck === updatedAt) return;
+    setMocAlert({ mocUpdatedAt: updatedAt, mocName: managerOnCall.name || myEmail });
+  }, [user?.email, managerOnCall]);
+  const dismissMocAlert = useCallback(() => {
+    if (!mocAlert) return;
+    try {
+      localStorage.setItem(`ops_hub_moc_ack:${(user?.email || '').toLowerCase()}`, mocAlert.mocUpdatedAt);
+    } catch {}
+    setMocAlert(null);
+  }, [mocAlert, user?.email]);
+  const openMocView = useCallback(() => {
+    dismissMocAlert();
+    setView('urgent-assist');
+    // UrgentAssistView listens for this and flips its scope to 'all'.
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('ops-hub:urgent-assist-open-all'));
+    }
+  }, [dismissMocAlert, setView]);
+
   // ── Clean up dismissed popups — only on login, not on every comms change ──
   // Removes IDs for announcements that no longer exist. Runs once when user
   // logs in (not on every comms update — that caused popups to flash back).
@@ -1503,7 +1542,7 @@ const App=()=>{
           {view==='feedback'      &&perms?.canView('feedback')!==false     &&<div className="page-enter"><FeedbackView user={effectiveUser} addToast={addToast} openCompose={feedbackCompose} onComposeOpened={()=>setFeedbackCompose(false)}/></div>}
           {view==='hr-hub'        &&perms?.canView('hr-hub')!==false       &&<div className="page-enter"><HrHubView user={effectiveUser} onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}/></div>}
           {view==='notifications' &&<div className="page-enter"><NotificationsView notifs={mergedNotifs} unreadCount={mergedNotifs.filter(n=>!n.read).length} markAllRead={markAllRead} markRead={(serverId)=>serverNotifs.markRead(serverId)} onNotifClick={handleNotifClick}/></div>}
-          {view==='urgent-assist' &&perms?.canView('urgent-assist')!==false&&<div className="page-enter" key={urgentAssistRefreshNonce}><UrgentAssistView user={effectiveUser} onCreate={()=>setUrgentAssistCreate(true)}/></div>}
+          {view==='urgent-assist' &&perms?.canView('urgent-assist')!==false&&<div className="page-enter" key={urgentAssistRefreshNonce}><UrgentAssistView user={effectiveUser} onCreate={()=>setUrgentAssistCreate(true)} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall}/></div>}
           {/* Leaders Hub — wraps the alerts view + the team admin surface
               behind a single sub-toggle. Default sub-tab is alerts. The
               `=== true` strict gate complements the route-level fallback
@@ -1522,6 +1561,7 @@ const App=()=>{
       {createModal   &&<CreateTaskModal onConfirm={confirmCreate} onClose={()=>setCreateModal(false)} currentUser={effectiveUser}/>}
       {hrHubCreate   &&<CreateHrHubRequestModal initialFlow={hrHubCreate.initialFlow||null} onClose={()=>setHrHubCreate(null)} onCreated={(id,flow)=>{setHrHubCreate(null);setView('hr-hub');addToast?.({kind:'success',message:`Submitted to HR Hub${flow?` (${flow.replace('_',' ')})`:''}.`});}}/>}
       {mentionGroupsOpen&&<ManageMentionGroupsModal onClose={()=>setMentionGroupsOpen(false)}/>}
+      {mocAlert && <MocAlertModal mocName={mocAlert.mocName} onDismiss={dismissMocAlert} onOpenView={openMocView} />}
       {leaderAlertCreate&&<CreateLeaderAlertModal onClose={()=>setLeaderAlertCreate(false)} onCreated={(alert)=>{setLeaderAlertCreate(false);setView('leader-alerts');setLeaderAlertsRefreshNonce(n=>n+1);addToast?.({kind:'success',message:`Posted${alert?.title?`: "${alert.title.slice(0,60)}${alert.title.length>60?'…':''}"`:' alert'}.`});}}/>}
       {urgentAssistCreate&&<CreateUrgentAssistModal currentUser={effectiveUser} onClose={()=>setUrgentAssistCreate(false)} onCreated={(row)=>{setUrgentAssistCreate(false);setView('urgent-assist');setUrgentAssistRefreshNonce(n=>n+1);addToast?.({kind:'success',message:`Urgent Assist created${row?.subject?`: "${row.subject.slice(0,60)}${row.subject.length>60?'…':''}"`:''}.`});}}/>}
       {projectModal  &&<CreateProjectModal onConfirm={confirmProject} onClose={()=>setProjectModal(null)} project={typeof projectModal==='object'?projectModal:null} currentUser={effectiveUser}/>}

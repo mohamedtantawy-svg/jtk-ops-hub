@@ -1028,12 +1028,16 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                       <span style={{color:'#9e9e9e',fontWeight:500}}>Manager On Call:</span>{' '}
                       <span style={{fontWeight:700,color:'#1b1b1b'}}>{managerOnCall.name}</span>
                     </div>
-                    {/* Edit pencil only visible to admin / TL / RM. The MoC
-                        is an org-wide setting — agents shouldn't be able to
-                        change who's on call for everyone. The 2026-05-01
-                        agent audit observed Trish (Agent) seeing this
-                        pencil and being able to reassign the global MoC. */}
-                    {(perms?.canManageManagerOnCall !== false && (perms?.dataScope === 'all_tasks' || perms?.dataScope === 'team_tasks' || isExec)) && (
+                    {/* Edit pencil visible to every authenticated user as
+                        of 2026-05-07 (Mohamed: "anyone can change [the
+                        MOC]"). The role gate (admin / TL / RM only) was
+                        lifted alongside the server-side requireRole drop
+                        on /api/v1/settings/manager-on-call so an agent
+                        rotating MOC mid-incident isn't blocked by
+                        permissions. The newly-assigned MOC sees a
+                        red/scary popup (App.jsx::MocAlertModal) so
+                        every assignment is acknowledged. */}
+                    {perms?.canManageManagerOnCall !== false && (
                       <button
                         type="button"
                         onClick={()=>setShowMocPicker(p=>!p)}
