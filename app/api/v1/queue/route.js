@@ -497,7 +497,13 @@ async function fetchZendeskQueue() {
       // Two metrics:
       //   • FRT (First Reply Time)   — assignee owes the FIRST agent
       //     reply. Active when the ticket has no agent comment yet:
-      //     metric_set.reply_time_in_minutes is null. Anchor = created_at.
+      //     metric_set.reply_time_in_minutes is null. Anchor =
+      //     max(created_at, assigned_at) so a ticket that sat
+      //     unassigned for days then got assigned doesn't appear
+      //     instantly breached — Mohamed's spec: "Once they are
+      //     assigned to the ticket they should be replying within
+      //     24hrs". When unassigned, max() collapses to created_at
+      //     and the FRT clock ticks against creation.
       //   • NRT (Next Reply Time)    — assignee owes a reply because
       //     the requester replied after the assignee's last action.
       //     Active when requester_updated_at > assignee_updated_at.
@@ -518,9 +524,11 @@ async function fetchZendeskQueue() {
         const rtm = metric.reply_time_in_minutes;
         const replyMins = (rtm && typeof rtm === 'object') ? rtm.calendar : rtm;
         if (replyMins == null) {
-          // FRT — first reply hasn't happened yet
+          // FRT — first reply hasn't happened yet. Anchor on the later
+          // of creation OR assignment so a ticket that sat unassigned
+          // for 3 days and was just routed gets a fresh 24h clock.
           slaMetric = 'frt';
-          activeAnchorMs = createdMs;
+          activeAnchorMs = Math.max(createdMs || 0, assignedMs || 0) || createdMs;
         } else if (requesterMs && (!assigneeMs || requesterMs > assigneeMs)) {
           // NRT — requester replied after assignee's last action
           slaMetric = 'nrt';
