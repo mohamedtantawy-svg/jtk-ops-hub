@@ -11,7 +11,15 @@ export function getAuthUser(req) {
 
 export function requireRole(req, ...allowedRoles) {
   const user = getAuthUser(req);
-  if (!user.id) {
+  // Email is the canonical identity (skill rule #4: never use members.id
+  // for matching). Middleware has already verified the JWT signature +
+  // expiry, so reaching this point means the session is valid. The old
+  // `!user.id` gate falsely rejected admins/RMs whose JWT carried
+  // `sub: 0` — the DB-less fallback path used when a user is in
+  // team_member_overrides but not yet in the members table (common
+  // immediately after the 2026-05-06 recovery, or for any new hire added
+  // via the Team tab before the members row is seeded).
+  if (!user.email) {
     return { authorized: false, status: 401, error: 'Unauthorized' };
   }
   if (allowedRoles.length > 0 && !allowedRoles.includes(user.role)) {
