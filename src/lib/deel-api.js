@@ -1459,12 +1459,15 @@ export async function listWorkbenchTasks(params = {}) {
   }
 
   // Recently-completed tasks — bounded by `completedLookbackHours` (24h
-  // default) so the upstream call stays cheap. Fetch one page of COMPLETED
-  // ordered by completedAt desc, post-filter by timestamp. Items already in
-  // `allItems` (transitioning) are deduped by id below in the mapper.
+  // default) so the upstream call stays cheap. Fetch BOTH terminal
+  // states (COMPLETED + CLOSED) so the home/briefing "Resolved past
+  // 24h" count includes everything an agent finished, not just the
+  // subset that got marked COMPLETED specifically. CLOSED tasks may
+  // not carry `completedAt` (workflow archives can stamp closedAt
+  // instead), so the post-filter falls back to updatedAt.
   if (includeCompleted) {
     try {
-      const qs = buildQs(null, ['COMPLETED']);
+      const qs = buildQs(null, ['COMPLETED', 'CLOSED']);
       const res = await deelFetch(`/admin/ops_workbench/tasks?${qs.toString()}`);
       const pageItems = res?.result || [];
       const cutoff = Date.now() - completedLookbackMs;
@@ -1472,15 +1475,20 @@ export async function listWorkbenchTasks(params = {}) {
       let kept = 0;
       for (const t of pageItems) {
         if (seen.has(t.id)) continue;
-        const ts = t.completedAt ? new Date(t.completedAt).getTime() : 0;
-        if (!ts || ts < cutoff) continue;
+        const ms = (() => {
+          const c = t.completedAt ? Date.parse(t.completedAt) : NaN;
+          if (Number.isFinite(c) && c > 0) return c;
+          const u = t.updatedAt ? Date.parse(t.updatedAt) : NaN;
+          return Number.isFinite(u) && u > 0 ? u : 0;
+        })();
+        if (!ms || ms < cutoff) continue;
         allItems.push(t);
         seen.add(t.id);
         kept++;
       }
-      if (kept > 0) console.info(`[workbench] kept ${kept} recently-completed task(s) (last ${completedLookbackMs / 3600000}h)`);
+      if (kept > 0) console.info(`[workbench] kept ${kept} recently-finished task(s) — COMPLETED+CLOSED, last ${completedLookbackMs / 3600000}h`);
     } catch (err) {
-      console.warn('[workbench] recently-completed fetch failed (non-fatal):', err.message);
+      console.warn('[workbench] recently-finished fetch failed (non-fatal):', err.message);
     }
   }
 

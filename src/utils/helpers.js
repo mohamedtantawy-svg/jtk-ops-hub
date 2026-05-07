@@ -28,12 +28,21 @@ function _slaAnchorMs(task) {
 
 export const slaInfo=(task,customThresholds)=>{
   if(!task||task.status==='resolved'||task.status==='waiting')return null;
-  // 2026-05-07 — the Zendesk policy_metrics path (PR #477) was reverted
-  // because the underlying server fetch OOM'd the pod at scale. We're
-  // back to the metric_set anchor from #471 — assignee-aware + paused-
-  // aware but without per-ticket Zendesk SLA breach times. Re-introduce
-  // policy_metrics later via a background cron + DB cache so this hot
-  // path stays cheap. See app/api/v1/queue/route.js for the rationale.
+
+  // ── Zendesk FRT / NRT path (2026-05-07) ──────────────────────────────
+  // The queue route stamps `slaMetric` per ticket from the already-
+  // sideloaded metric_set (zero extra Zendesk fetches — see route).
+  //   • 'frt' → first agent reply outstanding; anchor = created_at
+  //   • 'nrt' → requester replied after assignee; anchor = requester_updated_at
+  //   • null  → assignee has caught up, no clock running
+  // When null on an active Zendesk ticket, short-circuit to OK so the
+  // pill doesn't tick against a stale anchor for a ticket the assignee
+  // has already responded to. The labelled metric flows into the pill
+  // copy ("First reply breached" / "12h to next reply" etc.).
+  if (task.source === 'zendesk' && task.slaMetric === null
+      && task.status !== 'resolved' && task.status !== 'waiting') {
+    return { label: 'OK', short: 'OK', color: '#15803d', bg: '#f0fdf4', breach: false, remain: null, ok: true };
+  }
 
   // SLA uses task-type-specific thresholds from SLA_MINS (or custom overrides).
   // Per-task `slaMinsOverride` wins over everything — e.g. Jira tickets are
@@ -52,9 +61,20 @@ export const slaInfo=(task,customThresholds)=>{
   const lim = Number.isFinite(task.slaMinsOverride) && task.slaMinsOverride > 0
     ? task.slaMinsOverride
     : (thresholds[task.type] || SLA_MINS[task.type] || 1440);
+  // Friendly metric name for Zendesk pills — only used when the queue
+  // route stamped slaMetric ('frt' | 'nrt'). For Jira / Deel sources
+  // and unstamped Zendesk rows we keep the generic "SLA" copy.
+  const metricLabel = task.source === 'zendesk'
+    ? (task.slaMetric === 'frt' ? 'first reply'
+      : task.slaMetric === 'nrt' ? 'next reply'
+      : null)
+    : null;
   const rem = lim - elapsed;
-  if(rem<=0)return{label:'SLA Breached',short:'BREACHED',color:'#d42d35',bg:'#ffe2de',breach:true,remain:rem};
+  if(rem<=0){
+    const breachedLabel = metricLabel ? `${metricLabel.charAt(0).toUpperCase()}${metricLabel.slice(1)} breached` : 'SLA Breached';
+    return{label:breachedLabel,short:'BREACHED',color:'#d42d35',bg:'#ffe2de',breach:true,remain:rem};
+  }
   const pct = elapsed / lim;
-  if(pct>=0.75){const h=Math.floor(rem/60),m=rem%60;const s=h>0?`${h}h${m>0?' '+m+'m':''}`:`${m}m`;return{label:`${s} to SLA`,short:s+' left',color:'#ed5e2a',bg:'#fff3ee',breach:false,remain:rem};}
+  if(pct>=0.75){const h=Math.floor(rem/60),m=rem%60;const s=h>0?`${h}h${m>0?' '+m+'m':''}`:`${m}m`;return{label:`${s} to ${metricLabel || 'SLA'}`,short:s+' left',color:'#ed5e2a',bg:'#fff3ee',breach:false,remain:rem};}
   return{label:'OK',short:'OK',color:'#15803d',bg:'#f0fdf4',breach:false,remain:rem,ok:true};
 };

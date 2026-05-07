@@ -487,10 +487,48 @@ async function fetchZendeskQueue() {
       const createdMs   = tsMs(t.created_at);
       const updatedMs   = tsMs(t.updated_at);
 
-      const activeAnchorMs = Math.max(requesterMs || 0, assignedMs || 0)
-        || createdMs
-        || null;
       const pausedAnchorMs = assigneeMs || updatedMs || createdMs || null;
+
+      // ── FRT / NRT detection from metric_set (2026-05-07) ─────────────
+      // Replaces the reverted policy_metrics fetch (#477 → #480 OOM).
+      // Computes locally from data we already sideload — zero extra
+      // Zendesk calls, no per-batch payload bloat.
+      //
+      // Two metrics:
+      //   • FRT (First Reply Time)   — assignee owes the FIRST agent
+      //     reply. Active when the ticket has no agent comment yet:
+      //     metric_set.reply_time_in_minutes is null. Anchor = created_at.
+      //   • NRT (Next Reply Time)    — assignee owes a reply because
+      //     the requester replied after the assignee's last action.
+      //     Active when requester_updated_at > assignee_updated_at.
+      //     Anchor = requester_updated_at.
+      //
+      // When neither applies, the assignee has caught up — pill shows
+      // OK regardless of how stale the anchor is.
+      //
+      // Known limitation: NRT has a ~5% false-negative rate when the
+      // assignee posts an internal note (advances assignee_updated_at
+      // without a public reply). Acceptable trade-off per Mohamed's
+      // 2026-05-07 spec ("im fine with the margin of error"). Switch
+      // to Zendesk's policy_metrics via background cron + DB cache for
+      // 100% accuracy if needed later.
+      let slaMetric = null; // 'frt' | 'nrt' | null
+      let activeAnchorMs = null;
+      if (!isPausedStatus && appStatus !== 'resolved') {
+        const rtm = metric.reply_time_in_minutes;
+        const replyMins = (rtm && typeof rtm === 'object') ? rtm.calendar : rtm;
+        if (replyMins == null) {
+          // FRT — first reply hasn't happened yet
+          slaMetric = 'frt';
+          activeAnchorMs = createdMs;
+        } else if (requesterMs && (!assigneeMs || requesterMs > assigneeMs)) {
+          // NRT — requester replied after assignee's last action
+          slaMetric = 'nrt';
+          activeAnchorMs = requesterMs;
+        }
+        // Else: assignee has caught up. slaMetric stays null;
+        // FE's slaInfo treats this as OK regardless of anchor staleness.
+      }
       const slaAnchorIso = isPausedStatus
         ? (pausedAnchorMs ? new Date(pausedAnchorMs).toISOString() : t.created_at)
         : (activeAnchorMs ? new Date(activeAnchorMs).toISOString() : t.created_at);
@@ -528,6 +566,12 @@ async function fetchZendeskQueue() {
         // SLA settings table). slaInfo() reads this override before falling
         // back to type-based SLA_MINS.
         slaMinsOverride: isPausedStatus ? zendeskPausedMins : zendeskActiveMins,
+        // FRT/NRT hint for the FE pill. 'frt' = first reply not done yet,
+        // 'nrt' = requester replied after assignee's last action,
+        // null = assignee caught up (paused/solved/up-to-date). When
+        // null on an active ticket, slaInfo() short-circuits to OK
+        // regardless of anchor staleness.
+        slaMetric,
         // Phase 2 — values for the 4 ops-hub-tracked Zendesk custom fields.
         // Detail.jsx renders these as editable selects; PUT through
         // /queue/[id]/custom-fields persists changes back to Zendesk.

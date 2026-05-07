@@ -153,17 +153,19 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
         return { row: t, ms, source: t.source || 'zendesk', kind: 'ticket' };
       })
       .filter(x => x.ms >= cutoffMs);
-    // Workbench — server pulls COMPLETED rows within the last 24h via
-    // deel-api.listWorkbenchTasks(includeCompleted=true). Read the RAW
-    // `wb.tasks` (not the normalised SourceTable rows) because
+    // Workbench — server pulls COMPLETED + CLOSED rows within the last
+    // 24h via deel-api.listWorkbenchTasks(includeCompleted=true). Read
+    // the RAW `wb.tasks` (not the normalised SourceTable rows) because
     // normalizeWorkbench replaces t.status with a display-object — counting
-    // resolved on that loses the raw bucket. Hala El Khalfaoui's 2026-05-07
-    // feedback: "the resolved cases on the top right of the Hub doesn't
-    // reflect the resolved cases that I worked on." She works mostly on
-    // Workbench, which the previous tasks-only count silently dropped.
+    // resolved on that loses the raw bucket. Both terminal states are
+    // counted: an agent who archives via CLOSED would otherwise drop off
+    // the count even though they finished the work. completedAt is the
+    // primary timestamp; falls back to updatedAt for CLOSED rows that
+    // don't carry it.
+    const WB_DONE = new Set(['COMPLETED', 'CLOSED']);
     const wbResolved = (wb.tasks || [])
       .filter(t => (t?.assignee?.email || '').toLowerCase() === myEmail)
-      .filter(t => String(t?.status || '').toUpperCase() === 'COMPLETED')
+      .filter(t => WB_DONE.has(String(t?.status || '').toUpperCase()))
       .map(t => {
         const ms = (() => {
           const d = t.completedAt || t.updatedAt;
