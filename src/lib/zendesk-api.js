@@ -212,37 +212,47 @@ export async function showManyUsers(ids) {
   return zendeskFetch(`/users/show_many.json?ids=${batch.join(',')}`);
 }
 
-// ── Per-batch ticket+SLA fetch (used by the background SLA sync) ──────
-// Fetches `tickets/show_many.json?ids=...&include=slas` in chunks of
-// `chunkSize` (Zendesk caps show_many at 100). For each chunk the caller
-// gets the parsed response and decides what to do with it; the helper
-// itself does NOT accumulate all chunks in memory — the caller streams
-// each batch out to its sink (DB upsert) before requesting the next.
+// ── Per-ticket SLA policy_metrics fetch (background SLA sync) ─────────
+// Hits Zendesk's dedicated per-ticket endpoint
+// `GET /tickets/{id}/slas/policy_metrics.json` — returns ONLY the
+// policy_metrics array (~600 bytes per ticket) rather than the full
+// ticket payload. Real response shape (verified live 2026-05-07):
 //
-// Why this is safe at scale: PR #477 was reverted (#480) because it
-// kicked off ~21 batches in `Promise.all`, holding 21 × 1-5 MB of parsed
-// JSON in V8 plus the existing search calls + parallel scans → OOM at
-// ~2GB. The contract here is the opposite — sequential batches, with the
-// caller bounded to one batch's payload at a time. The cron sync
-// (zendesk-sla-sync.js) is what consumes this, well off the queue
-// route's hot path.
-export async function* iterateTicketsWithSlas(ids, { chunkSize = 100 } = {}) {
-  if (!Array.isArray(ids) || ids.length === 0) return;
-  const cap = Math.max(1, Math.min(100, chunkSize));
-  for (let i = 0; i < ids.length; i += cap) {
-    const batch = ids.slice(i, i + cap);
-    if (batch.length === 0) continue;
-    // include=slas attaches the policy_metrics array to each ticket. We
-    // do NOT request other sideloads here — they bloat the payload and
-    // the cron only cares about SLA times.
-    const res = await zendeskFetch(
-      `/tickets/show_many.json?ids=${batch.join(',')}&include=slas`,
-    );
-    yield {
-      tickets: Array.isArray(res?.tickets) ? res.tickets : [],
-      batchStart: i,
-      batchSize: batch.length,
-    };
+//   {
+//     "policy_metrics": [
+//       { "breach_at": "2026-05-08T14:29:34Z", "stage": "active",
+//         "metric": "next_reply_time",     "hours": 21 },
+//       { "breach_at": "2025-12-18T03:07:32Z", "stage": "achieved",
+//         "metric": "first_reply_time",    "days": -141 },
+//       { "breach_at": "2026-05-14T09:03:29Z", "stage": "active",
+//         "metric": "periodic_update_time", "days": 7 },
+//       ...
+//     ]
+//   }
+//
+// Why this endpoint instead of `tickets/show_many?include=slas`:
+//   • Payload per ticket is ~600 bytes vs 1-5 MB for show_many. With
+//     ~2k active tickets, total bytes pulled per cycle drops from ~50 MB
+//     to ~1.2 MB — eliminates the OOM risk that killed PR #477 entirely.
+//   • Trade-off is one HTTP call per ticket. With sequential pacing
+//     (~150 ms each, comfortably under Zendesk's 700 req/min Enterprise
+//     limit) ~2k tickets sync in ~5 minutes — within the 10-min cron
+//     window. Concurrency is intentionally NOT used here so we don't
+//     blow the rate limit on noisy days.
+//   • Returns nothing extraneous — no ticket bodies, no comments, no
+//     metric_sets — so V8 has nothing else to keep alive while parsing.
+//
+// Returns the raw `{ policy_metrics: [...] }` payload, or `null` if
+// Zendesk returned a 404 (ticket not found / SLA never applied). The
+// caller should treat null as "no SLA data for this ticket" and skip
+// the upsert (don't blank-out an existing cache row).
+export async function fetchTicketSlaPolicyMetrics(ticketId) {
+  if (!ticketId) return null;
+  try {
+    return await zendeskFetch(`/tickets/${ticketId}/slas/policy_metrics.json`);
+  } catch (err) {
+    if (err?.status === 404) return null;
+    throw err;
   }
 }
 

@@ -8,17 +8,19 @@
 // "-3mo / -6w / -4w" overflows on tickets that had legitimately reset
 // their SLA via agent activity but whose anchor we couldn't see.
 //
-// Why a background sync (vs inline in the queue route):
-//   • PR #477 fetched policy_metrics inline via Promise.all → 21 batches
-//     of 1-5 MB held in V8 simultaneously → OOM at 2 GB heap.
-//   • Inline cost also added 30s+ to the queue's response time, which the
-//     FE polls every 30s — visible UX regression.
-// This sync runs sequentially (one show_many batch in memory at a time)
-// and well off the queue's hot path. The queue's only added cost is a
-// single SELECT keyed on ticket_id.
+// Why the dedicated per-ticket endpoint (not show_many?include=slas):
+//   • Per-ticket payload is ~600 bytes vs 1-5 MB for show_many, so the
+//     OOM that killed PR #477 (21 batches × 1-5 MB held in V8 via
+//     Promise.all → 2 GB heap) cannot recur regardless of concurrency.
+//   • Trade-off is one HTTP call per ticket; sequential pacing keeps us
+//     comfortably under Zendesk's 700 req/min Enterprise limit (~7 req/s
+//     observed → 420/min). ~2 k tickets sync in ~5 min, fits the 10-min
+//     cron window.
+// The queue's only added cost is a single SELECT keyed on ticket_id; the
+// sync runs entirely off its hot path.
 
 import { query } from './db';
-import { searchTickets, iterateTicketsWithSlas, isZendeskConfigured } from './zendesk-api';
+import { searchTickets, fetchTicketSlaPolicyMetrics, isZendeskConfigured } from './zendesk-api';
 
 const ZD_GROUP_NAME = process.env.ZENDESK_HR_GROUP || 'HR Experience';
 
@@ -31,8 +33,17 @@ const LAST_RUN_KEY        = 'zendesk_sla_sync_last_run';
 const LOCK_STALE_AFTER_MS = 15 * 60 * 1000;        // 15 min — well above any normal sync runtime
 const SEARCH_PAGE_SIZE    = 100;                    // ZD search cap
 const SEARCH_MAX_PAGES    = 10;                     // 1k tickets per status — same as queue route
-const SHOW_MANY_CHUNK     = 100;                    // ZD show_many cap
 const ACTIVE_STATUSES     = ['new', 'open', 'pending', 'hold'];
+// Sequential pacing for the per-ticket SLA fetch. Zendesk Enterprise's
+// rate limit is 700 req/min; the dedicated endpoint runs ~70 ms upstream
+// + network → ~150 ms wall clock per call → naturally caps at ~7 req/s
+// = 420 req/min. We don't add artificial concurrency on top — the
+// upside (faster sync) is small and the downside (rate-limit storm
+// blocking the agent UIs that hit Zendesk concurrently) is real.
+const PER_TICKET_DELAY_MS = 0;
+// How often the cache UPSERT batches flush to the DB. Keeps the SQL
+// round-trips bounded without holding all rows in memory first.
+const UPSERT_BATCH_SIZE   = 50;
 // Soft TTL to skip work when a recent sync is already on disk. The cron
 // trigger AND the in-process scheduler both honour this so a manual hit
 // during a healthy cycle doesn't pile on. Set lower than the scheduler
@@ -98,52 +109,82 @@ async function setLastRun(summary) {
 }
 
 // ── policy_metrics → per-ticket SLA row ────────────────────────────────
-// Zendesk attaches `slas.policy_metrics` to each ticket when we sideload
-// `slas`. Shape (per Zendesk docs):
-//   metric:  'reply_time' | 'next_reply_time' | 'agent_work_time'
-//            | 'requester_wait_time' | 'periodic_update_time' |
-//              'pausable_update_time'
-//   stage:   'activated' | 'paused' | 'breached' | 'fulfilled'
-//   breach_at: ISO timestamp (when SLA will be / was breached)
-//   minutes:  target window in minutes
-//   business_hours: bool — if true, breach_at honours business calendar
-// We map ZD's reply_time → FRT and next_reply_time → NRT. The "active"
-// stage is whichever entry is currently 'activated' (clock running). If
-// neither is active, the assignee has caught up — pill renders OK.
-function extractSlaForTicket(t) {
-  const pm = Array.isArray(t?.slas?.policy_metrics) ? t.slas.policy_metrics : [];
+// Verified live response (ticket 5871989, 2026-05-07):
+//   {
+//     "policy_metrics": [
+//       { "breach_at": "2026-05-08T14:29:34Z", "stage": "active",
+//         "metric": "next_reply_time",     "hours": 21 },
+//       { "breach_at": "2025-12-18T03:07:32Z", "stage": "achieved",
+//         "metric": "first_reply_time",    "days": -141 },
+//       { "breach_at": "2026-05-14T09:03:29Z", "stage": "active",
+//         "metric": "periodic_update_time", "days": 7 },
+//       ...
+//     ]
+//   }
+//
+// Stages we observe:
+//   • "active"   — clock currently running; breach_at is the deadline
+//   • "achieved" — SLA met within target; clock no longer running
+//   • "paused"   — ticket on-hold/pending; clock paused (not surfaced
+//                  here — the queue's paused-window logic owns this)
+//   • "breached" — past breach_at and still uncompleted (rare in
+//                  practice; Zendesk usually keeps "active" past breach
+//                  with breach_at in the past, which the FE pill renders
+//                  as breached anyway)
+//
+// Metrics: only first_reply_time + next_reply_time are user-facing in
+// our pills. periodic_update_time / requester_wait_time / agent_work_time
+// are tracked but not surfaced.
+//
+// Duration: the per-metric `hours` or `days` field is a HUMAN-readable
+// summary of the policy target — convert to minutes for our cache so
+// slaInfo's at-risk-band math has a consistent unit. When a row carries
+// neither field (rare), we fall back to a 0 minutes record and slaInfo
+// uses the default 6h at-risk window.
+function _toMinutes(m) {
+  if (Number.isFinite(m?.minutes)) return Math.round(m.minutes);
+  if (Number.isFinite(m?.hours))   return Math.round(m.hours * 60);
+  if (Number.isFinite(m?.days))    return Math.round(m.days * 24 * 60);
+  return null;
+}
+
+function extractSlaFromPolicyMetricsResponse(ticketId, response) {
+  const pm = Array.isArray(response?.policy_metrics) ? response.policy_metrics : [];
   let frt = null;
   let nrt = null;
   let active_stage = null;
   let active_breach_at = null;
   for (const m of pm) {
     if (!m || typeof m !== 'object') continue;
-    if (m.metric === 'reply_time') {
+    if (m.metric === 'first_reply_time') {
       frt = m;
-      if (m.stage === 'activated') {
+      if (m.stage === 'active' && !active_stage) {
         active_stage = 'frt';
         active_breach_at = m.breach_at || null;
       }
     } else if (m.metric === 'next_reply_time') {
       nrt = m;
-      if (m.stage === 'activated' && !active_stage) {
+      // FRT takes precedence over NRT — once first reply is done, NRT
+      // takes over and FRT is "achieved", so they shouldn't both be
+      // active. The `!active_stage` guard handles the rare overlap
+      // gracefully.
+      if (m.stage === 'active' && !active_stage) {
         active_stage = 'nrt';
         active_breach_at = m.breach_at || null;
       }
     }
   }
-  // policy_id may be a number or string depending on tenant; coerce safely.
-  const policyId = Number.isFinite(t?.sla_policy_id) ? t.sla_policy_id
-                 : (frt?.policy?.id ?? nrt?.policy?.id ?? null);
   return {
-    ticket_id:        Number(t?.id),
+    ticket_id:        Number(ticketId),
     active_stage,
     active_breach_at,
     frt_breach_at:    frt?.breach_at || null,
-    frt_minutes:      Number.isFinite(frt?.minutes) ? frt.minutes : null,
+    frt_minutes:      frt ? _toMinutes(frt) : null,
     nrt_breach_at:    nrt?.breach_at || null,
-    nrt_minutes:      Number.isFinite(nrt?.minutes) ? nrt.minutes : null,
-    policy_id:        Number.isFinite(policyId) ? policyId : null,
+    nrt_minutes:      nrt ? _toMinutes(nrt) : null,
+    // Per-ticket endpoint doesn't return policy_id. Leave null; the
+    // schema column is nullable and no consumer reads it yet.
+    policy_id:        null,
   };
 }
 
@@ -249,27 +290,61 @@ export async function runZendeskSlaSync({ force = false } = {}) {
 
   const startedAt = Date.now();
   let ticketsSeen = 0;
-  let batches = 0;
+  let fetched = 0;
   let upserted = 0;
   let errors = 0;
+  let notFound = 0;
   try {
     const ids = await listActiveTicketIds();
     ticketsSeen = ids.length;
     if (ids.length === 0) {
-      await setLastRun({ ticketsSeen: 0, batches: 0, upserted: 0, durationMs: Date.now() - startedAt });
-      return { ran: true, ticketsSeen: 0, batches: 0, upserted: 0, durationMs: Date.now() - startedAt };
+      await setLastRun({ ticketsSeen: 0, fetched: 0, upserted: 0, durationMs: Date.now() - startedAt });
+      return { ran: true, ticketsSeen: 0, fetched: 0, upserted: 0, durationMs: Date.now() - startedAt };
     }
-    for await (const { tickets } of iterateTicketsWithSlas(ids, { chunkSize: SHOW_MANY_CHUNK })) {
-      batches++;
-      const rows = [];
-      for (const t of tickets) rows.push(extractSlaForTicket(t));
+
+    // Sequential per-ticket fetch + buffered UPSERT every UPSERT_BATCH_SIZE
+    // rows. Memory peak: one ~600 byte response + UPSERT_BATCH_SIZE rows
+    // (≈8 fields × 50 rows ≈ a few KB). Constant regardless of total
+    // ticket count.
+    let buffer = [];
+    const flushBuffer = async () => {
+      if (buffer.length === 0) return;
       try {
-        upserted += await upsertSlaBatch(rows);
+        upserted += await upsertSlaBatch(buffer);
       } catch (err) {
         errors++;
-        console.warn(`[zd-sla-sync] upsert batch ${batches} failed:`, err?.message);
+        console.warn(`[zd-sla-sync] upsert flush of ${buffer.length} rows failed:`, err?.message);
+      }
+      buffer = [];
+    };
+
+    for (const id of ids) {
+      let res = null;
+      try {
+        res = await fetchTicketSlaPolicyMetrics(id);
+        fetched++;
+      } catch (err) {
+        errors++;
+        // Soft-fail per ticket — a Zendesk hiccup on one ticket should
+        // not abort the whole sync. The previous cached row stays valid
+        // (we only overwrite on successful UPSERT).
+        console.warn(`[zd-sla-sync] fetch ticket ${id} failed:`, err?.message);
+        continue;
+      }
+      if (!res) {
+        // 404 → ticket has no SLA policy or was deleted. Skip without
+        // upserting so we don't blank out a row that was valid before
+        // the policy got removed mid-cycle.
+        notFound++;
+        continue;
+      }
+      buffer.push(extractSlaFromPolicyMetricsResponse(id, res));
+      if (buffer.length >= UPSERT_BATCH_SIZE) await flushBuffer();
+      if (PER_TICKET_DELAY_MS > 0) {
+        await new Promise(r => setTimeout(r, PER_TICKET_DELAY_MS));
       }
     }
+    await flushBuffer();
   } catch (err) {
     errors++;
     console.error('[zd-sla-sync] sync error:', err?.message);
@@ -280,9 +355,9 @@ export async function runZendeskSlaSync({ force = false } = {}) {
   }
 
   const durationMs = Date.now() - startedAt;
-  const summary = { ticketsSeen, batches, upserted, errors, durationMs };
+  const summary = { ticketsSeen, fetched, upserted, errors, notFound, durationMs };
   await setLastRun(summary);
-  console.log(`[zd-sla-sync] done: ${upserted} rows in ${durationMs}ms across ${batches} batch(es), ${errors} error(s)`);
+  console.log(`[zd-sla-sync] done: ${upserted}/${ticketsSeen} cached in ${durationMs}ms (${notFound} no-policy, ${errors} error(s))`);
   return { ran: true, ...summary };
 }
 
