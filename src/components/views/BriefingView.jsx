@@ -310,22 +310,22 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const scope=tasks.filter(t=>inScope(t)&&t.status!=='resolved');
   const personal=tasks.filter(t=>(t.assigneeId===user.id||(t.assigneeEmail&&t.assigneeEmail.toLowerCase()===user.email?.toLowerCase()))&&t.status!=='resolved');
 
-  // ── Resolved past 24h, cross-source, scoped per role ──────────────────
-  // Mohamed Tantawy 2026-05-07: agents see "1" while admin sees "722"
-  // because the admin tile counted scoped ZD/Jira-only resolved (org-wide
-  // for admin, team for TL, etc.). Align with AgentHome's pattern: rolling
-  // 24h window across every source we have completed-data for (ZD + Jira
-  // via the queue's solved<24h fetch; Workbench via deel-api's
-  // includeCompleted lookback). Other Deel sources don't currently
-  // expose COMPLETED rows — adding `includeCompleted` to those loaders
-  // is a separate scope (acceptable per "if no data source is available
-  // it's okay"). The scope filter now mirrors `inScope` so each role
-  // sees a count that matches their visibility:
+  // ── Resolved cross-source, scoped per role (no time cap) ───────────────
+  // 2026-05-07 Mohamed: the previous "Resolved (24h)" tile artificially
+  // capped the count at 24 h, so an admin saw "50" while DailySummary
+  // (whose Resolved counter has no time cap) showed "797" off the same
+  // FE state. Drop the cap and let the count reflect EVERY resolved row
+  // currently in scope — Zendesk + Jira tickets (the queue route caches
+  // resolved tickets across polls via mergeSourceIntoTasks, so this
+  // accumulates over the session) plus Workbench COMPLETED + CLOSED.
+  // Other Deel sources don't surface COMPLETED rows yet — they're
+  // missing from this count by design until those loaders gain
+  // `includeCompleted`. The scope filter mirrors `inScope` so each
+  // role's count matches their visibility:
   //   • Agent     → assignee = self
   //   • TL / RM   → assignee ∈ visibleEmails (own + reports)
   //   • Admin     → all
-  const resolvedPast24h = useMemo(() => {
-    const cutoffMs = Date.now() - 24 * 60 * 60 * 1000;
+  const resolvedInScope = useMemo(() => {
     const lcEmail = String(user?.email || '').toLowerCase();
     const inResolvedScope = (assigneeEmail) => {
       if (isAllScope) return true;
@@ -341,8 +341,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
         const d = t.updatedAt || t.resolvedAt;
         const ms = d ? new Date(d).getTime() : 0;
         return { row: t, ms, source: t.source || 'zendesk', kind: 'ticket' };
-      })
-      .filter(x => x.ms >= cutoffMs);
+      });
     // Raw workbench tasks (un-normalized) so we can read t.status and
     // t.completedAt directly. The normaliser replaces t.status with a
     // display-object, which would lose the bucket. Both terminal states
@@ -356,8 +355,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
         const d = t.completedAt || t.updatedAt;
         const ms = d ? new Date(d).getTime() : 0;
         return { row: t, ms, source: 'workbench', kind: 'workbench' };
-      })
-      .filter(x => x.ms >= cutoffMs);
+      });
     return [...ticketResolved, ...wbResolved].sort((a, b) => b.ms - a.ms);
   }, [tasks, workbenchData?.tasks, user?.email, isAllScope, isOwnScope, visibleEmails]);
   const total=scope.length;
@@ -384,10 +382,10 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const newT=scope.filter(t=>t.status==='new');
   const ipT=scope.filter(t=>t.status==='in_progress');
   const waitT=scope.filter(t=>t.status==='waiting');
-  // The legacy `resolved` count (in-scope all-time ZD/Jira) was replaced
-  // by the cross-source past-24h `resolvedPast24h` memo above. The
-  // Health Score's resolution-rate input also reads from that memo
-  // directly (see Resolution Rate block below).
+  // The legacy `resolved` count (in-scope all-time ZD/Jira) is replaced
+  // by the cross-source `resolvedInScope` memo above (no time cap, ZD +
+  // Jira + Workbench). The Resolution Rate block below uses a separate
+  // ZD-only formula per Mohamed's spec.
   const updated=scope.filter(t=>t.updatedMinsAgo!==undefined&&t.updatedMinsAgo<=120).length;
   const manager=user.lead?MEMBERS.find(m=>m.id===user.lead):null;
 
@@ -667,71 +665,76 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     return { ...m, wl: band.wl, wc: band.wc, capPct: mCapPct };
   });
 
-  // ── Health Score (composite 0-100) — 2026-05-07 recalibration ────────────
+  // ── Health Score (composite 0-100) — 2026-05-07 v2 recalibration ──────
   // Default weights total 100 (SLA 50 · Resp 20 · Cap 20 · Res 10), all
-  // four configurable. Component math (per Mohamed's spec):
-  //   • SLA Compliance — % NOT breached across OPEN-only requests
-  //     (excludes anything paused / on-hold in any queue). For ZD that's
-  //     `slaScope` (drops 'waiting' which maps from pending+hold).
-  //     For Deel sources we additionally filter `!isPaused` so workbench
-  //     ON_HOLD rows don't drag down the rate.
-  //   • Resolution Rate — Zendesk + Workbench, Closed-past-24h vs
-  //     currently-Open. Mohamed's calibration: 50% closed = "already
-  //     very good" → linear ramp 0–50% to score 0–100, capped at 100.
-  //   • Avg Response Time — ZD biz-minutes for tickets where the
-  //     assignee actually owes a response (slaMetric set, FRT or NRT
-  //     actively running). Caught-up tickets are excluded — they were
-  //     silently inflating the metric to multi-day numbers because the
-  //     anchor falls back to created_at.
-  //   • Team Capacity — for managers / admins: total active workload /
-  //     team size = avg per agent, bucketed against the same Low/Good/
-  //     High thresholds. For agents (own scope): existing personal-count
-  //     vs threshold (already works fine per Mohamed).
-  const slaPoolNonJira = slaScope.filter(t => t.source !== 'jira');
-  const breachedNonJira = breached.filter(t => t.source !== 'jira');
-  const slaPoolDeel = onboardingRows.filter(r => !r.isPaused).length
-    + offboardingRows.filter(r => !r.isPaused).length
-    + amendmentRows.filter(r => !r.isPaused).length
-    + redlineRows.filter(r => !r.isPaused).length
-    + workbenchRows.filter(r => !r.isPaused).length
-    + incentivePlanRows.filter(r => !r.isPaused).length;
-  const breachedDeel = onboardingRows.filter(r => !r.isPaused && r.slaBreachStatus === 'SLA_BREACHED').length
-    + offboardingRows.filter(r => !r.isPaused && r.slaBreachStatus === 'SLA_BREACHED').length
-    + amendmentRows.filter(r => !r.isPaused && r.slaBreachStatus === 'SLA_BREACHED').length
-    + redlineRows.filter(r => !r.isPaused && r.slaBreachStatus === 'SLA_BREACHED').length
-    + workbenchRows.filter(r => !r.isPaused && r.slaBreachStatus === 'SLA_BREACHED').length
-    + incentivePlanRows.filter(r => !r.isPaused && r.slaBreachStatus === 'SLA_BREACHED').length;
-  const slaTotal = slaPoolNonJira.length + slaPoolDeel;
-  const slaBreachTotal = breachedNonJira.length + breachedDeel;
+  // four configurable. Component math (per Mohamed's 2026-05-07 v2 spec):
+  //   • SLA Compliance — % NOT breached across EVERYTHING EXCEPT JIRA.
+  //     Zendesk in every status (incl. waiting/onhold), every Deel source
+  //     including paused rows. slaInfo() short-circuits waiting tickets
+  //     to "compliant" (no breach), and paused Deel rows still count as
+  //     breached if they exceeded their paused window. Wider pool ⇒ rate
+  //     reflects the team's whole obligation, not just the active slice.
+  //   • Resolution Rate — Zendesk only. closed / (closed + open + onhold).
+  //     50% = score 100 ("if half of all ZD tickets in scope are closed
+  //     this is already very good"). Linear ramp 0–50 ⇒ score 0–100.
+  //     Workbench dropped — Mohamed's v2 spec scopes this to ZD only.
+  //   • Avg Response Time — REVERTED to pre-#485 logic. Average biz-day
+  //     minutes from `lastCustomerResponseAt || updatedAt || createdAt`
+  //     across every ACTIVE ZD ticket (status !== resolved && !== waiting).
+  //     The slaMetric-only filter introduced in #485 was over-restrictive:
+  //     for many user scopes zero tickets had an active FRT/NRT clock,
+  //     collapsing the metric to "0m / Fast" and hiding real load.
+  //   • Team Capacity — unchanged. For managers / admins: total active
+  //     workload / team size = avg per agent, bucketed against Low/Good/
+  //     High. For agents: personal-count vs threshold.
+
+  // SLA Compliance pool — every non-Jira open ticket + every Deel row
+  // (paused included). Built independently from `slaScope` so the
+  // existing breached / atRisk org-wide buckets stay untouched.
+  const slaCompPoolTickets = scope.filter(t => t.source !== 'jira');
+  const slaCompBreachedTickets = slaCompPoolTickets.filter(t => {
+    const s = slaInfo(t); return s && s.breach;
+  }).length;
+  const slaCompPoolDeel = onboardingRows.length + offboardingRows.length
+    + amendmentRows.length + redlineRows.length
+    + workbenchRows.length + incentivePlanRows.length;
+  const slaCompBreachedDeel =
+      onboardingRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
+    + offboardingRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
+    + amendmentRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
+    + redlineRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
+    + workbenchRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
+    + incentivePlanRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length;
+  const slaTotal = slaCompPoolTickets.length + slaCompPoolDeel;
+  const slaBreachTotal = slaCompBreachedTickets + slaCompBreachedDeel;
   const slaCompRate = slaTotal > 0 ? Math.round(((slaTotal - slaBreachTotal) / slaTotal) * 100) : 100;
 
-  // Resolution Rate — ZD + Workbench, Closed past 24h vs Open now.
-  // Reuses the resolvedPast24h memo (#476 + #483) which already counts
-  // ZD resolved + Workbench COMPLETED+CLOSED past 24h, scoped to viewer.
-  const zdScope = scope.filter(t => t.source === 'zendesk');
-  const resolvedPast24hCount = resolvedPast24h.length;
-  const activeZdWb = zdScope.length + workbenchRows.length;
-  const resPool = resolvedPast24hCount + activeZdWb;
-  const resRate = resPool > 0 ? Math.round((resolvedPast24hCount / resPool) * 100) : 0;
-  // 50% = score 100 per Mohamed's spec ("if they closed 50% of the
-  // current workload this is already very good"). Linear ramp 0–50.
+  // Resolution Rate — Zendesk only. Pulls open + closed straight from
+  // the unified `tasks` array (which contains ZD + Jira) filtered to
+  // Zendesk and to the viewer's reporting-line scope.
+  const zdScope = scope.filter(t => t.source === 'zendesk');           // ZD open + onhold (scope already drops resolved)
+  const zdInScopeAll = (tasks || []).filter(t => t.source === 'zendesk' && inScope(t));
+  const zdClosedCount = zdInScopeAll.filter(t => t.status === 'resolved').length;
+  const zdOpenAndOnHoldCount = zdScope.length;                          // status !== 'resolved' (incl. waiting = pending+hold)
+  const resPool = zdClosedCount + zdOpenAndOnHoldCount;
+  const resRate = resPool > 0 ? Math.round((zdClosedCount / resPool) * 100) : 0;
+  // 50% closed = score 100 per Mohamed's spec.
   const resScore = Math.min(100, Math.round((resRate / 50) * 100));
 
-  // Avg Response Time — only count tickets where the assignee owes a
-  // response right now. The queue route (#482) stamps `slaMetric`
-  // ('frt'/'nrt') when FRT/NRT is actively running, null when the
-  // assignee has caught up. Filtering by slaMetric drops the caught-up
-  // rows whose anchor falls back to created_at and inflates the
-  // average to multi-day numbers (the "131h 35m" Mohamed flagged).
-  const zdActiveOwed = zdScope.filter(t => t.slaMetric);
-  const zdRespMins = zdActiveOwed.length > 0
-    ? Math.round(zdActiveOwed.reduce((sum, t) => {
-        const anchor = t.lastCustomerResponseAt || t.createdAt;
+  // Avg Response Time — pre-#485 logic. Average biz-day minutes from
+  // the most-recent meaningful anchor across every active ZD ticket
+  // (open + onhold). slaInfo() owns the "is breached" semantics; this
+  // metric is purely descriptive elapsed-time so the manager has a
+  // single number for "how long are we taking on average".
+  const zdActive = zdScope; // already (zd && status !== 'resolved')
+  const zdRespMins = zdActive.length > 0
+    ? Math.round(zdActive.reduce((sum, t) => {
+        const anchor = t.lastCustomerResponseAt || t.updatedAt || t.createdAt;
         if (!anchor) return sum;
         const ms = new Date(anchor).getTime();
         if (!Number.isFinite(ms)) return sum;
         return sum + elapsedBizMinutes(ms, Date.now());
-      }, 0) / zdActiveOwed.length)
+      }, 0) / zdActive.length)
     : 0;
   const avgResponseTime = zdRespMins;
   const respScore = avgResponseTime < 24 * 60 ? 100
@@ -1157,9 +1160,9 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   How your {scopeLabel.toLowerCase()} is performing right now. Each factor is scored 0-100 and weighted below.
                 </div>
                 {[
-                  {label:'SLA Compliance',weight:wSLA,value:`${slaCompRate}%`,score:slaCompRate,sub:`${Math.max(0, slaTotal - slaBreachTotal)}/${slaTotal} on-time · open only (excl. on-hold + Jira)`,icon:'bi-shield-check'},
-                  {label:'Resolution Rate',weight:wRes,value:`${resRate}%`,score:resScore,sub:`${resolvedPast24hCount} closed past 24h · ${activeZdWb} open · Zendesk + Workbench`,icon:'bi-check2-all'},
-                  {label:'Avg Response Time',weight:wResp,value:avgResponseTime>=60?`${Math.round(avgResponseTime/60)}h ${avgResponseTime%60}m`:`${avgResponseTime}m`,score:respScore,sub:`Zendesk biz-day · ${zdActiveOwed.length} ticket(s) awaiting reply · ${respScore>=80?'Fast':respScore>=60?'Normal':respScore>=40?'Slow':'Very slow'}`,icon:'bi-clock-history'},
+                  {label:'SLA Compliance',weight:wSLA,value:`${slaCompRate}%`,score:slaCompRate,sub:`${Math.max(0, slaTotal - slaBreachTotal)}/${slaTotal} on-time · everything except Jira`,icon:'bi-shield-check'},
+                  {label:'Resolution Rate',weight:wRes,value:`${resRate}%`,score:resScore,sub:`${zdClosedCount} closed · ${zdOpenAndOnHoldCount} open + on-hold · Zendesk only · 50% = excellent`,icon:'bi-check2-all'},
+                  {label:'Avg Response Time',weight:wResp,value:avgResponseTime>=60?`${Math.round(avgResponseTime/60)}h ${avgResponseTime%60}m`:`${avgResponseTime}m`,score:respScore,sub:`Zendesk biz-day · ${zdActive.length} active ticket(s) · ${respScore>=80?'Fast':respScore>=60?'Normal':respScore>=40?'Slow':'Very slow'}`,icon:'bi-clock-history'},
                   {label:'Team Capacity',weight:wCap,value:wl,score:wlScore,sub: isOwnScope ? `${myCount} tasks · ${Math.round(capPct)}% of ${capHighMin}` : `${myCount} avg / agent · ${totalActiveAcrossSources} tasks ÷ ${teamSize} ${teamSize === 1 ? 'member' : 'members'}`,icon:'bi-speedometer2'},
                 ].map(row=>{
                   const rc=row.score>=80?'#29811e':row.score>=60?'#ed8d00':'#d42d35';
@@ -1195,19 +1198,16 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             {settings.briefing_show_kpi_cards!==false&&<div style={{display:'flex',alignItems:'center',gap:'var(--space-4, 16px)',flexShrink:0}}>
               <KpiCard label="Workload" value={wl} color={wc} icon="bi-speedometer2" clickable onClick={()=>setView('my-queue')}/>
               <KpiCard label="SLA Comp %" value={`${slaCompRate}%`} color={slaCompRate>=80?'#29811e':slaCompRate>=60?'#ed8d00':'#d42d35'} icon="bi-shield-check" clickable onClick={()=>setView('analytics')}/>
-              {/* Header KPI: items resolved in the past 24h, scoped to what
-                  the viewer can see (own / team / region / org). Cross-source
-                  — counts ZD + Jira tickets plus Workbench COMPLETED rows so
-                  it actually reflects work done, not just the small subset
-                  we used to track (the pre-fix tile counted scoped ZD/Jira
-                  only, which made an HRX agent's 12 onboarding closes show
-                  up as "0"). Other Deel sources (onboarding / amendments /
-                  redlines / incentive plans / offboarding) don't currently
-                  expose COMPLETED rows from upstream — they're missing
-                  from this count by design until the loaders gain
-                  includeCompleted. The label is "Resolved (24h)" so the
-                  semantics aren't ambiguous. */}
-              <KpiCard label="Resolved (24h)" value={resolvedPast24h.length} color="#29811e" icon="bi-check-circle-fill" clickable onClick={()=>setView('my-queue')} title={`${resolvedPast24h.length} resolved in the past 24h within your scope. Counts Zendesk + Jira + Workbench (other Deel sources don't currently expose completed-data).`}/>
+              {/* Header KPI: every resolved item currently in the viewer's
+                  scope (own / team / region / org). Cross-source — counts
+                  Zendesk + Jira tickets + Workbench COMPLETED + CLOSED.
+                  No 24h cap (2026-05-07 v2): the previous "Resolved (24h)"
+                  tile collapsed to ~50 for an admin while DailySummary
+                  showed ~797 off the same FE state because of accumulation
+                  in mergeSourceIntoTasks. Other Deel sources don't surface
+                  COMPLETED rows yet — they're missing by design until
+                  those loaders gain `includeCompleted`. */}
+              <KpiCard label="Resolved" value={resolvedInScope.length} color="#29811e" icon="bi-check-circle-fill" clickable onClick={()=>setView('my-queue')} title={`${resolvedInScope.length} resolved in your scope. Counts Zendesk + Jira + Workbench (other Deel sources don't currently expose completed-data).`}/>
             </div>}
           </div>
         </div>
