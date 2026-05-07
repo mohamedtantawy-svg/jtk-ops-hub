@@ -385,9 +385,9 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const ipT=scope.filter(t=>t.status==='in_progress');
   const waitT=scope.filter(t=>t.status==='waiting');
   // The legacy `resolved` count (in-scope all-time ZD/Jira) was replaced
-  // by the cross-source past-24h `resolvedPast24h` memo above. Removed
-  // to avoid confusion — `zdResolved` below still computes the
-  // Zendesk-only count for the Health Score's resolution-rate input.
+  // by the cross-source past-24h `resolvedPast24h` memo above. The
+  // Health Score's resolution-rate input also reads from that memo
+  // directly (see Resolution Rate block below).
   const updated=scope.filter(t=>t.updatedMinsAgo!==undefined&&t.updatedMinsAgo<=120).length;
   const manager=user.lead?MEMBERS.find(m=>m.id===user.lead):null;
 
@@ -642,11 +642,23 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
 
   // Viewer's own workload — anchored on `capHighMin` so 100% on the
   // workload bar is the configured burnout threshold.
-  const myCount = isOwnScope ? personal.length : total;
+  // Mohamed 2026-05-07: managers/admins should see "avg per team
+  // member" instead of the raw scope total, so a 2,500-task team
+  // doesn't always read High when it's only ~25 per agent. Agents
+  // (own scope) keep the existing per-person threshold logic.
+  const totalActiveAcrossSources = scope.length
+    + onboardingRows.length + pausedOnboardingRows.length
+    + offboardingRows.length + amendmentRows.length
+    + redlineRows.length + workbenchRows.length + incentivePlanRows.length;
+  const teamSize = isOwnScope ? 1 : Math.max(1, visibleEmails.size);
+  const myCount = isOwnScope
+    ? personal.length
+    : Math.round(totalActiveAcrossSources / teamSize);
   const myWlBand = classifyWorkload(myCount);
   const wl = myWlBand.wl;
   const wc = myWlBand.wc;
   const capPct = Math.min(100, Math.round((myCount / BASELINE_CAPACITY) * 100));
+  const wlScore = wl === 'Low' ? 100 : wl === 'Good' ? 60 : 25;
 
   // Team-summary workload + capacity % using the same configured bands.
   const allAgentsWL = allAgents.map(m => {
@@ -655,51 +667,71 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     return { ...m, wl: band.wl, wc: band.wc, capPct: mCapPct };
   });
 
-  // ── Health Score (composite 0-100) — 2026-05-01 spec ─────────────────────
+  // ── Health Score (composite 0-100) — 2026-05-07 recalibration ────────────
   // Default weights total 100 (SLA 50 · Resp 20 · Cap 20 · Res 10), all
-  // four configurable. Component math:
-  //   • SLA Compliance — % of NON-Jira tasks that are NOT breached, across
-  //     ZD + Onb + Off + Amend + Redline + Workbench. Spec: "exclude Jira
-  //     from the SLA calculation only and the breach count on home page".
-  //   • Response Time — Zendesk-only, biz-day elapsed since
-  //     `lastCustomerResponseAt`. Gradient: <24h biz → 100, <36h → 70,
-  //     <48h → 40, ≥48h → 20.
-  //   • Resolution Rate — Zendesk-only resolved / (resolved + open).
-  //   • Team Capacity — Low → 100, Good → 60, High → 25 using the
-  //     configured lowMax/highMin thresholds.
+  // four configurable. Component math (per Mohamed's spec):
+  //   • SLA Compliance — % NOT breached across OPEN-only requests
+  //     (excludes anything paused / on-hold in any queue). For ZD that's
+  //     `slaScope` (drops 'waiting' which maps from pending+hold).
+  //     For Deel sources we additionally filter `!isPaused` so workbench
+  //     ON_HOLD rows don't drag down the rate.
+  //   • Resolution Rate — Zendesk + Workbench, Closed-past-24h vs
+  //     currently-Open. Mohamed's calibration: 50% closed = "already
+  //     very good" → linear ramp 0–50% to score 0–100, capped at 100.
+  //   • Avg Response Time — ZD biz-minutes for tickets where the
+  //     assignee actually owes a response (slaMetric set, FRT or NRT
+  //     actively running). Caught-up tickets are excluded — they were
+  //     silently inflating the metric to multi-day numbers because the
+  //     anchor falls back to created_at.
+  //   • Team Capacity — for managers / admins: total active workload /
+  //     team size = avg per agent, bucketed against the same Low/Good/
+  //     High thresholds. For agents (own scope): existing personal-count
+  //     vs threshold (already works fine per Mohamed).
   const slaPoolNonJira = slaScope.filter(t => t.source !== 'jira');
   const breachedNonJira = breached.filter(t => t.source !== 'jira');
-  const slaPoolDeel = onboardingRows.length + offboardingRows.length
-    + amendmentRows.length + redlineRows.length + workbenchRows.length + incentivePlanRows.length;
-  const breachedDeel = onboardingRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
-    + offboardingRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
-    + amendmentRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
-    + redlineRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
-    + workbenchRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
-    + incentivePlanRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length;
+  const slaPoolDeel = onboardingRows.filter(r => !r.isPaused).length
+    + offboardingRows.filter(r => !r.isPaused).length
+    + amendmentRows.filter(r => !r.isPaused).length
+    + redlineRows.filter(r => !r.isPaused).length
+    + workbenchRows.filter(r => !r.isPaused).length
+    + incentivePlanRows.filter(r => !r.isPaused).length;
+  const breachedDeel = onboardingRows.filter(r => !r.isPaused && r.slaBreachStatus === 'SLA_BREACHED').length
+    + offboardingRows.filter(r => !r.isPaused && r.slaBreachStatus === 'SLA_BREACHED').length
+    + amendmentRows.filter(r => !r.isPaused && r.slaBreachStatus === 'SLA_BREACHED').length
+    + redlineRows.filter(r => !r.isPaused && r.slaBreachStatus === 'SLA_BREACHED').length
+    + workbenchRows.filter(r => !r.isPaused && r.slaBreachStatus === 'SLA_BREACHED').length
+    + incentivePlanRows.filter(r => !r.isPaused && r.slaBreachStatus === 'SLA_BREACHED').length;
   const slaTotal = slaPoolNonJira.length + slaPoolDeel;
   const slaBreachTotal = breachedNonJira.length + breachedDeel;
   const slaCompRate = slaTotal > 0 ? Math.round(((slaTotal - slaBreachTotal) / slaTotal) * 100) : 100;
 
-  // Zendesk-only resolution rate.
+  // Resolution Rate — ZD + Workbench, Closed past 24h vs Open now.
+  // Reuses the resolvedPast24h memo (#476 + #483) which already counts
+  // ZD resolved + Workbench COMPLETED+CLOSED past 24h, scoped to viewer.
   const zdScope = scope.filter(t => t.source === 'zendesk');
-  const zdResolved = tasks.filter(t => t.source === 'zendesk' && inScope(t) && t.status === 'resolved').length;
-  const zdResRate = (zdResolved + zdScope.length) > 0
-    ? Math.round((zdResolved / (zdResolved + zdScope.length)) * 100)
-    : 0;
-  const resRate = zdResRate;
+  const resolvedPast24hCount = resolvedPast24h.length;
+  const activeZdWb = zdScope.length + workbenchRows.length;
+  const resPool = resolvedPast24hCount + activeZdWb;
+  const resRate = resPool > 0 ? Math.round((resolvedPast24hCount / resPool) * 100) : 0;
+  // 50% = score 100 per Mohamed's spec ("if they closed 50% of the
+  // current workload this is already very good"). Linear ramp 0–50.
+  const resScore = Math.min(100, Math.round((resRate / 50) * 100));
 
-  // Zendesk-only response time, biz-day from last requester reply (falls
-  // back to updatedAt → createdAt). Skip 'waiting'/'resolved'.
-  const zdActive = zdScope.filter(t => t.status !== 'waiting' && t.status !== 'resolved');
-  const zdRespMins = zdActive.length > 0
-    ? Math.round(zdActive.reduce((sum, t) => {
-        const anchor = t.lastCustomerResponseAt || t.updatedAt || t.createdAt;
+  // Avg Response Time — only count tickets where the assignee owes a
+  // response right now. The queue route (#482) stamps `slaMetric`
+  // ('frt'/'nrt') when FRT/NRT is actively running, null when the
+  // assignee has caught up. Filtering by slaMetric drops the caught-up
+  // rows whose anchor falls back to created_at and inflates the
+  // average to multi-day numbers (the "131h 35m" Mohamed flagged).
+  const zdActiveOwed = zdScope.filter(t => t.slaMetric);
+  const zdRespMins = zdActiveOwed.length > 0
+    ? Math.round(zdActiveOwed.reduce((sum, t) => {
+        const anchor = t.lastCustomerResponseAt || t.createdAt;
         if (!anchor) return sum;
         const ms = new Date(anchor).getTime();
         if (!Number.isFinite(ms)) return sum;
         return sum + elapsedBizMinutes(ms, Date.now());
-      }, 0) / zdActive.length)
+      }, 0) / zdActiveOwed.length)
     : 0;
   const avgResponseTime = zdRespMins;
   const respScore = avgResponseTime < 24 * 60 ? 100
@@ -707,13 +739,12 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     : avgResponseTime < 48 * 60 ? 40
     : 20;
 
-  const wlScore = wl === 'Low' ? 100 : wl === 'Good' ? 60 : 25;
   const wSLA = Number.isFinite(settings.briefing_health_sla_weight) ? settings.briefing_health_sla_weight : 50;
   const wRes = Number.isFinite(settings.briefing_health_resolution_weight) ? settings.briefing_health_resolution_weight : 10;
   const wResp = Number.isFinite(settings.briefing_health_response_weight) ? settings.briefing_health_response_weight : 20;
   const wCap = Number.isFinite(settings.briefing_health_capacity_weight) ? settings.briefing_health_capacity_weight : 20;
   const wSum = (wSLA + wRes + wResp + wCap) || 100;
-  const healthScore = Math.round((slaCompRate*wSLA + resRate*wRes + respScore*wResp + wlScore*wCap) / wSum) || 0;
+  const healthScore = Math.round((slaCompRate*wSLA + resScore*wRes + respScore*wResp + wlScore*wCap) / wSum) || 0;
   const hColor = healthScore >= 80 ? '#29811e' : healthScore >= 60 ? '#ed8d00' : '#d42d35';
   const hLabel = healthScore >= 80 ? 'Healthy' : healthScore >= 60 ? 'Attention' : 'Critical';
 
@@ -1126,10 +1157,10 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   How your {scopeLabel.toLowerCase()} is performing right now. Each factor is scored 0-100 and weighted below.
                 </div>
                 {[
-                  {label:'SLA Compliance',weight:wSLA,value:`${slaCompRate}%`,score:slaCompRate,sub:`${Math.max(0, slaTotal - slaBreachTotal)}/${slaTotal} on-time (excl. Jira)`,icon:'bi-shield-check'},
-                  {label:'Resolution Rate',weight:wRes,value:`${resRate}%`,score:resRate,sub:`${zdResolved} resolved · ${zdScope.length} open · Zendesk`,icon:'bi-check2-all'},
-                  {label:'Avg Response Time',weight:wResp,value:avgResponseTime>=60?`${Math.round(avgResponseTime/60)}h ${avgResponseTime%60}m`:`${avgResponseTime}m`,score:respScore,sub:`Zendesk biz-day · ${respScore>=80?'Fast':respScore>=60?'Normal':respScore>=40?'Slow':'Very slow'}`,icon:'bi-clock-history'},
-                  {label:'Team Capacity',weight:wCap,value:wl,score:wlScore,sub:`${myCount} tasks · ${Math.round(capPct)}% of ${capHighMin}`,icon:'bi-speedometer2'},
+                  {label:'SLA Compliance',weight:wSLA,value:`${slaCompRate}%`,score:slaCompRate,sub:`${Math.max(0, slaTotal - slaBreachTotal)}/${slaTotal} on-time · open only (excl. on-hold + Jira)`,icon:'bi-shield-check'},
+                  {label:'Resolution Rate',weight:wRes,value:`${resRate}%`,score:resScore,sub:`${resolvedPast24hCount} closed past 24h · ${activeZdWb} open · Zendesk + Workbench`,icon:'bi-check2-all'},
+                  {label:'Avg Response Time',weight:wResp,value:avgResponseTime>=60?`${Math.round(avgResponseTime/60)}h ${avgResponseTime%60}m`:`${avgResponseTime}m`,score:respScore,sub:`Zendesk biz-day · ${zdActiveOwed.length} ticket(s) awaiting reply · ${respScore>=80?'Fast':respScore>=60?'Normal':respScore>=40?'Slow':'Very slow'}`,icon:'bi-clock-history'},
+                  {label:'Team Capacity',weight:wCap,value:wl,score:wlScore,sub: isOwnScope ? `${myCount} tasks · ${Math.round(capPct)}% of ${capHighMin}` : `${myCount} avg / agent · ${totalActiveAcrossSources} tasks ÷ ${teamSize} ${teamSize === 1 ? 'member' : 'members'}`,icon:'bi-speedometer2'},
                 ].map(row=>{
                   const rc=row.score>=80?'#29811e':row.score>=60?'#ed8d00':'#d42d35';
                   return(
