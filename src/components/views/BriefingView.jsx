@@ -45,7 +45,7 @@ import {
   TriageStrip,
   DecisionsStrip,
   AccessBadge,
-  LastLoginPill,
+  LastSeenPill,
   CountriesCell,
   LoginAsButton,
 } from '../briefing/ManagerStrips';
@@ -1705,7 +1705,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 </thead>
                 <tbody>
                   {(() => {
-                    // Resolve the live roster row (lastLoginAt / countries /
+                    // Resolve the live roster row (lastSeenAt / countries /
                     // access flags) for an agent or manager. Falls back to the
                     // baked-in MEMBERS_BY_EMAIL when the live fetch hasn't
                     // landed yet so the row never blank-flashes.
@@ -1730,7 +1730,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                               <div style={{fontWeight:600,color:'#1b1b1b',display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
                                 {m.name}
                                 <AccessBadge access={live?.access || m.access || 'agent'} />
-                                <LastLoginPill iso={live?.lastLoginAt} loading={!!rosterLoading} />
+                                <LastSeenPill iso={live?.lastSeenAt} loading={!!rosterLoading} />
                               </div>
                               <div style={{fontSize:11,color:'#9e9e9e'}}>{FLAGS[m.country]} {m.team}</div>
                             </div>
@@ -1795,7 +1795,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                               <div style={{fontWeight:700,color:'#1b1b1b',display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
                                 {g.manager.name}
                                 <AccessBadge access={live?.access || g.manager.access} />
-                                <LastLoginPill iso={live?.lastLoginAt} loading={!!rosterLoading} />
+                                <LastSeenPill iso={live?.lastSeenAt} loading={!!rosterLoading} />
                               </div>
                               <div style={{fontSize:11,color:'#9e9e9e'}}>{g.manager.team} &middot; {g.headcount} {g.headcount === 1 ? 'agent' : 'agents'}</div>
                             </div>

@@ -13,7 +13,7 @@
 // hierarchical scope (`scopeMembers` from usePermissions) so a TL sees
 // "own + direct reports", an RM sees "own + full subtree", admin sees all.
 //
-// Helpers (formatLastLogin / LAST_LOGIN_TONE / ACCESS_BADGE / LoginAsButton /
+// Helpers (formatLastSeen / LAST_SEEN_TONE / ACCESS_BADGE / LoginAsButton /
 // CountriesCell) are also exported here — BriefingView's team table reuses
 // them so the Briefing rows match the Team-tab look-and-feel exactly.
 
@@ -25,10 +25,10 @@ import MultiCountryPicker from '../team/MultiCountryPicker';
 
 // ── Pure helpers (mirrored from Team.jsx so the look matches) ──────────────
 
-export function formatLastLogin(iso) {
-  if (!iso) return { label: 'Never logged in', tone: 'never' };
+export function formatLastSeen(iso) {
+  if (!iso) return { label: 'Never seen', tone: 'never' };
   const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return { label: 'Never logged in', tone: 'never' };
+  if (Number.isNaN(d.getTime())) return { label: 'Never seen', tone: 'never' };
   const now = Date.now();
   const diffMs = now - d.getTime();
   const diffMin = Math.floor(diffMs / 60000);
@@ -44,7 +44,7 @@ export function formatLastLogin(iso) {
   return { label: d.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' }), tone: 'stale', iso };
 }
 
-export const LAST_LOGIN_TONE = {
+export const LAST_SEEN_TONE = {
   fresh:  { bg: '#e8f5e3', color: '#29811e' },
   recent: { bg: '#e8f0fe', color: '#1f74b3' },
   stale:  { bg: '#f7f5f2', color: '#616161' },
@@ -380,7 +380,7 @@ export function AccessBadge({ access }) {
   );
 }
 
-export function LastLoginPill({ iso, loading = false }) {
+export function LastSeenPill({ iso, loading = false }) {
   if (loading && !iso) {
     return (
       <span style={{
@@ -394,11 +394,11 @@ export function LastLoginPill({ iso, loading = false }) {
       </span>
     );
   }
-  const ll = formatLastLogin(iso);
-  const tone = LAST_LOGIN_TONE[ll.tone] || LAST_LOGIN_TONE.never;
+  const ll = formatLastSeen(iso);
+  const tone = LAST_SEEN_TONE[ll.tone] || LAST_SEEN_TONE.never;
   return (
     <span
-      title={ll.iso ? `Last login: ${new Date(ll.iso).toLocaleString()}` : 'This user has never signed in to Ops Hub'}
+      title={ll.iso ? `Last seen: ${new Date(ll.iso).toLocaleString()}` : 'This user has never been active in Ops Hub'}
       style={{
         background: tone.bg, color: tone.color,
         fontSize: 10, fontWeight: 700,
@@ -407,7 +407,7 @@ export function LastLoginPill({ iso, loading = false }) {
       }}
     >
       <i className={ll.tone === 'never' ? 'bi-person-slash' : 'bi-clock-history'} style={{ fontSize: 9 }} />
-      {ll.tone === 'never' ? 'Never logged in' : ll.label}
+      {ll.tone === 'never' ? 'Never seen' : ll.label}
     </span>
   );
 }

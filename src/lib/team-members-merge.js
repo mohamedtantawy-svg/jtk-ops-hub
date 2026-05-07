@@ -6,7 +6,10 @@
 //   overrides (team_member_overrides DB table, keyed by email)
 //     → per-field nulls mean "use baseline"; is_new rows are entirely new
 //     → is_deleted rows mask a baseline entry out of the merged list
-//     → last_login_at is bumped on every successful auth
+//   logins (member_logins DB table, keyed by email)
+//     → last_seen_at = real activity (FE heartbeat); the badge column
+//     → last_login_at = actual auth event timestamp
+//     → login_count = lifetime auth event counter
 //
 // This module is imported by the /api/v1/team-members routes and by any
 // server-side code that needs the current, authoritative roster (not just
@@ -17,6 +20,13 @@
 // drop-in replacement.
 
 import { TEAM_MEMBERS } from '../data/members';
+
+function _toIso(v) {
+  if (!v) return null;
+  if (typeof v === 'string') return v;
+  if (v && typeof v.toISOString === 'function') return v.toISOString();
+  return null;
+}
 
 // Convert a DB override row (snake_case) to the client shape (camelCase).
 function normaliseOverrideRow(row) {
@@ -41,12 +51,6 @@ function normaliseOverrideRow(row) {
     isNew: row.is_new === true,
     isDeleted: row.is_deleted === true,
     onLeave: row.on_leave === true,
-    lastLoginAt: row.last_login_at
-      ? (typeof row.last_login_at === 'string'
-          ? row.last_login_at
-          : row.last_login_at.toISOString())
-      : null,
-    loginCount: row.login_count || 0,
     // Additive per-user permissions (Director can grant from the Team tab).
     isAnnouncementsAdmin: row.is_announcements_admin === true,
     isAccessAdmin: row.is_access_admin === true,
@@ -55,11 +59,31 @@ function normaliseOverrideRow(row) {
   };
 }
 
-// Apply non-null override fields on top of a baseline entry.
-function applyOverride(base, override) {
+// Build the lookup map of member_logins rows (snake_case from DB) keyed by
+// lowercased email. Missing rows ⇒ user has never been seen → null fields.
+function buildLoginsMap(loginRows = []) {
+  const m = new Map();
+  for (const r of loginRows) {
+    if (!r?.email) continue;
+    m.set(String(r.email).toLowerCase(), {
+      lastSeenAt:  _toIso(r.last_seen_at),
+      lastLoginAt: _toIso(r.last_login_at),
+      loginCount:  Number.isFinite(r.login_count) ? r.login_count : 0,
+    });
+  }
+  return m;
+}
+
+const EMPTY_LOGIN = { lastSeenAt: null, lastLoginAt: null, loginCount: 0 };
+
+// Apply non-null override fields on top of a baseline entry, then attach
+// login activity from the member_logins map.
+function applyOverride(base, override, loginsByEmail) {
+  const login = loginsByEmail.get(String(base.email).toLowerCase()) || EMPTY_LOGIN;
   if (!override) return {
     ...base,
-    isNew: false, isDeleted: false, onLeave: false, lastLoginAt: null, loginCount: 0,
+    isNew: false, isDeleted: false, onLeave: false,
+    ...login,
     isAnnouncementsAdmin: false,
     isAccessAdmin: false,
     isHrHubAdmin: false,
@@ -77,8 +101,12 @@ function applyOverride(base, override) {
   merged.isNew = override.isNew;
   merged.isDeleted = override.isDeleted;
   merged.onLeave = override.onLeave;
-  merged.lastLoginAt = override.lastLoginAt;
-  merged.loginCount = override.loginCount;
+  // Login activity comes from member_logins, NOT team_member_overrides.
+  // The legacy override columns are still dual-written for transition
+  // safety but we no longer read them.
+  merged.lastSeenAt  = login.lastSeenAt;
+  merged.lastLoginAt = login.lastLoginAt;
+  merged.loginCount  = login.loginCount;
   merged.isAnnouncementsAdmin = override.isAnnouncementsAdmin === true;
   merged.isAccessAdmin = override.isAccessAdmin === true;
   merged.isHrHubAdmin = override.isHrHubAdmin === true;
@@ -87,18 +115,25 @@ function applyOverride(base, override) {
 }
 
 /**
- * Merge baseline TEAM_MEMBERS with override rows.
+ * Merge baseline TEAM_MEMBERS with override rows + member_logins activity.
  *
  * @param {Array} overrideRows — rows from team_member_overrides (snake_case)
+ * @param {Array} [loginRows]  — rows from member_logins (snake_case);
+ *                                callers that haven't migrated yet pass [] /
+ *                                omit and every member's login fields are null
+ *                                (used to mean "Never seen"). Migrated callers
+ *                                pass the SELECT result so the merge has the
+ *                                authoritative activity timestamps.
  * @returns {Array} merged member list (camelCase), deleted entries filtered out
  */
-export function mergeTeamMembers(overrideRows = []) {
+export function mergeTeamMembers(overrideRows = [], loginRows = []) {
   // Build override lookup keyed by email
   const byEmail = new Map();
   for (const row of overrideRows) {
     const normalised = normaliseOverrideRow(row);
     if (normalised) byEmail.set(normalised.email.toLowerCase(), normalised);
   }
+  const loginsByEmail = buildLoginsMap(loginRows);
 
   const merged = [];
   const seenEmails = new Set();
@@ -109,7 +144,7 @@ export function mergeTeamMembers(overrideRows = []) {
     seenEmails.add(emailLc);
     const override = byEmail.get(emailLc);
     if (override?.isDeleted) continue;          // soft-deleted → hide
-    merged.push(applyOverride(base, override));
+    merged.push(applyOverride(base, override, loginsByEmail));
   }
 
   // 2. Brand-new members pass — emails not in baseline
@@ -117,6 +152,7 @@ export function mergeTeamMembers(overrideRows = []) {
     if (seenEmails.has(emailLc)) continue;       // already handled above
     if (override.isDeleted) continue;             // hard-deleted new row → skip
     if (!override.isNew) continue;                // defensive: shouldn't happen
+    const login = loginsByEmail.get(emailLc) || EMPTY_LOGIN;
     // For a brand-new row everything comes from the override — fill defaults
     // for any missing field so downstream renderers don't choke on undefined.
     merged.push({
@@ -135,8 +171,9 @@ export function mergeTeamMembers(overrideRows = []) {
       isNew: true,
       isDeleted: false,
       onLeave: override.onLeave,
-      lastLoginAt: override.lastLoginAt,
-      loginCount: override.loginCount,
+      lastSeenAt:  login.lastSeenAt,
+      lastLoginAt: login.lastLoginAt,
+      loginCount:  login.loginCount,
       isAnnouncementsAdmin: override.isAnnouncementsAdmin === true,
       isAccessAdmin: override.isAccessAdmin === true,
       isHrHubAdmin: override.isHrHubAdmin === true,

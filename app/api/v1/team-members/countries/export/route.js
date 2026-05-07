@@ -48,11 +48,11 @@ export async function GET(req) {
   await ensureRosterHydrated();
 
   try {
-    const [overridesRes, countriesRes] = await Promise.all([
+    const [overridesRes, countriesRes, loginsRes] = await Promise.all([
       query(
         `SELECT email, name, initials, title, access, manager_email, team, region,
                 service, country, avatar_url, start_date, is_new, is_deleted,
-                on_leave, last_login_at, login_count, is_announcements_admin,
+                on_leave, is_announcements_admin,
                 is_access_admin, created_at, updated_at
            FROM team_member_overrides`,
       ),
@@ -65,9 +65,15 @@ export async function GET(req) {
         console.warn('[team-members/countries/export] countries query failed:', err?.message);
         return { rows: [] };
       }),
+      query(
+        `SELECT email, last_seen_at, last_login_at, login_count FROM member_logins`,
+      ).catch(err => {
+        console.warn('[team-members/countries/export] member_logins query failed:', err?.message);
+        return { rows: [] };
+      }),
     ]);
 
-    const merged = mergeTeamMembers(overridesRes.rows).filter(m => !m.isDeleted);
+    const merged = mergeTeamMembers(overridesRes.rows, loginsRes.rows).filter(m => !m.isDeleted);
 
     // Group countries by lowercased email so we can render every member —
     // even ones with zero assignments — in a single sweep.

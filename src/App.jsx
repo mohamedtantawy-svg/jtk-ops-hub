@@ -29,6 +29,7 @@ import { useDeelData } from './hooks/useDeelData';
 import { useJiraData } from './hooks/useJiraData';
 import { useSlackData } from './hooks/useSlackData';
 import { useMeetingAlerts } from './hooks/useMeetingAlerts';
+import { useActivityHeartbeat } from './hooks/useActivityHeartbeat';
 
 // ── API services + normalizers ──────────────────────────────────────────────
 import { login as apiLogin, fetchMe as apiFetchMe } from './services/authApi';
@@ -812,6 +813,12 @@ const App=()=>{
   // Server-persisted feed (mentions, etc). The hook polls every 30s and
   // hydrates from a user-scoped localStorage cache for instant paint.
   const serverNotifs = useNotifications(user?.email || null);
+
+  // Real-activity heartbeat for the Team-tab "Last seen" badge. Posts to
+  // /api/v1/auth/heartbeat at most once per minute, only when the user
+  // has interacted (mouse/keyboard/scroll/touch) in the last 90 s AND
+  // the tab is visible. Idle background tabs never bump last_seen_at.
+  useActivityHeartbeat(user?.email || null);
 
   // Combine the in-memory popup feed (announcements arrival, toasts) with
   // the server feed for a single bell. Server rows go first so a fresh

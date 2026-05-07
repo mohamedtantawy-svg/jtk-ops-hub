@@ -76,46 +76,28 @@ export async function GET(req) {
           const { rows: ovRows } = await query(
             `SELECT email, name, initials, title, access, manager_email, team, region,
                     service, country, avatar_url, start_date, is_new, is_deleted,
-                    on_leave, last_login_at, login_count, is_announcements_admin,
+                    on_leave, is_announcements_admin,
                     is_access_admin, is_hr_hub_admin, is_leader_alerts_admin
                FROM team_member_overrides`
           );
-          const merged = mergeTeamMembers(ovRows);
+          // /me only consumes profile fields (role/team/region/etc.), never
+          // login activity — pass [] for loginRows to skip the redundant
+          // member_logins lookup.
+          const merged = mergeTeamMembers(ovRows, []);
           mergedEntry = merged.find(m => m.email.toLowerCase() === emailLc) || null;
         } catch (ovErr) {
           console.warn('[me] override merge failed:', ovErr.message);
         }
 
-        // 3. Touch last_login_at so existing JWT sessions backfill the
-        //    "Never logged in" badge. INSERT bumps count=1, UPDATE only
-        //    refreshes the timestamp so /me hits don't inflate the counter.
-        //    Dual-write: member_logins is the new canonical store
-        //    (2026-05-06); legacy write to team_member_overrides is kept
-        //    during the read-path migration window.
-        try {
-          await query(
-            `INSERT INTO member_logins (email, last_login_at, login_count)
-             VALUES ($1, NOW(), 1)
-             ON CONFLICT (email) DO UPDATE
-             SET last_login_at = NOW(),
-                 updated_at    = NOW()`,
-            [emailLc]
-          );
-        } catch (touchErr) {
-          console.warn('[me] last_login touch (member_logins) failed:', touchErr.message);
-        }
-        try {
-          await query(
-            `INSERT INTO team_member_overrides (email, last_login_at, login_count)
-             VALUES ($1, NOW(), 1)
-             ON CONFLICT (email) DO UPDATE
-             SET last_login_at = NOW(),
-                 updated_at    = NOW()`,
-            [emailLc]
-          );
-        } catch (touchErr) {
-          console.warn('[me] last_login touch (team_member_overrides legacy) failed:', touchErr.message);
-        }
+        // NOTE: /me intentionally no longer touches last_login_at or
+        // last_seen_at. /me fires once per App mount (and on token
+        // revalidation), which is "tab opened" not "user is interacting"
+        // — bumping a timestamp here made the Team-tab badge read like
+        // every refreshed tab was real activity. Real-activity tracking
+        // moved to /api/v1/auth/heartbeat (FE only fires it when the
+        // user actually clicks/types/scrolls AND the tab is visible).
+        // Login-event tracking still lives in /auth/login + /auth/google
+        // /callback where it belongs. Removed 2026-05-07.
 
         // 4. Lazy-backfill `members` from the merged profile so other code
         //    paths that still read `members` (legacy permission checks,

@@ -105,13 +105,27 @@ export async function PATCH(req, { params }) {
       SET ${updateSet}, updated_at = NOW()
       RETURNING email, name, initials, title, access, manager_email, team, region,
                 service, country, avatar_url, start_date, is_new, is_deleted,
-                on_leave, last_login_at, login_count, is_announcements_admin,
+                on_leave, is_announcements_admin,
                 is_access_admin,
                 created_at, updated_at
     `;
 
     const { rows } = await query(sql, insertVals);
     const row = rows[0];
+
+    // Fetch live activity from member_logins (the canonical store) so the
+    // PATCH response shows the same lastSeenAt the table renders. Empty
+    // result on a fresh user → null fields, displayed as "Never seen".
+    let loginRow = null;
+    try {
+      const { rows: loginRows } = await query(
+        `SELECT last_seen_at, last_login_at, login_count FROM member_logins WHERE email = $1`,
+        [email],
+      );
+      loginRow = loginRows[0] || null;
+    } catch (loginErr) {
+      console.warn('[team-members PATCH] member_logins lookup failed:', loginErr.message);
+    }
 
     // Keep the members table in sync with edited allocation. Auth + /me +
     // permissions all read from `members`, so a stale row there would cause
@@ -180,8 +194,15 @@ export async function PATCH(req, { params }) {
       isNew: row.is_new,
       isDeleted: row.is_deleted,
       onLeave: row.on_leave,
-      lastLoginAt: row.last_login_at ? (typeof row.last_login_at === 'string' ? row.last_login_at : row.last_login_at.toISOString()) : null,
-      loginCount: row.login_count || 0,
+      // Login activity comes from member_logins (canonical), not the
+      // legacy team_member_overrides columns.
+      lastSeenAt: loginRow?.last_seen_at
+        ? (typeof loginRow.last_seen_at === 'string' ? loginRow.last_seen_at : loginRow.last_seen_at.toISOString())
+        : null,
+      lastLoginAt: loginRow?.last_login_at
+        ? (typeof loginRow.last_login_at === 'string' ? loginRow.last_login_at : loginRow.last_login_at.toISOString())
+        : null,
+      loginCount: loginRow?.login_count || 0,
       isAnnouncementsAdmin: row.is_announcements_admin === true,
       isAccessAdmin: row.is_access_admin === true,
     });

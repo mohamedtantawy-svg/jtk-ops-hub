@@ -1244,6 +1244,26 @@ CREATE TABLE IF NOT EXISTS member_logins (
 CREATE INDEX IF NOT EXISTS idx_member_logins_last_login
   ON member_logins(last_login_at DESC NULLS LAST);
 
+-- ── last_seen_at — real activity, not just session start (2026-05-07) ──
+-- The Team-tab badge needs to answer "did this person actually work today?"
+-- last_login_at is bumped on auth and previously /me-on-mount, which made
+-- it conflate "logged in" with "tab open at all" — a user who reloaded at
+-- 9 AM and walked away showed "9 AM" all day. last_seen_at is bumped only
+-- by:
+--   • Actual auth events (login, SSO callback) — initial seed
+--   • The /api/v1/auth/heartbeat route, which the FE only calls when the
+--     user is genuinely active (mouse / keyboard / scroll / touch in the
+--     last 90 s AND tab is visible). Idle tabs in the background never
+--     bump it.
+-- Backfill seeds last_seen_at from the existing last_login_at so the badge
+-- doesn't read "Never seen" for everyone immediately after deploy.
+ALTER TABLE member_logins ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ;
+UPDATE member_logins
+   SET last_seen_at = last_login_at
+ WHERE last_seen_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_member_logins_last_seen
+  ON member_logins(last_seen_at DESC NULLS LAST);
+
 -- One-time backfill from team_member_overrides — capture all historical
 -- login activity so member_logins is the complete record from day 1.
 -- Idempotent via ON CONFLICT (email) DO NOTHING; subsequent boots no-op

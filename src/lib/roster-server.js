@@ -87,11 +87,11 @@ export async function ensureRosterHydrated({ force = false } = {}) {
       // previously-hydrated ownership map (passing `[]` to
       // hydrateOwnerCountries would clobber a known-good map with an empty
       // one and break Queue scoping mid-session).
-      const [overridesRes, countriesRes] = await Promise.all([
+      const [overridesRes, countriesRes, loginsRes] = await Promise.all([
         query(
           `SELECT email, name, initials, title, access, manager_email, team, region,
                   service, country, avatar_url, start_date, is_new, is_deleted,
-                  on_leave, last_login_at, login_count
+                  on_leave
              FROM team_member_overrides`,
         ),
         query(
@@ -103,8 +103,18 @@ export async function ensureRosterHydrated({ force = false } = {}) {
           console.warn('[roster-server] team_member_countries query failed:', err?.message);
           return null;
         }),
+        // member_logins is the canonical activity store. Pulled separately
+        // so we don't hold an outer-join row count up against the overrides
+        // count — empty rows here just mean every member shows "Never seen"
+        // until the next heartbeat / login.
+        query(
+          `SELECT email, last_seen_at, last_login_at, login_count FROM member_logins`,
+        ).catch(err => {
+          console.warn('[roster-server] member_logins query failed:', err?.message);
+          return { rows: [] };
+        }),
       ]);
-      const merged = mergeTeamMembers(overridesRes.rows);
+      const merged = mergeTeamMembers(overridesRes.rows, loginsRes.rows);
       hydrateRoster(merged);
       if (countriesRes) {
         rebuildCountriesMap(countriesRes.rows);
