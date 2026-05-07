@@ -118,25 +118,61 @@ export async function POST(req) {
       return NextResponse.json({ error: `Invalid team. Must be one of: ${VALID_TEAMS.join(', ')}` }, { status: 400 });
     }
 
-    // Reject duplicates: either a baseline entry exists or an override row already does
+    // Reject duplicates: only fully-populated, active override rows are
+    // genuine duplicates. Shell rows (login-only stubs from the auth-flow
+    // dual-write — name/access/manager all NULL) and soft-deleted rows
+    // should be PROMOTED / UNDELETED by this POST instead of rejected.
+    // Otherwise admins hit a dead-end: the row exists but the Team UI
+    // can't see it (merge filters !is_new and is_deleted), so the user
+    // can neither edit nor re-add the member.
     const baseline = TEAM_MEMBERS.find(m => m.email.toLowerCase() === email);
     if (baseline) {
       return NextResponse.json({ error: 'A baseline team member already exists with that email. Use edit-allocation instead.' }, { status: 409 });
     }
-    const existing = await query('SELECT email FROM team_member_overrides WHERE email = $1', [email]);
-    if (existing.rows.length > 0) {
-      return NextResponse.json({ error: 'A team member override already exists for that email.' }, { status: 409 });
+    const existingRes = await query(
+      `SELECT email, name, access, manager_email, is_deleted
+         FROM team_member_overrides WHERE email = $1`,
+      [email]
+    );
+    const existing = existingRes.rows[0];
+    if (existing) {
+      const isShell = !existing.name && !existing.access && !existing.manager_email;
+      const isSoftDeleted = existing.is_deleted === true;
+      if (!isShell && !isSoftDeleted) {
+        return NextResponse.json({ error: 'A team member override already exists for that email.' }, { status: 409 });
+      }
+      // Otherwise fall through to the UPSERT below — promote / undelete.
     }
 
     const initials = name.split(/\s+/).filter(Boolean).map(w => w[0] || '').join('').slice(0, 4).toUpperCase();
     const avatarUrl = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}&backgroundColor=6b3fa0&textColor=ffffff&fontSize=40`;
     const startDate = new Date().toISOString().slice(0, 10);
 
+    // ON CONFLICT promotes a shell row or undeletes a soft-deleted one.
+    // is_new is reset to true so the merge surface picks it up; is_deleted
+    // and on_leave are reset to false so a re-added member doesn't inherit
+    // a stale soft-delete state.
     await query(
       `INSERT INTO team_member_overrides
          (email, name, initials, title, access, manager_email, team, region,
           service, country, avatar_url, start_date, is_new, is_deleted, on_leave)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true,false,false)`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true,false,false)
+       ON CONFLICT (email) DO UPDATE
+       SET name          = EXCLUDED.name,
+           initials      = EXCLUDED.initials,
+           title         = EXCLUDED.title,
+           access        = EXCLUDED.access,
+           manager_email = EXCLUDED.manager_email,
+           team          = EXCLUDED.team,
+           region        = EXCLUDED.region,
+           service       = EXCLUDED.service,
+           country       = EXCLUDED.country,
+           avatar_url    = EXCLUDED.avatar_url,
+           start_date    = EXCLUDED.start_date,
+           is_new        = true,
+           is_deleted    = false,
+           on_leave      = false,
+           updated_at    = NOW()`,
       [email, name, initials, title, access, managerEmail, team, region, service, country, avatarUrl, startDate]
     );
 

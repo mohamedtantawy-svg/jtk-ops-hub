@@ -214,17 +214,27 @@ export function useTeamMembers() {
   const removeMember = useCallback(async (email) => {
     const lc = email.toLowerCase();
     const previous = members.find(m => m.email.toLowerCase() === lc);
-    if (!previous) return { ok: false, error: 'Member not found' };
-
-    // Optimistic remove
-    setMembers(prev => prev.filter(m => m.email.toLowerCase() !== lc));
+    // Don't bail on missing local state — the row may still exist in the DB
+    // even when it's filtered out of the merged result (e.g. a shell row
+    // from the auth-flow dual-write where is_new=false hides it from the
+    // mergeTeamMembers second pass, or a soft-deleted row). Without this,
+    // an admin trying to clean up a stale FE-only userAccessMap entry hit
+    // "Member not found" while the server happily holds the row that
+    // makes a later POST fail with "already exists". Let the server be
+    // the source of truth.
+    if (previous) {
+      // Optimistic remove
+      setMembers(prev => prev.filter(m => m.email.toLowerCase() !== lc));
+    }
 
     try {
       await apiFetch(`/team-members/${encodeURIComponent(lc)}`, { method: 'DELETE' });
       return { ok: true };
     } catch (err) {
-      // Roll back
-      setMembers(prev => [...prev, previous]);
+      if (previous) {
+        // Roll back the optimistic remove
+        setMembers(prev => [...prev, previous]);
+      }
       return { ok: false, error: err.message || 'Failed to remove member' };
     }
   }, [members]);
