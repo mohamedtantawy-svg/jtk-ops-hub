@@ -132,11 +132,16 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
   const myTicketsForSla = useMemo(() => myTickets.filter(t => t.source !== 'jira'), [myTickets]);
 
   const myResolvedToday = useMemo(() => {
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    const todayMs = today.getTime();
+    // Rolling 24h window (per user request 2026-05-07). Was previously
+    // anchored on local midnight, which collapsed the count to 0 every
+    // morning and made "resolved today" useless for someone reviewing
+    // overnight closes. The window matches the upstream limits we
+    // already pull (Zendesk solved updated<24hours; deel-api workbench
+    // includeCompleted lookback 24h) so we never paint a partial picture.
+    const cutoffMs = Date.now() - 24 * 60 * 60 * 1000;
     // Zendesk + Jira from the unified `tasks` array. The queue route
     // already pulls solved-within-24h Zendesk tickets; this filter narrows
-    // to today's local-midnight cutoff and the current viewer.
+    // to the rolling cutoff and the current viewer.
     const ticketResolved = (tasks || [])
       .filter(t => (t.assigneeEmail || '').toLowerCase() === myEmail)
       .filter(t => t.status === 'resolved')
@@ -147,7 +152,7 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
         })();
         return { row: t, ms, source: t.source || 'zendesk', kind: 'ticket' };
       })
-      .filter(x => x.ms >= todayMs);
+      .filter(x => x.ms >= cutoffMs);
     // Workbench — server pulls COMPLETED rows within the last 24h via
     // deel-api.listWorkbenchTasks(includeCompleted=true). Read the RAW
     // `wb.tasks` (not the normalised SourceTable rows) because
@@ -166,7 +171,7 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
         })();
         return { row: t, ms, source: 'workbench', kind: 'workbench' };
       })
-      .filter(x => x.ms >= todayMs);
+      .filter(x => x.ms >= cutoffMs);
     return [...ticketResolved, ...wbResolved].sort((a, b) => b.ms - a.ms);
   }, [tasks, wb.tasks, myEmail]);
 
@@ -488,7 +493,7 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
                 label="Resolved"
                 value={`${myResolvedToday.length}`}
                 color="#34d399"
-                sub="today"
+                sub="past 24h"
                 onClick={myResolvedToday.length > 0 ? () => setResolvedListOpen(true) : null}
               />
             </div>
@@ -1040,9 +1045,9 @@ function ResolvedTodayModal({ items, onClose }) {
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         }}>
           <div>
-            <div style={{ fontSize: 15, fontWeight: 700 }}>Resolved today</div>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>Resolved · past 24h</div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-              {items.length} item{items.length === 1 ? '' : 's'} closed since midnight
+              {items.length} item{items.length === 1 ? '' : 's'} closed in the last 24 hours
             </div>
           </div>
           <button
@@ -1063,7 +1068,7 @@ function ResolvedTodayModal({ items, onClose }) {
         <div style={{ flex: 1, overflow: 'auto' }}>
           {items.length === 0 ? (
             <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-              Nothing resolved yet today.
+              Nothing resolved in the last 24 hours.
             </div>
           ) : (
             <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
