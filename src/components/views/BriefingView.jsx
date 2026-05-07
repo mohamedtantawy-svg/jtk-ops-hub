@@ -309,6 +309,54 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   }, [scopeIds, visibleEmails]);
   const scope=tasks.filter(t=>inScope(t)&&t.status!=='resolved');
   const personal=tasks.filter(t=>(t.assigneeId===user.id||(t.assigneeEmail&&t.assigneeEmail.toLowerCase()===user.email?.toLowerCase()))&&t.status!=='resolved');
+
+  // ── Resolved past 24h, cross-source, scoped per role ──────────────────
+  // Mohamed Tantawy 2026-05-07: agents see "1" while admin sees "722"
+  // because the admin tile counted scoped ZD/Jira-only resolved (org-wide
+  // for admin, team for TL, etc.). Align with AgentHome's pattern: rolling
+  // 24h window across every source we have completed-data for (ZD + Jira
+  // via the queue's solved<24h fetch; Workbench via deel-api's
+  // includeCompleted lookback). Other Deel sources don't currently
+  // expose COMPLETED rows — adding `includeCompleted` to those loaders
+  // is a separate scope (acceptable per "if no data source is available
+  // it's okay"). The scope filter now mirrors `inScope` so each role
+  // sees a count that matches their visibility:
+  //   • Agent     → assignee = self
+  //   • TL / RM   → assignee ∈ visibleEmails (own + reports)
+  //   • Admin     → all
+  const resolvedPast24h = useMemo(() => {
+    const cutoffMs = Date.now() - 24 * 60 * 60 * 1000;
+    const lcEmail = String(user?.email || '').toLowerCase();
+    const inResolvedScope = (assigneeEmail) => {
+      if (isAllScope) return true;
+      const lc = String(assigneeEmail || '').toLowerCase();
+      if (!lc) return false;
+      if (isOwnScope) return lc === lcEmail;
+      return visibleEmails.has(lc);
+    };
+    const ticketResolved = (tasks || [])
+      .filter(t => t.status === 'resolved')
+      .filter(t => inResolvedScope(t.assigneeEmail))
+      .map(t => {
+        const d = t.updatedAt || t.resolvedAt;
+        const ms = d ? new Date(d).getTime() : 0;
+        return { row: t, ms, source: t.source || 'zendesk', kind: 'ticket' };
+      })
+      .filter(x => x.ms >= cutoffMs);
+    // Raw workbench tasks (un-normalized) so we can read t.status === 'COMPLETED'
+    // and t.completedAt directly. The normaliser replaces t.status with a
+    // display-object, which would lose the bucket.
+    const wbResolved = (workbenchData?.tasks || [])
+      .filter(t => String(t?.status || '').toUpperCase() === 'COMPLETED')
+      .filter(t => inResolvedScope(t?.assignee?.email))
+      .map(t => {
+        const d = t.completedAt || t.updatedAt;
+        const ms = d ? new Date(d).getTime() : 0;
+        return { row: t, ms, source: 'workbench', kind: 'workbench' };
+      })
+      .filter(x => x.ms >= cutoffMs);
+    return [...ticketResolved, ...wbResolved].sort((a, b) => b.ms - a.ms);
+  }, [tasks, workbenchData?.tasks, user?.email, isAllScope, isOwnScope, visibleEmails]);
   const total=scope.length;
   // Exclude waiting (snoozed) tasks from SLA counts — matches Queue.jsx behaviour
   const slaScope=scope.filter(t=>t.status!=='waiting');
@@ -333,7 +381,10 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const newT=scope.filter(t=>t.status==='new');
   const ipT=scope.filter(t=>t.status==='in_progress');
   const waitT=scope.filter(t=>t.status==='waiting');
-  const resolved=tasks.filter(t=>inScope(t)&&t.status==='resolved').length;
+  // The legacy `resolved` count (in-scope all-time ZD/Jira) was replaced
+  // by the cross-source past-24h `resolvedPast24h` memo above. Removed
+  // to avoid confusion — `zdResolved` below still computes the
+  // Zendesk-only count for the Health Score's resolution-rate input.
   const updated=scope.filter(t=>t.updatedMinsAgo!==undefined&&t.updatedMinsAgo<=120).length;
   const manager=user.lead?MEMBERS.find(m=>m.id===user.lead):null;
 
@@ -1106,15 +1157,19 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             {settings.briefing_show_kpi_cards!==false&&<div style={{display:'flex',alignItems:'center',gap:'var(--space-4, 16px)',flexShrink:0}}>
               <KpiCard label="Workload" value={wl} color={wc} icon="bi-speedometer2" clickable onClick={()=>setView('my-queue')}/>
               <KpiCard label="SLA Comp %" value={`${slaCompRate}%`} color={slaCompRate>=80?'#29811e':slaCompRate>=60?'#ed8d00':'#d42d35'} icon="bi-shield-check" clickable onClick={()=>setView('analytics')}/>
-              {/* Header KPI uses the same "in-scope all-time resolved" count as the
-                  Queue tab's Resolved counter so they stay aligned. The Status
-                  Pipeline below uses an org-wide resolved count, which can
-                  diverge from this number when scope < org. The label is
-                  qualified ("Resolved (Scope)") so the two no longer read as
-                  contradictory — the 2026-05-01 audit flagged "744 here vs 823
-                  there" as a data integrity bug; it's actually the difference
-                  between the user's scope and the full org. */}
-              <KpiCard label="Resolved (Scope)" value={resolved} color="#29811e" icon="bi-check-circle-fill" clickable onClick={()=>setView('my-queue')} title={`${resolved} resolved in your scope (matches Queue tab). Org-wide total appears in the Status Pipeline below.`}/>
+              {/* Header KPI: items resolved in the past 24h, scoped to what
+                  the viewer can see (own / team / region / org). Cross-source
+                  — counts ZD + Jira tickets plus Workbench COMPLETED rows so
+                  it actually reflects work done, not just the small subset
+                  we used to track (the pre-fix tile counted scoped ZD/Jira
+                  only, which made an HRX agent's 12 onboarding closes show
+                  up as "0"). Other Deel sources (onboarding / amendments /
+                  redlines / incentive plans / offboarding) don't currently
+                  expose COMPLETED rows from upstream — they're missing
+                  from this count by design until the loaders gain
+                  includeCompleted. The label is "Resolved (24h)" so the
+                  semantics aren't ambiguous. */}
+              <KpiCard label="Resolved (24h)" value={resolvedPast24h.length} color="#29811e" icon="bi-check-circle-fill" clickable onClick={()=>setView('my-queue')} title={`${resolvedPast24h.length} resolved in the past 24h within your scope. Counts Zendesk + Jira + Workbench (other Deel sources don't currently expose completed-data).`}/>
             </div>}
           </div>
         </div>
