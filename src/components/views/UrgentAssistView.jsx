@@ -239,7 +239,7 @@ export default function UrgentAssistView({ user, onCreate, managerOnCall, onChan
       // when 19 active urgent-assist rows exist org-wide.
       let allWb = 0;
       try {
-        const { apiFetch } = await import('../../services/apiClient');
+        const { apiFetch } = await import('../../services/api');
         const globalRes = await apiFetch('/urgent-assist/workbench-global');
         if (cancelled) return;
         const globalItems = Array.isArray(globalRes?.items) ? globalRes.items : [];
