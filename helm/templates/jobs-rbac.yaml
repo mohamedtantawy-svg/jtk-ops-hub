@@ -25,11 +25,7 @@ metadata:
     release: {{ .Release.Name }}
 subjects:
   - kind: ServiceAccount
-    # Match the SA created in service-account.yaml (sandboxName-keyed).
-    # Old `.Values.serviceAccountName` resolved to empty; harmless while
-    # jobsRbac.enabled is false but would silently bind to the empty SA
-    # if anyone flips the flag without auditing this file.
-    name: {{ .Values.sandboxName }}
+    name: {{ .Values.serviceAccountName }}
     namespace: {{ .Release.Namespace }}
 roleRef:
   kind: Role
