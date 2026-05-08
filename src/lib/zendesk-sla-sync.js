@@ -37,10 +37,16 @@ const ACTIVE_STATUSES     = ['new', 'open', 'pending', 'hold'];
 // Sequential pacing for the per-ticket SLA fetch. Zendesk Enterprise's
 // rate limit is 700 req/min; the dedicated endpoint runs ~70 ms upstream
 // + network → ~150 ms wall clock per call → naturally caps at ~7 req/s
-// = 420 req/min. We don't add artificial concurrency on top — the
-// upside (faster sync) is small and the downside (rate-limit storm
-// blocking the agent UIs that hit Zendesk concurrently) is real.
-const PER_TICKET_DELAY_MS = 0;
+// = 420 req/min. That's fine when the sync runs alone, but the queue
+// route ALSO calls Zendesk on every agent's queue refresh — and the
+// 2026-05-08 logs show the combined traffic regularly tripped the 700/min
+// limit, losing 164/1585 tickets per sync run to 429s. Adding 80 ms of
+// artificial delay drops the sync's contribution to ~4 req/s = ~240
+// req/min, leaving ~460 req/min headroom for queue + reply + user-search
+// callers. Sync wall time goes from ~3.5 min to ~5 min on 1.6k tickets,
+// still well inside the 10-min cron window. (The Retry-After-aware
+// retry in src/lib/retry.js mops up any 429s that still slip through.)
+const PER_TICKET_DELAY_MS = 80;
 // How often the cache UPSERT batches flush to the DB. Keeps the SQL
 // round-trips bounded without holding all rows in memory first.
 const UPSERT_BATCH_SIZE   = 50;

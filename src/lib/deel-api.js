@@ -86,6 +86,28 @@ async function _deelFetch(path, options = {}) {
       : '';
     const err = new Error(`Deel API ${res.status} @ ${url}: ${body.substring(0, 200)}${hint}`);
     err.status = res.status;
+    if (res.status === 429) {
+      // Deel admin API sends Retry-After in seconds when it throttles.
+      // Forward to withRetry so the backoff matches the upstream cool-down.
+      // Clamped to 60 s at the parser (defence-in-depth; withRetry caps too).
+      const RETRY_AFTER_PARSE_MAX_MS = 60_000;
+      const ra = res.headers.get('Retry-After');
+      if (ra) {
+        let parsedMs = null;
+        const asSec = Number(ra);
+        if (Number.isFinite(asSec) && asSec >= 0) {
+          parsedMs = Math.round(asSec * 1000);
+        } else {
+          const parsed = Date.parse(ra);
+          if (Number.isFinite(parsed)) {
+            parsedMs = Math.max(0, parsed - Date.now());
+          }
+        }
+        if (parsedMs !== null) {
+          err.retryAfterMs = Math.min(parsedMs, RETRY_AFTER_PARSE_MAX_MS);
+        }
+      }
+    }
     throw err;
   }
 
