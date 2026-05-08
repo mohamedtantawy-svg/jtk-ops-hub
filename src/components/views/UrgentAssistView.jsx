@@ -221,7 +221,7 @@ export default function UrgentAssistView({ user, onCreate, managerOnCall, onChan
       const matched = allWorkbenchTasks.filter(t =>
         isUrgentAssistTaskType(t?.taskType) || isUrgentAssistTaskType(t?.sourceType));
       const team = teamEmails || new Set();
-      let mineWb = 0, teamWb = 0, allWb = 0;
+      let mineWb = 0, teamWb = 0;
       for (const t of matched) {
         if (!NON_RESOLVED_UPSTREAM.has(t.status)) continue;
         const ae = (t.assignee?.email || '').toLowerCase();
@@ -229,9 +229,25 @@ export default function UrgentAssistView({ user, onCreate, managerOnCall, onChan
         if (ae && ae === lcEmail) mineWb++;
         // team: assignee in caller's team set (manager-only)
         if (wantTeam && ae && team.has(ae)) teamWb++;
-        // all: every actionable urgent-assist row globally
-        allWb++;
       }
+
+      // 3) All-scope workbench count — fetch from the unscoped global
+      // endpoint so non-admin users (RM/TL/Agent) get the true global
+      // count instead of their scoped subset (matches the table data
+      // returned by useUrgentAssistData when scope === 'all'). Without
+      // this the badge would say "0" for users like Duygu Cakalli even
+      // when 19 active urgent-assist rows exist org-wide.
+      let allWb = 0;
+      try {
+        const { apiFetch } = await import('../../services/apiClient');
+        const globalRes = await apiFetch('/urgent-assist/workbench-global');
+        if (cancelled) return;
+        const globalItems = Array.isArray(globalRes?.items) ? globalRes.items : [];
+        for (const t of globalItems) {
+          if (NON_RESOLVED_UPSTREAM.has(t.status)) allWb++;
+        }
+      } catch { /* swallow — All count falls back to 0 + manual */ }
+
       if (cancelled) return;
       setScopeCounts({
         mine: next.mine + mineWb,

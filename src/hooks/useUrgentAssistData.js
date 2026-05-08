@@ -189,23 +189,59 @@ export function useUrgentAssistData({
 
   useEffect(() => { loadManual(); }, [loadManual]);
 
+  // ── All-scope global workbench rows ──
+  // The IntegrationsContext workbench data is SCOPED per caller (the
+  // /api/v1/integrations/deel/workbench route applies scopeWorkbenchTasks
+  // before returning). That's correct for Mine/Team but WRONG for "All:
+  // Manager on Call View" — per spec, that scope is org-wide visible.
+  // Without a separate fetch, RM/TL/Agent users on All only saw their
+  // scoped subset (Duygu Cakalli reported 0 in All on 2026-05-08 because
+  // her regional subtree had no urgent-assist work, while admin saw 19).
+  //
+  // Fix: when scope === 'all', fetch from the dedicated unscoped endpoint
+  // /api/v1/urgent-assist/workbench-global. Refresh on the same cadence
+  // as a manual reload (effect re-runs when scope flips to 'all'). The
+  // endpoint piggybacks on the canonical workbench cache so we don't
+  // trigger duplicate admin-API scans.
+  const [globalWorkbenchRows, setGlobalWorkbenchRows] = useState([]);
+  const [globalWorkbenchLoading, setGlobalWorkbenchLoading] = useState(false);
+  useEffect(() => {
+    if (scope !== 'all') return undefined;
+    let cancelled = false;
+    setGlobalWorkbenchLoading(true);
+    (async () => {
+      try {
+        const { apiFetch } = await import('../services/apiClient');
+        const res = await apiFetch('/urgent-assist/workbench-global');
+        if (cancelled) return;
+        setGlobalWorkbenchRows(Array.isArray(res?.items) ? res.items : []);
+      } catch {
+        // Silent — surface as empty so the All view degrades gracefully.
+        // The IntegrationsContext (scoped) data still renders for managers
+        // / admins; agents on All would just see an empty table briefly.
+        if (!cancelled) setGlobalWorkbenchRows([]);
+      } finally {
+        if (!cancelled) setGlobalWorkbenchLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [scope]);
+
   // ── Workbench rows — filter to the urgent-assist task types ──
   // Then apply scope. Mine: assignee or creator = me. Team (manager only):
-  // assignee in my team. All: passes through.
+  // assignee in my team. All: from the unscoped global fetch above.
   const lcUser = (userEmail || '').toLowerCase();
   const workbenchUrgent = useMemo(() => {
+    if (scope === 'all') {
+      // Already pre-filtered to UA task types by the server endpoint.
+      // Return the unscoped global list so every role sees the full org
+      // view, per spec. Earlier implementation pulled from the (scoped)
+      // IntegrationsContext data and contradicted the "All" label for
+      // non-admin roles.
+      return globalWorkbenchRows;
+    }
     const tasks = Array.isArray(workbenchData.tasks) ? workbenchData.tasks : [];
     const matched = tasks.filter(t => isUrgentAssistTaskType(t?.taskType) || isUrgentAssistTaskType(t?.sourceType));
-    if (scope === 'all') {
-      // 2026-05-04 spec: "All Requests" is literal — every urgent-assist
-      // row across the org. Returning `matched` for every role matches
-      // the user's intent and aligns with the manual rows API which
-      // already returns everything for `all` (no predicate). Earlier
-      // implementation narrowed non-admins by visibleEmails (audit F7);
-      // that drift caused RM/TL "All" totals to differ from admin's,
-      // contradicting the label.
-      return matched;
-    }
     // Per the 2026-05-03 spec: "my requests = any request where I'm
     // assigned" — workbench-sourced rows now match on `assignee.email`
     // ONLY (no creator-OR fallback). Same rule for Team (assignee in
@@ -223,7 +259,7 @@ export function useUrgentAssistData({
     }
     // mine — assignee match only, per spec.
     return matched.filter(t => (t.assignee?.email || '').toLowerCase() === lcUser);
-  }, [workbenchData.tasks, scope, lcUser, isManager, isAdmin, teamEmails, visibleEmails]);
+  }, [workbenchData.tasks, scope, lcUser, isManager, isAdmin, teamEmails, visibleEmails, globalWorkbenchRows]);
 
   const items = useMemo(() => {
     const out = [];
@@ -261,7 +297,13 @@ export function useUrgentAssistData({
   return {
     items,
     statusCounts,
-    loading: !!(workbenchData.loading || manualLoading),
+    // For scope=all the global workbench fetch is the load-bearing source,
+    // so include its loading state. For other scopes the IntegrationsContext
+    // workbench loading state covers it.
+    loading: !!(
+      manualLoading
+      || (scope === 'all' ? globalWorkbenchLoading : workbenchData.loading)
+    ),
     error: workbenchData.error || manualError || null,
     refresh: useCallback(() => {
       loadManual();

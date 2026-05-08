@@ -1287,7 +1287,17 @@ const App=()=>{
         .then(data => {
           if (active && data?.name) {
             setManagerOnCall(prev => {
-              if (prev.name === data.name && prev.email === data.email) return prev;
+              // Compare ALL load-bearing fields, including updatedAt — the
+              // MOC alert popup useEffect (below) keys on `updatedAt` to
+              // detect a fresh assignment, so a name+email-only equality
+              // check would suppress re-assignments to the same person and
+              // the new MOC would never see the popup. Confirmed bug
+              // 2026-05-08: re-rotating MOC to the same person never
+              // re-fired the alert.
+              const sameName = prev?.name === data.name;
+              const sameEmail = (prev?.email || '') === (data.email || '');
+              const sameUpdatedAt = (prev?.updatedAt || null) === (data.updatedAt || null);
+              if (sameName && sameEmail && sameUpdatedAt) return prev;
               return data;
             });
           }
