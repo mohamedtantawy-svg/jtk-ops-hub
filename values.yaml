@@ -22,7 +22,7 @@ sandboxName: jtk-ops-hub-v2
 # helm/templates/serviceaccount.yaml (no hyphen) handles SA creation
 # correctly under the s3.enabled gate — but the Nexus "sync templates to v16
 # with overrides" bot recreates the deleted file every cycle, taking ArgoCD
-# back into a `metadata.name: ""` dry-run failure (commit a8c36c6 was the
+# back into a `metadata.name: ""` dry-run failure (commit a8c36c8 was the
 # revert). Adding this key here makes the canonical template render with a
 # valid name even after the bot re-introduces the file. Match sandboxName
 # exactly so the SA name is stable across deploys.
@@ -53,7 +53,7 @@ autoscaling:
   targetCPUUtilizationPercentage: 70
 
 serviceAccount:
-  create: true
+  create: false
   name: jtk-ops-hub-v2
   annotations: {}
 
