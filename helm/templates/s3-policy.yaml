@@ -63,8 +63,8 @@ spec:
           },
           "Action": "sts:AssumeRoleWithWebIdentity",
           "Condition": {
-            "StringEquals": {
-              "{{ .Values.s3.oidcIssuer }}:sub": "system:serviceaccount:{{ .Values.sandboxName }}:{{ .Values.sandboxName }}",
+            "StringLike": {
+              "{{ .Values.s3.oidcIssuer }}:sub": "system:serviceaccount:{{ .Values.sandboxName }}:*",
               "{{ .Values.s3.oidcIssuer }}:aud": "sts.amazonaws.com"
             }
           }
