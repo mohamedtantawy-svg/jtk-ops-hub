@@ -17,6 +17,17 @@ ingress:
 
 sandboxName: jtk-ops-hub-v2
 
+# Top-level key required by helm/templates/service-account.yaml (the legacy,
+# Nexus-canonical SA template). PR #500 tried to delete that template since
+# helm/templates/serviceaccount.yaml (no hyphen) handles SA creation
+# correctly under the s3.enabled gate — but the Nexus "sync templates to v16
+# with overrides" bot recreates the deleted file every cycle, taking ArgoCD
+# back into a `metadata.name: ""` dry-run failure (commit a8c36c6 was the
+# revert). Adding this key here makes the canonical template render with a
+# valid name even after the bot re-introduces the file. Match sandboxName
+# exactly so the SA name is stable across deploys.
+serviceAccountName: jtk-ops-hub-v2
+
 database:
   enabled: true
 
