@@ -211,7 +211,7 @@ export function useUrgentAssistData({
     setGlobalWorkbenchLoading(true);
     (async () => {
       try {
-        const { apiFetch } = await import('../services/apiClient');
+        const { apiFetch } = await import('../services/api');
         const res = await apiFetch('/urgent-assist/workbench-global');
         if (cancelled) return;
         setGlobalWorkbenchRows(Array.isArray(res?.items) ? res.items : []);
