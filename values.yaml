@@ -54,3 +54,6 @@ publicIngress:
 
 redis:
   enabled: false
+
+jobsRbac:
+  enabled: false
