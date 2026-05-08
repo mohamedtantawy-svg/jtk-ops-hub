@@ -25,9 +25,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
     spec:
-      {{- if .Values.s3.enabled }}
-      serviceAccountName: {{ .Values.sandboxName }}
-      {{- end }}
+      serviceAccountName: {{ .Values.serviceAccountName }}
       containers:
         - name: app
           image: "{{ .Values.app.image.repository }}:{{ .Values.app.image.tag }}"

@@ -1,4 +1,5 @@
 sandboxName: "my-sandbox"
+serviceAccountName: "app"
 
 app:
   image:
@@ -85,3 +86,8 @@ s3:
   bucket: "deel-playgrounds-data"
   accountId: "211125331032"
   oidcIssuer: "oidc.eks.eu-west-1.amazonaws.com/id/6D88D8938454CA111E105EEC1A1D5630"
+
+jobsRbac:
+  enabled: false
+  roleName: "nexus-jobs-role"
+  bindingName: "nexus-jobs-binding"
