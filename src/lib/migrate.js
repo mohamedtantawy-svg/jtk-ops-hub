@@ -1288,6 +1288,42 @@ BEGIN
     ON CONFLICT (email) DO NOTHING;
   END IF;
 END $$;
+
+-- ── One-shot backfill cleanup (2026-05-08) ────────────────────────────
+-- The 2026-05-07 last_seen_at backfill set last_seen_at = last_login_at
+-- for every existing row, so the badge "looked populated" on launch.
+-- We then discovered POST /api/v1/auth/heartbeat had been returning 401
+-- for the entire post-deploy window (the middleware skipped JWT
+-- verification for the whole /api/v1/auth/* prefix, including the new
+-- heartbeat route). Net result: every row STILL had last_seen_at exactly
+-- equal to last_login_at — confirmed by a live probe showing 85/85 rows
+-- equal, 0 diverged.
+--
+-- Now that the middleware bug is fixed and the FE hook only fires on
+-- real interaction, this UPDATE wipes the bogus backfilled values so the
+-- badge starts honest. Inactive users will read "Never seen" until they
+-- actually use the app — which is the correct truth, not "X hr ago"
+-- inferred from a stale tab they had open last week.
+--
+-- Gated by an app_settings sentinel so it runs ONCE on this deploy and
+-- never again. Only matches rows where the two timestamps are byte-equal,
+-- which is the proof-of-backfill signature: a real heartbeat would have
+-- moved last_seen_at strictly after last_login_at by definition (auth
+-- writes both, heartbeat writes only last_seen_at).
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM app_settings WHERE key = 'member_logins_backfill_v2_cleared'
+  ) THEN
+    UPDATE member_logins
+       SET last_seen_at = NULL
+     WHERE last_seen_at IS NOT NULL
+       AND last_seen_at = last_login_at;
+    INSERT INTO app_settings (key, value, updated_by, updated_at)
+    VALUES ('member_logins_backfill_v2_cleared', 'true'::jsonb, 'migrate.js', NOW())
+    ON CONFLICT (key) DO NOTHING;
+  END IF;
+END $$;
 `;
 
 export async function runMigrations() {

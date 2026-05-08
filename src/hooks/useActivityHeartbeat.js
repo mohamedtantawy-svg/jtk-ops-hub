@@ -73,8 +73,14 @@ function postHeartbeat() {
  *   hook tears down its listeners.
  */
 export function useActivityHeartbeat(loggedInEmail) {
-  // ref so the polling effect doesn't tear down on every event
-  const lastActivityRef = useRef(typeof performance !== 'undefined' ? performance.now() : Date.now());
+  // ref so the polling effect doesn't tear down on every event.
+  // Sentinel `0` = "user has not interacted yet". Any timer that wants
+  // to send a heartbeat MUST first verify lastActivityRef.current > 0
+  // (real activity recorded) AND that the gap to now() is within the
+  // active window. Without the sentinel, initialising to performance.now()
+  // / Date.now() would make every fresh mount appear "active" for the
+  // first 90 s — exactly the bug the heartbeat was meant to kill.
+  const lastActivityRef = useRef(0);
 
   useEffect(() => {
     if (!loggedInEmail) return;
@@ -83,31 +89,33 @@ export function useActivityHeartbeat(loggedInEmail) {
     const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
     const recordActivity = () => { lastActivityRef.current = now(); };
+    const isActive = () =>
+      lastActivityRef.current > 0 &&
+      now() - lastActivityRef.current < ACTIVE_WINDOW_MS;
 
     // Attach listeners. `passive: true` keeps scroll perf intact; `capture:
     // true` so listeners on stop-propagation handlers still see the event.
+    // visibilitychange is NOT wired here on purpose — Cmd+Tab returning to
+    // a tab is too weak a signal of engagement (a glance through tabs would
+    // bump the badge to "Just now"). Only real interaction counts.
     for (const ev of ACTIVITY_EVENTS) {
       window.addEventListener(ev, recordActivity, { passive: true, capture: true });
     }
-    // visibilitychange counts as activity — coming back to the tab is the
-    // user re-engaging, even if they don't click immediately.
-    const onVisibility = () => {
-      if (!document.hidden) recordActivity();
-    };
-    document.addEventListener('visibilitychange', onVisibility);
 
     // First heartbeat 5s after sign-in / mount so the badge updates
-    // promptly without waiting a full minute.
+    // promptly without waiting a full minute — but ONLY if the user
+    // actually clicked / typed / scrolled / touched in those 5 seconds.
+    // A passive page open with zero interaction stays silent.
     const primingTimer = setTimeout(() => {
-      if (!document.hidden && now() - lastActivityRef.current < ACTIVE_WINDOW_MS) {
-        postHeartbeat();
-      }
+      if (typeof document !== 'undefined' && document.hidden) return;
+      if (!isActive()) return;
+      postHeartbeat();
     }, 5_000);
 
     // Recurring tick.
     const interval = setInterval(() => {
       if (typeof document !== 'undefined' && document.hidden) return;     // tab in background
-      if (now() - lastActivityRef.current > ACTIVE_WINDOW_MS) return;     // idle
+      if (!isActive()) return;                                            // never interacted / idle
       postHeartbeat();
     }, HEARTBEAT_INTERVAL_MS);
 
@@ -116,7 +124,7 @@ export function useActivityHeartbeat(loggedInEmail) {
     // completes even after the page unloads.
     const onUnload = () => {
       if (typeof document !== 'undefined' && document.hidden) return;
-      if (now() - lastActivityRef.current > ACTIVE_WINDOW_MS) return;
+      if (!isActive()) return;
       postHeartbeat();
     };
     window.addEventListener('pagehide', onUnload);
@@ -125,7 +133,6 @@ export function useActivityHeartbeat(loggedInEmail) {
       for (const ev of ACTIVITY_EVENTS) {
         window.removeEventListener(ev, recordActivity, { capture: true });
       }
-      document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pagehide', onUnload);
       clearTimeout(primingTimer);
       clearInterval(interval);

@@ -152,8 +152,17 @@ export async function middleware(request) {
   // hit as a top-level browser redirect from Google's consent screen — no
   // bearer token is available at that point. The callback itself
   // authenticates via the signed `state` JWT (see src/lib/oauth-state.js).
+  //
+  // EXCEPTION: /api/v1/auth/heartbeat needs the Bearer token to identify
+  // the user whose last_seen_at to bump. It lives under the /api/v1/auth
+  // prefix only because every other auth-related route does, but it is
+  // an authenticated endpoint and MUST go through the JWT verification
+  // below — otherwise getAuthUser() reads no x-user-* headers and the
+  // route returns 401 for every call. (Caught 2026-05-08: the column
+  // had been showing last_login_at across the board because zero
+  // heartbeats were ever landing.)
   if (
-    pathname.startsWith('/api/v1/auth') ||
+    (pathname.startsWith('/api/v1/auth') && pathname !== '/api/v1/auth/heartbeat') ||
     pathname === '/api/v1/config' ||
     pathname === '/api/v1/version' ||
     pathname === '/api/v1/integrations/status' ||
