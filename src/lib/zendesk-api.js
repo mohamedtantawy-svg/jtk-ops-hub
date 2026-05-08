@@ -72,6 +72,33 @@ async function _zendeskFetch(endpoint, options = {}) {
     const body = await res.text().catch(() => '');
     const err = new Error(`Zendesk API ${res.status}: ${body.substring(0, 200)}`);
     err.status = res.status;
+    if (res.status === 429) {
+      // Zendesk sets Retry-After in seconds (per docs + observed behaviour).
+      // Pass it through to withRetry so the backoff respects the upstream's
+      // cool-down hint — generic exponential backoff would miss the limit
+      // window and waste another attempt. Spec also allows an HTTP-date,
+      // which we parse defensively (ms diff to now, floored at 0).
+      // Clamped to 60 s at the parser as defence-in-depth — withRetry caps
+      // the actual wait too, but bounding the value at the source means a
+      // hostile upstream can't make us hold a multi-minute timer either way.
+      const RETRY_AFTER_PARSE_MAX_MS = 60_000;
+      const ra = res.headers.get('Retry-After');
+      if (ra) {
+        let parsedMs = null;
+        const asSec = Number(ra);
+        if (Number.isFinite(asSec) && asSec >= 0) {
+          parsedMs = Math.round(asSec * 1000);
+        } else {
+          const parsed = Date.parse(ra);
+          if (Number.isFinite(parsed)) {
+            parsedMs = Math.max(0, parsed - Date.now());
+          }
+        }
+        if (parsedMs !== null) {
+          err.retryAfterMs = Math.min(parsedMs, RETRY_AFTER_PARSE_MAX_MS);
+        }
+      }
+    }
     throw err;
   }
 
