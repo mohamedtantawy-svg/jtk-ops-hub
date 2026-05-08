@@ -491,6 +491,57 @@ Any new CSV download route must:
 - **ASCII-safe filename** in `Content-Disposition` (Safari drops the header on non-ASCII).
 - **`.catch()` on optional secondary queries** in `Promise.all` so a missing table on a brand-new env serves with empty counts instead of 500ing the whole download.
 
+### 3.16 Platform vs project boundary — when to escalate to the Nexus team
+
+Some bugs aren't ours to fix. The chart files in `helm/templates/*.yaml`
+and the chart-default values in `helm/values.yaml` (note the prefix —
+this is NOT the project root `values.yaml`) are part of Nexus's canonical
+template set; every project on the same chart version gets the same
+baseline. When one of those files has a bug, project-level fixes fail:
+
+- **Editing the template** → Nexus's `[skip ci] sync templates to v16
+  with overrides` bot reverts your edit on its next cycle.
+- **Deleting the template** → same bot recreates the file on the next
+  cycle.
+- **Adding the missing key to OUR `values.yaml`** → works on dev, but
+  Nexus's `deploy: merge dev into main (user code only)` bot strips
+  values.yaml from the dev → main merge, so the fix never reaches prod
+  through the standard flow.
+
+The right answer is to ask the platform team (Mariusz et al.) to fix the
+canonical. The 2026-05-08 v16 SA template bug (broken
+`helm/templates/service-account.yaml` referencing a values key that
+wasn't in canonical defaults) was fixed by adding
+`serviceAccountName: "app"` to the canonical `helm/values.yaml`, which
+gave the broken template a valid fallback for every project automatically.
+
+**How to recognise a canonical-template bug:**
+- A `[skip ci] sync templates to v<N> with overrides` commit appears
+  in `git log nexus/dev` shortly before the symptom started.
+- The failing template references a `.Values.<key>` that isn't in
+  either our `values.yaml` or the chart's `helm/values.yaml`.
+- The same dry-run failure would presumably affect any other project
+  on the same Nexus chart version.
+
+**Escalate vs project-fix decision matrix:**
+
+| Layer | Owner | Examples |
+|---|---|---|
+| `src/`, `app/`, `.github/workflows/`, `Dockerfile` (mostly), root `values.yaml` | Project (us) | App code, API routes, runtime config. Standard PR → dev → Deploy Now. |
+| `helm/templates/*.yaml`, `helm/values.yaml`, ArgoCD config, the template-sync mechanism | Platform (Nexus team) | Escalate via Slack to Mariusz. Don't try to work around. |
+
+The Template Overrides UI in Nexus Settings exists as a project-level
+override mechanism, but the 2026-05-08 attempt to use "Add project-
+specific file" for an existing canonical template was wrong per the
+platform team. Until we have documented confirmation of the right UI
+flow, default to platform escalation.
+
+**Lesson logged 2026-05-08:** three failed PRs (#498/#500/#502) burned
+~2 hours each trying project-level workarounds for a v16 chart bug.
+The first sign of `sync templates to ... with overrides` reverting
+your fix is the signal to STOP and escalate, not to try a different
+angle.
+
 ---
 
 ## Phase 4 — Post-implementation audit
@@ -700,6 +751,69 @@ Tell the user:
 > **Heads up:** the dev→main PR will likely show a `values.yaml` tag conflict — take main's tag as usual.
 > After deploy, users must **Cmd+Shift+R** to pick up new JS chunks (Next.js caches aggressively).
 
+### 5.8 The dev → main "user code only" filter — `values.yaml` is stripped
+
+Nexus's `deploy: merge dev into main (user code only)` is a SQUASH merge
+that filters by file type. Confirmed 2026-05-08: after a Deploy Now
+click, the resulting commit on main contained ONLY `.test-trigger`
+even though dev had a `values.yaml` addition (PR #502). The user-code
+-only merge skips:
+
+- `values.yaml` (project root) — confirmed
+- `helm/values.yaml` (chart defaults) — confirmed
+- `helm/templates/*.yaml` (chart templates) — confirmed
+- `.github/workflows/ci.yml` (Nexus has its own canonical) — likely
+- `Dockerfile` (template-managed) — likely
+
+Long-standing pattern: main's `resources` block was ~4 days behind
+dev's `1Gi memory bump` because of this filter. Anything you add to
+dev's `values.yaml` lives there permanently with no path to main via
+Deploy Now.
+
+**Implication:** if your fix needs `values.yaml` to land on main, the
+standard PR → dev → Deploy Now flow won't work. Three options:
+
+1. **Direct hotfix PR base=main** — see §5.9. Requires explicit user
+   authorisation; hooks deny by default.
+2. **Ask the user to manually edit `values.yaml` on main** during
+   their normal Deploy Now flow — they're already familiar with the
+   `values.yaml` tag-conflict resolution path.
+3. **Ask the platform team** to add the value to canonical
+   `helm/values.yaml` (so every project gets it as a chart default).
+   This is the right answer when the value would benefit other
+   projects too — see §3.16.
+
+Default to option 3 for canonical-template adjacent fixes (the
+2026-05-08 SA bug should have been escalated immediately, not worked
+around three times). Option 1 for genuinely project-specific values.
+
+### 5.9 Direct-to-main hotfix workflow
+
+When the dev → main filter blocks a `values.yaml` fix and platform
+escalation isn't viable, you need a hotfix PR base=main. Hooks deny
+pushing such branches by default. Procedure:
+
+1. Branch off `nexus/main`: `git checkout -b hotfix/<slug> nexus/main`
+2. Make the change, commit locally.
+3. Try `git push -u nexus hotfix/<slug>` — expect a deny like:
+   > "Pushing a new branch directly targeting main bypasses the user's
+   > established dev → main flow."
+4. Stop. Explain to the user: "Hotfix to main needs your explicit OK
+   to push. Either authorise me, or you push it from your terminal:
+   `cd ~/Desktop/ops-hub && git push -u nexus <branch>`."
+5. Once pushed, open PR with `gh pr create --base main`.
+6. CI runs as normal (CodeQL + both Analyze checks).
+7. **STOP. The user merges to main themselves** — never run
+   `gh pr merge` on a base=main PR.
+8. After merge, GitHub Actions `Push on main` runs (~2-3 min) → image
+   tag bumps → ArgoCD reconciles. Verify with §6.5 `/version`
+   `startedAt` check.
+
+**Hooks rejecting "looks like authorisation":** "go with A" or "sounds
+good" is not specific enough — the deny rule wants explicit phrasing
+like "yes push the hotfix branch directly to main" or for the user to
+push themselves. Default to user-pushes-themselves to remove ambiguity.
+
 ---
 
 ## Phase 6 — Post-deploy verification (when user says "i deployed, can you check")
@@ -739,6 +853,34 @@ git show nexus/main:values.yaml | grep -E "^\s*tag:"
 ```
 
 Tag should be the SHA of the merge commit. ArgoCD syncs from this.
+
+### 6.4b The `/api/v1/version` `startedAt` check — definitive "is the new pod live"
+
+ArgoCD's `Applying latest changes...` status is NOT proof that the new
+pods rolled. The deploy can sit in a dry-run failure loop while ArgoCD
+keeps retrying — image tag bumped, build green, but cluster still
+serving the old pod. The only reliable liveness check is asking the
+running pod when it booted:
+
+```bash
+curl -s https://jtk.dp.com/api/v1/version | jq
+# { "version": "<random>", "startedAt": "<ISO timestamp>" }
+```
+
+Procedure:
+1. Note the time of the most recent `[skip ci]: update image tag to ...`
+   commit on main.
+2. Curl `/api/v1/version`.
+3. `startedAt` should be within ~2-3 min of the tag bump. If it's older
+   (especially "yesterday" old), the new pods aren't rolling — investigate
+   ArgoCD's `App Conditions` for `SyncError` and dry-run output.
+
+**Real example 2026-05-08:** image tag bumped at 11:00 UTC, `/version`
+still returned `startedAt: 2026-05-07T19:15:44Z` (yesterday's pod) for
+~30 min because ArgoCD's dry-run kept rejecting an empty SA name.
+Without the `startedAt` check we would have assumed the deploy was
+healthy and missed the failure entirely. Always include this in the
+post-deploy audit.
 
 ### 6.5 Browser cache disclaimer
 
@@ -895,6 +1037,26 @@ Compile report
 31. **Don't read URL params in a `useEffect`; read them in the `useState` initialiser.** Hard refresh on a deep-link URL (`?view=hr-hub&req=<uuid>`) defaults to `briefing` if `view` is initialised as the literal `'briefing'` and the URL is only consulted on mount. Read the URL search params inside the `useState(() => …)` initialiser so the first paint is correct. The 2026-05-02 HR Hub fix landed this in `App.jsx`'s view useState init — server-pushed deep-links from the bell + shared URLs now restore both view and per-view drawer state on F5.
 
 32. **Don't ship a topbar without responsive collapse rules.** The 2026-05-02 audit caught the topnav clipping at ≤1100 px: HR Hub label rendered as "HR Hu", search/bell/avatar pushed off-screen. Three-tier CSS-only collapse (1280 → icon-only tabs, 900 → user-pill text hidden, 760 → primary tabs scroll horizontally) lives in `index.css` § "Top nav responsive collapse". Whenever you add a new primary tab or right-side icon, re-test at all four breakpoints; small additions cumulatively overflow.
+
+33. **Don't try to fix Nexus canonical-template bugs at the project level.** When a `[skip ci] sync templates to v<N> with overrides` commit appears in `git log nexus/dev` shortly before a symptom started, and the failing template references a `.Values.<key>` not in any `values.yaml` we own — that's a platform bug. Editing the template gets reverted. Deleting it gets recreated. Adding the key to OUR `values.yaml` works on dev but never reaches main (see #34). The 2026-05-08 v16 SA template bug burned ~6 hours across PRs #498/#500/#502/#504 trying project-level workarounds before Mariusz fixed it in canonical `helm/values.yaml` in 5 minutes. First sign of a `sync templates` revert = STOP and escalate. See §3.16.
+
+34. **Nexus's `deploy: merge dev into main (user code only)` STRIPS `values.yaml` from the dev → main path.** Long-standing, confirmed 2026-05-08 by inspecting the merge commit's stat (only `.test-trigger` changed despite a `values.yaml` addition on dev). Same filter likely applies to `helm/values.yaml`, `helm/templates/*.yaml`, `.github/workflows/ci.yml`, `Dockerfile`. Anything you add to dev's `values.yaml` lives there permanently with no path to main via Deploy Now. If your fix needs `values.yaml` to land on main: direct hotfix PR base=main (§5.9), or ask the user to manually edit, or escalate to platform team (preferred). See §5.8.
+
+35. **Don't trust ArgoCD's "Applying latest changes…" status as a healthy rollout — verify with `/api/v1/version` `startedAt`.** It can mean "stuck in a dry-run failure loop." Image tag bumped, build green, but the cluster is still serving the old pod because every reconcile attempt fails. Curl `https://jtk.dp.com/api/v1/version | jq .startedAt` — should be within ~2-3 min of the most recent image-tag bump. If it's older (especially "yesterday"), the new pods aren't rolling. The 2026-05-08 v16 SA bug had `startedAt` stuck at the previous evening for ~30 min while ArgoCD looked busy. See §6.4b.
+
+36. **Nexus log UI's "Errors detected" badge is substring-based — false-positives on success messages.** `[zd-sla-sync] done: 1550/1550 cached in 215080ms (0 no-policy, 0 error(s))` lights up red because the substring `error` appears, but the actual data is `0 errors` (perfect run). Read the full log line, not just the badge. Doesn't make the badge wrong — but don't react to "Errors detected" alone.
+
+37. **HTTP 429 is retryable, not a 4xx terminal failure — special-case it in `withRetry`.** The shared `src/lib/retry.js` previously threw on every 4xx including 429, so every Zendesk rate-limit hit was data loss (164 Zendesk SLA tickets per cycle on 2026-05-08). Fix: parse `Retry-After` in the API client (Zendesk/Jira/Deel) into `err.retryAfterMs` (clamped at 60 s at the parser as defence-in-depth), and in `withRetry` use that value as the backoff (capped at 5 s — `RATE_LIMIT_MAX_WAIT_MS` — so an interactive route can't hang for the upstream's full cool-down). Other 4xx still throw immediately. CodeQL also flags `setTimeout(fn, x)` where `x` flows from an HTTP header (`js/resource-exhaustion`); the analyzer-friendly fix is to discretise `x` into a fixed allowlist of timer durations and call `setTimeout` with a NUMERIC LITERAL on each branch — const-bound `Math.min(x, CONST)` does NOT satisfy CodeQL. See PR #497 (`src/lib/retry.js _sleep` bucketed implementation).
+
+38. **For real-activity heartbeats, init the activity ref to sentinel `0` — NOT `performance.now()`.** Initialising to current time makes the activity-window check `now() - lastActivityRef.current < ACTIVE_WINDOW_MS` ALWAYS true on a fresh mount, so the priming heartbeat fires regardless of real interaction. The whole point of activity tracking is "real interaction OR nothing" — sentinel `0` enforces that. Also drop `visibilitychange` as an activity signal (Cmd+Tab glance is too weak). PR #495 fixed this; without it, every page refresh / new tab fires a heartbeat — defeating the purpose. See `src/hooks/useActivityHeartbeat.js`.
+
+39. **Backfill migrations need a cleanup escape hatch when the source data was bug-driven.** PR #492 backfilled `member_logins.last_seen_at = last_login_at` so the badge wouldn't read "Never seen" for everyone immediately after rollout — but the bug fixed in #495 (heartbeat 401-ing the entire window) meant no real heartbeats ever overwrote the backfill. Result: column showed last LOGIN data forever, not last SEEN. Fix needed an `app_settings`-gated `UPDATE … SET last_seen_at = NULL WHERE last_seen_at = last_login_at` to clear the bogus seed. When you backfill a "real activity" column from a less-accurate source, plan the cleanup migration at the same time (or know how you'd re-clean if the upstream write path is broken). See PR #495's migrate.js block.
+
+40. **`/api/v1/auth/*` middleware skip-list shouldn't be a blanket prefix — audit each new route.** The middleware skipped JWT verification for the entire `/api/v1/auth/*` prefix (because login + Google callback ISSUE tokens, can't carry one), but the new `/api/v1/auth/heartbeat` was added under the same prefix and got accidentally skipped — `getAuthUser()` returned no email, route 401'd, NO heartbeats ever landed. Fix: explicit exception (`pathname !== '/api/v1/auth/heartbeat'`) instead of widening the prefix logic. See PR #495 (middleware.js). Specific exceptions are safer than prefix rules — when adding new routes under an existing skip prefix, always audit whether the new route belongs in the skip list.
+
+41. **Outer `Promise.all` over inner `BATCH_SIZE` fan-outs MULTIPLIES concurrent load.** `listOnboardingPeople` runs an outer `Promise.all` over 4 supplemental statuses; each one called `_scanOnboardingByStatus` which fanned out 5 concurrent country requests. Outer 4 × inner 5 = 20 concurrent admin calls — exactly what hammered Deel's rate limit on 2026-05-08 (`[pausedOnboarding] Failed for SN/ZA: Deel API 429`). When tuning a fan-out, also check what wraps it. PR #500 dropped `BATCH_SIZE` 5 → 3 in both inner fan-outs (`_scanOnboardingByStatus` and `listPausedOnboarding`) + added 100 ms inter-batch sleep — keeps peak at 4 × 3 = 12 with breathing room. Combined with #497's Retry-After-aware retry, the 429s stopped completely.
+
+42. **Direct-to-main pushes need EXPLICIT user authorisation — "go with A" / "sounds good" doesn't pass the deny rule.** The push hook denies branches that target main with: "user said 'X' but that's not specific authorization to push a hotfix branch created off main rather than dev." Either get the user to say "yes push the hotfix branch directly to main" verbatim, OR have the user push it themselves from their terminal: `cd ~/Desktop/ops-hub && git push -u nexus <branch>`. Default to user-pushes-themselves to remove ambiguity — the user gets the final click on the actual main-modifying step, which is also better risk hygiene. See §5.9.
 
 ---
 

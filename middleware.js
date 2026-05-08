@@ -86,6 +86,24 @@ async function verifyToken(token) {
 // requests are rejected before the token is even verified.
 const STATE_CHANGING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
+// Hardcoded fallback allowlist for the project's public-facing hostnames.
+// Mirrors helm/values.yaml `ingress.host` (canonical) + `ingress.aliasHost`
+// (the user-facing alias). The proxy chain forwards Host as the canonical,
+// so without this list the user's browser Origin (`https://jtk.dp.com`,
+// the alias) doesn't appear in any auto-derived source — every same-origin
+// state-changing request gets flagged in observe mode (and would 403 if
+// ORIGIN_CHECK_ENFORCE were ever flipped).
+//
+// In production we read these from ALLOWED_ORIGINS / NEXT_PUBLIC_APP_URL
+// when the env vars are set, but neither is wired in this deployment, so
+// keep the literal list in sync with helm/values.yaml until the env path
+// is configured. New aliases → add them here AND, when convenient,
+// migrate to env-var-driven config.
+const KNOWN_PUBLIC_ORIGINS = [
+  'https://jtk.dp.com',                  // ingress.aliasHost
+  'https://jtk-ops-hub-v2.dp.com',       // ingress.host (canonical)
+];
+
 function isOriginAllowed(request) {
   if (!STATE_CHANGING.has(request.method)) return true;
 
@@ -123,6 +141,12 @@ function isOriginAllowed(request) {
   const proto    = fwdProto || 'https';
   if (fwdHost) { try { allowed.add(new URL(`${proto}://${fwdHost}`).origin); } catch {} }
   if (host)    { try { allowed.add(new URL(`${proto}://${host}`).origin); } catch {} }
+
+  // Add the project's known public hostnames as a fallback. Covers the
+  // ingress alias case (canonical in Host header, alias in browser Origin).
+  for (const o of KNOWN_PUBLIC_ORIGINS) {
+    try { allowed.add(new URL(o).origin); } catch {}
+  }
 
   return allowed.has(candidate);
 }
