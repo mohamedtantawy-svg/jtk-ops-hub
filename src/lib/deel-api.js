@@ -1256,7 +1256,16 @@ export async function listRedlineRequests(params = {}) {
 // changes, so we cache for an hour and refresh opportunistically.
 const AMEND_CLIENT_CACHE = new Map();
 const AMEND_CLIENT_TTL_MS = 60 * 60 * 1000;
-const AMEND_CLIENT_CONCURRENCY = 5;
+// Concurrency cap on the per-contract enrichment fan-out. Was 5, dropped
+// to 3 after 2026-05-08 logs showed `/rest/v2/contracts/<id>` accounted
+// for 80 of 99 Deel API 429s in a single capture window — far and away
+// the dominant rate-limit offender even after PR #500 paced the
+// onboarding fan-outs. Same pattern, different route. The Retry-After-
+// aware retry from PR #497 catches the survivors transparently. 100 ms
+// inter-batch sleep spreads the burst so concurrent agents on the
+// amendments view don't all hit the limit window at once.
+const AMEND_CLIENT_CONCURRENCY = 3;
+const AMEND_CLIENT_INTER_BATCH_DELAY_MS = 100;
 
 async function fetchClientNameForContract(contractId) {
   if (!contractId) return '';
@@ -1282,6 +1291,9 @@ async function enrichClientNames(items) {
     const batch = unique.slice(i, i + AMEND_CLIENT_CONCURRENCY);
     const results = await Promise.all(batch.map(id => fetchClientNameForContract(id)));
     batch.forEach((id, idx) => resolved.set(String(id), results[idx] || ''));
+    if (i + AMEND_CLIENT_CONCURRENCY < unique.length) {
+      await new Promise(r => setTimeout(r, AMEND_CLIENT_INTER_BATCH_DELAY_MS));
+    }
   }
   return items.map(item => ({
     ...item,
