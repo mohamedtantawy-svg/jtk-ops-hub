@@ -226,7 +226,16 @@ async function _scanOnboardingByStatus(statusName, label) {
 
   if (countries.length === 0) return [];
 
-  const BATCH_SIZE = 5;
+  // Concurrency cap on the country fan-out. Was 5, dropped to 3 after the
+  // 2026-05-08 logs showed Deel admin returning 429s during peak when the
+  // 4 supplemental sub-statuses fan out in parallel (4 × 5 = 20 concurrent
+  // admin calls — too many even for the per-minute Enterprise limit).
+  // 3 keeps the worst case at 4 × 3 = 12 concurrent. Combined with the
+  // 100 ms inter-batch sleep below, peak rate stays comfortably under
+  // limit. The Retry-After-aware retry in src/lib/retry.js (PR #497)
+  // is the safety net for any 429 that still slips through.
+  const BATCH_SIZE = 3;
+  const INTER_BATCH_DELAY_MS = 100;
   const collected = [];
   for (let i = 0; i < countries.length; i += BATCH_SIZE) {
     const batch = countries.slice(i, i + BATCH_SIZE);
@@ -242,6 +251,9 @@ async function _scanOnboardingByStatus(statusName, label) {
       }
     }));
     for (const items of results) collected.push(...items);
+    if (i + BATCH_SIZE < countries.length) {
+      await new Promise(r => setTimeout(r, INTER_BATCH_DELAY_MS));
+    }
   }
   return collected;
 }
@@ -391,11 +403,16 @@ export async function listPausedOnboarding() {
 
   // Fetch per-country in parallel (the API scopes cursor per country,
   // so a single call without country filter only returns ~50 items).
-  // Batch into groups of 5 to avoid hammering the API.
+  // BATCH_SIZE was 5; dropped to 3 after 2026-05-08 logs showed Deel
+  // admin 429-ing on SN, ZA, etc when this fan-out overlapped with the
+  // supplemental-onboarding scans (each also batching 3-5 concurrent).
+  // 100 ms inter-batch sleep spreads load further. Retry-After-aware
+  // retry in src/lib/retry.js (PR #497) is the safety net.
   const seen = new Set();
   const allItems = [];
 
-  const BATCH_SIZE = 5;
+  const BATCH_SIZE = 3;
+  const INTER_BATCH_DELAY_MS = 100;
   for (let i = 0; i < countries.length; i += BATCH_SIZE) {
     const batch = countries.slice(i, i + BATCH_SIZE);
     const results = await Promise.all(
@@ -418,6 +435,9 @@ export async function listPausedOnboarding() {
         seen.add(key);
         allItems.push(p);
       }
+    }
+    if (i + BATCH_SIZE < countries.length) {
+      await new Promise(r => setTimeout(r, INTER_BATCH_DELAY_MS));
     }
   }
 
