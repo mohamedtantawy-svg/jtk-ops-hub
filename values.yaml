@@ -54,7 +54,7 @@ autoscaling:
 
 serviceAccount:
   create: true
-  name: ""
+  name: jtk-ops-hub-v2
   annotations: {}
 
 
