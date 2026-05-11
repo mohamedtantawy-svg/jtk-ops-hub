@@ -97,6 +97,8 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
         isRefreshing: !!zd?.isRefreshing,
         error: zd?.error || null,
         lastSyncAt: zd?.lastSyncAt ?? isoToMs(zd?.lastSync),
+        truncated: !!zd?.truncated,
+        serverTotal: zd?.serverTotal || null,
         retry: zd?.retry || queueSync?.refresh,
       },
       jira: {
@@ -107,6 +109,7 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
         isRefreshing: !!jr?.isRefreshing,
         error: jr?.error || null,
         lastSyncAt: jr?.lastSyncAt ?? isoToMs(jr?.lastSync),
+        truncated: !!jr?.truncated,
         retry: jr?.retry || queueSync?.refresh,
       },
       onboarding: {

@@ -314,6 +314,18 @@ async function paginatedZendeskSearch(query, { maxPages = 10, perPage = 100 } = 
   const allResults = [];
   const metricsByTicketId = new Map();
   let page = 1;
+  // `truncated` flips to true when we exited the loop because of the maxPages
+  // safety cap AND the last page came back full (meaning Zendesk had more to
+  // give). Surfacing this lets the FE warn users like "Sarah Suge (2026-05-11
+  // feedback): all tickets are not fully displayed when scrolling" — without
+  // a hint they wouldn't know the listing was capped vs. the team genuinely
+  // having no further tickets. Zendesk Search caps total hits at 1000 per
+  // query, so a truncated result usually means the query needs narrowing
+  // (date range, status, assignee) rather than more pagination.
+  let truncated = false;
+  // The total Zendesk reports for this query — useful when truncated so the
+  // banner can say "showing N of M". Zendesk returns this on every page.
+  let serverTotal = null;
 
   while (page <= maxPages) {
     const res = await searchTickets(query, {
@@ -325,6 +337,7 @@ async function paginatedZendeskSearch(query, { maxPages = 10, perPage = 100 } = 
     });
     const results = res?.results || [];
     const metrics = res?.metric_sets || [];
+    if (typeof res?.count === 'number') serverTotal = res.count;
     for (const m of metrics) {
       if (m && m.ticket_id != null) {
         // String-normalise the key — Zendesk has been observed to
@@ -340,6 +353,12 @@ async function paginatedZendeskSearch(query, { maxPages = 10, perPage = 100 } = 
     // Stop if we got fewer than perPage (last page) or no next_page
     if (results.length < perPage || !res?.next_page) break;
     page++;
+    // If we just consumed the final allowed page and the next_page is still
+    // populated, Zendesk has more to give — mark the truncation so callers
+    // can surface a banner.
+    if (page > maxPages && res?.next_page) {
+      truncated = true;
+    }
   }
 
   // Attach the metric_set sideload to each ticket so the normaliser can
@@ -356,7 +375,7 @@ async function paginatedZendeskSearch(query, { maxPages = 10, perPage = 100 } = 
     }
   }
 
-  return allResults;
+  return { results: allResults, truncated, serverTotal };
 }
 
 // ── Batch user lookup with pagination (handles >100 users) ───────────────────
@@ -390,16 +409,22 @@ async function fetchZendeskQueue() {
     // status (10 pages × 100). Sequential to limit peak memory.
     const seenZd = new Set();
     const allTickets = [];
+    // Track if ANY status query was truncated by the page cap. When true the
+    // FE renders a "showing N — refine to see more" banner above the table.
+    let zdTruncated = false;
+    let zdServerTotal = 0; // Sum of per-status server-reported totals.
 
     const statusQueries = ['new', 'open', 'pending', 'hold'].map(
       s => `group:"${ZD_GROUP_NAME}" status:${s}`
     );
     // Fetch each status sequentially (not parallel) to reduce peak memory
     for (const q of statusQueries) {
-      const results = await paginatedZendeskSearch(q, { maxPages: 10 });
+      const { results, truncated, serverTotal } = await paginatedZendeskSearch(q, { maxPages: 10 });
       for (const t of results) {
         if (!seenZd.has(t.id)) { seenZd.add(t.id); allTickets.push(t); }
       }
+      if (truncated) zdTruncated = true;
+      if (typeof serverTotal === 'number') zdServerTotal += serverTotal;
     }
     // Recently solved (last 24 hours) — keeps resolved tickets visible in
     // the queue for a full day after they leave the active state. Pilar's
@@ -409,11 +434,14 @@ async function fetchZendeskQueue() {
     // count. Page count bumped to 5 to keep the 24h window fully covered
     // for high-volume teams.
     const solvedQuery = `group:"${ZD_GROUP_NAME}" status:solved updated<24hours`;
-    const solvedResults = await paginatedZendeskSearch(solvedQuery, { maxPages: 5 });
+    const { results: solvedResults, truncated: solvedTruncated, serverTotal: solvedServerTotal } =
+      await paginatedZendeskSearch(solvedQuery, { maxPages: 5 });
     for (const t of solvedResults) {
       if (!seenZd.has(t.id)) { seenZd.add(t.id); allTickets.push(t); }
     }
-    if (allTickets.length === 0) return { items: [], status: 'ok', count: 0, error: null };
+    if (solvedTruncated) zdTruncated = true;
+    if (typeof solvedServerTotal === 'number') zdServerTotal += solvedServerTotal;
+    if (allTickets.length === 0) return { items: [], status: 'ok', count: 0, truncated: zdTruncated, serverTotal: zdServerTotal || 0, error: null };
 
     // Collect unique user IDs for batch lookup
     const userIds = new Set();
@@ -686,10 +714,10 @@ async function fetchZendeskQueue() {
       }
     }
 
-    return { items, status: 'ok', count: items.length, error: null };
+    return { items, status: 'ok', count: items.length, truncated: zdTruncated, serverTotal: zdServerTotal || items.length, error: null };
   } catch (err) {
     console.error('[queue] Zendesk fetch error:', err.message);
-    return { items: [], status: 'error', error: 'Zendesk fetch failed' };
+    return { items: [], status: 'error', truncated: false, serverTotal: 0, error: 'Zendesk fetch failed' };
   }
 }
 
@@ -826,6 +854,11 @@ async function fetchJiraQueue() {
     // realistic chunk volumes; the runaway-pagination guard via
     // MAX_PAGES below still bounds total fetches.
     const MAX_ISSUES_PER_CLAUSE = 2000;
+    // True when at least one clause stopped at MAX_ISSUES_PER_CLAUSE while
+    // the server still had more rows to give. Surfaced in the response meta
+    // so the FE can warn that the queue listing is capped (Sarah Suge
+    // 2026-05-11 feedback).
+    let jiraTruncated = false;
 
     const fieldsToFetch = [
       'summary', 'status', 'assignee', 'reporter', 'priority',
@@ -881,8 +914,16 @@ async function fetchJiraQueue() {
         //     server that never stops returning `nextPageToken`)
         if (result?.isLast) break;
         if (!result?.nextPageToken) break;
-        if (fetched >= MAX_ISSUES_PER_CLAUSE) break;
-        if (++safetyPages >= MAX_PAGES) break;
+        if (fetched >= MAX_ISSUES_PER_CLAUSE) {
+          // The clause still has more rows behind it but we're stopping for
+          // safety. Mark as truncated so the FE knows to hint at filtering.
+          if (!result?.isLast && result?.nextPageToken) jiraTruncated = true;
+          break;
+        }
+        if (++safetyPages >= MAX_PAGES) {
+          if (!result?.isLast && result?.nextPageToken) jiraTruncated = true;
+          break;
+        }
 
         nextPageToken = result.nextPageToken;
       }
@@ -973,10 +1014,10 @@ async function fetchJiraQueue() {
       };
     });
 
-    return { items, status: 'ok', count: items.length, error: null };
+    return { items, status: 'ok', count: items.length, truncated: jiraTruncated, error: null };
   } catch (err) {
     console.error('[queue] Jira fetch error:', err.message);
-    return { items: [], status: 'error', error: 'Jira fetch failed' };
+    return { items: [], status: 'error', truncated: false, error: 'Jira fetch failed' };
   }
 }
 
@@ -1018,7 +1059,18 @@ export async function GET(req) {
       result = {
         source,
         items: fetched.items,
-        meta: { count: fetched.count || 0, status: fetched.status, error: fetched.error },
+        meta: {
+          count: fetched.count || 0,
+          status: fetched.status,
+          error: fetched.error,
+          // Truncation surfaces when the per-source pagination loop bailed at
+          // its safety cap (Zendesk Search's 1000-result hard limit per
+          // status, Jira's MAX_ISSUES_PER_CLAUSE) while the server still had
+          // more rows. The FE banner uses this to tell the viewer to refine
+          // their filter so they aren't blind to hidden tickets.
+          truncated: !!fetched.truncated,
+          serverTotal: fetched.serverTotal || null,
+        },
         syncedAt: new Date().toISOString(),
       };
       cacheSet(cacheKey, result);
@@ -1073,8 +1125,19 @@ export async function GET(req) {
     response = {
       items,
       meta: {
-        zendesk: { count: zendesk.count || 0, status: zendesk.status, error: zendesk.error },
-        jira:    { count: jira.count || 0,    status: jira.status,    error: jira.error },
+        zendesk: {
+          count: zendesk.count || 0,
+          status: zendesk.status,
+          error: zendesk.error,
+          truncated: !!zendesk.truncated,
+          serverTotal: zendesk.serverTotal || null,
+        },
+        jira: {
+          count: jira.count || 0,
+          status: jira.status,
+          error: jira.error,
+          truncated: !!jira.truncated,
+        },
         syncedAt: new Date().toISOString(),
         totalActive: items.filter(i => i.status !== 'resolved').length,
         totalResolved: items.filter(i => i.status === 'resolved').length,

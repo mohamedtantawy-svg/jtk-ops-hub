@@ -1039,6 +1039,47 @@ const Queue = ({ user, tasks, subFilter }) => {
       {/* ── Main ZD/JR table (when no work source is active) ── */}
       {!workSource && (fTool || hasActiveFilters) && (
         <div ref={ticketScrollerRef} style={{ flex: 1, overflowY: 'auto', background: '#fafaf9' }}>
+
+          {/* Truncation hint — Sarah Suge 2026-05-11 feedback: when scrolling
+              to the bottom the listing was cut off because Zendesk Search's
+              1000-hit/query hard cap (or Jira's MAX_ISSUES_PER_CLAUSE) was
+              hit and the older rows silently dropped. Now the backend tells
+              us which source was capped and we render this hint so the
+              viewer knows to refine their filter rather than wonder where
+              the missing tickets went.
+              Suppressed while a refresh is in flight (counts settle from
+              the cache mid-fetch and produce a false-positive flash). */}
+          {(() => {
+            const zdSrc = syncSources?.zendesk;
+            const jrSrc = syncSources?.jira;
+            const zdTrunc = !!zdSrc?.truncated && (!fTool || fTool === 'zendesk');
+            const jrTrunc = !!jrSrc?.truncated && (!fTool || fTool === 'jira');
+            const anyTrunc = (zdTrunc || jrTrunc)
+              && !(zdSrc?.isRefreshing || jrSrc?.isRefreshing);
+            if (!anyTrunc) return null;
+            const parts = [];
+            if (zdTrunc) parts.push(`Zendesk shows ${zdSrc.count}${zdSrc.serverTotal ? ` of ${zdSrc.serverTotal}` : ''}`);
+            if (jrTrunc) parts.push(`Jira shows ${jrSrc.count}`);
+            return (
+              <div
+                role="status"
+                style={{
+                  margin: '12px 16px 0', padding: '10px 14px',
+                  background: '#fff8e6', border: '1px solid #fde68a',
+                  borderRadius: 10,
+                  display: 'flex', alignItems: 'flex-start', gap: 10,
+                  fontSize: 12, color: '#92400e',
+                }}>
+                <i className="bi-exclamation-circle-fill" style={{ fontSize: 14, color: '#d97706', flexShrink: 0, marginTop: 1 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 2 }}>Some tickets may be hidden</div>
+                  <div style={{ lineHeight: 1.5 }}>
+                    {parts.join(' · ')}. Search and filter (Status / Unassigned / Country / SLA) to narrow the list and surface specific tickets that aren&apos;t in the visible chunk.
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
           {/* Breaches-across-sources hand-off panel. Renders whenever the
               breached filter is on and nothing source-specific is selected,
               so the user lands somewhere they can see + click into the
