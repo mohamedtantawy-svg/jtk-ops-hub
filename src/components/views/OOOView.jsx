@@ -22,7 +22,11 @@ import DetailSlideOut from '../ooo/DetailSlideOut';
 import CreateHandoverModal from '../ooo/CreateHandoverModal';
 import { useTeamMembers } from '../../hooks/useTeamMembers';
 import { listTimeOffEvents } from '../../services/timeOffApi';
-import { fetchHandoverLensCounts } from '../../services/handoversApi';
+import {
+  fetchHandoverLensCounts,
+  bulkApproveHandovers,
+  bulkRejectHandovers,
+} from '../../services/handoversApi';
 import { LENS_IDS, autoLens, isoDate } from '../../lib/handover-helpers';
 
 const MODE_KEY  = 'ops_hub_ooo_mode';
@@ -427,6 +431,39 @@ function OOOView({ user, setView, addToast }) {
             membersByEmail={membersByEmail}
             todayIso={todayIso}
             onSelectEvent={ev => setSelectedEventId(ev?.id || null)}
+            currentUserEmail={user?.email}
+            currentUserRole={user?.role}
+            onBulkApprove={async (eventIds) => {
+              // Convert event ids → handover ids using the events array.
+              const ids = events
+                .filter(e => eventIds.includes(e.id) && e.handover?.id)
+                .map(e => e.handover.id);
+              if (ids.length === 0) return;
+              try {
+                await bulkApproveHandovers(ids);
+                addToast?.({ kind: 'success', message: `Approved ${ids.length} handover${ids.length === 1 ? '' : 's'}.` });
+                refreshAll();
+              } catch (err) {
+                addToast?.({ kind: 'error', message: err?.message || 'Bulk approve failed' });
+              }
+            }}
+            onBulkReject={async (eventIds) => {
+              const ids = events
+                .filter(e => eventIds.includes(e.id) && e.handover?.id)
+                .map(e => e.handover.id);
+              if (ids.length === 0) return;
+              const reason = typeof window !== 'undefined'
+                ? window.prompt('Reason for rejection (required, shared across all selected):')
+                : null;
+              if (!reason) return;
+              try {
+                await bulkRejectHandovers(ids, reason);
+                addToast?.({ kind: 'success', message: `Rejected ${ids.length} handover${ids.length === 1 ? '' : 's'}.` });
+                refreshAll();
+              } catch (err) {
+                addToast?.({ kind: 'error', message: err?.message || 'Bulk reject failed' });
+              }
+            }}
           />
         )}
       </div>

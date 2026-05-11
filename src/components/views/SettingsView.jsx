@@ -9,6 +9,7 @@ import EmptyState from '../ui/EmptyState';
 import ZapierSettings from '../settings/ZapierSettings';
 import AccessControlSettings from '../settings/AccessControlSettings';
 import IntegrationsSettings from '../settings/IntegrationsSettings';
+import HandoverSettingsSection from '../settings/HandoverSettingsSection';
 
 const SETTINGS_GROUPS=[
   {
@@ -36,6 +37,7 @@ const SETTINGS_GROUPS=[
       {id:'escalation',icon:'bi-arrow-up-circle-fill',    label:'Escalation Rules'},
       {id:'team',      icon:'bi-people-fill',              label:'Team Management'},
       {id:'access',    icon:'bi-shield-lock-fill',         label:'Access Control'},
+      {id:'handovers', icon:'bi-airplane',                 label:'Handovers'},
     ],
   },
   {
@@ -396,6 +398,10 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
 
       case 'access': return(<div style={{margin:'-20px -28px',minHeight:'calc(100% + 40px)'}}>
         <AccessControlSettings accessTypes={accessTypes} setAccessTypes={setAccessTypes} userAccessMap={userAccessMap} setUserAccessMap={setUserAccessMap} addToast={addToast} user={user}/>
+      </div>);
+
+      case 'handovers': return(<div>
+        <HandoverSettingsSection user={user} addToast={addToast}/>
       </div>);
 
       case 'brand': return(<div>
