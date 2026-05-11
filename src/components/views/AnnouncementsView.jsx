@@ -1376,9 +1376,12 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
             <div style={{ maxHeight: 220, overflowY: 'auto' }}>
               {topLevelComments.map(cmt => <CommentItem key={cmt.id} cmt={cmt} />)}
             </div>
-            {/* Add new comment — supports @-mentions; tagged users get a notification. */}
-            <div style={{ display: 'flex', gap: 6, marginTop: 8, alignItems: 'flex-end' }}>
-              <div style={{ width: 22, height: 22, borderRadius: '50%', background: '#f3eff8', color: '#6b3fa0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, fontWeight: 700, flexShrink: 0 }}>
+            {/* Add new comment — supports @-mentions; tagged users get a notification.
+                The textarea defaults to ~3 lines and is vertically resizable
+                (drag the bottom-right handle) so users can compose longer
+                comments without squeezing into a 30px sliver. */}
+            <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'flex-end' }}>
+              <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#f3eff8', color: '#6b3fa0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>
                 {(user.name || 'U').charAt(0).toUpperCase()}
               </div>
               <MentionTextarea
@@ -1387,14 +1390,16 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
                 onMentionsChange={setNewCommentMentions}
                 members={MEMBERS}
                 placeholder="Add a comment… (type @ to mention someone, Shift+Enter for new line)"
-                rows={1}
-                minHeight={30}
-                maxHeight={80}
+                rows={3}
+                minHeight={88}
+                maxHeight={260}
+                style={{ fontSize: 13, padding: '10px 12px', lineHeight: 1.5 }}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && newComment.trim()) { e.preventDefault(); handleAddComment(newComment, null, newCommentMentions); } }}
               />
-              <button onClick={() => { if (newComment.trim()) handleAddComment(newComment, null, newCommentMentions); }} disabled={!newComment.trim()}
-                style={{ height: 30, padding: '0 10px', borderRadius: 10, border: 'none', background: newComment.trim() ? '#6b3fa0' : '#e8e8e8', color: newComment.trim() ? 'white' : '#9e9e9e', fontSize: 11, fontWeight: 600, cursor: newComment.trim() ? 'pointer' : 'default', flexShrink: 0 }}>
-                <i className="bi-send" style={{ fontSize: 10 }}></i>
+              <button onClick={() => { if (newComment.trim()) handleAddComment(newComment, null, newCommentMentions); }} disabled={!newComment.trim()} aria-label="Send comment"
+                style={{ height: 36, padding: '0 14px', borderRadius: 10, border: 'none', background: newComment.trim() ? '#6b3fa0' : '#e8e8e8', color: newComment.trim() ? 'white' : '#9e9e9e', fontSize: 12, fontWeight: 600, cursor: newComment.trim() ? 'pointer' : 'default', flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <i className="bi-send" style={{ fontSize: 12 }}></i>
+                <span>Send</span>
               </button>
             </div>
           </div>
