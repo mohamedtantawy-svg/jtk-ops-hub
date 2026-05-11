@@ -303,16 +303,25 @@ function adfToText(node) {
 }
 
 // ── Paginated Zendesk search helper ──────────────────────────────────────────
-// Sideloads `metric_sets` so each ticket carries a `metric_set` field with
-// the SLA-relevant timestamps (requester_updated_at, assignee_updated_at,
-// assigned_at). Without metric_sets the only available anchor is
-// `updated_at`, which silently masks SLA breaches because it bumps on
-// every assignee action (internal notes, field edits, status flips) — not
-// just on a real requester reply. See fetchZendeskQueue's normalize step
-// for the anchor formula.
+// Pulls active tickets via `/search.json`. We do NOT request the
+// `metric_sets` sideload here — Zendesk's Search API silently ignores
+// unsupported includes (metric_sets is sideloadable on /tickets.json
+// and /tickets/show_many.json but not on /search). The 2026-05-11 log
+// audit caught the consequence: every single fetch was logging
+// "NNNN/NNNN tickets missing metric_set sideload — fallback applied"
+// because the response never carried any metric_sets. The defensive
+// fallback in fetchZendeskQueue's normalize step (anchor on
+// updated_at when metric_set is absent) was firing for 100% of rows
+// and the row-level FRT/NRT logic was effectively dead code.
+//
+// The canonical SLA anchor today is the policy_metrics cache built by
+// `zendesk-sla-sync.js` (a background cron, persisted in
+// zendesk_sla_cache, joined per-row in fetchZendeskQueue via
+// `loadSlaRowsForTicketIds`). That cache carries Zendesk's authoritative
+// breach state + active stage and is the source of truth for the SLA
+// pill on every ticket.
 async function paginatedZendeskSearch(query, { maxPages = 10, perPage = 100 } = {}) {
   const allResults = [];
-  const metricsByTicketId = new Map();
   let page = 1;
   // `truncated` flips to true when we exited the loop because of the maxPages
   // safety cap AND the last page came back full (meaning Zendesk had more to
@@ -333,21 +342,9 @@ async function paginatedZendeskSearch(query, { maxPages = 10, perPage = 100 } = 
       page,
       sort_by: 'updated_at',
       sort_order: 'desc',
-      include: 'metric_sets',
     });
     const results = res?.results || [];
-    const metrics = res?.metric_sets || [];
     if (typeof res?.count === 'number') serverTotal = res.count;
-    for (const m of metrics) {
-      if (m && m.ticket_id != null) {
-        // String-normalise the key — Zendesk has been observed to
-        // return ticket_id as a number in some places and a string in
-        // others. A type-mismatched Map.get() would silently miss the
-        // join and the downstream FRT/NRT logic would treat the
-        // ticket as if it had no metric_set (false-positive breach).
-        metricsByTicketId.set(String(m.ticket_id), m);
-      }
-    }
     allResults.push(...results);
 
     // Stop if we got fewer than perPage (last page) or no next_page
@@ -358,20 +355,6 @@ async function paginatedZendeskSearch(query, { maxPages = 10, perPage = 100 } = 
     // can surface a banner.
     if (page > maxPages && res?.next_page) {
       truncated = true;
-    }
-  }
-
-  // Attach the metric_set sideload to each ticket so the normaliser can
-  // read SLA timestamps without managing the join. Tickets without a
-  // matching metric_set fall through with `metric_set` undefined;
-  // downstream anchor logic has a defensive fallback (see
-  // fetchZendeskQueue's normalize step) so a missing sideload doesn't
-  // false-positive a 3-month breach for a ticket that's been actively
-  // replied to.
-  for (const t of allResults) {
-    if (t && t.id != null) {
-      const m = metricsByTicketId.get(String(t.id));
-      if (m) t.metric_set = m;
     }
   }
 
@@ -474,16 +457,12 @@ async function fetchZendeskQueue() {
     // policy_metrics via a background cron + DB cache so the queue
     // route stays cheap.
 
-    // Diagnostic: count tickets that came back without a metric_set
-    // sideload. If this number is non-trivial relative to allTickets.length
-    // we'll know Zendesk is silently dropping the include for some subset
-    // and can investigate (plan limit, ticket age, etc.). One log line per
-    // request — keeps signal high without spamming.
-    let _missingMetricSet = 0;
-
-    // Normalize tickets
+    // Normalize tickets. `metric_set` is always undefined now (Zendesk
+    // Search doesn't sideload it — see paginatedZendeskSearch comment) so
+    // the row-level FRT/NRT branches below all fall through to the
+    // updated_at fallback path. The canonical SLA anchor is the
+    // policy_metrics cache, joined in further down via loadSlaRowsForTicketIds.
     const items = allTickets.map(t => {
-      if (!t.metric_set) _missingMetricSet++;
       const assignee = userMap[t.assignee_id] || {};
       const requester = userMap[t.requester_id] || {};
       // Read the per-ticket values for our 4 fields from t.custom_fields.
@@ -675,10 +654,6 @@ async function fetchZendeskQueue() {
         slaNrtBreachAt: null,
       };
     });
-
-    if (_missingMetricSet > 0) {
-      console.log(`[queue] Zendesk: ${_missingMetricSet}/${allTickets.length} tickets missing metric_set sideload — fallback applied`);
-    }
 
     // ── Merge the SLA cache (background-synced from Zendesk policy_metrics) ──
     // Single SELECT keyed on ticket_id; falls back to local logic when the
