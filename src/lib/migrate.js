@@ -1216,10 +1216,13 @@ CREATE INDEX IF NOT EXISTS idx_mention_group_member_email
 
 -- ── Announcements: tag-group targeting (2026-05-11) ──────────────────────────
 -- Announcements can now target a custom Tag Group in addition to the
--- region-based `target` enum. The string column stays as-is for region
+-- region-based 'target' enum. The string column stays as-is for region
 -- audiences ('global', 'emea', 'apac', 'americas', 'nam', 'latam', and
 -- the new 'leaders' rollup). When the composer picks a Tag Group, we
--- store the group id here and set `target='group'` as a discriminator.
+-- store the group id here and set target='group' as a discriminator.
+-- NOTE: backticks are FORBIDDEN inside this SQL block (SKILL §3.7,
+-- trap #6) — they close the surrounding JS template literal and break
+-- the Turbopack build. Use single quotes or plain text instead.
 -- Audience filter at /api/v1/announcements joins against
 -- mention_group_member to expand the group to its members on read.
 -- ON DELETE SET NULL so deleting a group leaves historical announcements
