@@ -75,3 +75,12 @@ redis:
 
 jobsRbac:
   enabled: false
+
+# ── Handover cron (Phase 4 of HANDOVERS_PLAN.md) ────────────────────────
+# Two CronJobs that hit /api/v1/handovers/cron/{lifecycle,reminders}
+# every 15 minutes. Disabled by default until CRON_SECRET is provisioned
+# in the external secret store; flip cronEnabled to true once it is.
+handovers:
+  cronEnabled: false
+  lifecycleSchedule: "*/15 * * * *"
+  remindersSchedule: "*/15 * * * *"
