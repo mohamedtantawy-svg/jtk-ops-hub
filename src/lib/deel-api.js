@@ -733,12 +733,36 @@ export async function listOffboardingCases() {
     // Wall time becomes max(stream_durations) instead of their sum,
     // cutting a ~80s scan to roughly the longer stream's duration
     // (~52s for the PROCESSING set on the live cohort, 2026-05-01).
+    //
+    // Per-promise catch: `Promise.all` rejects fast and silently drops
+    // ANY further rejections that resolve later. During a Deel 500-storm
+    // both streams fail almost simultaneously — the second rejection
+    // would otherwise leak past the outer try/catch as a process-level
+    // `unhandledRejection` (logged 7× on 2026-05-11 in the live audit).
+    // Wrapping each stream in its own `.catch` confines failures to
+    // their own slot and lets the merger decide whether partial results
+    // are usable. If every stream fails we throw so the route handler's
+    // stale-cache fallback still fires (the original "all-fail" behaviour
+    // is preserved — only the unhandled-rejection noise is removed).
+    const failureFlags = new Array(OFFBOARDING_ACTIONABLE_STATUSES.length).fill(null);
     const results = await Promise.all(
-      OFFBOARDING_ACTIONABLE_STATUSES.map(s => scanOneStatus(s))
+      OFFBOARDING_ACTIONABLE_STATUSES.map((s, idx) => scanOneStatus(s).catch(err => {
+        failureFlags[idx] = err;
+        console.warn(`[offboarding] status=${s} stream failed:`, err?.message || err);
+        return null;
+      })),
     );
+    const failureCount = failureFlags.filter(Boolean).length;
+    if (failureCount === OFFBOARDING_ACTIONABLE_STATUSES.length) {
+      // Every stream failed — surface the first error so the caller can
+      // fall back to stale cache. Without this we'd return zero rows
+      // silently and the FE would think the queue is empty.
+      throw failureFlags.find(Boolean);
+    }
     let serverTotalSum = 0;
     let everSawTotal = false;
     for (const r of results) {
+      if (!r) continue; // failed stream — already logged, skip
       totalScanned += r.scanned;
       totalPages += r.pages;
       if (Number.isFinite(r.statusTotal)) {
