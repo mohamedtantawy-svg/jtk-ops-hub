@@ -117,6 +117,99 @@ export async function toggleChecklistItem(handoverId, itemId, body) {
   });
 }
 
-// Phase 4 — handback. Stub raises until lifecycle ships.
-const PHASE_4_ERROR = 'Handback arrives in Phase 4 of HANDOVERS_PLAN.md';
-export async function logHandback(_id, _payload) { throw new Error(PHASE_4_ERROR); }
+/**
+ * Coverer logs the return-day handback summary. Transitions the
+ * handover to `completed` and ends the workspace merge.
+ * @param {string} id
+ * @param {Object} payload         — { summary: string, open_items?: [{kind,label,url,source,id}] }
+ */
+export async function logHandback(id, payload) {
+  return apiFetch(`/handovers/${encodeURIComponent(id)}/handback`, {
+    method: 'POST', body: JSON.stringify(payload || {}),
+  });
+}
+
+/** Bulk-approve N pending handovers as a manager. Atomic. */
+export async function bulkApproveHandovers(ids, note) {
+  return apiFetch('/handovers/bulk/approve', {
+    method: 'POST', body: JSON.stringify({ ids, note: note || null }),
+  });
+}
+
+/** Bulk-reject N pending handovers as a manager (reason required). */
+export async function bulkRejectHandovers(ids, reason) {
+  return apiFetch('/handovers/bulk/reject', {
+    method: 'POST', body: JSON.stringify({ ids, reason }),
+  });
+}
+
+/**
+ * Admin: full audit CSV for a date range. Triggers a browser download
+ * via a synthesised <a download> click. Uses plain fetch (not apiFetch)
+ * because the endpoint returns text/csv rather than JSON.
+ */
+export async function downloadHandoverAuditCsv({ from, to } = {}) {
+  const qs = new URLSearchParams();
+  if (from) qs.set('from', from);
+  if (to)   qs.set('to', to);
+  const q = qs.toString();
+  const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('ops_hub_token') || '') : '';
+  const res = await fetch(`/api/v1/handovers/audit-export${q ? `?${q}` : ''}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => '');
+    throw new Error(`Audit export failed (${res.status}): ${txt.slice(0, 200)}`);
+  }
+  const blob = await res.blob();
+  const cd = res.headers.get('content-disposition') || '';
+  const m = cd.match(/filename="([^"]+)"/);
+  const fname = m ? m[1] : `handover-audit-${from || 'all'}-${to || 'now'}.csv`;
+  if (typeof document !== 'undefined') {
+    const a = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    a.href = url;
+    a.download = fname;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  return { ok: true, filename: fname, bytes: blob.size };
+}
+
+// ── Settings APIs (admin) ────────────────────────────────────────────
+
+export async function listHandoverSettings() {
+  return apiFetch('/handover-settings');
+}
+export async function createHandoverSetting(payload) {
+  return apiFetch('/handover-settings', { method: 'POST', body: JSON.stringify(payload) });
+}
+export async function updateHandoverSetting(id, payload) {
+  return apiFetch(`/handover-settings/${encodeURIComponent(id)}`, {
+    method: 'PATCH', body: JSON.stringify(payload),
+  });
+}
+export async function deleteHandoverSetting(id) {
+  return apiFetch(`/handover-settings/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export async function listHandoverTemplates() {
+  return apiFetch('/handover-checklist-templates');
+}
+export async function createHandoverTemplate(payload) {
+  return apiFetch('/handover-checklist-templates', { method: 'POST', body: JSON.stringify(payload) });
+}
+export async function updateHandoverTemplate(id, payload) {
+  return apiFetch(`/handover-checklist-templates/${encodeURIComponent(id)}`, {
+    method: 'PATCH', body: JSON.stringify(payload),
+  });
+}
+export async function deleteHandoverTemplate(id) {
+  return apiFetch(`/handover-checklist-templates/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export async function listTimeOffImportBatches() {
+  return apiFetch('/time-off-import-batches');
+}

@@ -48,10 +48,24 @@ function statusLabel(ev, today) {
   return STATUS_COLOURS[colour]?.label || 'Unknown';
 }
 
-function TableMode({ events, membersByEmail, todayIso, onSelectEvent }) {
+function TableMode({
+  events, membersByEmail, todayIso, onSelectEvent,
+  currentUserEmail, currentUserRole, onBulkApprove, onBulkReject,
+}) {
   const today = todayIso || isoDate();
   const [sortBy, setSortBy] = useState('start_date');
   const [sortDir, setSortDir] = useState('asc');
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [busy, setBusy] = useState(false);
+
+  const callerLc = (currentUserEmail || '').toLowerCase();
+  const isAdminish = currentUserRole === 'admin' || currentUserRole === 'regional_manager';
+  function eligibleForBulk(ev) {
+    if (!ev?.handover) return false;
+    if (ev.handover.status !== 'pending_manager_approval') return false;
+    if (isAdminish) return true;
+    return (ev.handover.manager_email || '').toLowerCase() === callerLc;
+  }
 
   const rows = useMemo(() => {
     const arr = (events || []).map(ev => {
@@ -78,6 +92,38 @@ function TableMode({ events, membersByEmail, todayIso, onSelectEvent }) {
     return arr;
   }, [events, membersByEmail, today, sortBy, sortDir]);
 
+  const eligibleRows = useMemo(() => rows.filter(r => eligibleForBulk(r.event)), [rows]);
+  const allEligibleSelected = eligibleRows.length > 0 && eligibleRows.every(r => selectedIds.has(r.event.id));
+  const bulkAvailable = eligibleRows.length > 0;
+  const selectedCount = selectedIds.size;
+
+  function toggleSelectAll() {
+    setSelectedIds(prev => {
+      if (allEligibleSelected) return new Set();
+      const next = new Set(prev);
+      for (const r of eligibleRows) next.add(r.event.id);
+      return next;
+    });
+  }
+  function toggleSelect(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  async function runBulk(handler, label) {
+    if (selectedCount === 0) return;
+    setBusy(true);
+    try {
+      await handler(Array.from(selectedIds));
+      setSelectedIds(new Set());
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (rows.length === 0) {
     return (
       <div style={{ padding: 48, textAlign: 'center', color: 'var(--text-secondary)' }}>
@@ -94,10 +140,67 @@ function TableMode({ events, membersByEmail, todayIso, onSelectEvent }) {
   }
 
   return (
-    <div style={{ overflow: 'auto' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {selectedCount > 0 && (
+        <div style={{
+          position: 'sticky', top: 0, zIndex: 3,
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '8px 16px',
+          background: 'rgba(124, 58, 237, 0.10)',
+          borderBottom: '1px solid rgba(124, 58, 237, 0.25)',
+          color: 'var(--purple, #7c3aed)',
+          fontSize: 12,
+        }}>
+          <strong>{selectedCount} selected</strong>
+          <span style={{ color: 'var(--text-secondary)' }}>·</span>
+          <button type="button" disabled={busy}
+            onClick={() => runBulk(onBulkApprove, 'approve')}
+            style={{
+              padding: '5px 12px', borderRadius: 6,
+              background: 'var(--purple, #7c3aed)', color: 'white',
+              border: 'none', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+              fontFamily: 'inherit', opacity: busy ? 0.55 : 1,
+            }}>
+            Approve all
+          </button>
+          <button type="button" disabled={busy}
+            onClick={() => runBulk(onBulkReject, 'reject')}
+            style={{
+              padding: '5px 12px', borderRadius: 6,
+              background: 'var(--surface)', color: '#B91C1C',
+              border: '1px solid #B91C1C', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+              fontFamily: 'inherit', opacity: busy ? 0.55 : 1,
+            }}>
+            Reject all
+          </button>
+          <div style={{ flex: 1 }} />
+          <button type="button" onClick={() => setSelectedIds(new Set())}
+            style={{
+              background: 'transparent', border: 'none', color: 'var(--text-secondary)',
+              fontSize: 11, fontFamily: 'inherit', cursor: 'pointer',
+            }}>
+            Clear selection
+          </button>
+        </div>
+      )}
+      <div style={{ overflow: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0, fontSize: 12 }}>
         <thead>
           <tr style={{ position: 'sticky', top: 0, zIndex: 2, background: 'var(--surface)' }}>
+            {bulkAvailable && (
+              <th style={{
+                width: 36, padding: '10px 8px 10px 14px',
+                borderBottom: '1px solid var(--border-light)',
+              }}>
+                <input
+                  type="checkbox"
+                  aria-label="Select all eligible rows"
+                  checked={allEligibleSelected}
+                  onChange={toggleSelectAll}
+                  style={{ cursor: 'pointer' }}
+                />
+              </th>
+            )}
             {[
               { id: 'name',       label: 'Person',  w: 240 },
               { id: 'start_date', label: 'Range',   w: 200 },
@@ -145,6 +248,7 @@ function TableMode({ events, membersByEmail, todayIso, onSelectEvent }) {
               return m?.name || c.email;
             });
             const more = coverers.length > 2 ? `, +${coverers.length - 2} more` : '';
+            const isEligible = eligibleForBulk(r.event);
             return (
               <tr
                 key={r.event.id}
@@ -155,6 +259,24 @@ function TableMode({ events, membersByEmail, todayIso, onSelectEvent }) {
                   borderBottom: '1px solid var(--border-light)',
                 }}
               >
+                {bulkAvailable && (
+                  <td
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ padding: '10px 8px 10px 14px', width: 36 }}
+                  >
+                    {isEligible ? (
+                      <input
+                        type="checkbox"
+                        aria-label={`Select handover for ${r.name}`}
+                        checked={selectedIds.has(r.event.id)}
+                        onChange={() => toggleSelect(r.event.id)}
+                        style={{ cursor: 'pointer' }}
+                      />
+                    ) : (
+                      <span style={{ display: 'inline-block', width: 13 }} aria-hidden />
+                    )}
+                  </td>
+                )}
                 <td style={{ padding: '10px 14px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <Avatar
@@ -204,6 +326,7 @@ function TableMode({ events, membersByEmail, todayIso, onSelectEvent }) {
           })}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

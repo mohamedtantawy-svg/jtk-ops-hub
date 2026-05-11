@@ -24,6 +24,7 @@ import {
   submitHandover,
   toggleChecklistItem,
 } from '../../services/handoversApi';
+import LogHandbackModal from './LogHandbackModal';
 import {
   HANDOVER_STATUSES,
   TERMINAL_STATUSES,
@@ -110,6 +111,7 @@ function DetailSlideOut({
   const [loading, setLoading] = useState(false);
   const [busyAction, setBusyAction] = useState(null);   // string id of pending action
   const [pendingPrompt, setPendingPrompt] = useState(null);   // { kind: 'decline' | 'reject' | 'cancel', onConfirm }
+  const [handbackOpen, setHandbackOpen] = useState(false);
 
   const handoverId = event?.handover?.id || null;
 
@@ -261,6 +263,14 @@ function DetailSlideOut({
           successMsg: 'Rejected',
         });
       }),
+    });
+  }
+  if (handover && status === HANDOVER_STATUSES.ACTIVE && (isCoverer || isAdminish)) {
+    footerButtons.push({
+      id: 'log_handback',
+      kind: 'primary',
+      label: 'Log handback',
+      onClick: () => setHandbackOpen(true),
     });
   }
   if (handover && status && !TERMINAL_STATUSES.has(status)) {
@@ -512,6 +522,19 @@ function DetailSlideOut({
           defaultMessage={pendingPrompt.defaultMessage}
           onCancel={() => setPendingPrompt(null)}
           onConfirm={pendingPrompt.onConfirm}
+        />
+      )}
+
+      {handbackOpen && handover && (
+        <LogHandbackModal
+          handover={handover}
+          onClose={() => setHandbackOpen(false)}
+          onSubmitted={async () => {
+            setHandbackOpen(false);
+            await reload();
+            onUpdated?.();
+          }}
+          onToast={onToast}
         />
       )}
     </>
