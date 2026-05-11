@@ -156,6 +156,7 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
             textTransform: 'uppercase', color: 'var(--text-muted)',
           }}>{flowLabel}</div>
           <div style={{ flex: 1 }} />
+          <CopyLinkButton requestId={requestId} />
           <FollowButton
             isFollowing={isFollowing}
             onToggle={async () => {
@@ -351,6 +352,67 @@ function FollowButton({ isFollowing, onToggle }) {
     >
       <i className={`bi ${isFollowing ? 'bi-bell-fill' : 'bi-bell'}`} style={{ fontSize: 12 }} />
       {isFollowing ? 'Following' : 'Follow'}
+    </button>
+  );
+}
+
+// Copy a shareable deep-link to the clipboard. Anne Sanmartin 2026-05-11
+// feedback ("Links of HR Requests") — users want to paste the link to an
+// HR request into Slack, Workbench, or the employee profile in Deel admin.
+// Mohamed's clarifier: "the link should be accessible by anyone with ops
+// hub access depending on permission of course". Permission gating is
+// already enforced server-side by the audience check in
+// /api/v1/hr-hub/requests/[id]; this button just makes the URL discoverable
+// instead of forcing users to hand-edit the address bar.
+function CopyLinkButton({ requestId }) {
+  const [copied, setCopied] = useState(false);
+  const [err, setErr] = useState(false);
+
+  const handleCopy = useCallback(async () => {
+    if (!requestId || typeof window === 'undefined') return;
+    try {
+      // Build a clean URL: drop every existing query/hash so the recipient
+      // doesn't inherit stale filter / scope state from the sharer's tab.
+      // Only `view` + `req` are set — App.jsx + HrHubView read those on
+      // first paint via the existing URL-param-in-useState pattern.
+      const u = new URL(window.location.href);
+      const out = new URL(`${u.origin}${u.pathname}`);
+      out.searchParams.set('view', 'hr-hub');
+      out.searchParams.set('req', requestId);
+      await navigator.clipboard.writeText(out.toString());
+      setCopied(true);
+      setErr(false);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setErr(true);
+      setTimeout(() => setErr(false), 2400);
+    }
+  }, [requestId]);
+
+  const label = err ? 'Copy failed' : (copied ? 'Copied!' : 'Copy link');
+  const icon  = err ? 'bi-exclamation-triangle' : (copied ? 'bi-check2' : 'bi-link-45deg');
+  const tone  = err
+    ? { bg: '#fef2f2', color: '#991b1b', border: '#fca5a5' }
+    : (copied
+        ? { bg: '#e8f5e9', color: '#166534', border: '#86efac' }
+        : { bg: 'white', color: '#1b1b1b', border: '#e8e8e8' });
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      aria-label="Copy a shareable link to this request"
+      title="Copy a shareable link to this request — recipients with Ops Hub access (and audience visibility) will land directly on it."
+      style={{
+        padding: '6px 12px', borderRadius: 999,
+        border: `1px solid ${tone.border}`,
+        background: tone.bg, color: tone.color,
+        fontSize: 12, fontWeight: 600, cursor: 'pointer',
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        transition: 'all .15s',
+      }}
+    >
+      <i className={`bi ${icon}`} style={{ fontSize: 13 }} />
+      {label}
     </button>
   );
 }
