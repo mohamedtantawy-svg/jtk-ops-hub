@@ -17,7 +17,10 @@ import { ensureRosterHydrated } from '../../../../src/lib/roster-server';
 
 const ALLOWED_SORT = new Set(['top', 'new', 'oldest', 'recently_updated']);
 
-const ALLOWED_STATUS = new Set(['new', 'triaged', 'in_progress', 'done', 'wont_do', 'duplicate']);
+// `paused` was added 2026-05-11 alongside the rename of done/wont_do labels
+// to "Deployed" / "Rejected" in the FE. Enum values stay stable so existing
+// rows keep their meaning — only the displayed labels change.
+const ALLOWED_STATUS = new Set(['new', 'triaged', 'in_progress', 'paused', 'done', 'wont_do', 'duplicate']);
 const ALLOWED_PRIORITY = new Set(['low', 'medium', 'high', 'critical']);
 const ALLOWED_TYPE = new Set(['bug', 'improvement', 'question']);
 // Audience scope (Sarah Suge 2026-05-07 ask): submitters can restrict who

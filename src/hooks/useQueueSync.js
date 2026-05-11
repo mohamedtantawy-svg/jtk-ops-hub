@@ -474,16 +474,22 @@ export function useQueueSync(arg = true) {
   }, [syncSource]);
 
   // Combined meta (preserved for callers that read .meta.syncedAt etc).
+  // `truncated` flows through from the API per source so Queue.jsx can warn
+  // when the listing is capped at the upstream safety limit (Zendesk Search
+  // hard-caps at 1000 hits per query / Jira at MAX_ISSUES_PER_CLAUSE).
   const meta = useMemo(() => ({
     zendesk: {
       count: sourceMeta.zendesk?.count || 0,
       status: sourceMeta.zendesk?.status || 'unknown',
       error: sourceErrors.zendesk,
+      truncated: !!sourceMeta.zendesk?.truncated,
+      serverTotal: sourceMeta.zendesk?.serverTotal || null,
     },
     jira: {
       count: sourceMeta.jira?.count || 0,
       status: sourceMeta.jira?.status || 'unknown',
       error: sourceErrors.jira,
+      truncated: !!sourceMeta.jira?.truncated,
     },
     syncedAt: sourceLastSync.zendesk && sourceLastSync.jira
       ? (sourceLastSync.zendesk > sourceLastSync.jira ? sourceLastSync.zendesk : sourceLastSync.jira)
@@ -520,6 +526,13 @@ export function useQueueSync(arg = true) {
         lastSync: sourceLastSync.zendesk,
         lastSyncAt: lastFetchTsRefs.current.zendesk || null,
         count: tasks.filter(t => t.source === 'zendesk').length,
+        // `truncated` flips true when the backend's paginatedZendeskSearch
+        // exited early at its safety cap with the server still indicating
+        // more rows behind it. Surfacing this lets Queue.jsx warn the
+        // viewer when the ticket listing is intentionally capped (Sarah
+        // Suge 2026-05-11 feedback) so they aren't blind to hidden rows.
+        truncated: !!sourceMeta.zendesk?.truncated,
+        serverTotal: sourceMeta.zendesk?.serverTotal || null,
         retry: () => syncSource('zendesk', { bustCache: true, force: true }),
       },
       jira: {
@@ -529,6 +542,7 @@ export function useQueueSync(arg = true) {
         lastSync: sourceLastSync.jira,
         lastSyncAt: lastFetchTsRefs.current.jira || null,
         count: tasks.filter(t => t.source === 'jira').length,
+        truncated: !!sourceMeta.jira?.truncated,
         retry: () => syncSource('jira', { bustCache: true, force: true }),
       },
     },

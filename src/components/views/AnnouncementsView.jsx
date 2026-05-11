@@ -13,6 +13,7 @@ import MentionTextarea from '../ui/MentionTextarea';
 import { isApprover } from '../../data/approvers';
 import { createRequest as apiCreateRequest } from '../../services/announcementRequestsApi';
 import { useAnnouncementRequests } from '../../hooks/useAnnouncementRequests';
+import { useSavedAnnouncements } from '../../hooks/useSavedAnnouncements';
 import ApprovalQueueView from './ApprovalQueueView';
 
 // ── Mention chip rendering ──────────────────────────────────────────────────
@@ -110,8 +111,20 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
 
   // ── State ──
   const [filter,setFilter]=useState('all');
+  // "Show saved only" — secondary toggle that stacks on top of the type
+  // filter (All / Alerts / Updates / etc.). Lives in the header beside the
+  // sent count rather than as a sibling tab so users see saved items in
+  // the same surface they were saved from.
+  const [showSavedOnly,setShowSavedOnly]=useState(false);
   const [showCompose,setShowCompose]=useState(false);
   const [editDraft,setEditDraft]=useState(null);
+
+  // ── Personal "Save for later" bookmarks (per-user, localStorage) ───────
+  // Pure client-side preference — every role can save announcements they
+  // want to revisit. Storage is keyed by lowercased email so two users on
+  // one machine don't bleed into each other, and BroadcastChannel keeps
+  // additional tabs in sync.
+  const { isSaved, toggleSave, count: savedCount } = useSavedAnnouncements(user?.email);
 
   // ── Announcement requests (for the "Pending Approval" tab + badge) ─────
   // Backend auto-scopes: approvers see the whole queue, requesters see only
@@ -178,9 +191,14 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
     if(filter==='drafts')return c.status==='draft'&&isLA;
     if(filter==='archived')return c.status==='archived'&&isLA;
     if(filter==='scheduled')return canSeeScheduled(c);
-    if(filter!=='all')return c.type===filter&&c.status==='sent'&&canSee(c);
-    return c.status==='sent'&&canSee(c);
-  }),[comms,filter,isLA,user,serverUserId,isApproverUser]); // eslint-disable-line react-hooks/exhaustive-deps
+    // For sent surfaces ('all' + type filters), the optional "Saved only"
+    // toggle stacks on top — empty saved set just renders the empty
+    // state, not a phantom missing announcement.
+    const passes = filter==='all'
+      ? (c.status==='sent'&&canSee(c))
+      : (c.type===filter&&c.status==='sent'&&canSee(c));
+    return passes && (!showSavedOnly || isSaved(c.id));
+  }),[comms,filter,isLA,user,serverUserId,isApproverUser,showSavedOnly,savedCount]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const uid=Number(user.id);
   // Ack check — EMAIL-FIRST, drift-proof. The static MEMBERS array uses
@@ -447,6 +465,38 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
             </div>
           )}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+            {/* Saved-only secondary toggle. Pill style + bookmark icon so it
+                feels different from the type filter tabs below. Hidden on
+                drafts/archived/scheduled where saving doesn't apply. */}
+            {filter !== 'drafts' && filter !== 'archived' && filter !== 'scheduled' && filter !== 'pending-approval' && (
+              <button
+                onClick={() => setShowSavedOnly(s => !s)}
+                title={showSavedOnly ? 'Show all announcements' : 'Show saved only'}
+                aria-pressed={showSavedOnly}
+                style={{
+                  height: 32, padding: '0 14px',
+                  borderRadius: 128,
+                  border: showSavedOnly ? '1px solid #6b3fa0' : '1px solid #e8e8e8',
+                  background: showSavedOnly ? '#f3eff8' : 'white',
+                  color: showSavedOnly ? '#6b3fa0' : '#616161',
+                  fontSize: 12, fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  transition: 'all .15s',
+                }}>
+                <i className={showSavedOnly ? 'bi-bookmark-fill' : 'bi-bookmark'} style={{ fontSize: 12 }}></i>
+                <span>{showSavedOnly ? 'Saved only' : 'Saved'}</span>
+                {savedCount > 0 && (
+                  <span style={{
+                    background: showSavedOnly ? 'rgba(107,63,160,0.18)' : '#f2f2f2',
+                    color: showSavedOnly ? '#6b3fa0' : '#616161',
+                    borderRadius: 128, padding: '1px 7px',
+                    fontSize: 10, fontWeight: 700,
+                    fontVariantNumeric: 'tabular-nums',
+                  }}>{savedCount}</span>
+                )}
+              </button>
+            )}
             {pendingForMe.length > 0 && (
               <button onClick={() => { setWalkthrough(true); setWalkthroughDismissed([]); }}
                 style={{ height: 36, padding: '0 18px', borderRadius: 128, border: 'none', background: '#6b3fa0', color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 7 }}>
@@ -466,7 +516,7 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
             else if (f.id === 'archived') ct = comms.filter(c => c.status === 'archived').length;
             else if (f.id === 'scheduled') ct = comms.filter(c => canSeeScheduled(c)).length;
             else if (f.id === 'pending-approval') ct = pendingApprovalCount;
-            else ct = comms.filter(c => c.type === f.id && c.status === 'sent').length;
+            else ct = comms.filter(c => c.type === f.id && c.status === 'sent' && (!showSavedOnly || isSaved(c.id))).length;
             const isPendingTab = f.id === 'pending-approval';
             // Pending-Approval tab gets a red badge (urgency cue) when count > 0.
             const badgeBg = isPendingTab && ct > 0
@@ -490,7 +540,9 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
         {filter === 'pending-approval' ? (
           <ApprovalQueueView user={user} addToast={addToast} embedded />
         ) : visible.length === 0 ? (
-          <EmptyState icon="bi-inbox" title="No announcements" subtitle="All clear!" />
+          showSavedOnly
+            ? <EmptyState icon="bi-bookmark" title="No saved announcements" subtitle="Tap the bookmark icon on any announcement to save it for later." />
+            : <EmptyState icon="bi-inbox" title="No announcements" subtitle="All clear!" />
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
@@ -628,6 +680,22 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
                             <i className="bi-chat-dots" style={{ fontSize: 11 }}></i>
                           </button>
                         )}
+                        {/* Everyone: personal "save for later" bookmark.
+                            Distinct from Pin (admin-only, applies to all
+                            users) — this is per-user and stays in the
+                            Saved tab until the user removes it. */}
+                        {comm.status === 'sent' && (() => {
+                          const saved = isSaved(comm.id);
+                          return (
+                            <button
+                              onClick={() => toggleSave(comm.id)}
+                              title={saved ? 'Remove from Saved' : 'Save for later'}
+                              aria-pressed={saved}
+                              style={actionBtnStyle(saved ? '#f3eff8' : '#f2f2f2', saved ? '#6b3fa0' : '#9e9e9e')}>
+                              <i className={saved ? 'bi-bookmark-fill' : 'bi-bookmark'} style={{ fontSize: 11 }}></i>
+                            </button>
+                          );
+                        })()}
                         {/* Leads: expand ack tracker */}
                         {isLA && comm.status === 'sent' && ackMembers.length > 0 && settings.comms_show_member_ack_list !== false && (
                           <button onClick={() => setExpandedAck(isAckOpen ? null : comm.id)} title="Ack details"
@@ -786,6 +854,8 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
           apiUnlinkAnnouncement={apiUnlinkAnnouncement}
           setDetailId={setDetailId}
           highlightCommentId={detailCommentId}
+          isSaved={isSaved(detailComm.id)}
+          onToggleSave={() => toggleSave(detailComm.id)}
           onReact={(commId, emoji) => {
             if (apiReact) { apiReact(commId, emoji); }
             else {
@@ -987,7 +1057,7 @@ function WalkthroughOverlay({ comm, remaining, onAcknowledge, onSkip, onExit, on
 }
 
 // ── Detail overlay — view single announcement ──
-function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setComms, apiComments, apiSetComments, apiLoadComments, apiAddComment, apiDeleteComment, apiLinks, apiLoadLinks, apiLinkAnnouncement, apiUnlinkAnnouncement, setDetailId, onReact, highlightCommentId }) {
+function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setComms, apiComments, apiSetComments, apiLoadComments, apiAddComment, apiDeleteComment, apiLinks, apiLoadLinks, apiLinkAnnouncement, apiUnlinkAnnouncement, setDetailId, onReact, highlightCommentId, isSaved, onToggleSave }) {
   const t = COMMS_TYPES[comm.type] || COMMS_TYPES.update;
   // Email-only ack check to match the rest of the UI. We do NOT OR in an
   // id-axis fallback here — MEMBERS.id collides with DB members.id values,
@@ -1280,6 +1350,15 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
               <span>{comm.target === 'all' ? 'All Teams' : comm.target}</span>
             </div>
           </div>
+          {comm.status === 'sent' && onToggleSave && (
+            <button
+              onClick={onToggleSave}
+              title={isSaved ? 'Remove from Saved' : 'Save for later'}
+              aria-pressed={!!isSaved}
+              style={{ background: isSaved ? '#f3eff8' : '#f2f2f2', border: 'none', cursor: 'pointer', color: isSaved ? '#6b3fa0' : '#9e9e9e', width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>
+              <i className={isSaved ? 'bi-bookmark-fill' : 'bi-bookmark'}></i>
+            </button>
+          )}
           <button onClick={onClose} style={{ background: '#f2f2f2', border: 'none', cursor: 'pointer', color: '#9e9e9e', width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>
             <i className="bi-x-lg"></i>
           </button>

@@ -138,8 +138,15 @@ export async function POST(req) {
   try {
     const body = await req.json();
 
-    // Log what the proxy sent (keys only, not values, for security)
-    console.log('[auth/google/callback] Received keys:', Object.keys(body));
+    // Log what the proxy sent (keys only, not values, for security).
+    // Gated behind a dev-only flag so production logs don't carry
+    // a line per login (the 2026-05-11 audit caught 9 of these in
+    // the same window — the key names are not secrets, but the line
+    // is leftover diagnostic noise from when this route was being
+    // wired up against multiple proxy shapes).
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[auth/google/callback] Received keys:', Object.keys(body));
+    }
 
     let email = null;
     let name = null;

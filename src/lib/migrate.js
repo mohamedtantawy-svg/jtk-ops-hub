@@ -695,7 +695,7 @@ CREATE TABLE IF NOT EXISTS feedback_requests (
   issue                TEXT NOT NULL,
   proposed_resolution  TEXT,
   screenshot           TEXT,                     -- base64 data URI (data:image/png;base64,...)
-  status               VARCHAR(30) DEFAULT 'new' NOT NULL,        -- new | triaged | in_progress | done | wont_do | duplicate
+  status               VARCHAR(30) DEFAULT 'new' NOT NULL,        -- new | triaged | in_progress | paused | done(Deployed) | wont_do(Rejected) | duplicate
   priority             VARCHAR(20) DEFAULT 'medium' NOT NULL,      -- low | medium | high | critical
   category             VARCHAR(50),               -- 'queue' | 'briefing' | 'announcements' | 'team' | 'auth' | 'perf' | 'other' (free-form, not constrained)
   type                 VARCHAR(20) DEFAULT 'bug' NOT NULL,         -- bug | improvement | question

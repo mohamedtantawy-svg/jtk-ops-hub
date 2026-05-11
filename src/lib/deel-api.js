@@ -733,12 +733,36 @@ export async function listOffboardingCases() {
     // Wall time becomes max(stream_durations) instead of their sum,
     // cutting a ~80s scan to roughly the longer stream's duration
     // (~52s for the PROCESSING set on the live cohort, 2026-05-01).
+    //
+    // Per-promise catch: `Promise.all` rejects fast and silently drops
+    // ANY further rejections that resolve later. During a Deel 500-storm
+    // both streams fail almost simultaneously — the second rejection
+    // would otherwise leak past the outer try/catch as a process-level
+    // `unhandledRejection` (logged 7× on 2026-05-11 in the live audit).
+    // Wrapping each stream in its own `.catch` confines failures to
+    // their own slot and lets the merger decide whether partial results
+    // are usable. If every stream fails we throw so the route handler's
+    // stale-cache fallback still fires (the original "all-fail" behaviour
+    // is preserved — only the unhandled-rejection noise is removed).
+    const failureFlags = new Array(OFFBOARDING_ACTIONABLE_STATUSES.length).fill(null);
     const results = await Promise.all(
-      OFFBOARDING_ACTIONABLE_STATUSES.map(s => scanOneStatus(s))
+      OFFBOARDING_ACTIONABLE_STATUSES.map((s, idx) => scanOneStatus(s).catch(err => {
+        failureFlags[idx] = err;
+        console.warn(`[offboarding] status=${s} stream failed:`, err?.message || err);
+        return null;
+      })),
     );
+    const failureCount = failureFlags.filter(Boolean).length;
+    if (failureCount === OFFBOARDING_ACTIONABLE_STATUSES.length) {
+      // Every stream failed — surface the first error so the caller can
+      // fall back to stale cache. Without this we'd return zero rows
+      // silently and the FE would think the queue is empty.
+      throw failureFlags.find(Boolean);
+    }
     let serverTotalSum = 0;
     let everSawTotal = false;
     for (const r of results) {
+      if (!r) continue; // failed stream — already logged, skip
       totalScanned += r.scanned;
       totalPages += r.pages;
       if (Number.isFinite(r.statusTotal)) {
@@ -1552,28 +1576,69 @@ export async function listWorkbenchTasks(params = {}) {
   // subset that got marked COMPLETED specifically. CLOSED tasks may
   // not carry `completedAt` (workflow archives can stamp closedAt
   // instead), so the post-filter falls back to updatedAt.
+  //
+  // Paginated. The 2026-05-11 production log audit caught a silent
+  // truncation here: the previous code was a single non-paginated
+  // fetch using `params.limit` (50 by default from the route handler),
+  // so anything past the first 50 finished rows in the last 24h was
+  // dropped. With ~50-100 tasks/day completed on a busy team, that
+  // meant the "Resolved Today" tally on AgentHome + BriefingView was
+  // capped at 50. Now we paginate up to FINISHED_MAX_PAGES of
+  // FINISHED_PAGE_SIZE rows. Worst case: 1000 rows / 24h, which still
+  // fits comfortably below the WORKBENCH_MAX_PAGES * WORKBENCH_PAGE_SIZE
+  // active-branch ceiling.
+  //
+  // No "early-stop on first all-out-of-window page" optimisation: the
+  // upstream's row ordering on a multi-status filter
+  // (COMPLETED + CLOSED) isn't documented as DESC-by-recency. If a
+  // future version of the upstream interleaves rows, an early-stop
+  // would silently drop in-window rows mid-walk. The post-filter on
+  // `cutoff` is what enforces the lookback window per row; we just
+  // walk every page the cursor surfaces and trust the filter to
+  // discard old rows. Stop conditions are: empty page, no cursor,
+  // safety cap.
   if (includeCompleted) {
     try {
-      const qs = buildQs(null, ['COMPLETED', 'CLOSED']);
-      const res = await deelFetch(`/admin/ops_workbench/tasks?${qs.toString()}`);
-      const pageItems = res?.result || [];
+      const FINISHED_PAGE_SIZE = 200;
+      const FINISHED_MAX_PAGES = 5;
       const cutoff = Date.now() - completedLookbackMs;
       const seen = new Set(allItems.map(t => t.id));
       let kept = 0;
-      for (const t of pageItems) {
-        if (seen.has(t.id)) continue;
-        const ms = (() => {
-          const c = t.completedAt ? Date.parse(t.completedAt) : NaN;
-          if (Number.isFinite(c) && c > 0) return c;
-          const u = t.updatedAt ? Date.parse(t.updatedAt) : NaN;
-          return Number.isFinite(u) && u > 0 ? u : 0;
-        })();
-        if (!ms || ms < cutoff) continue;
-        allItems.push(t);
-        seen.add(t.id);
-        kept++;
+      let truncated = false;
+      let cursor = null;
+      for (let page = 0; page < FINISHED_MAX_PAGES; page++) {
+        const qs = new URLSearchParams();
+        qs.append('status[]', 'COMPLETED');
+        qs.append('status[]', 'CLOSED');
+        for (const id of teamIds) qs.append('teamIds[]', id);
+        qs.set('limit', String(FINISHED_PAGE_SIZE));
+        if (cursor) qs.set('cursor', cursor);
+        const res = await deelFetch(`/admin/ops_workbench/tasks?${qs.toString()}`);
+        const pageItems = res?.result || [];
+        if (pageItems.length === 0) break;
+        for (const t of pageItems) {
+          if (seen.has(t.id)) continue;
+          const ms = (() => {
+            const c = t.completedAt ? Date.parse(t.completedAt) : NaN;
+            if (Number.isFinite(c) && c > 0) return c;
+            const u = t.updatedAt ? Date.parse(t.updatedAt) : NaN;
+            return Number.isFinite(u) && u > 0 ? u : 0;
+          })();
+          if (!ms || ms < cutoff) continue;
+          allItems.push(t);
+          seen.add(t.id);
+          kept++;
+        }
+        cursor = res?.cursor || null;
+        if (!cursor) break;
+        if (page === FINISHED_MAX_PAGES - 1) truncated = true;
       }
-      if (kept > 0) console.info(`[workbench] kept ${kept} recently-finished task(s) — COMPLETED+CLOSED, last ${completedLookbackMs / 3600000}h`);
+      if (kept > 0) {
+        const suffix = truncated
+          ? ' (truncated at safety cap — bump FINISHED_MAX_PAGES if this fires regularly)'
+          : '';
+        console.info(`[workbench] kept ${kept} recently-finished task(s) — COMPLETED+CLOSED, last ${completedLookbackMs / 3600000}h${suffix}`);
+      }
     } catch (err) {
       console.warn('[workbench] recently-finished fetch failed (non-fatal):', err.message);
     }

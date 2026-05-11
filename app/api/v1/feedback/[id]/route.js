@@ -45,7 +45,8 @@ async function notifyFeedbackStatusChange({ id, requestTitle, prev, next, actor 
 
     const STATUS_LABEL = {
       new: 'New', triaged: 'Triaged', in_progress: 'In progress',
-      done: 'Resolved', wont_do: "Won't do", duplicate: 'Marked duplicate',
+      paused: 'Paused',
+      done: 'Deployed', wont_do: 'Rejected', duplicate: 'Marked duplicate',
     };
     const TERMINAL = new Set(['done', 'wont_do', 'duplicate']);
     const APPROVED = new Set(['done']);
@@ -85,7 +86,8 @@ async function notifyFeedbackStatusChange({ id, requestTitle, prev, next, actor 
   }
 }
 
-const ALLOWED_STATUS = new Set(['new', 'triaged', 'in_progress', 'done', 'wont_do', 'duplicate']);
+// `paused` added 2026-05-11; see /api/v1/feedback/route.js for the rationale.
+const ALLOWED_STATUS = new Set(['new', 'triaged', 'in_progress', 'paused', 'done', 'wont_do', 'duplicate']);
 const ALLOWED_PRIORITY = new Set(['low', 'medium', 'high', 'critical']);
 const ALLOWED_TYPE = new Set(['bug', 'improvement', 'question']);
 const ALLOWED_AUDIENCE = new Set(['global', 'emea', 'apac', 'americas', 'nam', 'latam', 'managers']);

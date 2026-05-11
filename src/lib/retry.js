@@ -110,8 +110,35 @@ export async function withRetry(fn, opts = {}) {
       }
 
       const tag = label || 'retry';
-      const snippet = (err.message || '').replace(/\s+/g, ' ').slice(0, 200);
-      console.warn(`[${tag}] Attempt ${attempt + 1}/${maxRetries + 1} failed (${waitReason}): ${snippet} — retrying in ${Math.round(waitMs)}ms...`);
+      // Truncate long base64 cursor params before logging. Deel admin
+      // cursor URLs encode the previous-page state and run 500-700 chars;
+      // they don't help the human debugging in real time and drown the
+      // surrounding signal in the log feed (2026-05-11 audit: ~270KB
+      // of log per 2h window was cursor-payload). Truncation collapses
+      // the value to first 12 chars + a "+N more" hint so the operator
+      // can tell two distinct cursors apart without seeing the full
+      // base64.
+      const truncated = String(err.message || '')
+        .replace(/\s+/g, ' ')
+        .replace(/cursor=([A-Za-z0-9+/=_-]{20,})/g,
+          (_, c) => `cursor=${c.slice(0, 12)}…[+${c.length - 12}]`);
+      const snippet = truncated.slice(0, 220);
+      // Demote first-attempt retry chatter in production. Deel's
+      // upstream 500s typically recover on attempt 2 — the 2026-05-11
+      // audit window saw 383 attempt-1 lines but only a handful of
+      // genuine failures. Operators still see attempt 2+, which IS
+      // a "this is actually flapping" signal, plus the final-failure
+      // path (caller's catch + stack trace). Dev / preview keep the
+      // full chatter for diagnostic. Flip DEEL_LOG_FIRST_ATTEMPT=1
+      // in prod for an hour if you're actively debugging an upstream
+      // incident.
+      const isFirstAttempt = attempt === 0;
+      const suppressFirst = isFirstAttempt
+        && process.env.NODE_ENV === 'production'
+        && process.env.DEEL_LOG_FIRST_ATTEMPT !== '1';
+      if (!suppressFirst) {
+        console.warn(`[${tag}] Attempt ${attempt + 1}/${maxRetries + 1} failed (${waitReason}): ${snippet} — retrying in ${Math.round(waitMs)}ms...`);
+      }
       await _sleep(waitMs);
     }
   }

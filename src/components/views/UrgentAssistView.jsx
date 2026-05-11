@@ -476,6 +476,14 @@ export default function UrgentAssistView({ user, onCreate, managerOnCall, onChan
                 <Th label="Type"     width={170} />
                 <Th label="Country"  width={110} />
                 <Th label="Assignee" width={130} />
+                {/* Mohamed 2026-05-11: second assignee column auto-tracking
+                    the current Manager on Call. The workbench assignee
+                    upstream stays in the column to its left (kept for
+                    audit / drill-in); this column shows the on-call CO
+                    expected to escalate to or pick up the case if needed.
+                    Auto-updates when the MoC rotates because the value
+                    flows through the prop chain from App.jsx. */}
+                <Th label="Urgent Assist Assignee" width={160} />
                 <Th label="Created"  width={120} />
                 <Th label="SLA (6h)" width={90} />
                 <Th label="Status"   width={150} />
@@ -488,6 +496,7 @@ export default function UrgentAssistView({ user, onCreate, managerOnCall, onChan
                 <UrgentRow
                   key={row.id}
                   row={row}
+                  managerOnCall={managerOnCall}
                   onStatusChange={handleStatusChange}
                   onDelete={handleDelete}
                 />
@@ -501,10 +510,17 @@ export default function UrgentAssistView({ user, onCreate, managerOnCall, onChan
 }
 
 // ── Row component ──
-function UrgentRow({ row, onStatusChange, onDelete }) {
+function UrgentRow({ row, managerOnCall, onStatusChange, onDelete }) {
   const [hov, setHov] = useState(false);
   const flag = getFlag(row.country);
   const countryLabel = getCountryName(row.country) || row.country || '';
+  // Display name for the Urgent Assist Assignee column. Falls back through
+  // each piece of the MoC payload — when the app is mid-boot before /me /
+  // settings/manager-on-call resolves, the prop can be null, in which case
+  // we render an em-dash rather than blowing up the row.
+  const mocName = managerOnCall?.name
+    || managerOnCall?.email
+    || '';
 
   return (
     <tr
@@ -546,6 +562,39 @@ function UrgentRow({ row, onStatusChange, onDelete }) {
             </span>
           </div>
         ) : <span style={{ fontSize: 11, color: '#9e9e9e' }}>Unassigned</span>}
+      </td>
+      {/* Urgent Assist Assignee — auto-tracks Manager on Call. */}
+      <td
+        style={tdStyle}
+        title={mocName ? `Manager on Call: ${mocName}` : 'Manager on Call not set'}
+      >
+        {mocName ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
+            <Avatar name={mocName} size="xs" />
+            <span style={{
+              fontSize: 11, color: '#1b1b1b', fontWeight: 500,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              maxWidth: 110,
+            }}>
+              {mocName.split(' ')[0]}
+            </span>
+            <span
+              aria-hidden="true"
+              title="Auto-set from Manager on Call — updates when the rota rotates"
+              style={{
+                marginLeft: 2,
+                display: 'inline-flex', alignItems: 'center',
+                fontSize: 9, fontWeight: 700,
+                color: '#7c3aed', background: '#f3eff8',
+                borderRadius: 4, padding: '1px 4px', lineHeight: 1,
+              }}
+            >
+              MoC
+            </span>
+          </div>
+        ) : (
+          <span style={{ fontSize: 11, color: '#9e9e9e' }}>—</span>
+        )}
       </td>
       <td style={{ ...tdStyle, fontSize: 11, color: '#616161', whiteSpace: 'nowrap' }} title={row.createdAt ? new Date(row.createdAt).toLocaleString() : ''}>
         <div>{fmtDate(row.createdAt)}</div>
