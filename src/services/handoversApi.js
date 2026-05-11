@@ -13,6 +13,15 @@ export async function fetchDefaultChecklistTemplate() {
   return apiFetch('/handover-checklist-templates/default');
 }
 
+/**
+ * Currently-merged coverages for the caller. Returns active or
+ * approved-in-window handovers where the caller has accepted coverage.
+ * Used by the Briefing CoverageBanner + CoverageCard.
+ */
+export async function fetchMyActiveCoverages() {
+  return apiFetch('/handovers/my-active-coverages');
+}
+
 /** Visible-scope handover list. Filters mirror the route's query params. */
 export async function listHandovers({ status, requester, manager, from, to } = {}) {
   const qs = new URLSearchParams();
