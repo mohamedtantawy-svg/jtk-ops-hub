@@ -129,6 +129,7 @@ export default function NotificationPanel({
   onNotifClick,
   markAllRead,
   markRead,
+  markUnread,
   onClose,
   onViewAll,
 }) {
@@ -166,6 +167,14 @@ export default function NotificationPanel({
     if (!markRead) return;
     for (const item of g.items) {
       if (!item.read && item.serverId) markRead(item.serverId);
+    }
+  };
+
+  const handleMarkGroupUnread = (e, g) => {
+    e.stopPropagation();
+    if (!markUnread) return;
+    for (const item of g.items) {
+      if (item.read && item.serverId) markUnread(item.serverId);
     }
   };
 
@@ -269,7 +278,9 @@ export default function NotificationPanel({
         ) : groups.map(g => <NotificationGroupCard key={g.key} group={g}
           onClick={() => handleGroupClick(g)}
           onMarkRead={(e) => handleMarkGroupRead(e, g)}
+          onMarkUnread={(e) => handleMarkGroupUnread(e, g)}
           canMarkRead={!!markRead && g.unreadCount > 0}
+          canMarkUnread={!!markUnread && g.unreadCount === 0 && g.items.length > 0}
         />)}
       </div>
 
@@ -299,7 +310,7 @@ export default function NotificationPanel({
   );
 }
 
-export function NotificationGroupCard({ group, onClick, onMarkRead, canMarkRead }) {
+export function NotificationGroupCard({ group, onClick, onMarkRead, onMarkUnread, canMarkRead, canMarkUnread }) {
   const [hov, setHov] = useState(false);
   const m = metaFor(group.latestType || 'info');
   const surfaceLabel = VIEW_LABELS[group.linkView] || '';
@@ -410,7 +421,9 @@ export function NotificationGroupCard({ group, onClick, onMarkRead, canMarkRead 
         )}
       </div>
 
-      {/* Per-row mark-as-read — appears on hover, also reachable via Tab */}
+      {/* Per-row read/unread toggle — JIRA-style. Shows "Mark as read" on
+          unread groups, "Mark as unread" on fully-read groups. Both appear
+          on hover and are Tab-focusable. */}
       {canMarkRead && (
         <button
           type="button"
@@ -429,6 +442,26 @@ export function NotificationGroupCard({ group, onClick, onMarkRead, canMarkRead 
           onBlur={e => { e.currentTarget.style.opacity = hov ? 1 : 0; }}
         >
           <i className="bi-check2" style={{ fontSize: 14 }} />
+        </button>
+      )}
+      {!canMarkRead && canMarkUnread && (
+        <button
+          type="button"
+          aria-label="Mark as unread"
+          title="Mark as unread"
+          onClick={onMarkUnread}
+          style={{
+            opacity: hov ? 1 : 0,
+            transition: 'opacity .15s',
+            border: 'none', background: 'transparent',
+            color: 'var(--text-muted)', cursor: 'pointer',
+            padding: 4, borderRadius: 6, alignSelf: 'flex-start',
+            flexShrink: 0, fontFamily: 'inherit',
+          }}
+          onFocus={e => { e.currentTarget.style.opacity = 1; }}
+          onBlur={e => { e.currentTarget.style.opacity = hov ? 1 : 0; }}
+        >
+          <i className="bi-envelope" style={{ fontSize: 13 }} />
         </button>
       )}
     </div>

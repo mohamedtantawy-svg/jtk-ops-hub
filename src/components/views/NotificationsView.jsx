@@ -33,6 +33,7 @@ export default function NotificationsView({
   unreadCount = 0,
   markAllRead,
   markRead,
+  markUnread,
   onNotifClick,
 }) {
   const [scope, setScope] = useState('all');           // 'all' | 'unread' | 'mentions'
@@ -100,6 +101,14 @@ export default function NotificationsView({
     if (!markRead) return;
     for (const item of g.items) {
       if (!item.read && item.serverId) markRead(item.serverId);
+    }
+  };
+
+  const handleMarkGroupUnread = (e, g) => {
+    e.stopPropagation();
+    if (!markUnread) return;
+    for (const item of g.items) {
+      if (item.read && item.serverId) markUnread(item.serverId);
     }
   };
 
@@ -263,7 +272,9 @@ export default function NotificationsView({
                 group={g}
                 onClick={() => handleClick(g)}
                 onMarkRead={(e) => handleMarkGroupRead(e, g)}
+                onMarkUnread={(e) => handleMarkGroupUnread(e, g)}
                 canMarkRead={!!markRead && g.unreadCount > 0}
+                canMarkUnread={!!markUnread && g.unreadCount === 0 && g.items.length > 0}
               />
             ))}
           </div>
