@@ -110,6 +110,18 @@ export async function register() {
         console.warn('[boot-wipe-alarm] checkForWipe failed (non-fatal):', alarmErr?.message);
       }
 
+      // Phase 3 — start the handover scope cache. Eager-loads delegation
+      // map at boot and refreshes every 60 s. Without this the coverer's
+      // workspace would NOT pick up the OOO person's queues until the
+      // next handover write triggered an invalidation. Wrapped in try so
+      // a missing table (fresh env mid-migration) never blocks boot.
+      try {
+        const { startHandoverScopeCacheRefresher } = await import('./src/lib/handover-scope-cache-loader');
+        startHandoverScopeCacheRefresher();
+      } catch (cacheErr) {
+        console.warn('[handover-scope-cache] start failed (non-fatal):', cacheErr?.message);
+      }
+
       // Seed members if table is empty
       const { rows: memberRows } = await query('SELECT COUNT(*) as count FROM members');
       if (parseInt(memberRows[0].count) === 0) {

@@ -28,6 +28,7 @@ import { useTaskNotes } from '../../hooks/useTaskNotes';
 import UnifiedSyncButton from './UnifiedSyncButton';
 import SourceTable from './SourceTable';
 import ErrorBoundary from '../ui/ErrorBoundary';
+import CoverageBanner from '../ooo/CoverageBanner';
 import {
   normalizeOnboarding,
   normalizeOffboarding,
@@ -661,6 +662,12 @@ const Queue = ({ user, tasks, subFilter }) => {
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* ── Phase 3 CoverageBanner — surfaces active OOO coverages so a
+          coverer scanning their merged queue knows whose rows are
+          appearing alongside their own (HANDOVERS_PLAN.md §10.3). */}
+      <div style={{ padding: '8px 24px 0', flexShrink: 0 }}>
+        <CoverageBanner />
+      </div>
       {/* ── Single Header ── */}
       <div data-role="queue-header" style={{ padding: '8px 32px 12px', background: 'var(--surface)', borderBottom: '1px solid #e8e8e8', flexShrink: 0 }}>
         {/* Line 1: SLA pills (left) · Title/totals · Sync button (right) */}

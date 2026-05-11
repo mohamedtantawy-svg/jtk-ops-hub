@@ -15,6 +15,7 @@ import {
   HANDOVER_EVENT_TYPES,
   HANDOVER_NOTIFICATION_TYPES,
 } from './handover-helpers';
+import { invalidateAndReloadHandoverScopeCache } from './handover-scope-cache-loader';
 
 // ── State machine — allowed transitions ────────────────────────────────
 // Maps each status to the set of statuses it can move to. The lifecycle
@@ -222,7 +223,30 @@ export async function transitionStatus(client, handover, next, {
 
   await writeLog(client, handover.id, logEventType, actor, logDetail || {});
 
+  // Schedule a cache reload after the surrounding transaction commits so
+  // the next request on this pod sees the new delegation set. Fire-and-
+  // forget — failure is logged inside the cache module.
+  scheduleScopeCacheReload();
+
   return updated.rows[0];
+}
+
+/**
+ * Schedule a fire-and-forget cache reload. Called from every server-side
+ * write path that mutates handovers or handover_coverers so the
+ * in-memory delegation map for `getVisibleEmails` / `getVisibleCountries`
+ * stays accurate without waiting for the 60-second TTL.
+ *
+ * Wrapped in setImmediate so the caller's transaction commits before
+ * the reload reads the new state. Errors are swallowed inside the cache
+ * module so a reload failure cannot break the API response.
+ */
+export function scheduleScopeCacheReload() {
+  if (typeof setImmediate === 'function') {
+    setImmediate(() => { invalidateAndReloadHandoverScopeCache(); });
+  } else {
+    setTimeout(() => { invalidateAndReloadHandoverScopeCache(); }, 0);
+  }
 }
 
 // ── Audit log writer ───────────────────────────────────────────────────
