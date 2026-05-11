@@ -168,22 +168,33 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('top');
   const [composeOpen, setComposeOpen] = useState(false);
-  // Read the deep-link target on first paint so a Carolina-style flow
-  // (click a notification → land on Feedback with the right row expanded)
-  // works regardless of how slow FeedbackView's mount + useFeedback fetch
-  // takes. Without reading the URL synchronously in the initialiser, the
-  // setView → mount → useEffect race in App.jsx can fire the openDetail
-  // event before this view has registered its listener.
-  const [expandedId, setExpandedId] = useState(() => {
-    if (typeof window === 'undefined') return null;
+  // Deep-link target (Carolina-style notification flow: click a feedback
+  // notification → land on Feedback with the right row expanded). Read in
+  // a useEffect-after-mount rather than the useState initialiser so SSR
+  // and the client first render return the same null — otherwise React
+  // throws #418 ("Hydration failed because the server rendered HTML
+  // didn't match the client") whenever `?fb=<id>` is present in the URL.
+  // The race with App.jsx's openDetail event that the previous comment
+  // worried about is mitigated by the second useEffect below (the
+  // dedicated openDetail listener), which fires on every fresh dispatch
+  // — so reading the URL one tick later doesn't drop the deep-link.
+  const [expandedId, setExpandedId] = useState(null);
+  // Snapshot of the initial ?fb= value (if any), used by the cleanup-on-
+  // collapse effect below. Filled in by the same mount effect that seeds
+  // `expandedId`, so we can't pre-compute it in a useRef initialiser
+  // without re-introducing the SSR/CSR divergence we're avoiding.
+  const initialDeepLinkRef = useRef(null);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
     try {
       const params = new URLSearchParams(window.location.search);
       const v = params.get('fb');
-      return v ? String(v) : null;
-    } catch {
-      return null;
-    }
-  });
+      if (v) {
+        initialDeepLinkRef.current = String(v);
+        setExpandedId(String(v));
+      }
+    } catch {}
+  }, []);
 
   // Allow App.jsx (via the "+ New Feedback" Create-menu shortcut) to pop the
   // composer the moment the user lands on this tab.
@@ -225,14 +236,14 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
 
   // When the user manually collapses the deep-linked row, drop the ?fb=
   // URL param so a subsequent reload doesn't keep auto-expanding it.
-  // Mounted-only effect — fires when `expandedId` clears AFTER the initial
-  // paint (the deep-link arrived, the user closed it, we clean up).
-  const initialExpandedRef = useRef(expandedId);
+  // Mounted-only effect — fires when `expandedId` clears AFTER the deep
+  // link has been seeded via initialDeepLinkRef (set in the mount effect
+  // above).
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (expandedId) return;
-    if (!initialExpandedRef.current) return;
-    initialExpandedRef.current = null;
+    if (!initialDeepLinkRef.current) return;
+    initialDeepLinkRef.current = null;
     try {
       const url = new URL(window.location.href);
       if (url.searchParams.has('fb')) {

@@ -456,8 +456,19 @@ const App=()=>{
   // (the pending-approval filter tab in that view displays the count). We no
   // longer need a top-nav badge, so App.jsx doesn't consume the requests
   // provider directly — AnnouncementsView reads it via useAnnouncementRequests().
-  const [dismissedPopups,setDismissedPopups]=useState(()=>{try{const d=localStorage.getItem('ops_hub_dismissed_popups');return d?JSON.parse(d):[];}catch(e){return[];}});
-  const [settings,setSettings]=useState(()=>{try{const s=localStorage.getItem('ops_hub_settings');return s?{...DEFAULT_SETTINGS,...JSON.parse(s)}:DEFAULT_SETTINGS;}catch(e){return DEFAULT_SETTINGS;}});
+  // Hydration-safe pattern: useState initialisers must not read localStorage
+  // directly, or the SSR pass returns the default while the client first
+  // render returns the user's saved value → React error #418 ("Hydration
+  // failed because the server rendered HTML didn't match the client").
+  // 2026-05-11 prod console caught this firing across Feedback / HR Hub /
+  // other views (Next.js 16 + React 19 strict-hydrates more aggressively
+  // than the prior version, surfacing what used to be a silent fall-back-
+  // to-CSR). All seven localStorage-derived initialisers below default
+  // to their SSR-safe value, then a single useEffect after mount hydrates
+  // the real state in one batch. Cost: a one-frame flash where the user
+  // briefly sees default settings before their stored prefs apply.
+  const [dismissedPopups,setDismissedPopups]=useState([]);
+  const [settings,setSettings]=useState(DEFAULT_SETTINGS);
   // Forward-compat merge of the cached `ops_hub_access_types` snapshot.
   // Without this, when a new view / action / admin power is shipped (most
   // recently 'feedback' on 2026-04-28), every user with a stale localStorage
@@ -468,34 +479,66 @@ const App=()=>{
   // type's lists with the latest defaults so newly-added entries
   // propagate automatically. Custom (non-default) access types are left
   // untouched so admin-defined tiers don't get overwritten.
-  const [accessTypes,setAccessTypes]=useState(()=>{
-    try{
-      const s=localStorage.getItem('ops_hub_access_types');
-      if(!s) return DEFAULT_ACCESS_TYPES;
-      const stored=JSON.parse(s);
-      if(!Array.isArray(stored)) return DEFAULT_ACCESS_TYPES;
-      const union=(a,b)=>Array.from(new Set([...(a||[]),...(b||[])]));
-      const enriched=stored.map(at=>{
-        const def=DEFAULT_ACCESS_TYPES.find(d=>d.id===at.id);
-        if(!def) return at;
-        return {
-          ...at,
-          views: union(at.views, def.views),
-          actions: union(at.actions, def.actions),
-          adminPowers: union(at.adminPowers, def.adminPowers),
-        };
-      });
-      // Append any new default access types that aren't yet in the stored
-      // list — without this, types added in a later release (e.g.
-      // at_hr_hub_admin, at_leader_alerts_admin) never surface in the
-      // Settings → Access Types editor and Directors can't assign them.
-      // Caught in the Leaders Alerts live audit (M1).
-      const storedIds=new Set(stored.map(at=>at.id));
-      const missing=DEFAULT_ACCESS_TYPES.filter(d=>!storedIds.has(d.id));
-      return [...enriched, ...missing];
-    }catch(e){return DEFAULT_ACCESS_TYPES;}
-  });
-  const [userAccessMap,setUserAccessMap]=useState(()=>{try{const ver=localStorage.getItem('ops_hub_uam_ver');if(ver!==ADMIN_LIST_VERSION){localStorage.removeItem('ops_hub_user_access_map');localStorage.setItem('ops_hub_uam_ver',ADMIN_LIST_VERSION);return{...DEFAULT_USER_ACCESS_MAP};}const s=localStorage.getItem('ops_hub_user_access_map');return s?JSON.parse(s):{...DEFAULT_USER_ACCESS_MAP};}catch(e){return DEFAULT_USER_ACCESS_MAP;}});
+  const [accessTypes,setAccessTypes]=useState(DEFAULT_ACCESS_TYPES);
+  const [userAccessMap,setUserAccessMap]=useState(DEFAULT_USER_ACCESS_MAP);
+  // Hydrate every localStorage-derived state in one batch after mount. See
+  // the "Hydration-safe pattern" comment above the useState declarations.
+  // The original initialiser logic (forward-compat union merges, version-
+  // pinned wipes, etc.) is preserved here verbatim — only the timing
+  // changes from "during initial render" to "during the first useEffect
+  // tick".
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const d = localStorage.getItem('ops_hub_dismissed_popups');
+      if (d) setDismissedPopups(JSON.parse(d));
+    } catch {}
+    try {
+      const s = localStorage.getItem('ops_hub_settings');
+      if (s) setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(s) });
+    } catch {}
+    try {
+      const s = localStorage.getItem('ops_hub_access_types');
+      if (s) {
+        const stored = JSON.parse(s);
+        if (Array.isArray(stored)) {
+          const union = (a, b) => Array.from(new Set([...(a || []), ...(b || [])]));
+          const enriched = stored.map(at => {
+            const def = DEFAULT_ACCESS_TYPES.find(d => d.id === at.id);
+            if (!def) return at;
+            return {
+              ...at,
+              views: union(at.views, def.views),
+              actions: union(at.actions, def.actions),
+              adminPowers: union(at.adminPowers, def.adminPowers),
+            };
+          });
+          // Append any new default access types that aren't yet in the
+          // stored list — without this, types added in a later release
+          // (e.g. at_hr_hub_admin, at_leader_alerts_admin) never surface
+          // in the Settings → Access Types editor and Directors can't
+          // assign them. Caught in the Leaders Alerts live audit (M1).
+          const storedIds = new Set(stored.map(at => at.id));
+          const missing = DEFAULT_ACCESS_TYPES.filter(d => !storedIds.has(d.id));
+          setAccessTypes([...enriched, ...missing]);
+        }
+      }
+    } catch {}
+    try {
+      const ver = localStorage.getItem('ops_hub_uam_ver');
+      if (ver !== ADMIN_LIST_VERSION) {
+        localStorage.removeItem('ops_hub_user_access_map');
+        localStorage.setItem('ops_hub_uam_ver', ADMIN_LIST_VERSION);
+      } else {
+        const s = localStorage.getItem('ops_hub_user_access_map');
+        if (s) setUserAccessMap(JSON.parse(s));
+      }
+    } catch {}
+    try { setShowOnboard(!localStorage.getItem('ops_hub_onboarded')); } catch {}
+    try { setShowWhatsNew(!localStorage.getItem(WHATS_NEW_KEY)); } catch {}
+    try { setShowMgrTour(!localStorage.getItem(MANAGER_TOUR_KEY)); } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Roster-version bridge ────────────────────────────────────────────────
   // The module-level roster in src/data/members.js is hydrated by
@@ -786,7 +829,11 @@ const App=()=>{
   const [feedbackCompose,setFeedbackCompose]=useState(false);
   const [toasts,setToasts]=useState([]);
   const [showSearch,setShowSearch]=useState(false);
-  const [showOnboard,setShowOnboard]=useState(()=>{ try{ return !localStorage.getItem('ops_hub_onboarded'); }catch(e){ return true; } });
+  // SSR-safe default: don't render any onboarding modal during the SSR
+  // pass / first client render. The post-mount hydration effect (above)
+  // flips this to its real value once it's safe to read localStorage,
+  // which keeps React #418 quiet without losing the show-once behaviour.
+  const [showOnboard,setShowOnboard]=useState(false);
   // Onboard overlay shows once; dismissible with Escape or click
   // May 2026 release tour — multi-step walkthrough of HR Hub, Workspace,
   // Hide Task, Escalate, Urgent Assist, Quick Create. Shows once per
@@ -794,13 +841,13 @@ const App=()=>{
   // the version key to re-prompt without invalidating this run's flags.
   // We defer-show until AFTER the welcome Onboarding modal so first-time
   // users don't get two stacked dialogs.
-  const [showWhatsNew,setShowWhatsNew]=useState(()=>{ try{ return !localStorage.getItem(WHATS_NEW_KEY); }catch(e){ return false; } });
+  const [showWhatsNew,setShowWhatsNew]=useState(false);
   // Manager-only release tour. Same show-once contract (key
   // `ops_hub_whats_new_mgr_v1`), gated below on `perms.dataScope` so agents
   // never see it. Renders AFTER both the welcome Onboarding and the general
   // WhatsNewTour finish, so a brand-new manager gets the full sequence on
   // first refresh, in order.
-  const [showMgrTour,setShowMgrTour]=useState(()=>{ try{ return !localStorage.getItem(MANAGER_TOUR_KEY); }catch(e){ return false; } });
+  const [showMgrTour,setShowMgrTour]=useState(false);
   const [sidebarOpen,setSidebarOpen]=useState(true);
   const [subFilter,setSubFilter]=useState(null);
   const [createModal,setCreateModal]=useState(false);
