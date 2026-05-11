@@ -487,13 +487,49 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
   const [error, setError] = useState(null);
   const [attachmentError, setAttachmentError] = useState(null);
 
+  // Tracks whether the user has touched the form since the modal opened (or
+  // since they last bounced back to the picker). Prefill values don't count
+  // — `setVal` and `handleAttachmentsChange` only fire on user interaction.
+  // Used by `attemptDiscard` to decide if an accidental close should prompt
+  // for confirmation.
+  const [userTouched, setUserTouched] = useState(false);
+  // When non-null, holds the action to run if the user confirms discard.
+  // Renders an inline confirmation panel covering the modal.
+  const [pendingDiscard, setPendingDiscard] = useState(null);
+
+  const hasUnsavedWork = userTouched || attachments.length > 0;
+
+  // Funnel every close/back path through this so the user gets a confirm
+  // prompt before losing what they've typed. `action` is the work to do if
+  // they confirm; if the form is clean, run it immediately.
+  const attemptDiscard = useCallback((action) => {
+    if (submitting) return;
+    if (hasUnsavedWork) {
+      setPendingDiscard(() => action);
+    } else {
+      action();
+    }
+  }, [submitting, hasUnsavedWork]);
+
   // Esc to close (when not submitting). onClose ref so changes to the
-  // parent's identity don't rebind the listener on every render.
+  // parent's identity don't rebind the listener on every render. When the
+  // discard-confirm panel is open, Esc dismisses THAT instead of the modal.
   const onCloseRef = useRef(onClose);
   const submittingRef = useRef(submitting);
-  useEffect(() => { onCloseRef.current = onClose; submittingRef.current = submitting; });
+  const attemptDiscardRef = useRef(attemptDiscard);
+  const pendingDiscardRef = useRef(pendingDiscard);
   useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape' && !submittingRef.current) onCloseRef.current?.(); };
+    onCloseRef.current = onClose;
+    submittingRef.current = submitting;
+    attemptDiscardRef.current = attemptDiscard;
+    pendingDiscardRef.current = pendingDiscard;
+  });
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== 'Escape' || submittingRef.current) return;
+      if (pendingDiscardRef.current) { setPendingDiscard(null); return; }
+      attemptDiscardRef.current?.(() => onCloseRef.current?.());
+    };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, []);
@@ -528,8 +564,20 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
   }, [settings, flow]);
 
   // The form's current value for a field id (uniform shape: string,
-  // string-array, etc.) — defaults from settings if present.
-  const setVal = (id, v) => setValues(prev => ({ ...prev, [id]: v }));
+  // string-array, etc.) — defaults from settings if present. Marks the
+  // form as user-touched so `attemptDiscard` knows to confirm before close.
+  const setVal = (id, v) => {
+    if (!userTouched) setUserTouched(true);
+    setValues(prev => ({ ...prev, [id]: v }));
+  };
+
+  // Wrapped setter for the AttachmentField. Same touch-tracking as setVal
+  // so dropping a screenshot before closing still triggers the prompt.
+  // Accepts either a value or the React-setter functional form.
+  const handleAttachmentsChange = (next) => {
+    if (!userTouched) setUserTouched(true);
+    setAttachments(next);
+  };
 
   const card = FLOW_CARDS.find(c => c.id === flow);
 
@@ -574,9 +622,18 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
     return typeof v === 'string' ? v.trim().length > 0 : !!v;
   });
 
+  // All non-Submit close paths route through this so dirty forms prompt
+  // for confirmation before discarding. Submitting is left as the only
+  // unguarded exit.
+  const closeIfClean = () => attemptDiscard(() => onClose?.());
+  const goBackToPicker = () => attemptDiscard(() => {
+    setFlow(null); setValues({}); setAttachments([]); setError(null);
+    setUserTouched(false);
+  });
+
   return (
     <div
-      onClick={() => { if (!submitting) onClose?.(); }}
+      onClick={closeIfClean}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
         display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
@@ -589,6 +646,7 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
         aria-labelledby="hrhub-create-title"
         onClick={e => e.stopPropagation()}
         style={{
+          position: 'relative',
           width: 'min(720px, 92vw)', maxHeight: '85vh',
           background: 'var(--surface)', borderRadius: 16,
           boxShadow: '0 20px 50px rgba(0,0,0,0.18)',
@@ -603,7 +661,7 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
         }}>
           {flow && (
             <button
-              onClick={() => { setFlow(null); setValues({}); setAttachments([]); setError(null); }}
+              onClick={goBackToPicker}
               style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 4, marginLeft: -4, color: 'var(--text-secondary)' }}
               aria-label="Back to picker"
             ><i className="bi bi-arrow-left" style={{ fontSize: 16 }} /></button>
@@ -619,7 +677,7 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
             )}
           </div>
           <button
-            onClick={() => { if (!submitting) onClose?.(); }}
+            onClick={closeIfClean}
             style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 4, color: 'var(--text-secondary)' }}
             aria-label="Close"
           ><i className="bi bi-x-lg" style={{ fontSize: 14 }} /></button>
@@ -720,7 +778,7 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
                     <AttachmentField
                       key={f.id}
                       attachments={attachments}
-                      setAttachments={setAttachments}
+                      setAttachments={handleAttachmentsChange}
                       error={attachmentError}
                       setError={setAttachmentError}
                     />
@@ -762,7 +820,7 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
           {flow && (
             <>
               <button
-                onClick={() => { if (!submitting) onClose?.(); }}
+                onClick={closeIfClean}
                 disabled={submitting}
                 style={{
                   padding: '8px 16px', borderRadius: 10, border: '1px solid var(--border)',
@@ -784,7 +842,7 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
           )}
           {!flow && (
             <button
-              onClick={() => { if (!submitting) onClose?.(); }}
+              onClick={closeIfClean}
               style={{
                 padding: '8px 16px', borderRadius: 10, border: '1px solid var(--border)',
                 background: 'var(--surface)', color: 'var(--text)', fontSize: 13, fontWeight: 500, cursor: 'pointer',
@@ -792,6 +850,71 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
             >Close</button>
           )}
         </div>
+
+        {/* Discard-confirmation overlay — rendered inside the dialog so it
+            traps the click; backdrop click here only dismisses the
+            confirmation, never the parent modal. Esc handler at the modal
+            level closes this overlay first (one layer at a time). */}
+        {pendingDiscard && (
+          <div
+            onClick={(e) => { e.stopPropagation(); setPendingDiscard(null); }}
+            style={{
+              position: 'absolute', inset: 0, background: 'rgba(15, 15, 15, 0.45)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: 24, borderRadius: 'inherit', zIndex: 1,
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="hrhub-discard-title"
+              style={{
+                width: 'min(420px, 100%)', background: 'var(--surface)', color: 'var(--text)',
+                borderRadius: 14, border: '1px solid var(--border)',
+                boxShadow: '0 20px 60px rgba(0,0,0,.25)',
+                padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 12,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 10, background: '#fef3c7', color: '#b45309', flexShrink: 0 }}>
+                  <i className="bi-exclamation-triangle-fill" style={{ fontSize: 14 }} />
+                </span>
+                <div id="hrhub-discard-title" style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>
+                  Discard your request?
+                </div>
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                You'll lose what you've typed so far. This can't be undone.
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+                <button
+                  type="button"
+                  onClick={() => setPendingDiscard(null)}
+                  autoFocus
+                  style={{
+                    padding: '8px 14px', borderRadius: 10, border: '1px solid var(--border)',
+                    background: 'var(--surface)', color: 'var(--text)', fontSize: 13, fontWeight: 600,
+                    cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >
+                  Keep editing
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { const action = pendingDiscard; setPendingDiscard(null); action?.(); }}
+                  style={{
+                    padding: '8px 16px', borderRadius: 10, border: 'none',
+                    background: '#d42d35', color: 'white', fontSize: 13, fontWeight: 600,
+                    cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >
+                  Discard
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
