@@ -358,14 +358,14 @@ const CommentRow = ({ comment, currentUser, perms, onUpdate }) => {
         {av.initials}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 2 }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{comment.author_name || comment.author_email}</span>
-          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{formatRelative(comment.created_at)}{comment.edited_at ? ' · edited' : ''}</span>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 3 }}>
+          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{comment.author_name || comment.author_email}</span>
+          <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{formatRelative(comment.created_at)}{comment.edited_at ? ' · edited' : ''}</span>
         </div>
 
         {!editing && (
           <div style={{
-            fontSize: 13, lineHeight: 1.5, color: 'var(--text)',
+            fontSize: 14, lineHeight: 1.6, color: 'var(--text)',
             whiteSpace: 'pre-wrap', wordBreak: 'break-word',
           }}>
             {renderBody(comment.body)}
@@ -779,12 +779,12 @@ const CommentComposer = ({ alertId, currentUser, onPosted }) => {
           onChange={onChangeBody}
           onKeyDown={onKeyDown}
           onPaste={handlePaste}
-          rows={1}
+          rows={2}
           placeholder="Reply to this alert · @ to mention · paste a screenshot"
           style={{
-            flex: 1, minHeight: 32, maxHeight: 240, resize: 'vertical',
-            padding: '6px 8px', border: 'none', background: 'transparent',
-            color: 'var(--text)', fontSize: 14, outline: 'none',
+            flex: 1, minHeight: 56, maxHeight: 260, resize: 'vertical',
+            padding: '10px 12px', border: 'none', background: 'transparent',
+            color: 'var(--text)', fontSize: 14, lineHeight: 1.5, outline: 'none',
             fontFamily: 'inherit',
           }}
         />
