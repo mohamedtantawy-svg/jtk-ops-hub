@@ -989,6 +989,20 @@ const App=()=>{
       } else if (n.linkView === 'feedback' && n.linkId) {
         // Feedback board deep-link: flip the view + ask FeedbackView to
         // expand the row + scroll its comment thread into view.
+        //
+        // We also stamp ?fb=<id> on the URL so:
+        //   (1) FeedbackView's useState initialiser reads it on first paint
+        //       and avoids the setView → mount → useEffect race (Carolina
+        //       Ferreira 2026-05-11 feedback "Accessing requests through
+        //       notifications" — landing on the Feedback board but the
+        //       row never expanded).
+        //   (2) the link survives F5 / share-the-URL so support can hand
+        //       a deep-link to another agent.
+        try {
+          const url = new URL(window.location.href);
+          url.searchParams.set('fb', n.linkId);
+          window.history.replaceState({}, '', url.toString());
+        } catch {}
         setView('feedback');
         const detail = {
           id: n.linkId,

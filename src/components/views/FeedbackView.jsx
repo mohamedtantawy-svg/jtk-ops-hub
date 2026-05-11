@@ -11,7 +11,7 @@
 // screenshot reference.
 // ────────────────────────────────────────────────────────────────────────
 
-import { useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { PermissionsContext } from '../../App';
 import { MEMBERS, MEMBERS_BY_EMAIL } from '../../data/members';
 import { useFeedback } from '../../hooks/useFeedback';
@@ -168,7 +168,22 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('top');
   const [composeOpen, setComposeOpen] = useState(false);
-  const [expandedId, setExpandedId] = useState(null);
+  // Read the deep-link target on first paint so a Carolina-style flow
+  // (click a notification → land on Feedback with the right row expanded)
+  // works regardless of how slow FeedbackView's mount + useFeedback fetch
+  // takes. Without reading the URL synchronously in the initialiser, the
+  // setView → mount → useEffect race in App.jsx can fire the openDetail
+  // event before this view has registered its listener.
+  const [expandedId, setExpandedId] = useState(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const v = params.get('fb');
+      return v ? String(v) : null;
+    } catch {
+      return null;
+    }
+  });
 
   // Allow App.jsx (via the "+ New Feedback" Create-menu shortcut) to pop the
   // composer the moment the user lands on this tab.
@@ -192,6 +207,13 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
       const id = e?.detail?.id;
       if (!id) return;
       setExpandedId(String(id));
+      // Mirror to the URL so a later F5 / share-the-URL restores the same
+      // expanded row. Stays in sync with the App.jsx writer.
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('fb', String(id));
+        window.history.replaceState({}, '', url.toString());
+      } catch {}
       requestAnimationFrame(() => {
         const node = document.querySelector(`[data-feedback-row="${String(id)}"]`);
         if (node) node.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -200,6 +222,40 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
     window.addEventListener('feedback:openDetail', handler);
     return () => window.removeEventListener('feedback:openDetail', handler);
   }, []);
+
+  // When the user manually collapses the deep-linked row, drop the ?fb=
+  // URL param so a subsequent reload doesn't keep auto-expanding it.
+  // Mounted-only effect — fires when `expandedId` clears AFTER the initial
+  // paint (the deep-link arrived, the user closed it, we clean up).
+  const initialExpandedRef = useRef(expandedId);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (expandedId) return;
+    if (!initialExpandedRef.current) return;
+    initialExpandedRef.current = null;
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has('fb')) {
+        url.searchParams.delete('fb');
+        window.history.replaceState({}, '', url.toString());
+      }
+    } catch {}
+  }, [expandedId]);
+
+  // After the items list lands, scroll the deep-linked row into view (the
+  // openDetail event handler already does this on its own dispatch path,
+  // but on the URL-param path the items aren't loaded yet at mount).
+  useEffect(() => {
+    if (!expandedId) return;
+    const id = String(expandedId);
+    const t = setTimeout(() => {
+      try {
+        const node = document.querySelector(`[data-feedback-row="${id}"]`);
+        if (node) node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } catch {}
+    }, 60);
+    return () => clearTimeout(t);
+  }, [expandedId]);
 
   const { items, loading, error, lastSyncAt, refresh, create, patch, remove, vote, fetchComments, submitComment } = useFeedback({
     enabled: !!user,
@@ -222,13 +278,28 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
   // Scope (mine vs all) → status bucket → type → text search. Status counts
   // below are computed after scope so the four big buttons reflect the
   // numbers you'd actually see when you click them.
+  // Deep-link bypass: when a notification expanded a specific row, always
+  // include it in the visible list regardless of the active filters — the
+  // user explicitly asked to see THAT item. Without this, a notification
+  // pointing to a Done request while the user is on the Open filter would
+  // flip the view, set expandedId, and STILL show the row collapsed and
+  // out-of-view (Carolina Ferreira 2026-05-11 "Accessing requests through
+  // notifications").
+  const matchesDeepLink = useCallback(
+    (item) => !!(expandedId && String(item.id) === String(expandedId)),
+    [expandedId],
+  );
+
   const scopedItems = useMemo(() => (
-    scopeFilter === 'mine' ? items.filter(isMineFn) : items
-  ), [items, scopeFilter, isMineFn]);
+    scopeFilter === 'mine'
+      ? items.filter(item => isMineFn(item) || matchesDeepLink(item))
+      : items
+  ), [items, scopeFilter, isMineFn, matchesDeepLink]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return scopedItems.filter(item => {
+      if (matchesDeepLink(item)) return true;
       if (bucketForStatus(item.status) !== statusFilter) return false;
       if (typeFilter && item.type !== typeFilter) return false;
       if (q) {
@@ -237,7 +308,7 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
       }
       return true;
     });
-  }, [scopedItems, statusFilter, typeFilter, search]);
+  }, [scopedItems, statusFilter, typeFilter, search, matchesDeepLink]);
 
   // ── Status counts (drive the five large filter buttons) ───────────────
   // Counts respect the scope toggle so "My requests · New (3)" reads
