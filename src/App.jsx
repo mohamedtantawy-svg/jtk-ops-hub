@@ -378,9 +378,39 @@ const App=()=>{
   // requests; now there's a single shared instance threaded through
   // IntegrationsContext. Per Mohamed's 2026-05-01 spec: "load everything"
   // on login.
+  //
+  // Deferred via requestIdleCallback so the view the user actually landed
+  // on (Feedback, HR Hub, Announcements, etc.) doesn't share bandwidth
+  // with 6 parallel Deel-API calls that can each take 10–15 s. The
+  // 2026-05-11 prod audit caught Feedback first-paint at ~8 s solely
+  // because of this pre-warm — the page's own /api/v1/feedback call is
+  // fast, but it was queued behind /integrations/deel/offboarding (15 s)
+  // and friends. With the defer in place: same eventual warm, first paint
+  // returns to the user's view almost immediately. The 1.5 s `timeout`
+  // forces the callback through even on a backgrounded tab or busy main
+  // thread, so the "load everything on login" guarantee still holds —
+  // worst case the pre-warm starts ~1.5 s later than before.
+  const [prewarmReady, setPrewarmReady] = useState(false);
+  useEffect(() => {
+    if (!user) { setPrewarmReady(false); return; }
+    if (typeof window === 'undefined') return;
+    let cancelled = false;
+    const flip = () => { if (!cancelled) setPrewarmReady(true); };
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(flip, { timeout: 1500 });
+      return () => {
+        cancelled = true;
+        if (typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(id);
+      };
+    }
+    // Safari <16.4 + any other UA without rIC — short setTimeout keeps
+    // the same "after first paint" intent without the idle wait.
+    const id = setTimeout(flip, 600);
+    return () => { cancelled = true; clearTimeout(id); };
+  }, [user]);
   const queueUnified = useQueueUnifiedSync({
     queueSync,
-    enabled: !!user,
+    enabled: !!user && prewarmReady,
     userEmail: user?.email || null,
   });
   // Pre-warm the global hide list on auth so every queue render starts
