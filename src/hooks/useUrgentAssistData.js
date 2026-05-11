@@ -189,6 +189,33 @@ export function useUrgentAssistData({
 
   useEffect(() => { loadManual(); }, [loadManual]);
 
+  // Auto-refresh on tab focus / visibility return — Jessica Fowler 2026-05-11
+  // feedback "even if I reassign the WB, it is not removed from my queue":
+  // a user who steps away to the upstream Deel Workbench to reassign a row
+  // would otherwise have to wait for the next workbench cache cycle (5 min)
+  // OR manually click Refresh to see their old assignment drop off. Pulling
+  // a fresh fetch the moment they return to the tab closes that gap with no
+  // explicit action required. Manual rows are also re-fetched in the same
+  // pass so a status edit made from another tab settles immediately too.
+  useEffect(() => {
+    if (typeof document === 'undefined' || typeof window === 'undefined') return undefined;
+    const onVis = () => {
+      if (document.visibilityState !== 'visible') return;
+      loadManual();
+      try { workbenchData.refresh?.(); } catch {}
+    };
+    const onFocus = () => {
+      loadManual();
+      try { workbenchData.refresh?.(); } catch {}
+    };
+    document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('focus', onFocus);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [loadManual, workbenchData]);
+
   // ── All-scope global workbench rows ──
   // The IntegrationsContext workbench data is SCOPED per caller (the
   // /api/v1/integrations/deel/workbench route applies scopeWorkbenchTasks
