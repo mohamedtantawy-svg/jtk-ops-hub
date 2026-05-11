@@ -18,18 +18,31 @@ import { useFeedback } from '../../hooks/useFeedback';
 import Avatar from '../ui/Avatar';
 import EmptyState from '../ui/EmptyState';
 import ImageLightbox from '../ui/ImageLightbox';
+import MentionTextarea from '../ui/MentionTextarea';
 import CreateFeedbackModal from '../modals/CreateFeedbackModal';
 
 // ── Visual config ──────────────────────────────────────────────────────
+// Status labels were renamed 2026-05-11 to match the team's actual lifecycle:
+//   New → In Progress → Paused → Deployed → Rejected.
+// DB enum values stayed stable (done = Deployed, wont_do = Rejected) so
+// existing rows keep their meaning; only the displayed labels changed.
+// `triaged` and `duplicate` are legacy values kept here for backwards
+// compatibility on older rows — they're not shown in the user-facing status
+// dropdown (STATUS_ORDER) but DO render correctly on a row whose status is
+// still set to one of those values.
 const STATUS_CONFIG = {
-  new:         { label: 'New',           color: '#0369a1', bg: '#e0f2fe', icon: 'bi-circle-fill',          dot: '#0ea5e9' },
-  triaged:     { label: 'Triaged',       color: '#7c3aed', bg: '#f3eff8', icon: 'bi-pin-angle-fill',       dot: '#7c3aed' },
-  in_progress: { label: 'In Progress',   color: '#d97706', bg: '#fff8e6', icon: 'bi-arrow-repeat',         dot: '#f59e0b' },
-  done:        { label: 'Done',          color: '#15803d', bg: '#e8f5e9', icon: 'bi-check-circle-fill',    dot: '#22c55e' },
-  wont_do:     { label: "Won't do",      color: '#737373', bg: '#f5f5f4', icon: 'bi-slash-circle',          dot: '#9ca3af' },
-  duplicate:   { label: 'Duplicate',     color: '#737373', bg: '#f5f5f4', icon: 'bi-files',                 dot: '#9ca3af' },
+  new:         { label: 'New',         color: '#0369a1', bg: '#e0f2fe', icon: 'bi-circle-fill',          dot: '#0ea5e9' },
+  triaged:     { label: 'Triaged',     color: '#7c3aed', bg: '#f3eff8', icon: 'bi-pin-angle-fill',       dot: '#7c3aed' },
+  in_progress: { label: 'In Progress', color: '#d97706', bg: '#fff8e6', icon: 'bi-arrow-repeat',         dot: '#f59e0b' },
+  paused:      { label: 'Paused',      color: '#a16207', bg: '#fef9c3', icon: 'bi-pause-circle-fill',    dot: '#eab308' },
+  done:        { label: 'Deployed',    color: '#15803d', bg: '#e8f5e9', icon: 'bi-rocket-takeoff-fill',  dot: '#22c55e' },
+  wont_do:     { label: 'Rejected',    color: '#dc2626', bg: '#fef2f2', icon: 'bi-x-circle-fill',        dot: '#ef4444' },
+  duplicate:   { label: 'Duplicate',   color: '#737373', bg: '#f5f5f4', icon: 'bi-files',                dot: '#9ca3af' },
 };
-const STATUS_ORDER = ['new', 'triaged', 'in_progress', 'done', 'wont_do', 'duplicate'];
+// User-facing dropdown order — five statuses matching the lifecycle. The
+// legacy `triaged` / `duplicate` values aren't surfaced for new edits but
+// existing rows carrying them still render via STATUS_CONFIG.
+const STATUS_ORDER = ['new', 'in_progress', 'paused', 'done', 'wont_do'];
 
 const PRIORITY_CONFIG = {
   low:      { label: 'Low',      color: '#9b928a', bg: '#f7f5f2' },
@@ -64,21 +77,32 @@ const SORTS = [
   { value: 'oldest', label: 'Oldest' },
 ];
 
-// Four large status filter buttons — replaces the old flat row of seven
-// pills. New + Triaged are folded into "Open" (anything that hasn't moved
-// to one of the other three buckets), per Pilar's revamp brief.
+// Five large status filter buttons matching the lifecycle (2026-05-11):
+//   New → In Progress → Paused → Deployed → Rejected.
+// Legacy `triaged` rows fold into the "New" bucket, legacy `duplicate` rows
+// fold into "Rejected" — see counts and filter logic below.
 const STATUS_FILTERS = [
-  { value: 'open',         label: 'Open',         icon: 'bi-circle-fill',           color: '#0369a1', bg: '#e0f2fe', tint: '#bae6fd' },
-  { value: 'in_progress',  label: 'In progress',  icon: 'bi-arrow-repeat',          color: '#d97706', bg: '#fff8e6', tint: '#fde68a' },
-  { value: 'done',         label: 'Done',         icon: 'bi-check-circle-fill',     color: '#15803d', bg: '#e8f5e9', tint: '#bbf7d0' },
-  { value: 'wont_do',      label: "Won't do",     icon: 'bi-slash-circle',          color: '#737373', bg: '#f5f5f4', tint: '#e7e5e4' },
+  { value: 'new',          label: 'New',          icon: 'bi-circle-fill',          color: '#0369a1', bg: '#e0f2fe', tint: '#bae6fd' },
+  { value: 'in_progress',  label: 'In Progress',  icon: 'bi-arrow-repeat',         color: '#d97706', bg: '#fff8e6', tint: '#fde68a' },
+  { value: 'paused',       label: 'Paused',       icon: 'bi-pause-circle-fill',    color: '#a16207', bg: '#fef9c3', tint: '#fde68a' },
+  { value: 'done',         label: 'Deployed',     icon: 'bi-rocket-takeoff-fill',  color: '#15803d', bg: '#e8f5e9', tint: '#bbf7d0' },
+  { value: 'wont_do',      label: 'Rejected',     icon: 'bi-x-circle-fill',        color: '#dc2626', bg: '#fef2f2', tint: '#fecaca' },
 ];
 
-// Statuses that are NOT considered "Open" — used by the Open filter and the
-// open-count badge. Anything not in this set (new / triaged / duplicate) is
-// shown when the Open button is active.
-const NOT_OPEN = new Set(['in_progress', 'done', 'wont_do']);
+// Terminal states keep the same enum membership: done + wont_do + duplicate.
+// "Open"-style meta-bucket is gone now that the 5 buttons map 1:1 to the
+// lifecycle statuses.
 const TERMINAL = new Set(['done', 'wont_do', 'duplicate']);
+
+// Map a row's stored status onto the filter bucket it belongs to. Legacy
+// `triaged` rows surface as "New" so they stay visible after the rename;
+// legacy `duplicate` rows surface as "Rejected" since duplicate is, in
+// effect, a rejection-because-already-tracked.
+function bucketForStatus(status) {
+  if (status === 'triaged') return 'new';
+  if (status === 'duplicate') return 'wont_do';
+  return status;
+}
 
 // Activity indicator threshold: how recently the row was last touched, and
 // the minimum gap between created_at and updated_at to avoid false
@@ -134,12 +158,12 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
   const perms = useContext(PermissionsContext);
   const isPriv = perms?.isAdmin || perms?.dataScope === 'regional_tasks' || false;
 
-  // Default filter set per the revamp brief: scope=All, status=Open. The
-  // Open bucket is the most important first impression (everything that
-  // still needs attention) — single-selecting Open by default keeps the
-  // board scannable.
+  // Default filter set 2026-05-11: scope=All, status=New. The New bucket
+  // is the first stop in the lifecycle (New → In Progress → Paused →
+  // Deployed → Rejected) so landing on it surfaces the freshest items
+  // that haven't been triaged yet.
   const [scopeFilter, setScopeFilter] = useState('all'); // 'all' | 'mine'
-  const [statusFilter, setStatusFilter] = useState('open'); // always one of the four
+  const [statusFilter, setStatusFilter] = useState('new'); // one of the five lifecycle statuses
   const [typeFilter, setTypeFilter] = useState(null);
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('top');
@@ -177,7 +201,7 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
     return () => window.removeEventListener('feedback:openDetail', handler);
   }, []);
 
-  const { items, loading, error, lastSyncAt, refresh, create, patch, remove, vote } = useFeedback({
+  const { items, loading, error, lastSyncAt, refresh, create, patch, remove, vote, fetchComments, submitComment } = useFeedback({
     enabled: !!user,
     userEmail: user?.email || null,
     sort,
@@ -205,9 +229,7 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return scopedItems.filter(item => {
-      if (statusFilter === 'open') {
-        if (NOT_OPEN.has(item.status)) return false;
-      } else if (item.status !== statusFilter) return false;
+      if (bucketForStatus(item.status) !== statusFilter) return false;
       if (typeFilter && item.type !== typeFilter) return false;
       if (q) {
         const hay = `${item.title} ${item.issue} ${item.proposedResolution || ''} ${item.category || ''} ${item.submitterName || ''} ${item.submitterEmail || ''}`.toLowerCase();
@@ -217,17 +239,16 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
     });
   }, [scopedItems, statusFilter, typeFilter, search]);
 
-  // ── Status counts (drive the four large filter buttons) ───────────────
-  // Counts respect the scope toggle so "My requests · Open (3)" reads
+  // ── Status counts (drive the five large filter buttons) ───────────────
+  // Counts respect the scope toggle so "My requests · New (3)" reads
   // accurately. Type / search are NOT applied here so the user can see how
   // many would land in each bucket regardless of the secondary filter.
+  // Legacy `triaged` rows fold into `new`; legacy `duplicate` into `wont_do`.
   const counts = useMemo(() => {
-    const c = { open: 0, in_progress: 0, done: 0, wont_do: 0 };
+    const c = { new: 0, in_progress: 0, paused: 0, done: 0, wont_do: 0 };
     for (const i of scopedItems) {
-      if (i.status === 'in_progress') c.in_progress += 1;
-      else if (i.status === 'done') c.done += 1;
-      else if (i.status === 'wont_do') c.wont_do += 1;
-      else c.open += 1; // new / triaged / duplicate / anything else
+      const bucket = bucketForStatus(i.status);
+      if (bucket in c) c[bucket] += 1;
     }
     return c;
   }, [scopedItems]);
@@ -294,11 +315,14 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
   // ── Render ─────────────────────────────────────────────────────────────
   return (
     <div style={page}>
-      {/* Inline responsive style — the four big status buttons collapse to
-          a 2x2 grid on narrow viewports so the labels never truncate. */}
+      {/* Inline responsive style — the five big status buttons collapse to
+          a 3+2 grid at medium widths and 2x3 / 1-per-row at the narrow end
+          so labels never truncate. */}
       <style>{`
-        .feedback-status-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-        @media (max-width: 900px) { .feedback-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        .feedback-status-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+        @media (max-width: 1200px) { .feedback-status-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        @media (max-width: 760px)  { .feedback-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 520px)  { .feedback-status-grid { grid-template-columns: 1fr; } }
       `}</style>
       {/* Header */}
       <div style={pageHead}>
@@ -447,7 +471,7 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
               <button
                 onClick={items.length === 0
                   ? () => setComposeOpen(true)
-                  : () => { setStatusFilter('open'); setScopeFilter('all'); setTypeFilter(null); setSearch(''); }}
+                  : () => { setStatusFilter('new'); setScopeFilter('all'); setTypeFilter(null); setSearch(''); }}
                 style={primaryBtn}
               >
                 <i className={items.length === 0 ? 'bi-plus-circle-fill' : 'bi-x-circle'} style={{ fontSize: 13 }} />
@@ -472,6 +496,9 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
                 isPriv={isPriv}
                 isAdmin={!!perms?.isAdmin}
                 user={user}
+                fetchComments={fetchComments}
+                submitComment={submitComment}
+                addToast={addToast}
               />
             ))}
           </ul>
@@ -490,7 +517,7 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
 }
 
 // ── Row ─────────────────────────────────────────────────────────────────
-function FeedbackRow({ item, expanded, onToggle, onVote, onStatusChange, onPriorityChange, onAssigneeChange, onDelete, onCopy, isPriv, isAdmin, user }) {
+function FeedbackRow({ item, expanded, onToggle, onVote, onStatusChange, onPriorityChange, onAssigneeChange, onDelete, onCopy, isPriv, isAdmin, user, fetchComments, submitComment, addToast }) {
   const status = STATUS_CONFIG[item.status] || STATUS_CONFIG.new;
   const priority = PRIORITY_CONFIG[item.priority] || PRIORITY_CONFIG.medium;
   const type = TYPE_CONFIG[item.type] || TYPE_CONFIG.bug;
@@ -728,6 +755,10 @@ function FeedbackRow({ item, expanded, onToggle, onVote, onStatusChange, onPrior
             onStatusChange={onStatusChange}
             onPriorityChange={onPriorityChange}
             onAssigneeChange={onAssigneeChange}
+            user={user}
+            fetchComments={fetchComments}
+            submitComment={submitComment}
+            addToast={addToast}
           />
         </div>
       )}
@@ -735,8 +766,190 @@ function FeedbackRow({ item, expanded, onToggle, onVote, onStatusChange, onPrior
   );
 }
 
+// Inline-render a comment body: split on newlines, wrap @first.last tokens
+// in styled chips that resolve to roster members. Unknown handles fall
+// through as plain text so a typo doesn't blow up the comment.
+function renderCommentLine(line, mentionByPrefix) {
+  if (!line) return null;
+  const parts = [];
+  const re = /(^|\s)@([a-z0-9._-]+)/gi;
+  let lastIndex = 0;
+  let m;
+  let key = 0;
+  while ((m = re.exec(line)) !== null) {
+    const before = line.slice(lastIndex, m.index + m[1].length);
+    if (before) parts.push(<span key={`t-${key++}`}>{before}</span>);
+    const handle = String(m[2] || '').toLowerCase();
+    const member = mentionByPrefix.get(handle);
+    if (member) {
+      parts.push(
+        <span key={`m-${key++}`} title={member.email}
+          style={{
+            display: 'inline-flex', alignItems: 'center',
+            background: 'var(--purple-mid, #ede9fe)',
+            color: 'var(--purple, #6b3fa0)',
+            borderRadius: 6, padding: '0 5px', fontWeight: 600,
+          }}>@{handle}</span>
+      );
+    } else {
+      parts.push(<span key={`u-${key++}`}>@{handle}</span>);
+    }
+    lastIndex = m.index + m[1].length + 1 + m[2].length;
+  }
+  const tail = line.slice(lastIndex);
+  if (tail) parts.push(<span key={`t-${key++}`}>{tail}</span>);
+  return parts;
+}
+
+// ── Comments thread (load on expand, post with @-mentions) ──────────────
+// The /api/v1/feedback/[id]/comments route already fans notifications out
+// to the submitter, previous commenters, and any @-mentioned users — we
+// just have to surface the thread in the UI and let users post.
+function CommentsSection({ item, fetchComments, submitComment, user, addToast }) {
+  const [comments, setComments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [draft, setDraft] = useState('');
+  const [, setMentions] = useState([]); // resolved emails — server re-parses, kept for parity with other composers
+  const [posting, setPosting] = useState(false);
+
+  // mentionByPrefix lets the renderer chip-ify @handles without re-walking
+  // the full members list on every line.
+  const mentionByPrefix = useMemo(() => {
+    const map = new Map();
+    for (const m of MEMBERS) {
+      const e = String(m?.email || '');
+      const at = e.indexOf('@');
+      const prefix = (at > 0 ? e.slice(0, at) : e).toLowerCase();
+      if (prefix) map.set(prefix, m);
+    }
+    return map;
+  }, []);
+
+  // Load comments on mount (i.e. when the row is expanded). The thread is
+  // small enough to fetch in one shot — no pagination needed.
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    Promise.resolve(fetchComments(item.id))
+      .then(res => { if (!cancelled) setComments(Array.isArray(res?.items) ? res.items : []); })
+      .catch(err => { if (!cancelled) addToast?.('error', 'Comments', err?.message || 'Could not load comments'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [item.id, fetchComments, addToast]);
+
+  const handleSubmit = async () => {
+    const body = draft.trim();
+    if (!body || posting) return;
+    setPosting(true);
+    try {
+      const created = await submitComment(item.id, body);
+      if (created) setComments(prev => [...prev, created]);
+      setDraft('');
+      setMentions([]);
+    } catch (err) {
+      addToast?.('error', 'Comment failed', err?.message || 'Please try again.');
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  const authorEmailLc = String(user?.email || '').toLowerCase();
+
+  return (
+    <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px dashed var(--border)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+        <i className="bi-chat-text-fill" style={{ fontSize: 13, color: '#7c3aed' }} />
+        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Discussion</span>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>({comments.length})</span>
+      </div>
+
+      {loading ? (
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '6px 0' }}>Loading comments…</div>
+      ) : comments.length === 0 ? (
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '6px 0' }}>
+          No comments yet. Be the first to weigh in — type <code style={{ background: 'var(--surface-2)', padding: '0 4px', borderRadius: 4 }}>@</code> to tag someone.
+        </div>
+      ) : (
+        <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {comments.map(c => {
+            const cAuthorEmail = String(c.authorEmail || '').toLowerCase();
+            const member = cAuthorEmail ? MEMBERS_BY_EMAIL[cAuthorEmail] : null;
+            const isOwn = cAuthorEmail && cAuthorEmail === authorEmailLc;
+            return (
+              <li key={c.id} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                <Avatar name={member?.name || c.authorName || c.authorEmail} initials={member?.initials} size="sm" />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 2 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
+                      {member?.name || c.authorName || c.authorEmail || 'Unknown'}
+                    </span>
+                    {isOwn && (
+                      <span style={{ ...mutedPill, padding: '0 6px', fontSize: 9, height: 16 }}>YOU</span>
+                    )}
+                    <span style={{ fontSize: 10, color: 'var(--text-muted)' }} title={new Date(c.createdAt).toLocaleString('en-GB')}>
+                      {relTime(c.createdAt)}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {String(c.body || '').split('\n').map((line, i) => (
+                      <div key={i}>{line.trim() === '' ? <>&nbsp;</> : renderCommentLine(line, mentionByPrefix)}</div>
+                    ))}
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {/* Composer — Cmd/Ctrl+Enter submits, plain Enter inserts a newline.
+          Server re-parses @-mentions so we don't need to thread the
+          resolved list back, but we still track them locally for parity
+          with other composers in the app. */}
+      <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+        <Avatar name={user?.name || user?.email} size="sm" />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <MentionTextarea
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onMentionsChange={setMentions}
+            members={MEMBERS}
+            placeholder="Add a comment… type @ to mention someone. Cmd/Ctrl+Enter to send."
+            rows={2}
+            minHeight={64}
+            maxHeight={200}
+            style={{ fontSize: 13, padding: '8px 10px', lineHeight: 1.45, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', width: '100%', boxSizing: 'border-box', outline: 'none', resize: 'vertical' }}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && draft.trim()) {
+                e.preventDefault();
+                handleSubmit();
+              }
+            }}
+          />
+        </div>
+        <button
+          onClick={handleSubmit}
+          disabled={!draft.trim() || posting}
+          aria-label="Post comment"
+          style={{
+            height: 36, padding: '0 14px', borderRadius: 8, border: 'none',
+            background: draft.trim() && !posting ? '#7c3aed' : 'var(--surface-2)',
+            color: draft.trim() && !posting ? 'white' : 'var(--text-muted)',
+            fontSize: 12, fontWeight: 700,
+            cursor: draft.trim() && !posting ? 'pointer' : 'default',
+            display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0,
+            boxShadow: draft.trim() && !posting ? '0 2px 8px rgba(124,58,237,0.22)' : 'none',
+          }}>
+          <i className={posting ? 'bi-arrow-clockwise spin' : 'bi-send-fill'} style={{ fontSize: 12 }} />
+          {posting ? 'Posting…' : 'Post'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Expanded detail (description, screenshot full-size, status changer) ──
-function ExpandedDetail({ item, isPriv, onStatusChange, onPriorityChange, onAssigneeChange }) {
+function ExpandedDetail({ item, isPriv, onStatusChange, onPriorityChange, onAssigneeChange, user, fetchComments, submitComment, addToast }) {
   const [lightbox, setLightbox] = useState(null);
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 240px', gap: 16 }}>
@@ -798,6 +1011,19 @@ function ExpandedDetail({ item, isPriv, onStatusChange, onPriorityChange, onAssi
             </div>
           );
         })()}
+
+        {/* Discussion thread + composer. Available to everyone with view
+            access to the row — the server's audience gate on
+            /api/v1/feedback/[id]/comments mirrors the row's audience scope. */}
+        {fetchComments && submitComment && user && (
+          <CommentsSection
+            item={item}
+            fetchComments={fetchComments}
+            submitComment={submitComment}
+            user={user}
+            addToast={addToast}
+          />
+        )}
       </div>
 
       {/* Right: action panel */}
