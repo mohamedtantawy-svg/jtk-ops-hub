@@ -38,6 +38,11 @@ export const ALL_VIEWS = [
   'hr-hub',
   // 'leader-alerts' is the route id; users see "Leaders Hub" in the nav.
   'leader-alerts',
+  // OOO & Handovers (Phase 1, 2026-05-11) — single-tab surface for OOO
+  // calendar + handover workflow. Visible to every signed-in user (no
+  // MANAGERIAL_ONLY_VIEWS entry) per HANDOVERS_PLAN.md §2.1; the
+  // reporting-tree scope clips what each user actually sees.
+  'ooo',
   'urgent-assist',
   // 'notifications' is the full-page sibling of the bell dropdown
   // (src/components/views/NotificationsView.jsx). Open to every signed-in
@@ -133,6 +138,7 @@ export const VIEW_LABELS = {
   'feedback':      'Feedback',
   'hr-hub':        'HR Hub',
   'leader-alerts': 'Leaders Hub',
+  'ooo':           'OOO',
   'urgent-assist': 'Urgent Assist',
   'notifications': 'Notifications',
   'settings':      'Settings',

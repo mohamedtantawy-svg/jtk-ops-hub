@@ -18,6 +18,10 @@ const WIPE_ALARM_TABLES = [
   'team_member_overrides',
   'feedback_requests',
   'members',
+  // OOO / Handovers (Phase 1, 2026-05-11) — once seeded, a wipe of these
+  // would silently empty the calendar and lose every in-flight handover.
+  'time_off_events',
+  'handovers',
 ];
 
 async function checkForWipe(query) {
