@@ -69,6 +69,7 @@ import {
   ALL_EMAILS_SET,
 } from '../data/members.js';
 import { OWNER_COUNTRIES, COUNTRY_OWNERS } from '../data/countryOwners.js';
+import { getActiveHandoverDelegationsSync } from './handover-scope-cache.js';
 
 // Every country anyone owns — admin baseline + fallback when data is sparse.
 // Computed lazily so a hydrateOwnerCountries() update from
@@ -110,16 +111,34 @@ export function isAdminUser(user) {
 }
 
 // ── Visible emails ─────────────────────────────────────────────────────────
+// Phase 3 — getVisibleEmails additionally folds in every requester whose
+// handover is currently `active` (or `approved` and inside the date
+// window) AND lists the caller as an accepted coverer. The delegation
+// data lives in the in-memory handover-scope-cache, populated at boot
+// and refreshed on every handover write + every 60 s. Admins are
+// short-circuited; they already see everything.
 export function getVisibleEmails(user) {
   if (!user || !user.email) return new Set();
   if (isAdminUser(user)) return ALL_EMAILS_SET;
-  return getVisibleEmailsForAccess(user.email);
+  const base = getVisibleEmailsForAccess(user.email);
+  const delegations = getActiveHandoverDelegationsSync(user.email);
+  if (delegations.length === 0) return base;
+  for (const d of delegations) {
+    if (d?.requesterEmail) base.add(d.requesterEmail);
+  }
+  return base;
 }
 
 // ── Visible countries ──────────────────────────────────────────────────────
 // Aggregates OWNER_COUNTRIES across every email the user can "see", where the
 // hierarchy is defined exactly as for assignee visibility so the two modes
 // stay consistent.
+//
+// Phase 3 — additionally adds the delegated country set. If a coverer
+// row carries an empty `countries` array we treat that as full coverage
+// of the requester's owned countries; if it carries an explicit subset
+// we add ONLY those codes. Either way the merge is additive: the
+// coverer's pre-existing country set is never narrowed.
 export function getVisibleCountries(user) {
   if (!user || !user.email) return new Set();
   const role = normalizeRole(user);
@@ -140,6 +159,20 @@ export function getVisibleCountries(user) {
     const owned = OWNER_COUNTRIES.get(e);
     if (owned) for (const c of owned) countries.add(c);
   }
+
+  // Phase 3 — fold in delegated countries.
+  const delegations = getActiveHandoverDelegationsSync(email);
+  for (const d of delegations) {
+    if (!d?.requesterEmail) continue;
+    if (!d.countries || d.countries.size === 0) {
+      // Full coverage — add every country the requester owns.
+      const owned = OWNER_COUNTRIES.get(d.requesterEmail);
+      if (owned) for (const c of owned) countries.add(c);
+    } else {
+      for (const c of d.countries) countries.add(c);
+    }
+  }
+
   return countries;
 }
 

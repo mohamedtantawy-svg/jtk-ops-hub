@@ -2,6 +2,8 @@ import { query } from './db';
 import { seedCountryOwnersIfEmpty } from './country-owners-seed';
 import { seedHrHubSettingsIfNeeded } from './hr-hub-seed';
 import { seedLeaderAlertsSettingsIfNeeded } from './leader-alerts-seed';
+import { seedTimeOffEventsIfNeeded } from './time-off-seed';
+import { seedHandoverDefaultsIfNeeded } from './handover-defaults-seed';
 
 const SCHEMA_SQL = `
 -- Members
@@ -1349,6 +1351,218 @@ BEGIN
     ON CONFLICT (key) DO NOTHING;
   END IF;
 END $$;
+
+-- ══════════════════════════════════════════════════════════════════════════
+-- OOO & Handovers (2026-05-11) — Phase 1
+-- ══════════════════════════════════════════════════════════════════════════
+-- Single OOO surface (one primary nav tab, no sub-tabs). Two view modes
+-- (Calendar Gantt + Table), six lenses (Mine / Covering me / My team /
+-- Approvals / Drafts / All). Workspace merges while a handover is active
+-- via getVisibleEmails/getVisibleCountries cache extension in
+-- src/lib/queue-scoping.js (Phase 3). Full spec in HANDOVERS_PLAN.md.
+-- Phase 1 lands schema + CSV seed + read-only OOO surface only; write
+-- paths and lifecycle cron arrive in Phases 2-4.
+-- All new tables — nothing existing is destructively altered.
+-- is_handover_admin is added to team_member_overrides as a stackable
+-- per-user grant mirroring is_announcements_admin / is_hr_hub_admin.
+
+-- Source-of-truth list of OOO ranges per person. Seeded from the May 11
+-- 2026 HRX CSV via src/lib/time-off-seed.js; refreshed day-to-day via the
+-- "Sync from Deel API" admin action (Phase 5) which writes source='deel_api'
+-- with external_id set. The (work_email, start_date, end_date, source)
+-- unique constraint makes re-imports dedupe automatically.
+CREATE TABLE IF NOT EXISTS time_off_events (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  work_email      VARCHAR(255) NOT NULL,
+  start_date      DATE NOT NULL,
+  end_date        DATE NOT NULL,
+  source          VARCHAR(20) NOT NULL DEFAULT 'csv',
+  external_id     VARCHAR(255),
+  status          VARCHAR(20) NOT NULL DEFAULT 'approved',
+  reason          VARCHAR(80),
+  imported_batch  UUID,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (work_email, start_date, end_date, source)
+);
+CREATE INDEX IF NOT EXISTS idx_too_email   ON time_off_events(LOWER(work_email));
+CREATE INDEX IF NOT EXISTS idx_too_window  ON time_off_events(start_date, end_date);
+CREATE INDEX IF NOT EXISTS idx_too_active  ON time_off_events(end_date) WHERE status = 'approved';
+
+-- CSV / Deel API import provenance. One row per import batch; per-row
+-- parse failures collected in error_log so we never silently drop data
+-- without a trace.
+CREATE TABLE IF NOT EXISTS time_off_import_batches (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source            VARCHAR(20) NOT NULL,
+  filename          VARCHAR(500),
+  uploaded_by_email VARCHAR(255),
+  rows_total        INTEGER NOT NULL DEFAULT 0,
+  rows_inserted     INTEGER NOT NULL DEFAULT 0,
+  rows_skipped      INTEGER NOT NULL DEFAULT 0,
+  rows_invalid      INTEGER NOT NULL DEFAULT 0,
+  error_log         JSONB   NOT NULL DEFAULT '[]'::jsonb,
+  uploaded_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_to_import_batches_uploaded
+  ON time_off_import_batches(uploaded_at DESC);
+
+-- Handovers lifecycle table. State machine (HANDOVERS_PLAN.md §8):
+--   draft → pending_coverage_acceptance → pending_manager_approval
+--   → approved → active → completed
+-- with rejected / cancelled / expired terminals. Only the lifecycle cron
+-- (Phase 4) writes active / completed / expired; everything else is
+-- user-driven. settings_id pins the configuration preset that drove this
+-- handover so a later edit to settings does not retroactively change
+-- in-flight rows.
+CREATE TABLE IF NOT EXISTS handovers (
+  id                        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  requester_email           VARCHAR(255) NOT NULL,
+  start_date                DATE NOT NULL,
+  end_date                  DATE NOT NULL,
+  time_off_event_id         UUID REFERENCES time_off_events(id) ON DELETE SET NULL,
+  reason                    TEXT,
+  status                    VARCHAR(30) NOT NULL DEFAULT 'draft',
+  manager_email             VARCHAR(255),
+  manager_approval_required BOOLEAN NOT NULL DEFAULT TRUE,
+  manager_decision_at       TIMESTAMPTZ,
+  manager_decision_note     TEXT,
+  checklist_template_id     UUID,
+  settings_id               UUID,
+  submitted_at              TIMESTAMPTZ,
+  activated_at              TIMESTAMPTZ,
+  completed_at              TIMESTAMPTZ,
+  cancelled_at              TIMESTAMPTZ,
+  cancelled_by              VARCHAR(255),
+  cancel_reason             TEXT,
+  created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at                TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_handover_requester ON handovers(LOWER(requester_email), start_date);
+CREATE INDEX IF NOT EXISTS idx_handover_manager   ON handovers(LOWER(manager_email), status);
+CREATE INDEX IF NOT EXISTS idx_handover_active    ON handovers(status, start_date, end_date) WHERE status IN ('approved','active');
+CREATE INDEX IF NOT EXISTS idx_handover_event     ON handovers(time_off_event_id);
+
+-- Multi-coverer rows. country_codes='{}' means full coverage of the
+-- requester's countries; a non-empty array narrows the cover to those
+-- ISO-2 codes. Per-coverer acceptance state lets one decline without
+-- nuking the rest of the handover.
+CREATE TABLE IF NOT EXISTS handover_coverers (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  handover_id        UUID NOT NULL REFERENCES handovers(id) ON DELETE CASCADE,
+  coverer_email      VARCHAR(255) NOT NULL,
+  country_codes      TEXT[] NOT NULL DEFAULT '{}'::text[],
+  acceptance_status  VARCHAR(20) NOT NULL DEFAULT 'pending',
+  accepted_at        TIMESTAMPTZ,
+  declined_at        TIMESTAMPTZ,
+  decline_reason     TEXT,
+  invited_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (handover_id, coverer_email)
+);
+CREATE INDEX IF NOT EXISTS idx_hcover_email ON handover_coverers(LOWER(coverer_email));
+
+-- Reusable checklist template (config). items is an ordered JSONB array
+-- of { id, label, required, hint } objects. is_default picks the template
+-- inserted into a new handover when no scope-specific template matches.
+CREATE TABLE IF NOT EXISTS handover_checklist_templates (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name              VARCHAR(200) NOT NULL,
+  description       TEXT,
+  scope             VARCHAR(20)  NOT NULL DEFAULT 'global',
+  scope_value       VARCHAR(100),
+  items             JSONB        NOT NULL DEFAULT '[]'::jsonb,
+  is_default        BOOLEAN      NOT NULL DEFAULT FALSE,
+  created_by_email  VARCHAR(255),
+  created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_handover_templates_scope
+  ON handover_checklist_templates(scope, scope_value);
+
+-- Per-handover instance of template items (snapshot at submit-time so a
+-- later template edit never alters historical checklists).
+CREATE TABLE IF NOT EXISTS handover_checklist_items (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  handover_id   UUID NOT NULL REFERENCES handovers(id) ON DELETE CASCADE,
+  item_id       VARCHAR(80) NOT NULL,
+  label         TEXT NOT NULL,
+  required      BOOLEAN NOT NULL DEFAULT TRUE,
+  completed     BOOLEAN NOT NULL DEFAULT FALSE,
+  note          TEXT,
+  completed_at  TIMESTAMPTZ,
+  completed_by  VARCHAR(255),
+  UNIQUE (handover_id, item_id)
+);
+
+-- Audit log: every state transition writes exactly one row. Never
+-- auto-pruned. Surfaced via GET /handovers/:id/audit-trail and the
+-- admin CSV export in Phase 5.
+CREATE TABLE IF NOT EXISTS handover_log (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  handover_id  UUID NOT NULL REFERENCES handovers(id) ON DELETE CASCADE,
+  event_type   VARCHAR(40) NOT NULL,
+  actor_email  VARCHAR(255),
+  actor_name   VARCHAR(255),
+  detail       JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_handover_log_handover ON handover_log(handover_id, created_at);
+
+-- Handback summary: coverer logs this on return-day so the workspace
+-- merge can flip to completed. open_items is a JSONB array of stable
+-- pointers (source/id pairs or URLs) the requester needs to pick up.
+CREATE TABLE IF NOT EXISTS handover_handback (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  handover_id     UUID NOT NULL REFERENCES handovers(id) ON DELETE CASCADE,
+  ack_email       VARCHAR(255) NOT NULL,
+  summary         TEXT,
+  open_items      JSONB NOT NULL DEFAULT '[]'::jsonb,
+  acknowledged_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (handover_id, ack_email)
+);
+
+-- Configuration presets ("setups") — global / region / team. Resolution
+-- rule when multiple match: team > region > global. is_default picks the
+-- global fallback when no scope-specific row applies. Phase 5 ships the
+-- Settings UI; Phase 1 only needs the table so foreign keys resolve.
+CREATE TABLE IF NOT EXISTS handover_settings (
+  id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name                        VARCHAR(200) NOT NULL,
+  scope                       VARCHAR(20) NOT NULL DEFAULT 'global',
+  scope_value                 VARCHAR(100),
+  reminder_48h_enabled        BOOLEAN NOT NULL DEFAULT TRUE,
+  reminder_24h_enabled        BOOLEAN NOT NULL DEFAULT TRUE,
+  reminder_handback_enabled   BOOLEAN NOT NULL DEFAULT TRUE,
+  manager_approval_required   BOOLEAN NOT NULL DEFAULT TRUE,
+  coverer_acceptance_required BOOLEAN NOT NULL DEFAULT TRUE,
+  min_days_to_trigger         INTEGER NOT NULL DEFAULT 1,
+  allow_country_split         BOOLEAN NOT NULL DEFAULT TRUE,
+  default_template_id         UUID REFERENCES handover_checklist_templates(id) ON DELETE SET NULL,
+  is_default                  BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_handover_settings_scope
+  ON handover_settings(scope, scope_value);
+
+-- Idempotency ledger for reminders. The composite primary key means the
+-- cron (Phase 4) can fire as often as it wants without ever double-sending
+-- a notification for the same event/type pair.
+CREATE TABLE IF NOT EXISTS time_off_reminders_sent (
+  time_off_event_id UUID NOT NULL REFERENCES time_off_events(id) ON DELETE CASCADE,
+  reminder_type     VARCHAR(20) NOT NULL,
+  sent_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (time_off_event_id, reminder_type)
+);
+
+-- Per-user grant for the Handover Settings panel. Stackable on any base
+-- access type, mirrors is_announcements_admin / is_hr_hub_admin /
+-- is_access_admin. Without this grant only admin / regional_manager can
+-- reach the Handovers section of Settings.
+ALTER TABLE team_member_overrides
+  ADD COLUMN IF NOT EXISTS is_handover_admin BOOLEAN DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS idx_tmo_is_handover_admin
+  ON team_member_overrides(is_handover_admin) WHERE is_handover_admin = true;
 `;
 
 export async function runMigrations() {
@@ -1400,5 +1614,30 @@ export async function runMigrations() {
     }
   } catch (err) {
     console.warn('[db] Leaders Alerts settings seed failed:', err?.message);
+  }
+
+  // OOO: bootstrap time_off_events from the bundled HRX snapshot
+  // (src/data/time_off_seed.json). Additive — never deletes manual
+  // imports or Deel-API rows. Bump SEED_VERSION in time-off-seed.js
+  // to roll out a newly regenerated snapshot.
+  try {
+    const seedResult = await seedTimeOffEventsIfNeeded();
+    if (seedResult?.reseeded) {
+      console.log(`[db] Time-off events seeded to v${seedResult.version}: ${seedResult.inserted} inserted, ${seedResult.skipped} already present`);
+    }
+  } catch (err) {
+    console.warn('[db] Time-off seed failed:', err?.message);
+  }
+
+  // Handover defaults: one global handover_settings + checklist template
+  // so the Phase 2 wizard's checklist step pre-fills from day 1. Admin
+  // edits via Settings → Handovers (Phase 5) are preserved across boots.
+  try {
+    const seedResult = await seedHandoverDefaultsIfNeeded();
+    if (seedResult?.reseeded) {
+      console.log(`[db] Handover defaults seeded to v${seedResult.version}: template=${seedResult.template_id} settings=${seedResult.settings_id}`);
+    }
+  } catch (err) {
+    console.warn('[db] Handover defaults seed failed:', err?.message);
   }
 }

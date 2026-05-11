@@ -16,7 +16,9 @@ import {
   normalizeWorkbench,
 } from '../../utils/normalizeSourceRows';
 import Avatar from '../ui/Avatar';
+import OOOBadge from '../ui/OOOBadge';
 import PageHeader from '../ui/PageHeader';
+import { useTimeOffEvents } from '../../hooks/useTimeOffEvents';
 
 // ── Last-seen badge helper ──────────────────────────────────────────────────
 // Renders a small pill next to each member that's accurate to the last hour.
@@ -143,6 +145,12 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
     toggleOnLeave,
     setCountries,
   } = useTeamMembers();
+
+  // Time-off events grouped by email — feeds the dated OOO pill rendered
+  // next to each row's name. Additive UI: if the hook fails (or the
+  // table is empty pre-seed) the legacy `On Leave` manual toggle still
+  // renders, so the row never loses its OOO indicator.
+  const { eventsByEmail: oooEventsByEmail } = useTimeOffEvents();
 
   // ── Deel-source breach inputs for the per-agent SLA dot ──────────────────
   // Mounting these hooks here lets `slaHealth(email)` cover Onboarding,
@@ -627,6 +635,8 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                 {isOnLeave && (
                   <span style={{ background: '#fff8e6', color: '#ed8d00', fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 128 }}>On Leave</span>
                 )}
+                <OOOBadge events={oooEventsByEmail.get((email || '').toLowerCase())} />
+
                 {isManager && (
                   <span style={{ fontSize: 10, color: '#9e9e9e', fontWeight: 500 }}>
                     {subReports.length} report{subReports.length !== 1 ? 's' : ''}

@@ -18,6 +18,10 @@ const WIPE_ALARM_TABLES = [
   'team_member_overrides',
   'feedback_requests',
   'members',
+  // OOO / Handovers (Phase 1, 2026-05-11) — once seeded, a wipe of these
+  // would silently empty the calendar and lose every in-flight handover.
+  'time_off_events',
+  'handovers',
 ];
 
 async function checkForWipe(query) {
@@ -104,6 +108,18 @@ export async function register() {
         await checkForWipe(query);
       } catch (alarmErr) {
         console.warn('[boot-wipe-alarm] checkForWipe failed (non-fatal):', alarmErr?.message);
+      }
+
+      // Phase 3 — start the handover scope cache. Eager-loads delegation
+      // map at boot and refreshes every 60 s. Without this the coverer's
+      // workspace would NOT pick up the OOO person's queues until the
+      // next handover write triggered an invalidation. Wrapped in try so
+      // a missing table (fresh env mid-migration) never blocks boot.
+      try {
+        const { startHandoverScopeCacheRefresher } = await import('./src/lib/handover-scope-cache-loader');
+        startHandoverScopeCacheRefresher();
+      } catch (cacheErr) {
+        console.warn('[handover-scope-cache] start failed (non-fatal):', cacheErr?.message);
       }
 
       // Seed members if table is empty

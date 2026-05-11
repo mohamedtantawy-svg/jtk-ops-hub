@@ -109,6 +109,7 @@ import HrHubView from './components/views/HrHubView';
 import NotificationsView from './components/views/NotificationsView';
 import LeaderAlertsView from './components/views/LeaderAlertsView';
 import LeadersHubView from './components/views/LeadersHubView';
+import OOOView from './components/views/OOOView';
 import UrgentAssistView from './components/views/UrgentAssistView';
 import CreateHrHubRequestModal from './components/modals/CreateHrHubRequestModal';
 import ManageMentionGroupsModal from './components/modals/ManageMentionGroupsModal';
@@ -1754,6 +1755,7 @@ const App=()=>{
               hand-off) get an empty render instead of leaking the view
               while perms re-hydrate (audit 2026-05-04 hardening). */}
           {view==='leader-alerts' && perms?.canView('leader-alerts') === true &&<div className="page-enter"><LeadersHubView user={effectiveUser} perms={perms} refreshNonce={leaderAlertsRefreshNonce} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
+          {view==='ooo' && perms?.canView('ooo')!==false &&<div className="page-enter"><OOOView user={effectiveUser} setView={setView} addToast={addToast}/></div>}
           {/* Legacy direct route — keeps deep-links to ?view=team working
               by sending the user to Leaders Hub (which contains the Team
               sub-view). Avoids 404s on bookmarks/notifications from the

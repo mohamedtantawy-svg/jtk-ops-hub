@@ -25,6 +25,12 @@ const PRIMARY_TABS = [
   { id: 'briefing',      icon: 'bi-house',                label: 'Home' },
   { id: 'my-queue',      icon: 'bi-inbox',                label: 'Workspace' },
   { id: 'hr-hub',        icon: 'bi-broadcast-pin',        label: 'HR Hub' },
+  // OOO & Handovers — single-tab surface (HANDOVERS_PLAN.md). Visible to
+  // everyone; visibility is naturally scoped by the reporting tree on
+  // both the calendar feed and the handover list. Slotted before
+  // Leaders Hub so the visual rhythm (per-user surface → manager
+  // surface) reads top-to-bottom for managerial users.
+  { id: 'ooo',           icon: 'bi-airplane',             label: 'OOO' },
   // managerialOnly — hard block for agents in addition to MANAGERIAL_ONLY_VIEWS
   // gating in accessControl. Belt-and-braces because Leaders Hub also embeds
   // the Team admin surface; no path through the UI should reach it for an
