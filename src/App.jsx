@@ -697,6 +697,17 @@ const App=()=>{
       setView('briefing');
       return;
     }
+    // RM: in addition to their reports chain (handled below), RMs may also
+    // impersonate any admin via the dedicated "Login as Admin" affordance
+    // in the user menu. The feature was requested by the system owner to
+    // give RMs the full admin layout + data access on demand. Reports-chain
+    // check still applies for impersonating non-admin targets.
+    const targetIsAdmin = (liveMembersByEmail?.[emailLc]?.access || liveMembersByEmail?.[emailLc]?.role || MEMBERS_BY_EMAIL[email]?.access || '').toLowerCase() === 'admin';
+    if (me.access === 'regional_manager' && targetIsAdmin) {
+      setImpersonating(email);
+      setView('briefing');
+      return;
+    }
     // TL/RM: verify target is in their reports chain (live data first, then baseline)
     const reports = liveGetAllReports
       ? liveGetAllReports(user.email)
@@ -707,6 +718,39 @@ const App=()=>{
       setView('briefing');
     }
   }, [user, liveMembersByEmail, liveGetAllReports]);
+
+  // "Login as Admin" — for regional managers. Picks the canonical owner
+  // admin (mohamed.tantawy@deel.com) if they exist in the roster, else the
+  // first 'admin' access user found in live members, else the static
+  // baseline. Routes through handleImpersonate so the existing
+  // impersonation banner + sessionStorage + audit propagation all just work.
+  const handleLoginAsAdmin = useCallback(() => {
+    if (!user) return;
+    const myAccess = (
+      liveMembersByEmail?.[user.email?.toLowerCase()]?.access
+      || liveMembersByEmail?.[user.email?.toLowerCase()]?.role
+      || MEMBERS_BY_EMAIL[user.email]?.access
+      || ''
+    ).toLowerCase();
+    if (myAccess !== 'regional_manager') return;
+    // Prefer the owner — there's always exactly one and they're guaranteed
+    // to have admin access in production.
+    const ownerLc = 'mohamed.tantawy@deel.com';
+    let target = null;
+    if (liveMembersByEmail?.[ownerLc] || MEMBERS_BY_EMAIL[ownerLc]) {
+      target = ownerLc;
+    } else {
+      // Fallback: scan live roster for any admin.
+      const live = liveMembersByEmail ? Object.values(liveMembersByEmail) : [];
+      const liveAdmin = live.find(m => (m?.access || m?.role || '').toLowerCase() === 'admin');
+      if (liveAdmin?.email) target = String(liveAdmin.email).toLowerCase();
+      else {
+        const baselineAdmin = MEMBERS.find(m => String(m.access || m.role || '').toLowerCase() === 'admin');
+        if (baselineAdmin?.email) target = String(baselineAdmin.email).toLowerCase();
+      }
+    }
+    if (target) handleImpersonate(target);
+  }, [user, liveMembersByEmail, handleImpersonate]);
 
   const [announceCompose,setAnnounceCompose]=useState(false);
   const [feedbackCompose,setFeedbackCompose]=useState(false);
@@ -1559,9 +1603,11 @@ const App=()=>{
       {impersonating && <style>{`.deel-topnav{top:36px!important;}`}</style>}
       <DeelTopNav
         view={view} setView={setView} user={effectiveUser} setUser={setUser}
+        realUser={user}
         onSearch={()=>setShowSearch(true)} notifs={mergedNotifs} markAllRead={markAllRead} markRead={(serverId)=>serverNotifs.markRead(serverId)} markUnread={(serverId)=>serverNotifs.markUnread(serverId)} onNotifClick={handleNotifClick}
         onViewAllNotifications={()=>setView('notifications')}
         onLogout={handleLogout}
+        onLoginAsAdmin={handleLoginAsAdmin}
         onCreateAnnouncement={()=>{setView('announcements');setAnnounceCompose(true);}}
         onCreateFeedback={()=>{setView('feedback');setFeedbackCompose(true);}}
         onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}
