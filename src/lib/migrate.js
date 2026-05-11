@@ -3,6 +3,7 @@ import { seedCountryOwnersIfEmpty } from './country-owners-seed';
 import { seedHrHubSettingsIfNeeded } from './hr-hub-seed';
 import { seedLeaderAlertsSettingsIfNeeded } from './leader-alerts-seed';
 import { seedTimeOffEventsIfNeeded } from './time-off-seed';
+import { seedHandoverDefaultsIfNeeded } from './handover-defaults-seed';
 
 const SCHEMA_SQL = `
 -- Members
@@ -1626,5 +1627,17 @@ export async function runMigrations() {
     }
   } catch (err) {
     console.warn('[db] Time-off seed failed:', err?.message);
+  }
+
+  // Handover defaults: one global handover_settings + checklist template
+  // so the Phase 2 wizard's checklist step pre-fills from day 1. Admin
+  // edits via Settings → Handovers (Phase 5) are preserved across boots.
+  try {
+    const seedResult = await seedHandoverDefaultsIfNeeded();
+    if (seedResult?.reseeded) {
+      console.log(`[db] Handover defaults seeded to v${seedResult.version}: template=${seedResult.template_id} settings=${seedResult.settings_id}`);
+    }
+  } catch (err) {
+    console.warn('[db] Handover defaults seed failed:', err?.message);
   }
 }

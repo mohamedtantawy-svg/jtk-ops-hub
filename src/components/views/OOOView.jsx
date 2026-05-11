@@ -19,6 +19,7 @@ import ActionBanner from '../ooo/ActionBanner';
 import CalendarMode from '../ooo/CalendarMode';
 import TableMode from '../ooo/TableMode';
 import DetailSlideOut from '../ooo/DetailSlideOut';
+import CreateHandoverModal from '../ooo/CreateHandoverModal';
 import { useTeamMembers } from '../../hooks/useTeamMembers';
 import { listTimeOffEvents } from '../../services/timeOffApi';
 import { fetchHandoverLensCounts } from '../../services/handoversApi';
@@ -73,7 +74,7 @@ function isManagerRole(role) {
   return role === 'admin' || role === 'regional_manager' || role === 'team_lead';
 }
 
-function OOOView({ user, setView }) {
+function OOOView({ user, setView, addToast }) {
   const urlInit = readUrl();
   const todayIso = isoDate();
 
@@ -93,6 +94,7 @@ function OOOView({ user, setView }) {
   const [loading, setLoading] = useState(true);
   const [autoResolved, setAutoResolved] = useState(lens !== LENS_IDS.AUTO);
   const [selectedEventId, setSelectedEventId] = useState(urlInit.handover || null);
+  const [wizardEventId, setWizardEventId] = useState(null);   // null = closed; an id = open w/ that event
 
   const { items: members } = useTeamMembers();
 
@@ -160,9 +162,10 @@ function OOOView({ user, setView }) {
     setAutoResolved(true);
   }, [autoResolved, counts, user?.role]);
 
-  // Load events whenever lens / range changes.
+  // Load events whenever lens / range changes — and on demand via
+  // refreshEvents() after a wizard / detail-panel write.
   const reqIdRef = useRef(0);
-  useEffect(() => {
+  const refreshEvents = useCallback(() => {
     if (lens === LENS_IDS.AUTO) return; // wait for auto resolution before fetching
     const reqId = ++reqIdRef.current;
     setLoading(true);
@@ -181,6 +184,12 @@ function OOOView({ user, setView }) {
         if (reqIdRef.current === reqId) setLoading(false);
       });
   }, [lens, from, to]);
+  useEffect(() => { refreshEvents(); }, [refreshEvents]);
+
+  const refreshAll = useCallback(() => {
+    refreshEvents();
+    refreshCounts();
+  }, [refreshEvents, refreshCounts]);
 
   // Client-side filters: search, country, missing-only.
   const filteredEvents = useMemo(() => {
@@ -245,18 +254,16 @@ function OOOView({ user, setView }) {
           </button>
           <button
             type="button"
-            disabled
-            title="Submit handover (Phase 2)"
-            aria-disabled="true"
+            onClick={() => setWizardEventId('')}
+            title="Create a new handover"
             style={{
               height: 32, padding: '0 14px', borderRadius: 8,
-              background: 'rgba(124, 58, 237, 0.55)',
+              background: 'var(--purple, #7c3aed)',
               color: 'white',
               border: 'none',
               fontWeight: 700, fontSize: 12,
-              cursor: 'not-allowed',
+              cursor: 'pointer',
               fontFamily: 'inherit',
-              opacity: 0.7,
             }}
           >
             <i className="bi-plus-lg" style={{ marginRight: 6 }} />
@@ -428,9 +435,31 @@ function OOOView({ user, setView }) {
         event={selectedEvent}
         membersByEmail={membersByEmail}
         currentUserEmail={user?.email}
+        currentUserRole={user?.role}
         todayIso={todayIso}
         onClose={() => setSelectedEventId(null)}
+        onUpdated={refreshAll}
+        onSubmitDraft={(ev) => setWizardEventId(ev?.id || '')}
+        onToast={addToast}
       />
+
+      {wizardEventId !== null && (
+        <CreateHandoverModal
+          initialEventId={wizardEventId || null}
+          currentUserEmail={user?.email}
+          members={members}
+          onClose={() => setWizardEventId(null)}
+          onCreated={(handover) => {
+            setWizardEventId(null);
+            refreshAll();
+            addToast?.({ kind: 'success', message: handover?.status === 'draft'
+              ? 'Handover saved as draft.'
+              : 'Handover submitted — coverers notified.',
+            });
+            if (handover?.time_off_event_id) setSelectedEventId(handover.time_off_event_id);
+          }}
+        />
+      )}
     </div>
   );
 }
