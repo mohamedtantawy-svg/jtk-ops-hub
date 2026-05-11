@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   listNotifications,
   markNotificationRead,
+  markNotificationUnread,
   markAllNotificationsRead,
 } from '../services/notificationsApi';
 
@@ -177,6 +178,22 @@ export function useNotifications(userEmail) {
     }
   }, []);
 
+  const markUnread = useCallback(async (id) => {
+    // Optimistic flip — refresh will reconcile if the server rejected.
+    let bumped = false;
+    setItems(prev => prev.map(n => {
+      if (n.id !== id) return n;
+      if (!n.readAt) return n;
+      bumped = true;
+      return { ...n, readAt: null };
+    }));
+    if (bumped) setUnreadCount(prev => prev + 1);
+    try { await markNotificationUnread(id); }
+    catch (err) {
+      console.warn('[useNotifications] markUnread failed:', err.message);
+    }
+  }, []);
+
   const markAllRead = useCallback(async () => {
     setItems(prev => prev.map(n => n.readAt ? n : { ...n, readAt: new Date().toISOString() }));
     setUnreadCount(0);
@@ -191,6 +208,7 @@ export function useNotifications(userEmail) {
     error,
     refresh: () => refresh(),
     markRead,
+    markUnread,
     markAllRead,
-  }), [items, unreadCount, loading, error, refresh, markRead, markAllRead]);
+  }), [items, unreadCount, loading, error, refresh, markRead, markUnread, markAllRead]);
 }

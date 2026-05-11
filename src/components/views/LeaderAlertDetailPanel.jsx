@@ -16,6 +16,7 @@ import { MEMBERS } from '../../data/members';
 import { FLAGS, getCountryName } from '../../data/constants';
 import LeaderAlertCommentsThread from './LeaderAlertCommentsThread';
 import ImageLightbox from '../ui/ImageLightbox';
+import { renderRichText } from '../../utils/renderRichText';
 
 // ── Constants (mirror LeaderAlertsView) ───────────────────────────────────
 
@@ -79,6 +80,76 @@ function listAllManagers() {
     const access = String(m.access || m.role || '').toLowerCase();
     if (access === 'team_lead' || access === 'regional_manager' || access === 'admin') out.push(m);
   }
+  return out;
+}
+
+// ── Body formatter ────────────────────────────────────────────────────────
+// Renders the alert body as a readable block: lines starting with `*` or `-`
+// (with optional whitespace) become indented bullet rows; blank lines act
+// as paragraph separators; everything else stays a paragraph. Each line
+// goes through `renderRichText` so markdown links + bare URLs work.
+//
+// Previously the body was a single `whiteSpace: pre-wrap` div at fontSize:13
+// with no inter-bullet spacing — dense walls of asterisks (per Duygu's
+// Feedback ticket). This bumps to 14.5/1.7 and gives each bullet visible
+// breathing room.
+function renderAlertBody(body) {
+  if (!body) return null;
+  const lines = String(body).split(/\r?\n/);
+  const out = [];
+  let bulletGroup = null; // collects consecutive bullet lines into one <ul>
+  let paraBuffer = [];    // collects consecutive non-bullet lines as one <p>
+  let key = 0;
+
+  const flushPara = () => {
+    if (paraBuffer.length === 0) return;
+    out.push(
+      <p key={`para-${key++}`} style={{ margin: '0 0 10px 0', lineHeight: 1.7 }}>
+        {paraBuffer.flatMap((ln, i) => {
+          const rendered = renderRichText(ln, { keyPrefix: `body-${key}-p${i}` });
+          return i === 0 ? rendered : [<br key={`br-${key}-${i}`} />, ...(rendered || [])];
+        })}
+      </p>
+    );
+    paraBuffer = [];
+  };
+
+  const flushBullets = () => {
+    if (!bulletGroup || bulletGroup.length === 0) { bulletGroup = null; return; }
+    out.push(
+      <ul key={`ul-${key++}`} style={{
+        margin: '0 0 12px 0', paddingLeft: 22,
+        display: 'flex', flexDirection: 'column', gap: 6,
+      }}>
+        {bulletGroup.map((b, i) => (
+          <li key={`li-${key}-${i}`} style={{ lineHeight: 1.65 }}>
+            {renderRichText(b, { keyPrefix: `body-${key}-b${i}` })}
+          </li>
+        ))}
+      </ul>
+    );
+    bulletGroup = null;
+  };
+
+  for (const raw of lines) {
+    const line = raw.replace(/\s+$/, '');
+    if (!line.trim()) {
+      flushPara();
+      flushBullets();
+      continue;
+    }
+    const bulletMatch = line.match(/^\s*[*\-•]\s+(.*)$/);
+    if (bulletMatch) {
+      flushPara();
+      if (!bulletGroup) bulletGroup = [];
+      bulletGroup.push(bulletMatch[1]);
+    } else {
+      flushBullets();
+      paraBuffer.push(line);
+    }
+  }
+  flushPara();
+  flushBullets();
   return out;
 }
 
@@ -256,12 +327,12 @@ const LeaderAlertDetailPanel = ({
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div id="leader-alert-detail-title" style={{
-              fontSize: 13, fontWeight: 700, color: 'var(--text)',
+              fontSize: 17, fontWeight: 700, color: 'var(--text)', lineHeight: 1.3,
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
             }}>
               {alert ? alert.title : 'Loading…'}
             </div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>
               {alert && (
                 <>
                   {alert.created_by_name || alert.created_by_email} · {formatRelative(alert.created_at)}
@@ -369,13 +440,15 @@ const LeaderAlertDetailPanel = ({
                 )}
               </div>
 
-              {/* Body text */}
+              {/* Body — rendered with renderAlertBody so `* ` / `- ` lines
+                  become real bullet rows with breathing room. Bumped from
+                  13/1.6 to 14.5/1.7 per Duygu's Feedback ticket — the dense
+                  wall of asterisks was hard to scan. */}
               <div style={{
-                fontSize: 13, lineHeight: 1.6, color: 'var(--text)',
-                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                marginBottom: 16,
+                fontSize: 14.5, color: 'var(--text)',
+                wordBreak: 'break-word', marginBottom: 18,
               }}>
-                {alert.body}
+                {renderAlertBody(alert.body)}
               </div>
 
               {/* Impact tags */}

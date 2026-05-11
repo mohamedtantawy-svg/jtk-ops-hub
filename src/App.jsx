@@ -312,6 +312,28 @@ const App=()=>{
     } catch {}
     return 'briefing';
   });
+  // When the user opens a notification from the full Notifications page,
+  // remember it so we can offer a "← Back to Notifications" affordance on
+  // the destination view. Cleared as soon as the user navigates away by
+  // any other means (tab click, search, etc.).
+  const [returnToNotifications, setReturnToNotifications] = useState(false);
+  // Set true by handleNotifClick before it changes view; consumed by the
+  // view-change effect to suppress its clear-on-navigate behaviour. Without
+  // this, the same view change that arms the pill would also clear it.
+  const justFromNotifClickRef = useRef(false);
+  useEffect(() => {
+    if (view === 'notifications') {
+      setReturnToNotifications(false);
+      justFromNotifClickRef.current = false;
+      return;
+    }
+    if (!justFromNotifClickRef.current) {
+      // User navigated away by any other path (tab click, search, deep-link)
+      // — drop the pill.
+      setReturnToNotifications(false);
+    }
+    justFromNotifClickRef.current = false;
+  }, [view]);
   // Temporary: gate unready features behind the owner's email. Nav tabs are
   // also filtered in DeelTopNav.jsx; this guards deep-link / programmatic
   // navigation (e.g. BriefingView KPI tiles that call setView('announcements')).
@@ -866,6 +888,13 @@ const App=()=>{
   // the legacy "mark all + go to my-queue/escalations/briefing" behaviour
   // since they don't carry link metadata.
   const handleNotifClick = useCallback((n) => {
+    // Track "came from Notifications page" so the destination view can
+    // surface a back-to-notifications pill. Bell-dropdown clicks leave
+    // `view !== 'notifications'`, so the flag stays false and no pill
+    // shows — the user was never on the notifications page to begin with.
+    const fromNotif = view === 'notifications';
+    setReturnToNotifications(fromNotif);
+    justFromNotifClickRef.current = fromNotif;
     if (n && n._source === 'server') {
       if (n.serverId && !n.read) serverNotifs.markRead(n.serverId);
       if (n.linkView === 'announcements' && n.linkId) {
@@ -933,7 +962,7 @@ const App=()=>{
     // doesn't keep highlighting after acknowledgement.
     if (n && n.id) setNotifs(prev => prev.map(x => x.id === n.id ? { ...x, read: true } : x));
     markAllRead();
-  }, [serverNotifs, markAllRead]);
+  }, [serverNotifs, markAllRead, view]);
 
   // ── Cross-user announcement sync (15 s poll) ───────────────────────────────
   // Keeps the Home banner, top-nav notification list, popup queue, and the
@@ -969,7 +998,7 @@ const App=()=>{
       seen.add(c.id);
       if(c.status!=='sent') continue;
       if(c.author&&c.author.id===user.id) continue;
-      const inAudience=(Array.isArray(c.target)&&c.target.includes(user.id))||matchesAudience(c.target,user.team);
+      const inAudience=(Array.isArray(c.target)&&c.target.includes(user.id))||matchesAudience(c.target,user);
       if(!inAudience) continue;
       // Skip notifying on already-acked comms. Email-only suppression when
       // the server has the email axis — see popupQueue comment for why the
@@ -1403,7 +1432,7 @@ const App=()=>{
     };
     const targetMatch=(c)=>{
       if(Array.isArray(c.target)&&c.target.includes(user.id))return true;
-      return matchesAudience(c.target, user.team);
+      return matchesAudience(c.target, user);
     };
     return comms.filter(c=>
       c.isPopup&&c.status==='sent'&&!isAckedByMe(c)&&!dismissedPopups.includes(c.id)&&(targetMatch(c)||(c.author&&c.author.id===user.id))
@@ -1530,7 +1559,7 @@ const App=()=>{
       {impersonating && <style>{`.deel-topnav{top:36px!important;}`}</style>}
       <DeelTopNav
         view={view} setView={setView} user={effectiveUser} setUser={setUser}
-        onSearch={()=>setShowSearch(true)} notifs={mergedNotifs} markAllRead={markAllRead} markRead={(serverId)=>serverNotifs.markRead(serverId)} onNotifClick={handleNotifClick}
+        onSearch={()=>setShowSearch(true)} notifs={mergedNotifs} markAllRead={markAllRead} markRead={(serverId)=>serverNotifs.markRead(serverId)} markUnread={(serverId)=>serverNotifs.markUnread(serverId)} onNotifClick={handleNotifClick}
         onViewAllNotifications={()=>setView('notifications')}
         onLogout={handleLogout}
         onCreateAnnouncement={()=>{setView('announcements');setAnnounceCompose(true);}}
@@ -1546,6 +1575,26 @@ const App=()=>{
       />
       <div style={{height:(impersonating?104:68)+(versionHasUpdate?44:0),flexShrink:0}}/>
       <DeelSubNav view={view} subFilter={subFilter} setSubFilter={setSubFilter} tasks={tasks} user={effectiveUser}/>
+      {returnToNotifications && view !== 'notifications' && (
+        <div style={{ display: 'flex', justifyContent: 'flex-start', padding: '8px 24px 0', background: 'var(--bg)', flexShrink: 0 }}>
+          <button
+            type="button"
+            onClick={() => { setView('notifications'); setReturnToNotifications(false); }}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '6px 12px', borderRadius: 128,
+              background: 'var(--surface)', color: 'var(--text)',
+              border: '1px solid var(--border)', fontSize: 12, fontWeight: 600,
+              cursor: 'pointer', fontFamily: 'inherit',
+              boxShadow: '0 1px 2px rgba(15,23,42,0.04)',
+            }}
+            aria-label="Back to Notifications"
+          >
+            <i className="bi-arrow-left" style={{ fontSize: 12 }} />
+            Back to Notifications
+          </button>
+        </div>
+      )}
       <div className="deel-content" data-region="main-content" aria-label="Main content" style={{display:'flex',overflowX:'hidden',overflowY:'auto',position:'relative',flex:1}}>
           {view==='briefing'      &&perms?.canView('briefing')!==false &&(perms?.raw?.dataScope==='all_tasks'||perms?.raw?.dataScope==='regional_tasks'||perms?.raw?.dataScope==='team_tasks') &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={()=>{}} comms={comms} escalations={[]} setSubFilter={setSubFilter} requests={[]} projects={[]} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
           {view==='lead-home' &&<div className="page-enter"><TeamLeadHome user={effectiveUser} tasks={tasks} setView={setView} managerOnCall={managerOnCall}/></div>}
@@ -1558,7 +1607,7 @@ const App=()=>{
           {view==='alerts'        &&perms?.canView('alerts')!==false       &&<div className="page-enter"><Alerts tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setTasks={setTasks}/></div>}
           {view==='feedback'      &&perms?.canView('feedback')!==false     &&<div className="page-enter"><FeedbackView user={effectiveUser} addToast={addToast} openCompose={feedbackCompose} onComposeOpened={()=>setFeedbackCompose(false)}/></div>}
           {view==='hr-hub'        &&perms?.canView('hr-hub')!==false       &&<div className="page-enter"><HrHubView user={effectiveUser} onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}/></div>}
-          {view==='notifications' &&<div className="page-enter"><NotificationsView notifs={mergedNotifs} unreadCount={mergedNotifs.filter(n=>!n.read).length} markAllRead={markAllRead} markRead={(serverId)=>serverNotifs.markRead(serverId)} onNotifClick={handleNotifClick}/></div>}
+          {view==='notifications' &&<div className="page-enter"><NotificationsView notifs={mergedNotifs} unreadCount={mergedNotifs.filter(n=>!n.read).length} markAllRead={markAllRead} markRead={(serverId)=>serverNotifs.markRead(serverId)} markUnread={(serverId)=>serverNotifs.markUnread(serverId)} onNotifClick={handleNotifClick}/></div>}
           {view==='urgent-assist' &&perms?.canView('urgent-assist')!==false&&<div className="page-enter" key={urgentAssistRefreshNonce}><UrgentAssistView user={effectiveUser} onCreate={()=>setUrgentAssistCreate(true)} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall}/></div>}
           {/* Leaders Hub — wraps the alerts view + the team admin surface
               behind a single sub-toggle. Default sub-tab is alerts. The

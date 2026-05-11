@@ -50,7 +50,8 @@ export async function GET(req) {
               status, rejection_reason,
               decided_by_id, decided_by_email, decided_by_name, decided_at,
               scheduled_for, urgent_override,
-              type, title, body, target, priority, is_popup, image_url, link, sound_key,
+              type, title, body, target, target_group_id,
+              priority, is_popup, image_url, link, sound_key,
               published_id, published_at,
               created_at, updated_at
          FROM announcement_requests${whereSql}
@@ -78,6 +79,7 @@ export async function GET(req) {
       title: r.title,
       body: r.body,
       target: r.target,
+      targetGroupId: r.target_group_id || null,
       priority: r.priority,
       isPopup: r.is_popup,
       imageUrl: r.image_url,
@@ -128,8 +130,9 @@ export async function POST(req) {
       `INSERT INTO announcement_requests
          (requested_by_id, requested_by_email, requested_by_name,
           scheduled_for, urgent_override,
-          type, title, body, target, priority, is_popup, image_url, link, sound_key)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+          type, title, body, target, target_group_id,
+          priority, is_popup, image_url, link, sound_key)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
        RETURNING id`,
       [
         user.id || null,
@@ -141,6 +144,7 @@ export async function POST(req) {
         payload.title,
         payload.body,
         payload.target,
+        payload.target === 'group' ? (payload.targetGroupId || null) : null,
         payload.priority,
         payload.isPopup,
         payload.imageUrl,

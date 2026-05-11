@@ -20,6 +20,13 @@ export async function markNotificationRead(id) {
   });
 }
 
+export async function markNotificationUnread(id) {
+  return apiFetch(`/notifications/${encodeURIComponent(id)}/unread`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
 export async function markAllNotificationsRead() {
   return apiFetch('/notifications/read-all', {
     method: 'POST',

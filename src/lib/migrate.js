@@ -1214,6 +1214,31 @@ CREATE TABLE IF NOT EXISTS mention_group_member (
 CREATE INDEX IF NOT EXISTS idx_mention_group_member_email
   ON mention_group_member(LOWER(member_email));
 
+-- ── Announcements: tag-group targeting (2026-05-11) ──────────────────────────
+-- Announcements can now target a custom Tag Group in addition to the
+-- region-based 'target' enum. The string column stays as-is for region
+-- audiences ('global', 'emea', 'apac', 'americas', 'nam', 'latam', and
+-- the new 'leaders' rollup). When the composer picks a Tag Group, we
+-- store the group id here and set target='group' as a discriminator.
+-- NOTE: backticks are FORBIDDEN inside this SQL block (SKILL §3.7,
+-- trap #6) — they close the surrounding JS template literal and break
+-- the Turbopack build. Use single quotes or plain text instead.
+-- Audience filter at /api/v1/announcements joins against
+-- mention_group_member to expand the group to its members on read.
+-- ON DELETE SET NULL so deleting a group leaves historical announcements
+-- visible (degrades to "no audience" — still reachable to author + admins).
+ALTER TABLE announcements
+  ADD COLUMN IF NOT EXISTS target_group_id UUID
+  REFERENCES mention_group(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_announcements_target_group
+  ON announcements(target_group_id) WHERE target_group_id IS NOT NULL;
+
+-- Same column on the approval-queue request rows so target_group_id
+-- survives the request -> approve -> publish round-trip.
+ALTER TABLE announcement_requests
+  ADD COLUMN IF NOT EXISTS target_group_id UUID
+  REFERENCES mention_group(id) ON DELETE SET NULL;
+
 -- ── Member logins (2026-05-06) ───────────────────────────────────────────────
 -- Dedicated login-tracking table. Replaces writing login_count/last_login_at
 -- to team_member_overrides (which used to create "shell rows" — bare emails

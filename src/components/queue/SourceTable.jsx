@@ -205,7 +205,12 @@ export default function SourceTable({
   onBulkHide,                // (rows[]) => void — bulk variant; enables checkboxes + bulk-bar Hide button
   onBulkEscalate,            // (rows[]) => void — bulk variant; enables checkboxes + bulk-bar Escalate button
   onBulkReassign,            // (rows[]) => void — bulk variant; enables checkboxes + bulk-bar Reassign button
+  notesApi = null,           // useTaskNotes() return — enables the Note column when present
 }) {
+  // Note modal state — opened from any row's Note button. One modal per
+  // table; the active row is held here so SourceRow stays stateless.
+  const [noteModalRow, setNoteModalRow] = useState(null);
+  const hasNotes = !!notesApi;
   // Selection state — opt-in. Only mounts the checkbox column + bulk-bar
   // when the parent passes at least one bulk handler. Selection key = row.id
   // (already string-coerced by every normalizer); sticky across re-renders
@@ -450,6 +455,7 @@ export default function SourceTable({
     + 1 // Status
     + 1 // Task
     + (hideContract ? 0 : 1)
+    + (hasNotes ? 1 : 0) // Note column when the parent wires the notes hook
     + ((onHide || onEscalate || onReassign) ? 1 : 0) // Actions column when the parent provides any row action
     + (canBulk ? 1 : 0); // Selection checkbox column when any bulk handler is wired
 
@@ -599,6 +605,7 @@ export default function SourceTable({
                 <SortTh col="status"    label="Status"     sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 115 }} />
                 <th style={{ ...thStyle, width: 55 }}>Task</th>
                 {!hideContract && <th style={{ ...thStyle, width: 55 }}>Contract</th>}
+                {hasNotes && <th style={{ ...thStyle, width: 50 }} title="Personal notes — saved to your browser, keyed by the task's source+id">Note</th>}
                 {(onHide || onEscalate || onReassign) && <th style={{ ...thStyle, width: 200 }}>Actions</th>}
               </tr>
             </thead>
@@ -638,6 +645,7 @@ export default function SourceTable({
                   );
                 }
                 const row = it.row;
+                const noteHas = hasNotes ? notesApi.hasNote(row.source, row.id) : false;
                 return (
                   <SourceRow
                     key={`${row.source}-${row.id}`}
@@ -655,6 +663,9 @@ export default function SourceTable({
                     isSelectable={canBulk}
                     isSelected={canBulk && selectedIds.has(String(row.id))}
                     onToggleSelection={canBulk ? () => toggleRowSelection(String(row.id)) : null}
+                    showNoteColumn={hasNotes}
+                    hasNote={noteHas}
+                    onOpenNote={hasNotes ? () => setNoteModalRow(row) : null}
                   />
                 );
               })}
@@ -667,12 +678,163 @@ export default function SourceTable({
           </table>
         </div>
       )}
+
+      {/* Note editor modal — single instance per table; the active row
+          identifies which note to load/save. Notes are user-scoped + keyed
+          by `${source}:${row.id}` so they re-attach after every queue sync. */}
+      {noteModalRow && notesApi && (
+        <NoteModal
+          row={noteModalRow}
+          initialText={notesApi.getNote(noteModalRow.source, noteModalRow.id)}
+          maxLength={notesApi.maxLength}
+          onSave={(text) => { notesApi.setNote(noteModalRow.source, noteModalRow.id, text); setNoteModalRow(null); }}
+          onDelete={() => { notesApi.removeNote(noteModalRow.source, noteModalRow.id); setNoteModalRow(null); }}
+          onClose={() => setNoteModalRow(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Note editor modal ──────────────────────────────────────────────────────
+// Centered overlay with textarea + Save / Delete / Cancel buttons. Esc
+// closes; Cmd/Ctrl+Enter saves. The text is bounded by `maxLength` from the
+// hook so a single note can't blow the storage quota. Uses CSS vars for
+// surface/text/border so the panel works in light + dark themes.
+function NoteModal({ row, initialText, maxLength, onSave, onDelete, onClose }) {
+  const [text, setText] = useState(initialText || '');
+  const textareaRef = useRef(null);
+
+  useEffect(() => {
+    const h = (e) => {
+      if (e.key === 'Escape') { onClose(); return; }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { onSave(text); }
+    };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }, [onClose, onSave, text]);
+
+  useEffect(() => {
+    // Focus + place caret at the end for fast continuation.
+    const el = textareaRef.current;
+    if (!el) return;
+    el.focus();
+    const len = el.value.length;
+    try { el.setSelectionRange(len, len); } catch {}
+  }, []);
+
+  const hadNote = !!(initialText && initialText.trim());
+  const tool = TOOLS[row.source];
+  const sourceLabel = tool?.label || row.source;
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(15, 15, 15, 0.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 1000, padding: 16,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={hadNote ? 'Edit note' : 'Add note'}
+        style={{
+          width: 'min(520px, 100%)', background: 'var(--surface)', color: 'var(--text)',
+          borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,.25)',
+          border: '1px solid var(--border)', display: 'flex', flexDirection: 'column',
+          maxHeight: '85vh',
+        }}
+      >
+        {/* Header */}
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-light)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 8, background: '#fef7e0', color: '#b7791f' }}>
+              <i className="bi-sticky-fill" style={{ fontSize: 14 }} />
+            </span>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>
+              {hadNote ? 'Edit note' : 'Add note'}
+            </div>
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6, marginLeft: 36, flexWrap: 'wrap' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '1px 7px', borderRadius: 128, background: 'var(--surface-2)', fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'capitalize' }}>
+              {sourceLabel}
+            </span>
+            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }} title={row.subject}>
+              {row.subject || row.id}
+            </span>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={(e) => setText(e.target.value.slice(0, maxLength))}
+            placeholder="Add a personal note for this task. Only you can see it."
+            rows={6}
+            style={{
+              width: '100%', minHeight: 140, padding: '10px 12px', borderRadius: 10,
+              border: '1px solid var(--border)', background: 'var(--surface-2)',
+              color: 'var(--text)', fontSize: 13, fontFamily: 'inherit',
+              lineHeight: 1.45, outline: 'none', resize: 'vertical', boxSizing: 'border-box',
+            }}
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--text-muted)' }}>
+            <span>Saved on this device, keyed to this task's source + id.</span>
+            <span>{text.length} / {maxLength}</span>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: '12px 20px 16px', borderTop: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+          {hadNote && (
+            <button
+              type="button"
+              onClick={onDelete}
+              style={{
+                padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)',
+                background: 'var(--surface)', color: '#d42d35', fontSize: 12, fontWeight: 600,
+                cursor: 'pointer', fontFamily: 'inherit', marginRight: 'auto',
+              }}
+            >
+              <i className="bi-trash" style={{ fontSize: 11, marginRight: 4 }} />
+              Delete
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)',
+              background: 'var(--surface)', color: 'var(--text)', fontSize: 12, fontWeight: 600,
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => onSave(text)}
+            style={{
+              padding: '8px 16px', borderRadius: 8, border: '1px solid var(--purple)',
+              background: 'var(--purple)', color: 'white', fontSize: 12, fontWeight: 600,
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            Save
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
 
 // ── Row component ──
-const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, dateField = 'startDate', showClient = false, showType = false, hideUpdated = false, hideContract = false, onHide = null, onEscalate = null, onReassign = null, isSelectable = false, isSelected = false, onToggleSelection = null }) {
+const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, dateField = 'startDate', showClient = false, showType = false, hideUpdated = false, hideContract = false, onHide = null, onEscalate = null, onReassign = null, isSelectable = false, isSelected = false, onToggleSelection = null, showNoteColumn = false, hasNote = false, onOpenNote = null }) {
   const [hov, setHov] = useState(false);
   const sev = row.status?.severity || 'info';
   const isUrgent = sev === 'critical';
@@ -927,6 +1089,32 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
               <i className="bi-file-earmark-text" style={{ fontSize: 9 }} />View
             </a>
           ) : <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>}
+        </td>
+      )}
+
+      {/* Note — sticky-note icon. Filled amber when a note exists, outline
+          grey otherwise. Click opens the editor (state lives in the parent
+          SourceTable so one modal handles every row). */}
+      {showNoteColumn && (
+        <td style={tdStyle}>
+          {onOpenNote && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onOpenNote(); }}
+              aria-label={hasNote ? `Edit note on "${row.subject || row.id}"` : `Add note to "${row.subject || row.id}"`}
+              title={hasNote ? 'Edit personal note' : 'Add personal note'}
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 28, height: 24, padding: 0, borderRadius: 6,
+                background: hasNote ? '#fef7e0' : (hov ? '#fff8e6' : '#f5f4f2'),
+                color: hasNote ? '#b7791f' : (hov ? '#b7791f' : '#9e9e9e'),
+                border: hasNote ? '1px solid #f4d96b' : (hov ? '1px solid #f4d96b' : '1px solid transparent'),
+                cursor: 'pointer', fontFamily: 'inherit', transition: 'all .15s',
+              }}
+            >
+              <i className={hasNote ? 'bi-sticky-fill' : 'bi-sticky'} style={{ fontSize: 12 }} />
+            </button>
+          )}
         </td>
       )}
 

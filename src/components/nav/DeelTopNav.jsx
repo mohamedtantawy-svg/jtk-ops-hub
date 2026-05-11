@@ -68,7 +68,7 @@ const CREATE_ACTIONS = [
 
 const DeelTopNav = ({
   view, setView, user,
-  onSearch, notifs, markAllRead, markRead, onNotifClick, onViewAllNotifications,
+  onSearch, notifs, markAllRead, markRead, markUnread, onNotifClick, onViewAllNotifications,
   onLogout,
   onCreateAnnouncement, onCreateFeedback,
   onCreateHrHub,
@@ -304,6 +304,7 @@ const DeelTopNav = ({
               onClose={() => setShowNotifs(false)}
               markAllRead={markAllRead}
               markRead={markRead}
+              markUnread={markUnread}
               onViewAll={onViewAllNotifications}
               onNotifClick={(group) => {
                 // The panel passes a *group* (collection of related notifications

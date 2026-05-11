@@ -24,6 +24,7 @@ import { ToolBadge, StatusBadge, SlaBadge } from '../ui/Badges';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import Avatar from '../ui/Avatar';
 import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
+import { useTaskNotes } from '../../hooks/useTaskNotes';
 import UnifiedSyncButton from './UnifiedSyncButton';
 import SourceTable from './SourceTable';
 import ErrorBoundary from '../ui/ErrorBoundary';
@@ -184,6 +185,12 @@ const Queue = ({ user, tasks, subFilter }) => {
   const perms = useContext(PermissionsContext);
   const settings = useContext(SettingsContext);
   const { queueSync, queueUnified, hiddenTasks } = useContext(IntegrationsContext);
+  // Personal notes attached to any queue row — user-scoped localStorage,
+  // keyed by `${source}:${id}` so notes re-attach after every sync.
+  const taskNotes = useTaskNotes(user?.email);
+  // Modal state for editing a Zendesk/Jira ticket note — SourceTable rows
+  // handle their own modal internally; this covers the QueueRow path.
+  const [noteModalTask, setNoteModalTask] = useState(null);
   const isHiddenKey = useCallback((source, id) => {
     if (!source || !id) return false;
     const key = `${String(source).toLowerCase()}:${String(id)}`;
@@ -613,8 +620,9 @@ const Queue = ({ user, tasks, subFilter }) => {
     }
     return out;
   }, [active, snoozed, done]);
-  // Add 1 for the new Actions column we render at the end of the row.
-  const ticketColSpan = (settings.sla_enabled !== false ? 9 : 8) + 1;
+  // Base ticket columns + Actions + Note (always rendered, since Queue
+  // owns the notes hook unconditionally).
+  const ticketColSpan = (settings.sla_enabled !== false ? 9 : 8) + 2;
   const { startIdx: ticketStart, endIdx: ticketEnd, topPad: ticketTopPad, bottomPad: ticketBottomPad } = useVirtualRows({
     rowCount: ticketVirtualItems.length,
     rowHeight: TICKET_ROW_HEIGHT,
@@ -846,6 +854,7 @@ const Queue = ({ user, tasks, subFilter }) => {
         <ErrorBoundary>
           <SourceTable
             viewerEmail={user?.email}
+            notesApi={taskNotes}
             rows={tblOnboardingRows}
             loading={onboardingData.loading || pausedOnboardingData.loading}
             error={onboardingData.error || pausedOnboardingData.error}
@@ -869,6 +878,7 @@ const Queue = ({ user, tasks, subFilter }) => {
         <ErrorBoundary>
           <SourceTable
             viewerEmail={user?.email}
+            notesApi={taskNotes}
             rows={tblOffboardingRows}
             loading={offboardingData.loading}
             error={offboardingData.error}
@@ -892,6 +902,7 @@ const Queue = ({ user, tasks, subFilter }) => {
         <ErrorBoundary>
           <SourceTable
             viewerEmail={user?.email}
+            notesApi={taskNotes}
             rows={tblAmendmentRows}
             loading={changeRequestData.loading}
             error={changeRequestData.error}
@@ -918,6 +929,7 @@ const Queue = ({ user, tasks, subFilter }) => {
         <ErrorBoundary>
           <SourceTable
             viewerEmail={user?.email}
+            notesApi={taskNotes}
             rows={tblRedlineRows}
             loading={changeRequestData.loading}
             error={changeRequestData.error}
@@ -944,6 +956,7 @@ const Queue = ({ user, tasks, subFilter }) => {
         <ErrorBoundary>
           <SourceTable
             viewerEmail={user?.email}
+            notesApi={taskNotes}
             rows={tblWorkbenchRows}
             loading={workbenchData.loading}
             error={workbenchData.error}
@@ -968,6 +981,7 @@ const Queue = ({ user, tasks, subFilter }) => {
         <ErrorBoundary>
           <SourceTable
             viewerEmail={user?.email}
+            notesApi={taskNotes}
             rows={tblIncentivePlanRows}
             loading={incentivePlansData.loading}
             error={incentivePlansData.error}
@@ -1154,6 +1168,7 @@ const Queue = ({ user, tasks, subFilter }) => {
                   )}
                   <SortableTh col="status"   label="Status"   width={90}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <th scope="col" style={{ ...thStyle, width: 60 }}>Link</th>
+                  <th scope="col" style={{ ...thStyle, width: 50 }} title="Personal notes — saved to your browser, keyed by the task's source+id">Note</th>
                   <th scope="col" style={{ ...thStyle, width: 160 }}>Actions</th>
                 </tr>
               </thead>
@@ -1189,6 +1204,8 @@ const Queue = ({ user, tasks, subFilter }) => {
                     settings={settings}
                     onHide={() => setHideModalTask(taskDescriptor)}
                     onEscalate={() => setEscalateModalTask(taskDescriptor)}
+                    hasNote={taskNotes.hasNote(task.source, task.id)}
+                    onOpenNote={() => setNoteModalTask(task)}
                   />;
                 })}
                 {ticketBottomPad > 0 && (
@@ -1211,6 +1228,21 @@ const Queue = ({ user, tasks, subFilter }) => {
           task={hideModalTask}
           onClose={() => setHideModalTask(null)}
           onSubmitted={() => { try { hiddenTasks?.refresh?.(); } catch {} }}
+        />
+      )}
+
+      {/* Note editor modal for ZD/Jira tickets — SourceTable rows render
+          their own modal internally, but QueueRow (ZD/Jira) is a top-level
+          render so the modal lives here. Shape mirrors the SourceTable
+          variant exactly to keep the experience consistent. */}
+      {noteModalTask && (
+        <TicketNoteModal
+          task={noteModalTask}
+          initialText={taskNotes.getNote(noteModalTask.source, noteModalTask.id)}
+          maxLength={taskNotes.maxLength}
+          onSave={(text) => { taskNotes.setNote(noteModalTask.source, noteModalTask.id, text); setNoteModalTask(null); }}
+          onDelete={() => { taskNotes.removeNote(noteModalTask.source, noteModalTask.id); setNoteModalTask(null); }}
+          onClose={() => setNoteModalTask(null)}
         />
       )}
 
@@ -1274,7 +1306,7 @@ const Queue = ({ user, tasks, subFilter }) => {
 };
 
 // ── Table row component ──
-const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onEscalate }) => {
+const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onEscalate, hasNote = false, onOpenNote = null }) => {
   const [hov, setHov] = useState(false);
   const assignee = resolveAssignee(task);
   const sla = slaInfo(task);
@@ -1349,6 +1381,27 @@ const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onEscalate }) => {
           <i className="bi-box-arrow-up-right" style={{ fontSize: 9 }}></i>
           <span style={{ fontSize: 10 }}>{task.id ? `${task.id}` : TOOLS[task.source]?.label || 'Open'}</span>
         </a>
+      </td>
+      {/* Note — sticky-note icon. Filled amber if a note exists. */}
+      <td style={tdStyle}>
+        {onOpenNote && (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onOpenNote(); }}
+            aria-label={hasNote ? `Edit note on "${task.subject || task.id}"` : `Add note to "${task.subject || task.id}"`}
+            title={hasNote ? 'Edit personal note' : 'Add personal note'}
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: 28, height: 24, padding: 0, borderRadius: 6,
+              background: hasNote ? '#fef7e0' : (hov ? '#fff8e6' : '#f5f4f2'),
+              color: hasNote ? '#b7791f' : (hov ? '#b7791f' : '#9e9e9e'),
+              border: hasNote ? '1px solid #f4d96b' : (hov ? '1px solid #f4d96b' : '1px solid transparent'),
+              cursor: 'pointer', fontFamily: 'inherit', transition: 'all .15s',
+            }}
+          >
+            <i className={hasNote ? 'bi-sticky-fill' : 'bi-sticky'} style={{ fontSize: 12 }} />
+          </button>
+        )}
       </td>
       {/* Actions */}
       <td style={tdStyle}>
@@ -1555,5 +1608,136 @@ MultiFilterDropdown.displayName = 'MultiFilterDropdown';
 // ── Styles ──
 const thStyle = { padding: '10px 12px', fontSize: 11, fontWeight: 600, color: '#9e9e9e', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center', whiteSpace: 'nowrap', borderBottom: '1px solid #e8e8e8' };
 const tdStyle = { padding: '10px 12px', textAlign: 'center', verticalAlign: 'middle' };
+
+// ── Ticket note modal ─────────────────────────────────────────────────────
+// Same shape as SourceTable's NoteModal, but reads task.subject / task.source
+// from the ZD/Jira task descriptor. Personal notes saved to localStorage,
+// keyed by `${source}:${id}` so they re-attach after every queue sync.
+function TicketNoteModal({ task, initialText, maxLength, onSave, onDelete, onClose }) {
+  const [text, setText] = useState(initialText || '');
+  const textareaRef = useRef(null);
+
+  useEffect(() => {
+    const h = (e) => {
+      if (e.key === 'Escape') { onClose(); return; }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { onSave(text); }
+    };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
+  }, [onClose, onSave, text]);
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.focus();
+    const len = el.value.length;
+    try { el.setSelectionRange(len, len); } catch {}
+  }, []);
+
+  const hadNote = !!(initialText && initialText.trim());
+  const sourceLabel = TOOLS[task.source]?.label || task.source;
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(15, 15, 15, 0.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 1000, padding: 16,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={hadNote ? 'Edit note' : 'Add note'}
+        style={{
+          width: 'min(520px, 100%)', background: 'var(--surface)', color: 'var(--text)',
+          borderRadius: 14, boxShadow: '0 20px 60px rgba(0,0,0,.25)',
+          border: '1px solid var(--border)', display: 'flex', flexDirection: 'column',
+          maxHeight: '85vh',
+        }}
+      >
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-light)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 8, background: '#fef7e0', color: '#b7791f' }}>
+              <i className="bi-sticky-fill" style={{ fontSize: 14 }} />
+            </span>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>
+              {hadNote ? 'Edit note' : 'Add note'}
+            </div>
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6, marginLeft: 36, flexWrap: 'wrap' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '1px 7px', borderRadius: 128, background: 'var(--surface-2)', fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'capitalize' }}>
+              {sourceLabel}
+            </span>
+            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }} title={task.subject}>
+              {task.subject || task.id}
+            </span>
+          </div>
+        </div>
+
+        <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto' }}>
+          <textarea
+            ref={textareaRef}
+            value={text}
+            onChange={(e) => setText(e.target.value.slice(0, maxLength))}
+            placeholder="Add a personal note for this task. Only you can see it."
+            rows={6}
+            style={{
+              width: '100%', minHeight: 140, padding: '10px 12px', borderRadius: 10,
+              border: '1px solid var(--border)', background: 'var(--surface-2)',
+              color: 'var(--text)', fontSize: 13, fontFamily: 'inherit',
+              lineHeight: 1.45, outline: 'none', resize: 'vertical', boxSizing: 'border-box',
+            }}
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--text-muted)' }}>
+            <span>Saved on this device, keyed to this task&apos;s source + id.</span>
+            <span>{text.length} / {maxLength}</span>
+          </div>
+        </div>
+
+        <div style={{ padding: '12px 20px 16px', borderTop: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+          {hadNote && (
+            <button
+              type="button"
+              onClick={onDelete}
+              style={{
+                padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)',
+                background: 'var(--surface)', color: '#d42d35', fontSize: 12, fontWeight: 600,
+                cursor: 'pointer', fontFamily: 'inherit', marginRight: 'auto',
+              }}
+            >
+              <i className="bi-trash" style={{ fontSize: 11, marginRight: 4 }} />
+              Delete
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)',
+              background: 'var(--surface)', color: 'var(--text)', fontSize: 12, fontWeight: 600,
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => onSave(text)}
+            style={{
+              padding: '8px 16px', borderRadius: 8, border: '1px solid var(--purple)',
+              background: 'var(--purple)', color: 'white', fontSize: 12, fontWeight: 600,
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default Queue;

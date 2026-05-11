@@ -26,13 +26,15 @@ import {
 // announcement — the "some users see no banners" bug.
 async function resolveCallerProfile(email) {
   const emailLc = String(email || '').trim().toLowerCase();
-  if (!emailLc) return { id: null, team: null };
+  if (!emailLc) return { id: null, team: null, access: null };
 
   let id = null;
   let team = null;
+  let access = null;
   try {
     const { rows } = await query(
-      `SELECT m.id AS member_id, m.team AS member_team, o.team AS override_team
+      `SELECT m.id AS member_id, m.team AS member_team, o.team AS override_team,
+              m.access AS member_access, o.access AS override_access
          FROM (SELECT $1::text AS email) c
          LEFT JOIN members m ON LOWER(m.email) = c.email
          LEFT JOIN team_member_overrides o ON LOWER(o.email) = c.email`,
@@ -41,15 +43,21 @@ async function resolveCallerProfile(email) {
     if (rows.length > 0) {
       id = rows[0].member_id || null;
       team = rows[0].override_team || rows[0].member_team || null;
+      access = rows[0].override_access || rows[0].member_access || null;
     }
   } catch (_) { /* DB blip — fall through to static baseline */ }
 
-  if (!team) {
+  if (!team || !access) {
     const baseline = MEMBERS_BY_EMAIL[emailLc];
-    if (baseline) team = baseline.team || null;
+    if (baseline) {
+      if (!team) team = baseline.team || null;
+      if (!access) access = baseline.access || null;
+    }
   }
-  return { id, team };
+  return { id, team, access };
 }
+
+const LEADER_ACCESS = new Set(['team_lead', 'regional_manager', 'admin']);
 
 export async function GET(req) {
   try {
@@ -73,6 +81,9 @@ export async function GET(req) {
     const profile = await resolveCallerProfile(user.email);
     let callerTeam = profile.team;
     let callerId = profile.id || (user.id && Number(user.id) > 0 ? Number(user.id) : null);
+    const callerAccess = String(profile.access || user.role || '').toLowerCase();
+    const callerIsLeader = LEADER_ACCESS.has(callerAccess);
+    const callerEmailLc = String(user.email).toLowerCase();
 
     let whereSql = ' WHERE 1=1';
     const params = [];
@@ -113,6 +124,21 @@ export async function GET(req) {
           audienceClauses.push(`LOWER(target) = 'americas'`);
         }
       }
+      // Leaders rollup — TLs, RMs, Admins all see leaders-only broadcasts.
+      if (callerIsLeader) {
+        audienceClauses.push(`LOWER(target) = 'leaders'`);
+      }
+      // Tag-group audience — join via mention_group_member on the
+      // group_id stored in target_group_id. NULL target_group_id rows
+      // (every region-targeted announcement) trivially fail the EXISTS
+      // so this only adds the group-membership branch.
+      audienceClauses.push(`(target = 'group' AND target_group_id IS NOT NULL
+        AND EXISTS (
+          SELECT 1 FROM mention_group_member mgm
+           WHERE mgm.group_id = announcements.target_group_id
+             AND LOWER(mgm.member_email) = $${idx++}
+        ))`);
+      params.push(callerEmailLc);
       if (callerId) {
         audienceClauses.push(`author_id = $${idx++}`);
         params.push(callerId);
@@ -121,7 +147,8 @@ export async function GET(req) {
     }
 
     const countSql = 'SELECT COUNT(*) FROM announcements' + whereSql;
-    const dataSql = `SELECT id, type, title, body, target, priority, is_popup, image_url, link,
+    const dataSql = `SELECT id, type, title, body, target, target_group_id,
+                            priority, is_popup, image_url, link,
                             status, author_id, pinned, sound_key, sent_at, scheduled_for,
                             created_at, updated_at
                        FROM announcements${whereSql}
@@ -184,7 +211,8 @@ export async function GET(req) {
 
     const items = filtered.map(r => ({
       id: r.id, type: r.type, title: r.title, body: r.body,
-      target: r.target, priority: r.priority, isPopup: r.is_popup,
+      target: r.target, targetGroupId: r.target_group_id || null,
+      priority: r.priority, isPopup: r.is_popup,
       imageUrl: r.image_url, link: r.link, status: r.status,
       authorId: r.author_id, pinned: r.pinned,
       author: authorMap[r.author_id] || { id: r.author_id, name: '', email: '' },
@@ -266,6 +294,7 @@ export async function POST(req) {
           title: payload.title,
           body: payload.body,
           target: payload.target,
+          target_group_id: payload.targetGroupId,
           priority: payload.priority,
           is_popup: payload.isPopup,
           image_url: payload.imageUrl,
@@ -289,7 +318,8 @@ export async function POST(req) {
 
     return NextResponse.json({
       id: published.id, type: published.type, title: published.title, body: published.body,
-      target: published.target, priority: published.priority, isPopup: published.is_popup,
+      target: published.target, targetGroupId: published.target_group_id || null,
+      priority: published.priority, isPopup: published.is_popup,
       imageUrl: published.image_url, link: published.link, status: published.status,
       authorId: published.author_id, pinned: published.pinned,
       acks: [],
