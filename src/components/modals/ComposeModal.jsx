@@ -1,6 +1,7 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { COMMS_TYPES, AUDIENCES, AUDIENCE_LABELS, SOUND_PRESETS } from '../../data/comms';
 import { isApprover } from '../../data/approvers';
+import { listMentionGroups } from '../../services/mentionGroupsApi';
 import PreviewPopup from './PreviewPopup';
 import AnnouncementMedia, { isAnnouncementVideo } from '../ui/AnnouncementMedia';
 
@@ -120,6 +121,21 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
     return v;
   };
   const [target,setTarget]=useState(normaliseTarget(draft?.target));
+  // Tag-group id when the target is a custom group. Stays null for region/
+  // role audiences; set when the picker selects a "Tag Group" option.
+  const [targetGroupId,setTargetGroupId]=useState(draft?.targetGroupId || null);
+  // Mention groups list — loaded once when the modal opens so the picker
+  // can include them alongside the region audiences. Best-effort: if the
+  // call fails (network blip, no groups yet), the picker still works with
+  // only the canonical audiences.
+  const [mentionGroups,setMentionGroups]=useState([]);
+  useEffect(()=>{
+    let cancelled=false;
+    listMentionGroups()
+      .then(res=>{ if(!cancelled) setMentionGroups(Array.isArray(res?.items) ? res.items : []); })
+      .catch(()=>{ /* swallow — picker falls back to audience-only options */ });
+    return ()=>{ cancelled=true; };
+  },[]);
   const [priority,setPriority]=useState(draft?.priority||'medium');
   const [isPopup,setIsPopup]=useState(draft?.isPopup||false);
   const [soundKey,setSoundKey]=useState(draft?.soundKey||'chime');
@@ -195,7 +211,12 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
     urgentReasonOk;
 
   const buildDraft = (status, extra = {}) => ({
-    type, title, body, target, priority, status,
+    type, title, body,
+    target,
+    // Only send a group id when the audience IS a group — clears any
+    // stale id left over from a previous picker session.
+    targetGroupId: target === 'group' ? (targetGroupId || null) : null,
+    priority, status,
     isPopup, imageUrl, link, soundKey,
     scheduledFor: scheduleLater ? new Date(scheduledFor).toISOString() : null,
     urgentOverride: canBypassQueue && urgentOverride,
@@ -439,10 +460,34 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
           <div style={{display:'flex',gap:12,marginBottom:12}}>
             <div style={{flex:1}}>
               <div style={{fontSize:11,fontWeight:700,color:'#616161',letterSpacing:'.05em',marginBottom:5}}>SEND TO</div>
-              <select value={target} onChange={e=>setTarget(e.target.value)} style={{width:'100%',border:'1px solid #e8e8e8',borderRadius:8,padding:'8px 10px',fontSize:13,outline:'none',fontFamily:'inherit',color:'#1b1b1b',cursor:'pointer'}}>
-                {AUDIENCES.map(k => (
-                  <option key={k} value={k}>{AUDIENCE_LABELS[k]}</option>
-                ))}
+              <select
+                value={target === 'group' && targetGroupId ? `group:${targetGroupId}` : target}
+                onChange={e=>{
+                  const v = e.target.value;
+                  if (v.startsWith('group:')) {
+                    setTarget('group');
+                    setTargetGroupId(v.slice('group:'.length));
+                  } else {
+                    setTarget(v);
+                    setTargetGroupId(null);
+                  }
+                }}
+                style={{width:'100%',border:'1px solid #e8e8e8',borderRadius:8,padding:'8px 10px',fontSize:13,outline:'none',fontFamily:'inherit',color:'#1b1b1b',cursor:'pointer'}}
+              >
+                <optgroup label="Audiences">
+                  {AUDIENCES.map(k => (
+                    <option key={k} value={k}>{AUDIENCE_LABELS[k]}</option>
+                  ))}
+                </optgroup>
+                {mentionGroups.length > 0 && (
+                  <optgroup label="Tag Groups">
+                    {mentionGroups.map(g => (
+                      <option key={g.id} value={`group:${g.id}`}>
+                        @{g.handle}{g.name ? ` — ${g.name}` : ''} ({g.memberCount ?? (Array.isArray(g.members) ? g.members.length : 0)})
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </select>
             </div>
             <div style={{flex:1}}>

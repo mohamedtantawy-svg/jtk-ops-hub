@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------------
 import { query } from './db';
 
-export const VALID_TARGETS = ['all', 'global', 'emea', 'apac', 'americas', 'nam', 'latam'];
+export const VALID_TARGETS = ['all', 'global', 'emea', 'apac', 'americas', 'nam', 'latam', 'leaders', 'group'];
 export const VALID_TYPES = ['announce', 'kudos', 'info', 'general', 'alert'];
 
 // Publishing rate limits
@@ -101,12 +101,30 @@ export function normalizePayload(raw) {
   if (!VALID_TARGETS.includes(target)) {
     throw new Error(`Invalid target. Must be one of: ${VALID_TARGETS.join(', ')}`);
   }
+  // Tag-group target: the actual audience lives in `target_group_id`. The
+  // string column stays as the discriminator 'group'. We accept the UUID
+  // here and pass it through; the route layer validates referential
+  // integrity (mention_group exists) before INSERT.
+  const targetGroupIdRaw = raw?.targetGroupId ? String(raw.targetGroupId).trim() : null;
+  const targetGroupId = (targetGroupIdRaw && /^[0-9a-f-]{36}$/i.test(targetGroupIdRaw))
+    ? targetGroupIdRaw
+    : null;
+  if (target === 'group' && !targetGroupId) {
+    throw new Error('targetGroupId (UUID) is required when target=group');
+  }
+  if (target !== 'group' && targetGroupId) {
+    // Defensive: a stale group id from a previous draft shouldn't survive
+    // a switch back to a region audience. Drop it silently rather than
+    // 400ing the publish.
+    // (Handled below by only returning targetGroupId when target==='group'.)
+  }
 
   return {
     type: (raw?.type || 'announce').toString(),
     title,
     body: (raw?.body || '').toString(),
     target,
+    targetGroupId: target === 'group' ? targetGroupId : null,
     priority: (raw?.priority || 'medium').toString(),
     isPopup: Boolean(raw?.isPopup),
     // Media URL holds either an http(s) link (~bytes) or an inline data URI
@@ -194,15 +212,19 @@ export async function publishFromRequest(request, options = {}) {
 
   const { rows } = await query(
     `INSERT INTO announcements
-       (type, title, body, target, priority, is_popup, image_url, link,
+       (type, title, body, target, target_group_id, priority, is_popup, image_url, link,
         author_id, sound_key, status, sent_at, scheduled_for)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
      RETURNING *`,
     [
       request.type || 'announce',
       request.title,
       request.body || '',
       request.target || 'global',
+      // Only persist a group id when the audience is the 'group' sentinel.
+      // Otherwise leave NULL so a leftover id from a prior draft can't
+      // accidentally narrow a region-targeted broadcast.
+      request.target === 'group' ? (request.target_group_id || null) : null,
       request.priority || 'medium',
       Boolean(request.is_popup),
       request.image_url || null,

@@ -157,7 +157,7 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
   // LATAM+NAM dual-region members all resolve correctly.
   const targetMatch=(c)=>{
     if(Array.isArray(c.target)&&c.target.includes(user.id))return true;
-    return matchesAudience(c.target, user.team);
+    return matchesAudience(c.target, user);
   };
   const canSee=(c)=>{
     if(c.author&&c.author.id===user.id)return true;
@@ -322,7 +322,7 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
       const set=new Set(comm.target);
       audienceMembers=MEMBERS.filter(m=>set.has(m.id));
     } else {
-      audienceMembers=MEMBERS.filter(m=>matchesAudience(comm.target, m.team));
+      audienceMembers=MEMBERS.filter(m=>matchesAudience(comm.target, m));
     }
     const scoped=scopeAckMembers(audienceMembers, user, accessType, comm);
     const hasEmailAxis = Array.isArray(comm.ackEmails);

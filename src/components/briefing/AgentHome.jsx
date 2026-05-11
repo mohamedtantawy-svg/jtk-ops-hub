@@ -309,14 +309,14 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
             : [];
           return ackList.map(e => String(e || '').toLowerCase()).includes(myEmail);
         };
-    const inAud = (c) => matchesAudience(c.target, user?.team) || (c.author && c.author.email && c.author.email.toLowerCase() === myEmail);
+    const inAud = (c) => matchesAudience(c.target, user) || (c.author && c.author.email && c.author.email.toLowerCase() === myEmail);
     return comms.filter(c =>
       c.status === 'sent'
       && (c.type === 'announce' || c.type === 'alert' || c.type === 'guidance')
       && !isAcked(c)
       && inAud(c)
     ).length;
-  }, [comms, ackEmails, isAckedByMeProp, user?.team, myEmail]);
+  }, [comms, ackEmails, isAckedByMeProp, user, myEmail]);
 
   // ── Header KPIs — Health / Workload / SLA % / Resolved Today ──────────
   // Three signals an agent should see the moment they open Home:

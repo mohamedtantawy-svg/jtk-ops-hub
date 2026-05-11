@@ -998,7 +998,7 @@ const App=()=>{
       seen.add(c.id);
       if(c.status!=='sent') continue;
       if(c.author&&c.author.id===user.id) continue;
-      const inAudience=(Array.isArray(c.target)&&c.target.includes(user.id))||matchesAudience(c.target,user.team);
+      const inAudience=(Array.isArray(c.target)&&c.target.includes(user.id))||matchesAudience(c.target,user);
       if(!inAudience) continue;
       // Skip notifying on already-acked comms. Email-only suppression when
       // the server has the email axis — see popupQueue comment for why the
@@ -1432,7 +1432,7 @@ const App=()=>{
     };
     const targetMatch=(c)=>{
       if(Array.isArray(c.target)&&c.target.includes(user.id))return true;
-      return matchesAudience(c.target, user.team);
+      return matchesAudience(c.target, user);
     };
     return comms.filter(c=>
       c.isPopup&&c.status==='sent'&&!isAckedByMe(c)&&!dismissedPopups.includes(c.id)&&(targetMatch(c)||(c.author&&c.author.id===user.id))

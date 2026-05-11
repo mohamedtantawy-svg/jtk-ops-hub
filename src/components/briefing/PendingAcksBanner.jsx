@@ -68,7 +68,7 @@ export default function PendingAcksBanner({
       // is by team string and matchesAudience handles wildcard / array forms.
       if (Array.isArray(c.target) && user?.id != null && c.target.includes(user.id)) return true;
       if (c.author && user?.id != null && c.author.id === user.id) return true;
-      return matchesAudience(c.target, user?.team);
+      return matchesAudience(c.target, user);
     };
     return comms.filter(c =>
       c.status === 'sent'
@@ -76,7 +76,7 @@ export default function PendingAcksBanner({
       && !isAcked(c)
       && !(c.author && user?.id != null && c.author.id === user.id),
     );
-  }, [comms, user?.id, user?.email, user?.team, isAckedByMeProp]);
+  }, [comms, user, isAckedByMeProp]);
 
   // Self-heal when the underlying list shrinks past the current index
   // (e.g. user opens a comm in another tab and acks it).
