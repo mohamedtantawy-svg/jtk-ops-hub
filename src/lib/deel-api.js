@@ -1599,8 +1599,15 @@ export async function listWorkbenchTasks(params = {}) {
   // safety cap.
   if (includeCompleted) {
     try {
-      const FINISHED_PAGE_SIZE = 200;
-      const FINISHED_MAX_PAGES = 5;
+      // Deel admin API caps `limit` at 100 — passing 200 returns
+      // HTTP 400 ("limit must be less than or equal to 100") and the
+      // catch below swallows it, silently producing ZERO recently-
+      // finished merges (worse than the original 50-cap this branch
+      // was meant to fix). 2026-05-11 prod logs caught it firing on
+      // every sync cycle. Pages doubled to keep the ~1000-row ceiling
+      // documented above.
+      const FINISHED_PAGE_SIZE = 100;
+      const FINISHED_MAX_PAGES = 10;
       const cutoff = Date.now() - completedLookbackMs;
       const seen = new Set(allItems.map(t => t.id));
       let kept = 0;
