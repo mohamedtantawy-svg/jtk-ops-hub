@@ -327,6 +327,20 @@ const Queue = ({ user, tasks, subFilter }) => {
 
   const isAdmin = isAdminUser(user);
   const isLead = perms?.dataScope === 'team_tasks';
+  // Agents see country-OR-assignee unions on Redlines / Amendments / Onb /
+  // Off / Incentive Plans (their `visibleEmails` is just self, but their
+  // `visibleCountries` pulls in team members' rows). Trish Lee 2026-05-11
+  // feedback: the SLA header pills tallied that whole union, so an agent
+  // with 2 personal breaches but 3 teammate breaches in her countries saw
+  // "5 Breached" — misleading. The pills should reflect HER queue, not the
+  // team's. Managers (TL / RM / Admin) keep the team-wide tally because
+  // that's the signal they need to delegate / escalate.
+  const isAgent = perms?.dataScope === 'own_tasks_only';
+  const myEmailLc = (user?.email || '').toLowerCase();
+  const mineOnlyForSla = useCallback((rows) => {
+    if (!isAgent || !myEmailLc || !Array.isArray(rows)) return rows;
+    return rows.filter(r => (r?.assigneeEmail || '').toLowerCase() === myEmailLc);
+  }, [isAgent, myEmailLc]);
   // Reassign is open to every authenticated user (2026-05-07): the
   // server-side role gate on /api/v1/queue/source-reassign and
   // /api/v1/queue/reassign was lifted alongside this — agents need to
@@ -533,13 +547,15 @@ const Queue = ({ user, tasks, subFilter }) => {
   }, [rowSlaSeverity]);
 
   // ── SLA pills counts — reflect post-filter row sets per active tab ──
+  // Agents get a mine-only tally (see `mineOnlyForSla` above) so the pills
+  // reflect THEIR queue, not the team's. Managers keep the team-wide count.
   const { atRiskCount, breachedCount, onTrackCount } = useMemo(() => {
-    if (workSource === 'onboarding')      return tallyDeelSla(visOnboardingRows);
-    if (workSource === 'offboarding')     return tallyDeelSla(visOffboardingRows);
-    if (workSource === 'amendments')      return tallyDeelSla(visAmendmentRows);
-    if (workSource === 'redlines')        return tallyDeelSla(visRedlineRows);
-    if (workSource === 'workbench')       return tallyDeelSla(visWorkbenchRows);
-    if (workSource === 'incentive_plans') return tallyDeelSla(visIncentivePlanRows);
+    if (workSource === 'onboarding')      return tallyDeelSla(mineOnlyForSla(visOnboardingRows));
+    if (workSource === 'offboarding')     return tallyDeelSla(mineOnlyForSla(visOffboardingRows));
+    if (workSource === 'amendments')      return tallyDeelSla(mineOnlyForSla(visAmendmentRows));
+    if (workSource === 'redlines')        return tallyDeelSla(mineOnlyForSla(visRedlineRows));
+    if (workSource === 'workbench')       return tallyDeelSla(mineOnlyForSla(visWorkbenchRows));
+    if (workSource === 'incentive_plans') return tallyDeelSla(mineOnlyForSla(visIncentivePlanRows));
     // Admin Hidden tab — no SLA semantics. Pills sit at zero so they don't
     // borrow numbers from the underlying ZD/Jira queue.
     if (workSource === 'hidden') return { atRiskCount: 0, breachedCount: 0, onTrackCount: 0 };
@@ -547,11 +563,11 @@ const Queue = ({ user, tasks, subFilter }) => {
     if (workSource === 'jira') slaBase = visPreSla.filter(t => t.source === 'jira');
     else if (workSource === 'zendesk') slaBase = visPreSla.filter(t => t.source === 'zendesk');
     else slaBase = visPreSla;
-    slaBase = slaBase.filter(t => t.status !== 'resolved' && t.status !== 'waiting');
+    slaBase = mineOnlyForSla(slaBase.filter(t => t.status !== 'resolved' && t.status !== 'waiting'));
     const atRisk = slaBase.filter(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; }).length;
     const breached = slaBase.filter(t => { const s = slaInfo(t); return s && s.breach; }).length;
     return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: slaBase.length - atRisk - breached };
-  }, [workSource, visPreSla, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows, visIncentivePlanRows, tallyDeelSla]);
+  }, [workSource, visPreSla, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows, visIncentivePlanRows, tallyDeelSla, mineOnlyForSla]);
 
   // ── View-aware header counts ──
   // For each Deel source we read the SLA-filtered row set so the "N open"
