@@ -36,6 +36,32 @@ function buildCountryOptions() {
 }
 
 const COUNTRY_OPTIONS = buildCountryOptions();
+const CANONICAL_CODES = new Set(COUNTRY_OPTIONS.map(o => o.code));
+
+// Some saved member.countries entries can be ISO-shaped (matches /^[A-Z]{2}$/
+// on the server) but not in FLAGS — typically legacy values like `UK` instead
+// of `GB`, or codes from old seeds. Without this synthesizer those rows
+// silently survived every save: the picker counted them in `selected.length`
+// (badge says "6 countries") but rendered no checkbox to uncheck them, so
+// Ewa Kotowska (2026-05-11 feedback "I removed countries from Raquel but she
+// is still showing as assigned to 6") couldn't get the count down past the
+// visible ones. Building a synthetic option per unknown code lets the user
+// see + clear them.
+function buildUnknownOptions(selected) {
+  if (!Array.isArray(selected) || selected.length === 0) return [];
+  const out = [];
+  const seen = new Set();
+  for (const raw of selected) {
+    if (typeof raw !== 'string') continue;
+    const upper = raw.trim().toUpperCase();
+    if (!/^[A-Z]{2}$/.test(upper)) continue;
+    if (CANONICAL_CODES.has(upper)) continue;
+    if (seen.has(upper)) continue;
+    seen.add(upper);
+    out.push({ code: upper, name: `Unknown (${upper})`, flag: '🌐', unknown: true });
+  }
+  return out.sort((a, b) => a.code.localeCompare(b.code));
+}
 
 export default function MultiCountryPicker({
   selected = [],
@@ -79,13 +105,25 @@ export default function MultiCountryPicker({
 
   const selectedSet = useMemo(() => new Set(draft), [draft]);
 
+  // Include synthetic rows for any saved code that isn't in COUNTRY_OPTIONS
+  // (legacy / unknown ISO-shaped codes). They get the canonical "selected →
+  // pinned to top" treatment below so users can spot and clear them.
+  const allOptions = useMemo(() => {
+    const extras = buildUnknownOptions(draft);
+    return extras.length === 0 ? COUNTRY_OPTIONS : [...extras, ...COUNTRY_OPTIONS];
+  }, [draft]);
+
+  // Count of synthetic / unknown codes currently in the draft. Drives the
+  // "Remove unknown codes" affordance + the on-row warning chip.
+  const unknownCount = useMemo(() => buildUnknownOptions(draft).length, [draft]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return COUNTRY_OPTIONS;
-    return COUNTRY_OPTIONS.filter(o =>
+    if (!q) return allOptions;
+    return allOptions.filter(o =>
       o.code.toLowerCase().includes(q) || o.name.toLowerCase().includes(q),
     );
-  }, [query]);
+  }, [query, allOptions]);
 
   // Pin selected entries to the top of the dropdown so the user can see
   // (and uncheck) what's already on this member without scrolling.
@@ -135,6 +173,11 @@ export default function MultiCountryPicker({
 
   const handleClear = () => setDraft([]);
   const handleCancel = () => { setDraft(normaliseList(selected)); setOpen(false); };
+  // One-click cleanup of every saved code that's not in the canonical
+  // FLAGS list. Visible only when there's at least one unknown to remove.
+  const handleClearUnknown = () => {
+    setDraft(prev => prev.filter(c => CANONICAL_CODES.has(c)));
+  };
 
   // ── Trigger ────────────────────────────────────────────────────────────
   const triggerHeight = size === 'sm' ? 26 : 30;
@@ -236,19 +279,39 @@ export default function MultiCountryPicker({
           }}>
             <span style={{ color: '#616161', fontWeight: 600 }}>
               {draft.length} selected
+              {unknownCount > 0 && (
+                <span style={{ marginLeft: 6, color: '#b45309', fontWeight: 600 }}>
+                  · {unknownCount} unknown
+                </span>
+              )}
             </span>
-            {draft.length > 0 && (
-              <button
-                type="button"
-                onClick={handleClear}
-                style={{
-                  border: 'none', background: 'transparent', cursor: 'pointer',
-                  fontSize: 11, color: '#7c3aed', fontWeight: 600, padding: 0,
-                }}
-              >
-                Clear all
-              </button>
-            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              {unknownCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClearUnknown}
+                  title="Remove every code that doesn't match a recognized country (typically legacy values from older seeds)"
+                  style={{
+                    border: 'none', background: 'transparent', cursor: 'pointer',
+                    fontSize: 11, color: '#b45309', fontWeight: 600, padding: 0,
+                  }}
+                >
+                  Remove unknown
+                </button>
+              )}
+              {draft.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleClear}
+                  style={{
+                    border: 'none', background: 'transparent', cursor: 'pointer',
+                    fontSize: 11, color: '#7c3aed', fontWeight: 600, padding: 0,
+                  }}
+                >
+                  Clear all
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Options list */}
@@ -260,19 +323,20 @@ export default function MultiCountryPicker({
             )}
             {orderedOptions.map(opt => {
               const checked = selectedSet.has(opt.code);
+              const isUnknown = !!opt.unknown;
               return (
                 <div
                   key={opt.code}
                   onClick={() => toggle(opt.code)}
                   onMouseEnter={e => { if (!checked) e.currentTarget.style.background = '#f9f8f6'; }}
-                  onMouseLeave={e => { e.currentTarget.style.background = checked ? '#f3eff8' : 'transparent'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = checked ? (isUnknown ? '#fff8e6' : '#f3eff8') : 'transparent'; }}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 10,
                     padding: '7px 12px',
                     fontSize: 12,
                     cursor: 'pointer',
-                    background: checked ? '#f3eff8' : 'transparent',
-                    color: checked ? '#5b2ba0' : '#1b1b1b',
+                    background: checked ? (isUnknown ? '#fff8e6' : '#f3eff8') : 'transparent',
+                    color: checked ? (isUnknown ? '#92400e' : '#5b2ba0') : '#1b1b1b',
                     transition: 'background .1s',
                   }}
                 >
@@ -280,19 +344,23 @@ export default function MultiCountryPicker({
                     aria-hidden="true"
                     style={{
                       width: 16, height: 16, borderRadius: 4,
-                      border: checked ? '2px solid #7c3aed' : '2px solid #d5d5d5',
-                      background: checked ? '#7c3aed' : 'white',
+                      border: checked
+                        ? (isUnknown ? '2px solid #d97706' : '2px solid #7c3aed')
+                        : '2px solid #d5d5d5',
+                      background: checked ? (isUnknown ? '#d97706' : '#7c3aed') : 'white',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       flexShrink: 0,
                     }}
                   >
                     {checked && <i className="bi-check2" style={{ fontSize: 10, color: 'white' }} />}
                   </span>
-                  <span style={{ fontSize: 14, lineHeight: 1, width: 18 }}>{opt.flag}</span>
+                  <span style={{ fontSize: 14, lineHeight: 1, width: 18 }}>
+                    {isUnknown ? <i className="bi-question-circle-fill" style={{ fontSize: 12, color: '#d97706' }} /> : opt.flag}
+                  </span>
                   <span style={{
                     fontFamily: 'ui-monospace, SFMono-Regular, "SF Mono", monospace',
                     fontSize: 11, fontWeight: 600,
-                    color: checked ? '#5b2ba0' : '#9e9e9e',
+                    color: checked ? (isUnknown ? '#92400e' : '#5b2ba0') : '#9e9e9e',
                     width: 26,
                   }}>
                     {opt.code}
@@ -300,7 +368,9 @@ export default function MultiCountryPicker({
                   <span style={{
                     flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                     fontWeight: checked ? 600 : 500,
-                  }}>
+                  }}
+                  title={isUnknown ? 'Code is saved on this member but doesn’t match a recognized country — uncheck to remove' : undefined}
+                  >
                     {opt.name}
                   </span>
                 </div>
