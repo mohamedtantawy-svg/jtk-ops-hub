@@ -132,7 +132,18 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
   useEffect(()=>{
     let cancelled=false;
     listMentionGroups()
-      .then(res=>{ if(!cancelled) setMentionGroups(Array.isArray(res?.items) ? res.items : []); })
+      .then(res=>{
+        // /api/v1/mention-groups returns { groups: [...] } (verified live
+        // 2026-05-11). The original `res?.items` read silently produced an
+        // empty array even when groups existed, so the Tag Groups optgroup
+        // never rendered. Matches the existing reader in
+        // ManageMentionGroupsModal.jsx.
+        if (cancelled) return;
+        const list = Array.isArray(res?.groups) ? res.groups
+                   : Array.isArray(res?.items)  ? res.items
+                   : [];
+        setMentionGroups(list);
+      })
       .catch(()=>{ /* swallow — picker falls back to audience-only options */ });
     return ()=>{ cancelled=true; };
   },[]);

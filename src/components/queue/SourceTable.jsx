@@ -252,14 +252,21 @@ export default function SourceTable({
     }
     if (searchTerm) {
       const q = searchTerm.toLowerCase();
+      // Every field is String-coerced before .toLowerCase() — live audit
+      // 2026-05-11 caught a crash when an onboarding row carried a numeric
+      // `id` and `(row.id || '').toLowerCase()` threw "toLowerCase is not
+      // a function". Defensive coercion across the lot so any future
+      // upstream that ships a number / boolean / null doesn't take the
+      // whole queue down.
+      const lc = (v) => String(v == null ? '' : v).toLowerCase();
       r = r.filter(row =>
-        (row.subject || '').toLowerCase().includes(q) ||
-        (row.function || '').toLowerCase().includes(q) ||
-        (row.country || '').toLowerCase().includes(q) ||
-        (row.assignee || '').toLowerCase().includes(q) ||
-        (row.clientName || '').toLowerCase().includes(q) ||
-        (row.typeLabel || '').toLowerCase().includes(q) ||
-        (row.id || '').toLowerCase().includes(q)
+        lc(row.subject).includes(q) ||
+        lc(row.function).includes(q) ||
+        lc(row.country).includes(q) ||
+        lc(row.assignee).includes(q) ||
+        lc(row.clientName).includes(q) ||
+        lc(row.typeLabel).includes(q) ||
+        lc(row.id).includes(q)
       );
     }
     return r;
