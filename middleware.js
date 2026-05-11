@@ -190,7 +190,16 @@ export async function middleware(request) {
     pathname === '/api/v1/config' ||
     pathname === '/api/v1/version' ||
     pathname === '/api/v1/integrations/status' ||
-    pathname === '/api/v1/calendar/oauth/callback'
+    pathname === '/api/v1/calendar/oauth/callback' ||
+    // Phase 4 of HANDOVERS_PLAN.md — the handover cron endpoints
+    // authenticate via CRON_SECRET (shared bearer), not JWT. The
+    // k8s CronJob (helm/templates/cronjob-handovers.yaml) attaches
+    // the secret on the Authorization header but it isn't a JWT, so
+    // the standard middleware verification below would reject it.
+    // Bypassing here lets verifyCronSecret() in the route handle
+    // the check + return the right status (403 on bad token,
+    // 503 on missing env var).
+    pathname.startsWith('/api/v1/handovers/cron/')
   ) {
     return NextResponse.next();
   }
