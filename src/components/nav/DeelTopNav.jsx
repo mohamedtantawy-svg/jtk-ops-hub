@@ -68,8 +68,15 @@ const CREATE_ACTIONS = [
 
 const DeelTopNav = ({
   view, setView, user,
+  // Real (pre-impersonation) signed-in user — used by the user-menu to
+  // decide whether to show "Login as Admin". Driven by the real role, not
+  // the impersonated one, so an RM who is currently acting as admin still
+  // sees the option (which becomes a no-op via the App.jsx guard) and an
+  // agent never sees it regardless of who they impersonate.
+  realUser,
   onSearch, notifs, markAllRead, markRead, markUnread, onNotifClick, onViewAllNotifications,
   onLogout,
+  onLoginAsAdmin,
   onCreateAnnouncement, onCreateFeedback,
   onCreateHrHub,
   onCreateLeaderAlert,
@@ -379,6 +386,25 @@ const DeelTopNav = ({
                     onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                     style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 500, color: 'var(--text)', transition: 'background .12s' }}>
                     <i className="bi bi-gear" style={{ fontSize: 14 }} /> Settings
+                  </div>
+                )}
+                {/* Login as Admin — shown to Regional Managers only, gated
+                    on the REAL signed-in role (so an RM currently acting
+                    as admin doesn't see it doubled up). Click impersonates
+                    the canonical admin via App.jsx::handleLoginAsAdmin so
+                    the existing impersonation banner + Exit affordance
+                    handle the rest of the lifecycle. */}
+                {realUser
+                  && String(realUser?.access || realUser?.role || '').toLowerCase() === 'regional_manager'
+                  && String(user?.access || user?.role || '').toLowerCase() !== 'admin'
+                  && onLoginAsAdmin && (
+                  <div role="button" tabIndex={0}
+                    onClick={() => { onLoginAsAdmin(); setShowUser(false); }}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onLoginAsAdmin(); setShowUser(false); } }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--purple-light, #f5f0ff)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                    style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 14px', cursor: 'pointer', fontSize: 13, fontWeight: 600, color: 'var(--purple, #7c3aed)', transition: 'background .12s' }}>
+                    <i className="bi bi-shield-lock" style={{ fontSize: 14 }} /> Login as Admin
                   </div>
                 )}
                 <div role="button" tabIndex={0}
