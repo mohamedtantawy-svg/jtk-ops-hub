@@ -235,7 +235,13 @@ async function _scanOnboardingByStatus(statusName, label) {
   // limit. The Retry-After-aware retry in src/lib/retry.js (PR #497)
   // is the safety net for any 429 that still slips through.
   const BATCH_SIZE = 3;
-  const INTER_BATCH_DELAY_MS = 100;
+  // 2026-05-11 audit: 100 ms left the per-status burst window too tight,
+  // contributing to the Deel 429 storm right after the fresh-pod boot.
+  // Bumping to 250 ms spreads each 3-call batch over a wider window
+  // (single supplemental status now caps out at ~12 calls/sec instead of
+  // ~30 calls/sec) without meaningfully changing total wall time given
+  // that the outer loop is now sequential.
+  const INTER_BATCH_DELAY_MS = 250;
   const collected = [];
   for (let i = 0; i < countries.length; i += BATCH_SIZE) {
     const batch = countries.slice(i, i + BATCH_SIZE);
@@ -287,15 +293,32 @@ export async function listOnboardingPeople(params = {}) {
   const offset = params.offset || '0';
   const qs = `actionableQueueFilters%5Boffset%5D=${offset}`;
 
-  // Fan out the actionable-queue scan and the supplemental-status scans in
-  // parallel so total wall time is bounded by the slowest of the two paths,
-  // not their sum. Each branch self-handles failure; a flaky supplemental
-  // status doesn't block the primary feed.
+  // Fan out the actionable-queue scan in parallel with the supplemental
+  // status scans. The supplemental scans themselves run SEQUENTIALLY — each
+  // status already does its own 3-at-a-time country fan-out, and running
+  // four of those concurrently created a compound 4×3 = 12 peak concurrent
+  // calls that was the dominant cause of the 2026-05-11 Deel 429 burst
+  // (live logs showed sustained 429s on `/admin/eor/employee-manager/list/
+  // Onboarding.EA.EASigning.Paused?countries[]=...` across GB / AL / AM /
+  // AE / ... within the same second). Sequential outer keeps peak at
+  // 1 (actionable) + 3 (one inner batch) = 4 concurrent, well inside the
+  // upstream's tolerance. Wall time grows from max-of-4 to sum-of-4 (~4×
+  // longer for the supplemental branch only), still bounded by the slower
+  // actionable scan in the common case. Skill mistake #41.
+  const supplementalSequential = async () => {
+    const out = [];
+    for (const name of SUPPLEMENTAL_ONBOARDING_STATUSES) {
+      const items = await _scanOnboardingByStatus(
+        name,
+        name.split('.').slice(-2).join('.'),
+      );
+      out.push(items);
+    }
+    return out;
+  };
   const [actionableRes, supplementalRaw] = await Promise.all([
     deelFetch(`/admin/eor/employee-manager/list/Onboarding.ActionableQueue?${qs}`),
-    Promise.all(SUPPLEMENTAL_ONBOARDING_STATUSES.map(name =>
-      _scanOnboardingByStatus(name, name.split('.').slice(-2).join('.')),
-    )),
+    supplementalSequential(),
   ]);
 
   const rawItems = actionableRes?.result || [];
@@ -412,7 +435,10 @@ export async function listPausedOnboarding() {
   const allItems = [];
 
   const BATCH_SIZE = 3;
-  const INTER_BATCH_DELAY_MS = 100;
+  // Bumped 100 → 250 ms on 2026-05-11 in lockstep with the supplemental
+  // onboarding scan — the two fan-outs overlap on the first poll cycle
+  // after boot, so tightening either alone wasn't enough.
+  const INTER_BATCH_DELAY_MS = 250;
   for (let i = 0; i < countries.length; i += BATCH_SIZE) {
     const batch = countries.slice(i, i + BATCH_SIZE);
     const results = await Promise.all(
@@ -1265,7 +1291,14 @@ const AMEND_CLIENT_TTL_MS = 60 * 60 * 1000;
 // inter-batch sleep spreads the burst so concurrent agents on the
 // amendments view don't all hit the limit window at once.
 const AMEND_CLIENT_CONCURRENCY = 3;
-const AMEND_CLIENT_INTER_BATCH_DELAY_MS = 100;
+// Bumped 100 → 250 ms on 2026-05-11. The fresh-pod boot log captured
+// dozens of `/rest/v2/contracts/<id>` 429s overlapping with the
+// onboarding fan-out's burst. Wider inter-batch spacing spreads the
+// enricher's load over a fuller second so it doesn't pile onto the same
+// Deel rate-limit window. Wall time delta is ~2.4× for the enricher
+// alone, but contract-name resolution isn't on the interactive critical
+// path (it backfills the amendments view as data arrives).
+const AMEND_CLIENT_INTER_BATCH_DELAY_MS = 250;
 
 async function fetchClientNameForContract(contractId) {
   if (!contractId) return '';
