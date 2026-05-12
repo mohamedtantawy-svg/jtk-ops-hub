@@ -29,7 +29,7 @@ import {
 
 const ALLOWED_FLOWS = new Set(['hr_request', 'hr_reporting', 'escalation_zero', 'feedback', 'hide_task_request']);
 const ALLOWED_HIDE_REASON_CODES = new Set(['internal_deel_employee', 'test_task', 'other']);
-const ALLOWED_STATUSES = new Set(['new', 'in_progress', 'on_hold', 'resolved']);
+const ALLOWED_STATUSES = new Set(['new', 'in_progress', 'on_hold', 'resolved', 'rejected']);
 const ALLOWED_PRIORITIES = new Set(['low', 'medium', 'high', 'critical']);
 // `assigned` = items where assignee_email matches the caller. Distinct from
 // `mine` (which keys off created_by_email) — a manager who triages a request

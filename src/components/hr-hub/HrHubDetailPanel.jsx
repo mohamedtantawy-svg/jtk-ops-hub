@@ -31,6 +31,10 @@ const STATUS_OPTIONS = [
   { id: 'in_progress', label: 'In Progress', color: '#92400e', bg: '#fff8e6' },
   { id: 'on_hold',     label: 'On Hold',     color: 'var(--text-secondary)', bg: '#f3f3f3' },
   { id: 'resolved',    label: 'Resolved',    color: '#166534', bg: '#e8f5e9' },
+  // Terminal "closed without resolving" — Megan's 2026-05-12 ask. Red
+  // semantic stays literal across themes (status colours convey meaning
+  // that must not shift with dark mode).
+  { id: 'rejected',    label: 'Rejected',    color: '#991b1b', bg: '#fee2e2' },
 ];
 const PRIORITY_OPTIONS = [
   { id: 'low',      label: 'Low' },

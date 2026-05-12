@@ -1,12 +1,15 @@
 // ── useHrHubBadge ─────────────────────────────────────────────────────────
 // Top-nav red number for the HR Hub tab — counts items where:
 //   • assignee_email = viewer (the new `assigned` scope on /api/v1/hr-hub)
-//   • status ∈ { new, in_progress, on_hold }   (excludes resolved)
+//   • status ∈ { new, in_progress, on_hold }   (excludes resolved + rejected)
 //
 // Mirrors useUrgentAssistBadge: 60s polling + visibility-change refresh,
 // stale-while-revalidate on transient errors. Single network call per
 // tick — the `assigned` scope server-filters to assignee=me already, so
-// the FE just counts the non-resolved ones.
+// the FE just counts the non-terminal ones. `rejected` (added
+// 2026-05-12 alongside the existing `resolved`) is also terminal —
+// the allow-set is already non-terminal-only so the badge ignores it
+// for free.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { listHrHubRequests } from '../services/hrHubApi';
