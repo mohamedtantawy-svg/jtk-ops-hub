@@ -13,9 +13,9 @@ function CommandCenterContent() {
   }
 }
 
-export default function CommandCenterApp({ email, workspace }) {
+export default function CommandCenterApp({ email, workspace, role }) {
   return (
-    <WorkspaceProvider workspace={workspace} email={email}>
+    <WorkspaceProvider workspace={workspace} email={email} role={role}>
       <WorkspaceShell>
         <CommandCenterContent />
       </WorkspaceShell>

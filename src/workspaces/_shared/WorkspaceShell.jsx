@@ -116,8 +116,13 @@ const content = {
 };
 
 export default function WorkspaceShell({ children }) {
-  const { workspace, email, activeTab, setActiveTab } = useWorkspace();
+  const { workspace, email, isAdmin, activeTab, setActiveTab } = useWorkspace();
   const signOut = useWorkspaceSignOut();
+
+  // Filter out admin-only tabs for non-admins. AdminView itself re-checks
+  // permission server-side, so this is purely a UX nicety — don't show users
+  // a tab they can't use.
+  const visibleTabs = workspace.tabs.filter(t => !t.adminOnly || isAdmin);
 
   return (
     <div style={wrap}>
@@ -137,9 +142,9 @@ export default function WorkspaceShell({ children }) {
         </button>
       </header>
 
-      {workspace.tabs.length > 1 && (
+      {visibleTabs.length > 1 && (
         <nav style={subNav}>
-          {workspace.tabs.map(tab => (
+          {visibleTabs.map(tab => (
             <button
               key={tab.id}
               type="button"
