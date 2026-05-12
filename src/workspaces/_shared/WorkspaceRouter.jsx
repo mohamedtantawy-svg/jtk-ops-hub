@@ -1,16 +1,26 @@
 'use client';
 
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useState } from 'react';
 
-import { detectWorkspace, WORKSPACE_IDS, getWorkspace } from './workspaceRegistry';
+import {
+  detectWorkspace,
+  WORKSPACE_IDS,
+  getWorkspace,
+  userHasAccess,
+  SELECTED_WORKSPACE_KEY,
+} from './workspaceRegistry';
+import WorkspacePicker from './WorkspacePicker';
 
-// Top-level decision-maker. Reads the logged-in email (set by HR's OAuth
-// callback into localStorage) plus the optional `?workspace=<id>` URL param,
-// then renders ONE of the workspace apps.
-//
-// HR Hub (`../../App`) is the default fallback. New workspaces live under
-// `src/workspaces/<team>/` and are code-split via React.lazy so a Payroll
-// user never downloads the Command Center bundle and vice versa.
+// Top-level decision-maker. Three states:
+//   1. Unauthenticated and no URL override → show WorkspacePicker (the
+//      pre-SSO card grid). Lets users explicitly pick a workspace before
+//      hitting Google OAuth — essential for users on multiple allowlists.
+//   2. Authenticated → resolve workspace (URL param > picker choice > email
+//      allowlist > HR) and render that workspace's app. If the user lacks
+//      access to the resolved workspace, fall back to the picker with an
+//      "access denied" hint.
+//   3. URL override (?workspace=<id>) → bypass picker and auth gate, render
+//      the requested workspace. Intentional dev/preview backdoor.
 //
 // This file is loaded by app/page.jsx with dynamic({ssr:false}), so window
 // is always defined here. Reads are synchronous — no useEffect setState
@@ -51,20 +61,47 @@ function readUrlWorkspaceParam() {
   } catch { return null; }
 }
 
+function readSelectedWorkspace() {
+  try { return localStorage.getItem(SELECTED_WORKSPACE_KEY) || null; }
+  catch { return null; }
+}
+
 export default function WorkspaceRouter() {
-  const email = readEmail();
-  const urlParam = readUrlWorkspaceParam();
-  const workspaceId = detectWorkspace({ email, urlParam });
+  // Read localStorage + URL ONCE at mount. useState's init function runs
+  // exactly once per component instance — re-renders (including React
+  // strict-mode's double-render in dev) see the same snapshot, so mutations
+  // performed by event handlers don't cause render-loop tearing.
+  const [snapshot] = useState(() => ({
+    email: readEmail(),
+    urlParam: readUrlWorkspaceParam(),
+    selectedWorkspace: readSelectedWorkspace(),
+  }));
+  const { email, urlParam, selectedWorkspace } = snapshot;
+
+  // Pre-auth: show picker (unless URL param explicitly overrides for dev).
+  if (!email && !urlParam) {
+    return <WorkspacePicker initialSelected={selectedWorkspace} />;
+  }
+
+  const workspaceId = detectWorkspace({ email, urlParam, selectedWorkspace });
+
+  // Authenticated but doesn't have access to the resolved workspace — most
+  // likely they picked Command Center but aren't on the allowlist. Re-show
+  // the picker with an "access denied" hint. We deliberately do NOT clear
+  // selectedWorkspace here (that would be a render-time side effect); the
+  // user re-picking on the card grid overwrites it via an event handler.
+  if (email && !userHasAccess(workspaceId, email)) {
+    return <WorkspacePicker accessDeniedFor={workspaceId} />;
+  }
 
   // HR is the legacy app. Hand off the entire tree to it — it owns its own
-  // login screen, routing, and state.
+  // login flow (for the URL-param dev path) and HR Hub state.
   if (workspaceId === WORKSPACE_IDS.HR) {
     return <Suspense fallback={loadingScreen()}><HrApp /></Suspense>;
   }
 
   const workspace = getWorkspace(workspaceId);
   if (!workspace) {
-    // Unknown workspace id (probably a bad URL param). Fall through to HR.
     return <Suspense fallback={loadingScreen()}><HrApp /></Suspense>;
   }
 

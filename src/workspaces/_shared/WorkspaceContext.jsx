@@ -33,13 +33,15 @@ export function useWorkspace() {
 }
 
 // Minimal sign-out shared across non-HR workspaces. Mirrors what HR's App.jsx
-// does on logout: clear auth keys, reload, let the login flow restart.
+// does on logout: clear auth keys + the workspace pick, reload, let the
+// picker show again so the user can re-select on next sign-in.
 export function useWorkspaceSignOut() {
   return useCallback(() => {
     try {
       localStorage.removeItem('ops_hub_logged_in_email');
       localStorage.removeItem('ops_hub_token');
       localStorage.removeItem('ops_hub_user');
+      localStorage.removeItem('ops_hub_selected_workspace');
     } catch {}
     window.location.href = '/';
   }, []);
