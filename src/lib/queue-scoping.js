@@ -321,21 +321,32 @@ export const scopeZendeskTickets   = (items, user) => filterByAssignee(items, us
 export const scopeJiraIssues       = (items, user) => filterByAssignee(items, user);
 export const scopeWorkbenchTasks   = (items, user) => filterByAssignee(items, user);
 
-export const scopeOnboardingPeople      = (items, user) => filterByCountryOrAssignee(items, user);
-export const scopePausedOnboarding      = (items, user) => filterByCountryOrAssignee(items, user);
-// Offboarding: agents see ASSIGNEE-only (with country fallback for orphans),
+// Agents see ASSIGNEE-only (with country fallback only for orphan rows),
 // while TL / Regional / Admin keep the broader country-OR-assignee union so
 // they retain visibility into their team's / region's full pipeline.
-// Raised by Raquel 2026-04-28 — agents were seeing the entire UK team's
-// offboarding because the union model surfaced every country-owned row
-// regardless of assignment. (Bug 4)
-export const scopeOffboardingCases = (items, user) => {
+//
+// First applied to Offboarding on 2026-04-28 after Raquel reported seeing
+// the entire UK team's offboarding queue. Extended to every other
+// country-OR-assignee surface on 2026-05-12 — Raquel raised the same bug
+// on Amendments ("When I am working on my task, I can see tasks for
+// other HRX under the same country, meaning that the volume of tasks is
+// more than it should be"). Mohamed approved extending the agent-strict
+// rule across the board: agents now see only THEIR row on every queue,
+// managers still see the full country/team picture.
+//
+// `assigneeEmail` is reliably populated on every row because the
+// synthetic-owner shim in `normalizeSourceRows.js` fills it from
+// COUNTRY_OWNERS (hash-balanced round-robin) for queues without an
+// upstream assignee (Amendments, Redlines, Incentive Plans). So the
+// strict assignee filter is meaningful on every queue here.
+const scopeAgentOrUnion = (items, user) => {
   if (normalizeRole(user) === 'agent') return filterByAssignee(items, user);
   return filterByCountryOrAssignee(items, user);
 };
-export const scopeAmendmentRequests     = (items, user) => filterByCountryOrAssignee(items, user);
-export const scopeRedlineRequests       = (items, user) => filterByCountryOrAssignee(items, user);
-// Incentive plans have no upstream assignee, so they ride the country path
-// only — country owners (and their TL/RM chain) see every PENDING_IP_PREP
-// row in their owned countries; admin sees all.
-export const scopeIncentivePlans        = (items, user) => filterByCountryOrAssignee(items, user);
+
+export const scopeOnboardingPeople      = (items, user) => scopeAgentOrUnion(items, user);
+export const scopePausedOnboarding      = (items, user) => scopeAgentOrUnion(items, user);
+export const scopeOffboardingCases      = (items, user) => scopeAgentOrUnion(items, user);
+export const scopeAmendmentRequests     = (items, user) => scopeAgentOrUnion(items, user);
+export const scopeRedlineRequests       = (items, user) => scopeAgentOrUnion(items, user);
+export const scopeIncentivePlans        = (items, user) => scopeAgentOrUnion(items, user);
