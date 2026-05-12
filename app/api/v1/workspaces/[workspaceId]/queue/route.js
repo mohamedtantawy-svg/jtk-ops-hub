@@ -1,17 +1,19 @@
 // ── GET /api/v1/workspaces/[workspaceId]/queue ──────────────────────────────
-// Workspace-scoped queue. Mirrors HR's /api/v1/queue but:
-//   • Uses the workspace's own Zendesk API token (Zendesk_API_Payroll_GIX)
-//   • Filters by the workspace's Zendesk group ("Payroll" / "Immigration
-//     Experience" — overridable via ZENDESK_PAYROLL_GROUP / ZENDESK_GIX_GROUP)
-//   • Applies workspace-specific role scoping (admin / manager / agent) based
-//     on workspace_members + the per-workspace roster
+// Workspace-scoped queue. Mirrors HR's /api/v1/queue normalisation so the
+// shared queue UI can be byte-identical to HR Hub's table.
 //
-// Statuses matched against HR's queue:
-//   new / open / pending / hold (active set) + solved updated<24h (visible
-//   resolved-today bucket)
+//   • Token: Zendesk_API_Payroll_GIX (per workspace, via workspace-zendesk-api)
+//   • Group: "Payroll" for payroll, "Immigration Experience" for gix
+//     (overridable via ZENDESK_PAYROLL_GROUP / ZENDESK_GIX_GROUP)
+//   • Statuses: new / open / pending / hold (active set — solved excluded
+//     per 2026-05-12 spec)
+//   • Role scoping (admin / manager / agent) handled server-side via
+//     workspace_members + the workspace's roster (allowlist.js ROSTER).
 //
-// Response shape mirrors HR's normalised ticket so the workspace queue UI can
-// reuse the same row + filter components.
+// Normalised ticket shape matches HR's queue route so the same Badges +
+// table can render both. Status is mapped Zendesk→app (new→new, open→
+// in_progress, pending→waiting, hold→waiting); raw Zendesk status is
+// preserved in `zdStatus` for tooltip display.
 
 import { NextResponse } from 'next/server';
 
@@ -29,76 +31,119 @@ import {
 
 const VALID_WORKSPACES = new Set(['payroll', 'gix']);
 
-// SLA defaults — match HR's defaults from app/api/v1/queue/route.js so the
-// pill behaviour is consistent across workspaces. Values in business-day
-// minutes; for the workspace queue we apply them as wall-clock hours for
-// simplicity (no business-hours engine yet — to be promoted to full HR
-// parity once per-workspace SLA settings land).
-const SLA_ACTIVE_HOURS = 24;
-const SLA_PAUSED_HOURS = 48;
+// Status + priority maps copied from HR's queue route so the FE sees the
+// same normalised shape across HR and workspace queues.
+const ZD_STATUS_MAP = {
+  new:     'new',
+  open:    'in_progress',
+  pending: 'waiting',
+  hold:    'waiting',
+};
+const ZD_PRIORITY_MAP = {
+  urgent: 'critical',
+  high:   'high',
+  normal: 'medium',
+  low:    'low',
+};
 
-// Cache (per-process) so a refresh storm doesn't hammer Zendesk. 60s is
-// short enough to feel live, long enough to absorb tab-thrash.
+// SLA defaults — match HR's defaults from app/api/v1/queue/route.js. Values
+// in business-day minutes, applied as wall-clock minutes here pending the
+// per-workspace SLA settings panel.
+const SLA_ACTIVE_MINS = 24 * 60;
+const SLA_PAUSED_MINS = 48 * 60;
+
+// Country / type detection — lightweight subset of HR's logic. Inferred from
+// tags + subject. Full HR's COUNTRY_KEYWORDS + TYPE_KEYWORDS aren't copied
+// (they're HR-territory data); we re-derive the minimum needed for column
+// display. Will be expanded as patterns surface in production tickets.
+const COUNTRY_TAGS = /^([a-z]{2})$/i;
+const TYPE_TAG_TO_LABEL = {
+  onboarding:  'Onboarding',
+  offboarding: 'Offboarding',
+  termination: 'Offboarding',
+  benefits:    'Benefits',
+  pto:         'Leave Request',
+  'time-off':  'Leave Request',
+  payroll:     'Payment Issue',
+  payment:     'Payment Issue',
+  payslip:     'Payment Issue',
+  immigration: 'Immigration',
+  visa:        'Immigration',
+  document:    'Document Request',
+};
+
+function detectCountry(tags) {
+  for (const tag of tags || []) {
+    const m = String(tag).trim().match(COUNTRY_TAGS);
+    if (m) return m[1].toUpperCase();
+  }
+  return null;
+}
+
+function detectType(tags) {
+  for (const tag of tags || []) {
+    const k = String(tag).toLowerCase().trim();
+    if (TYPE_TAG_TO_LABEL[k]) return TYPE_TAG_TO_LABEL[k];
+  }
+  return null;
+}
+
 const CACHE_TTL_MS = 60_000;
-const _cache = new Map(); // key: `${workspaceId}:${role}:${email}` → { ts, data }
-
+const _cache = new Map();
 function cacheKey(workspaceId, role, email) {
   return `${workspaceId}:${role}:${String(email).toLowerCase()}`;
 }
 
-function ageHoursFrom(iso) {
+function minutesSince(iso) {
   if (!iso) return null;
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return null;
-  return (Date.now() - t) / (1000 * 60 * 60);
+  return Math.floor((Date.now() - t) / 60_000);
 }
 
-function ageDaysFrom(iso) {
-  const h = ageHoursFrom(iso);
-  return h == null ? null : Math.floor(h / 24);
-}
-
-function computeSlaState(ticket) {
-  // Paused statuses match HR's queue route behaviour — pending + hold pause
-  // the SLA clock; new + open run the active clock.
-  const isPaused = ticket.status === 'pending' || ticket.status === 'hold';
-  const limit = isPaused ? SLA_PAUSED_HOURS : SLA_ACTIVE_HOURS;
-  const age = ageHoursFrom(ticket.updated_at || ticket.created_at);
-  if (age == null) return { state: 'unknown', limitHours: limit, ageHours: null };
-  if (age >= limit) return { state: 'breached', limitHours: limit, ageHours: age };
-  if (age >= limit * 0.75) return { state: 'at_risk', limitHours: limit, ageHours: age };
-  return { state: 'within', limitHours: limit, ageHours: age };
-}
-
-function normalizeTicket(t, userMap, workspaceId) {
+function normalizeTicket(t, userMap, workspaceId, subdomain) {
   const assignee = t.assignee_id ? userMap?.[t.assignee_id] : null;
   const requester = t.requester_id ? userMap?.[t.requester_id] : null;
-  const sla = computeSlaState(t);
+  const appStatus = ZD_STATUS_MAP[t.status] || 'new';
+  const isPaused = appStatus === 'waiting';
+  const minutesAgo = minutesSince(t.created_at);
+  const minutesSinceLast = minutesSince(t.updated_at || t.created_at);
   return {
-    id: `zd-${t.id}`,
+    id: `ZD-${t.id}`,
     source: 'zendesk',
     workspace_id: workspaceId,
-    external_id: String(t.id),
-    external_url: t.url ? t.url.replace('.json', '') : null,
+    externalId: String(t.id),
     subject: t.subject || '(no subject)',
-    description: t.description || '',
-    status: t.status,
-    priority: t.priority || null,
-    tags: Array.isArray(t.tags) ? t.tags : [],
-    created_at: t.created_at,
-    updated_at: t.updated_at,
-    ageHours: sla.ageHours,
-    ageDays: ageDaysFrom(t.created_at),
-    sla_state: sla.state,
-    sla_limit_hours: sla.limitHours,
-    assignee: assignee ? { id: t.assignee_id, name: assignee.name, email: assignee.email } : null,
-    requester: requester ? { id: t.requester_id, name: requester.name, email: requester.email } : null,
+    description: (t.description || '').substring(0, 200),
+    status: appStatus,
+    zdStatus: t.status || null,
+    priority: ZD_PRIORITY_MAP[t.priority] || 'medium',
+    type: detectType(t.tags),
+    country: detectCountry(t.tags),
+    assigneeEmail: assignee?.email || null,
+    assigneeName: assignee?.name || null,
+    requesterName: requester?.name || 'Unknown',
+    requesterEmail: requester?.email || null,
+    lastCustomerResponseAt: t.updated_at || t.created_at,
+    createdAt: t.created_at,
+    updatedAt: t.updated_at,
+    pausedAt: isPaused ? (t.updated_at || t.created_at) : null,
+    slaMinsOverride: isPaused ? SLA_PAUSED_MINS : SLA_ACTIVE_MINS,
+    minutesAgo,
+    minutesSinceLastResponse: minutesSinceLast,
+    externalUrl: subdomain ? `https://${subdomain}.zendesk.com/agent/tickets/${t.id}` : '',
+    tags: t.tags || [],
+    // Workspace queues don't sync from Zendesk policy_metrics yet; the FE
+    // slaInfo() helper falls back to the local biz-day computation against
+    // slaMinsOverride when slaSource isn't 'zendesk_policy'.
+    slaSource: 'local_metric_set',
+    slaMetric: isPaused ? null : 'frt',
+    slaBreachAt: null,
+    slaFrtBreachAt: null,
+    slaNrtBreachAt: null,
   };
 }
 
-// Load the workspace's roster (email → manager_email) from its allowlist
-// file. Dynamic import so the route stays small for workspaces we don't
-// scope here yet.
 async function loadRoster(workspaceId) {
   if (workspaceId === 'payroll') {
     const mod = await import('../../../../../../src/workspaces/payroll/data/allowlist');
@@ -130,8 +175,6 @@ export async function GET(req, ctx) {
     });
   }
 
-  // Resolve role first so we cache per role + email (admin sees more than
-  // agent — caching admin's response and serving it to an agent would leak).
   let roster, scope;
   try {
     roster = await loadRoster(workspaceId);
@@ -142,16 +185,16 @@ export async function GET(req, ctx) {
   }
   const { role, reports } = scope;
 
-  // Cache lookup
   const ck = cacheKey(workspaceId, role, user.email);
   const cached = _cache.get(ck);
   if (cached && (Date.now() - cached.ts) < CACHE_TTL_MS) {
     return NextResponse.json(cached.data);
   }
 
-  // Fetch from Zendesk
   const group = getWorkspaceZendeskGroup(workspaceId);
+  const subdomain = process.env.ZENDESK_SUBDOMAIN || '';
   try {
+    // Active statuses only — solved excluded per 2026-05-12 spec.
     const statusQueries = ['new', 'open', 'pending', 'hold']
       .map(s => `group:"${group}" status:${s}`);
     const seen = new Set();
@@ -168,14 +211,7 @@ export async function GET(req, ctx) {
       if (t) truncated = true;
       if (typeof st === 'number') serverTotal += st;
     }
-    // Recently solved last 24h — matches HR's "still visible today" behaviour
-    const solvedQ = `group:"${group}" status:solved updated<24hours`;
-    const { results: solved } = await workspacePaginatedSearch(workspaceId, solvedQ, { maxPages: 5 });
-    for (const ticket of solved) {
-      if (!seen.has(ticket.id)) { seen.add(ticket.id); allTickets.push(ticket); }
-    }
 
-    // Batch-fetch user details for assignees + requesters
     const userIds = new Set();
     for (const t of allTickets) {
       if (t.assignee_id) userIds.add(t.assignee_id);
@@ -183,7 +219,6 @@ export async function GET(req, ctx) {
     }
     const userMap = await workspaceBatchFetchUsers(workspaceId, userIds);
 
-    // Role-scope the visible tickets
     const visible = filterTicketsByRole({
       tickets: allTickets,
       userMap,
@@ -192,7 +227,7 @@ export async function GET(req, ctx) {
       reports,
     });
 
-    const items = visible.map(t => normalizeTicket(t, userMap, workspaceId));
+    const items = visible.map(t => normalizeTicket(t, userMap, workspaceId, subdomain));
     const data = {
       items,
       meta: {
