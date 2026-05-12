@@ -398,9 +398,17 @@ const Queue = ({ user, tasks, subFilter }) => {
   const redlineRows     = useMemo(() => scopeRedlineRequests(redlineRowsAll, user), [redlineRowsAll, user]);
   const workbenchRows   = useMemo(() => scopeWorkbenchTasks(workbenchRowsAll, user), [workbenchRowsAll, user]);
   const incentivePlanRows = useMemo(() => scopeIncentivePlans(incentivePlanRowsAll, user), [incentivePlanRowsAll, user]);
+  // Workbench is the only Deel source that intentionally surfaces resolved
+  // rows (24h of COMPLETED + CLOSED) so the "RESOLVED TODAY" section can
+  // render. Strip them from the cross-source "All" aggregates so the
+  // top-of-page open/paused counts and the active SLA tally don't double-
+  // count finished work alongside actual backlog. SourceTable still gets
+  // the full `tblWorkbenchRows` set so it can render its own resolved
+  // section directly.
+  const workbenchActiveRows = useMemo(() => workbenchRows.filter(r => !r.isResolved), [workbenchRows]);
   const allSourceRows   = useMemo(() => [
-    ...onboardingRows, ...offboardingRows, ...amendmentRows, ...redlineRows, ...workbenchRows, ...incentivePlanRows,
-  ], [onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, incentivePlanRows]);
+    ...onboardingRows, ...offboardingRows, ...amendmentRows, ...redlineRows, ...workbenchActiveRows, ...incentivePlanRows,
+  ], [onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchActiveRows, incentivePlanRows]);
 
   // ── Memoized filter chain — only recomputes when inputs change ──
   const { baseVis, visPreSla, active, snoozed, done, all } = useMemo(() => {
@@ -510,6 +518,13 @@ const Queue = ({ user, tasks, subFilter }) => {
   // never silently turns at-risk classification off.
   const rowSlaSeverity = useCallback((row) => {
     if (!row) return 'ok';
+    // Resolved rows don't tick against the SLA bands — once a task is
+    // closed the SLA evaluation is final and the row sits under the
+    // "RESOLVED TODAY" section, not the active backlog. Returning 'ok'
+    // here keeps the SLA pill filter consistent with the pill counts
+    // (which already exclude resolved) so clicking "Breached N" never
+    // surfaces a finished-and-was-breached row from the resolved tail.
+    if (row.isResolved) return 'ok';
     if (row.slaBreachStatus === 'SLA_BREACHED' || (typeof row.slaRemaining === 'number' && row.slaRemaining <= 0)) return 'breached';
     if (typeof row.slaRemaining !== 'number') return 'ok';
     const windowSeconds = Number.isFinite(row.slaWindowMs) && row.slaWindowMs > 0
@@ -555,7 +570,10 @@ const Queue = ({ user, tasks, subFilter }) => {
     if (workSource === 'offboarding')     return tallyDeelSla(mineOnlyForSla(visOffboardingRows));
     if (workSource === 'amendments')      return tallyDeelSla(mineOnlyForSla(visAmendmentRows));
     if (workSource === 'redlines')        return tallyDeelSla(mineOnlyForSla(visRedlineRows));
-    if (workSource === 'workbench')       return tallyDeelSla(mineOnlyForSla(visWorkbenchRows));
+    // Workbench: pills are an active-state band. Strip resolved (24h
+    // COMPLETED + CLOSED) before tallying so today's finished tasks
+    // don't keep ticking against the SLA bands.
+    if (workSource === 'workbench')       return tallyDeelSla(mineOnlyForSla(visWorkbenchRows.filter(r => !r.isResolved)));
     if (workSource === 'incentive_plans') return tallyDeelSla(mineOnlyForSla(visIncentivePlanRows));
     // Admin Hidden tab — no SLA semantics. Pills sit at zero so they don't
     // borrow numbers from the underlying ZD/Jira queue.
@@ -579,7 +597,19 @@ const Queue = ({ user, tasks, subFilter }) => {
     if (workSource === 'offboarding')     return { open: tblOffboardingRows.length,   paused: 0, resolved: 0 };
     if (workSource === 'amendments')      return { open: tblAmendmentRows.length,     paused: 0, resolved: 0 };
     if (workSource === 'redlines')        return { open: tblRedlineRows.length,       paused: 0, resolved: 0 };
-    if (workSource === 'workbench')       return { open: tblWorkbenchRows.length,     paused: 0, resolved: 0 };
+    if (workSource === 'workbench') {
+      // Workbench is the only Deel source that surfaces resolved rows in
+      // the queue. Split active / paused / resolved so the header reads
+      // "N open · M paused · K resolved" instead of bundling everything
+      // under "open".
+      let wbOpen = 0, wbPaused = 0, wbResolved = 0;
+      for (const r of tblWorkbenchRows) {
+        if (r.isResolved) wbResolved++;
+        else if (r.isPaused) wbPaused++;
+        else wbOpen++;
+      }
+      return { open: wbOpen, paused: wbPaused, resolved: wbResolved };
+    }
     if (workSource === 'incentive_plans') return { open: tblIncentivePlanRows.length, paused: 0, resolved: 0 };
     if (workSource === 'hidden') return { open: hiddenTasks?.items?.length ?? 0, paused: 0, resolved: 0 };
     const sourceOpen = fTool ? 0 : (
@@ -598,7 +628,7 @@ const Queue = ({ user, tasks, subFilter }) => {
     if (workSource === 'offboarding')     return { open: offboardingRows.length };
     if (workSource === 'amendments')      return { open: amendmentRows.length };
     if (workSource === 'redlines')        return { open: redlineRows.length };
-    if (workSource === 'workbench')       return { open: workbenchRows.length };
+    if (workSource === 'workbench')       return { open: workbenchActiveRows.length };
     if (workSource === 'incentive_plans') return { open: incentivePlanRows.length };
     if (workSource === 'hidden') return { open: hiddenTasks?.items?.length ?? 0 };
     const base = fTool ? baseVis.filter(t => t.source === fTool) : baseVis;
@@ -735,7 +765,7 @@ const Queue = ({ user, tasks, subFilter }) => {
               : workSource === 'offboarding' ? offboardingRows
               : workSource === 'amendments' ? amendmentRows
               : workSource === 'redlines' ? redlineRows
-              : workSource === 'workbench' ? workbenchRows
+              : workSource === 'workbench' ? workbenchActiveRows
               : workSource === 'incentive_plans' ? incentivePlanRows
               : [];
             const present = new Set(rowsForPanel.map(r => r?.status?.severity).filter(Boolean));
@@ -765,7 +795,7 @@ const Queue = ({ user, tasks, subFilter }) => {
                   : ws.id === 'offboarding' ? visOffboardingRows.length
                   : ws.id === 'amendments' ? visAmendmentRows.length
                   : ws.id === 'redlines' ? visRedlineRows.length
-                  : ws.id === 'workbench' ? visWorkbenchRows.length
+                  : ws.id === 'workbench' ? visWorkbenchRows.filter(r => !r.isResolved).length
                   : ws.id === 'incentive_plans' ? visIncentivePlanRows.length
                   : ws.id === 'jira' ? jiraCount
                   : ws.id === 'zendesk' ? zdCount
@@ -1052,7 +1082,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             offboardingCount={offboardingRows.length}
             amendmentsCount={amendmentRows.length}
             redlinesCount={redlineRows.length}
-            workbenchCount={workbenchRows.length}
+            workbenchCount={workbenchActiveRows.length}
             incentivePlansCount={incentivePlanRows.length}
             sourceRowsAll={allSourceRows}
           />

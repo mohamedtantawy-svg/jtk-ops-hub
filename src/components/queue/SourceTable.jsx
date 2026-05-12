@@ -137,6 +137,11 @@ function offboardingUrgency(row) {
 // which tier. Rows without slaRemaining fall into "on-track" so a sparse
 // upstream payload sorts to the bottom rather than the top.
 function slaTier(row) {
+  // Resolved rows sit in their own "RESOLVED TODAY" section — the sort
+  // tier is irrelevant for them (the section orders by recency, not by
+  // SLA), but classifying as on-track keeps the SLA-column sort and the
+  // header pill counts consistent.
+  if (row?.isResolved) return 2;
   if (row?.slaBreachStatus === 'SLA_BREACHED') return 0;
   if (typeof row?.slaRemaining === 'number' && row.slaRemaining <= 0) return 0;
   if (typeof row?.slaRemaining === 'number' && row.slaRemaining > 0) {
@@ -248,7 +253,11 @@ export default function SourceTable({
   const filtered = useMemo(() => {
     let r = rows;
     if (statusFilter) {
-      r = r.filter(row => row.status?.severity === statusFilter);
+      // Severity pills are active-state only — pill counts exclude resolved
+      // (see `counts` memo above), so the filter must drop resolved rows too
+      // or clicking "In Progress N" would surface > N rows when a workbench
+      // task closed today still carries the In Progress severity stamp.
+      r = r.filter(row => !row?.isResolved && row.status?.severity === statusFilter);
     }
     if (searchTerm) {
       const q = searchTerm.toLowerCase();
@@ -327,10 +336,16 @@ export default function SourceTable({
     });
   }, [filtered, sortCol, sortDir]);
 
-  // Status counts
+  // Status counts — exclude resolved rows because the severity pills are an
+  // active-state band (Critical / Action Needed / In Progress / Other). A
+  // workbench task that finished today still carries its last severity
+  // marker; counting it under "In Progress" would re-inflate the very
+  // backlog the user just cleared.
   const counts = useMemo(() => {
-    const c = { total: rows.length, critical: 0, warning: 0, active: 0, info: 0 };
+    const c = { total: 0, critical: 0, warning: 0, active: 0, info: 0 };
     for (const r of rows) {
+      if (r?.isResolved) continue;
+      c.total++;
       const sev = r.status?.severity;
       if (sev && c[sev] !== undefined) c[sev]++;
     }
@@ -338,25 +353,30 @@ export default function SourceTable({
   }, [rows]);
 
   // Partition the sorted list into Mine vs Others, then split each into
-  // Active vs Paused. "Mine" = rows whose assigneeEmail matches the
-  // viewer (real or synthetic-from-country-owner). When the viewer has
-  // no rows of their own (admin / RM looking at a region they don't
-  // personally own, or pre-auth) the Mine sections collapse and we
-  // render a single Active + Paused stack like before.
+  // Active vs Paused vs Resolved. "Mine" = rows whose assigneeEmail
+  // matches the viewer (real or synthetic-from-country-owner). When the
+  // viewer has no rows of their own (admin / RM looking at a region they
+  // don't personally own, or pre-auth) the Mine sections collapse and we
+  // render a single Active + Paused + Resolved stack like before. Resolved
+  // covers Workbench's 24h COMPLETED + CLOSED window — they're rendered
+  // under their own "RESOLVED TODAY" band so they read as "done", not
+  // mixed into the active backlog.
   const viewerEmailLc = (viewerEmail || '').toLowerCase();
-  const { mineActive, minePaused, othersActive, othersPaused } = useMemo(() => {
-    const mA = [], mP = [], oA = [], oP = [];
+  const { mineActive, minePaused, mineResolved, othersActive, othersPaused, othersResolved } = useMemo(() => {
+    const mA = [], mP = [], mR = [], oA = [], oP = [], oR = [];
     for (const r of sorted) {
       const isMine = !!viewerEmailLc && (r.assigneeEmail || '').toLowerCase() === viewerEmailLc;
-      const bucket = r?.isPaused
-        ? (isMine ? mP : oP)
-        : (isMine ? mA : oA);
+      const bucket = r?.isResolved
+        ? (isMine ? mR : oR)
+        : r?.isPaused
+          ? (isMine ? mP : oP)
+          : (isMine ? mA : oA);
       bucket.push(r);
     }
-    return { mineActive: mA, minePaused: mP, othersActive: oA, othersPaused: oP };
+    return { mineActive: mA, minePaused: mP, mineResolved: mR, othersActive: oA, othersPaused: oP, othersResolved: oR };
   }, [sorted, viewerEmailLc]);
 
-  const hasMineSection = mineActive.length + minePaused.length > 0;
+  const hasMineSection = mineActive.length + minePaused.length + mineResolved.length > 0;
 
   // Selection bookkeeping derived from the filtered+sorted view. Selecting
   // "All" only affects rows the user can currently see (respects search +
@@ -419,7 +439,9 @@ export default function SourceTable({
   // math stays arithmetic.
   const virtualItems = useMemo(() => {
     const out = [];
-    const hasAnythingBelowMine = minePaused.length > 0 || othersActive.length > 0 || othersPaused.length > 0;
+    const hasAnythingBelowMine =
+      minePaused.length > 0 || mineResolved.length > 0 ||
+      othersActive.length > 0 || othersPaused.length > 0 || othersResolved.length > 0;
     if (mineActive.length > 0 && hasAnythingBelowMine) {
       out.push({ kind: 'header', tone: 'mine', label: 'MINE', count: mineActive.length });
     }
@@ -438,8 +460,18 @@ export default function SourceTable({
       out.push({ kind: 'header', tone: 'paused', label: hasMineSection ? 'OTHERS — PAUSED' : 'PAUSED', count: othersPaused.length });
       for (const r of othersPaused) out.push({ kind: 'row', row: r });
     }
+    // Resolved sits at the very bottom — a single "RESOLVED TODAY" band that
+    // spans both Mine and Others. Splitting it would dilute the signal (an
+    // agent doesn't need to scan "who else closed something") and matches
+    // the Zendesk queue's single bottom resolved section.
+    const resolvedCount = mineResolved.length + othersResolved.length;
+    if (resolvedCount > 0) {
+      out.push({ kind: 'header', tone: 'resolved', label: 'RESOLVED TODAY', count: resolvedCount });
+      for (const r of mineResolved) out.push({ kind: 'row', row: r });
+      for (const r of othersResolved) out.push({ kind: 'row', row: r });
+    }
     return out;
-  }, [mineActive, minePaused, othersActive, othersPaused, hasMineSection]);
+  }, [mineActive, minePaused, mineResolved, othersActive, othersPaused, othersResolved, hasMineSection]);
 
   const scrollerRef = useRef(null);
   const { startIdx, endIdx, topPad, bottomPad } = useVirtualRows({
@@ -499,7 +531,16 @@ export default function SourceTable({
           </button>
         )}
 
-        <span aria-live="polite" aria-atomic="true" style={{ fontSize: 11, color: '#9e9e9e' }}>{sorted.length} {sorted.length === 1 ? 'task' : 'tasks'}</span>
+        <span aria-live="polite" aria-atomic="true" style={{ fontSize: 11, color: '#9e9e9e' }}>
+          {(() => {
+            const resolvedN = mineResolved.length + othersResolved.length;
+            const activeN = sorted.length - resolvedN;
+            if (resolvedN > 0) {
+              return <>{activeN} active{activeN === 1 ? '' : ''} · <span style={{ color: '#29811e' }}>{resolvedN} resolved</span></>;
+            }
+            return `${sorted.length} ${sorted.length === 1 ? 'task' : 'tasks'}`;
+          })()}
+        </span>
       </div>
       )}
 
@@ -633,15 +674,20 @@ export default function SourceTable({
                   // the virtualizer math stays uniform.
                   const isPausedHeader = it.tone === 'paused';
                   const isMineHeader = it.tone === 'mine';
-                  // 3-tone palette: Paused (warm brown), Mine (subtle blue —
-                  // emphasizes the rows the viewer owns), Others (neutral
-                  // grey). Each band rests at 44px so the virtualizer's
-                  // arithmetic stays uniform.
-                  const headerStyle = isPausedHeader
-                    ? { color: '#6b6560', background: '#faf9f7', icon: 'bi-pause-circle-fill' }
-                    : isMineHeader
-                      ? { color: '#1d4ed8', background: '#eff6ff', icon: 'bi-person-check-fill' }
-                      : { color: '#6b6560', background: '#f5f4f2', icon: 'bi-people' };
+                  const isResolvedHeader = it.tone === 'resolved';
+                  // 4-tone palette: Paused (warm brown), Mine (subtle blue —
+                  // emphasizes the rows the viewer owns), Resolved (green —
+                  // mirrors the ticket queue's "RESOLVED TODAY" band so the
+                  // Workbench source reads visually identical to Zendesk),
+                  // Others (neutral grey). Each band rests at ROW_HEIGHT so
+                  // the virtualizer's arithmetic stays uniform.
+                  const headerStyle = isResolvedHeader
+                    ? { color: '#29811e', background: '#f9faf8', icon: 'bi-check-circle' }
+                    : isPausedHeader
+                      ? { color: '#6b6560', background: '#faf9f7', icon: 'bi-pause-circle-fill' }
+                      : isMineHeader
+                        ? { color: '#1d4ed8', background: '#eff6ff', icon: 'bi-person-check-fill' }
+                        : { color: '#6b6560', background: '#f5f4f2', icon: 'bi-people' };
                   return (
                     <tr key={`section-band-${startIdx + i}`} style={{ height: ROW_HEIGHT }}>
                       <td colSpan={sectionColSpan} style={{ padding: '12px 16px', fontSize: 11, fontWeight: 700, color: headerStyle.color, letterSpacing: '.04em', background: headerStyle.background, borderTop: '1px solid #e8e8e8', borderBottom: '1px solid #e8e8e8' }}>
