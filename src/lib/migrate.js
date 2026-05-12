@@ -4,6 +4,7 @@ import { seedHrHubSettingsIfNeeded } from './hr-hub-seed';
 import { seedLeaderAlertsSettingsIfNeeded } from './leader-alerts-seed';
 import { seedTimeOffEventsIfNeeded } from './time-off-seed';
 import { seedHandoverDefaultsIfNeeded } from './handover-defaults-seed';
+import { seedWorkspaceMembersIfNeeded } from './workspace-members-seed';
 
 const SCHEMA_SQL = `
 -- Members
@@ -1563,6 +1564,40 @@ ALTER TABLE team_member_overrides
   ADD COLUMN IF NOT EXISTS is_handover_admin BOOLEAN DEFAULT FALSE;
 CREATE INDEX IF NOT EXISTS idx_tmo_is_handover_admin
   ON team_member_overrides(is_handover_admin) WHERE is_handover_admin = true;
+
+-- ── Workspace memberships (2026-05-12) ─────────────────────────────────────
+-- DB-backed roster + role for the non-HR workspaces (Command Center, Payroll
+-- Hub, GIX Hub). Replaces the file-based allowlists under
+-- src/workspaces/<team>/data/allowlist.js so admins can add/remove users
+-- through the UI without a code deploy.
+--
+-- HR Hub does NOT use this table — its membership is implicit (any @deel.com
+-- via SSO) and its admin model is the legacy is_hr_hub_admin / is_access_admin
+-- flags on team_member_overrides. This table is for the new workspaces only.
+--
+-- Status='removed' rows are kept for audit (who removed whom, when). The
+-- UNIQUE constraint scoped by status='active' allows the same email to be
+-- re-added after removal.
+CREATE TABLE IF NOT EXISTS workspace_members (
+  id              SERIAL PRIMARY KEY,
+  workspace_id    VARCHAR(50)  NOT NULL,
+  email           VARCHAR(255) NOT NULL,
+  role            VARCHAR(20)  NOT NULL DEFAULT 'member',
+  status          VARCHAR(20)  NOT NULL DEFAULT 'active',
+  added_by        VARCHAR(255),
+  added_at        TIMESTAMPTZ  DEFAULT NOW(),
+  removed_by      VARCHAR(255),
+  removed_at      TIMESTAMPTZ,
+  CONSTRAINT chk_wm_role   CHECK (role   IN ('member', 'admin')),
+  CONSTRAINT chk_wm_status CHECK (status IN ('active', 'removed'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_workspace_member_active
+  ON workspace_members(workspace_id, LOWER(email))
+  WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_workspace_members_email_status
+  ON workspace_members(LOWER(email), status);
+CREATE INDEX IF NOT EXISTS idx_workspace_members_workspace_status
+  ON workspace_members(workspace_id, status);
 `;
 
 export async function runMigrations() {
@@ -1639,5 +1674,20 @@ export async function runMigrations() {
     }
   } catch (err) {
     console.warn('[db] Handover defaults seed failed:', err?.message);
+  }
+
+  // Workspace memberships (2026-05-12): seed workspace_members from the
+  // file-based allowlists under src/workspaces/<team>/data/allowlist.js.
+  // Idempotent + version-marked — runs once per deployed SEED_VERSION,
+  // ON CONFLICT preserves any rows admins added/changed via the UI.
+  // Failing the seed must not block boot: HR Hub doesn't depend on this
+  // table and the other workspaces fall back to the file-based check.
+  try {
+    const seedResult = await seedWorkspaceMembersIfNeeded();
+    if (!seedResult?.skipped) {
+      console.log(`[db] Workspace members seeded to v${seedResult.version}: ${seedResult.inserted}/${seedResult.totalCandidates} rows`);
+    }
+  } catch (err) {
+    console.warn('[db] Workspace members seed failed:', err?.message);
   }
 }

@@ -7,15 +7,18 @@ import { createContext, useContext, useMemo, useState, useCallback } from 'react
 
 const WorkspaceContext = createContext(null);
 
-export function WorkspaceProvider({ workspace, email, children }) {
+export function WorkspaceProvider({ workspace, email, role, children }) {
   const [activeTab, setActiveTab] = useState(workspace.defaultTab);
+  const isAdmin = role === 'admin';
 
   const value = useMemo(() => ({
     workspace,
     email,
+    role: role || 'member',
+    isAdmin,
     activeTab,
     setActiveTab,
-  }), [workspace, email, activeTab]);
+  }), [workspace, email, role, isAdmin, activeTab]);
 
   return (
     <WorkspaceContext.Provider value={value}>

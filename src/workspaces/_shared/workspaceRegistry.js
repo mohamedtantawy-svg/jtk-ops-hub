@@ -44,10 +44,16 @@ export const COMMAND_CENTER_ADMINS = [
 
 const PAYROLL_GIX_TABS = [
   { id: 'home', label: 'Home' },
+  { id: 'team', label: 'Team' },
   { id: 'workspace', label: 'Workspace' },
   { id: 'ooo', label: 'OOO' },
   { id: 'urgent-assist', label: 'Urgent Assist' },
   { id: 'announcements', label: 'Announcements' },
+  // Admin-only — WorkspaceShell filters this tab out for non-admins based on
+  // the role returned by /api/v1/workspaces/memberships. AdminView itself
+  // also re-checks the role server-side, so the tab being visible is a UX
+  // convenience, not an authorization gate.
+  { id: 'admin', label: 'Admin', adminOnly: true },
 ];
 
 // HR-admin override: HR has its own admin model (isHrHubAdmin etc. via App.jsx).
