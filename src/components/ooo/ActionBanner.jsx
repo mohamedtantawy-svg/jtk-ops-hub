@@ -10,6 +10,11 @@
 //   4. Drafts                 → caller has an unfinished draft
 // None → no banner.
 
+// Each banner exposes its CTA via an `action` key — the parent maps that to
+// either a lens-jump (`onJumpToLens`) or a wizard-open (`onCreateHandover`).
+// The 2026-05-12 bug report from Jose reported "Submit handover does
+// nothing" because the mine_missing CTA only flipped the lens and didn't
+// open the wizard — now `action: 'create'` triggers the create flow.
 const BANNERS = [
   {
     key: 'approvals',
@@ -18,6 +23,7 @@ const BANNERS = [
     icon: 'bi-shield-check',
     body: (c) => `${c.approvals} handover${c.approvals === 1 ? '' : 's'} awaiting your approval.`,
     cta: 'Review',
+    action: 'lens',
     lens: 'approvals',
   },
   {
@@ -27,6 +33,7 @@ const BANNERS = [
     icon: 'bi-person-check',
     body: (c) => `${c.covering_pending} coverage invitation${c.covering_pending === 1 ? '' : 's'} need your response.`,
     cta: 'Open',
+    action: 'lens',
     lens: 'covering',
   },
   {
@@ -36,6 +43,7 @@ const BANNERS = [
     icon: 'bi-exclamation-triangle',
     body: (c) => `You have ${c.mine_missing_handover} upcoming OOO without a handover.`,
     cta: 'Submit handover',
+    action: 'create',
     lens: 'mine',
   },
   {
@@ -45,6 +53,7 @@ const BANNERS = [
     icon: 'bi-pencil-square',
     body: (c) => `${c.drafts} unsubmitted draft${c.drafts === 1 ? '' : 's'}.`,
     cta: 'Resume',
+    action: 'lens',
     lens: 'drafts',
   },
 ];
@@ -55,11 +64,23 @@ const INTENT_STYLES = {
   slate: { bg: '#F1F5F9', border: '#E2E8F0', fg: '#334155', cta: '#475569' },
 };
 
-function ActionBanner({ counts, onJumpToLens }) {
+function ActionBanner({ counts, onJumpToLens, onCreateHandover }) {
   const banner = BANNERS.find(b => b.test(counts));
   if (!banner) return null;
 
   const styles = INTENT_STYLES[banner.intent] || INTENT_STYLES.slate;
+
+  const handleClick = () => {
+    if (banner.action === 'create') {
+      // Open the create-handover wizard. If the parent didn't wire
+      // onCreateHandover (older mount), fall back to the lens jump so
+      // the user at least lands on their own list.
+      if (onCreateHandover) onCreateHandover();
+      else onJumpToLens?.(banner.lens);
+      return;
+    }
+    onJumpToLens?.(banner.lens);
+  };
 
   return (
     <div
@@ -80,7 +101,7 @@ function ActionBanner({ counts, onJumpToLens }) {
       <span style={{ flex: 1, fontWeight: 500 }}>{banner.body(counts)}</span>
       <button
         type="button"
-        onClick={() => onJumpToLens?.(banner.lens)}
+        onClick={handleClick}
         style={{
           padding: '6px 12px',
           borderRadius: 999,
