@@ -1,5 +1,5 @@
 // ── ImageLightbox ──────────────────────────────────────────────────────────
-// In-app fullscreen viewer for screenshot attachments. Replaces the
+// In-app fullscreen viewer for screenshot + video attachments. Replaces the
 // `<a href={dataUri} target="_blank">` pattern that previously sat under
 // every Feedback / HR Hub / Leaders-Alerts attachment thumbnail —
 // modern Chrome refuses to navigate to large data: URIs in a new tab
@@ -8,10 +8,16 @@
 // Mount once per render site, control visibility with a `src` state. Esc
 // or backdrop click closes. The download link gives the user an actual
 // way to save the file (browsers allow `download` attribute on data URIs).
+//
+// `kind` defaults to `'image'` so every existing call site keeps its
+// behaviour. Pass `kind="video"` to render `<video controls>` instead — the
+// 2026-05-12 HR Hub attachment bug was caused by inline `<video>` tiles
+// silently failing for large data URIs with no way to download. The
+// lightbox now hosts the player so users can play, scrub, and download.
 
 import { useEffect } from 'react';
 
-export default function ImageLightbox({ src, alt = '', name, onClose }) {
+export default function ImageLightbox({ src, alt = '', name, kind = 'image', onClose }) {
   useEffect(() => {
     if (!src) return;
     const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
@@ -64,21 +70,37 @@ export default function ImageLightbox({ src, alt = '', name, onClose }) {
         </button>
       </div>
 
-      {/* Image — scaled to fit, click stops propagation so the user can
-          interact (right-click → save) without dismissing. */}
-      <img
-        src={src}
-        alt={alt}
-        onClick={e => e.stopPropagation()}
-        style={{
-          maxWidth: 'min(96vw, 1600px)',
-          maxHeight: 'calc(100vh - 100px)',
-          objectFit: 'contain',
-          borderRadius: 8,
-          boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
-          background: '#fff',
-        }}
-      />
+      {/* Media — scaled to fit, click stops propagation so the user can
+          interact (right-click → save, play, scrub) without dismissing. */}
+      {kind === 'video' ? (
+        <video
+          src={src}
+          controls
+          autoPlay
+          onClick={e => e.stopPropagation()}
+          style={{
+            maxWidth: 'min(96vw, 1600px)',
+            maxHeight: 'calc(100vh - 100px)',
+            borderRadius: 8,
+            boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+            background: '#000',
+          }}
+        />
+      ) : (
+        <img
+          src={src}
+          alt={alt}
+          onClick={e => e.stopPropagation()}
+          style={{
+            maxWidth: 'min(96vw, 1600px)',
+            maxHeight: 'calc(100vh - 100px)',
+            objectFit: 'contain',
+            borderRadius: 8,
+            boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+            background: '#fff',
+          }}
+        />
+      )}
 
       {name && (
         <div
