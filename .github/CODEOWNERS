@@ -2,3 +2,15 @@
 Dockerfile @mariusz-byczynski-deel
 helm/ @mariusz-byczynski-deel
 values.yaml @mariusz-byczynski-deel
+
+# ── Workspace ownership (locked 2026-05-12) ──────────────────────────────────
+# Each workspace folder is owned by its team. Cross-workspace edits require
+# review from the affected team's owner. HR Hub = everything outside
+# src/workspaces/ (the legacy code at the src/ root).
+#
+# Owners below are placeholders pending the org-chart handover. Update with
+# the real team leads when assigned.
+src/workspaces/_shared/        @mohamed-tantawy
+src/workspaces/command-center/ @mohamed-tantawy
+src/workspaces/payroll/        @mohamed-tantawy
+src/workspaces/gix/            @mohamed-tantawy

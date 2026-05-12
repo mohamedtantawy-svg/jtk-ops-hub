@@ -35,7 +35,12 @@ import ErrorBoundary from '../src/components/ui/ErrorBoundary';
 // pre-warm defer in #542 + this change compound).
 // ─────────────────────────────────────────────────────────────────────────
 
-const App = dynamic(() => import('../src/App'), {
+// WorkspaceRouter decides which workspace app to mount (HR Hub stays the
+// default fallback; Command Center / Payroll / GIX live under
+// src/workspaces/<team>/). Same ssr:false reasoning as before — all the
+// downstream apps are heavy client components that read localStorage at
+// first render, so SSR'ing this tree just causes hydration churn.
+const WorkspaceRouter = dynamic(() => import('../src/workspaces/_shared/WorkspaceRouter'), {
   ssr: false,
   loading: () => (
     <div style={{
@@ -56,7 +61,7 @@ const App = dynamic(() => import('../src/App'), {
 export default function Page() {
   return (
     <ErrorBoundary>
-      <App />
+      <WorkspaceRouter />
     </ErrorBoundary>
   );
 }
