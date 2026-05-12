@@ -563,6 +563,25 @@ CREATE TABLE IF NOT EXISTS announcement_requests (
 CREATE INDEX IF NOT EXISTS idx_ann_requests_status ON announcement_requests(status);
 CREATE INDEX IF NOT EXISTS idx_ann_requests_requested_by ON announcement_requests(requested_by_email);
 CREATE INDEX IF NOT EXISTS idx_ann_requests_created ON announcement_requests(created_at DESC);
+-- 2026-05-12: extend the lifecycle with the awaiting_post stage so the
+-- approver can split approval from publication. Laura reported that
+-- the old one-shot approve also published immediately, which forced
+-- her to DM the requester separately to confirm post-on-Slack-first.
+-- The new state sits between pending and the terminal approved: the
+-- approver decides to release the announcement to the requester for
+-- the Slack-first post, and the requester (or the approver as an
+-- override) drives the final publish through
+-- /announcement-requests/:id/publish.
+--
+-- All SQL identifiers stay in single quotes below — the whole
+-- SCHEMA_SQL is a JS template literal, and stray backticks would
+-- close it (skill mistake #6).
+DO $$ BEGIN
+  ALTER TABLE announcement_requests DROP CONSTRAINT IF EXISTS chk_ann_requests_status;
+  ALTER TABLE announcement_requests ADD CONSTRAINT chk_ann_requests_status
+    CHECK (status IN ('pending','approved','rejected','withdrawn','needs_info','awaiting_post'));
+END $$;
+ALTER TABLE announcement_requests ADD COLUMN IF NOT EXISTS awaiting_post_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS announcement_request_audit (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),

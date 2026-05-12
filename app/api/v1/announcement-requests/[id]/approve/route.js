@@ -8,13 +8,28 @@ import { publishFromRequest, recordAudit } from '../../../../../../src/lib/annou
 // POST /api/v1/announcement-requests/:id/approve
 //   Body: { scheduledFor?: ISOString | null, urgentOverride?: boolean,
 //           overrideEdits?: { title?, body?, target?, priority?, isPopup?,
-//                             imageUrl?, link?, soundKey?, type? } }
+//                             imageUrl?, link?, soundKey?, type? },
+//           publishImmediately?: boolean }
 //   Behaviour:
 //     * Approver only.
-//     * Applies overrideEdits to the request row, then publishes.
-//     * Publishing checks rate limits unless urgentOverride === true.
-//     * On success: request.status = 'approved', published_id + published_at set.
-//     * Records audit events: edited (if overrides), approved, scheduled|published.
+//     * Applies overrideEdits to the request row.
+//     * Two-stage flow (default, publishImmediately !== true): approves
+//       the request into status='awaiting_post'. No announcement row is
+//       created yet — the requester (or the approver, as a follow-up)
+//       drives the final publish through POST /publish below AFTER
+//       posting on Slack. Matches Laura's 2026-05-12 ask that every
+//       announcement go to Slack before the Ops Hub popup.
+//     * Override (publishImmediately === true): bypasses the Slack-first
+//       stage and publishes inline. Same semantics as the legacy
+//       one-shot approve. Useful for urgent fixes / internal notices
+//       that don't need a Slack mirror.
+//     * Publishing (either path) checks rate limits unless
+//       urgentOverride === true.
+//     * On success:
+//         two-stage:    status='awaiting_post', awaiting_post_at=NOW().
+//         immediate:    status='approved', published_id + published_at set.
+//     * Records audit events: edited (if overrides), approved, then
+//       awaiting_post | scheduled | published.
 export async function POST(req, { params }) {
   try {
     const user = getAuthUser(req);
@@ -124,6 +139,59 @@ export async function POST(req, { params }) {
       );
     }
 
+    const publishImmediately = body.publishImmediately === true;
+    const scheduledISO = sendAt && sendAt.getTime() > Date.now() ? sendAt.toISOString() : null;
+
+    // Two-stage approval (default). Stash the merged fields + intended
+    // send time on the request row, flip status to awaiting_post, and
+    // stop here — no announcement row exists yet. The requester (or
+    // the approver) finalises publishing through POST /publish once
+    // the Slack message is out.
+    if (!publishImmediately) {
+      await query(
+        `UPDATE announcement_requests SET
+           status = 'awaiting_post',
+           decided_by_id = $1, decided_by_email = $2, decided_by_name = $3,
+           decided_at = NOW(),
+           awaiting_post_at = NOW(),
+           scheduled_for = $4,
+           urgent_override = $5,
+           type = $6, title = $7, body = $8, target = $9, target_group_id = $10,
+           priority = $11,
+           is_popup = $12, image_url = $13, link = $14, sound_key = $15,
+           updated_at = NOW()
+         WHERE id = $16`,
+        [
+          user.id || null, user.email, user.name || null,
+          scheduledISO,
+          urgentOverride,
+          merged.type, merged.title, merged.body, merged.target,
+          merged.target === 'group' ? (merged.target_group_id || null) : null,
+          merged.priority,
+          merged.is_popup, merged.image_url, merged.link, merged.sound_key,
+          id,
+        ],
+      );
+      await recordAudit(id, user, 'approved', {
+        urgentOverride,
+        urgentOverrideReason: urgentOverride ? urgentOverrideReason : undefined,
+        scheduledFor: scheduledISO,
+        awaitingPost: true,
+      });
+      await recordAudit(id, user, 'awaiting_post', {
+        scheduledFor: scheduledISO,
+      });
+      return NextResponse.json({
+        ok: true,
+        awaitingPost: true,
+        scheduled: Boolean(scheduledISO),
+        scheduledFor: scheduledISO,
+      });
+    }
+
+    // Override path — publishImmediately=true. Behaves like the legacy
+    // one-shot approve: create the announcement row inline and mark the
+    // request approved.
     let published;
     try {
       published = await publishFromRequest(merged, {
@@ -138,7 +206,6 @@ export async function POST(req, { params }) {
       throw e;
     }
 
-    const scheduledISO = sendAt && sendAt.getTime() > Date.now() ? sendAt.toISOString() : null;
     await query(
       `UPDATE announcement_requests SET
          status = 'approved',
@@ -171,6 +238,7 @@ export async function POST(req, { params }) {
       urgentOverride,
       urgentOverrideReason: urgentOverride ? urgentOverrideReason : undefined,
       scheduledFor: scheduledISO,
+      publishImmediately: true,
     });
     await recordAudit(id, user, scheduledISO ? 'scheduled' : 'published', {
       announcementId: published.id,

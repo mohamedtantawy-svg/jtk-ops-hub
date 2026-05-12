@@ -18,6 +18,7 @@ import {
   createRequest as apiCreate,
   editRequest as apiEdit,
   approveRequest as apiApprove,
+  publishApprovedRequest as apiPublish,
   rejectRequest as apiReject,
   requestInfo as apiRequestInfo,
   withdrawRequest as apiWithdraw,
@@ -87,6 +88,15 @@ function useAnnouncementRequestsStore() {
     return out;
   }, [refresh]);
 
+  // 2026-05-12 stage 2: requester (or approver) drives the final
+  // publish from awaiting_post. Server reuses the approval-time
+  // payload, so no options here.
+  const publishAwaitingPost = useCallback(async (id) => {
+    const out = await apiPublish(id);
+    await refresh();
+    return out;
+  }, [refresh]);
+
   const reject = useCallback(async (id, reason) => {
     const out = await apiReject(id, reason);
     await refresh();
@@ -113,7 +123,7 @@ function useAnnouncementRequestsStore() {
     items, canApprove, loading, error, lastSyncedAt,
     refresh,
     fetchDetail: fetchRequestDetail,
-    create, edit, approve, reject,
+    create, edit, approve, publishAwaitingPost, reject,
     askClarification, withdraw, addComment,
   };
 }
@@ -144,6 +154,7 @@ const FALLBACK_VALUE = {
   create: async () => { throw new Error('AnnouncementRequestsProvider not mounted'); },
   edit: async () => { throw new Error('AnnouncementRequestsProvider not mounted'); },
   approve: async () => { throw new Error('AnnouncementRequestsProvider not mounted'); },
+  publishAwaitingPost: async () => { throw new Error('AnnouncementRequestsProvider not mounted'); },
   reject: async () => { throw new Error('AnnouncementRequestsProvider not mounted'); },
   askClarification: async () => { throw new Error('AnnouncementRequestsProvider not mounted'); },
   withdraw: async () => { throw new Error('AnnouncementRequestsProvider not mounted'); },

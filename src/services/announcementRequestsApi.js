@@ -29,11 +29,34 @@ export async function editRequest(id, patch) {
   });
 }
 
-export async function approveRequest(id, { scheduledFor, urgentOverride, urgentOverrideReason, overrideEdits } = {}) {
+export async function approveRequest(id, {
+  scheduledFor,
+  urgentOverride,
+  urgentOverrideReason,
+  overrideEdits,
+  // 2026-05-12 two-stage flow: default is false (approve into
+  // awaiting_post; requester drives the final publish). Pass true to
+  // bypass the Slack-first step and publish inline (legacy
+  // one-shot behaviour).
+  publishImmediately,
+} = {}) {
   return apiFetch(`/announcement-requests/${id}/approve`, {
     method: 'POST',
-    body: JSON.stringify({ scheduledFor, urgentOverride, urgentOverrideReason, overrideEdits }),
+    body: JSON.stringify({
+      scheduledFor,
+      urgentOverride,
+      urgentOverrideReason,
+      overrideEdits,
+      publishImmediately: publishImmediately === true,
+    }),
   });
+}
+
+// 2026-05-12 stage 2: requester (or approver) drives the final publish
+// from awaiting_post. Server reuses the approval-time payload — no body
+// fields needed.
+export async function publishApprovedRequest(id) {
+  return apiFetch(`/announcement-requests/${id}/publish`, { method: 'POST' });
 }
 
 export async function rejectRequest(id, reason) {
