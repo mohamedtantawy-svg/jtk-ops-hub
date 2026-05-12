@@ -165,7 +165,11 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
   const { sla: teamQueueSla } = useQueueSlaSettings();
   const onbAgentRows = useMemo(() => normalizeOnboarding(teamOnbData.items, teamQueueSla), [teamOnbData.items, teamQueueSla]);
   const offAgentRows = useMemo(() => normalizeOffboarding(teamOffData.items, teamQueueSla), [teamOffData.items, teamQueueSla]);
-  const wbAgentRows  = useMemo(() => normalizeWorkbench(teamWbData.tasks, teamQueueSla), [teamWbData.tasks, teamQueueSla]);
+  // Workbench surfaces 24h of COMPLETED + CLOSED rows (for the home
+  // "Resolved Today" KPI). Team rollups are active-state only — strip
+  // resolved here so per-agent capacity + SLA dot reflect today's
+  // backlog, not yesterday's wins.
+  const wbAgentRows  = useMemo(() => normalizeWorkbench(teamWbData.tasks, teamQueueSla).filter(r => !r.isResolved), [teamWbData.tasks, teamQueueSla]);
 
   // UI state
   const [showAddModal, setShowAddModal] = useState(false);

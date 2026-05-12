@@ -16,6 +16,7 @@ import {
   scopeAmendmentRequests,
   scopeRedlineRequests,
   scopeIncentivePlans,
+  scopeHiddenTasks,
   filterByAssignee as scopeTicketsByAssignee,
   getVisibleEmails,
   isAdminUser,
@@ -90,7 +91,10 @@ const WORK_SOURCES = [
 // access === 'admin'. Renders HiddenTasksPanel instead of a SourceTable
 // because the data shape (hidden_task rows) is different from queue rows
 // — it carries hidden_by, approved_by, reason, etc. that no other panel
-// uses. Count comes from hiddenTasks.items.length (global hide list).
+// uses. Count + panel rows are role-scoped via `scopeHiddenTasks` so
+// every role sees only the hides in their visibility chain (admin still
+// sees everything). `hiddenTasks.hiddenKeys` is intentionally NOT
+// scoped — hides are universal at the queue-display layer.
 const HIDDEN_TAB = { id: 'hidden', label: 'Hidden', icon: 'bi-eye-slash-fill', color: '#d42d35', bg: '#fef2f2' };
 
 const PRIORITY_DOT = { critical: '#dc2626', high: '#d97706', medium: '#0369a1', low: '#9b928a' };
@@ -398,9 +402,33 @@ const Queue = ({ user, tasks, subFilter }) => {
   const redlineRows     = useMemo(() => scopeRedlineRequests(redlineRowsAll, user), [redlineRowsAll, user]);
   const workbenchRows   = useMemo(() => scopeWorkbenchTasks(workbenchRowsAll, user), [workbenchRowsAll, user]);
   const incentivePlanRows = useMemo(() => scopeIncentivePlans(incentivePlanRowsAll, user), [incentivePlanRowsAll, user]);
+  // Workbench is the only Deel source that intentionally surfaces resolved
+  // rows (24h of COMPLETED + CLOSED) so the "RESOLVED TODAY" section can
+  // render. Strip them from the cross-source "All" aggregates so the
+  // top-of-page open/paused counts and the active SLA tally don't double-
+  // count finished work alongside actual backlog. SourceTable still gets
+  // the full `tblWorkbenchRows` set so it can render its own resolved
+  // section directly.
+  const workbenchActiveRows = useMemo(() => workbenchRows.filter(r => !r.isResolved), [workbenchRows]);
+  // Per-role view of the Hidden audit list. `hiddenTasks.items` stays
+  // global (so `hiddenKeys` keeps filtering hidden rows out of every
+  // queue for everyone — hides are universal), but the Hidden TAB now
+  // surfaces a role-scoped slice so an agent sees their own hide
+  // requests / approvals, a TL sees the team's, an RM their region,
+  // and admin still sees everything.
+  const scopedHiddenItems = useMemo(
+    () => scopeHiddenTasks(hiddenTasks?.items || [], user),
+    [hiddenTasks?.items, user],
+  );
+  // Shape-stable wrapper so HiddenTasksPanel keeps reading `items` +
+  // `refresh` the same way; only the items list is narrowed.
+  const scopedHiddenTasks = useMemo(
+    () => ({ ...(hiddenTasks || {}), items: scopedHiddenItems }),
+    [hiddenTasks, scopedHiddenItems],
+  );
   const allSourceRows   = useMemo(() => [
-    ...onboardingRows, ...offboardingRows, ...amendmentRows, ...redlineRows, ...workbenchRows, ...incentivePlanRows,
-  ], [onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, incentivePlanRows]);
+    ...onboardingRows, ...offboardingRows, ...amendmentRows, ...redlineRows, ...workbenchActiveRows, ...incentivePlanRows,
+  ], [onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchActiveRows, incentivePlanRows]);
 
   // ── Memoized filter chain — only recomputes when inputs change ──
   const { baseVis, visPreSla, active, snoozed, done, all } = useMemo(() => {
@@ -510,6 +538,13 @@ const Queue = ({ user, tasks, subFilter }) => {
   // never silently turns at-risk classification off.
   const rowSlaSeverity = useCallback((row) => {
     if (!row) return 'ok';
+    // Resolved rows don't tick against the SLA bands — once a task is
+    // closed the SLA evaluation is final and the row sits under the
+    // "RESOLVED TODAY" section, not the active backlog. Returning 'ok'
+    // here keeps the SLA pill filter consistent with the pill counts
+    // (which already exclude resolved) so clicking "Breached N" never
+    // surfaces a finished-and-was-breached row from the resolved tail.
+    if (row.isResolved) return 'ok';
     if (row.slaBreachStatus === 'SLA_BREACHED' || (typeof row.slaRemaining === 'number' && row.slaRemaining <= 0)) return 'breached';
     if (typeof row.slaRemaining !== 'number') return 'ok';
     const windowSeconds = Number.isFinite(row.slaWindowMs) && row.slaWindowMs > 0
@@ -555,7 +590,10 @@ const Queue = ({ user, tasks, subFilter }) => {
     if (workSource === 'offboarding')     return tallyDeelSla(mineOnlyForSla(visOffboardingRows));
     if (workSource === 'amendments')      return tallyDeelSla(mineOnlyForSla(visAmendmentRows));
     if (workSource === 'redlines')        return tallyDeelSla(mineOnlyForSla(visRedlineRows));
-    if (workSource === 'workbench')       return tallyDeelSla(mineOnlyForSla(visWorkbenchRows));
+    // Workbench: pills are an active-state band. Strip resolved (24h
+    // COMPLETED + CLOSED) before tallying so today's finished tasks
+    // don't keep ticking against the SLA bands.
+    if (workSource === 'workbench')       return tallyDeelSla(mineOnlyForSla(visWorkbenchRows.filter(r => !r.isResolved)));
     if (workSource === 'incentive_plans') return tallyDeelSla(mineOnlyForSla(visIncentivePlanRows));
     // Admin Hidden tab — no SLA semantics. Pills sit at zero so they don't
     // borrow numbers from the underlying ZD/Jira queue.
@@ -579,9 +617,21 @@ const Queue = ({ user, tasks, subFilter }) => {
     if (workSource === 'offboarding')     return { open: tblOffboardingRows.length,   paused: 0, resolved: 0 };
     if (workSource === 'amendments')      return { open: tblAmendmentRows.length,     paused: 0, resolved: 0 };
     if (workSource === 'redlines')        return { open: tblRedlineRows.length,       paused: 0, resolved: 0 };
-    if (workSource === 'workbench')       return { open: tblWorkbenchRows.length,     paused: 0, resolved: 0 };
+    if (workSource === 'workbench') {
+      // Workbench is the only Deel source that surfaces resolved rows in
+      // the queue. Split active / paused / resolved so the header reads
+      // "N open · M paused · K resolved" instead of bundling everything
+      // under "open".
+      let wbOpen = 0, wbPaused = 0, wbResolved = 0;
+      for (const r of tblWorkbenchRows) {
+        if (r.isResolved) wbResolved++;
+        else if (r.isPaused) wbPaused++;
+        else wbOpen++;
+      }
+      return { open: wbOpen, paused: wbPaused, resolved: wbResolved };
+    }
     if (workSource === 'incentive_plans') return { open: tblIncentivePlanRows.length, paused: 0, resolved: 0 };
-    if (workSource === 'hidden') return { open: hiddenTasks?.items?.length ?? 0, paused: 0, resolved: 0 };
+    if (workSource === 'hidden') return { open: scopedHiddenItems.length, paused: 0, resolved: 0 };
     const sourceOpen = fTool ? 0 : (
       tblOnboardingRows.length + tblOffboardingRows.length + tblAmendmentRows.length
       + tblRedlineRows.length + tblWorkbenchRows.length + tblIncentivePlanRows.length
@@ -591,22 +641,22 @@ const Queue = ({ user, tasks, subFilter }) => {
       paused: snoozed.length,
       resolved: done.length,
     };
-  }, [workSource, fTool, active, snoozed, done, tblOnboardingRows, tblOffboardingRows, tblAmendmentRows, tblRedlineRows, tblWorkbenchRows, tblIncentivePlanRows, hiddenTasks?.items]);
+  }, [workSource, fTool, active, snoozed, done, tblOnboardingRows, tblOffboardingRows, tblAmendmentRows, tblRedlineRows, tblWorkbenchRows, tblIncentivePlanRows, scopedHiddenItems]);
 
   const rawCounts = useMemo(() => {
     if (workSource === 'onboarding')      return { open: onboardingRows.length };
     if (workSource === 'offboarding')     return { open: offboardingRows.length };
     if (workSource === 'amendments')      return { open: amendmentRows.length };
     if (workSource === 'redlines')        return { open: redlineRows.length };
-    if (workSource === 'workbench')       return { open: workbenchRows.length };
+    if (workSource === 'workbench')       return { open: workbenchActiveRows.length };
     if (workSource === 'incentive_plans') return { open: incentivePlanRows.length };
-    if (workSource === 'hidden') return { open: hiddenTasks?.items?.length ?? 0 };
+    if (workSource === 'hidden') return { open: scopedHiddenItems.length };
     const base = fTool ? baseVis.filter(t => t.source === fTool) : baseVis;
     const srcExtra = fTool ? 0 : allSourceRows.length;
     return {
       open: base.filter(t => t.status !== 'resolved' && t.status !== 'waiting').length + srcExtra,
     };
-  }, [workSource, fTool, baseVis, allSourceRows, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, incentivePlanRows, hiddenTasks?.items]);
+  }, [workSource, fTool, baseVis, allSourceRows, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, incentivePlanRows, scopedHiddenItems]);
   const hiddenByFilters = Math.max(0, rawCounts.open - headerCounts.open);
 
   // Persist filters to localStorage — user-scoped so two people on the
@@ -689,7 +739,7 @@ const Queue = ({ user, tasks, subFilter }) => {
           </div>
 
           {(isAdmin || isLead) && (() => {
-            const sourceLabels = { onboarding: 'Onboarding', offboarding: 'Offboarding', amendments: 'Amendments', redlines: 'Redlines', workbench: 'Workbench', incentive_plans: 'Incentive Plans', hidden: 'Hidden (admin)' };
+            const sourceLabels = { onboarding: 'Onboarding', offboarding: 'Offboarding', amendments: 'Amendments', redlines: 'Redlines', workbench: 'Workbench', incentive_plans: 'Incentive Plans', hidden: 'Hidden' };
             const toolLabels = { zendesk: 'Zendesk', jira: 'Jira' };
             const viewLabel = sourceLabels[workSource] || toolLabels[fTool] || (isAdmin ? 'All Tasks' : user.team);
             return <span style={{ fontSize: 13, fontWeight: 600, color: '#616161', marginLeft: 6 }}>{viewLabel}</span>;
@@ -735,7 +785,7 @@ const Queue = ({ user, tasks, subFilter }) => {
               : workSource === 'offboarding' ? offboardingRows
               : workSource === 'amendments' ? amendmentRows
               : workSource === 'redlines' ? redlineRows
-              : workSource === 'workbench' ? workbenchRows
+              : workSource === 'workbench' ? workbenchActiveRows
               : workSource === 'incentive_plans' ? incentivePlanRows
               : [];
             const present = new Set(rowsForPanel.map(r => r?.status?.severity).filter(Boolean));
@@ -758,18 +808,18 @@ const Queue = ({ user, tasks, subFilter }) => {
             // wrap also gives narrow desktops / tablets a usable layout instead
             // of a horizontal-scroll filter row.
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', overflow: 'visible', paddingBottom: 2 }}>
-              {(isAdmin ? [...WORK_SOURCES, HIDDEN_TAB] : WORK_SOURCES).map(ws => {
+              {[...WORK_SOURCES, HIDDEN_TAB].map(ws => {
                 const isQueueFilter = ws.id === 'zendesk' || ws.id === 'jira';
                 const isActive = isQueueFilter ? (fTool === ws.id && !workSource) : workSource === ws.id;
                 const count = ws.id === 'onboarding' ? visOnboardingRows.length
                   : ws.id === 'offboarding' ? visOffboardingRows.length
                   : ws.id === 'amendments' ? visAmendmentRows.length
                   : ws.id === 'redlines' ? visRedlineRows.length
-                  : ws.id === 'workbench' ? visWorkbenchRows.length
+                  : ws.id === 'workbench' ? visWorkbenchRows.filter(r => !r.isResolved).length
                   : ws.id === 'incentive_plans' ? visIncentivePlanRows.length
                   : ws.id === 'jira' ? jiraCount
                   : ws.id === 'zendesk' ? zdCount
-                  : ws.id === 'hidden' ? (hiddenTasks?.items?.length ?? 0)
+                  : ws.id === 'hidden' ? scopedHiddenItems.length
                   : 0;
                 const handleClick = () => {
                   if (isQueueFilter) {
@@ -1026,9 +1076,9 @@ const Queue = ({ user, tasks, subFilter }) => {
           />
         </ErrorBoundary>
       )}
-      {workSource === 'hidden' && isAdmin && (
+      {workSource === 'hidden' && (
         <ErrorBoundary>
-          <HiddenTasksPanel hiddenTasks={hiddenTasks} />
+          <HiddenTasksPanel hiddenTasks={scopedHiddenTasks} />
         </ErrorBoundary>
       )}
 
@@ -1052,7 +1102,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             offboardingCount={offboardingRows.length}
             amendmentsCount={amendmentRows.length}
             redlinesCount={redlineRows.length}
-            workbenchCount={workbenchRows.length}
+            workbenchCount={workbenchActiveRows.length}
             incentivePlansCount={incentivePlanRows.length}
             sourceRowsAll={allSourceRows}
           />

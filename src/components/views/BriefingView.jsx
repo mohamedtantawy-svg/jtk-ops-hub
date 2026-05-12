@@ -291,6 +291,14 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const amendmentRows = useMemo(() => scopeAmendmentRequests(amendmentRowsAll, user), [amendmentRowsAll, user]);
   const redlineRows = useMemo(() => scopeRedlineRequests(redlineRowsAll, user), [redlineRowsAll, user]);
   const workbenchRows = useMemo(() => scopeWorkbenchTasks(workbenchRowsAll, user), [workbenchRowsAll, user]);
+  // Workbench is the only Deel source that intentionally surfaces a 24h
+  // window of COMPLETED + CLOSED rows (so the home "Resolved Today" KPI
+  // can include workbench). Active aggregates — capacity bands, SLA
+  // totals, per-member rollups, the cross-source "Active Requests"
+  // count — must read the resolved rows OUT, otherwise today's finished
+  // work re-inflates the very backlog the user just cleared.
+  const workbenchActiveRows    = useMemo(() => workbenchRows.filter(r => !r.isResolved),    [workbenchRows]);
+  const workbenchActiveRowsAll = useMemo(() => workbenchRowsAll.filter(r => !r.isResolved), [workbenchRowsAll]);
   const incentivePlanRows = useMemo(() => scopeIncentivePlans(incentivePlanRowsAll, user), [incentivePlanRowsAll, user]);
 
   const inScope = useCallback(t => {
@@ -401,16 +409,19 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   //                 already country/assignee-scoped by the Queue rules above.
   //   • Exec (RM/Director/Admin) → org-wide open + all Deel rows.
   // The Deel source rows are "open by definition" — resolved ones don't come
-  // back from the actionable-queue endpoints — so no status filter needed.
+  // back from the actionable-queue endpoints — EXCEPT workbench, which
+  // intentionally pulls a 24h window of COMPLETED + CLOSED tasks for the
+  // home "Resolved Today" KPI. Use the active-only workbench list here so
+  // a closed task doesn't keep counting against today's backlog.
   const deelSourceRowsLen =
     onboardingRows.length + offboardingRows.length + amendmentRows.length +
-    redlineRows.length + workbenchRows.length + incentivePlanRows.length;
+    redlineRows.length + workbenchActiveRows.length + incentivePlanRows.length;
   const activeRequestsCount = isOwnScope
     ? personal.length + deelSourceRowsLen
     : isTeamScope
       ? scope.length + deelSourceRowsLen
       : orgOpen.length + onboardingRowsAll.length + offboardingRowsAll.length +
-        amendmentRowsAll.length + redlineRowsAll.length + workbenchRowsAll.length +
+        amendmentRowsAll.length + redlineRowsAll.length + workbenchActiveRowsAll.length +
         incentivePlanRowsAll.length;
 
   // ── Today's meetings ───────────────────────────────────────────────────
@@ -597,7 +608,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     const offBreach = mOff.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length;
 
     // — Workbench (48h-from-creation; per-row slaBreachStatus) —
-    const mWb = workbenchRowsAll.filter(r => r.assigneeEmail && r.assigneeEmail === memEmail);
+    const mWb = workbenchActiveRowsAll.filter(r => r.assigneeEmail && r.assigneeEmail === memEmail);
     const wbOpen   = mWb.length;
     const wbBreach = mWb.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length;
 
@@ -649,7 +660,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const totalActiveAcrossSources = scope.length
     + onboardingRows.length + pausedOnboardingRows.length
     + offboardingRows.length + amendmentRows.length
-    + redlineRows.length + workbenchRows.length + incentivePlanRows.length;
+    + redlineRows.length + workbenchActiveRows.length + incentivePlanRows.length;
   const teamSize = isOwnScope ? 1 : Math.max(1, visibleEmails.size);
   const myCount = isOwnScope
     ? personal.length
@@ -699,13 +710,13 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   }).length;
   const slaCompPoolDeel = onboardingRows.length + offboardingRows.length
     + amendmentRows.length + redlineRows.length
-    + workbenchRows.length + incentivePlanRows.length;
+    + workbenchActiveRows.length + incentivePlanRows.length;
   const slaCompBreachedDeel =
       onboardingRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
     + offboardingRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
     + amendmentRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
     + redlineRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
-    + workbenchRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
+    + workbenchActiveRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
     + incentivePlanRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length;
   const slaTotal = slaCompPoolTickets.length + slaCompPoolDeel;
   const slaBreachTotal = slaCompBreachedTickets + slaCompBreachedDeel;
@@ -764,7 +775,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   if (offboardingRows.length) srcCounts['offboarding'] = (srcCounts['offboarding'] || 0) + offboardingRows.length;
   if (amendmentRows.length)   srcCounts['amendments']  = (srcCounts['amendments']  || 0) + amendmentRows.length;
   if (redlineRows.length)     srcCounts['redlines']    = (srcCounts['redlines']    || 0) + redlineRows.length;
-  if (workbenchRows.length)   srcCounts['workbench']   = (srcCounts['workbench']   || 0) + workbenchRows.length;
+  if (workbenchActiveRows.length)   srcCounts['workbench']   = (srcCounts['workbench']   || 0) + workbenchActiveRows.length;
   if (incentivePlanRows.length) srcCounts['incentive_plans'] = (srcCounts['incentive_plans'] || 0) + incentivePlanRows.length;
   const srcEntries=Object.entries(srcCounts).sort((a,b)=>b[1]-a[1]);
   // Total across all sources (for percentage calculation)
@@ -808,8 +819,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const amendAtRisk  = deelAtRisk(amendmentRows);
   const redBreach    = redlineRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED');
   const redAtRisk    = deelAtRisk(redlineRows);
-  const wbBreach     = workbenchRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED');
-  const wbAtRisk     = deelAtRisk(workbenchRows);
+  const wbBreach     = workbenchActiveRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED');
+  const wbAtRisk     = deelAtRisk(workbenchActiveRows);
   const ipBreach     = incentivePlanRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED');
   const ipAtRisk     = deelAtRisk(incentivePlanRows);
   const orgBreach = orgSlaPool.filter(t => { const s = slaInfo(t); return s && s.breach; }).length
@@ -817,7 +828,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const orgAtRisk = orgSlaPool.filter(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; }).length
     + onbAtRisk.length + offAtRisk.length + amendAtRisk.length + redAtRisk.length + wbAtRisk.length + ipAtRisk.length;
   const orgSlaTotal = orgSlaPool.length + onboardingRows.length + offboardingRows.length
-    + amendmentRows.length + redlineRows.length + workbenchRows.length + incentivePlanRows.length;
+    + amendmentRows.length + redlineRows.length + workbenchActiveRows.length + incentivePlanRows.length;
   const orgSlaComp = orgSlaTotal > 0 ? Math.round(((orgSlaTotal - orgBreach) / orgSlaTotal) * 100) : 100;
 
   // ── Sparkline ─────────────────────────────────────────────────────────
@@ -1385,7 +1396,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               {srcEntries.map(([src,cnt])=>{
                 const tl=TOOLS[src];const pct=srcPctMap.get(src) ?? 0;
                 const isExpanded=expandedSource===src;
-                const deelApiRowsMap={onboarding:onboardingRows,offboarding:offboardingRows,amendments:amendmentRows,redlines:redlineRows,workbench:workbenchRows};
+                const deelApiRowsMap={onboarding:onboardingRows,offboarding:offboardingRows,amendments:amendmentRows,redlines:redlineRows,workbench:workbenchActiveRows};
                 const srcTasks=[...srcPool.filter(t=>t.source===src),...(deelApiRowsMap[src]||[])];
                 const srcBarColor=SOURCE_COLOURS[src]||tl?.color||'#9e9e9e';
                 return(
@@ -1585,7 +1596,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             if(offboardingRows.length) srcMap.offboarding =(srcMap.offboarding ||0)+offboardingRows.length;
             if(amendmentRows.length)   srcMap.amendments  =(srcMap.amendments  ||0)+amendmentRows.length;
             if(redlineRows.length)     srcMap.redlines    =(srcMap.redlines    ||0)+redlineRows.length;
-            if(workbenchRows.length)   srcMap.workbench   =(srcMap.workbench   ||0)+workbenchRows.length;
+            if(workbenchActiveRows.length)   srcMap.workbench   =(srcMap.workbench   ||0)+workbenchActiveRows.length;
             const srcBreakdown=Object.entries(srcMap).sort((a,b)=>b[1]-a[1]);
             return(<>
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:10}}>
@@ -1677,7 +1688,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 ...offboardingRows,
                 ...amendmentRows,
                 ...redlineRows,
-                ...workbenchRows,
+                ...workbenchActiveRows,
                 ...incentivePlanRows,
               ]}
               tickets={scope}

@@ -44,11 +44,70 @@ function daysBetween(a, b) {
   return Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / 86400000) + 1;
 }
 
+// Iterate one day at a time between two ISO dates (inclusive) — used to
+// detect weekend-only gaps between two events.
+function isoAddDays(iso, n) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const ms = Date.UTC(y, m - 1, d) + n * 86400000;
+  const dt = new Date(ms);
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`;
+}
+function isoDayOfWeek(iso) {
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0=Sun .. 6=Sat
+}
+
+// Group time-off events whose gap is only a weekend into a single
+// "logical range". Deel reports OOO per-day with weekends excluded, so
+// a Fri-Mon vacation lands as two single-day events (Fri + Mon). The
+// handover wizard needs to treat that as one continuous range so the
+// user submits ONE handover rather than two (Jose's 2026-05-12 bug
+// "Date selection only works day by day. If a period spans a weekend,
+// it shows as two separate handovers instead of one continuous range").
+// Returns groups in start-date order, each carrying the merged range
+// + the constituent event ids for backend submission.
+function groupWeekendAdjacent(events) {
+  if (!Array.isArray(events) || events.length === 0) return [];
+  const sorted = [...events].sort((a, b) => String(a.start_date).localeCompare(String(b.start_date)));
+  const groups = [];
+  for (const ev of sorted) {
+    const last = groups[groups.length - 1];
+    if (!last) {
+      groups.push({ events: [ev], start_date: ev.start_date, end_date: ev.end_date });
+      continue;
+    }
+    // Compute the gap between `last.end_date` and `ev.start_date`. If the
+    // only non-event days in between are Saturday and/or Sunday, merge.
+    let bridge = true;
+    let cursor = isoAddDays(last.end_date, 1);
+    let safety = 0;
+    while (cursor < ev.start_date && safety++ < 14) {
+      const dow = isoDayOfWeek(cursor);
+      if (dow !== 0 && dow !== 6) { bridge = false; break; }
+      cursor = isoAddDays(cursor, 1);
+    }
+    if (bridge && cursor === ev.start_date) {
+      last.events.push(ev);
+      last.end_date = ev.end_date;
+    } else {
+      groups.push({ events: [ev], start_date: ev.start_date, end_date: ev.end_date });
+    }
+  }
+  return groups;
+}
+
 function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClose, onCreated }) {
   const [step, setStep] = useState(1);
   const [myEvents, setMyEvents] = useState([]);
   const [eventsLoading, setEventsLoading] = useState(true);
-  const [selectedEventId, setSelectedEventId] = useState(initialEventId || null);
+  // Selection is a SET of event ids — a weekend-adjacent group spans
+  // multiple time_off_event rows, and the wizard submits one handover
+  // per id (sharing coverers + checklist). Seeded with `initialEventId`
+  // for callers that deep-link to a specific event (e.g. "Submit
+  // handover" on a single Table row).
+  const [selectedEventIds, setSelectedEventIds] = useState(
+    initialEventId ? [initialEventId] : [],
+  );
   const [reason, setReason] = useState('');
   const [coverers, setCoverers] = useState([]);   // [{ email, country_codes: [] }]
   const [coverPickerOpen, setCoverPickerOpen] = useState(false);
@@ -90,10 +149,22 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
     return () => document.removeEventListener('mousedown', handler);
   }, [coverPickerOpen]);
 
-  const selectedEvent = useMemo(
-    () => myEvents.find(e => e.id === selectedEventId) || null,
-    [myEvents, selectedEventId],
+  // Group adjacent events for display in Step 1 + match the active group
+  // by membership of the first selected id (or the only selected id).
+  const groupedEvents = useMemo(() => groupWeekendAdjacent(myEvents), [myEvents]);
+  const selectedGroup = useMemo(() => {
+    if (selectedEventIds.length === 0) return null;
+    const head = selectedEventIds[0];
+    return groupedEvents.find(g => g.events.some(e => e.id === head)) || null;
+  }, [groupedEvents, selectedEventIds]);
+  const selectedEvents = useMemo(
+    () => myEvents.filter(e => selectedEventIds.includes(e.id)),
+    [myEvents, selectedEventIds],
   );
+  // Keep the legacy single-event reference around for the Review step's
+  // "Range" copy — falls back to the first selected event so the wizard
+  // keeps showing something sensible when the group spans many events.
+  const selectedEvent = selectedEvents[0] || null;
 
   const candidateMembers = useMemo(() => {
     const q = coverQuery.trim().toLowerCase();
@@ -110,7 +181,7 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
   }, [members, coverQuery, coverers, currentUserEmail]);
 
   // Step gating.
-  const step1Ok = !!selectedEventId;
+  const step1Ok = selectedEventIds.length > 0;
   const step2Ok = coverers.length > 0;
   const requiredMissing = checklistItems.filter(i => i.required && !i.completed).length;
   const step3Ok = checklistItems.length > 0;
@@ -150,39 +221,49 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
     setBusy(true);
     setError(null);
     try {
-      const payload = {
-        time_off_event_id: selectedEventId,
-        reason: reason || null,
-        coverers: coverers.map(c => ({
-          email: c.email,
-          country_codes: c.country_codes || [],
-        })),
-        checklist_items: checklistItems.map(i => ({
-          id: i.id, label: i.label, required: i.required !== false, hint: i.hint || null,
-        })),
-      };
-      const created = await createHandover(payload);
-      const handoverId = created?.handover?.id;
-      if (!handoverId) throw new Error('Create returned no id');
-
-      // If user ticked any items pre-submit, mirror that on the server.
-      // The create endpoint stores items as completed=false; we tick them
-      // post-create via the checklist toggle route which also writes a
-      // matching audit log entry.
+      if (submit && requiredMissing > 0) {
+        throw new Error(`${requiredMissing} required item${requiredMissing === 1 ? '' : 's'} still unchecked`);
+      }
+      // One handover per selected time-off event id, all sharing the
+      // same coverers + checklist + reason. The Deel time-off feed
+      // ships per-day rows with weekends excluded, so a Fri-Mon
+      // vacation lands as two events; this loop submits them as one
+      // logical handover from the user's perspective.
+      const sharedCoverers = coverers.map(c => ({
+        email: c.email,
+        country_codes: c.country_codes || [],
+      }));
+      const sharedChecklist = checklistItems.map(i => ({
+        id: i.id, label: i.label, required: i.required !== false, hint: i.hint || null,
+      }));
       const preChecked = checklistItems.filter(i => i.completed);
-      for (const item of preChecked) {
-        await toggleChecklistItem(handoverId, item.id, { completed: true });
-      }
 
-      let final = created.handover;
-      if (submit) {
-        if (requiredMissing > 0) {
-          throw new Error(`${requiredMissing} required item${requiredMissing === 1 ? '' : 's'} still unchecked`);
+      const created = [];
+      for (const eventId of selectedEventIds) {
+        const res = await createHandover({
+          time_off_event_id: eventId,
+          reason: reason || null,
+          coverers: sharedCoverers,
+          checklist_items: sharedChecklist,
+        });
+        const handoverId = res?.handover?.id;
+        if (!handoverId) throw new Error('Create returned no id');
+        // Mirror pre-checked items on the server so the audit log
+        // captures the click and the row reflects the right counts.
+        for (const item of preChecked) {
+          await toggleChecklistItem(handoverId, item.id, { completed: true });
         }
-        const submitted = await submitHandover(handoverId);
-        final = submitted?.handover || final;
+        let final = res.handover;
+        if (submit) {
+          const submitted = await submitHandover(handoverId);
+          final = submitted?.handover || final;
+        }
+        created.push(final);
       }
-      onCreated?.(final);
+      // Surface the first handover to the caller for the deep-link /
+      // toast flow; the parent refreshes its list either way so the
+      // remaining rows appear in the table on the next paint.
+      onCreated?.(created[0]);
     } catch (err) {
       setError(err?.message || 'Failed to save');
     } finally {
@@ -245,22 +326,40 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
             <>
               <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>
                 Pick the OOO range you want to hand over. Only your approved time-off appears here.
+                Weekend-adjacent days are grouped into a single range — submitting covers every day in
+                the group with one set of coverers + checklist.
               </div>
               {eventsLoading ? (
                 <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Loading…</div>
-              ) : myEvents.length === 0 ? (
+              ) : groupedEvents.length === 0 ? (
                 <div style={{ padding: 18, borderRadius: 10, background: 'rgba(15,23,42,0.03)', border: '1px dashed var(--border)', fontSize: 13, color: 'var(--text-secondary)' }}>
                   You have no approved upcoming OOO. Submit your time-off in Deel first.
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {myEvents.map(ev => {
-                    const active = ev.id === selectedEventId;
+                  {groupedEvents.map(g => {
+                    const ids = g.events.map(e => e.id);
+                    const active = selectedEventIds.length > 0 && ids.some(id => selectedEventIds.includes(id));
+                    // Group is "fully covered" only when EVERY event in it
+                    // already has an in-flight or completed handover. A
+                    // mixed group still allows the user to add the
+                    // missing ones — we filter out the covered ids at
+                    // submit time so the user can't double-create.
+                    const handovers = g.events.filter(e => e.handover);
+                    const totalDays = daysBetween(g.start_date, g.end_date);
                     return (
                       <button
-                        key={ev.id}
+                        key={ids.join('|')}
                         type="button"
-                        onClick={() => setSelectedEventId(ev.id)}
+                        onClick={() => {
+                          // Select every event in the group that doesn't
+                          // already have a handover. Empty selection
+                          // (everything covered) falls back to the full
+                          // list so the user at least sees a record on
+                          // the Review step.
+                          const uncovered = g.events.filter(e => !e.handover).map(e => e.id);
+                          setSelectedEventIds(uncovered.length > 0 ? uncovered : ids);
+                        }}
                         style={{
                           textAlign: 'left',
                           padding: '12px 14px',
@@ -271,10 +370,15 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
                           fontFamily: 'inherit',
                         }}
                       >
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>{fmt(ev.start_date)} → {fmt(ev.end_date)}</div>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{fmt(g.start_date)} → {fmt(g.end_date)}</div>
                         <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
-                          {daysBetween(ev.start_date, ev.end_date)} day{daysBetween(ev.start_date, ev.end_date) === 1 ? '' : 's'}
-                          {ev.handover ? ` · handover already ${String(ev.handover.status).replace(/_/g, ' ')}` : ' · no handover yet'}
+                          {totalDays} day{totalDays === 1 ? '' : 's'}
+                          {g.events.length > 1 ? ` · ${g.events.length} time-off entries merged across the weekend` : ''}
+                          {handovers.length === g.events.length
+                            ? ` · handover already ${String(handovers[0].handover.status).replace(/_/g, ' ')}`
+                            : handovers.length > 0
+                              ? ` · ${handovers.length} of ${g.events.length} already handed over`
+                              : ' · no handover yet'}
                         </div>
                       </button>
                     );
@@ -478,7 +582,12 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
               </div>
               <div style={{ padding: 14, borderRadius: 12, border: '1px solid var(--border-light)' }}>
                 <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', marginBottom: 6, fontWeight: 700 }}>OOO range</div>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>{selectedEvent ? `${fmt(selectedEvent.start_date)} → ${fmt(selectedEvent.end_date)}` : '—'}</div>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{selectedGroup ? `${fmt(selectedGroup.start_date)} → ${fmt(selectedGroup.end_date)}` : (selectedEvent ? `${fmt(selectedEvent.start_date)} → ${fmt(selectedEvent.end_date)}` : '—')}</div>
+                {selectedEventIds.length > 1 && (
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>
+                    {selectedEventIds.length} time-off entries handed over in one go (weekend-adjacent).
+                  </div>
+                )}
                 {reason && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 6 }}>{reason}</div>}
               </div>
               <div style={{ padding: 14, borderRadius: 12, border: '1px solid var(--border-light)' }}>

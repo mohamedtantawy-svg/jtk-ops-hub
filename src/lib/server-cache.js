@@ -15,9 +15,25 @@ import { readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
 
 const CACHE_DIR = join(process.env.CACHE_DIR || '/tmp', 'ops-hub-cache');
-const MAX_ENTRIES = 30;           // LRU cap — at most 30 entries in memory
+// 2026-05-12 memory audit (pod RSS > 3 GiB OOM kills): tightened from 30
+// in-memory entries to 12. Each entry holds a full Deel/Zendesk/Jira
+// payload (workbench's slimmed projection is still ~5000 rows × ~600 B =
+// ~3 MiB per entry). With 12 entries the worst-case in-memory cache
+// footprint is ~36 MiB — well under the 1 GiB pod budget. Distinct
+// active keys today: `queue`, `queue_zendesk_active_*`,
+// `queue_jira_active_*`, `deel_workbench`, `deel_onboarding`,
+// `deel_onboarding_paused`, `deel_offboarding`, `deel_amendments_v2`,
+// `deel_redlines_v2`, `deel_incentive_plans_v1`,
+// `urgent_assist_workbench_global` — ~11 routine keys plus a couple of
+// settings entries, all of which evict cleanly under 12.
+const MAX_ENTRIES = 12;
 const CLEANUP_INTERVAL = 5 * 60_000; // sweep stale entries every 5 minutes
-const MAX_FILE_AGE = 60 * 60_000;    // remove cache files older than 60 minutes
+// 30 min instead of 60 min — anything we haven't touched in 30 min isn't
+// hot, so holding it in memory + on disk just costs bytes. The
+// stale-while-revalidate path still works because routes pass an explicit
+// `staleTtl` to `buildWithTimeout` / `staleWhileRevalidate` independent
+// of this sweep window.
+const MAX_FILE_AGE = 30 * 60_000;
 
 const memoryFallback = new Map(); // in-memory fallback if FS fails
 const accessOrder = [];           // LRU tracking: most-recently-used at end

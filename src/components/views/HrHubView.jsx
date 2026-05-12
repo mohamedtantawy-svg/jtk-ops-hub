@@ -34,6 +34,10 @@ const STATUS_FILTERS = [
   { value: 'in_progress', label: 'In Progress', icon: 'bi-arrow-repeat',         color: '#d97706', bg: '#fff8e6', tint: '#fde68a' },
   { value: 'on_hold',     label: 'On Hold',     icon: 'bi-pause-circle-fill',    color: '#737373', bg: '#f5f5f4', tint: '#e7e5e4' },
   { value: 'resolved',    label: 'Resolved',    icon: 'bi-check-circle-fill',    color: '#15803d', bg: '#e8f5e9', tint: '#bbf7d0' },
+  // Terminal "closed without resolving" (2026-05-12) — Megan reported HR
+  // requests sometimes get declined, not resolved. Red literal stays
+  // semantic across light/dark themes.
+  { value: 'rejected',    label: 'Rejected',    icon: 'bi-x-circle-fill',        color: '#991b1b', bg: '#fee2e2', tint: '#fecaca' },
 ];
 const STATUS_BY_VALUE = Object.fromEntries(STATUS_FILTERS.map(s => [s.value, s]));
 
@@ -210,7 +214,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
   // ask the server for the unfiltered (by status) set under the same
   // scope/flow, then count locally. Cheap because the page size is 25 +
   // the four status totals fit a single round-trip.
-  const [statusCounts, setStatusCounts] = useState({ new: 0, in_progress: 0, on_hold: 0, resolved: 0, total: 0 });
+  const [statusCounts, setStatusCounts] = useState({ new: 0, in_progress: 0, on_hold: 0, resolved: 0, rejected: 0, total: 0 });
   const [scopeCounts, setScopeCounts] = useState({ mine: null, assigned: null, team: null, all: null });
   useEffect(() => {
     let cancelled = false;
@@ -223,7 +227,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
           limit: 100,
         });
         if (cancelled) return;
-        const counts = { new: 0, in_progress: 0, on_hold: 0, resolved: 0, total: (r?.items || []).length };
+        const counts = { new: 0, in_progress: 0, on_hold: 0, resolved: 0, rejected: 0, total: (r?.items || []).length };
         for (const it of r?.items || []) {
           if (counts[it.status] != null) counts[it.status]++;
         }
@@ -250,7 +254,10 @@ export default function HrHubView({ user, onCreateHrHub }) {
           const r = await listHrHubRequests({ flow: flowQuery, scope: sc, limit: 100 });
           if (cancelled) return;
           const items = r?.items || [];
-          out[sc] = items.filter(i => i.status !== 'resolved').length;
+          // Exclude both terminal statuses — `rejected` (added 2026-05-12)
+          // is closed-without-resolving, equally "out of counting" for the
+          // pending-action scope badge.
+          out[sc] = items.filter(i => i.status !== 'resolved' && i.status !== 'rejected').length;
         } catch { /* swallow */ }
       }
       if (!cancelled) setScopeCounts(out);
@@ -329,8 +336,12 @@ export default function HrHubView({ user, onCreateHrHub }) {
   return (
     <div style={page}>
       <style>{`
-        .hrhub-status-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-        @media (max-width: 900px) { .hrhub-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        /* 5 status cards (new/in_progress/on_hold/resolved/rejected) since
+           2026-05-12. Wider screens fit all five on one row; mid-widths
+           collapse to 3-up, narrow to 2-up so each card stays readable. */
+        .hrhub-status-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+        @media (max-width: 1200px) { .hrhub-status-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        @media (max-width: 900px)  { .hrhub-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         .hrhub-row:hover { border-color: var(--border-light); background: var(--surface-2); }
       `}</style>
 
@@ -620,6 +631,7 @@ function RequestRow({ item, active, onClick, viewerEmail, isManager, isAdmin, on
   const isSelf = (item.createdByEmail || '').toLowerCase() === viewerLc;
   const canDecide = isHide
     && item.status !== 'resolved'
+    && item.status !== 'rejected'
     && !!isManager
     && (!isSelf || !!isAdmin);
 

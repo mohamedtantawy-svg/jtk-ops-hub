@@ -725,12 +725,22 @@ export function normalizeIncentivePlans(items = [], slaConfig = null) {
 export function normalizeWorkbench(items = [], slaConfig = null) {
   const { activeMs, pausedMs } = slaMsFor(slaConfig, 'workbench', WORKBENCH_SLA_ACTIVE_MS, WORKBENCH_SLA_PAUSED_MS);
   return dropTestRows(items, t => [t?.name]).map(t => {
+    // `listWorkbenchTasks` returns both the active backlog (TO_DO /
+    // IN_PROGRESS / ON_HOLD / ESCALATED) AND a rolling 24h of recently-
+    // finished rows (COMPLETED / CLOSED) so the home "Resolved Today" KPI
+    // can include workbench. Flag terminal states here so every consumer
+    // can section them out of active aggregates — the SourceTable's
+    // "RESOLVED TODAY" group, header counts, SLA pills, and the Briefing /
+    // Team / AgentHome active-count rollups all read this.
+    const rawStatus = String(t.status || '').toUpperCase();
+    const isResolved = rawStatus === 'COMPLETED' || rawStatus === 'CLOSED';
+    const resolvedAt = isResolved ? (t.completedAt || t.updatedAt || null) : null;
     // Override upstream Deel-side SLA with the configured flat-from-creation
     // policy. The upstream `t.slaTime`/`t.slaRemaining` vary arbitrarily per
     // task config and don't match the team's operating model. Paused branch
     // (configurable) applies when upstream flags a pause state.
-    const isPaused = !!t.isPaused || t.status === 'ON_HOLD';
-    const pausedAt = t.pausedAt || (t.status === 'ON_HOLD' ? t.updatedAt : null);
+    const isPaused = !isResolved && (!!t.isPaused || rawStatus === 'ON_HOLD');
+    const pausedAt = isPaused ? (t.pausedAt || (rawStatus === 'ON_HOLD' ? t.updatedAt : null)) : null;
     const sla = computeSlaWindow(activeMs, t.createdAt, {
       pausedMs: isPaused ? pausedMs : null,
       pausedAt,
@@ -758,6 +768,12 @@ export function normalizeWorkbench(items = [], slaConfig = null) {
       // `isPaused` flag.
       isPaused,
       pausedAt,
+      isResolved,
+      resolvedAt,
+      // SLA fields stay populated for resolved rows so Analytics' SLA
+      // compliance pool can include them with their final state (mirrors
+      // how resolved tickets are evaluated at resolution time). Active-
+      // backlog consumers gate on `isResolved` instead of zeroing SLA.
       slaRemaining: sla.slaRemaining,
       slaBreachStatus: sla.slaBreachStatus,
       slaWindowMs: sla.slaWindowMs,

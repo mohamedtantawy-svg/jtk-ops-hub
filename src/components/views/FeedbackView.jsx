@@ -1068,27 +1068,70 @@ function ExpandedDetail({ item, isPriv, onStatusChange, onPriorityChange, onAssi
             <div style={{ marginTop: 14 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>{label}</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
-                {atts.map((a, idx) => (
-                  <div key={idx} style={{ minWidth: 0 }}>
-                    {a.kind === 'video' ? (
-                      <video src={a.dataUri} controls preload="metadata"
-                        style={{ display: 'block', width: '100%', maxHeight: 320, borderRadius: 10, border: '1px solid var(--border)', background: '#000' }} />
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setLightbox({ src: a.dataUri, name: a.name || `Attachment ${idx + 1}` })}
-                        title="Open"
-                        style={{ display: 'block', width: '100%', padding: 0, border: 'none', background: 'transparent', cursor: 'zoom-in' }}
+                {atts.map((a, idx) => {
+                  const fallbackName = a.name || `Attachment ${idx + 1}`;
+                  const lightboxKind = a.kind === 'video' ? 'video' : 'image';
+                  const titleAttr = a.kind === 'video' ? 'Play video' : 'Open image';
+                  return (
+                    <div key={idx} style={{ minWidth: 0, position: 'relative' }}>
+                      {a.kind === 'video' ? (
+                        <button
+                          type="button"
+                          onClick={() => setLightbox({ src: a.dataUri, name: fallbackName, kind: 'video' })}
+                          title={titleAttr}
+                          aria-label={titleAttr}
+                          style={{ position: 'relative', display: 'block', width: '100%', padding: 0, border: 'none', background: '#000', cursor: 'zoom-in', borderRadius: 10, overflow: 'hidden' }}
+                        >
+                          <video
+                            src={a.dataUri}
+                            preload="metadata"
+                            muted
+                            playsInline
+                            style={{ display: 'block', width: '100%', maxHeight: 320, borderRadius: 10, border: '1px solid var(--border)', background: '#000', pointerEvents: 'none' }}
+                          />
+                          <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+                            <span style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(0,0,0,0.55)', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <i className="bi-play-fill" style={{ fontSize: 22 }} />
+                            </span>
+                          </span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setLightbox({ src: a.dataUri, name: fallbackName, kind: 'image' })}
+                          title={titleAttr}
+                          style={{ display: 'block', width: '100%', padding: 0, border: 'none', background: 'transparent', cursor: 'zoom-in' }}
+                        >
+                          <img src={a.dataUri} alt={fallbackName}
+                            style={{ display: 'block', width: '100%', maxHeight: 320, objectFit: 'contain', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface-2)' }} />
+                        </button>
+                      )}
+                      {/* Download fallback — works for both kinds via the
+                          `download` attribute on a data: URI. Always
+                          present so the user has a path to save even if
+                          the inline preview can't decode the file. */}
+                      <a
+                        href={a.dataUri}
+                        download={fallbackName}
+                        onClick={e => e.stopPropagation()}
+                        aria-label={`Download ${fallbackName}`}
+                        title="Download"
+                        style={{
+                          position: 'absolute', top: 6, right: 6,
+                          width: 28, height: 28, borderRadius: '50%',
+                          background: 'rgba(0,0,0,0.65)', color: '#fff',
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          textDecoration: 'none',
+                        }}
                       >
-                        <img src={a.dataUri} alt={a.name || `Attachment ${idx + 1}`}
-                          style={{ display: 'block', width: '100%', maxHeight: 320, objectFit: 'contain', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface-2)' }} />
-                      </button>
-                    )}
-                    {a.name && (
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</div>
-                    )}
-                  </div>
-                ))}
+                        <i className="bi-download" style={{ fontSize: 12 }} />
+                      </a>
+                      {a.name && (
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.name}</div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           );
@@ -1166,6 +1209,7 @@ function ExpandedDetail({ item, isPriv, onStatusChange, onPriorityChange, onAssi
       <ImageLightbox
         src={lightbox?.src}
         name={lightbox?.name}
+        kind={lightbox?.kind || 'image'}
         onClose={() => setLightbox(null)}
       />
     </div>

@@ -225,7 +225,25 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
     }
     return false;
   };
-  const pendingForMe=useMemo(()=>comms.filter(c=>c.status==='sent'&&targetMatch(c)&&!isAckedByMe(c)&&!(c.author&&c.author.id===user.id)),[comms,user,uid,serverUid,myEmailLc,serverEmailLc]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Exclude announcements I authored from MY "pending" list. Author match
+  // is email-first (canonical), with id-axis as a fallback that only fires
+  // when both sides carry a positive integer — sentinel `0` (override-only
+  // users) and null/undefined ids must NOT coerce-collide into a false
+  // self-author identification, otherwise an override-only viewer would
+  // see their pending count under-report for every author=0 announcement.
+  const isAuthoredByMe = (c) => {
+    if (!c.author) return false;
+    const aEmail = String(c.author.email || '').toLowerCase();
+    if (aEmail && myEmailLc && aEmail === myEmailLc) return true;
+    if (aEmail && serverEmailLc && aEmail === serverEmailLc) return true;
+    const aIdN = Number(c.author.id);
+    if (Number.isFinite(aIdN) && aIdN > 0) {
+      if (Number.isFinite(uid) && uid > 0 && aIdN === uid) return true;
+      if (Number.isFinite(serverUid) && serverUid > 0 && aIdN === serverUid) return true;
+    }
+    return false;
+  };
+  const pendingForMe=useMemo(()=>comms.filter(c=>c.status==='sent'&&targetMatch(c)&&!isAckedByMe(c)&&!isAuthoredByMe(c)),[comms,user,uid,serverUid,myEmailLc,serverEmailLc]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const acknowledge=(id)=>{
     // Always pass both axes to the API — the hook uses email first in its
@@ -1073,9 +1091,22 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
   // "global" could never be acknowledged by the management team and the
   // tracker permanently showed 1-2%. Author identity is stable across
   // id/email drift because we compare both axes.
+  //
+  // Email is the primary axis (canonical, stable). The id axis is only
+  // consulted when BOTH sides carry a real positive integer — otherwise a
+  // sentinel `0` (override-only member without a `members` row) or a
+  // missing `user.id` would coerce via `Number(null)` / `Number('')` →
+  // 0 and falsely identify the viewer as the author, hiding the ack
+  // button on announcements whose `author_id` was never hydrated past a
+  // 0 placeholder. The 2026-05-12 "Missing Acknowledgment Button" bug
+  // (old announcements pre-roster-rebuild) traced back to this branch.
   const authorEmailLc = String(comm.author?.email || '').toLowerCase();
+  const authorIdNum = Number(comm.author?.id);
+  const viewerIdNum = Number(user?.id);
+  const haveBothPositiveIds = Number.isFinite(authorIdNum) && authorIdNum > 0
+    && Number.isFinite(viewerIdNum) && viewerIdNum > 0;
   const isAuthor = (authorEmailLc && myEmailLc && authorEmailLc === myEmailLc)
-    || (comm.author?.id != null && Number(comm.author.id) === Number(user.id));
+    || (haveBothPositiveIds && authorIdNum === viewerIdNum);
   const PRIO_COLORS={high:'#d42d35',medium:'#ed8d00',low:'#29811e',critical:'#d42d35'};
 
   // ── Emoji floaters ──

@@ -84,7 +84,7 @@ function formatDate(dateStr) {
   }
 }
 
-export default function AnnouncementPopup({ comm, onAcknowledge }) {
+export default function AnnouncementPopup({ comm, onAcknowledge, onSnooze }) {
   const config = TYPE_CONFIG[comm.type] || TYPE_CONFIG.announce;
   const priorityColor = PRIORITY_COLORS[comm.priority] || PRIORITY_COLORS.low;
 
@@ -107,10 +107,20 @@ export default function AnnouncementPopup({ comm, onAcknowledge }) {
   }, [comm.soundKey]);
 
   const [acking, setAcking] = useState(false);
+  const [snoozing, setSnoozing] = useState(false);
   const handleAcknowledge = useCallback(() => {
     setAcking(true);
     setTimeout(() => onAcknowledge(comm.id), 400);
   }, [onAcknowledge, comm.id]);
+  const handleSnooze = useCallback(() => {
+    if (!onSnooze) return;
+    setSnoozing(true);
+    // Briefly hold the "Snoozed" affordance so the user sees the action
+    // landed before the popup dismisses. App-level state then hides this
+    // popup for 4 hours; a minute-tick re-evaluates the queue so it
+    // reappears automatically without a page refresh.
+    setTimeout(() => onSnooze(comm.id), 400);
+  }, [onSnooze, comm.id]);
 
   return (
     <div
@@ -312,19 +322,58 @@ export default function AnnouncementPopup({ comm, onAcknowledge }) {
           )}
         </div>
 
-        {/* Acknowledge button — fixed at bottom */}
+        {/* Footer actions — fixed at bottom. Snooze sits to the left of
+            Acknowledge so the user always sees the "Acknowledge" CTA on
+            the right (the primary action). Snooze re-shows the popup in
+            4 h — the announcement is NOT lost, only deferred. Carolina
+            (2026-05-12) raised that having only an Acknowledge button
+            forced people to either stop everything to read or ack
+            without reading. */}
         <div
           style={{
             padding: '16px 32px 24px 32px',
             borderTop: '1px solid #f3f4f6',
             backgroundColor: 'var(--surface)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
           }}
         >
+          {onSnooze && (
+            <button
+              onClick={handleSnooze}
+              disabled={acking || snoozing}
+              title="Snooze for 4 hours — the popup will come back if you haven't acknowledged it"
+              style={{
+                flex: '0 0 auto',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                padding: '14px 20px',
+                backgroundColor: snoozing ? '#e5e7eb' : 'transparent',
+                color: snoozing ? '#374151' : '#374151',
+                border: '1px solid #d1d5db',
+                borderRadius: 128,
+                fontSize: 14,
+                fontWeight: 600,
+                cursor: (acking || snoozing) ? 'default' : 'pointer',
+                transition: 'all 0.2s',
+                lineHeight: 1,
+                whiteSpace: 'nowrap',
+              }}
+              onMouseEnter={(e) => { if (!acking && !snoozing) e.currentTarget.style.backgroundColor = '#f3f4f6'; }}
+              onMouseLeave={(e) => { if (!acking && !snoozing) e.currentTarget.style.backgroundColor = 'transparent'; }}
+            >
+              <i className={snoozing ? 'bi bi-check-lg' : 'bi bi-clock-history'} style={{ fontSize: 15 }} />
+              {snoozing ? 'Snoozed' : 'Snooze 4h'}
+            </button>
+          )}
           <button
             onClick={handleAcknowledge}
-            disabled={acking}
+            disabled={acking || snoozing}
             style={{
-              width: '100%',
+              flex: 1,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -336,12 +385,13 @@ export default function AnnouncementPopup({ comm, onAcknowledge }) {
               borderRadius: 128,
               fontSize: 15,
               fontWeight: 600,
-              cursor: acking ? 'default' : 'pointer',
+              cursor: (acking || snoozing) ? 'default' : 'pointer',
               transition: 'all 0.25s',
               lineHeight: 1,
+              opacity: snoozing ? 0.5 : 1,
             }}
-            onMouseEnter={(e) => { if (!acking) e.currentTarget.style.backgroundColor = '#1f2937'; }}
-            onMouseLeave={(e) => { if (!acking) e.currentTarget.style.backgroundColor = '#111827'; }}
+            onMouseEnter={(e) => { if (!acking && !snoozing) e.currentTarget.style.backgroundColor = '#1f2937'; }}
+            onMouseLeave={(e) => { if (!acking && !snoozing) e.currentTarget.style.backgroundColor = '#111827'; }}
           >
             <i className={acking ? 'bi bi-check-lg' : 'bi bi-check-circle-fill'} style={{ fontSize: 16 }} />
             {acking ? 'Acknowledged!' : 'Acknowledge'}

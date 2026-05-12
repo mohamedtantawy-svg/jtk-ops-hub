@@ -31,6 +31,10 @@ const STATUS_OPTIONS = [
   { id: 'in_progress', label: 'In Progress', color: '#92400e', bg: '#fff8e6' },
   { id: 'on_hold',     label: 'On Hold',     color: 'var(--text-secondary)', bg: '#f3f3f3' },
   { id: 'resolved',    label: 'Resolved',    color: '#166534', bg: '#e8f5e9' },
+  // Terminal "closed without resolving" — Megan's 2026-05-12 ask. Red
+  // semantic stays literal across themes (status colours convey meaning
+  // that must not shift with dark mode).
+  { id: 'rejected',    label: 'Rejected',    color: '#991b1b', bg: '#fee2e2' },
 ];
 const PRIORITY_OPTIONS = [
   { id: 'low',      label: 'Low' },
@@ -670,33 +674,89 @@ function AttachmentsGrid({ attachments }) {
         gap: 8,
       }}>
         {attachments.map((a, i) => {
+          // Tiles always render as a relative-positioned container so the
+          // download icon (and, for video, the play-overlay hint) can sit
+          // on top of the media without affecting its layout. The inline
+          // `<video>` previously rendered standalone — for large data URIs
+          // the inline player would silently fail to load with no way for
+          // the user to recover. We now open every attachment in the
+          // lightbox on click and always surface a download icon so the
+          // user has a fallback path to the file.
           const tileStyle = {
+            position: 'relative',
             display: 'block',
             borderRadius: 8,
             overflow: 'hidden',
             border: '1px solid var(--border)',
-            background: 'var(--surface-2)',
+            background: a.kind === 'video' ? '#1b1b1b' : 'var(--surface-2)',
             aspectRatio: '4 / 3',
             padding: 0,
-            cursor: a.kind === 'image' ? 'zoom-in' : 'default',
+            cursor: 'zoom-in',
             width: '100%',
           };
-          if (a.kind === 'image') {
-            return (
-              <button
-                key={i}
-                type="button"
-                onClick={() => setLightbox({ src: a.dataUri, name: a.name })}
-                style={tileStyle}
-                title="Open"
-              >
-                <img src={a.dataUri} alt={a.name || ''} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              </button>
-            );
-          }
+          const lightboxKind = a.kind === 'video' ? 'video' : 'image';
+          const titleAttr = a.kind === 'video' ? 'Play video' : 'Open image';
           return (
-            <div key={i} style={tileStyle}>
-              <video src={a.dataUri} controls preload="metadata" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <div key={i} style={{ position: 'relative' }}>
+              <button
+                type="button"
+                onClick={() => setLightbox({ src: a.dataUri, name: a.name, kind: lightboxKind })}
+                style={tileStyle}
+                title={titleAttr}
+                aria-label={titleAttr}
+              >
+                {a.kind === 'image' ? (
+                  <img src={a.dataUri} alt={a.name || ''} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  // `preload="metadata"` is enough to render the first
+                  // frame as a thumbnail. Pointer events are disabled so
+                  // clicks bubble to the wrapping button (one click =
+                  // open lightbox, never accidentally tap inline-play).
+                  <>
+                    <video
+                      src={a.dataUri}
+                      preload="metadata"
+                      muted
+                      playsInline
+                      style={{ width: '100%', height: '100%', objectFit: 'cover', pointerEvents: 'none' }}
+                    />
+                    <span style={{
+                      position: 'absolute', inset: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      pointerEvents: 'none',
+                    }}>
+                      <span style={{
+                        width: 44, height: 44, borderRadius: '50%',
+                        background: 'rgba(0,0,0,0.55)', color: '#fff',
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        <i className="bi-play-fill" style={{ fontSize: 22 }} />
+                      </span>
+                    </span>
+                  </>
+                )}
+              </button>
+              {/* Download — works for both images and videos via the
+                  `download` attribute on a data: URI. Sits at the
+                  top-right of every tile so the user always has a way
+                  to save the file even if the in-app player can't
+                  decode it. */}
+              <a
+                href={a.dataUri}
+                download={a.name || (a.kind === 'video' ? 'attachment.mp4' : 'attachment.png')}
+                onClick={e => e.stopPropagation()}
+                aria-label={`Download ${a.name || a.kind}`}
+                title="Download"
+                style={{
+                  position: 'absolute', top: 6, right: 6,
+                  width: 28, height: 28, borderRadius: '50%',
+                  background: 'rgba(0,0,0,0.65)', color: '#fff',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  textDecoration: 'none',
+                }}
+              >
+                <i className="bi-download" style={{ fontSize: 12 }} />
+              </a>
             </div>
           );
         })}
@@ -704,6 +764,7 @@ function AttachmentsGrid({ attachments }) {
       <ImageLightbox
         src={lightbox?.src}
         name={lightbox?.name}
+        kind={lightbox?.kind || 'image'}
         onClose={() => setLightbox(null)}
       />
     </div>

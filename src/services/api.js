@@ -61,18 +61,28 @@ export async function apiFetch(path, options = {}) {
     // admin or regional_manager, so this is safe to ALWAYS attach when
     // present — no need to gate it client-side. (Stage 2 of the
     // 2026-05-03 audit fix sweep — A-F17 / A-F19 / A-F22.)
-    try {
-      const raw = sessionStorage.getItem('ops_hub_impersonating');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        // App.jsx writes `{ actor: <admin email>, target: <impersonated email> }`.
-        // The server expects the IMPERSONATED email (the "as" identity), so
-        // read `target` first and fall back to `email` for forward
-        // compatibility if the schema ever changes.
-        const target = parsed && (parsed.target || parsed.email);
-        if (target) impersonateAs = String(target).toLowerCase();
-      }
-    } catch {}
+    //
+    // EXCEPTION — `options.skipImpersonation`: identity routes (`/me`) must
+    // always return the ACTOR, never the impersonated target. Otherwise the
+    // FE writes the target's profile back into `user` state, the
+    // impersonation restore effect sees an actor mismatch on next refresh
+    // and wipes sessionStorage — Kristina's 2026-05-12 "Admin view reverts
+    // after a refresh" bug. Routes that opt out pass
+    // `apiFetch('/me', { skipImpersonation: true })`.
+    if (!options.skipImpersonation) {
+      try {
+        const raw = sessionStorage.getItem('ops_hub_impersonating');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          // App.jsx writes `{ actor: <admin email>, target: <impersonated email> }`.
+          // The server expects the IMPERSONATED email (the "as" identity), so
+          // read `target` first and fall back to `email` for forward
+          // compatibility if the schema ever changes.
+          const target = parsed && (parsed.target || parsed.email);
+          if (target) impersonateAs = String(target).toLowerCase();
+        }
+      } catch {}
+    }
   }
 
   const headers = {

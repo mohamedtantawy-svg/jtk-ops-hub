@@ -469,6 +469,19 @@ const App=()=>{
   // the real state in one batch. Cost: a one-frame flash where the user
   // briefly sees default settings before their stored prefs apply.
   const [dismissedPopups,setDismissedPopups]=useState([]);
+  // Per-popup snooze map: { [commId]: snoozeUntilEpochMs }. The popup is
+  // hidden from the queue while `Date.now() < snoozeUntilEpochMs`. After
+  // expiry the minute-tick re-evaluates the memo and the popup comes
+  // back automatically — the announcement is NOT lost (Carolina's
+  // 2026-05-12 ask: "make sure the announcement is not lost and must
+  // be acknowledged"). Persisted in localStorage so a tab close mid-
+  // snooze still suppresses the popup until the window expires.
+  const [snoozedPopups,setSnoozedPopups]=useState({});
+  // `popupTick` re-renders the popup memo every minute so a snooze that
+  // expires while the tab is open re-surfaces the popup without
+  // requiring a manual refresh. Cheap (one Date.now() comparison) and
+  // capped to once-per-minute so it costs ~nothing.
+  const [popupTick,setPopupTick]=useState(0);
   const [settings,setSettings]=useState(DEFAULT_SETTINGS);
   // Forward-compat merge of the cached `ops_hub_access_types` snapshot.
   // Without this, when a new view / action / admin power is shipped (most
@@ -493,6 +506,25 @@ const App=()=>{
     try {
       const d = localStorage.getItem('ops_hub_dismissed_popups');
       if (d) setDismissedPopups(JSON.parse(d));
+    } catch {}
+    try {
+      const s = localStorage.getItem('ops_hub_snoozed_popups');
+      if (s) {
+        const parsed = JSON.parse(s);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          // Prune already-expired entries on hydration so the localStorage
+          // map doesn't grow forever across browser sessions.
+          const now = Date.now();
+          const fresh = {};
+          for (const [id, until] of Object.entries(parsed)) {
+            if (Number.isFinite(until) && until > now) fresh[id] = until;
+          }
+          setSnoozedPopups(fresh);
+          if (Object.keys(fresh).length !== Object.keys(parsed).length) {
+            try { localStorage.setItem('ops_hub_snoozed_popups', JSON.stringify(fresh)); } catch {}
+          }
+        }
+      }
     } catch {}
     try {
       const s = localStorage.getItem('ops_hub_settings');
@@ -1580,10 +1612,33 @@ const App=()=>{
       if(Array.isArray(c.target)&&c.target.includes(user.id))return true;
       return matchesAudience(c.target, user);
     };
+    // Snooze gate — eslint-disable for popupTick because it intentionally
+    // forces re-evaluation every minute so an expired snooze brings the
+    // popup back without a page refresh, even though `popupTick` isn't
+    // read inside the filter body.
+    void popupTick; // eslint-disable-line no-unused-expressions
+    const now = Date.now();
+    const isSnoozed = (id) => {
+      const until = snoozedPopups?.[id];
+      return Number.isFinite(until) && until > now;
+    };
     return comms.filter(c=>
-      c.isPopup&&c.status==='sent'&&!isAckedByMe(c)&&!dismissedPopups.includes(c.id)&&(targetMatch(c)||(c.author&&c.author.id===user.id))
+      c.isPopup&&c.status==='sent'&&!isAckedByMe(c)&&!dismissedPopups.includes(c.id)&&!isSnoozed(c.id)&&(targetMatch(c)||(c.author&&c.author.id===user.id))
     );
-  },[comms,user,dismissedPopups,apiServerUserId,apiServerUserEmail]);
+  },[comms,user,dismissedPopups,snoozedPopups,popupTick,apiServerUserId,apiServerUserEmail]);
+
+  // Minute-tick used as a dependency of `popupQueue` above. Cheap — just
+  // increments a counter so the memo re-runs and re-checks snooze
+  // expiries. visibilitychange also nudges it so a tab that was hidden
+  // for hours catches up the moment it comes back into focus.
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const bump = () => setPopupTick((t) => (t + 1) % 1000000);
+    const id = setInterval(bump, 60_000);
+    const onVis = () => { if (!document.hidden) bump(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', onVis); };
+  }, []);
 
   const handlePopupAcknowledge=useCallback((commId)=>{
     // Immediately dismiss from popup queue + acknowledge in state/API.
@@ -1598,8 +1653,33 @@ const App=()=>{
       try { localStorage.setItem('ops_hub_dismissed_popups', JSON.stringify(next)); } catch(e){}
       return next;
     });
+    // Acking also clears any pending snooze so the localStorage map
+    // doesn't carry a dead entry around (acked → never popup again).
+    setSnoozedPopups(prev=>{
+      if (!prev || !(commId in prev)) return prev;
+      const next = { ...prev };
+      delete next[commId];
+      try { localStorage.setItem('ops_hub_snoozed_popups', JSON.stringify(next)); } catch(e){}
+      return next;
+    });
     apiAcknowledge(commId, user.id, user.email);
   },[user, apiAcknowledge]);
+
+  const SNOOZE_DURATION_MS = 4 * 60 * 60 * 1000; // 4 hours
+  const handlePopupSnooze = useCallback((commId) => {
+    // Hide the popup for SNOOZE_DURATION_MS. The minute-tick re-evaluates
+    // the popupQueue memo so the popup reappears the moment the window
+    // expires — even if the tab stays open. We DO NOT add the id to
+    // dismissedPopups: snooze is temporary, dismiss is permanent.
+    setSnoozedPopups(prev => {
+      const next = { ...(prev || {}), [commId]: Date.now() + SNOOZE_DURATION_MS };
+      try { localStorage.setItem('ops_hub_snoozed_popups', JSON.stringify(next)); } catch (e) {}
+      return next;
+    });
+    // Surface a confirmation so the user knows it's not lost.
+    if (addToast) addToast('info', 'Snoozed for 4 hours', 'The announcement will pop up again — it still needs your acknowledgement.');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addToast]);
 
   useEffect(()=>{setSubFilter(null);},[view]);
 
@@ -1793,7 +1873,7 @@ const App=()=>{
           (anything other than 'own_tasks_only' is a TL/RM/Admin); agents
           never see it. */}
       {!showOnboard && !showWhatsNew && showMgrTour && perms?.dataScope && perms.dataScope !== 'own_tasks_only' &&<ManagerTour onDismiss={()=>setShowMgrTour(false)}/>}
-      {popupQueue.length>0&&<AnnouncementPopup key={popupQueue[0].id} comm={popupQueue[0]} onAcknowledge={handlePopupAcknowledge}/>}
+      {popupQueue.length>0&&<AnnouncementPopup key={popupQueue[0].id} comm={popupQueue[0]} onAcknowledge={handlePopupAcknowledge} onSnooze={handlePopupSnooze}/>}
       <Toasts toasts={toasts} dismiss={dismissToast}/>
     </div>
     </SettingsContext.Provider>

@@ -100,7 +100,12 @@ function OOOView({ user, setView, addToast }) {
   const [selectedEventId, setSelectedEventId] = useState(urlInit.handover || null);
   const [wizardEventId, setWizardEventId] = useState(null);   // null = closed; an id = open w/ that event
 
-  const { items: members } = useTeamMembers();
+  // `useTeamMembers` returns `{ members, membersByEmail, ... }` — the
+  // previous `items` rename matched an older shape and silently produced
+  // `undefined`. With members undefined the create-handover modal's
+  // coverer search rendered zero candidates (Jose's 2026-05-12 bug
+  // report: "typing a name returns no results and no dropdown appears").
+  const { members } = useTeamMembers();
 
   // Sync state → URL + localStorage
   useEffect(() => { pushUrl({ mode, lens, from, to, handover: selectedEventId }); }, [mode, lens, from, to, selectedEventId]);
@@ -406,7 +411,11 @@ function OOOView({ user, setView, addToast }) {
           </div>
         </div>
 
-        <ActionBanner counts={counts} onJumpToLens={setLens} />
+        <ActionBanner
+          counts={counts}
+          onJumpToLens={setLens}
+          onCreateHandover={() => setWizardEventId('')}
+        />
       </div>
 
       {/* ── Body ────────────────────────────────────────────────────── */}

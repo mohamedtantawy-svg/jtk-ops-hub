@@ -113,7 +113,11 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
     const c = normalizeOffboarding(off.items, queueSla).filter(r => !isHidden('offboarding', r.id) && matches(r));
     const d = normalizeAmendments(cr.amendments, queueSla).filter(r => !isHidden('amendments', r.id) && matches(r));
     const e = normalizeRedlines(cr.redlines, queueSla).filter(r => !isHidden('redlines', r.id) && matches(r));
-    const f = normalizeWorkbench(wb.tasks, queueSla).filter(r => !isHidden('workbench', r.id) && matches(r));
+    // myRows feeds the agent's "open across sources" rollup — skip the 24h
+    // COMPLETED + CLOSED workbench tail so finished work doesn't re-inflate
+    // today's active count. The dedicated `wbResolved` block below already
+    // surfaces the agent's resolved-today contribution for the KPI tile.
+    const f = normalizeWorkbench(wb.tasks, queueSla).filter(r => !isHidden('workbench', r.id) && matches(r) && !r.isResolved);
     const g = normalizeIncentivePlans(ip.items, queueSla).filter(r => !isHidden('incentive_plans', r.id) && matches(r));
     return [...a, ...b, ...c, ...d, ...e, ...f, ...g];
   }, [onb.items, pob.items, off.items, cr.amendments, cr.redlines, wb.tasks, ip.items, queueSla, isHidden, myEmail]);

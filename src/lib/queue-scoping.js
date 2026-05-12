@@ -321,21 +321,65 @@ export const scopeZendeskTickets   = (items, user) => filterByAssignee(items, us
 export const scopeJiraIssues       = (items, user) => filterByAssignee(items, user);
 export const scopeWorkbenchTasks   = (items, user) => filterByAssignee(items, user);
 
-export const scopeOnboardingPeople      = (items, user) => filterByCountryOrAssignee(items, user);
-export const scopePausedOnboarding      = (items, user) => filterByCountryOrAssignee(items, user);
-// Offboarding: agents see ASSIGNEE-only (with country fallback for orphans),
+// Agents see ASSIGNEE-only (with country fallback only for orphan rows),
 // while TL / Regional / Admin keep the broader country-OR-assignee union so
 // they retain visibility into their team's / region's full pipeline.
-// Raised by Raquel 2026-04-28 — agents were seeing the entire UK team's
-// offboarding because the union model surfaced every country-owned row
-// regardless of assignment. (Bug 4)
-export const scopeOffboardingCases = (items, user) => {
+//
+// First applied to Offboarding on 2026-04-28 after Raquel reported seeing
+// the entire UK team's offboarding queue. Extended to every other
+// country-OR-assignee surface on 2026-05-12 — Raquel raised the same bug
+// on Amendments ("When I am working on my task, I can see tasks for
+// other HRX under the same country, meaning that the volume of tasks is
+// more than it should be"). Mohamed approved extending the agent-strict
+// rule across the board: agents now see only THEIR row on every queue,
+// managers still see the full country/team picture.
+//
+// `assigneeEmail` is reliably populated on every row because the
+// synthetic-owner shim in `normalizeSourceRows.js` fills it from
+// COUNTRY_OWNERS (hash-balanced round-robin) for queues without an
+// upstream assignee (Amendments, Redlines, Incentive Plans). So the
+// strict assignee filter is meaningful on every queue here.
+const scopeAgentOrUnion = (items, user) => {
   if (normalizeRole(user) === 'agent') return filterByAssignee(items, user);
   return filterByCountryOrAssignee(items, user);
 };
-export const scopeAmendmentRequests     = (items, user) => filterByCountryOrAssignee(items, user);
-export const scopeRedlineRequests       = (items, user) => filterByCountryOrAssignee(items, user);
-// Incentive plans have no upstream assignee, so they ride the country path
-// only — country owners (and their TL/RM chain) see every PENDING_IP_PREP
-// row in their owned countries; admin sees all.
-export const scopeIncentivePlans        = (items, user) => filterByCountryOrAssignee(items, user);
+
+// Hidden-task list visibility (2026-05-12). The Hidden tab was admin-only;
+// Jose asked to widen it to every role with the same scope rules used
+// elsewhere. The `hidden_task` table does NOT denormalise country /
+// assignee per row, so we can't apply the country-OR-assignee union
+// directly. Closest match using the columns we DO have:
+//   • Admin                — sees everything (short-circuit).
+//   • TL / RM              — see rows where the requester (`hidden_by_email`)
+//                            or the approving manager (`approved_by_email`)
+//                            is anywhere in their visibility chain. This
+//                            preserves the team-lead / region semantics
+//                            (a TL sees what their team hid; an RM sees
+//                            their region's hides).
+//   • Agent                — sees only the rows they personally requested
+//                            or approved (visibleEmails for an agent is
+//                            just their own email).
+// `hiddenKeys` (used by the queue-display filter so a hidden row never
+// re-appears anywhere) is intentionally NOT scoped — hides are global,
+// only the audit-list rendering is per-role. Apply this helper at the
+// Hidden-tab render site, not in the source-cache layer.
+export function scopeHiddenTasks(items, user) {
+  if (!Array.isArray(items)) return [];
+  if (!user) return [];
+  if (isAdminUser(user)) return items;
+  const visibleEmails = getVisibleEmails(user);
+  return items.filter(it => {
+    const h = (it?.hiddenByEmail || '').toLowerCase();
+    if (h && visibleEmails.has(h)) return true;
+    const a = (it?.approvedByEmail || '').toLowerCase();
+    if (a && visibleEmails.has(a)) return true;
+    return false;
+  });
+}
+
+export const scopeOnboardingPeople      = (items, user) => scopeAgentOrUnion(items, user);
+export const scopePausedOnboarding      = (items, user) => scopeAgentOrUnion(items, user);
+export const scopeOffboardingCases      = (items, user) => scopeAgentOrUnion(items, user);
+export const scopeAmendmentRequests     = (items, user) => scopeAgentOrUnion(items, user);
+export const scopeRedlineRequests       = (items, user) => scopeAgentOrUnion(items, user);
+export const scopeIncentivePlans        = (items, user) => scopeAgentOrUnion(items, user);

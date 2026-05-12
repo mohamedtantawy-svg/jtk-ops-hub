@@ -92,6 +92,21 @@ async function checkForWipe(query) {
 }
 
 export async function register() {
+  // Watchdog runs in every server boot regardless of DB availability —
+  // memory issues happen even when the DB is offline (mock-data paths,
+  // build pre-render, etc.). Imported dynamically + Node-runtime gated
+  // so the Edge bundle (used by middleware) never pulls in
+  // `process.memoryUsage`, which Turbopack's static analyser flags as
+  // Edge-runtime incompatible.
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    try {
+      const { startMemoryWatchdog } = await import('./src/lib/memory-watchdog');
+      startMemoryWatchdog();
+    } catch (err) {
+      console.warn('[memory-watchdog] could not start:', err?.message);
+    }
+  }
+
   // Only run migrations on the server, not during build
   if (process.env.NEXT_RUNTIME === 'nodejs' && process.env.DATABASE_URL) {
     try {

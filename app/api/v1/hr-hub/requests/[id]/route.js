@@ -23,8 +23,15 @@ import {
   addFollower,
 } from '../../../../../../src/lib/hr-hub-helpers';
 
-const ALLOWED_STATUSES = ['new', 'in_progress', 'on_hold', 'resolved'];
-const STATUS_ORDER = Object.fromEntries(ALLOWED_STATUSES.map((s, i) => [s, i]));
+// `rejected` is a terminal state (alongside `resolved`) introduced
+// 2026-05-12 — Megan reported HR requests/reporting sometimes get
+// declined, not resolved. Both share rank 3 so moving between them
+// (e.g. an admin reclassifies a closure) doesn't trip the
+// backwards-direction guard below.
+const ALLOWED_STATUSES = ['new', 'in_progress', 'on_hold', 'resolved', 'rejected'];
+const STATUS_ORDER = {
+  new: 0, in_progress: 1, on_hold: 2, resolved: 3, rejected: 3,
+};
 const ALLOWED_PRIORITIES = new Set(['low', 'medium', 'high', 'critical']);
 
 function isUuid(s) {
@@ -189,9 +196,16 @@ export async function PATCH(req, { params }) {
         }
       }
       updates.push(`status = $${p++}`); values.push(patch.status);
-      if (patch.status === 'resolved') {
+      // `resolved_at` doubles as the "closed-at" timestamp for either
+      // terminal status — Megan's 2026-05-12 ask added `rejected` as a
+      // close path, so we stamp on both transitions in and clear on
+      // re-open (move back to a non-terminal state).
+      const TERMINAL = new Set(['resolved', 'rejected']);
+      const wasTerminal = TERMINAL.has(existing.status);
+      const isTerminal = TERMINAL.has(patch.status);
+      if (!wasTerminal && isTerminal) {
         updates.push(`resolved_at = NOW()`);
-      } else if (existing.status === 'resolved') {
+      } else if (wasTerminal && !isTerminal) {
         updates.push(`resolved_at = NULL`);
       }
       logs.push({ event: 'status_change', before: { status: existing.status }, after: { status: patch.status } });
