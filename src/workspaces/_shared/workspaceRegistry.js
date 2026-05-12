@@ -44,6 +44,7 @@ export const COMMAND_CENTER_ADMINS = [
 
 const PAYROLL_GIX_TABS = [
   { id: 'home', label: 'Home' },
+  { id: 'team', label: 'Team' },
   { id: 'workspace', label: 'Workspace' },
   { id: 'ooo', label: 'OOO' },
   { id: 'urgent-assist', label: 'Urgent Assist' },

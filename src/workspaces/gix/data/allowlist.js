@@ -1,13 +1,14 @@
 // ─────────────────────────────────────────────────────────────────────────
-// GIX HUB ACCESS
+// GIX HUB ACCESS + ROSTER
 //
-// Auto-generated 2026-05-12 from `GIX Org Chart - Deelers Info.xlsx`. Source
-// of truth is the GIX team's HRIS. When the roster changes, regenerate this
-// file rather than hand-editing — keeps drift between this and HRIS minimal.
+// Auto-generated 2026-05-12 from `GIX Org Chart - Deelers Info.xlsx` source data.
+// `ALLOWED_EMAILS` gates access. `ROSTER` carries manager relationships
+// used by the Team view + org chart. Names are derived client-side from
+// the local-part of the email (helpers/deriveName) — no PII stored here
+// beyond what's in the @deel.com email itself.
 //
-// `ADMINS` is a separate subset with elevated rights inside GIX Hub
-// (settings, configuration, roster management). Currently a placeholder
-// pending team-lead assignment; mohamed.tantawy@deel.com is bootstrap admin.
+// `ADMINS` is the bootstrap admin subset; currently mohamed.tantawy
+// pending team-lead assignment.
 // ─────────────────────────────────────────────────────────────────────────
 
 export const GIX_ALLOWED_EMAILS = [
@@ -80,6 +81,77 @@ export const GIX_ALLOWED_EMAILS = [
   'valentina.rojas@deel.com',
   'victoria.albuquerque@deel.com',
 ];
+
+export const GIX_ROSTER = {
+  'adriana.diez@deel.com': 'derek.house@deel.com',
+  'aniket.dutta@deel.com': 'neethu.harilal@deel.com',
+  'antonella.baletto@deel.com': 'paula.schlitt@deel.com',
+  'arjun.kamath@deel.com': 'paula.schlitt@deel.com',
+  'ashley.acevedo@deel.com': 'greta.klevinskiene@deel.com',
+  'beata.sroda@deel.com': 'derek.house@deel.com',
+  'breno.freire@deel.com': 'greta.klevinskiene@deel.com',
+  'brygida.duszynska@deel.com': 'derek.house@deel.com',
+  'callum.middleton@deel.com': 'madiha.azam@deel.com',
+  'carla.plata@deel.com': 'derek.house@deel.com',
+  'catalina.oyarzo@deel.com': 'beata.sroda@deel.com',
+  'chahat.sharma@deel.com': 'carla.plata@deel.com',
+  'charlotte.gachon@deel.com': 'greta.klevinskiene@deel.com',
+  'clare.macmillanbell@deel.com': 'greta.klevinskiene@deel.com',
+  'dahiana.plazas@deel.com': 'greta.klevinskiene@deel.com',
+  'darragh.cull@deel.com': 'beata.sroda@deel.com',
+  'elaine.kok@deel.com': 'derek.house@deel.com',
+  'eliane.suarez@deel.com': 'beata.sroda@deel.com',
+  'erica.wiessner@deel.com': 'julian.meneilley@deel.com',
+  'facundo.berdini@deel.com': 'beata.sroda@deel.com',
+  'fran.logiudice@deel.com': 'greta.klevinskiene@deel.com',
+  'greta.klevinskiene@deel.com': 'derek.house@deel.com',
+  'guillermo.harrsch@deel.com': 'carla.plata@deel.com',
+  'hanna.sirnio@deel.com': 'greta.klevinskiene@deel.com',
+  'heejin.jeon@deel.com': 'julian.meneilley@deel.com',
+  'iara.haertel@deel.com': 'julian.meneilley@deel.com',
+  'jacob.mgiba@deel.com': 'beata.sroda@deel.com',
+  'jaikishan.bhatia@deel.com': 'beata.sroda@deel.com',
+  'jane.lee@deel.com': 'derek.house@deel.com',
+  'julian.meneilley@deel.com': 'adriana.diez@deel.com',
+  'kara.guan@deel.com': 'derek.house@deel.com',
+  'katherine.cruzat@deel.com': 'beata.sroda@deel.com',
+  'katy.siu@deel.com': 'derek.house@deel.com',
+  'kevin.omeye@deel.com': 'julian.meneilley@deel.com',
+  'leah.mcrae@deel.com': 'julian.meneilley@deel.com',
+  'lopez.daniel@deel.com': 'greta.klevinskiene@deel.com',
+  'luna.lu@deel.com': 'carla.plata@deel.com',
+  'madiha.azam@deel.com': 'derek.house@deel.com',
+  'maite.bocutti@deel.com': 'julian.meneilley@deel.com',
+  'marcin.farganus@deel.com': 'derek.house@deel.com',
+  'maria.badaloni@deel.com': 'greta.klevinskiene@deel.com',
+  'maria.soto@deel.com': 'neethu.harilal@deel.com',
+  'mashael.aljassim@deel.com': 'madiha.azam@deel.com',
+  'max.rizza@deel.com': 'paula.schlitt@deel.com',
+  'mohamed.tantawy@deel.com': null,
+  'mohammed.alhashemi@deel.com': 'madiha.azam@deel.com',
+  'nailya.becker@deel.com': 'greta.klevinskiene@deel.com',
+  'neethu.harilal@deel.com': 'adriana.diez@deel.com',
+  'nesreen.starkey@deel.com': 'greta.klevinskiene@deel.com',
+  'nura.alieva@deel.com': 'madiha.azam@deel.com',
+  'olga.sotiriou@deel.com': 'greta.klevinskiene@deel.com',
+  'pam.chen@deel.com': 'derek.house@deel.com',
+  'patrick.chang@deel.com': 'adriana.diez@deel.com',
+  'paula.schlitt@deel.com': 'adriana.diez@deel.com',
+  'paulina.hermosillo@deel.com': 'adriana.diez@deel.com',
+  'pragnya.sudheendra@deel.com': 'paula.schlitt@deel.com',
+  'ricky.espana@deel.com': 'neethu.harilal@deel.com',
+  'sadaf.afaq@deel.com': 'beata.sroda@deel.com',
+  'safa.hadami@deel.com': 'greta.klevinskiene@deel.com',
+  'salima.talata@deel.com': 'beata.sroda@deel.com',
+  'seyi.faronbi@deel.com': 'julian.meneilley@deel.com',
+  'sheryl.saniel@deel.com': 'beata.sroda@deel.com',
+  'sophia.aziz@deel.com': 'madiha.azam@deel.com',
+  'stefan.poliakov@deel.com': 'greta.klevinskiene@deel.com',
+  'taylor.marshall@deel.com': 'derek.house@deel.com',
+  'valentin.malvasi@deel.com': 'julian.meneilley@deel.com',
+  'valentina.rojas@deel.com': 'carla.plata@deel.com',
+  'victoria.albuquerque@deel.com': 'greta.klevinskiene@deel.com',
+};
 
 export const GIX_ADMINS = [
   'mohamed.tantawy@deel.com',
