@@ -42,18 +42,22 @@ export const COMMAND_CENTER_ADMINS = [
   'mohamed.tantawy@deel.com',
 ];
 
+// Icons match HR's PRIMARY_TABS so the visual rhythm stays identical and
+// the label-hidden state at narrow viewports (per the @media rule in
+// src/index.css that hides .deel-nav-item-label under 1280px) still
+// communicates the tab purpose via icon.
 const PAYROLL_GIX_TABS = [
-  { id: 'home', label: 'Home' },
-  { id: 'team', label: 'Team' },
-  { id: 'workspace', label: 'Workspace' },
-  { id: 'ooo', label: 'OOO' },
-  { id: 'urgent-assist', label: 'Urgent Assist' },
-  { id: 'announcements', label: 'Announcements' },
+  { id: 'home',          label: 'Home',          icon: 'bi-house' },
+  { id: 'team',          label: 'Team',          icon: 'bi-people' },
+  { id: 'workspace',     label: 'Workspace',     icon: 'bi-inbox' },
+  { id: 'ooo',           label: 'OOO',           icon: 'bi-airplane' },
+  { id: 'urgent-assist', label: 'Urgent Assist', icon: 'bi-exclamation-octagon' },
+  { id: 'announcements', label: 'Announcements', icon: 'bi-megaphone' },
   // Admin-only — WorkspaceShell filters this tab out for non-admins based on
   // the role returned by /api/v1/workspaces/memberships. AdminView itself
   // also re-checks the role server-side, so the tab being visible is a UX
   // convenience, not an authorization gate.
-  { id: 'admin', label: 'Admin', adminOnly: true },
+  { id: 'admin',         label: 'Admin',         icon: 'bi-shield-lock', adminOnly: true },
 ];
 
 // HR-admin override: HR has its own admin model (isHrHubAdmin etc. via App.jsx).
@@ -78,7 +82,7 @@ export const WORKSPACES = {
     allowedEmails: COMMAND_CENTER_EMAILS,
     admins: COMMAND_CENTER_ADMINS,
     tabs: [
-      { id: 'home', label: 'Home' },
+      { id: 'home', label: 'Home', icon: 'bi-house' },
     ],
     defaultTab: 'home',
   },
