@@ -867,14 +867,16 @@ CREATE INDEX IF NOT EXISTS idx_hr_hub_request_flow_status ON hr_hub_request(flow
 CREATE INDEX IF NOT EXISTS idx_hr_hub_request_assignee   ON hr_hub_request(assignee_email, status);
 CREATE INDEX IF NOT EXISTS idx_hr_hub_request_creator    ON hr_hub_request(created_by_email, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_hr_hub_request_team_lead  ON hr_hub_request(team_lead_email, status);
--- Extend the hr_hub_request status taxonomy with `rejected` (2026-05-12).
+-- Extend the hr_hub_request status taxonomy with 'rejected' (2026-05-12).
 -- Megan reported HR requests/reporting sometimes get declined, not
--- resolved — closing them with `resolved` was inaccurate. The
+-- resolved — closing them with 'resolved' was inaccurate. The
 -- anonymous inline CHECK from CREATE TABLE becomes
 -- hr_hub_request_status_check; drop and re-add idempotently with the
 -- expanded value set. Existing rows (only the four legacy values) all
 -- continue to satisfy the new constraint, so the migration is
--- non-destructive.
+-- non-destructive. (SQL identifiers in this comment are deliberately
+-- single-quoted, not backticked — the whole SCHEMA_SQL is a JS
+-- template literal and stray backticks close it. Skill mistake #6.)
 DO $$ BEGIN
   ALTER TABLE hr_hub_request DROP CONSTRAINT IF EXISTS hr_hub_request_status_check;
   ALTER TABLE hr_hub_request ADD CONSTRAINT hr_hub_request_status_check
