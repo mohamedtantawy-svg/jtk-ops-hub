@@ -344,6 +344,39 @@ const scopeAgentOrUnion = (items, user) => {
   return filterByCountryOrAssignee(items, user);
 };
 
+// Hidden-task list visibility (2026-05-12). The Hidden tab was admin-only;
+// Jose asked to widen it to every role with the same scope rules used
+// elsewhere. The `hidden_task` table does NOT denormalise country /
+// assignee per row, so we can't apply the country-OR-assignee union
+// directly. Closest match using the columns we DO have:
+//   • Admin                — sees everything (short-circuit).
+//   • TL / RM              — see rows where the requester (`hidden_by_email`)
+//                            or the approving manager (`approved_by_email`)
+//                            is anywhere in their visibility chain. This
+//                            preserves the team-lead / region semantics
+//                            (a TL sees what their team hid; an RM sees
+//                            their region's hides).
+//   • Agent                — sees only the rows they personally requested
+//                            or approved (visibleEmails for an agent is
+//                            just their own email).
+// `hiddenKeys` (used by the queue-display filter so a hidden row never
+// re-appears anywhere) is intentionally NOT scoped — hides are global,
+// only the audit-list rendering is per-role. Apply this helper at the
+// Hidden-tab render site, not in the source-cache layer.
+export function scopeHiddenTasks(items, user) {
+  if (!Array.isArray(items)) return [];
+  if (!user) return [];
+  if (isAdminUser(user)) return items;
+  const visibleEmails = getVisibleEmails(user);
+  return items.filter(it => {
+    const h = (it?.hiddenByEmail || '').toLowerCase();
+    if (h && visibleEmails.has(h)) return true;
+    const a = (it?.approvedByEmail || '').toLowerCase();
+    if (a && visibleEmails.has(a)) return true;
+    return false;
+  });
+}
+
 export const scopeOnboardingPeople      = (items, user) => scopeAgentOrUnion(items, user);
 export const scopePausedOnboarding      = (items, user) => scopeAgentOrUnion(items, user);
 export const scopeOffboardingCases      = (items, user) => scopeAgentOrUnion(items, user);
