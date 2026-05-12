@@ -11,7 +11,14 @@
 //
 // API integrations are intentionally NOT wired. Each workspace will get its
 // own credentials later; do not reuse HR's API adapters.
+//
+// Roster source of truth lives WITH each team under
+// `src/workspaces/<team>/data/allowlist.js`. CODEOWNERS protects those files
+// so each team can manage its own roster without crossing into shared code.
 // ─────────────────────────────────────────────────────────────────────────────
+
+import { PAYROLL_ALLOWED_EMAILS, PAYROLL_ADMINS } from '../payroll/data/allowlist';
+import { GIX_ALLOWED_EMAILS, GIX_ADMINS } from '../gix/data/allowlist';
 
 export const WORKSPACE_IDS = {
   HR: 'hr',
@@ -23,23 +30,16 @@ export const WORKSPACE_IDS = {
 // localStorage key for the user's most-recent workspace pick from the picker.
 export const SELECTED_WORKSPACE_KEY = 'ops_hub_selected_workspace';
 
-// Hardcoded allowlists. Future plan: move to a DB table keyed on email →
-// workspace. For now, simple arrays so we don't ship a half-built admin UI.
-//
-// Empty allowlist = permissive (anyone authenticated can enter) — used during
-// rollout while Payroll/GIX rosters aren't confirmed yet. Once populated, the
-// list becomes restrictive.
+// Command Center has a small, leadership-only roster — fine to keep inline.
+// Payroll and GIX use larger rosters that live in each team's data/ folder.
 export const COMMAND_CENTER_EMAILS = [
-  'kento.arrue@deel.com',
   'carlos@deel.com',
+  'kento.arrue@deel.com',
+  'mohamed.tantawy@deel.com',
 ];
 
-export const PAYROLL_EMAILS = [
-  // User will provide list.
-];
-
-export const GIX_EMAILS = [
-  // User will provide list.
+export const COMMAND_CENTER_ADMINS = [
+  'mohamed.tantawy@deel.com',
 ];
 
 const PAYROLL_GIX_TABS = [
@@ -48,6 +48,15 @@ const PAYROLL_GIX_TABS = [
   { id: 'ooo', label: 'OOO' },
   { id: 'urgent-assist', label: 'Urgent Assist' },
   { id: 'announcements', label: 'Announcements' },
+];
+
+// HR-admin override: HR has its own admin model (isHrHubAdmin etc. via App.jsx).
+// We don't touch that. But mohamed.tantawy@deel.com is the bootstrap super-admin
+// across all workspaces, including HR — listed here only so isWorkspaceAdmin()
+// returns the right answer when HR code (or future cross-workspace tooling)
+// asks.
+const HR_ADMINS = [
+  'mohamed.tantawy@deel.com',
 ];
 
 // All four workspaces, including HR. HR's `tabs` is empty because the legacy
@@ -61,6 +70,7 @@ export const WORKSPACES = {
     icon: 'bi-bar-chart-fill',
     accent: '#7c3aed',
     allowedEmails: COMMAND_CENTER_EMAILS,
+    admins: COMMAND_CENTER_ADMINS,
     tabs: [
       { id: 'home', label: 'Home' },
     ],
@@ -73,6 +83,7 @@ export const WORKSPACES = {
     icon: 'bi-people-fill',
     accent: '#ed5e2a',
     allowedEmails: [], // open to anyone authenticated via @deel.com SSO
+    admins: HR_ADMINS, // informational only — HR's own isHrHubAdmin flag is canonical
     tabs: [], // HR's App.jsx owns its own nav, not the registry
     defaultTab: null,
   },
@@ -82,7 +93,8 @@ export const WORKSPACES = {
     description: 'Workspace for the Payroll Operations team.',
     icon: 'bi-cash-coin',
     accent: '#10b981',
-    allowedEmails: PAYROLL_EMAILS,
+    allowedEmails: PAYROLL_ALLOWED_EMAILS,
+    admins: PAYROLL_ADMINS,
     tabs: PAYROLL_GIX_TABS,
     defaultTab: 'home',
   },
@@ -92,7 +104,8 @@ export const WORKSPACES = {
     description: 'Workspace for the Global Immigration team.',
     icon: 'bi-globe2',
     accent: '#3b82f6',
-    allowedEmails: GIX_EMAILS,
+    allowedEmails: GIX_ALLOWED_EMAILS,
+    admins: GIX_ADMINS,
     tabs: PAYROLL_GIX_TABS,
     defaultTab: 'home',
   },
@@ -155,4 +168,16 @@ export function userHasAccess(workspaceId, email) {
   if (!email) return false;
   const normalised = String(email).trim().toLowerCase();
   return ws.allowedEmails.some(e => e.toLowerCase() === normalised);
+}
+
+// Admin check for a given workspace. NOTE: HR Hub's canonical admin model is
+// the legacy `isHrHubAdmin` / `isAccessAdmin` flags on the user object (handled
+// by App.jsx); this helper returning true for HR is informational only and
+// SHOULD NOT be used to gate HR-Hub admin UI.
+export function isWorkspaceAdmin(workspaceId, email) {
+  if (!workspaceId || !email) return false;
+  const ws = WORKSPACES[workspaceId];
+  if (!ws || !ws.admins) return false;
+  const normalised = String(email).trim().toLowerCase();
+  return ws.admins.some(e => e.toLowerCase() === normalised);
 }

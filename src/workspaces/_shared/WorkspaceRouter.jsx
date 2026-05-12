@@ -78,8 +78,12 @@ export default function WorkspaceRouter() {
   }));
   const { email, urlParam, selectedWorkspace } = snapshot;
 
-  // Pre-auth: show picker (unless URL param explicitly overrides for dev).
-  if (!email && !urlParam) {
+  // Pre-auth: always show the picker. URL param is NOT an auth bypass — it
+  // only acts as a workspace override AFTER the user has authenticated.
+  // (Earlier it bypassed both picker and auth, which let anyone hit
+  // /?workspace=command-center and see the CC UI without signing in. Audit
+  // 2026-05-12 flagged this for fixing before main.)
+  if (!email) {
     return <WorkspacePicker initialSelected={selectedWorkspace} />;
   }
 
