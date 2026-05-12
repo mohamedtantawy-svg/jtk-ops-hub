@@ -8,6 +8,7 @@ import WorkspacePage from './pages/WorkspacePage';
 import OOOPage from './pages/OOOPage';
 import UrgentAssistPage from './pages/UrgentAssistPage';
 import AnnouncementsPage from './pages/AnnouncementsPage';
+import AdminPage from './pages/AdminPage';
 
 function PayrollContent() {
   const { activeTab } = useWorkspace();
@@ -17,15 +18,16 @@ function PayrollContent() {
     case 'ooo': return <OOOPage />;
     case 'urgent-assist': return <UrgentAssistPage />;
     case 'announcements': return <AnnouncementsPage />;
+    case 'admin': return <AdminPage />;
     case 'home':
     default:
       return <HomePage />;
   }
 }
 
-export default function PayrollApp({ email, workspace }) {
+export default function PayrollApp({ email, workspace, role }) {
   return (
-    <WorkspaceProvider workspace={workspace} email={email}>
+    <WorkspaceProvider workspace={workspace} email={email} role={role}>
       <WorkspaceShell>
         <PayrollContent />
       </WorkspaceShell>
