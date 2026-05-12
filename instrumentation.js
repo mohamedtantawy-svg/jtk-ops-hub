@@ -91,7 +91,51 @@ async function checkForWipe(query) {
   }
 }
 
+// ── Memory watchdog ─────────────────────────────────────────────────────────
+// Logs pod RSS / heap every 60 s so the next time memory spikes we can pin
+// the timing in the pod logs without external profiling. Also LOUDLY warns
+// at two thresholds:
+//   • SOFT (800 MiB RSS): "approaching memory cap" — operators see this in
+//     Nexus log search; if it stays elevated, investigate.
+//   • HARD (950 MiB RSS): "over budget" — pod is within ~50 MiB of the
+//     1 GiB target ceiling the user set on 2026-05-12. Anything above
+//     this should be treated as a regression.
+//
+// No throwing, no GC forcing — observation only. The actual caps that keep
+// us under 1 GiB live in server-cache.js, deel-api.js's workbench
+// projection / finished-tail cap, and the CONTRACT_DETAIL_CACHE bound.
+function startMemoryWatchdog() {
+  const SOFT_RSS_MB = 800;
+  const HARD_RSS_MB = 950;
+  const tick = () => {
+    try {
+      const m = process.memoryUsage();
+      const rssMB = Math.round(m.rss / (1024 * 1024));
+      const heapMB = Math.round(m.heapUsed / (1024 * 1024));
+      const extMB = Math.round((m.external || 0) / (1024 * 1024));
+      if (rssMB >= HARD_RSS_MB) {
+        console.warn(`[memory] OVER BUDGET — rss=${rssMB} MiB heap=${heapMB} MiB external=${extMB} MiB (target ceiling 1024 MiB)`);
+      } else if (rssMB >= SOFT_RSS_MB) {
+        console.warn(`[memory] approaching cap — rss=${rssMB} MiB heap=${heapMB} MiB external=${extMB} MiB`);
+      } else {
+        console.log(`[memory] rss=${rssMB} MiB heap=${heapMB} MiB external=${extMB} MiB`);
+      }
+    } catch {}
+  };
+  // First reading right after boot so a cold-start spike is recorded, then
+  // every 60 s.
+  setTimeout(tick, 5_000);
+  setInterval(tick, 60_000).unref?.();
+}
+
 export async function register() {
+  // Watchdog runs in every server boot regardless of DB availability —
+  // memory issues happen even when the DB is offline (mock-data paths,
+  // build pre-render, etc.).
+  if (process.env.NEXT_RUNTIME === 'nodejs') {
+    startMemoryWatchdog();
+  }
+
   // Only run migrations on the server, not during build
   if (process.env.NEXT_RUNTIME === 'nodejs' && process.env.DATABASE_URL) {
     try {

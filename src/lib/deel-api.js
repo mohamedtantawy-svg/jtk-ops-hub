@@ -1124,9 +1124,37 @@ async function fetchAllRedlinesForStatus(status) {
 // inline on most rows — we fetch /admin/api/contract/{oid} to read them.
 // Shared across feeds so a contract referenced by both an amendment and a
 // workbench task only round-trips once per hour.
+// LRU-bounded contract-detail cache. The previous unbounded `Map` grew
+// every time a contract was resolved (onboarding + offboarding +
+// amendments + redlines + workbench + incentive plans all feed into it).
+// Stale entries were never pruned — only checked at read time — so after
+// a few hours of running the map could hold tens of thousands of dead
+// entries. 2026-05-12 memory audit pinned this as a contributor to the
+// > 3 GiB RSS spikes that triggered OOM kills.
+//
+// Cap: 4000 entries (covers all currently-active Deel rows with headroom).
+// Eviction: O(1) LRU via insertion-ordered Map — re-set on read to move
+// the entry to the tail, drop the head when over cap.
+const CONTRACT_DETAIL_CACHE_MAX = 4000;
 const CONTRACT_DETAIL_CACHE = new Map();
 const CONTRACT_DETAIL_TTL_MS = 60 * 60 * 1000;
 const CONTRACT_DETAIL_CONCURRENCY = 5;
+
+function _contractCacheTouch(key, entry) {
+  // Re-insert moves the entry to the tail in a v8-spec Map's iteration
+  // order, making the head the least-recently-touched key. Safe to call
+  // during reads — the entry object reference is preserved.
+  CONTRACT_DETAIL_CACHE.delete(key);
+  CONTRACT_DETAIL_CACHE.set(key, entry);
+}
+
+function _contractCacheEvict() {
+  while (CONTRACT_DETAIL_CACHE.size > CONTRACT_DETAIL_CACHE_MAX) {
+    const oldestKey = CONTRACT_DETAIL_CACHE.keys().next().value;
+    if (oldestKey === undefined) break;
+    CONTRACT_DETAIL_CACHE.delete(oldestKey);
+  }
+}
 
 // Contract name format from Deel: "<Employee Legal Name> - <Job Title>".
 // Split on the first " - " — job titles may themselves contain " - "
@@ -1143,7 +1171,10 @@ async function fetchContractDetail(contractOid) {
   if (!contractOid) return null;
   const key = String(contractOid);
   const hit = CONTRACT_DETAIL_CACHE.get(key);
-  if (hit && Date.now() - hit.ts < CONTRACT_DETAIL_TTL_MS) return hit.detail;
+  if (hit && Date.now() - hit.ts < CONTRACT_DETAIL_TTL_MS) {
+    _contractCacheTouch(key, hit);
+    return hit.detail;
+  }
   try {
     const c = await deelFetch(`/admin/api/contract/${encodeURIComponent(key)}`);
     const detail = {
@@ -1154,6 +1185,7 @@ async function fetchContractDetail(contractOid) {
       tags:         Array.isArray(c?.tags) ? c.tags : [],
     };
     CONTRACT_DETAIL_CACHE.set(key, { detail, ts: Date.now() });
+    _contractCacheEvict();
     return detail;
   } catch (e) {
     return hit?.detail || null;
@@ -1604,10 +1636,17 @@ export async function listWorkbenchTasks(params = {}) {
       // catch below swallows it, silently producing ZERO recently-
       // finished merges (worse than the original 50-cap this branch
       // was meant to fix). 2026-05-11 prod logs caught it firing on
-      // every sync cycle. Pages doubled to keep the ~1000-row ceiling
-      // documented above.
+      // every sync cycle.
+      //
+      // 2026-05-12 memory audit (pod RSS spiked > 3 GiB): the
+      // ~1000-row ceiling was way more than the home "Resolved Today"
+      // KPI ever needs — even a busy team finishes ~50–100 tasks per
+      // day. Dropping the cap to 200 (2 × 100-page batches) keeps the
+      // KPI accurate AND removes a 800-row tail from the workbench
+      // cache. Combined with the projection slim above, this cuts
+      // worst-case workbench-cache memory roughly in half.
       const FINISHED_PAGE_SIZE = 100;
-      const FINISHED_MAX_PAGES = 10;
+      const FINISHED_MAX_PAGES = 2;
       const cutoff = Date.now() - completedLookbackMs;
       const seen = new Set(allItems.map(t => t.id));
       let kept = 0;
@@ -1651,12 +1690,19 @@ export async function listWorkbenchTasks(params = {}) {
     }
   }
 
+  // Slim projection — only fields consumed downstream by the queue route,
+  // normalizeWorkbench, and queue-scoping. Per the 2026-05-12 memory audit
+  // (pod RSS spiked > 3 GiB triggering OOM kills), dropping unused fields
+  // (description, statusCategory, creator, dueAt, slaTime, slaRemaining,
+  // slaState, teamName/teamId, highPriority, organizationId, origin,
+  // reasonForEscalation, jiraIssues, zendeskTickets, escalations) cuts
+  // per-row cache footprint by ~60-70%. With ~5000 active + 200 finished
+  // rows in the workbench cache, that's tens of MiB freed per refresh
+  // cycle — across every Deel cache the savings multiply.
   const items = allItems.map(t => ({
     id:               t.id || '',
     name:             t.name || '',
-    description:      t.description || '',
     status:           t.status || '',                              // TO_DO, IN_PROGRESS, etc.
-    statusCategory:   t.customStatus?.statusCategory || t.status,
     // Country: prefer top-level; fall back to the custom-field scan.
     country:          t.country
                    || extractCountryFromCustomFields(t.taskConfiguration?.customFieldConfigurations)
@@ -1667,32 +1713,20 @@ export async function listWorkbenchTasks(params = {}) {
     // through to the country-owner path for every task — broader than the
     // team spec, which calls for assignee-only on Workbench.
     assigneeEmail:    t.assignee?.email || '',
-    creator:          t.creator ? { id: t.creator.id, email: t.creator.email, name: t.creator.name } : null,
     createdAt:        t.createdAt || '',
     updatedAt:        t.updatedAt || '',
-    dueAt:            t.dueAt || null,
     completedAt:      t.completedAt || null,
-    // SLA
-    slaTime:          t.slaTime || null,                           // SLA window in seconds
-    slaRemaining:     t.slaRemaining ?? null,                      // seconds remaining (?? preserves 0)
-    slaBreachStatus:  t.slaBreachStatus || '',                     // SLA_NOT_STARTED, SLA_NOT_BREACHED, SLA_PAUSED
-    slaState:         t.slaState || '',                            // NOT_STARTED, RUNNING, PAUSED
-    // Task type
-    taskType:         t.taskConfiguration?.name || '',             // e.g. "Expedite EOR Onboarding"
+    // SLA — only `slaBreachStatus` is read downstream (by
+    // `deriveWorkbenchStatus` in the workbench route handler). The other
+    // SLA fields are recomputed in `normalizeSourceRows.computeSlaWindow`
+    // from `createdAt`/`pausedAt`, so caching the upstream values just
+    // adds bytes.
+    slaBreachStatus:  t.slaBreachStatus || '',
+    // Task type — drives the "Type" column and the workbench scope.
+    taskType:         t.taskConfiguration?.name || '',
     sourceType:       t.taskConfiguration?.sourceType || '',
-    teamName:         t.taskConfiguration?.team?.name || '',       // e.g. "HRX Operations"
-    teamId:           t.taskConfiguration?.team?.id || '',
-    // Priority & refs
-    highPriority:     t.highPriority || 0,
+    // Refs — contractOid powers the contract deep-link.
     contractOid:      t.contractOid || '',
-    organizationId:   t.organizationId || null,
-    origin:           t.origin || '',
-    // Escalation
-    reasonForEscalation: t.reasonForEscalation || '',
-    // Linked items
-    jiraIssues:       t.jiraIssues || [],
-    zendeskTickets:   t.zendeskTickets || [],
-    escalations:      t.escalations || [],
   }));
 
   // Deeler-tag filter removed 2026-05-04 — see actionable-onboarding note.
