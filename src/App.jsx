@@ -738,7 +738,17 @@ const App=()=>{
     setImpersonating(null);
     setUser(null);
     setLoggedInEmail(null);
-    try { localStorage.removeItem('ops_hub_logged_in_email'); localStorage.removeItem('ops_hub_token'); localStorage.removeItem('ops_hub_token_ts'); localStorage.removeItem('ops_hub_user'); } catch(e) {}
+    try {
+      localStorage.removeItem('ops_hub_logged_in_email');
+      localStorage.removeItem('ops_hub_token');
+      localStorage.removeItem('ops_hub_token_ts');
+      localStorage.removeItem('ops_hub_user');
+      // Also clear the workspace pick from the pre-SSO picker (set by
+      // src/workspaces/_shared/WorkspacePicker.jsx). Without this, the next
+      // person to sign in on this browser would see a "LAST USED" badge on
+      // the previous user's workspace — a small but real session leak.
+      localStorage.removeItem('ops_hub_selected_workspace');
+    } catch(e) {}
     // Clear every queue-related cache so the next user doesn't inherit prior
     // session data on the same browser.
     clearQueueCaches();
