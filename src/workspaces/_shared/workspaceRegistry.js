@@ -78,7 +78,7 @@ export const WORKSPACES = {
   },
   [WORKSPACE_IDS.HR]: {
     id: WORKSPACE_IDS.HR,
-    label: 'HRX Hub',
+    label: 'HR Hub',
     description: 'HR Operations command center for the HR team.',
     icon: 'bi-people-fill',
     accent: '#ed5e2a',
