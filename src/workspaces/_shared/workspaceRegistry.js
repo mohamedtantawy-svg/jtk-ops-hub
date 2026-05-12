@@ -120,33 +120,32 @@ export const PICKER_ORDER = [
   WORKSPACE_IDS.GIX,
 ];
 
-const NON_HR_WORKSPACES = [
-  WORKSPACES[WORKSPACE_IDS.COMMAND_CENTER],
-  WORKSPACES[WORKSPACE_IDS.PAYROLL],
-  WORKSPACES[WORKSPACE_IDS.GIX],
-];
-
 // Determine which workspace a session should land in.
-//   1. `?workspace=<id>` URL param wins (dev/preview override).
+//   1. `?workspace=<id>` URL param wins (post-auth override only).
 //   2. User's explicit pick from the picker (localStorage).
-//   3. Email allowlist match for any non-HR workspace.
-//   4. Anything else falls through to HR Hub (the existing App.jsx).
+//   3. Anything else → HR Hub (safe default — the legacy App.jsx).
+//
+// Email allowlists are intentionally NOT used for routing — only for the
+// post-resolution access check (`userHasAccess`). This prevents users who
+// happen to sit on multiple allowlists (e.g. a Payroll lead who's also on
+// the Command Center list) from being auto-routed somewhere unexpected.
+// The picker is the canonical way to land in a non-HR workspace; new
+// users see it on first sign-in, returning users land in their last
+// explicit pick.
 //
 // Returns one of the WORKSPACE_IDS values.
-export function detectWorkspace({ email, urlParam, selectedWorkspace }) {
+//
+// NOTE: `email` is currently unused by the routing logic, but is kept in
+// the signature because callers pass it and it's used elsewhere for access
+// checks. Underscore-prefix tells lint we know it's intentional.
+//
+// eslint-disable-next-line no-unused-vars
+export function detectWorkspace({ email: _email, urlParam, selectedWorkspace }) {
   if (urlParam && (urlParam === WORKSPACE_IDS.HR || WORKSPACES[urlParam])) {
     return urlParam;
   }
   if (selectedWorkspace && (selectedWorkspace === WORKSPACE_IDS.HR || WORKSPACES[selectedWorkspace])) {
     return selectedWorkspace;
-  }
-  if (email) {
-    const normalised = String(email).trim().toLowerCase();
-    for (const ws of NON_HR_WORKSPACES) {
-      if (ws.allowedEmails.some(e => e.toLowerCase() === normalised)) {
-        return ws.id;
-      }
-    }
   }
   return WORKSPACE_IDS.HR;
 }
