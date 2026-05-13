@@ -197,6 +197,12 @@ export async function POST(req, { params }) {
       published = await publishFromRequest(merged, {
         sendAt,
         urgentOverride,
+        // Threaded through 2026-05-13 so the [announcementFlow]
+        // urgent-override bypass log stops reading `reason: (none)`.
+        // Validated already at line ~135 (≥5 chars when urgentOverride
+        // is true), so by the time it reaches publishFromRequest it's
+        // a real string the audit can rely on.
+        urgentOverrideReason: urgentOverride ? urgentOverrideReason : undefined,
         actor: user,
       });
     } catch (e) {

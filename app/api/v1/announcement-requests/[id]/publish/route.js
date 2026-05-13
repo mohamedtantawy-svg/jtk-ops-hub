@@ -73,11 +73,37 @@ export async function POST(req, { params }) {
     const sendAt = r.scheduled_for ? new Date(r.scheduled_for) : null;
     const urgentOverride = Boolean(r.urgent_override);
 
+    // Fetch the urgent-override reason from the approve audit row so the
+    // [announcementFlow] urgent-override bypass log records a real reason
+    // rather than `(none)`. The reason was captured + validated (≥5 chars)
+    // in the approve route; we read it back here for the two-stage publish.
+    // Cheap single-row query — only fires when urgentOverride is true.
+    let urgentOverrideReason;
+    if (urgentOverride) {
+      try {
+        const { rows: auditRows } = await query(
+          `SELECT meta FROM announcement_request_audit
+             WHERE request_id = $1 AND action = 'approved'
+             ORDER BY created_at DESC
+             LIMIT 1`,
+          [id],
+        );
+        const reason = auditRows[0]?.meta?.urgentOverrideReason;
+        if (typeof reason === 'string' && reason.trim().length > 0) {
+          urgentOverrideReason = reason.trim();
+        }
+      } catch (auditErr) {
+        // Audit read is best-effort — fall back to `(none)` if it fails.
+        console.warn('[publish] audit-read failed:', auditErr.message);
+      }
+    }
+
     let published;
     try {
       published = await publishFromRequest(merged, {
         sendAt,
         urgentOverride,
+        urgentOverrideReason,
         actor: user,
       });
     } catch (e) {
