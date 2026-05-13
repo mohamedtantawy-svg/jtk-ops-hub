@@ -276,30 +276,34 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
 
   // Lazy-load full attachments the moment a row opens. The list response
   // ships lite rows (no attachment dataUris) so the cold load is fast;
-  // when the user clicks to expand, fetch the detail — we already track
-  // which ids have been hydrated via `attachmentsLoadedRef` so re-expand
-  // / re-collapse cycles don't re-fetch. `attachments.length > 0` is the
-  // fast-path skip — if a row carries attachments (e.g. the user just
-  // submitted one) we don't need a refetch.
-  const attachmentsLoadedRef = useRef(new Set());
+  // when the user clicks to expand, fetch the detail.
+  //
+  // Dedupe rule: track ids currently being fetched (NOT ids that have
+  // been fetched in the past). The 30 s background poll replaces the
+  // `items` array with a fresh lite shape — so an id we previously
+  // hydrated drops its `attachments` array back to `[]`. A "loaded once"
+  // ref would say "already done" and the next expand of the same row
+  // would render the loading placeholder forever (caught 2026-05-13
+  // post-ship sweep). Keying the dedupe on `attachments.length ===
+  // attachmentCount` instead means the effect naturally refetches after
+  // the poll wipes the data, and `inFlightFetchRef` only blocks
+  // duplicate fetches WHILE one is mid-flight.
+  const inFlightFetchRef = useRef(new Set());
   useEffect(() => {
     if (!expandedId) return;
     const id = expandedId;
     const item = items.find(i => String(i.id) === String(id));
     if (!item) return;
-    if (item.attachmentCount === 0 || item.attachmentCount == null) {
-      // No attachments → no fetch needed, but mark so future polls don't
-      // think we're missing them.
-      attachmentsLoadedRef.current.add(id);
-      return;
-    }
-    if (attachmentsLoadedRef.current.has(id)) return;
-    if (Array.isArray(item.attachments) && item.attachments.length >= item.attachmentCount) {
-      attachmentsLoadedRef.current.add(id);
-      return;
-    }
-    attachmentsLoadedRef.current.add(id);
-    loadDetail(id);
+    // No attachments to hydrate → noop.
+    if (!item.attachmentCount) return;
+    // Already fully loaded — every attachment present.
+    if (Array.isArray(item.attachments) && item.attachments.length >= item.attachmentCount) return;
+    // Already fetching for this id — wait.
+    if (inFlightFetchRef.current.has(id)) return;
+    inFlightFetchRef.current.add(id);
+    Promise.resolve(loadDetail(id)).finally(() => {
+      inFlightFetchRef.current.delete(id);
+    });
   }, [expandedId, items, loadDetail]);
 
   // Identity match for the "My requests" toggle. Email is preferred (the
