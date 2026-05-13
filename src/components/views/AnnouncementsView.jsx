@@ -145,10 +145,77 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
   const [expandedAck,setExpandedAck]=useState(null); // which row has ack tracker open
   const [walkthrough,setWalkthrough]=useState(false); // popup walkthrough mode
   const [walkthroughDismissed,setWalkthroughDismissed]=useState([]); // dismissed during this walkthrough
-  const [detailId,setDetailId]=useState(null); // single item detail popup
+  // Single-item detail popup. Initial value read from `?announcement=<id>`
+  // so shared URLs (e.g. someone pastes a link in Slack) land directly on
+  // the right announcement after F5. Read in the initialiser per skill
+  // mistake #31 — useEffect-based reads cause a one-frame flicker on the
+  // default state before the deep-link applies.
+  const [detailId,setDetailId]=useState(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const v = new URL(window.location.href).searchParams.get('announcement');
+      return v && /^[0-9a-f-]{8,}$/i.test(v) ? v : null;
+    } catch { return null; }
+  });
   // Optional comment to scroll into view once the detail opens — used by
   // notification deep-links so a tagged user lands on the exact comment.
   const [detailCommentId,setDetailCommentId]=useState(null);
+
+  // Mirror the open detail into `?announcement=<id>` so the URL is always
+  // shareable. replaceState (not pushState) keeps detail clicks out of the
+  // back/forward history — opening + closing an announcement shouldn't
+  // create five history entries.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const url = new URL(window.location.href);
+      if (detailId) {
+        if (url.searchParams.get('announcement') !== String(detailId)) {
+          url.searchParams.set('announcement', String(detailId));
+          window.history.replaceState({}, '', url.toString());
+        }
+      } else if (url.searchParams.has('announcement')) {
+        url.searchParams.delete('announcement');
+        window.history.replaceState({}, '', url.toString());
+      }
+    } catch {}
+  }, [detailId]);
+
+  // Copy a deep-link URL for an announcement to the user's clipboard.
+  // Built from window.location so it works on any host (local dev, the
+  // dp.com aliases, prod). Falls back to a hidden-textarea + execCommand
+  // path for browsers where the async Clipboard API isn't available
+  // (older Safari, http://localhost without secure-context, etc.). Surfaces
+  // a toast either way so the user knows whether the copy succeeded.
+  const copyShareLink = useCallback(async (commId) => {
+    if (typeof window === 'undefined' || !commId) return;
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('view', 'announcements');
+      url.searchParams.set('announcement', String(commId));
+      const link = url.toString();
+      let copied = false;
+      if (navigator.clipboard?.writeText) {
+        try { await navigator.clipboard.writeText(link); copied = true; } catch {}
+      }
+      if (!copied) {
+        const ta = document.createElement('textarea');
+        ta.value = link;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.top = '-9999px';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); copied = true; } catch {}
+        document.body.removeChild(ta);
+      }
+      if (copied) addToast?.('success', 'Link copied', 'Share this URL with your team.');
+      else addToast?.('error', 'Copy failed', 'Could not copy link to clipboard.');
+    } catch (err) {
+      addToast?.('error', 'Copy failed', err?.message || 'Could not copy link.');
+    }
+  }, [addToast]);
 
   // Allow other views (e.g. the home "Review & acknowledge" CTA, the
   // notification bell deep-link) to open the detail overlay programmatically
@@ -698,6 +765,19 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
                             <i className="bi-chat-dots" style={{ fontSize: 11 }}></i>
                           </button>
                         )}
+                        {/* Everyone: copy a deep-link to this announcement.
+                            Per Trish's feedback — when announcements land
+                            in Slack, users want a single shareable URL to
+                            paste into chat / pass to new joiners later. */}
+                        {comm.status === 'sent' && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); copyShareLink(comm.id); }}
+                            title="Copy link"
+                            aria-label="Copy link to this announcement"
+                            style={actionBtnStyle('#f2f2f2', '#616161')}>
+                            <i className="bi-link-45deg" style={{ fontSize: 12 }}></i>
+                          </button>
+                        )}
                         {/* Everyone: personal "save for later" bookmark.
                             Distinct from Pin (admin-only, applies to all
                             users) — this is per-user and stays in the
@@ -874,6 +954,7 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
           highlightCommentId={detailCommentId}
           isSaved={isSaved(detailComm.id)}
           onToggleSave={() => toggleSave(detailComm.id)}
+          onCopyLink={() => copyShareLink(detailComm.id)}
           onReact={(commId, emoji) => {
             if (apiReact) { apiReact(commId, emoji); }
             else {
@@ -1075,7 +1156,7 @@ function WalkthroughOverlay({ comm, remaining, onAcknowledge, onSkip, onExit, on
 }
 
 // ── Detail overlay — view single announcement ──
-function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setComms, apiComments, apiSetComments, apiLoadComments, apiAddComment, apiDeleteComment, apiLinks, apiLoadLinks, apiLinkAnnouncement, apiUnlinkAnnouncement, setDetailId, onReact, highlightCommentId, isSaved, onToggleSave }) {
+function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setComms, apiComments, apiSetComments, apiLoadComments, apiAddComment, apiDeleteComment, apiLinks, apiLoadLinks, apiLinkAnnouncement, apiUnlinkAnnouncement, setDetailId, onReact, highlightCommentId, isSaved, onToggleSave, onCopyLink }) {
   const t = COMMS_TYPES[comm.type] || COMMS_TYPES.update;
   // Email-only ack check to match the rest of the UI. We do NOT OR in an
   // id-axis fallback here — MEMBERS.id collides with DB members.id values,
@@ -1381,6 +1462,15 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
               <span>{comm.target === 'all' ? 'All Teams' : comm.target}</span>
             </div>
           </div>
+          {comm.status === 'sent' && onCopyLink && (
+            <button
+              onClick={onCopyLink}
+              title="Copy link"
+              aria-label="Copy link to this announcement"
+              style={{ background: '#f2f2f2', border: 'none', cursor: 'pointer', color: '#9e9e9e', width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>
+              <i className="bi-link-45deg"></i>
+            </button>
+          )}
           {comm.status === 'sent' && onToggleSave && (
             <button
               onClick={onToggleSave}
