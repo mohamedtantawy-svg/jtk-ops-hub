@@ -310,6 +310,9 @@ const App=()=>{
       const v = sp.get('view');
       if (v && /^[a-z][a-z0-9-]{0,30}$/i.test(v)) return v;
       if (sp.get('req')) return 'hr-hub';
+      // `?announcement=<id>` shared from the Copy link button —
+      // land on Announcements so the deep-link opens the detail.
+      if (sp.get('announcement')) return 'announcements';
     } catch {}
     return 'briefing';
   });

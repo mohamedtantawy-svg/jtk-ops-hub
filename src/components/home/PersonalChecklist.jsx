@@ -444,6 +444,13 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
   const [expandedId, setExpandedId] = useState(null);
   const [draft, setDraft] = useState({ title: '', description: '', dueDate: '', priority: 'normal' });
   const [showAddForm, setShowAddForm] = useState(false);
+  // Completed tasks are hidden behind a collapsible section at the bottom of
+  // the list so they don't clutter the active queue. Default collapsed —
+  // users opening the panel see only what still needs doing. Unchecking a
+  // completed item moves it straight back into the open list via the
+  // existing toggle. Items themselves remain in the persistence layer
+  // (LS + IDB + server) regardless of this UI-only toggle.
+  const [showCompleted, setShowCompleted] = useState(false);
   const titleInputRef = useRef(null);
   const skipNextWriteRef = useRef(false); // set when we adopt a broadcast so we don't echo
   // Server sync state — `serverSyncedRef` flips true after the first GET +
@@ -651,16 +658,12 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
   // Tombstones (`deleted: true`) live in the persistence layer for cross-
   // device sync but never render — strip them at the display boundary.
   const liveItems = items.filter(i => !i.deleted);
-  // Sort order (most actionable first):
-  //   1. Done items sink to the bottom.
-  //   2. Incomplete items sort by due-date bucket (overdue → today → tomorrow
-  //      → this week → later → undated).
-  //   3. Within a bucket, priority breaks the tie (urgent → high → normal →
-  //      low) — so an "urgent + due today" always beats "normal + due today".
-  //   4. Within a bucket+priority, the earlier literal due date wins.
-  //   5. Finally, creation order keeps identical items stable.
-  const sorted = [...liveItems].sort((a, b) => {
-    if (a.done !== b.done) return a.done ? 1 : -1;
+  // Sort within a section by schedule + priority (most actionable first):
+  //   1. Due-date bucket (overdue → today → tomorrow → this week → later → undated)
+  //   2. Priority breaks ties within a bucket (urgent → high → normal → low)
+  //   3. Earlier literal due date wins
+  //   4. Creation order keeps identical items stable
+  const sortBySchedule = (a, b) => {
     const ab = dueBucket(a.dueDate);
     const bb = dueBucket(b.dueDate);
     if (ab !== bb) return ab - bb;
@@ -671,12 +674,139 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
     const bd = b.dueDate || '';
     if (ad && bd && ad !== bd) return ad.localeCompare(bd);
     return (a.createdAt || 0) - (b.createdAt || 0);
-  });
+  };
+  const openSorted = liveItems.filter(i => !i.done).sort(sortBySchedule);
+  // Completed items render under a separate collapsible "Completed (N)"
+  // group so finished work doesn't clutter the active list. Most recently
+  // completed first so the user's latest checks bubble to the top of the
+  // section when they expand it.
+  const completedSorted = liveItems.filter(i => i.done)
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
   const doneCount = liveItems.filter(i => i.done).length;
   const openCount = liveItems.length - doneCount;
   const overdueCount = liveItems.filter(i => !i.done && i.dueDate && new Date(i.dueDate + 'T00:00:00') < new Date(todayISO() + 'T00:00:00')).length;
   const todayCount = liveItems.filter(i => !i.done && i.dueDate === todayISO()).length;
   const progressPct = liveItems.length > 0 ? Math.round((doneCount / liveItems.length) * 100) : 0;
+
+  // Row renderer — shared between the open list and the collapsible Completed
+  // section so both render with identical interaction (checkbox toggle, click-
+  // to-expand inline editor, delete X). Checking an item flips `done: true`
+  // and it moves from the open list to the Completed group on the next render;
+  // unchecking moves it straight back. Storage is untouched in either case.
+  const renderItem = (item) => {
+    const due = formatDue(item.dueDate);
+    const isExpanded = expandedId === item.id;
+    const priMeta = PRIORITY_META[item.priority] || PRIORITY_META.normal;
+    const showPriPill = item.priority && item.priority !== 'normal';
+    return (
+      <div key={item.id} style={{
+        borderBottom: '1px solid #f5f5f5',
+        transition: 'background .15s',
+        borderRadius: primary ? 8 : 0,
+        // Always render a 3px stripe so content alignment stays stable
+        // as priority changes; transparent for `normal`.
+        borderLeft: `3px solid ${showPriPill ? priMeta.color : 'transparent'}`,
+      }}>
+        {/* Row */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: primary ? 10 : 8, padding: primary ? '10px 8px' : '8px 4px' }}>
+          <button
+            onClick={() => toggle(item.id)}
+            aria-label={item.done ? 'Mark as not done' : 'Mark as done'}
+            style={{ width: primary ? 22 : 20, height: primary ? 22 : 20, borderRadius: primary ? 7 : 6, border: `1.5px solid ${item.done ? '#7c3aed' : '#d0d0d0'}`, background: item.done ? '#7c3aed' : 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1, padding: 0, transition: 'all .15s' }}
+          >
+            {item.done && <i className="bi-check" style={{ fontSize: primary ? 13 : 12, color: 'white' }}></i>}
+          </button>
+          <div
+            onClick={() => setExpandedId(isExpanded ? null : item.id)}
+            style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
+          >
+            <div style={{ fontSize: primary ? 13.5 : 13, color: item.done ? '#9e9e9e' : '#1b1b1b', textDecoration: item.done ? 'line-through' : 'none', fontWeight: 500, lineHeight: 1.35, wordBreak: 'break-word' }}>
+              {item.title}
+            </div>
+            {(item.description || due || showPriPill) && !isExpanded && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
+                {showPriPill && (
+                  <span title={`Priority: ${priMeta.label}`} style={{ fontSize: 10, fontWeight: 700, color: priMeta.color, background: priMeta.bg, padding: '1px 7px', borderRadius: 99, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                    <i className="bi-flag-fill" style={{ fontSize: 9 }}></i>{priMeta.label}
+                  </span>
+                )}
+                {item.description && (
+                  <span style={{ fontSize: 11, color: '#9e9e9e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180, display: 'inline-block' }} title={item.description}>
+                    {item.description}
+                  </span>
+                )}
+                {due && (
+                  <span style={{ fontSize: 10, fontWeight: 700, color: due.color, background: due.bg, padding: '1px 7px', borderRadius: 99, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                    <i className={due.icon} style={{ fontSize: 9 }}></i>{due.label}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+          <button
+            onClick={() => remove(item.id)}
+            aria-label="Delete item"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d0d0d0', fontSize: 12, padding: '2px 4px', borderRadius: 4, transition: 'color .15s', flexShrink: 0 }}
+            onMouseEnter={e => e.currentTarget.style.color = '#d42d35'}
+            onMouseLeave={e => e.currentTarget.style.color = '#d0d0d0'}
+          >
+            <i className="bi-x" style={{ fontSize: 14 }}></i>
+          </button>
+        </div>
+        {/* Inline edit — title / description / due date / priority */}
+        {isExpanded && (
+          <div style={{ padding: '4px 4px 12px 32px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <input
+              value={item.title}
+              onChange={e => updateField(item.id, 'title', e.target.value)}
+              placeholder="Title"
+              style={{ width: '100%', padding: '6px 10px', borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 12, fontFamily: 'inherit', outline: 'none', color: '#1b1b1b', boxSizing: 'border-box' }}
+              onFocus={e => e.target.style.borderColor = '#7c3aed'}
+              onBlur={e => e.target.style.borderColor = '#e8e8e8'}
+            />
+            <DescriptionField
+              value={item.description}
+              onChange={(v) => updateField(item.id, 'description', v)}
+            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <label style={{ fontSize: 11, color: '#9e9e9e', fontWeight: 600 }}>Due</label>
+              <input
+                type="date"
+                value={item.dueDate || ''}
+                onChange={e => updateField(item.id, 'dueDate', e.target.value || null)}
+                style={{ padding: '4px 8px', borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 12, fontFamily: 'inherit', outline: 'none', color: '#1b1b1b' }}
+                onFocus={e => e.target.style.borderColor = '#7c3aed'}
+                onBlur={e => e.target.style.borderColor = '#e8e8e8'}
+              />
+              {item.dueDate && (
+                <button
+                  onClick={() => updateField(item.id, 'dueDate', null)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9e9e9e', fontSize: 11, padding: '2px 6px', borderRadius: 4 }}
+                  onMouseEnter={e => e.currentTarget.style.color = '#d42d35'}
+                  onMouseLeave={e => e.currentTarget.style.color = '#9e9e9e'}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <label style={{ fontSize: 11, color: '#9e9e9e', fontWeight: 600 }}>Priority</label>
+              <PriorityPicker value={item.priority || 'normal'} onChange={p => updateField(item.id, 'priority', p)} mode="full" />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ flex: 1 }}></div>
+              <button
+                onClick={() => setExpandedId(null)}
+                style={{ background: '#f7f5f2', border: 'none', cursor: 'pointer', color: '#616161', fontSize: 11, padding: '4px 10px', borderRadius: 6, fontWeight: 600 }}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // ── UI ───────────────────────────────────────────────────────────────────
   // Primary variant fills a tall left-column slot: bigger header, gradient
@@ -938,120 +1068,78 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
             )}
           </div>
         )}
-        {sorted.map(item => {
-          const due = formatDue(item.dueDate);
-          const isExpanded = expandedId === item.id;
-          const priMeta = PRIORITY_META[item.priority] || PRIORITY_META.normal;
-          const showPriPill = item.priority && item.priority !== 'normal';
-          return (
-            <div key={item.id} style={{
-              borderBottom: '1px solid #f5f5f5',
-              transition: 'background .15s',
-              borderRadius: primary ? 8 : 0,
-              // Always render a 3px stripe so content alignment stays stable
-              // as priority changes; transparent for `normal`.
-              borderLeft: `3px solid ${showPriPill ? priMeta.color : 'transparent'}`,
-            }}>
-              {/* Row */}
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: primary ? 10 : 8, padding: primary ? '10px 8px' : '8px 4px' }}>
-                <button
-                  onClick={() => toggle(item.id)}
-                  aria-label={item.done ? 'Mark as not done' : 'Mark as done'}
-                  style={{ width: primary ? 22 : 20, height: primary ? 22 : 20, borderRadius: primary ? 7 : 6, border: `1.5px solid ${item.done ? '#7c3aed' : '#d0d0d0'}`, background: item.done ? '#7c3aed' : 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1, padding: 0, transition: 'all .15s' }}
-                >
-                  {item.done && <i className="bi-check" style={{ fontSize: primary ? 13 : 12, color: 'white' }}></i>}
-                </button>
-                <div
-                  onClick={() => setExpandedId(isExpanded ? null : item.id)}
-                  style={{ flex: 1, minWidth: 0, cursor: 'pointer' }}
-                >
-                  <div style={{ fontSize: primary ? 13.5 : 13, color: item.done ? '#9e9e9e' : '#1b1b1b', textDecoration: item.done ? 'line-through' : 'none', fontWeight: 500, lineHeight: 1.35, wordBreak: 'break-word' }}>
-                    {item.title}
-                  </div>
-                  {(item.description || due || showPriPill) && !isExpanded && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
-                      {showPriPill && (
-                        <span title={`Priority: ${priMeta.label}`} style={{ fontSize: 10, fontWeight: 700, color: priMeta.color, background: priMeta.bg, padding: '1px 7px', borderRadius: 99, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                          <i className="bi-flag-fill" style={{ fontSize: 9 }}></i>{priMeta.label}
-                        </span>
-                      )}
-                      {item.description && (
-                        <span style={{ fontSize: 11, color: '#9e9e9e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180, display: 'inline-block' }} title={item.description}>
-                          {item.description}
-                        </span>
-                      )}
-                      {due && (
-                        <span style={{ fontSize: 10, fontWeight: 700, color: due.color, background: due.bg, padding: '1px 7px', borderRadius: 99, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-                          <i className={due.icon} style={{ fontSize: 9 }}></i>{due.label}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-                <button
-                  onClick={() => remove(item.id)}
-                  aria-label="Delete item"
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d0d0d0', fontSize: 12, padding: '2px 4px', borderRadius: 4, transition: 'color .15s', flexShrink: 0 }}
-                  onMouseEnter={e => e.currentTarget.style.color = '#d42d35'}
-                  onMouseLeave={e => e.currentTarget.style.color = '#d0d0d0'}
-                >
-                  <i className="bi-x" style={{ fontSize: 14 }}></i>
-                </button>
+        {/* All caught up — there are completed items but nothing open. Keeps
+            the panel from looking empty when the user has finished everything. */}
+        {openSorted.length === 0 && completedSorted.length > 0 && !showAddForm && (
+          <div style={{
+            padding: primary ? '32px 24px 24px' : '18px 0',
+            textAlign: 'center',
+            fontSize: primary ? 13 : 12,
+            color: '#9e9e9e',
+          }}>
+            <i className="bi-check-circle" style={{
+              fontSize: primary ? 32 : 20,
+              display: 'block',
+              marginBottom: primary ? 8 : 4,
+              color: '#15803d',
+            }}></i>
+            <div style={{ fontWeight: 700, fontSize: primary ? 13 : 12, color: '#616161' }}>All caught up — nice work!</div>
+            <div style={{ fontSize: 11, marginTop: 2 }}>Completed tasks are tucked below.</div>
+          </div>
+        )}
+        {openSorted.map(renderItem)}
+
+        {/* Completed group — collapsed by default so finished work doesn't
+            clutter the active list. Items stay in storage; toggling the
+            checkbox back to undone returns them to the open list. */}
+        {completedSorted.length > 0 && (
+          <div style={{
+            borderTop: openSorted.length > 0 ? '1px solid #f0eeec' : 'none',
+            marginTop: openSorted.length > 0 ? 6 : 0,
+            paddingTop: openSorted.length > 0 ? 4 : 0,
+          }}>
+            <button
+              onClick={() => setShowCompleted(s => !s)}
+              aria-expanded={showCompleted}
+              aria-controls="personal-checklist-completed-list"
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: primary ? '8px 8px' : '6px 4px',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                color: '#616161',
+                fontFamily: 'inherit',
+                transition: 'color .15s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.color = '#1b1b1b'}
+              onMouseLeave={e => e.currentTarget.style.color = '#616161'}
+            >
+              <i
+                className={`bi-chevron-${showCompleted ? 'up' : 'down'}`}
+                style={{ fontSize: 11, transition: 'transform .15s' }}
+              ></i>
+              <span style={{ fontSize: primary ? 11 : 10, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase' }}>Completed</span>
+              <span style={{
+                background: '#f5f5f5',
+                color: '#616161',
+                fontSize: 10,
+                fontWeight: 700,
+                padding: '2px 8px',
+                borderRadius: 99,
+                fontVariantNumeric: 'tabular-nums',
+              }}>{completedSorted.length}</span>
+            </button>
+            {showCompleted && (
+              <div id="personal-checklist-completed-list" style={{ opacity: 0.85 }}>
+                {completedSorted.map(renderItem)}
               </div>
-              {/* Inline edit — title / description / due date / priority */}
-              {isExpanded && (
-                <div style={{ padding: '4px 4px 12px 32px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <input
-                    value={item.title}
-                    onChange={e => updateField(item.id, 'title', e.target.value)}
-                    placeholder="Title"
-                    style={{ width: '100%', padding: '6px 10px', borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 12, fontFamily: 'inherit', outline: 'none', color: '#1b1b1b', boxSizing: 'border-box' }}
-                    onFocus={e => e.target.style.borderColor = '#7c3aed'}
-                    onBlur={e => e.target.style.borderColor = '#e8e8e8'}
-                  />
-                  <DescriptionField
-                    value={item.description}
-                    onChange={(v) => updateField(item.id, 'description', v)}
-                  />
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <label style={{ fontSize: 11, color: '#9e9e9e', fontWeight: 600 }}>Due</label>
-                    <input
-                      type="date"
-                      value={item.dueDate || ''}
-                      onChange={e => updateField(item.id, 'dueDate', e.target.value || null)}
-                      style={{ padding: '4px 8px', borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 12, fontFamily: 'inherit', outline: 'none', color: '#1b1b1b' }}
-                      onFocus={e => e.target.style.borderColor = '#7c3aed'}
-                      onBlur={e => e.target.style.borderColor = '#e8e8e8'}
-                    />
-                    {item.dueDate && (
-                      <button
-                        onClick={() => updateField(item.id, 'dueDate', null)}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9e9e9e', fontSize: 11, padding: '2px 6px', borderRadius: 4 }}
-                        onMouseEnter={e => e.currentTarget.style.color = '#d42d35'}
-                        onMouseLeave={e => e.currentTarget.style.color = '#9e9e9e'}
-                      >
-                        Clear
-                      </button>
-                    )}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <label style={{ fontSize: 11, color: '#9e9e9e', fontWeight: 600 }}>Priority</label>
-                    <PriorityPicker value={item.priority || 'normal'} onChange={p => updateField(item.id, 'priority', p)} mode="full" />
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{ flex: 1 }}></div>
-                    <button
-                      onClick={() => setExpandedId(null)}
-                      style={{ background: '#f7f5f2', border: 'none', cursor: 'pointer', color: '#616161', fontSize: 11, padding: '4px 10px', borderRadius: 6, fontWeight: 600 }}
-                    >
-                      Done
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

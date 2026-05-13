@@ -24,6 +24,7 @@ import {
   submitHandover,
   toggleChecklistItem,
 } from '../../services/handoversApi';
+import { deleteTimeOffEvent } from '../../services/timeOffApi';
 import LogHandbackModal from './LogHandbackModal';
 import {
   HANDOVER_STATUSES,
@@ -96,6 +97,33 @@ const EVENT_TYPE_LABEL = {
 
 function lc(v) { return (v || '').toLowerCase(); }
 
+// Client-side mirror of `canManageTimeOffFor` in src/lib/queue-scoping.js.
+// Keeps the Delete button hidden when the caller can't act — the server is
+// still the authority, so a 403 toast surfaces the same message if the
+// roster cache and the server view ever drift.
+function canCallerManageTarget(callerEmail, callerRole, targetEmail, membersByEmail) {
+  if (!callerEmail || !targetEmail) return false;
+  const callerLc = String(callerEmail).toLowerCase();
+  const targetLc = String(targetEmail).toLowerCase();
+  if (callerLc === targetLc) return true;
+  if (callerRole === 'admin') return true;
+  const targetMember = membersByEmail?.get?.(targetLc);
+  if (!targetMember) return false;
+  const directMgr = String(targetMember.managerEmail || '').toLowerCase();
+  if (callerRole === 'team_lead') return directMgr === callerLc;
+  if (callerRole === 'regional_manager') {
+    let cursor = directMgr;
+    let safety = 0;
+    while (cursor && safety++ < 20) {
+      if (cursor === callerLc) return true;
+      const next = membersByEmail?.get?.(cursor);
+      cursor = String(next?.managerEmail || '').toLowerCase();
+    }
+    return false;
+  }
+  return false;
+}
+
 function DetailSlideOut({
   event,
   membersByEmail,
@@ -159,6 +187,26 @@ function DetailSlideOut({
   const isManager  = handover && lc(handover.manager_email) === callerLc;
   const isCoverer  = handover ? handover.coverers?.some(c => lc(c.coverer_email) === callerLc) : false;
   const isAdminish = currentUserRole === 'admin' || currentUserRole === 'regional_manager';
+  const canDelete  = canCallerManageTarget(currentUserEmail, currentUserRole, event.work_email, membersByEmail);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const handleDelete = async () => {
+    if (!canDelete || deleteBusy) return;
+    const confirmed = typeof window !== 'undefined'
+      ? window.confirm(`Delete this time-off entry?\n\n${event.work_email} · ${event.start_date} → ${event.end_date}\n\nThis can't be undone.`)
+      : false;
+    if (!confirmed) return;
+    setDeleteBusy(true);
+    try {
+      await deleteTimeOffEvent(event.id);
+      onToast?.({ kind: 'success', message: 'Time-off entry removed.' });
+      onUpdated?.();
+      onClose?.();
+    } catch (err) {
+      onToast?.({ kind: 'error', message: err?.body?.error || err?.message || 'Delete failed' });
+    } finally {
+      setDeleteBusy(false);
+    }
+  };
 
   const coverers = handover?.coverers || event.handover?.coverers || [];
   const checklistItems = handover?.checklist_items || [];
@@ -341,6 +389,32 @@ function DetailSlideOut({
               )}
             </div>
           </div>
+          {canDelete && (
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={deleteBusy}
+              aria-label="Delete time-off entry"
+              title="Delete this entry"
+              style={{
+                background: 'transparent',
+                border: '1px solid var(--border)',
+                padding: '5px 10px',
+                cursor: deleteBusy ? 'not-allowed' : 'pointer',
+                color: '#b91c1c',
+                fontFamily: 'inherit',
+                fontSize: 11,
+                fontWeight: 600,
+                borderRadius: 6,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+              }}
+            >
+              <i className="bi-trash" style={{ fontSize: 11 }} />
+              {deleteBusy ? 'Deleting…' : 'Delete'}
+            </button>
+          )}
           <button type="button" onClick={onClose} aria-label="Close" style={{
             background: 'transparent', border: 'none', padding: 6, cursor: 'pointer',
             color: 'var(--text-secondary)', fontFamily: 'inherit',

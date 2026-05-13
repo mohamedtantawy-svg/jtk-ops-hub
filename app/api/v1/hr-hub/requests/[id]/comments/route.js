@@ -23,7 +23,12 @@ const MAX_BODY_BYTES = 20000;
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024;
 const MAX_TOTAL_PAYLOAD_BYTES = 30 * 1024 * 1024;
-const ATTACHMENT_KINDS = new Set(['image', 'video']);
+const ATTACHMENT_KINDS = new Set(['image', 'video', 'pdf']);
+const ATTACHMENT_PREFIX_BY_KIND = {
+  image: 'data:image/',
+  video: 'data:video/',
+  pdf: 'data:application/pdf',
+};
 
 function isUuid(s) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s || ''));
@@ -42,8 +47,8 @@ function sanitiseAttachments(raw) {
     const kind = ATTACHMENT_KINDS.has(a.kind) ? a.kind : null;
     const dataUri = typeof a.dataUri === 'string' ? a.dataUri : null;
     if (!kind || !dataUri) continue;
-    const expected = kind === 'image' ? 'data:image/' : 'data:video/';
-    if (!dataUri.startsWith(expected)) continue;
+    const expected = ATTACHMENT_PREFIX_BY_KIND[kind];
+    if (!expected || !dataUri.startsWith(expected)) continue;
     if (dataUri.length > MAX_ATTACHMENT_BYTES) {
       throw Object.assign(new Error(`Attachment too large`), { status: 413 });
     }

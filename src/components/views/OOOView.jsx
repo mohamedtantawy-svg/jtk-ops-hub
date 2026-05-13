@@ -20,6 +20,7 @@ import CalendarMode from '../ooo/CalendarMode';
 import TableMode from '../ooo/TableMode';
 import DetailSlideOut from '../ooo/DetailSlideOut';
 import CreateHandoverModal from '../ooo/CreateHandoverModal';
+import SubmitTimeOffModal from '../ooo/SubmitTimeOffModal';
 import { useTeamMembers } from '../../hooks/useTeamMembers';
 import { listTimeOffEvents } from '../../services/timeOffApi';
 import {
@@ -99,6 +100,7 @@ function OOOView({ user, setView, addToast }) {
   const [autoResolved, setAutoResolved] = useState(lens !== LENS_IDS.AUTO);
   const [selectedEventId, setSelectedEventId] = useState(urlInit.handover || null);
   const [wizardEventId, setWizardEventId] = useState(null);   // null = closed; an id = open w/ that event
+  const [submitTimeOffOpen, setSubmitTimeOffOpen] = useState(false);
 
   // `useTeamMembers` returns `{ members, membersByEmail, ... }` — the
   // previous `items` rename matched an older shape and silently produced
@@ -260,6 +262,23 @@ function OOOView({ user, setView, addToast }) {
             }}
           >
             <i className="bi-gear" style={{ fontSize: 14 }} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setSubmitTimeOffOpen(true)}
+            title="Submit a manual time-off entry"
+            style={{
+              height: 32, padding: '0 14px', borderRadius: 8,
+              background: 'var(--surface)',
+              color: 'var(--text)',
+              border: '1px solid var(--border)',
+              fontWeight: 600, fontSize: 12,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            <i className="bi-calendar-plus" style={{ marginRight: 6 }} />
+            Submit time off
           </button>
           <button
             type="button"
@@ -504,6 +523,20 @@ function OOOView({ user, setView, addToast }) {
             });
             if (handover?.time_off_event_id) setSelectedEventId(handover.time_off_event_id);
           }}
+        />
+      )}
+
+      {submitTimeOffOpen && (
+        <SubmitTimeOffModal
+          currentUserEmail={user?.email}
+          currentUserAccess={user?.role}
+          members={members}
+          onClose={() => setSubmitTimeOffOpen(false)}
+          onCreated={(item) => {
+            refreshAll();
+            if (item?.id) setSelectedEventId(item.id);
+          }}
+          onToast={addToast}
         />
       )}
     </div>

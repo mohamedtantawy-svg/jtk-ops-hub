@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   listFeedback,
+  getFeedback,
   createFeedback,
   updateFeedback,
   deleteFeedback,
@@ -55,7 +56,15 @@ export function useFeedback({ enabled = true, userEmail = null, sort = 'top' } =
   // render — eliminates the minute-long skeleton for users on a cold pod.
   const initialCache = readCache(userEmail, sort);
   const [items, setItems] = useState(initialCache?.items || []);
-  const [loading, setLoading] = useState(!initialCache);
+  // Skeleton flips on when (a) we have NO cache at all OR (b) the cache
+  // happens to be empty. An empty cache means we'd otherwise show
+  // "No feedback yet" while the background refresh is still running —
+  // the exact case Mohamed reported 2026-05-13 ("when you first go to
+  // it it shows empty until it's loaded"). With this check the skeleton
+  // stays up until a real fetch returns, regardless of stale empty
+  // caches.
+  const initialCachedCount = initialCache?.items?.length ?? 0;
+  const [loading, setLoading] = useState(!initialCache || initialCachedCount === 0);
   const [error, setError] = useState(null);
   const [lastSyncAt, setLastSyncAt] = useState(initialCache?.ts || null);
   const inFlightRef = useRef(null);
@@ -96,13 +105,17 @@ export function useFeedback({ enabled = true, userEmail = null, sort = 'top' } =
 
   // Initial load + reset on user / sort change. Re-hydrates from the new
   // cache key (per user / per sort) before kicking the network revalidation
-  // so the board doesn't blink to empty between sort changes.
+  // so the board doesn't blink to empty between sort changes. Same
+  // empty-cache rule as the initial state — keep the skeleton up if the
+  // cache happens to be empty so the user doesn't see a false "No
+  // feedback yet" while the refresh is in-flight.
   useEffect(() => {
     const cached = readCache(userEmail, sort);
+    const cachedCount = cached?.items?.length ?? 0;
     setItems(cached?.items || []);
     setLastSyncAt(cached?.ts || null);
-    setLoading(!cached);
-    if (enabled) refresh({ silent: !!cached });
+    setLoading(!cached || cachedCount === 0);
+    if (enabled) refresh({ silent: cachedCount > 0 });
   }, [enabled, userEmail, sort, refresh]);
 
   // Background poll — paused while tab is hidden, with a visibility-return
@@ -192,6 +205,24 @@ export function useFeedback({ enabled = true, userEmail = null, sort = 'top' } =
     }
   }, [refresh]);
 
+  // Lazy-load the full row (with attachments) on demand. The list endpoint
+  // now omits attachment data URIs to keep the cold-load payload tiny;
+  // FeedbackView calls this when a row is expanded so the screenshot /
+  // attachments render inline. Result is merged into the local item by
+  // id — no cache write, no re-list, no echo.
+  const loadDetail = useCallback(async (id) => {
+    if (!id) return null;
+    try {
+      const res = await getFeedback(id);
+      const item = res?.item;
+      if (item) setItems(prev => prev.map(i => i.id === id ? { ...i, ...item } : i));
+      return item;
+    } catch (err) {
+      if (mountedRef.current) setError(err?.message || 'Failed to load attachments');
+      return null;
+    }
+  }, []);
+
   const fetchComments  = useCallback((id) => listComments(id), []);
   const submitComment  = useCallback(async (id, body) => {
     const res = await addComment(id, body);
@@ -209,6 +240,7 @@ export function useFeedback({ enabled = true, userEmail = null, sort = 'top' } =
     patch,
     remove,
     vote,
+    loadDetail,
     fetchComments,
     submitComment,
   };

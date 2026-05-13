@@ -34,6 +34,8 @@ import {
   scopeIncentivePlans,
 } from '../../lib/queue-scoping';
 import Avatar from '../ui/Avatar';
+import OOOBadge from '../ui/OOOBadge';
+import { useTimeOffEvents } from '../../hooks/useTimeOffEvents';
 import { ToolBadge, FnBadge } from '../ui/Badges';
 import PersonalChecklist from '../home/PersonalChecklist';
 import CoverageBanner from '../ooo/CoverageBanner';
@@ -71,6 +73,11 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     getAllReports: liveGetAllReports,
     loading: rosterLoading,
   } = useTeamMembers();
+  // OOO events keyed by email, same source as the Leaders Hub Team table
+  // (Ziyaad's 2026-05-13 ask: the OOO chip should ALSO show on the team
+  // table here on the home Overview surface). One-shot fetch via the
+  // shared hook so we don't refetch per-row.
+  const { eventsByEmail: oooEventsByEmail } = useTimeOffEvents();
   // ── Login-as gate (mirrors Team.jsx::canLoginAs) ─────────────────────────
   // Only TL/RM/admin can impersonate. Target must be in the caller's
   // reporting subtree, not deactivated, and not currently impersonated.
@@ -107,10 +114,24 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     }
     return false;
   }, [realUser?.email, liveMembersByEmail, liveGetAllReports]);
-  const mocCandidates = useMemo(() => (liveMembers || TEAM_MEMBERS)
-    .filter(m => !m.isDeleted)
-    .filter(m => m.access === 'team_lead' || m.access === 'regional_manager' || m.access === 'admin'),
-    [liveMembers]);
+  // Sort: current user (if eligible) first so changing the MOC to yourself
+  // takes one click and a steady cursor position — matches Ziyaad's 2026-05-13
+  // ask ("perhaps adding my name first on the list"). After self, fall back
+  // to alphabetical so the rest of the list is predictable rather than
+  // roster-insertion order. Soft-deleted members and non-managerial roles
+  // are filtered out before sorting.
+  const mocCandidates = useMemo(() => {
+    const callerEmail = (user?.email || '').toLowerCase();
+    const eligible = (liveMembers && liveMembers.length ? liveMembers : TEAM_MEMBERS)
+      .filter(m => !m.isDeleted)
+      .filter(m => m.access === 'team_lead' || m.access === 'regional_manager' || m.access === 'admin');
+    return eligible.sort((a, b) => {
+      const aSelf = (a.email || '').toLowerCase() === callerEmail ? 0 : 1;
+      const bSelf = (b.email || '').toLowerCase() === callerEmail ? 0 : 1;
+      if (aSelf !== bSelf) return aSelf - bSelf;
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    });
+  }, [liveMembers, user?.email]);
   // Drift-proof ack check — matches Announcements view + App.jsx. Local
   // MEMBERS.id is an array-position index that collides with DB members.id
   // values. When the server gives us `ackEmails` (our source of truth) we
@@ -1102,9 +1123,17 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                     )}
                   </div>
                   {showMocPicker&&(
-                    <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,background:'var(--surface)',borderRadius:14,border:'1px solid #e8e8e8',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'6px 0',minWidth:300,maxHeight:360,overflowY:'auto',zIndex:1000}}>
-                      <div style={{padding:'6px 16px 8px',fontSize:10,fontWeight:700,color:'#bebebe',letterSpacing:'.04em',textTransform:'uppercase'}}>Select Manager On Call</div>
-                      {mocCandidates.map(m=>(
+                    <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,background:'var(--surface)',borderRadius:14,border:'1px solid var(--border)',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'6px 0',minWidth:300,maxHeight:360,overflowY:'auto',zIndex:1400}}>
+                      <div style={{padding:'6px 16px 8px',fontSize:10,fontWeight:700,color:'var(--text-muted)',letterSpacing:'.04em',textTransform:'uppercase'}}>Select Manager On Call</div>
+                      {mocCandidates.length === 0 && (
+                        <div style={{padding:'14px 16px',fontSize:12,color:'var(--text-muted)',textAlign:'center'}}>
+                          No managers available
+                        </div>
+                      )}
+                      {mocCandidates.map(m=>{
+                        const isSelected = (managerOnCall.email || '').toLowerCase() === (m.email || '').toLowerCase();
+                        const isSelf = (user?.email || '').toLowerCase() === (m.email || '').toLowerCase();
+                        return (
                           <div
                             key={m.email}
                             role="button"
@@ -1120,17 +1149,23 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                                 setShowMocPicker(false);
                               }
                             }}
-                            onMouseEnter={e=>e.currentTarget.style.background='#fafaf9'}
-                            onMouseLeave={e=>e.currentTarget.style.background=managerOnCall.email===m.email?'#fafaf9':'transparent'}
-                            style={{display:'flex',alignItems:'center',gap:10,padding:'8px 16px',cursor:'pointer',transition:'background .12s',background:managerOnCall.email===m.email?'#fafaf9':'transparent'}}
+                            onMouseEnter={e=>e.currentTarget.style.background='var(--surface-2)'}
+                            onMouseLeave={e=>e.currentTarget.style.background=isSelected?'var(--surface-2)':'transparent'}
+                            style={{display:'flex',alignItems:'center',gap:10,padding:'8px 16px',cursor:'pointer',transition:'background .12s',background:isSelected?'var(--surface-2)':'transparent'}}
                           >
                             <Avatar name={m.name} initials={m.initials} src={m.avatarUrl} size={28}/>
                             <div style={{minWidth:0,flex:1}}>
-                              <div style={{fontSize:13,fontWeight:managerOnCall.email===m.email?600:400,color:managerOnCall.email===m.email?'#7c3aed':'#1b1b1b',lineHeight:'17px',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{m.name}</div>
-                              <div style={{fontSize:11,color:'#9e9e9e',lineHeight:'15px'}}>{m.team}</div>
+                              <div style={{fontSize:13,fontWeight:isSelected?600:500,color:isSelected?'#7c3aed':'var(--text)',lineHeight:'17px',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',display:'flex',alignItems:'center',gap:6}}>
+                                <span style={{overflow:'hidden',textOverflow:'ellipsis'}}>{m.name}</span>
+                                {isSelf && (
+                                  <span style={{fontSize:9,fontWeight:700,color:'#7c3aed',background:'#f3eff8',padding:'1px 6px',borderRadius:99,letterSpacing:'.04em',textTransform:'uppercase',flexShrink:0}}>You</span>
+                                )}
+                              </div>
+                              <div style={{fontSize:11,color:'var(--text-muted)',lineHeight:'15px'}}>{m.team}</div>
                             </div>
                           </div>
-                        ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -1749,6 +1784,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                                 {m.name}
                                 <AccessBadge access={live?.access || m.access || 'agent'} />
                                 <LastSeenPill iso={live?.lastSeenAt} loading={!!rosterLoading} />
+                                <OOOBadge events={oooEventsByEmail.get((m.email || '').toLowerCase())} />
                               </div>
                               <div style={{fontSize:11,color:'#9e9e9e'}}>{FLAGS[m.country]} {m.team}</div>
                             </div>
@@ -1814,6 +1850,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                                 {g.manager.name}
                                 <AccessBadge access={live?.access || g.manager.access} />
                                 <LastSeenPill iso={live?.lastSeenAt} loading={!!rosterLoading} />
+                                <OOOBadge events={oooEventsByEmail.get((g.manager.email || '').toLowerCase())} />
                               </div>
                               <div style={{fontSize:11,color:'#9e9e9e'}}>{g.manager.team} &middot; {g.headcount} {g.headcount === 1 ? 'agent' : 'agents'}</div>
                             </div>

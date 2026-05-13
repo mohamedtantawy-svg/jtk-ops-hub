@@ -149,6 +149,50 @@ function rowToShape(row) {
   };
 }
 
+// List-shape — every field except the heavy base64 payloads. The
+// previous list response shipped every row's full `screenshot` data
+// URI AND every entry in `attachments`, which is what made the initial
+// Feedback tab load take ~1 min on a busy board (Mohamed 2026-05-13).
+// The detail endpoint (`GET /api/v1/feedback/[id]`) still returns the
+// full attachments; the FE lazy-fetches it the moment the user opens
+// a row. `attachmentCount` is enough for the list-row affordance
+// (badge / pip).
+function rowToListShape(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    issue: row.issue,
+    proposedResolution: row.proposed_resolution,
+    // Heavy fields intentionally omitted — FE knows how many to draw
+    // via `attachmentCount` and triggers a lazy detail-fetch when
+    // expanded.
+    screenshot: null,
+    attachments: [],
+    attachmentCount: Number(row.attachment_count || 0),
+    status: row.status,
+    priority: row.priority,
+    category: row.category,
+    type: row.type,
+    audience: row.audience || 'global',
+    submitterId: row.submitter_id,
+    submitterEmail: row.submitter_email,
+    submitterName: row.submitter_name,
+    assigneeId: row.assignee_id,
+    assigneeEmail: row.assignee_email || null,
+    assigneeName:  row.assignee_name  || null,
+    resolutionNote: row.resolution_note,
+    duplicateOf: row.duplicate_of,
+    resolvedAt: row.resolved_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    upvotes: Number(row.upvotes || 0),
+    downvotes: Number(row.downvotes || 0),
+    score: Number(row.score || 0),
+    commentCount: Number(row.comment_count || 0),
+    myVote: row.my_vote == null ? 0 : Number(row.my_vote),
+  };
+}
+
 export async function GET(req) {
   const user = getAuthUser(req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -180,15 +224,30 @@ export async function GET(req) {
   if (type && ALLOWED_TYPE.has(type)) { params.push(type); filters.push(`r.type = $${params.length}`); }
   const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
 
+  // Explicit column projection — the previous `SELECT r.*` pulled the full
+  // `screenshot` data URI (up to 3 MB base64) AND every entry of the
+  // `attachments` JSON array (up to 12 MB each, 5 per row). With a 500-row
+  // limit that meant the list payload could exceed 100 MB, making the
+  // Feedback tab's initial load take ~1 min on a healthy connection
+  // (Mohamed 2026-05-13 report). We now project the metadata columns only
+  // and compute an `attachment_count` so the FE can render an affordance
+  // (badge / pip) while the detail endpoint serves the full payload on
+  // expand.
   const sql = `
-    SELECT r.*,
+    SELECT r.id, r.title, r.issue, r.proposed_resolution, r.status, r.priority,
+           r.category, r.type, r.audience, r.submitter_id, r.submitter_email,
+           r.submitter_name, r.assignee_id, r.resolution_note, r.duplicate_of,
+           r.resolved_at, r.created_at, r.updated_at,
            a.email                     AS assignee_email,
            a.name                      AS assignee_name,
            COALESCE(v.up, 0)           AS upvotes,
            COALESCE(v.down, 0)         AS downvotes,
            COALESCE(v.up, 0) - COALESCE(v.down, 0) AS score,
            COALESCE(c.cnt, 0)          AS comment_count,
-           mv.vote                     AS my_vote
+           mv.vote                     AS my_vote,
+           (CASE WHEN r.screenshot IS NOT NULL AND r.screenshot <> '' THEN 1 ELSE 0 END)
+             + COALESCE(jsonb_array_length(COALESCE(r.attachments, '[]'::jsonb)), 0)
+                                       AS attachment_count
       FROM feedback_requests r
       LEFT JOIN members a ON a.id = r.assignee_id
       LEFT JOIN (
@@ -218,7 +277,7 @@ export async function GET(req) {
     const member = MEMBERS_BY_EMAIL[lcEmail] || null;
     const role = String(user.role || '').toLowerCase();
     const isAdmin = role === 'admin';
-    const items = rows.map(rowToShape).filter(item => {
+    const items = rows.map(rowToListShape).filter(item => {
       if (isAdmin) return true;
       if ((item.submitterEmail || '').toLowerCase() === lcEmail) return true;
       return feedbackAudienceVisible(item.audience, { team: member?.team, role });

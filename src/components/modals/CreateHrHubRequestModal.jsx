@@ -18,6 +18,7 @@ import { getHrHubSettings, createHrHubRequest } from '../../services/hrHubApi';
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 10 * 1024 * 1024;
+const MAX_PDF_BYTES = 10 * 1024 * 1024;
 const MAX_ATTACHMENTS = 5;
 const MAX_TOTAL_PAYLOAD_BYTES = 25 * 1024 * 1024;
 const ACCEPTED_VIDEO_TYPES = new Set(['video/mp4', 'video/webm', 'video/quicktime', 'video/x-m4v']);
@@ -312,13 +313,18 @@ function AttachmentField({ attachments, setAttachments, error, setError }) {
       }
       const isImage = file.type?.startsWith('image/');
       const isVideo = ACCEPTED_VIDEO_TYPES.has(file.type) || file.type?.startsWith('video/');
-      if (!isImage && !isVideo) continue;
+      const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+      if (!isImage && !isVideo && !isPdf) continue;
       if (isImage && file.size > MAX_IMAGE_BYTES * 4) {
         setError(`"${file.name}" is too large to attach.`);
         continue;
       }
       if (isVideo && file.size > MAX_VIDEO_BYTES) {
         setError(`"${file.name}" exceeds the ${Math.round(MAX_VIDEO_BYTES / 1024 / 1024)} MB video limit.`);
+        continue;
+      }
+      if (isPdf && file.size > MAX_PDF_BYTES) {
+        setError(`"${file.name}" exceeds the ${Math.round(MAX_PDF_BYTES / 1024 / 1024)} MB PDF limit.`);
         continue;
       }
       const dataUri = isImage
@@ -329,11 +335,12 @@ function AttachmentField({ attachments, setAttachments, error, setError }) {
         setError('Total attachment payload would exceed the limit. Drop one and try again.');
         break;
       }
+      const kind = isImage ? 'image' : isVideo ? 'video' : 'pdf';
       additions.push({
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        kind: isImage ? 'image' : 'video',
+        kind,
         dataUri,
-        name: file.name || (isImage ? 'image' : 'video'),
+        name: file.name || kind,
       });
     }
     if (additions.length) setAttachments(prev => [...prev, ...additions]);
@@ -380,12 +387,12 @@ function AttachmentField({ attachments, setAttachments, error, setError }) {
         }}
       >
         <i className="bi bi-cloud-arrow-up" style={{ fontSize: 18, marginRight: 6 }} />
-        Drop, paste (Cmd/Ctrl+V), or click to attach screenshots / short clips.
+        Drop, paste (Cmd/Ctrl+V), or click to attach screenshots, PDFs, or short clips.
       </div>
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*,video/mp4,video/webm,video/quicktime"
+        accept="image/*,video/mp4,video/webm,video/quicktime,application/pdf,.pdf"
         multiple
         style={{ display: 'none' }}
         onChange={e => addFiles(e.target.files)}
@@ -408,8 +415,19 @@ function AttachmentField({ attachments, setAttachments, error, setError }) {
             }}>
               {a.kind === 'image' ? (
                 <img src={a.dataUri} alt={a.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              ) : (
+              ) : a.kind === 'video' ? (
                 <video src={a.dataUri} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                <div style={{
+                  width: '100%', height: '100%',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                  padding: 6, gap: 4,
+                  color: '#b91c1c',
+                  textAlign: 'center',
+                }}>
+                  <i className="bi bi-filetype-pdf" style={{ fontSize: 28 }} />
+                  <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }} title={a.name}>{a.name || 'document.pdf'}</span>
+                </div>
               )}
               <button
                 type="button"
