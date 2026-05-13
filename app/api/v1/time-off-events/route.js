@@ -12,14 +12,15 @@
 //       — server-side narrowing matching the FE chip the user picked.
 //         Defaults to `all` (caller filters client-side if needed).
 //
-// Visibility is enforced via getVisibleEmails(user) — same scoping the
-// Queue / Briefing / HR Hub already use, so an agent never sees outside
-// their reporting tree.
+// Visibility is enforced via getVisibleOOOEmails(user) — the OOO-specific
+// cohort (Fernanda 2026-05-13). Broader than the Queue / HR scoping so
+// peer TLs / peer RMs and intra-team agents can see each other's leave.
 
 import { NextResponse } from 'next/server';
 import { query } from '../../../../src/lib/db';
 import { getAuthUser } from '../../../../src/lib/auth-helpers';
-import { getVisibleOOOEmails, isAdminUser } from '../../../../src/lib/queue-scoping';
+import { getVisibleOOOEmails, isAdminUser, canManageTimeOffFor } from '../../../../src/lib/queue-scoping';
+import { ensureRosterHydrated } from '../../../../src/lib/roster-server';
 import { LENS_IDS } from '../../../../src/lib/handover-helpers';
 
 const VALID_LENSES = new Set(Object.values(LENS_IDS));
@@ -182,6 +183,79 @@ export async function GET(req) {
     return NextResponse.json({ items, total: items.length, lens });
   } catch (err) {
     console.error('[time-off-events GET]', err.message);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+// ── POST /api/v1/time-off-events ────────────────────────────────────────
+// Manually submit a new approved time-off entry, mirroring what would
+// normally land via the Deel platform import. Per Lucy's 2026-05-13 ask
+// (ticket "Upcoming OOO not accurate") — Ops Hub's auto-imported OOO can
+// be out of sync with Deel's source of truth; team members and managers
+// need an escape hatch to correct it inline.
+//
+// Permission model (enforced via canManageTimeOffFor):
+//   • Agents      — themselves only
+//   • Team Leads  — themselves + direct reports
+//   • Regional Mgrs — themselves + full subtree
+//   • Admin       — anyone
+//
+// Idempotency: the (work_email, start_date, end_date, source) unique
+// constraint catches a duplicate submit — we ON CONFLICT bump the reason
+// + updated_at, returning the existing row so retries are safe.
+export async function POST(req) {
+  const user = getAuthUser(req);
+  if (!user.email) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  let body;
+  try { body = await req.json(); }
+  catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }); }
+
+  const workEmail = String(body.work_email || '').toLowerCase().trim();
+  const startDate = normaliseDate(body.start_date);
+  const endDate = normaliseDate(body.end_date);
+  const reasonRaw = typeof body.reason === 'string' ? body.reason.trim() : '';
+  const reason = reasonRaw ? reasonRaw.slice(0, 80) : null;
+
+  if (!workEmail) return NextResponse.json({ error: 'work_email is required' }, { status: 400 });
+  if (!startDate || !endDate) return NextResponse.json({ error: 'start_date and end_date must be YYYY-MM-DD' }, { status: 400 });
+  if (endDate < startDate) return NextResponse.json({ error: 'end_date must be on or after start_date' }, { status: 400 });
+
+  await ensureRosterHydrated();
+
+  if (!canManageTimeOffFor(user, workEmail)) {
+    return NextResponse.json(
+      { error: 'You can only submit time off for yourself or your direct reports.' },
+      { status: 403 },
+    );
+  }
+
+  try {
+    const insert = await query(
+      `INSERT INTO time_off_events (work_email, start_date, end_date, source, status, reason)
+       VALUES ($1, $2, $3, 'manual', 'approved', $4)
+       ON CONFLICT (work_email, start_date, end_date, source) DO UPDATE
+         SET reason = EXCLUDED.reason, updated_at = NOW()
+       RETURNING id, work_email, start_date, end_date, source, status, reason`,
+      [workEmail, startDate, endDate, reason],
+    );
+    const row = insert.rows[0];
+    return NextResponse.json({
+      item: {
+        id: row.id,
+        work_email: row.work_email,
+        start_date: row.start_date instanceof Date ? row.start_date.toISOString().slice(0, 10) : row.start_date,
+        end_date: row.end_date instanceof Date ? row.end_date.toISOString().slice(0, 10) : row.end_date,
+        source: row.source,
+        status: row.status,
+        reason: row.reason,
+        handover: null,
+      },
+    }, { status: 201 });
+  } catch (err) {
+    console.error('[time-off-events POST]', err.message);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

@@ -15,7 +15,11 @@ import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 <<<<<<< HEAD
 import { getVisibleEmails, isAdminUser } from '../../../../../src/lib/queue-scoping';
 =======
+<<<<<<< HEAD
+import { getVisibleEmails, isAdminUser } from '../../../../../src/lib/queue-scoping';
+=======
 import { getVisibleOOOEmails, isAdminUser } from '../../../../../src/lib/queue-scoping';
+>>>>>>> nexus/dev
 >>>>>>> nexus/dev
 
 export async function GET(req) {
@@ -32,7 +36,11 @@ export async function GET(req) {
 <<<<<<< HEAD
       : Array.from(getVisibleEmails(user)).map(e => String(e).toLowerCase());
 =======
+<<<<<<< HEAD
+      : Array.from(getVisibleEmails(user)).map(e => String(e).toLowerCase());
+=======
       : Array.from(getVisibleOOOEmails(user)).map(e => String(e).toLowerCase());
+>>>>>>> nexus/dev
 >>>>>>> nexus/dev
 
     // Mine — caller's upcoming events. Missing-handover narrowing is

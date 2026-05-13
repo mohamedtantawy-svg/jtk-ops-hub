@@ -210,6 +210,37 @@ export function getVisibleOOOEmails(user) {
   return visible;
 }
 
+// ── Write permission for time-off entries ───────────────────────────────────
+// Manual submit / delete spec (Lucy + Mohamed 2026-05-13):
+//   • Agents      — themselves only
+//   • Team Leads  — themselves + their direct reports
+//   • Regional Mgrs — themselves + their full subtree
+//   • Admin       — anyone
+// Symmetric on create and delete so a manager who CAN create for a report can
+// also REMOVE the entry they (or anyone else) created for that same report.
+// The write set is intentionally NARROWER than getVisibleOOOEmails (which
+// is for read scope) — peer TLs / peer RMs can SEE each other's leave but
+// can't edit it. Pure view ≠ write.
+export function canManageTimeOffFor(user, targetEmail) {
+  if (!user || !user.email || !targetEmail) return false;
+  const callerEmail = String(user.email).toLowerCase();
+  const target = String(targetEmail).toLowerCase();
+  if (callerEmail === target) return true; // self always
+  if (isAdminUser(user)) return true;
+
+  const callerMember = MEMBERS_BY_EMAIL[callerEmail];
+  if (!callerMember) return false;
+  const access = String(callerMember.access || '').toLowerCase();
+
+  if (access === 'regional_manager') {
+    return new Set(getAllReports(callerEmail)).has(target);
+  }
+  if (access === 'team_lead') {
+    return getDirectReports(callerEmail).some(r => r.email === target);
+  }
+  return false;
+}
+
 // ── Visible countries ──────────────────────────────────────────────────────
 // Aggregates OWNER_COUNTRIES across every email the user can "see", where the
 // hierarchy is defined exactly as for assignee visibility so the two modes
