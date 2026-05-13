@@ -353,7 +353,8 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
   };
 
   const perms = useContext(PermissionsContext);
-  const { deelData } = useContext(IntegrationsContext);
+  // deelData removed 2026-05-13 — only used for a cosmetic "Deel API
+  // Connected" caption; REST-v2 wrappers were retired in the same pass.
   const isAdmin = perms?.dataScope === 'all_tasks';
   // Roster mutation gate — admin / regional_manager / per-user Access Admin
   // grant. Mirrors the server-side canManageRoster() in src/lib/access-admin.
@@ -888,16 +889,10 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
         )}
       />
       <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px' }}>
-        {/* Deel API Connected banner */}
-        {deelData?.isAvailable && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', borderRadius: 10, background: '#f0fdf4', border: '1px solid #bbf7d0', marginBottom: 14, fontSize: 12 }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#16a34a', display: 'inline-block' }} />
-            <span style={{ fontWeight: 600, color: '#16a34a' }}>Deel API Connected</span>
-            <span style={{ color: '#616161' }}>
-              — {Array.isArray(deelData.people) ? deelData.people.length : 0} workers, {Array.isArray(deelData.timeOff) ? deelData.timeOff.length : 0} time-off requests
-            </span>
-          </div>
-        )}
+        {/* "Deel API Connected" caption removed 2026-05-13 alongside the
+            REST-v2 deprecation. The banner showed `0 workers, 0 time-off
+            requests` once the endpoints started 401-ing — misleading.
+            Admin-API queue feeds remain wired through their own hooks. */}
 
         {/* Region filter + Add Member button */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>

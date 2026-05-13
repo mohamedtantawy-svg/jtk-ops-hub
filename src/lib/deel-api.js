@@ -129,54 +129,15 @@ export async function deelFetch(path, options = {}) {
   return withRetry(() => _deelFetch(path, options), { label: 'Deel', maxRetries: 2 });
 }
 
-// ── People / Workers (REST v2 API) ──────────────────────────────────────────
-
-export async function listPeople(params = {}) {
-  const qs = new URLSearchParams();
-  if (params.limit) qs.set('limit', String(params.limit));
-  if (params.offset) qs.set('offset', String(params.offset));
-  if (params.search) qs.set('search', params.search);
-  const q = qs.toString();
-  return deelFetch(`/rest/v2/people${q ? `?${q}` : ''}`);
-}
-
-export async function getPersonByEmail(email) {
-  return deelFetch(`/rest/v2/people?search=${encodeURIComponent(email)}`);
-}
-
-// ── Contracts (REST v2 API) ─────────────────────────────────────────────────
-
-export async function listContracts(params = {}) {
-  const qs = new URLSearchParams();
-  if (params.limit) qs.set('limit', String(params.limit));
-  if (params.offset) qs.set('offset', String(params.offset));
-  if (params.statuses) qs.set('statuses', params.statuses);
-  if (params.types) qs.set('types', params.types);
-  if (params.search) qs.set('search', params.search);
-  const q = qs.toString();
-  return deelFetch(`/rest/v2/contracts${q ? `?${q}` : ''}`);
-}
-
-export async function getContract(id) {
-  return deelFetch(`/rest/v2/contracts/${id}`);
-}
-
-// ── Time Off (REST v2 API) ──────────────────────────────────────────────────
-
-export async function listTimeOffRequests(params = {}) {
-  const qs = new URLSearchParams();
-  if (params.contract_id) qs.set('contract_id', params.contract_id);
-  if (params.status) qs.set('status', params.status);
-  if (params.limit) qs.set('limit', String(params.limit));
-  const q = qs.toString();
-  return deelFetch(`/rest/v2/time-off${q ? `?${q}` : ''}`);
-}
-
-// ── Organization (REST v2 API) ──────────────────────────────────────────────
-
-export async function getOrganization() {
-  return deelFetch('/rest/v2/organizations/current');
-}
+// REST v2 list/single wrappers (listPeople, listContracts, listTimeOffRequests,
+// getOrganization) were removed 2026-05-13 — `/rest/v2/people` + `/contracts`
+// list endpoints had been 401-ing for weeks (~240 errors / 3h in prod logs)
+// and `/time-off` + `/organizations/current` were 404 (endpoints retired by
+// upstream). The only consumers were diagnostic tiles on Briefing + a Team
+// caption — none of the queue / HR Hub / OOO surfaces depended on them.
+// fetchClientNameForContract below still uses `/rest/v2/contracts/<id>`
+// (single-resource) for amendment + onboarding client-name enrichment, which
+// continues to work with the current DEEL_API_KEY scope.
 
 // ── Onboarding (Admin API) ───────────────────────────────────────────────────
 
@@ -835,27 +796,9 @@ export async function listOffboardingCases() {
   return { items, statusCounts, serverTotal, scanned, pages: page + 1 };
 }
 
-// ── Contract Amendments (REST v2 API) ───────────────────────────────────────
-
-export async function listAmendments(params = {}) {
-  const qs = new URLSearchParams();
-  if (params.limit) qs.set('limit', String(params.limit));
-  if (params.offset) qs.set('offset', String(params.offset));
-  if (params.statuses) qs.set('statuses', params.statuses);
-  const q = qs.toString();
-  return deelFetch(`/rest/v2/contracts/amendments${q ? `?${q}` : ''}`);
-}
-
-// ── Invoices (REST v2 API) ──────────────────────────────────────────────────
-
-export async function listInvoices(params = {}) {
-  const qs = new URLSearchParams();
-  if (params.limit) qs.set('limit', String(params.limit));
-  if (params.offset) qs.set('offset', String(params.offset));
-  if (params.statuses) qs.set('statuses', params.statuses);
-  const q = qs.toString();
-  return deelFetch(`/rest/v2/invoices${q ? `?${q}` : ''}`);
-}
+// `listAmendments` (/rest/v2/contracts/amendments) and `listInvoices`
+// (/rest/v2/invoices) were dead code as of 2026-05-13 — no caller anywhere
+// in src/ or app/. Removed alongside the REST-v2 deprecation pass.
 
 // ── Incentive Plans (Admin API) ─────────────────────────────────────────────
 // /admin/eor-experience/incentive-plans — pending IP preparation feed.
@@ -1645,8 +1588,19 @@ export async function listWorkbenchTasks(params = {}) {
       // KPI accurate AND removes a 800-row tail from the workbench
       // cache. Combined with the projection slim above, this cuts
       // worst-case workbench-cache memory roughly in half.
+      //
+      // 2026-05-13: bumped 2 → 5 pages (200 → 500 row ceiling) after
+      // a 3-hour prod log audit showed EVERY workbench sync emitting
+      // the truncation flag with `kept 185` — the upstream cursor was
+      // still pointing forward past the 200-row cap, so we were
+      // silently dropping a tail of recently-finished tasks each
+      // cycle. That made the home "Resolved Today" KPI under-report
+      // by an unknown amount on busy days. Extra memory cost: ~60 KB
+      // at the worst case (500 rows × ~120 bytes per row after the
+      // slim projection) — negligible vs the 1733 MiB heap we were
+      // already tolerating during peak builds.
       const FINISHED_PAGE_SIZE = 100;
-      const FINISHED_MAX_PAGES = 2;
+      const FINISHED_MAX_PAGES = 5;
       const cutoff = Date.now() - completedLookbackMs;
       const seen = new Set(allItems.map(t => t.id));
       let kept = 0;
@@ -1733,8 +1687,6 @@ export async function listWorkbenchTasks(params = {}) {
   return { items, total: items.length, cursor: null };
 }
 
-// ── Payslips (REST v2 API) ──────────────────────────────────────────────────
-
-export async function getPayslips(contractId) {
-  return deelFetch(`/rest/v2/contracts/${contractId}/payslips`);
-}
+// `getPayslips` (/rest/v2/contracts/<id>/payslips) was dead code as of
+// 2026-05-13 — no caller anywhere in src/ or app/. Removed alongside the
+// REST-v2 deprecation pass.
