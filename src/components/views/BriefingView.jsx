@@ -34,6 +34,8 @@ import {
   scopeIncentivePlans,
 } from '../../lib/queue-scoping';
 import Avatar from '../ui/Avatar';
+import OOOBadge from '../ui/OOOBadge';
+import { useTimeOffEvents } from '../../hooks/useTimeOffEvents';
 import { ToolBadge, FnBadge } from '../ui/Badges';
 import PersonalChecklist from '../home/PersonalChecklist';
 import CoverageBanner from '../ooo/CoverageBanner';
@@ -71,6 +73,11 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     getAllReports: liveGetAllReports,
     loading: rosterLoading,
   } = useTeamMembers();
+  // OOO events keyed by email, same source as the Leaders Hub Team table
+  // (Ziyaad's 2026-05-13 ask: the OOO chip should ALSO show on the team
+  // table here on the home Overview surface). One-shot fetch via the
+  // shared hook so we don't refetch per-row.
+  const { eventsByEmail: oooEventsByEmail } = useTimeOffEvents();
   // ── Login-as gate (mirrors Team.jsx::canLoginAs) ─────────────────────────
   // Only TL/RM/admin can impersonate. Target must be in the caller's
   // reporting subtree, not deactivated, and not currently impersonated.
@@ -1777,6 +1784,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                                 {m.name}
                                 <AccessBadge access={live?.access || m.access || 'agent'} />
                                 <LastSeenPill iso={live?.lastSeenAt} loading={!!rosterLoading} />
+                                <OOOBadge events={oooEventsByEmail.get((m.email || '').toLowerCase())} />
                               </div>
                               <div style={{fontSize:11,color:'#9e9e9e'}}>{FLAGS[m.country]} {m.team}</div>
                             </div>
@@ -1842,6 +1850,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                                 {g.manager.name}
                                 <AccessBadge access={live?.access || g.manager.access} />
                                 <LastSeenPill iso={live?.lastSeenAt} loading={!!rosterLoading} />
+                                <OOOBadge events={oooEventsByEmail.get((g.manager.email || '').toLowerCase())} />
                               </div>
                               <div style={{fontSize:11,color:'#9e9e9e'}}>{g.manager.team} &middot; {g.headcount} {g.headcount === 1 ? 'agent' : 'agents'}</div>
                             </div>

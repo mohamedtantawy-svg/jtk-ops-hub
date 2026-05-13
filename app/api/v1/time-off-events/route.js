@@ -12,15 +12,25 @@
 //       — server-side narrowing matching the FE chip the user picked.
 //         Defaults to `all` (caller filters client-side if needed).
 //
+<<<<<<< HEAD
+// Visibility is enforced via getVisibleEmails(user) — same scoping the
+// Queue / Briefing / HR Hub already use, so an agent never sees outside
+// their reporting tree.
+=======
 // Visibility is enforced via getVisibleOOOEmails(user) — the OOO-specific
 // cohort (Fernanda 2026-05-13). Broader than the Queue / HR scoping so
 // peer TLs / peer RMs and intra-team agents can see each other's leave.
+>>>>>>> nexus/dev
 
 import { NextResponse } from 'next/server';
 import { query } from '../../../../src/lib/db';
 import { getAuthUser } from '../../../../src/lib/auth-helpers';
+<<<<<<< HEAD
+import { getVisibleEmails, isAdminUser } from '../../../../src/lib/queue-scoping';
+=======
 import { getVisibleOOOEmails, isAdminUser, canManageTimeOffFor } from '../../../../src/lib/queue-scoping';
 import { ensureRosterHydrated } from '../../../../src/lib/roster-server';
+>>>>>>> nexus/dev
 import { LENS_IDS } from '../../../../src/lib/handover-helpers';
 
 const VALID_LENSES = new Set(Object.values(LENS_IDS));
@@ -95,7 +105,11 @@ export async function GET(req) {
   // by their reporting tree. Skipped for 'mine'/'drafts' since the
   // caller-email predicate already narrows further.
   if (!isAdminUser(user) && lens !== LENS_IDS.MINE && lens !== LENS_IDS.DRAFTS) {
+<<<<<<< HEAD
+    const visible = Array.from(getVisibleEmails(user));
+=======
     const visible = Array.from(getVisibleOOOEmails(user));
+>>>>>>> nexus/dev
     if (visible.length === 0) {
       where.push('FALSE');
     } else {
@@ -186,6 +200,8 @@ export async function GET(req) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
+<<<<<<< HEAD
+=======
 
 // ── POST /api/v1/time-off-events ────────────────────────────────────────
 // Manually submit a new approved time-off entry, mirroring what would
@@ -259,3 +275,4 @@ export async function POST(req) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
+>>>>>>> nexus/dev
