@@ -268,11 +268,39 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
     return () => clearTimeout(t);
   }, [expandedId]);
 
-  const { items, loading, error, lastSyncAt, refresh, create, patch, remove, vote, fetchComments, submitComment } = useFeedback({
+  const { items, loading, error, lastSyncAt, refresh, create, patch, remove, vote, loadDetail, fetchComments, submitComment } = useFeedback({
     enabled: !!user,
     userEmail: user?.email || null,
     sort,
   });
+
+  // Lazy-load full attachments the moment a row opens. The list response
+  // ships lite rows (no attachment dataUris) so the cold load is fast;
+  // when the user clicks to expand, fetch the detail — we already track
+  // which ids have been hydrated via `attachmentsLoadedRef` so re-expand
+  // / re-collapse cycles don't re-fetch. `attachments.length > 0` is the
+  // fast-path skip — if a row carries attachments (e.g. the user just
+  // submitted one) we don't need a refetch.
+  const attachmentsLoadedRef = useRef(new Set());
+  useEffect(() => {
+    if (!expandedId) return;
+    const id = expandedId;
+    const item = items.find(i => String(i.id) === String(id));
+    if (!item) return;
+    if (item.attachmentCount === 0 || item.attachmentCount == null) {
+      // No attachments → no fetch needed, but mark so future polls don't
+      // think we're missing them.
+      attachmentsLoadedRef.current.add(id);
+      return;
+    }
+    if (attachmentsLoadedRef.current.has(id)) return;
+    if (Array.isArray(item.attachments) && item.attachments.length >= item.attachmentCount) {
+      attachmentsLoadedRef.current.add(id);
+      return;
+    }
+    attachmentsLoadedRef.current.add(id);
+    loadDetail(id);
+  }, [expandedId, items, loadDetail]);
 
   // Identity match for the "My requests" toggle. Email is preferred (the
   // canonical submitter id since the JOIN added in /api/v1/feedback);
@@ -792,15 +820,43 @@ function FeedbackRow({ item, expanded, onToggle, onVote, onStatusChange, onPrior
           </div>
         </div>
 
-        {/* Attachment thumb (right rail) — first image if any, else first
-            video frame placeholder. "+N" badge appears when more than one
-            attachment is present so the row signals there's more inside. */}
+        {/* Attachment thumb (right rail). Two shapes:
+            • Hydrated (server returned the dataUri — happens on detail
+              fetch after expand, OR for rows the user just submitted):
+              render the first image / video frame as a thumbnail.
+            • Lite (list response — server omits dataUris for perf):
+              render a generic "📎 N" placeholder. Clicking it expands
+              the row, which triggers the lazy detail-fetch and swaps
+              this in for the real thumbnail next pass. */}
         {(() => {
           if (expanded) return null;
           const atts = Array.isArray(item.attachments) && item.attachments.length > 0
             ? item.attachments
             : (item.screenshot ? [{ kind: 'image', dataUri: item.screenshot, name: 'screenshot' }] : []);
-          if (atts.length === 0) return null;
+          const liteCount = Number(item.attachmentCount || 0);
+          if (atts.length === 0 && liteCount === 0) return null;
+
+          // Lite placeholder — no dataUri yet.
+          if (atts.length === 0) {
+            return (
+              <div style={{ flexShrink: 0, alignSelf: 'flex-start', position: 'relative' }}>
+                <button onClick={onToggle} style={thumbBtn} aria-label={`View ${liteCount} attachment${liteCount === 1 ? '' : 's'}`}>
+                  <div style={{
+                    width: 92, height: 64,
+                    borderRadius: 8, border: '1px dashed var(--border)',
+                    background: 'var(--surface-2)',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                    color: 'var(--text-secondary)',
+                    gap: 2,
+                  }}>
+                    <i className="bi-paperclip" style={{ fontSize: 16 }} />
+                    <span style={{ fontSize: 10, fontWeight: 600 }}>{liteCount} attachment{liteCount === 1 ? '' : 's'}</span>
+                  </div>
+                </button>
+              </div>
+            );
+          }
+
           const first = atts.find(a => a.kind === 'image') || atts[0];
           const moreCount = atts.length - 1;
           return (
@@ -1060,6 +1116,32 @@ function ExpandedDetail({ item, isPriv, onStatusChange, onPriorityChange, onAssi
           const atts = Array.isArray(item.attachments) && item.attachments.length > 0
             ? item.attachments
             : (item.screenshot ? [{ kind: 'image', dataUri: item.screenshot, name: 'screenshot' }] : []);
+          const liteCount = Number(item.attachmentCount || 0);
+          // List endpoint omits data URIs for perf — show a placeholder
+          // while the detail-fetch (kicked off by the row's expand
+          // useEffect) lands. Typically <500 ms; the placeholder keeps
+          // the layout stable so the inline preview slots in seamlessly.
+          if (atts.length === 0 && liteCount > 0) {
+            return (
+              <div style={{ marginTop: 14 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+                  {liteCount === 1 ? 'Attachment' : `Attachments (${liteCount})`}
+                </div>
+                <div style={{
+                  padding: '24px 16px',
+                  border: '1px dashed var(--border)',
+                  borderRadius: 10,
+                  background: 'var(--surface-2)',
+                  textAlign: 'center',
+                  color: 'var(--text-secondary)',
+                  fontSize: 12,
+                }}>
+                  <i className="bi-arrow-clockwise spin" style={{ fontSize: 16, marginRight: 6 }} />
+                  Loading {liteCount === 1 ? 'attachment' : 'attachments'}…
+                </div>
+              </div>
+            );
+          }
           if (atts.length === 0) return null;
           const label = atts.length === 1
             ? (atts[0].kind === 'video' ? 'Clip' : 'Screenshot')

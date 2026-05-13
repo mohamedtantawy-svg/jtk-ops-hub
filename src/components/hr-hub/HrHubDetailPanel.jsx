@@ -682,13 +682,7 @@ function AttachmentsGrid({ attachments }) {
           // the user to recover. We now open every attachment in the
           // lightbox on click and always surface a download icon so the
           // user has a fallback path to the file.
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
-=======
           const isPdf = a.kind === 'pdf';
->>>>>>> nexus/dev
->>>>>>> nexus/dev
           const tileStyle = {
             position: 'relative',
             display: 'block',
@@ -698,18 +692,6 @@ function AttachmentsGrid({ attachments }) {
             background: a.kind === 'video' ? '#1b1b1b' : 'var(--surface-2)',
             aspectRatio: '4 / 3',
             padding: 0,
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
->>>>>>> nexus/dev
-            cursor: 'zoom-in',
-            width: '100%',
-          };
-          const lightboxKind = a.kind === 'video' ? 'video' : 'image';
-          const titleAttr = a.kind === 'video' ? 'Play video' : 'Open image';
-<<<<<<< HEAD
-=======
-=======
             cursor: isPdf ? 'pointer' : 'zoom-in',
             width: '100%',
           };
@@ -722,36 +704,18 @@ function AttachmentsGrid({ attachments }) {
           const onTileClick = isPdf
             ? () => { try { window.open(a.dataUri, '_blank', 'noopener,noreferrer'); } catch {} }
             : () => setLightbox({ src: a.dataUri, name: a.name, kind: lightboxKind });
->>>>>>> nexus/dev
->>>>>>> nexus/dev
           return (
             <div key={i} style={{ position: 'relative' }}>
               <button
                 type="button"
-<<<<<<< HEAD
-                onClick={() => setLightbox({ src: a.dataUri, name: a.name, kind: lightboxKind })}
-=======
-<<<<<<< HEAD
-                onClick={() => setLightbox({ src: a.dataUri, name: a.name, kind: lightboxKind })}
-=======
                 onClick={onTileClick}
->>>>>>> nexus/dev
->>>>>>> nexus/dev
                 style={tileStyle}
                 title={titleAttr}
                 aria-label={titleAttr}
               >
                 {a.kind === 'image' ? (
                   <img src={a.dataUri} alt={a.name || ''} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-<<<<<<< HEAD
-                ) : (
-=======
-<<<<<<< HEAD
-                ) : (
-=======
                 ) : a.kind === 'video' ? (
->>>>>>> nexus/dev
->>>>>>> nexus/dev
                   // `preload="metadata"` is enough to render the first
                   // frame as a thumbnail. Pointer events are disabled so
                   // clicks bubble to the wrapping button (one click =
@@ -778,16 +742,6 @@ function AttachmentsGrid({ attachments }) {
                       </span>
                     </span>
                   </>
-<<<<<<< HEAD
-                )}
-              </button>
-              {/* Download — works for both images and videos via the
-=======
-<<<<<<< HEAD
-                )}
-              </button>
-              {/* Download — works for both images and videos via the
-=======
                 ) : (
                   // PDF tile — icon + filename. No inline preview because
                   // rendering data-URI PDFs in <object>/<iframe> is
@@ -808,23 +762,13 @@ function AttachmentsGrid({ attachments }) {
                 )}
               </button>
               {/* Download — works for images, videos, and PDFs via the
->>>>>>> nexus/dev
->>>>>>> nexus/dev
                   `download` attribute on a data: URI. Sits at the
                   top-right of every tile so the user always has a way
                   to save the file even if the in-app player can't
                   decode it. */}
               <a
                 href={a.dataUri}
-<<<<<<< HEAD
-                download={a.name || (a.kind === 'video' ? 'attachment.mp4' : 'attachment.png')}
-=======
-<<<<<<< HEAD
-                download={a.name || (a.kind === 'video' ? 'attachment.mp4' : 'attachment.png')}
-=======
                 download={a.name || (a.kind === 'video' ? 'attachment.mp4' : a.kind === 'pdf' ? 'attachment.pdf' : 'attachment.png')}
->>>>>>> nexus/dev
->>>>>>> nexus/dev
                 onClick={e => e.stopPropagation()}
                 aria-label={`Download ${a.name || a.kind}`}
                 title="Download"
