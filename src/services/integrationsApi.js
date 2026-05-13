@@ -16,40 +16,11 @@ export async function fetchDeelHealth() {
   return apiFetch('/integrations/deel/health');
 }
 
-export async function fetchDeelPeople({ search, email, limit, offset } = {}) {
-  const params = new URLSearchParams();
-  if (search) params.set('search', search);
-  if (email) params.set('email', email);
-  if (limit) params.set('limit', String(limit));
-  if (offset) params.set('offset', String(offset));
-  const qs = params.toString();
-  return apiFetch(`/integrations/deel/people${qs ? `?${qs}` : ''}`);
-}
-
-export async function fetchDeelContracts({ search, statuses, types, limit, offset, id } = {}) {
-  const params = new URLSearchParams();
-  if (id) params.set('id', id);
-  if (search) params.set('search', search);
-  if (statuses) params.set('statuses', statuses);
-  if (types) params.set('types', types);
-  if (limit) params.set('limit', String(limit));
-  if (offset) params.set('offset', String(offset));
-  const qs = params.toString();
-  return apiFetch(`/integrations/deel/contracts${qs ? `?${qs}` : ''}`);
-}
-
-export async function fetchDeelTimeOff({ contract_id, status, limit } = {}) {
-  const params = new URLSearchParams();
-  if (contract_id) params.set('contract_id', contract_id);
-  if (status) params.set('status', status);
-  if (limit) params.set('limit', String(limit));
-  const qs = params.toString();
-  return apiFetch(`/integrations/deel/time-off${qs ? `?${qs}` : ''}`);
-}
-
-export async function fetchDeelOrg() {
-  return apiFetch('/integrations/deel/org');
-}
+// REST-v2 client wrappers (fetchDeelPeople / fetchDeelContracts /
+// fetchDeelTimeOff / fetchDeelOrg) were removed 2026-05-13 — the matching
+// server routes were retired in the same pass after `/rest/v2/people` +
+// `/contracts` 401-ed and `/time-off` + `/organizations/current` 404-ed
+// for weeks in prod. See src/lib/deel-api.js for the full rationale.
 
 export async function fetchDeelOffboarding({ bustCache } = {}) {
   const qs = bustCache ? '?bust=1' : '';

@@ -22,8 +22,16 @@ export async function GET() {
       deel: {
         configured: isDeelConfigured(),
         label: 'Deel Admin',
-        description: 'People, contracts, time-off, payslips',
-        endpoints: ['/integrations/deel/people', '/integrations/deel/contracts', '/integrations/deel/time-off', '/integrations/deel/org'],
+        description: 'Onboarding, offboarding, amendments, redlines, workbench, incentive plans (admin API)',
+        endpoints: [
+          '/integrations/deel/onboarding',
+          '/integrations/deel/onboarding-paused',
+          '/integrations/deel/offboarding',
+          '/integrations/deel/amendments',
+          '/integrations/deel/redlines',
+          '/integrations/deel/workbench',
+          '/integrations/deel/incentive-plans',
+        ],
       },
       jira: {
         configured: isJiraConfigured(),

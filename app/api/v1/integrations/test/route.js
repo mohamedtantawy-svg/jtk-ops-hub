@@ -3,17 +3,21 @@
 // Requires auth (JWT verified by middleware).
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
-import { isDeelConfigured, listPeople } from '../../../../../src/lib/deel-api';
+import { isDeelConfigured, deelFetch } from '../../../../../src/lib/deel-api';
 import { isJiraConfigured, listProjects } from '../../../../../src/lib/jira-api';
 import { isSlackConfigured, listChannels } from '../../../../../src/lib/slack-api';
 import { isZendeskConfigured, listTickets } from '../../../../../src/lib/zendesk-api';
 
+// 2026-05-13: switched from listPeople (/rest/v2/people, 401 in prod) to
+// the admin /admin_profile/me endpoint — mirrors what the dedicated
+// /integrations/deel/health endpoint uses, and proves the token's admin
+// scope (the one we actually rely on for queue / onboarding / etc.).
 async function testDeel() {
   if (!isDeelConfigured()) return { status: 'skipped', reason: 'not configured' };
   try {
-    const result = await listPeople({ limit: 1, offset: 0 });
-    const count = result?.data?.length ?? result?.total ?? '?';
-    return { status: 'ok', message: `Connected — ${count} people accessible` };
+    const profile = await deelFetch('/admin/admin_profile/me');
+    const adminName = profile?.full_name || profile?.data?.full_name || profile?.email || '(ok)';
+    return { status: 'ok', message: `Connected — admin: ${adminName}` };
   } catch (err) {
     return { status: 'error', message: err.message };
   }

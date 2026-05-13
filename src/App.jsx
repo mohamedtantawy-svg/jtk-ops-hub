@@ -25,7 +25,8 @@ import { usePermissions } from './hooks/usePermissions';
 import ErrorBoundary from './components/ui/ErrorBoundary';
 import { slaInfo } from './utils/helpers';
 import { useIntegrations } from './hooks/useIntegrations';
-import { useDeelData } from './hooks/useDeelData';
+// useDeelData removed 2026-05-13 — REST-v2 endpoints retired (see
+// src/lib/deel-api.js for the deprecation rationale).
 import { useJiraData } from './hooks/useJiraData';
 import { useSlackData } from './hooks/useSlackData';
 import { useMeetingAlerts } from './hooks/useMeetingAlerts';
@@ -1254,12 +1255,15 @@ const App=()=>{
     if (isManagerial && view === 'agent-home') setView('briefing');
   }, [effectiveUser, perms?.raw?.dataScope, view]);
 
-  // ── Live integrations (Deel, Jira, Slack) ─────────────────────────────────
+  // ── Live integrations (Jira, Slack) ───────────────────────────────────────
+  // Deel REST-v2 wrapper (useDeelData) retired 2026-05-13 — endpoints had
+  // been 401/404 for weeks and only fed two diagnostic tiles. Admin-API
+  // queue data flows through useQueueUnifiedSync / useOnboardingData /
+  // useWorkbenchData etc., which remain wired separately.
   const integrations = useIntegrations();
-  const deelData = useDeelData(integrations.isConfigured('deel'));
   const jiraData = useJiraData(integrations.isConfigured('jira'));
   const slackData = useSlackData(integrations.isConfigured('slack'));
-  const integrationsCtx = { integrations, deelData, jiraData, slackData, queueSync, queueUnified, hiddenTasks };
+  const integrationsCtx = { integrations, jiraData, slackData, queueSync, queueUnified, hiddenTasks };
 
   // ── Toast helpers ──────────────────────────────────────────────────────────
   const addToast=useCallback((type,title,body,onUndo)=>{

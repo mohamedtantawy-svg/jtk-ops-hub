@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useIntegrations } from '../../hooks/useIntegrations';
 import {
-  fetchDeelPeople, fetchDeelOrg,
+  fetchDeelHealth,
   searchJiraIssues, fetchJiraProjects,
   fetchSlackChannels, fetchSlackUsers,
 } from '../../services/integrationsApi';
@@ -16,11 +16,18 @@ const INTEGRATIONS = [
     icon: 'bi-building',
     color: '#15357a',
     bg: '#e8edf6',
-    description: 'People, contracts, time-off requests, payslips, organization data',
+    description: 'Onboarding, offboarding, amendments, redlines, workbench, incentive plans (admin API)',
     envVars: ['DEEL_API_KEY'],
+    // 2026-05-13: switched from /rest/v2/organizations/current (404 in
+    // prod) to the diagnostic /deel/health endpoint, which pings
+    // /admin/admin_profile/me — a working admin route.
     testFn: async () => {
-      const res = await fetchDeelOrg();
-      return { ok: true, detail: res?.data?.name || 'Connected' };
+      const res = await fetchDeelHealth();
+      if (res?.status === 'ok') {
+        return { ok: true, detail: res.message || 'Connected' };
+      }
+      const help = res?.help || res?.error || 'Deel API health check failed';
+      throw new Error(help);
     },
   },
   {
