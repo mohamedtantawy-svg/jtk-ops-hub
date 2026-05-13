@@ -1588,8 +1588,19 @@ export async function listWorkbenchTasks(params = {}) {
       // KPI accurate AND removes a 800-row tail from the workbench
       // cache. Combined with the projection slim above, this cuts
       // worst-case workbench-cache memory roughly in half.
+      //
+      // 2026-05-13: bumped 2 → 5 pages (200 → 500 row ceiling) after
+      // a 3-hour prod log audit showed EVERY workbench sync emitting
+      // the truncation flag with `kept 185` — the upstream cursor was
+      // still pointing forward past the 200-row cap, so we were
+      // silently dropping a tail of recently-finished tasks each
+      // cycle. That made the home "Resolved Today" KPI under-report
+      // by an unknown amount on busy days. Extra memory cost: ~60 KB
+      // at the worst case (500 rows × ~120 bytes per row after the
+      // slim projection) — negligible vs the 1733 MiB heap we were
+      // already tolerating during peak builds.
       const FINISHED_PAGE_SIZE = 100;
-      const FINISHED_MAX_PAGES = 2;
+      const FINISHED_MAX_PAGES = 5;
       const cutoff = Date.now() - completedLookbackMs;
       const seen = new Set(allItems.map(t => t.id));
       let kept = 0;
