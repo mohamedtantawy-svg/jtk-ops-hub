@@ -42,7 +42,12 @@ const ALLOWED_SCOPES = new Set(['mine', 'team', 'all', 'assigned']);
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_BYTES = 12 * 1024 * 1024;
 const MAX_TOTAL_PAYLOAD_BYTES = 30 * 1024 * 1024;
-const ATTACHMENT_KINDS = new Set(['image', 'video']);
+const ATTACHMENT_KINDS = new Set(['image', 'video', 'pdf']);
+const ATTACHMENT_PREFIX_BY_KIND = {
+  image: 'data:image/',
+  video: 'data:video/',
+  pdf: 'data:application/pdf',
+};
 
 function clean(str, max) {
   if (typeof str !== 'string') return null;
@@ -64,8 +69,8 @@ function sanitiseAttachments(raw) {
     const kind = ATTACHMENT_KINDS.has(a.kind) ? a.kind : null;
     const dataUri = typeof a.dataUri === 'string' ? a.dataUri : null;
     if (!kind || !dataUri) continue;
-    const expected = kind === 'image' ? 'data:image/' : 'data:video/';
-    if (!dataUri.startsWith(expected)) continue;
+    const expected = ATTACHMENT_PREFIX_BY_KIND[kind];
+    if (!expected || !dataUri.startsWith(expected)) continue;
     if (dataUri.length > MAX_ATTACHMENT_BYTES) {
       throw Object.assign(
         new Error(`Attachment "${a.name || kind}" too large (max ${Math.round(MAX_ATTACHMENT_BYTES / 1024 / 1024)} MB)`),

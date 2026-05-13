@@ -25,6 +25,7 @@ const QUICK_EMOJIS = [
 const MAX_ATTACHMENTS = 5;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 10 * 1024 * 1024;
+const MAX_PDF_BYTES = 10 * 1024 * 1024;
 const MAX_TOTAL_PAYLOAD_BYTES = 25 * 1024 * 1024;
 const ACCEPTED_VIDEO_TYPES = new Set(['video/mp4', 'video/webm', 'video/quicktime', 'video/x-m4v']);
 
@@ -131,13 +132,16 @@ export default function HrHubComposer({ onSubmit }) {
       }
       const isImage = f.type?.startsWith('image/');
       const isVideo = ACCEPTED_VIDEO_TYPES.has(f.type) || f.type?.startsWith('video/');
-      if (!isImage && !isVideo) continue;
+      const isPdf = f.type === 'application/pdf' || /\.pdf$/i.test(f.name || '');
+      if (!isImage && !isVideo && !isPdf) continue;
       if (isImage && f.size > MAX_IMAGE_BYTES * 4) { setError(`"${f.name}" too large`); continue; }
       if (isVideo && f.size > MAX_VIDEO_BYTES) { setError(`"${f.name}" exceeds video limit`); continue; }
+      if (isPdf && f.size > MAX_PDF_BYTES) { setError(`"${f.name}" exceeds PDF limit (${Math.round(MAX_PDF_BYTES / 1024 / 1024)} MB)`); continue; }
       const dataUri = isImage ? (await compressImage(f)) || (await fileToDataUri(f)) : await fileToDataUri(f);
       total += dataUri.length;
       if (total > MAX_TOTAL_PAYLOAD_BYTES) { setError('Total payload too large'); break; }
-      additions.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, kind: isImage ? 'image' : 'video', dataUri, name: f.name });
+      const kind = isImage ? 'image' : isVideo ? 'video' : 'pdf';
+      additions.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, kind, dataUri, name: f.name });
     }
     if (additions.length) setAttachments(prev => [...prev, ...additions]);
   }, [attachments]);
@@ -254,10 +258,22 @@ export default function HrHubComposer({ onSubmit }) {
               borderRadius: 6, overflow: 'hidden',
               border: '1px solid var(--border)', background: 'var(--surface-2)',
             }}>
-              {a.kind === 'image'
-                ? <img src={a.dataUri} alt={a.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                : <video src={a.dataUri} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-              }
+              {a.kind === 'image' ? (
+                <img src={a.dataUri} alt={a.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : a.kind === 'video' ? (
+                <video src={a.dataUri} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              ) : (
+                <div style={{
+                  width: '100%', height: '100%',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                  padding: 4, gap: 2,
+                  color: '#b91c1c',
+                  textAlign: 'center',
+                }}>
+                  <i className="bi bi-filetype-pdf" style={{ fontSize: 22 }} />
+                  <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }} title={a.name}>{a.name || 'document.pdf'}</span>
+                </div>
+              )}
               <button
                 onClick={() => setAttachments(prev => prev.filter(x => x.id !== a.id))}
                 aria-label="Remove"
@@ -297,7 +313,7 @@ export default function HrHubComposer({ onSubmit }) {
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*,video/mp4,video/webm,video/quicktime"
+          accept="image/*,video/mp4,video/webm,video/quicktime,application/pdf,.pdf"
           multiple
           style={{ display: 'none' }}
           onChange={e => addFiles(e.target.files)}

@@ -682,6 +682,7 @@ function AttachmentsGrid({ attachments }) {
           // the user to recover. We now open every attachment in the
           // lightbox on click and always surface a download icon so the
           // user has a fallback path to the file.
+          const isPdf = a.kind === 'pdf';
           const tileStyle = {
             position: 'relative',
             display: 'block',
@@ -691,23 +692,30 @@ function AttachmentsGrid({ attachments }) {
             background: a.kind === 'video' ? '#1b1b1b' : 'var(--surface-2)',
             aspectRatio: '4 / 3',
             padding: 0,
-            cursor: 'zoom-in',
+            cursor: isPdf ? 'pointer' : 'zoom-in',
             width: '100%',
           };
           const lightboxKind = a.kind === 'video' ? 'video' : 'image';
-          const titleAttr = a.kind === 'video' ? 'Play video' : 'Open image';
+          const titleAttr = isPdf ? 'Open PDF' : a.kind === 'video' ? 'Play video' : 'Open image';
+          // PDFs open in a new tab via the browser's built-in viewer
+          // (data URIs render fine in modern Chromium/Firefox). The
+          // lightbox is image/video only, so we'd lose the user's
+          // context if we tried to route PDFs through it.
+          const onTileClick = isPdf
+            ? () => { try { window.open(a.dataUri, '_blank', 'noopener,noreferrer'); } catch {} }
+            : () => setLightbox({ src: a.dataUri, name: a.name, kind: lightboxKind });
           return (
             <div key={i} style={{ position: 'relative' }}>
               <button
                 type="button"
-                onClick={() => setLightbox({ src: a.dataUri, name: a.name, kind: lightboxKind })}
+                onClick={onTileClick}
                 style={tileStyle}
                 title={titleAttr}
                 aria-label={titleAttr}
               >
                 {a.kind === 'image' ? (
                   <img src={a.dataUri} alt={a.name || ''} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                ) : (
+                ) : a.kind === 'video' ? (
                   // `preload="metadata"` is enough to render the first
                   // frame as a thumbnail. Pointer events are disabled so
                   // clicks bubble to the wrapping button (one click =
@@ -734,16 +742,33 @@ function AttachmentsGrid({ attachments }) {
                       </span>
                     </span>
                   </>
+                ) : (
+                  // PDF tile — icon + filename. No inline preview because
+                  // rendering data-URI PDFs in <object>/<iframe> is
+                  // unreliable across browsers; the click handler opens
+                  // the file in a new tab where the browser's viewer
+                  // takes over, and the download icon overlay is the
+                  // belt-and-braces fallback.
+                  <div style={{
+                    width: '100%', height: '100%',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                    padding: 8, gap: 6,
+                    color: '#b91c1c',
+                    textAlign: 'center',
+                  }}>
+                    <i className="bi bi-filetype-pdf" style={{ fontSize: 36 }} />
+                    <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }} title={a.name}>{a.name || 'document.pdf'}</span>
+                  </div>
                 )}
               </button>
-              {/* Download — works for both images and videos via the
+              {/* Download — works for images, videos, and PDFs via the
                   `download` attribute on a data: URI. Sits at the
                   top-right of every tile so the user always has a way
                   to save the file even if the in-app player can't
                   decode it. */}
               <a
                 href={a.dataUri}
-                download={a.name || (a.kind === 'video' ? 'attachment.mp4' : 'attachment.png')}
+                download={a.name || (a.kind === 'video' ? 'attachment.mp4' : a.kind === 'pdf' ? 'attachment.pdf' : 'attachment.png')}
                 onClick={e => e.stopPropagation()}
                 aria-label={`Download ${a.name || a.kind}`}
                 title="Download"
