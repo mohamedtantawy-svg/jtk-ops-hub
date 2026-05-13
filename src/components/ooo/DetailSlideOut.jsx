@@ -140,6 +140,14 @@ function DetailSlideOut({
   const [busyAction, setBusyAction] = useState(null);   // string id of pending action
   const [pendingPrompt, setPendingPrompt] = useState(null);   // { kind: 'decline' | 'reject' | 'cancel', onConfirm }
   const [handbackOpen, setHandbackOpen] = useState(false);
+  // Delete-time-off busy flag — hoisted above the early-return at L~175 so
+  // the hook order is stable regardless of whether `event` is set. The
+  // 2026-05-13 first version placed this AFTER the `if (!event) return null;`
+  // guard, which gave React error #310 ("Rendered fewer hooks than expected")
+  // the moment a user clicked Submit / Delete and the panel re-rendered
+  // with event toggling. Rules of hooks — every render must call the same
+  // hooks in the same order.
+  const [deleteBusy, setDeleteBusy] = useState(false);
 
   const handoverId = event?.handover?.id || null;
 
@@ -188,7 +196,6 @@ function DetailSlideOut({
   const isCoverer  = handover ? handover.coverers?.some(c => lc(c.coverer_email) === callerLc) : false;
   const isAdminish = currentUserRole === 'admin' || currentUserRole === 'regional_manager';
   const canDelete  = canCallerManageTarget(currentUserEmail, currentUserRole, event.work_email, membersByEmail);
-  const [deleteBusy, setDeleteBusy] = useState(false);
   const handleDelete = async () => {
     if (!canDelete || deleteBusy) return;
     const confirmed = typeof window !== 'undefined'
