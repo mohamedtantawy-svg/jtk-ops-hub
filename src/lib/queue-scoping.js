@@ -129,6 +129,87 @@ export function getVisibleEmails(user) {
   return base;
 }
 
+// ── OOO visibility ─────────────────────────────────────────────────────────
+// The OOO surface is a team-coordination tool — visibility is intentionally
+// broader than the queue/HR scoping (which keeps tickets confidential to
+// the reporting chain). Per Fernanda's 2026-05-13 feedback the spec is:
+//
+//   Admin             → everyone
+//   Regional Manager  → own subtree + peer RMs (just the RMs themselves,
+//                       not their subtrees — RMs need to know which peers
+//                       are out so they can re-route cross-region)
+//   Team Lead         → self + own direct reports + peer TLs under the
+//                       same manager (so TLs can coordinate coverage with
+//                       their fellow leads under the same RM)
+//   Agent             → self + the rest of their team (their TL's direct
+//                       reports — i.e. their peer agents). Agents don't see
+//                       up to their TL because the TL's calendar reaches a
+//                       different cohort.
+//
+// Handover-delegation pass-through is preserved on top of the role cohort —
+// if you're actively covering for someone whose email isn't in your normal
+// OOO visibility, you still see their leave (otherwise the Covering me lens
+// would underflow).
+//
+// IMPORTANT: this DOES NOT replace `getVisibleEmails` (queue/HR scoping).
+// Leak path: don't accidentally pass an OOO email-set into a queue route or
+// every TL will start seeing tickets across teams.
+export function getVisibleOOOEmails(user) {
+  if (!user || !user.email) return new Set();
+  if (isAdminUser(user)) return new Set(ALL_EMAILS_SET);
+
+  const callerEmail = String(user.email).toLowerCase();
+  const callerMember = MEMBERS_BY_EMAIL[callerEmail];
+  if (!callerMember) {
+    // Unknown directory member — fall back to self-only.
+    const fallback = new Set([callerEmail]);
+    for (const d of getActiveHandoverDelegationsSync(callerEmail)) {
+      if (d?.requesterEmail) fallback.add(d.requesterEmail);
+    }
+    return fallback;
+  }
+
+  const visible = new Set([callerEmail]);
+  const access = String(callerMember.access || '').toLowerCase();
+
+  if (access === 'regional_manager') {
+    for (const r of getAllReports(callerEmail)) visible.add(r);
+    for (const m of Object.values(MEMBERS_BY_EMAIL)) {
+      if (!m || m.email === callerEmail) continue;
+      if (m.isDeleted) continue;
+      if (String(m.access || '').toLowerCase() === 'regional_manager') {
+        visible.add(m.email);
+      }
+    }
+  } else if (access === 'team_lead') {
+    for (const r of getDirectReports(callerEmail)) visible.add(r.email);
+    const managerEmail = callerMember.managerEmail ? String(callerMember.managerEmail).toLowerCase() : null;
+    if (managerEmail) {
+      for (const m of Object.values(MEMBERS_BY_EMAIL)) {
+        if (!m || m.email === callerEmail) continue;
+        if (m.isDeleted) continue;
+        if (String(m.access || '').toLowerCase() !== 'team_lead') continue;
+        const peerManager = m.managerEmail ? String(m.managerEmail).toLowerCase() : null;
+        if (peerManager === managerEmail) visible.add(m.email);
+      }
+    }
+  } else {
+    // Agent (or any non-managerial role) — the whole team under the same TL.
+    const managerEmail = callerMember.managerEmail ? String(callerMember.managerEmail).toLowerCase() : null;
+    if (managerEmail) {
+      for (const r of getDirectReports(managerEmail)) visible.add(r.email);
+    }
+  }
+
+  // Active-coverage delegations broaden visibility further so the Covering
+  // me lens never underflows.
+  for (const d of getActiveHandoverDelegationsSync(callerEmail)) {
+    if (d?.requesterEmail) visible.add(d.requesterEmail);
+  }
+
+  return visible;
+}
+
 // ── Visible countries ──────────────────────────────────────────────────────
 // Aggregates OWNER_COUNTRIES across every email the user can "see", where the
 // hierarchy is defined exactly as for assignee visibility so the two modes

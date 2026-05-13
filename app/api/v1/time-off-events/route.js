@@ -19,7 +19,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../src/lib/db';
 import { getAuthUser } from '../../../../src/lib/auth-helpers';
-import { getVisibleEmails, isAdminUser } from '../../../../src/lib/queue-scoping';
+import { getVisibleOOOEmails, isAdminUser } from '../../../../src/lib/queue-scoping';
 import { LENS_IDS } from '../../../../src/lib/handover-helpers';
 
 const VALID_LENSES = new Set(Object.values(LENS_IDS));
@@ -94,7 +94,7 @@ export async function GET(req) {
   // by their reporting tree. Skipped for 'mine'/'drafts' since the
   // caller-email predicate already narrows further.
   if (!isAdminUser(user) && lens !== LENS_IDS.MINE && lens !== LENS_IDS.DRAFTS) {
-    const visible = Array.from(getVisibleEmails(user));
+    const visible = Array.from(getVisibleOOOEmails(user));
     if (visible.length === 0) {
       where.push('FALSE');
     } else {

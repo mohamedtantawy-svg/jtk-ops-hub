@@ -12,7 +12,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
-import { getVisibleEmails, isAdminUser } from '../../../../../src/lib/queue-scoping';
+import { getVisibleOOOEmails, isAdminUser } from '../../../../../src/lib/queue-scoping';
 
 export async function GET(req) {
   const user = getAuthUser(req);
@@ -25,7 +25,7 @@ export async function GET(req) {
     // Resolve visible-scope emails once; reuse for team/all queries.
     const visibleEmails = isAdminUser(user)
       ? null
-      : Array.from(getVisibleEmails(user)).map(e => String(e).toLowerCase());
+      : Array.from(getVisibleOOOEmails(user)).map(e => String(e).toLowerCase());
 
     // Mine — caller's upcoming events. Missing-handover narrowing is
     // intentionally NOT applied here; the chip count shows total
