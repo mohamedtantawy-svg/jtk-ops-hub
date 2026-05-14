@@ -79,8 +79,18 @@ export default function CommentReactions({
   const [customEmoji, setCustomEmoji] = useState('');
   const [busy, setBusy] = useState(false);
   const pickerRef = useRef(null);
+  const triggerRef = useRef(null);
+  // Auto-flip up when the trigger is near the bottom of the viewport
+  // (announcement modal comments sit just above a sticky reaction strip
+  // that the downward picker would overlap with).
+  const [pickerDir, setPickerDir] = useState('down');
   useEffect(() => {
     if (!pickerOpen) return;
+    const r = triggerRef.current?.getBoundingClientRect();
+    if (r) {
+      const spaceBelow = window.innerHeight - r.bottom;
+      setPickerDir(spaceBelow < 200 ? 'up' : 'down');
+    }
     const h = (e) => { if (pickerRef.current && !pickerRef.current.contains(e.target)) setPickerOpen(false); };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
@@ -123,34 +133,42 @@ export default function CommentReactions({
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: compact ? 4 : 6, marginTop: compact ? 4 : 6, position: 'relative' }}>
-      {aggregated.map(r => (
-        <button
-          key={r.emoji}
-          type="button"
-          onClick={() => toggle(r.emoji)}
-          disabled={busy}
-          title={r.names.slice(0, 5).join(', ') + (r.count > 5 ? ` +${r.count - 5} more` : '')}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 4,
-            padding: compact ? '1px 7px' : '2px 8px', borderRadius: 128,
-            border: `1px solid ${r.iReacted ? '#7c3aed' : 'var(--border)'}`,
-            background: r.iReacted ? '#f3eff8' : 'var(--surface)',
-            color: r.iReacted ? '#5b21b6' : 'var(--text-secondary, #616161)',
-            fontSize: compact ? 11 : 12, fontWeight: 600,
-            cursor: busy ? 'wait' : 'pointer', lineHeight: 1,
-            height: compact ? 22 : 24, fontFamily: 'inherit',
-          }}
-        >
-          <span>{r.emoji}</span>
-          {r.count}
-        </button>
-      ))}
+      {aggregated.map(r => {
+        const reactorList = r.names.slice(0, 5).join(', ') + (r.count > 5 ? ` and ${r.count - 5} more` : '');
+        const ariaLabel = `${r.emoji} reaction, ${r.count} ${r.count === 1 ? 'person' : 'people'}: ${reactorList}. ${r.iReacted ? 'You reacted. Click to remove your reaction.' : 'Click to add your reaction.'}`;
+        return (
+          <button
+            key={r.emoji}
+            type="button"
+            onClick={() => toggle(r.emoji)}
+            disabled={busy}
+            aria-label={ariaLabel}
+            aria-pressed={r.iReacted}
+            title={r.names.slice(0, 5).join(', ') + (r.count > 5 ? ` +${r.count - 5} more` : '')}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: compact ? '1px 7px' : '2px 8px', borderRadius: 128,
+              border: `1px solid ${r.iReacted ? '#7c3aed' : 'var(--border)'}`,
+              background: r.iReacted ? '#f3eff8' : 'var(--surface)',
+              color: r.iReacted ? '#5b21b6' : 'var(--text-secondary, #616161)',
+              fontSize: compact ? 11 : 12, fontWeight: 600,
+              cursor: busy ? 'wait' : 'pointer', lineHeight: 1,
+              height: compact ? 22 : 24, fontFamily: 'inherit',
+            }}
+          >
+            <span aria-hidden="true">{r.emoji}</span>
+            <span aria-hidden="true">{r.count}</span>
+          </button>
+        );
+      })}
       <div ref={pickerRef} style={{ position: 'relative', display: 'inline-flex' }}>
         <button
+          ref={triggerRef}
           type="button"
           onClick={() => setPickerOpen(p => !p)}
           disabled={busy}
           aria-label="Add reaction"
+          aria-expanded={pickerOpen}
           title="Add reaction"
           style={{
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -164,7 +182,11 @@ export default function CommentReactions({
         </button>
         {pickerOpen && (
           <div style={{
-            position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 30,
+            position: 'absolute',
+            ...(pickerDir === 'up'
+              ? { bottom: 'calc(100% + 6px)' }
+              : { top: 'calc(100% + 6px)' }),
+            left: 0, zIndex: 30,
             display: 'flex', flexDirection: 'column', gap: 6,
             padding: 8, borderRadius: 10,
             background: 'var(--surface)', border: '1px solid var(--border)',

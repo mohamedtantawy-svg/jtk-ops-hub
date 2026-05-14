@@ -1009,7 +1009,7 @@ const Queue = ({ user, tasks, subFilter }) => {
                   onMouseLeave={e => { e.currentTarget.style.background = '#fff7ed'; }}
                 >
                   <i className="bi-funnel-fill" style={{ fontSize: 10 }}></i>
-                  {hiddenByFilters} hidden — click to clear
+                  Filters hiding {hiddenByFilters} — clear
                 </button>
               )}
 

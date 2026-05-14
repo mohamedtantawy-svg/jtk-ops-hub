@@ -65,6 +65,24 @@ const QUEUE_STORAGE_KEYS = [
   'ops_hub_queuev2_templates',
 ];
 
+// Friendly URL aliases for view slugs. The canonical view IDs (used by
+// permission checks + view-gating in ALL_VIEWS) are often less intuitive
+// than what users type when deep-linking — `leaders-hub` for the Leaders
+// Hub, `oo-o` typos, etc. Map common aliases to their canonical form
+// before any other view logic runs so a stale shortcut doesn't bounce
+// to briefing.
+const _VIEW_ALIASES = {
+  'leaders-hub': 'leader-alerts',
+  'leadership': 'leader-alerts',
+  'workspace': 'my-queue',
+  'queue': 'my-queue',
+  'home': 'briefing',
+};
+function _resolveViewAlias(v) {
+  if (!v) return v;
+  return _VIEW_ALIASES[String(v).toLowerCase()] || v;
+}
+
 function clearQueueCaches() {
   try {
     for (const k of QUEUE_STORAGE_KEYS) localStorage.removeItem(k);
@@ -313,7 +331,7 @@ const App=()=>{
     try {
       const sp = new URL(window.location.href).searchParams;
       const v = sp.get('view');
-      if (v && /^[a-z][a-z0-9-]{0,30}$/i.test(v)) return v;
+      if (v && /^[a-z][a-z0-9-]{0,30}$/i.test(v)) return _resolveViewAlias(v);
       if (sp.get('req')) return 'hr-hub';
       // `?announcement=<id>` shared from the Copy link button —
       // land on Announcements so the deep-link opens the detail.

@@ -181,27 +181,61 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // Click-outside closes the dropdown; we scope it to a ref on the pill
   // wrapper so clicking the edit button inside still toggles cleanly.
   const [showMocPicker,setShowMocPicker]=useState(false);
+  const [mocPickerPos,setMocPickerPos]=useState(null);
   const mocRef=useRef(null);
+  const mocPopRef=useRef(null);
   useEffect(()=>{
-    if(!showMocPicker)return;
+    if(!showMocPicker){setMocPickerPos(null);return;}
+    const update=()=>{
+      const r=mocRef.current?.getBoundingClientRect();
+      if(r)setMocPickerPos({top:Math.round(r.bottom+6),left:Math.round(r.left)});
+    };
+    update();
     const onDocClick=(e)=>{
-      if(mocRef.current&&!mocRef.current.contains(e.target)) setShowMocPicker(false);
+      if(mocRef.current?.contains(e.target))return;
+      if(mocPopRef.current?.contains(e.target))return;
+      setShowMocPicker(false);
     };
     document.addEventListener('mousedown',onDocClick);
-    return ()=>document.removeEventListener('mousedown',onDocClick);
+    window.addEventListener('scroll',update,true);
+    window.addEventListener('resize',update);
+    return ()=>{
+      document.removeEventListener('mousedown',onDocClick);
+      window.removeEventListener('scroll',update,true);
+      window.removeEventListener('resize',update);
+    };
   },[showMocPicker]);
   // Mirror picker state for the TLOC pill — separate ref + open flag so
   // clicking the MOC pencil doesn't toggle the TLOC dropdown and vice
   // versa.
   const [showTlocPicker,setShowTlocPicker]=useState(false);
+  // Picker is rendered with position:fixed (not absolute) so it escapes the
+  // briefing header's overflow:hidden and stays anchored to the trigger
+  // even when the page scrolls. We recompute the rect on scroll/resize so
+  // the popover tracks the button visually.
+  const [tlocPickerPos,setTlocPickerPos]=useState(null);
   const tlocRef=useRef(null);
+  const tlocPopRef=useRef(null);
   useEffect(()=>{
-    if(!showTlocPicker)return;
+    if(!showTlocPicker){setTlocPickerPos(null);return;}
+    const update=()=>{
+      const r=tlocRef.current?.getBoundingClientRect();
+      if(r)setTlocPickerPos({top:Math.round(r.bottom+6),left:Math.round(r.left)});
+    };
+    update();
     const onDocClick=(e)=>{
-      if(tlocRef.current&&!tlocRef.current.contains(e.target)) setShowTlocPicker(false);
+      if(tlocRef.current?.contains(e.target))return;
+      if(tlocPopRef.current?.contains(e.target))return;
+      setShowTlocPicker(false);
     };
     document.addEventListener('mousedown',onDocClick);
-    return ()=>document.removeEventListener('mousedown',onDocClick);
+    window.addEventListener('scroll',update,true);
+    window.addEventListener('resize',update);
+    return ()=>{
+      document.removeEventListener('mousedown',onDocClick);
+      window.removeEventListener('scroll',update,true);
+      window.removeEventListener('resize',update);
+    };
   },[showTlocPicker]);
   // \u2500\u2500 SSR-safe time state \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
   // The greeting / dateStr / timeStr depend on the *user's* local time. Server
@@ -1159,8 +1193,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                       </button>
                     )}
                   </div>
-                  {showMocPicker&&(
-                    <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,background:'var(--surface)',borderRadius:14,border:'1px solid var(--border)',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'6px 0',minWidth:300,maxHeight:360,overflowY:'auto',zIndex:1400}}>
+                  {showMocPicker&&mocPickerPos&&(
+                    <div ref={mocPopRef} style={{position:'fixed',top:mocPickerPos.top,left:mocPickerPos.left,background:'var(--surface)',borderRadius:14,border:'1px solid var(--border)',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'6px 0',minWidth:300,maxHeight:360,overflowY:'auto',zIndex:1400}}>
                       <div style={{padding:'6px 16px 8px',fontSize:10,fontWeight:700,color:'var(--text-muted)',letterSpacing:'.04em',textTransform:'uppercase'}}>Select Manager On Call</div>
                       {mocCandidates.length === 0 && (
                         <div style={{padding:'14px 16px',fontSize:12,color:'var(--text-muted)',textAlign:'center'}}>
@@ -1238,8 +1272,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                         <i className="bi bi-pencil" style={{fontSize:11,color:'#9e9e9e'}}></i>
                       </button>
                     </div>
-                    {showTlocPicker&&(
-                      <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,background:'var(--surface)',borderRadius:14,border:'1px solid var(--border)',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'6px 0',minWidth:300,maxHeight:360,overflowY:'auto',zIndex:1400}}>
+                    {showTlocPicker&&tlocPickerPos&&(
+                      <div ref={tlocPopRef} style={{position:'fixed',top:tlocPickerPos.top,left:tlocPickerPos.left,background:'var(--surface)',borderRadius:14,border:'1px solid var(--border)',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'6px 0',minWidth:300,maxHeight:360,overflowY:'auto',zIndex:1400}}>
                         <div style={{padding:'6px 16px 8px',fontSize:10,fontWeight:700,color:'var(--text-muted)',letterSpacing:'.04em',textTransform:'uppercase'}}>Select Team Lead On Call</div>
                         {tlocCandidates.length === 0 && (
                           <div style={{padding:'14px 16px',fontSize:12,color:'var(--text-muted)',textAlign:'center'}}>
@@ -1298,8 +1332,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                       <i className="bi-broadcast-pin" style={{fontSize:12}}/>
                       Set Team Lead On Call
                     </button>
-                    {showTlocPicker&&(
-                      <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,background:'var(--surface)',borderRadius:14,border:'1px solid var(--border)',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'6px 0',minWidth:300,maxHeight:360,overflowY:'auto',zIndex:1400}}>
+                    {showTlocPicker&&tlocPickerPos&&(
+                      <div ref={tlocPopRef} style={{position:'fixed',top:tlocPickerPos.top,left:tlocPickerPos.left,background:'var(--surface)',borderRadius:14,border:'1px solid var(--border)',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'6px 0',minWidth:300,maxHeight:360,overflowY:'auto',zIndex:1400}}>
                         <div style={{padding:'6px 16px 8px',fontSize:10,fontWeight:700,color:'var(--text-muted)',letterSpacing:'.04em',textTransform:'uppercase'}}>Select Team Lead On Call</div>
                         {tlocCandidates.length === 0 ? (
                           <div style={{padding:'14px 16px',fontSize:12,color:'var(--text-muted)',textAlign:'center'}}>No team leads available</div>
