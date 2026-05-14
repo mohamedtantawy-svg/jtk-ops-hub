@@ -10,6 +10,7 @@ import { FEED_EVENTS } from './data/feed';
 import { ALL_AGENT_IDS, matchesAudience } from './data/comms';
 import { useAnnouncements } from './hooks/useAnnouncements';
 import { useNotifications } from './hooks/useNotifications';
+import { useNotificationSound } from './hooks/useNotificationSound';
 import { useVersionCheck } from './hooks/useVersionCheck';
 import UpdateBanner from './components/ui/UpdateBanner';
 import { AnnouncementRequestsProvider } from './hooks/useAnnouncementRequests';
@@ -1045,6 +1046,19 @@ const App=()=>{
     return [...fromServer, ...notifs].slice(0, 50);
   }, [serverNotifs.items, notifs]);
 
+  // Per-user "play a chime on new notification" preference. Drives off the
+  // merged-unread count so both the server feed and the in-memory toasts
+  // can trigger a chime — and lives on the bell dropdown so every role
+  // (agents included) can flip it, no Settings access required.
+  const mergedUnreadCount = React.useMemo(
+    () => mergedNotifs.filter(n => !n.read).length,
+    [mergedNotifs],
+  );
+  const notifSound = useNotificationSound({
+    unreadCount: mergedUnreadCount,
+    userEmail: user?.email || null,
+  });
+
   const markAllRead = useCallback(() => {
     setNotifs(prev => prev.map(n => ({ ...n, read: true })));
     serverNotifs.markAllRead();
@@ -1794,6 +1808,7 @@ const App=()=>{
         view={view} setView={setView} user={effectiveUser} setUser={setUser}
         realUser={user}
         onSearch={()=>setShowSearch(true)} notifs={mergedNotifs} markAllRead={markAllRead} markRead={(serverId)=>serverNotifs.markRead(serverId)} markUnread={(serverId)=>serverNotifs.markUnread(serverId)} onNotifClick={handleNotifClick}
+        notifSound={notifSound}
         onViewAllNotifications={()=>setView('notifications')}
         onLogout={handleLogout}
         onLoginAsAdmin={handleLoginAsAdmin}
