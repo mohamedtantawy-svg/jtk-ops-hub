@@ -71,6 +71,11 @@ export default function WorkspaceHome({
   workbenchCount = 0,
   incentivePlansCount = 0,
   sourceRowsAll = [],   // all Deel-source rows (already scoped) for breach detection
+  // Authoritative breach count from Queue.jsx — keeps the "Clear all
+  // breaches" card aligned with the SLA pill on workspace home. When
+  // omitted (no consumer today, but kept as a fallback) we compute the
+  // same aggregate locally.
+  breachedCount: breachedCountProp,
 }) {
   const perms = useContext(PermissionsContext);
   const isAdmin = perms?.dataScope === 'all_tasks';
@@ -110,7 +115,7 @@ export default function WorkspaceHome({
   // tile counts ZD + every Deel-source breach but NOT Jira — Jira's
   // SLA model differs and double-counting it would distort the rule
   // "clear breaches first across every queue".
-  const breachedCount = useMemo(() => {
+  const breachedCountFallback = useMemo(() => {
     let n = 0;
     for (const r of sourceRowsAll) if (rowSlaSeverity(r) === 'breached') n++;
     for (const t of ticketRows) {
@@ -119,6 +124,7 @@ export default function WorkspaceHome({
     }
     return n;
   }, [sourceRowsAll, ticketRows]);
+  const breachedCount = typeof breachedCountProp === 'number' ? breachedCountProp : breachedCountFallback;
 
   const totalOpen =
     zdCount + jiraCount + onboardingCount + offboardingCount +

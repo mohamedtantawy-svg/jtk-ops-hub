@@ -582,10 +582,46 @@ const Queue = ({ user, tasks, subFilter }) => {
     return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: rows.length - atRisk - breached };
   }, [rowSlaSeverity]);
 
+  // Workspace-home aggregate — pills + the "Clear all breaches" card on
+  // WorkspaceHome MUST agree. Before 2026-05-14 the pill counted ZD+Jira
+  // tickets only (post mineOnlyForSla) while the card counted ZD-only
+  // tickets + every Deel source — Aline reported the "always different"
+  // mismatch in feedback 2026-05-13. Single source of truth: ZD-only
+  // ticket breaches (Jira excluded per Mohamed's 2026-05-01 home rule)
+  // plus all Deel-source breaches, with mineOnlyForSla applied to both
+  // so agents see a narrowed "their own queue" view on home consistent
+  // with Trish Lee's 2026-05-11 per-source pill feedback. Managers
+  // (TL/RM/Admin) see the same team aggregate in both places because
+  // mineOnlyForSla is a no-op for them. The result is passed down to
+  // WorkspaceHome so the card reads the same number.
+  const workspaceHomeSla = useMemo(() => {
+    const tickets = mineOnlyForSla(
+      visPreSla.filter(t => t.source === 'zendesk' && t.status !== 'resolved' && t.status !== 'waiting'),
+    );
+    let atRisk = 0, breached = 0, onTrack = 0;
+    for (const t of tickets) {
+      const s = slaInfo(t);
+      if (!s) { onTrack++; continue; }
+      if (s.breach) breached++;
+      else if (!s.ok) atRisk++;
+      else onTrack++;
+    }
+    const deel = tallyDeelSla(mineOnlyForSla(allSourceRows));
+    return {
+      atRiskCount: atRisk + deel.atRiskCount,
+      breachedCount: breached + deel.breachedCount,
+      onTrackCount: onTrack + deel.onTrackCount,
+    };
+  }, [visPreSla, allSourceRows, mineOnlyForSla, tallyDeelSla]);
+
   // ── SLA pills counts — reflect post-filter row sets per active tab ──
   // Agents get a mine-only tally (see `mineOnlyForSla` above) so the pills
   // reflect THEIR queue, not the team's. Managers keep the team-wide count.
   const { atRiskCount, breachedCount, onTrackCount } = useMemo(() => {
+    // Workspace-home state (no source + no tool + no other filter) uses
+    // the aggregated count above so the pills and the "Clear all breaches"
+    // card on WorkspaceHome show the same number.
+    if (!workSource && !fTool && !hasActiveFilters) return workspaceHomeSla;
     if (workSource === 'onboarding')      return tallyDeelSla(mineOnlyForSla(visOnboardingRows));
     if (workSource === 'offboarding')     return tallyDeelSla(mineOnlyForSla(visOffboardingRows));
     if (workSource === 'amendments')      return tallyDeelSla(mineOnlyForSla(visAmendmentRows));
@@ -606,7 +642,7 @@ const Queue = ({ user, tasks, subFilter }) => {
     const atRisk = slaBase.filter(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; }).length;
     const breached = slaBase.filter(t => { const s = slaInfo(t); return s && s.breach; }).length;
     return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: slaBase.length - atRisk - breached };
-  }, [workSource, visPreSla, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows, visIncentivePlanRows, tallyDeelSla, mineOnlyForSla]);
+  }, [workSource, fTool, hasActiveFilters, workspaceHomeSla, visPreSla, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows, visIncentivePlanRows, tallyDeelSla, mineOnlyForSla]);
 
   // ── View-aware header counts ──
   // For each Deel source we read the SLA-filtered row set so the "N open"
@@ -1105,6 +1141,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             workbenchCount={workbenchActiveRows.length}
             incentivePlansCount={incentivePlanRows.length}
             sourceRowsAll={allSourceRows}
+            breachedCount={workspaceHomeSla.breachedCount}
           />
         </ErrorBoundary>
       )}
