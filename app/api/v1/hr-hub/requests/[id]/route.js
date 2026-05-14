@@ -93,7 +93,7 @@ export async function GET(req, { params }) {
   const commentIds = commentsRes.rows.map(c => c.id);
   let reactionMap = new Map();
   if (commentIds.length > 0) {
-    const { fetchReactionsForComments } = await import('../../../../../src/lib/comment-reactions-helpers');
+    const { fetchReactionsForComments } = await import('../../../../../../src/lib/comment-reactions-helpers');
     reactionMap = await fetchReactionsForComments('hr_hub', commentIds);
   }
 
