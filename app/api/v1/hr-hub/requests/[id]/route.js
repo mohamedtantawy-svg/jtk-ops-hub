@@ -53,7 +53,9 @@ export async function GET(req, { params }) {
               links, attachments,
               created_by_email, created_by_name, assignee_email, assignee_name,
               team_lead_email, cc_email, created_at, updated_at, resolved_at,
-              task_source, task_id, task_url, task_subject
+              task_source, task_id, task_url, task_subject,
+              sla_ext_requested_days, sla_ext_reason_code, sla_ext_acknowledged,
+              sla_ext_approved_days
          FROM hr_hub_request WHERE id = $1`,
       [id],
     ),
@@ -84,6 +86,17 @@ export async function GET(req, { params }) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
   const r = reqRes.rows[0];
+
+  // Splice emoji reactions onto each comment (Sarah Suge 2026-05-14
+  // feedback "Emoji Reactions to Messages"). Single bulk query keyed on
+  // the polymorphic (comment_type, comment_id) pair.
+  const commentIds = commentsRes.rows.map(c => c.id);
+  let reactionMap = new Map();
+  if (commentIds.length > 0) {
+    const { fetchReactionsForComments } = await import('../../../../../../src/lib/comment-reactions-helpers');
+    reactionMap = await fetchReactionsForComments('hr_hub', commentIds);
+  }
+
   return NextResponse.json({
     request: {
       id: r.id,
@@ -112,6 +125,10 @@ export async function GET(req, { params }) {
       taskId: r.task_id,
       taskUrl: r.task_url,
       taskSubject: r.task_subject,
+      slaExtRequestedDays: r.sla_ext_requested_days,
+      slaExtReasonCode: r.sla_ext_reason_code,
+      slaExtAcknowledged: r.sla_ext_acknowledged,
+      slaExtApprovedDays: r.sla_ext_approved_days,
     },
     comments: commentsRes.rows.map(c => ({
       id: c.id,
@@ -124,6 +141,7 @@ export async function GET(req, { params }) {
       attachments: c.attachments || [],
       createdAt: c.created_at,
       editedAt: c.edited_at,
+      reactions: reactionMap.get(String(c.id)) || [],
     })),
     followers: followersRes.rows,
     log: logRes.rows.map(l => ({
@@ -230,10 +248,16 @@ export async function PATCH(req, { params }) {
       const newName = newEmail ? (memberByEmail(newEmail)?.name || null) : null;
       updates.push(`assignee_email = $${p++}`); values.push(newEmail);
       updates.push(`assignee_name  = $${p++}`); values.push(newName);
+      // Mark as manually-assigned so the next Team Lead On Call
+      // rotation skips this row (Mohamed 2026-05-14 spec: "the
+      // assignment should change as well with exception to anything
+      // that has been assigned manually"). Idempotent — re-flipping a
+      // row already TRUE is a no-op.
+      updates.push(`assignee_manually_set = $${p++}`); values.push(true);
       logs.push({
         event: 'assignee_change',
         before: { assigneeEmail: existing.assignee_email },
-        after: { assigneeEmail: newEmail },
+        after: { assigneeEmail: newEmail, manuallySet: true },
       });
       after.assigneeEmail = newEmail;
       // Auto-follow: any new assignee starts following.

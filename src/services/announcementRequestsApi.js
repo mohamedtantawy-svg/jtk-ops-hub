@@ -31,8 +31,6 @@ export async function editRequest(id, patch) {
 
 export async function approveRequest(id, {
   scheduledFor,
-  urgentOverride,
-  urgentOverrideReason,
   overrideEdits,
   // 2026-05-12 two-stage flow: default is false (approve into
   // awaiting_post; requester drives the final publish). Pass true to
@@ -40,12 +38,12 @@ export async function approveRequest(id, {
   // one-shot behaviour).
   publishImmediately,
 } = {}) {
+  // urgentOverride + urgentOverrideReason removed 2026-05-14 alongside
+  // the publishing rate limits — the server ignores both fields now.
   return apiFetch(`/announcement-requests/${id}/approve`, {
     method: 'POST',
     body: JSON.stringify({
       scheduledFor,
-      urgentOverride,
-      urgentOverrideReason,
       overrideEdits,
       publishImmediately: publishImmediately === true,
     }),

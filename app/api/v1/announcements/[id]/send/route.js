@@ -2,11 +2,12 @@ import { NextResponse } from 'next/server';
 import { query } from '../../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { isApprover } from '../../../../../../src/data/approvers';
-import { checkPublishingRules } from '../../../../../../src/lib/announcementFlow';
 
 // PATCH /api/v1/announcements/:id/send — flip a draft or scheduled row to
-// 'sent'. Enforces the 2/day + 4h-gap publishing rules. Approvers may skip
-// them via ?urgent=1 (passed as a query param to keep signature stable).
+// 'sent'. Once approval requirements are satisfied the publish proceeds.
+// (Publishing rate limits + the `?urgent=1` override were removed
+// 2026-05-14 per Laura Llopis feedback — there's no rate limit left to
+// override.)
 //
 // Allowed for:
 //   • approvers (roster)
@@ -25,11 +26,8 @@ export async function PATCH(req, { params }) {
     const isPrivileged = approver || allowedRoles.includes(user.role);
 
     const { id } = await params;
-    const { searchParams } = new URL(req.url);
-    const urgentOverride = approver && searchParams.get('urgent') === '1';
 
-    // Load the target row so we can (a) check ownership, (b) ensure it
-    // actually exists before we run the rate-limit query, and (c) reject
+    // Load the target row so we can (a) check ownership and (b) reject
     // trying to "send" an already-cancelled or deleted item.
     const { rows: existingRows } = await query(
       'SELECT id, status, author_id FROM announcements WHERE id = $1 LIMIT 1',
@@ -52,14 +50,6 @@ export async function PATCH(req, { params }) {
     const isRequester = callerDbId && existing.author_id === callerDbId;
     if (!isPrivileged && !isRequester) {
       return NextResponse.json({ error: 'Only managers/approvers or the original requester can publish this announcement' }, { status: 403 });
-    }
-
-    // Only the current approver roster can bypass rate limits.
-    if (!urgentOverride) {
-      const check = await checkPublishingRules(new Date());
-      if (!check.ok) {
-        return NextResponse.json({ error: check.reason, code: 'RATE_LIMIT' }, { status: 409 });
-      }
     }
 
     const { rows } = await query(

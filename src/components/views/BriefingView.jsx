@@ -6,6 +6,7 @@ import { matchesAudience } from '../../data/comms';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import { CALENDAR_EVENTS } from '../../data/calendar';
 import { slaInfo, rel, getVisibleEmails } from '../../utils/helpers';
+import { applySlaExtensionsToRows } from '../../utils/applySlaExtensions';
 // Queue data hooks are now mounted once in App.jsx and threaded through
 // IntegrationsContext — see queueUnified destructure below. Removing the
 // per-view mounts collapses 4× initial requests into 1×.
@@ -62,7 +63,7 @@ const SOURCE_COLOURS = {
   amendments: '#ed8d00', redlines: '#7c3aed',
 };
 
-const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSubFilter,requests=[],projects=[],managerOnCall=null,onChangeManagerOnCall,realUser=null,onImpersonate=null,impersonating=null})=>{
+const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSubFilter,requests=[],projects=[],managerOnCall=null,onChangeManagerOnCall,teamLeadOnCall=null,onChangeTeamLeadOnCall,realUser=null,onImpersonate=null,impersonating=null})=>{
   // Live roster for the Manager-on-call picker so admins see managers added
   // via the Team tab (not just the baked-in baseline). Filter out
   // soft-deleted rows so we don't offer to impersonate a disabled account.
@@ -132,6 +133,21 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
       return String(a.name || '').localeCompare(String(b.name || ''));
     });
   }, [liveMembers, user?.email]);
+  // Team Lead On Call candidates: team_lead access only — RMs and admins
+  // belong on the MOC rotation, the TL rotation stays the daily-triage
+  // role for HR Hub auto-routing.
+  const tlocCandidates = useMemo(() => {
+    const callerEmail = (user?.email || '').toLowerCase();
+    const eligible = (liveMembers && liveMembers.length ? liveMembers : TEAM_MEMBERS)
+      .filter(m => !m.isDeleted)
+      .filter(m => m.access === 'team_lead');
+    return eligible.sort((a, b) => {
+      const aSelf = (a.email || '').toLowerCase() === callerEmail ? 0 : 1;
+      const bSelf = (b.email || '').toLowerCase() === callerEmail ? 0 : 1;
+      if (aSelf !== bSelf) return aSelf - bSelf;
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    });
+  }, [liveMembers, user?.email]);
   // Drift-proof ack check — matches Announcements view + App.jsx. Local
   // MEMBERS.id is an array-position index that collides with DB members.id
   // values. When the server gives us `ackEmails` (our source of truth) we
@@ -174,6 +190,19 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     document.addEventListener('mousedown',onDocClick);
     return ()=>document.removeEventListener('mousedown',onDocClick);
   },[showMocPicker]);
+  // Mirror picker state for the TLOC pill — separate ref + open flag so
+  // clicking the MOC pencil doesn't toggle the TLOC dropdown and vice
+  // versa.
+  const [showTlocPicker,setShowTlocPicker]=useState(false);
+  const tlocRef=useRef(null);
+  useEffect(()=>{
+    if(!showTlocPicker)return;
+    const onDocClick=(e)=>{
+      if(tlocRef.current&&!tlocRef.current.contains(e.target)) setShowTlocPicker(false);
+    };
+    document.addEventListener('mousedown',onDocClick);
+    return ()=>document.removeEventListener('mousedown',onDocClick);
+  },[showTlocPicker]);
   // \u2500\u2500 SSR-safe time state \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
   // The greeting / dateStr / timeStr depend on the *user's* local time. Server
   // renders in UTC, client hydrates in the visitor's timezone, and React's
@@ -222,7 +251,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const perms=useContext(PermissionsContext);
   const settings=useContext(SettingsContext);
   // deelData removed 2026-05-13 — Deel REST-v2 wrapper retired.
-  const { jiraData, slackData, queueUnified, hiddenTasks } = useContext(IntegrationsContext);
+  const { jiraData, slackData, queueUnified, hiddenTasks, slaExtensions } = useContext(IntegrationsContext);
   // Hide-task filter — mirrors the Queue's behaviour so home aggregates
   // exclude rows the manager has approved to hide. Without this, Home
   // surfaces a count that includes hidden rows (e.g. 797 workbench) while
@@ -277,13 +306,20 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // 2026-05-03 live audit found Home Workbench=797 while Workspace=740
   // because Briefing wasn't filtering hidden rows; the gap matched the 57
   // hide-task entries managers had approved.
-  const onboardingRowsAll = useMemo(() => normalizeOnboarding(onboardingData.items, queueSla).filter(r => !isHiddenKey('onboarding', r.id)), [onboardingData.items, queueSla, isHiddenKey]);
-  const pausedOnboardingRowsAll = useMemo(() => normalizePausedOnboarding(pausedOnboardingData.items, queueSla).filter(r => !isHiddenKey('paused_onboarding', r.id) && !isHiddenKey('onboarding', r.id)), [pausedOnboardingData.items, queueSla, isHiddenKey]);
-  const offboardingRowsAll = useMemo(() => normalizeOffboarding(offboardingData.items, queueSla).filter(r => !isHiddenKey('offboarding', r.id)), [offboardingData.items, queueSla, isHiddenKey]);
-  const amendmentRowsAll = useMemo(() => normalizeAmendments(changeRequestData.amendments, queueSla).filter(r => !isHiddenKey('amendments', r.id)), [changeRequestData.amendments, queueSla, isHiddenKey]);
-  const redlineRowsAll = useMemo(() => normalizeRedlines(changeRequestData.redlines, queueSla).filter(r => !isHiddenKey('redlines', r.id)), [changeRequestData.redlines, queueSla, isHiddenKey]);
-  const workbenchRowsAll = useMemo(() => normalizeWorkbench(workbenchData.tasks, queueSla).filter(r => !isHiddenKey('workbench', r.id)), [workbenchData.tasks, queueSla, isHiddenKey]);
-  const incentivePlanRowsAll = useMemo(() => normalizeIncentivePlans(incentivePlansData.items, queueSla).filter(r => !isHiddenKey('incentive_plans', r.id)), [incentivePlansData.items, queueSla, isHiddenKey]);
+  // Phase 3 of SLA Extensions — apply the active-extension override to
+  // every Deel-source row right after normalization+hide-filter. The
+  // override rewrites slaRemaining/slaBreachStatus/slaWindowMs so the
+  // Health Score, Org Breach ring, and per-manager / per-source breach
+  // tallies below all see extended rows as "in SLA" while the timer is
+  // running. See SLA_EXTENSIONS_PLAN.md.
+  const slaExtensionMap = slaExtensions?.map || null;
+  const onboardingRowsAll = useMemo(() => applySlaExtensionsToRows(normalizeOnboarding(onboardingData.items, queueSla).filter(r => !isHiddenKey('onboarding', r.id)), slaExtensionMap, 'onboarding'), [onboardingData.items, queueSla, isHiddenKey, slaExtensionMap]);
+  const pausedOnboardingRowsAll = useMemo(() => applySlaExtensionsToRows(normalizePausedOnboarding(pausedOnboardingData.items, queueSla).filter(r => !isHiddenKey('paused_onboarding', r.id) && !isHiddenKey('onboarding', r.id)), slaExtensionMap, 'onboarding'), [pausedOnboardingData.items, queueSla, isHiddenKey, slaExtensionMap]);
+  const offboardingRowsAll = useMemo(() => applySlaExtensionsToRows(normalizeOffboarding(offboardingData.items, queueSla).filter(r => !isHiddenKey('offboarding', r.id)), slaExtensionMap, 'offboarding'), [offboardingData.items, queueSla, isHiddenKey, slaExtensionMap]);
+  const amendmentRowsAll = useMemo(() => applySlaExtensionsToRows(normalizeAmendments(changeRequestData.amendments, queueSla).filter(r => !isHiddenKey('amendments', r.id)), slaExtensionMap, 'amendments'), [changeRequestData.amendments, queueSla, isHiddenKey, slaExtensionMap]);
+  const redlineRowsAll = useMemo(() => applySlaExtensionsToRows(normalizeRedlines(changeRequestData.redlines, queueSla).filter(r => !isHiddenKey('redlines', r.id)), slaExtensionMap, 'redlines'), [changeRequestData.redlines, queueSla, isHiddenKey, slaExtensionMap]);
+  const workbenchRowsAll = useMemo(() => applySlaExtensionsToRows(normalizeWorkbench(workbenchData.tasks, queueSla).filter(r => !isHiddenKey('workbench', r.id)), slaExtensionMap, 'workbench'), [workbenchData.tasks, queueSla, isHiddenKey, slaExtensionMap]);
+  const incentivePlanRowsAll = useMemo(() => applySlaExtensionsToRows(normalizeIncentivePlans(incentivePlansData.items, queueSla).filter(r => !isHiddenKey('incentive_plans', r.id)), slaExtensionMap, 'incentive_plans'), [incentivePlansData.items, queueSla, isHiddenKey, slaExtensionMap]);
 
   // Source-row scoping — delegate to the Queue's single source of truth so
   // "Active Requests" here always matches what the user sees in each tab.
@@ -1087,8 +1123,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   home page, with inline editing for anyone (per the original
                   top-nav behavior). Avatar + name + pencil, visually matched
                   to the neighboring "Viewing: All" / "Live" pill row. */}
-              {managerOnCall&&(
-                <div ref={mocRef} style={{marginTop:8,display:'inline-flex',position:'relative'}}>
+              {managerOnCall&&(<div style={{marginTop:8,display:'inline-flex',gap:8,flexWrap:'wrap'}}>
+                <div ref={mocRef} style={{display:'inline-flex',position:'relative'}}>
                   <div style={{display:'inline-flex',alignItems:'center',gap:8,padding:'5px 12px 5px 5px',borderRadius:128,background:'rgba(255,255,255,0.85)',border:'1px solid rgba(232,232,232,0.8)',backdropFilter:'blur(4px)'}}>
                     <Avatar
                       name={managerOnCall.name}
@@ -1170,7 +1206,128 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                     </div>
                   )}
                 </div>
-              )}
+                {/* ── Team Lead On Call — sits next to Manager On Call.
+                    Same visual treatment so users read both pills as
+                    "the two people who can route work right now". HR
+                    Requests + HR Reporting auto-assign to whoever sits
+                    in this slot; rotating it triggers a server-side
+                    bulk reassign of un-manually-touched rows. See
+                    App.jsx::handleChangeTeamLeadOnCall. */}
+                {teamLeadOnCall ? (
+                  <div ref={tlocRef} style={{display:'inline-flex',position:'relative'}}>
+                    <div style={{display:'inline-flex',alignItems:'center',gap:8,padding:'5px 12px 5px 5px',borderRadius:128,background:'rgba(255,255,255,0.85)',border:'1px solid rgba(232,232,232,0.8)',backdropFilter:'blur(4px)'}}>
+                      <Avatar
+                        name={teamLeadOnCall.name}
+                        initials={teamLeadOnCall.initials}
+                        src={teamLeadOnCall.avatarUrl}
+                        size={22}
+                      />
+                      <div style={{fontSize:12,lineHeight:'16px',whiteSpace:'nowrap'}}>
+                        <span style={{color:'#9e9e9e',fontWeight:500}}>Team Lead On Call:</span>{' '}
+                        <span style={{fontWeight:700,color:'#1b1b1b'}}>{teamLeadOnCall.name}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={()=>setShowTlocPicker(p=>!p)}
+                        aria-label="Change team lead on call"
+                        title="Change team lead on call"
+                        style={{width:22,height:22,padding:0,border:'none',background:'transparent',borderRadius:'50%',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',transition:'background .12s'}}
+                        onMouseEnter={e=>e.currentTarget.style.background='#f0f0f0'}
+                        onMouseLeave={e=>e.currentTarget.style.background='transparent'}
+                      >
+                        <i className="bi bi-pencil" style={{fontSize:11,color:'#9e9e9e'}}></i>
+                      </button>
+                    </div>
+                    {showTlocPicker&&(
+                      <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,background:'var(--surface)',borderRadius:14,border:'1px solid var(--border)',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'6px 0',minWidth:300,maxHeight:360,overflowY:'auto',zIndex:1400}}>
+                        <div style={{padding:'6px 16px 8px',fontSize:10,fontWeight:700,color:'var(--text-muted)',letterSpacing:'.04em',textTransform:'uppercase'}}>Select Team Lead On Call</div>
+                        {tlocCandidates.length === 0 && (
+                          <div style={{padding:'14px 16px',fontSize:12,color:'var(--text-muted)',textAlign:'center'}}>
+                            No team leads available
+                          </div>
+                        )}
+                        {tlocCandidates.map(m=>{
+                          const isSelected = (teamLeadOnCall.email || '').toLowerCase() === (m.email || '').toLowerCase();
+                          const isSelf = (user?.email || '').toLowerCase() === (m.email || '').toLowerCase();
+                          return (
+                            <div
+                              key={m.email}
+                              role="button"
+                              tabIndex={0}
+                              onClick={()=>{
+                                onChangeTeamLeadOnCall?.({name:m.name,initials:m.initials,email:m.email,avatarUrl:m.avatarUrl});
+                                setShowTlocPicker(false);
+                              }}
+                              onKeyDown={e=>{
+                                if(e.key==='Enter'||e.key===' '){
+                                  e.preventDefault();
+                                  onChangeTeamLeadOnCall?.({name:m.name,initials:m.initials,email:m.email,avatarUrl:m.avatarUrl});
+                                  setShowTlocPicker(false);
+                                }
+                              }}
+                              onMouseEnter={e=>e.currentTarget.style.background='var(--surface-2)'}
+                              onMouseLeave={e=>e.currentTarget.style.background=isSelected?'var(--surface-2)':'transparent'}
+                              style={{display:'flex',alignItems:'center',gap:10,padding:'8px 16px',cursor:'pointer',transition:'background .12s',background:isSelected?'var(--surface-2)':'transparent'}}
+                            >
+                              <Avatar name={m.name} initials={m.initials} src={m.avatarUrl} size={28}/>
+                              <div style={{minWidth:0,flex:1}}>
+                                <div style={{fontSize:13,fontWeight:isSelected?600:500,color:isSelected?'#d97706':'var(--text)',lineHeight:'17px',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',display:'flex',alignItems:'center',gap:6}}>
+                                  <span style={{overflow:'hidden',textOverflow:'ellipsis'}}>{m.name}</span>
+                                  {isSelf && (
+                                    <span style={{fontSize:9,fontWeight:700,color:'#d97706',background:'#fff7ed',padding:'1px 6px',borderRadius:99,letterSpacing:'.04em',textTransform:'uppercase',flexShrink:0}}>You</span>
+                                  )}
+                                </div>
+                                <div style={{fontSize:11,color:'var(--text-muted)',lineHeight:'15px'}}>{m.team}</div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ) : onChangeTeamLeadOnCall ? (
+                  /* TLOC empty-state — show a "Set Team Lead On Call"
+                     button so the first-time setup is obvious. Once a
+                     TL is picked, the regular pill above renders. */
+                  <div ref={tlocRef} style={{display:'inline-flex',position:'relative'}}>
+                    <button
+                      type="button"
+                      onClick={()=>setShowTlocPicker(p=>!p)}
+                      style={{display:'inline-flex',alignItems:'center',gap:6,padding:'5px 12px',borderRadius:128,background:'rgba(255,255,255,0.6)',border:'1px dashed rgba(217,119,6,0.55)',color:'#b45309',fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit',backdropFilter:'blur(4px)'}}
+                    >
+                      <i className="bi-broadcast-pin" style={{fontSize:12}}/>
+                      Set Team Lead On Call
+                    </button>
+                    {showTlocPicker&&(
+                      <div style={{position:'absolute',top:'calc(100% + 6px)',left:0,background:'var(--surface)',borderRadius:14,border:'1px solid var(--border)',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'6px 0',minWidth:300,maxHeight:360,overflowY:'auto',zIndex:1400}}>
+                        <div style={{padding:'6px 16px 8px',fontSize:10,fontWeight:700,color:'var(--text-muted)',letterSpacing:'.04em',textTransform:'uppercase'}}>Select Team Lead On Call</div>
+                        {tlocCandidates.length === 0 ? (
+                          <div style={{padding:'14px 16px',fontSize:12,color:'var(--text-muted)',textAlign:'center'}}>No team leads available</div>
+                        ) : tlocCandidates.map(m=>(
+                          <div
+                            key={m.email}
+                            role="button"
+                            tabIndex={0}
+                            onClick={()=>{
+                              onChangeTeamLeadOnCall?.({name:m.name,initials:m.initials,email:m.email,avatarUrl:m.avatarUrl});
+                              setShowTlocPicker(false);
+                            }}
+                            onMouseEnter={e=>e.currentTarget.style.background='var(--surface-2)'}
+                            onMouseLeave={e=>e.currentTarget.style.background='transparent'}
+                            style={{display:'flex',alignItems:'center',gap:10,padding:'8px 16px',cursor:'pointer',transition:'background .12s'}}
+                          >
+                            <Avatar name={m.name} initials={m.initials} src={m.avatarUrl} size={28}/>
+                            <div style={{minWidth:0,flex:1}}>
+                              <div style={{fontSize:13,fontWeight:500,color:'var(--text)',lineHeight:'17px',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{m.name}</div>
+                              <div style={{fontSize:11,color:'var(--text-muted)',lineHeight:'15px'}}>{m.team}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+              </div>)}
               {/* Live integrations status — Deel pill removed 2026-05-13
                   alongside the REST-v2 deprecation. Admin-API queues stay
                   live through their own hooks. */}

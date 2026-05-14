@@ -26,6 +26,12 @@ export async function GET(req, { params }) {
          FROM announcement_request_comments WHERE request_id = $1 ORDER BY created_at ASC`,
       [id]
     );
+    // Splice emoji reactions onto each comment (Sarah Suge 2026-05-14).
+    let reactionMap = new Map();
+    if (rows.length > 0) {
+      const { fetchReactionsForComments } = await import('../../../../../../src/lib/comment-reactions-helpers');
+      reactionMap = await fetchReactionsForComments('announcement_request', rows.map(c => c.id));
+    }
     return NextResponse.json({
       items: rows.map((c) => ({
         id: c.id,
@@ -34,6 +40,7 @@ export async function GET(req, { params }) {
         authorName: c.author_name,
         body: c.body,
         createdAt: c.created_at,
+        reactions: reactionMap.get(String(c.id)) || [],
       })),
     });
   } catch (err) {

@@ -143,7 +143,14 @@ export async function GET(req, { params }) {
       'SELECT * FROM feedback_comments WHERE request_id = $1 ORDER BY created_at ASC',
       [id],
     );
-    return NextResponse.json({ items: rows.map(shape) });
+    // Splice emoji reactions onto each comment (Sarah Suge 2026-05-14).
+    const items = rows.map(shape);
+    if (items.length > 0) {
+      const { fetchReactionsForComments } = await import('../../../../../../src/lib/comment-reactions-helpers');
+      const map = await fetchReactionsForComments('feedback', items.map(c => c.id));
+      for (const c of items) c.reactions = map.get(String(c.id)) || [];
+    }
+    return NextResponse.json({ items });
   } catch (err) {
     console.error('[feedback/comments/list]', err.message);
     return NextResponse.json({ error: 'Failed to load comments' }, { status: 500 });

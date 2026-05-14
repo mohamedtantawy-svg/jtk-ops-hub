@@ -54,15 +54,34 @@ function CalendarMode({
   to,
   todayIso,
   onSelectEvent,
+  // Emails that should ALWAYS render as a calendar row even with zero
+  // events in the window. Lets a newly-added member (no time off
+  // scheduled yet) confirm their presence on the calendar — Ines Barata
+  // 2026-05-14 bug "Personal OOO view" / "we just added her to the ops
+  // hub, maybe a bug?". OOOView wires this with the caller's own email
+  // (always shown) plus, when the lens is 'team', the rest of the
+  // visible direct-team roster. Other lenses keep the legacy
+  // events-first behaviour to avoid clutter.
+  alwaysShowEmails = null,
 }) {
   const today = todayIso || isoDate();
   const totalDays = Math.max(1, dayDelta(from, to) + 1);
   const gridWidth = totalDays * DAY_PX;
   const [hoveredEventId, setHoveredEventId] = useState(null);
 
-  // Group events by work_email; sort each group by start_date.
+  // Group events by work_email; sort each group by start_date. Seed the
+  // map with `alwaysShowEmails` so even members with zero events in the
+  // window get a row (empty timeline) — keeps the calendar honest about
+  // who's on the team.
   const byEmail = useMemo(() => {
     const map = new Map();
+    if (alwaysShowEmails) {
+      for (const e of alwaysShowEmails) {
+        if (!e) continue;
+        const lc = String(e).toLowerCase();
+        if (!map.has(lc)) map.set(lc, []);
+      }
+    }
     for (const ev of events || []) {
       if (!ev?.work_email) continue;
       const e = ev.work_email.toLowerCase();
@@ -73,7 +92,7 @@ function CalendarMode({
       arr.sort((a, b) => (a.start_date || '').localeCompare(b.start_date || ''));
     }
     return map;
-  }, [events]);
+  }, [events, alwaysShowEmails]);
 
   // Stable, alphabetical row order by member name (fall back to email).
   const personRows = useMemo(() => {

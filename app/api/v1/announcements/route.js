@@ -6,7 +6,6 @@ import { isAnnouncementsAdmin, canManageAnnouncements } from '../../../../src/li
 import { MEMBERS_BY_EMAIL } from '../../../../src/data/members';
 import {
   VALID_TARGETS,
-  checkPublishingRules,
   publishFromRequest,
   normalizePayload,
   promoteDueScheduled,
@@ -245,11 +244,14 @@ export async function GET(req) {
 // /api/v1/announcement-requests.
 //
 // Body may include:
-//   scheduledFor   — ISO timestamp; if set, announcement is created with
-//                    status='scheduled' and will lazy-promote to 'sent'
-//                    when the time arrives.
-//   urgentOverride — boolean; skips the 2/day + 4h-gap rate limits. Only
-//                    honoured for approvers.
+//   scheduledFor — ISO timestamp; if set, announcement is created with
+//                  status='scheduled' and will lazy-promote to 'sent'
+//                  when the time arrives.
+//
+// 2026-05-14 — `urgentOverride` + `urgentOverrideReason` body fields are
+// no longer read. The publishing rate limits they used to bypass were
+// removed (Laura Llopis feedback), so the override is redundant.
+// Old clients can still send the field; it's ignored.
 export async function POST(req) {
   try {
     const user = getAuthUser(req);
@@ -273,48 +275,26 @@ export async function POST(req) {
     if (scheduledFor && Number.isNaN(scheduledFor.getTime())) {
       return NextResponse.json({ error: 'Invalid scheduledFor' }, { status: 400 });
     }
-    const urgentOverride = approver && Boolean(raw.urgentOverride);
-    const urgentOverrideReason = urgentOverride
-      ? String(raw.urgentOverrideReason || '').trim()
-      : '';
-    // Bypassing the 2/day + 4h-gap limits must be accompanied by a reason so
-    // future audits can see *why* a limit was skipped.
-    if (urgentOverride && urgentOverrideReason.length < 5) {
-      return NextResponse.json(
-        { error: 'An urgent-override reason (≥5 chars) is required to bypass publishing rate limits' },
-        { status: 400 }
-      );
-    }
 
-    let published;
-    try {
-      published = await publishFromRequest(
-        {
-          type: payload.type,
-          title: payload.title,
-          body: payload.body,
-          target: payload.target,
-          target_group_id: payload.targetGroupId,
-          priority: payload.priority,
-          is_popup: payload.isPopup,
-          image_url: payload.imageUrl,
-          link: payload.link,
-          sound_key: payload.soundKey,
-          requested_by_id: user.id || null,
-        },
-        {
-          sendAt: scheduledFor,
-          urgentOverride,
-          urgentOverrideReason,
-          actor: user,
-        }
-      );
-    } catch (e) {
-      if (e.code === 'RATE_LIMIT') {
-        return NextResponse.json({ error: e.message, code: 'RATE_LIMIT' }, { status: 409 });
+    const published = await publishFromRequest(
+      {
+        type: payload.type,
+        title: payload.title,
+        body: payload.body,
+        target: payload.target,
+        target_group_id: payload.targetGroupId,
+        priority: payload.priority,
+        is_popup: payload.isPopup,
+        image_url: payload.imageUrl,
+        link: payload.link,
+        sound_key: payload.soundKey,
+        requested_by_id: user.id || null,
+      },
+      {
+        sendAt: scheduledFor,
+        actor: user,
       }
-      throw e;
-    }
+    );
 
     return NextResponse.json({
       id: published.id, type: published.type, title: published.title, body: published.body,
@@ -336,4 +316,4 @@ export async function POST(req) {
 }
 
 // Re-export rule helpers for routes that import from here (none currently).
-export { checkPublishingRules, VALID_TARGETS };
+export { VALID_TARGETS };

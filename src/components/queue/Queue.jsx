@@ -8,6 +8,7 @@ import { useVirtualRows } from '../../hooks/useVirtualRows';
 const TICKET_ROW_HEIGHT = 44;
 import { MEMBERS_BY_EMAIL } from '../../data/members';
 import { slaInfo, getUrl } from '../../utils/helpers';
+import { applySlaExtensionsToRows } from '../../utils/applySlaExtensions';
 import {
   scopeOffboardingCases,
   scopeWorkbenchTasks,
@@ -41,6 +42,7 @@ import {
 } from '../../utils/normalizeSourceRows';
 import { isUrgentAssistTaskType } from '../../lib/urgent-assist-task-types';
 import CreateHideTaskRequestModal from '../modals/CreateHideTaskRequestModal';
+import CreateSlaExtensionModal from '../modals/CreateSlaExtensionModal';
 import ReassignTaskModal from '../modals/ReassignTaskModal';
 import CreateHrHubRequestModal from '../modals/CreateHrHubRequestModal';
 import HiddenTasksPanel from './HiddenTasksPanel';
@@ -189,7 +191,7 @@ const Queue = ({ user, tasks, subFilter }) => {
 
   const perms = useContext(PermissionsContext);
   const settings = useContext(SettingsContext);
-  const { queueSync, queueUnified, hiddenTasks } = useContext(IntegrationsContext);
+  const { queueSync, queueUnified, hiddenTasks, slaExtensions } = useContext(IntegrationsContext);
   // Personal notes attached to any queue row — user-scoped localStorage,
   // keyed by `${source}:${id}` so notes re-attach after every sync.
   const taskNotes = useTaskNotes(user?.email);
@@ -207,6 +209,11 @@ const Queue = ({ user, tasks, subFilter }) => {
   // the modal needs (subject + source + id + url) so the modal stays
   // shape-agnostic across the seven row types.
   const [hideModalTask, setHideModalTask] = useState(null);
+  // SLA Extension modal state — opens from the row's "SLA Extension"
+  // action in any of the 8 sources (tickets + 6 Deel sources). The modal
+  // collects duration, reason, ack, then POSTs to /hr-hub/requests with
+  // flow='sla_extension_request'. See SLA_EXTENSIONS_PLAN.md.
+  const [slaExtensionModalTask, setSlaExtensionModalTask] = useState(null);
   // Reassign modal state — only opens for source rows whose upstream
   // doesn't support reassignment (onboarding / amendments / redlines /
   // incentive plans). Same descriptor shape as hide + the row's current
@@ -353,7 +360,23 @@ const Queue = ({ user, tasks, subFilter }) => {
   // The directory + active-member checks on the server still prevent
   // parking rows on a ghost / deactivated email.
   const canReassign = !!user;
-  const ns = (tasks || []).filter(t => t.source !== 'slack' && t.source !== 'calendar' && !isHiddenKey(t.source, t.id));
+  // Tickets: attach `slaExtension` to ZD/Jira rows so `slaInfo()` reads
+  // the override at the very top of its decision tree (helpers.js). The
+  // override map is keyed (source, id) — same key Queue.jsx uses for the
+  // hidden-task filter — so applying it inline here keeps the override
+  // out of the tickets' `tasks` state at the App.jsx level (which is
+  // shared with other surfaces that don't care about SLA).
+  const _slaExtMapForTickets = slaExtensions?.map || null;
+  const ns = (tasks || [])
+    .filter(t => t.source !== 'slack' && t.source !== 'calendar' && !isHiddenKey(t.source, t.id))
+    .map(t => {
+      if (!_slaExtMapForTickets) return t;
+      const ext = _slaExtMapForTickets.get(`${t.source}:${String(t.id)}`);
+      if (!ext || !ext.expiresAt) return t;
+      const expiresMs = Date.parse(ext.expiresAt);
+      if (!Number.isFinite(expiresMs) || expiresMs <= Date.now()) return t;
+      return { ...t, slaExtension: ext };
+    });
 
   // Emails the current viewer "owns" — their email + every teammate below
   // them in the hierarchy (used to classify each Jira ticket as Actionable
@@ -385,8 +408,17 @@ const Queue = ({ user, tasks, subFilter }) => {
   }, [fJiraActionable, fJiraRaised, jiraIsActionable, jiraIsRaised]);
 
   // ── Per-source scoping (see lib/queue-scoping.js for the full matrix) ──
-  const onboardingActionRows = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user), [onboardingRowsAll, user]);
-  const pausedOnboardingRows = useMemo(() => scopePausedOnboarding(pausedOnboardingRowsAll, user), [pausedOnboardingRowsAll, user]);
+  // After scoping, each row set is run through `applySlaExtensionsToRows`
+  // so any row carrying an approved + active sla_extension gets its
+  // `slaRemaining`/`slaBreachStatus`/`slaWindowMs` rewritten to the
+  // extended timer (Phase 3 — SLA_EXTENSIONS_PLAN.md). Downstream
+  // consumers (rowSlaSeverity, slaTier, BriefingView aggregates) read
+  // the overridden fields naturally — no per-consumer code change.
+  const slaExtensionMap = slaExtensions?.map || null;
+  const onboardingActionRowsScoped = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user), [onboardingRowsAll, user]);
+  const pausedOnboardingRowsScoped = useMemo(() => scopePausedOnboarding(pausedOnboardingRowsAll, user), [pausedOnboardingRowsAll, user]);
+  const onboardingActionRows = useMemo(() => applySlaExtensionsToRows(onboardingActionRowsScoped, slaExtensionMap, 'onboarding'), [onboardingActionRowsScoped, slaExtensionMap]);
+  const pausedOnboardingRows = useMemo(() => applySlaExtensionsToRows(pausedOnboardingRowsScoped, slaExtensionMap, 'onboarding'), [pausedOnboardingRowsScoped, slaExtensionMap]);
   const onboardingRows = useMemo(() => {
     const seen = new Set();
     const merged = [];
@@ -397,11 +429,11 @@ const Queue = ({ user, tasks, subFilter }) => {
     }
     return merged;
   }, [onboardingActionRows, pausedOnboardingRows]);
-  const offboardingRows = useMemo(() => scopeOffboardingCases(offboardingRowsAll, user), [offboardingRowsAll, user]);
-  const amendmentRows   = useMemo(() => scopeAmendmentRequests(amendmentRowsAll, user), [amendmentRowsAll, user]);
-  const redlineRows     = useMemo(() => scopeRedlineRequests(redlineRowsAll, user), [redlineRowsAll, user]);
-  const workbenchRows   = useMemo(() => scopeWorkbenchTasks(workbenchRowsAll, user), [workbenchRowsAll, user]);
-  const incentivePlanRows = useMemo(() => scopeIncentivePlans(incentivePlanRowsAll, user), [incentivePlanRowsAll, user]);
+  const offboardingRows = useMemo(() => applySlaExtensionsToRows(scopeOffboardingCases(offboardingRowsAll, user), slaExtensionMap, 'offboarding'), [offboardingRowsAll, user, slaExtensionMap]);
+  const amendmentRows   = useMemo(() => applySlaExtensionsToRows(scopeAmendmentRequests(amendmentRowsAll, user), slaExtensionMap, 'amendments'), [amendmentRowsAll, user, slaExtensionMap]);
+  const redlineRows     = useMemo(() => applySlaExtensionsToRows(scopeRedlineRequests(redlineRowsAll, user), slaExtensionMap, 'redlines'), [redlineRowsAll, user, slaExtensionMap]);
+  const workbenchRows   = useMemo(() => applySlaExtensionsToRows(scopeWorkbenchTasks(workbenchRowsAll, user), slaExtensionMap, 'workbench'), [workbenchRowsAll, user, slaExtensionMap]);
+  const incentivePlanRows = useMemo(() => applySlaExtensionsToRows(scopeIncentivePlans(incentivePlanRowsAll, user), slaExtensionMap, 'incentive_plans'), [incentivePlanRowsAll, user, slaExtensionMap]);
   // Workbench is the only Deel source that intentionally surfaces resolved
   // rows (24h of COMPLETED + CLOSED) so the "RESOLVED TODAY" section can
   // render. Strip them from the cross-source "All" aggregates so the
@@ -582,10 +614,46 @@ const Queue = ({ user, tasks, subFilter }) => {
     return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: rows.length - atRisk - breached };
   }, [rowSlaSeverity]);
 
+  // Workspace-home aggregate — pills + the "Clear all breaches" card on
+  // WorkspaceHome MUST agree. Before 2026-05-14 the pill counted ZD+Jira
+  // tickets only (post mineOnlyForSla) while the card counted ZD-only
+  // tickets + every Deel source — Aline reported the "always different"
+  // mismatch in feedback 2026-05-13. Single source of truth: ZD-only
+  // ticket breaches (Jira excluded per Mohamed's 2026-05-01 home rule)
+  // plus all Deel-source breaches, with mineOnlyForSla applied to both
+  // so agents see a narrowed "their own queue" view on home consistent
+  // with Trish Lee's 2026-05-11 per-source pill feedback. Managers
+  // (TL/RM/Admin) see the same team aggregate in both places because
+  // mineOnlyForSla is a no-op for them. The result is passed down to
+  // WorkspaceHome so the card reads the same number.
+  const workspaceHomeSla = useMemo(() => {
+    const tickets = mineOnlyForSla(
+      visPreSla.filter(t => t.source === 'zendesk' && t.status !== 'resolved' && t.status !== 'waiting'),
+    );
+    let atRisk = 0, breached = 0, onTrack = 0;
+    for (const t of tickets) {
+      const s = slaInfo(t);
+      if (!s) { onTrack++; continue; }
+      if (s.breach) breached++;
+      else if (!s.ok) atRisk++;
+      else onTrack++;
+    }
+    const deel = tallyDeelSla(mineOnlyForSla(allSourceRows));
+    return {
+      atRiskCount: atRisk + deel.atRiskCount,
+      breachedCount: breached + deel.breachedCount,
+      onTrackCount: onTrack + deel.onTrackCount,
+    };
+  }, [visPreSla, allSourceRows, mineOnlyForSla, tallyDeelSla]);
+
   // ── SLA pills counts — reflect post-filter row sets per active tab ──
   // Agents get a mine-only tally (see `mineOnlyForSla` above) so the pills
   // reflect THEIR queue, not the team's. Managers keep the team-wide count.
   const { atRiskCount, breachedCount, onTrackCount } = useMemo(() => {
+    // Workspace-home state (no source + no tool + no other filter) uses
+    // the aggregated count above so the pills and the "Clear all breaches"
+    // card on WorkspaceHome show the same number.
+    if (!workSource && !fTool && !hasActiveFilters) return workspaceHomeSla;
     if (workSource === 'onboarding')      return tallyDeelSla(mineOnlyForSla(visOnboardingRows));
     if (workSource === 'offboarding')     return tallyDeelSla(mineOnlyForSla(visOffboardingRows));
     if (workSource === 'amendments')      return tallyDeelSla(mineOnlyForSla(visAmendmentRows));
@@ -606,7 +674,7 @@ const Queue = ({ user, tasks, subFilter }) => {
     const atRisk = slaBase.filter(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; }).length;
     const breached = slaBase.filter(t => { const s = slaInfo(t); return s && s.breach; }).length;
     return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: slaBase.length - atRisk - breached };
-  }, [workSource, visPreSla, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows, visIncentivePlanRows, tallyDeelSla, mineOnlyForSla]);
+  }, [workSource, fTool, hasActiveFilters, workspaceHomeSla, visPreSla, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows, visIncentivePlanRows, tallyDeelSla, mineOnlyForSla]);
 
   // ── View-aware header counts ──
   // For each Deel source we read the SLA-filtered row set so the "N open"
@@ -722,21 +790,54 @@ const Queue = ({ user, tasks, subFilter }) => {
       <div data-role="queue-header" style={{ padding: '8px 32px 12px', background: 'var(--surface)', borderBottom: '1px solid #e8e8e8', flexShrink: 0 }}>
         {/* Line 1: SLA pills (left) · Title/totals · Sync button (right) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
-          <div onClick={() => setFSla(fSla === 'ok' ? null : 'ok')} title="Filter by SLA: On Track" role="button" tabIndex={0} style={{ display: 'flex', alignItems: 'center', gap: 5, background: fSla === 'ok' ? '#dcfce7' : '#f0fdf4', border: `${fSla === 'ok' ? '2' : '1'}px solid ${fSla === 'ok' ? '#15803d' : '#bbf7d0'}`, borderRadius: 128, padding: '5px 14px', cursor: 'pointer', transition: 'all .15s', flexShrink: 0, boxShadow: fSla === 'ok' ? '0 0 0 2px #15803d30' : 'none' }}>
-            <i className="bi-check-circle-fill" style={{ color: '#15803d', fontSize: 13 }}></i>
-            <span style={{ fontSize: 13, fontWeight: 700, color: '#166534' }}>{onTrackCount}</span>
-            <span style={{ fontSize: 11, fontWeight: 500, color: '#166534' }}>On Track</span>
-          </div>
-          <div onClick={() => setFSla(fSla === 'at_risk' ? null : 'at_risk')} title="Filter by SLA: At Risk" role="button" tabIndex={0} style={{ display: 'flex', alignItems: 'center', gap: 5, background: fSla === 'at_risk' ? '#fef3c7' : '#fff8e6', border: `${fSla === 'at_risk' ? '2' : '1'}px solid ${fSla === 'at_risk' ? '#ed8d00' : '#ffe27c'}`, borderRadius: 128, padding: '5px 14px', cursor: 'pointer', transition: 'all .15s', flexShrink: 0, boxShadow: fSla === 'at_risk' ? '0 0 0 2px #ed8d0030' : 'none' }}>
-            <i className="bi-exclamation-circle-fill" style={{ color: '#ed8d00', fontSize: 13 }}></i>
-            <span style={{ fontSize: 13, fontWeight: 700, color: '#92400E' }}>{atRiskCount}</span>
-            <span style={{ fontSize: 11, fontWeight: 500, color: '#92400E' }}>At Risk</span>
-          </div>
-          <div onClick={() => setFSla(fSla === 'breached' ? null : 'breached')} title="Filter by SLA: Breached" role="button" tabIndex={0} style={{ display: 'flex', alignItems: 'center', gap: 5, background: fSla === 'breached' ? '#fecaca' : '#ffe2de', border: `${fSla === 'breached' ? '2' : '1'}px solid ${fSla === 'breached' ? '#d42d35' : '#fca5a5'}`, borderRadius: 128, padding: '5px 14px', cursor: 'pointer', transition: 'all .15s', flexShrink: 0, boxShadow: fSla === 'breached' ? '0 0 0 2px #d42d3530' : 'none' }}>
-            <i className="bi-x-circle-fill" style={{ color: '#d42d35', fontSize: 13 }}></i>
-            <span style={{ fontSize: 13, fontWeight: 700, color: '#991b1b' }}>{breachedCount}</span>
-            <span style={{ fontSize: 11, fontWeight: 500, color: '#991b1b' }}>Breached</span>
-          </div>
+          {/* Active state strengthened 2026-05-14 (Carolina Ferreira
+              feedback): when the user clicks an SLA pill, the active
+              chip flips to a solid filled background with white text +
+              a check icon. The "is this filter on?" signal becomes
+              unmistakable. Inactive state stays the existing light
+              pastel so the row still reads as three semantic statuses.
+              Tooltips now explicitly explain what each filter does. */}
+          <SlaPill
+            active={fSla === 'ok'}
+            onClick={() => setFSla(fSla === 'ok' ? null : 'ok')}
+            tone="ok"
+            count={onTrackCount}
+            label="On Track"
+            hint="Tasks well inside their SLA window — at least 25% of the time budget still remaining."
+          />
+          <SlaPill
+            active={fSla === 'at_risk'}
+            onClick={() => setFSla(fSla === 'at_risk' ? null : 'at_risk')}
+            tone="atRisk"
+            count={atRiskCount}
+            label="At Risk"
+            hint="Tasks inside SLA but with less than 25% of the time budget left — handle next to avoid a breach."
+          />
+          <SlaPill
+            active={fSla === 'breached'}
+            onClick={() => setFSla(fSla === 'breached' ? null : 'breached')}
+            tone="breached"
+            count={breachedCount}
+            label="Breached"
+            hint="Tasks past their SLA window — handle these first."
+          />
+          {fSla && (
+            <button
+              type="button"
+              onClick={() => setFSla(null)}
+              title="Clear the SLA filter"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                background: 'transparent', border: '1px solid #e8e8e8',
+                borderRadius: 128, padding: '4px 10px', fontSize: 11,
+                color: '#616161', cursor: 'pointer', fontFamily: 'inherit',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <i className="bi-x-lg" style={{ fontSize: 9 }} />
+              Clear SLA filter
+            </button>
+          )}
 
           {(isAdmin || isLead) && (() => {
             const sourceLabels = { onboarding: 'Onboarding', offboarding: 'Offboarding', amendments: 'Amendments', redlines: 'Redlines', workbench: 'Workbench', incentive_plans: 'Incentive Plans', hidden: 'Hidden' };
@@ -940,6 +1041,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             hideStatusPills
             showClient
             onHide={(row) => setHideModalTask({ source: 'onboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onSlaExtension={(row) => setSlaExtensionModalTask({ source: 'onboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'onboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onReassign={canReassign ? (row) => setReassignModalTask({ source: 'onboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country, assigneeEmail: row.assigneeEmail || null, assigneeName: row.assignee || null, hasOverride: !!row.reassignedFromEmail }) : null}
             onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'onboarding')))}
@@ -965,6 +1067,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             showClient
             showType
             onHide={(row) => setHideModalTask({ source: 'offboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onSlaExtension={(row) => setSlaExtensionModalTask({ source: 'offboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'offboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'offboarding')))}
             hideFilterBar
@@ -991,6 +1094,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             dateField="createdAt"
             dateLabel="Requested Date"
             onHide={(row) => setHideModalTask({ source: 'amendments', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onSlaExtension={(row) => setSlaExtensionModalTask({ source: 'amendments', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'amendments', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onReassign={canReassign ? (row) => setReassignModalTask({ source: 'amendments', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country, assigneeEmail: row.assigneeEmail || null, assigneeName: row.assignee || null, hasOverride: !!row.reassignedFromEmail }) : null}
             onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'amendments')))}
@@ -1018,6 +1122,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             dateField="createdAt"
             dateLabel="Requested Date"
             onHide={(row) => setHideModalTask({ source: 'redlines', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onSlaExtension={(row) => setSlaExtensionModalTask({ source: 'redlines', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'redlines', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onReassign={canReassign ? (row) => setReassignModalTask({ source: 'redlines', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country, assigneeEmail: row.assigneeEmail || null, assigneeName: row.assignee || null, hasOverride: !!row.reassignedFromEmail }) : null}
             onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'redlines')))}
@@ -1045,6 +1150,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             dateField="createdAt"
             dateLabel="Created"
             onHide={(row) => setHideModalTask({ source: 'workbench', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onSlaExtension={(row) => setSlaExtensionModalTask({ source: 'workbench', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'workbench', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'workbench')))}
           />
@@ -1069,6 +1175,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             dateField="createdAt"
             dateLabel="Requested Date"
             onHide={(row) => setHideModalTask({ source: 'incentive_plans', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onSlaExtension={(row) => setSlaExtensionModalTask({ source: 'incentive_plans', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'incentive_plans', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onReassign={canReassign ? (row) => setReassignModalTask({ source: 'incentive_plans', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country, assigneeEmail: row.assigneeEmail || null, assigneeName: row.assignee || null, hasOverride: !!row.reassignedFromEmail }) : null}
             onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'incentive_plans')))}
@@ -1105,6 +1212,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             workbenchCount={workbenchActiveRows.length}
             incentivePlansCount={incentivePlanRows.length}
             sourceRowsAll={allSourceRows}
+            breachedCount={workspaceHomeSla.breachedCount}
           />
         </ErrorBoundary>
       )}
@@ -1317,6 +1425,7 @@ const Queue = ({ user, tasks, subFilter }) => {
                     slaAgeClass={slaAgeClass}
                     settings={settings}
                     onHide={() => setHideModalTask(taskDescriptor)}
+                    onSlaExtension={() => setSlaExtensionModalTask(taskDescriptor)}
                     onEscalate={() => setEscalateModalTask(taskDescriptor)}
                     hasNote={taskNotes.hasNote(task.source, task.id)}
                     onOpenNote={() => setNoteModalTask(task)}
@@ -1342,6 +1451,18 @@ const Queue = ({ user, tasks, subFilter }) => {
           task={hideModalTask}
           onClose={() => setHideModalTask(null)}
           onSubmitted={() => { try { hiddenTasks?.refresh?.(); } catch {} }}
+        />
+      )}
+
+      {/* SLA Extension request modal — opens from any row's "SLA Extension"
+          action across all 8 sources (tickets + 6 Deel sources). Phase 1
+          ships the request; Phase 2 wires the manager review in HR Hub;
+          Phase 3 propagates the override into SLA math. See
+          SLA_EXTENSIONS_PLAN.md. */}
+      {slaExtensionModalTask && (
+        <CreateSlaExtensionModal
+          task={slaExtensionModalTask}
+          onClose={() => setSlaExtensionModalTask(null)}
         />
       )}
 
@@ -1419,8 +1540,54 @@ const Queue = ({ user, tasks, subFilter }) => {
   );
 };
 
+// ── SLA filter pill (workspace header) ────────────────────────────────
+// Three tones — ok / atRisk / breached. Active state is a SOLID filled
+// chip with white text + a check icon so the user can see at a glance
+// which filter is on (Carolina Ferreira 2026-05-14: "Improve the
+// visibility of the filters under the Workspace"). Inactive state is
+// the existing soft pastel so the row still reads as three semantic
+// statuses. `hint` is rendered into the tooltip so hover explains what
+// each filter does before the user has to click to find out.
+const SLA_PILL_TONES = {
+  ok:       { iconClass: 'bi-check-circle-fill',       activeBg: '#15803d', activeText: '#ffffff', inactiveBg: '#f0fdf4', inactiveText: '#166534', inactiveBorder: '#bbf7d0' },
+  atRisk:   { iconClass: 'bi-exclamation-circle-fill', activeBg: '#d97706', activeText: '#ffffff', inactiveBg: '#fff8e6', inactiveText: '#92400E', inactiveBorder: '#ffe27c' },
+  breached: { iconClass: 'bi-x-circle-fill',           activeBg: '#d42d35', activeText: '#ffffff', inactiveBg: '#ffe2de', inactiveText: '#991b1b', inactiveBorder: '#fca5a5' },
+};
+const SlaPill = ({ active, onClick, tone, count, label, hint }) => {
+  const t = SLA_PILL_TONES[tone] || SLA_PILL_TONES.ok;
+  const handleKey = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick?.(); }
+  };
+  return (
+    <div
+      onClick={onClick}
+      onKeyDown={handleKey}
+      title={`${label} — ${hint}${active ? ' (active — click again to clear)' : ' (click to filter)'}`}
+      role="button"
+      aria-pressed={active}
+      tabIndex={0}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        background: active ? t.activeBg : t.inactiveBg,
+        border: `1px solid ${active ? t.activeBg : t.inactiveBorder}`,
+        borderRadius: 128, padding: '5px 14px',
+        cursor: 'pointer', transition: 'all .15s', flexShrink: 0,
+        boxShadow: active ? '0 1px 4px rgba(15,23,42,0.18)' : 'none',
+        outline: 'none',
+      }}
+    >
+      {active && (
+        <i className="bi-check-lg" style={{ color: t.activeText, fontSize: 12 }} aria-hidden="true" />
+      )}
+      <i className={t.iconClass} style={{ color: active ? t.activeText : t.inactiveText, fontSize: 13 }} aria-hidden="true" />
+      <span style={{ fontSize: 13, fontWeight: 700, color: active ? t.activeText : t.inactiveText }}>{count}</span>
+      <span style={{ fontSize: 11, fontWeight: 600, color: active ? t.activeText : t.inactiveText }}>{label}</span>
+    </div>
+  );
+};
+
 // ── Table row component ──
-const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onEscalate, hasNote = false, onOpenNote = null }) => {
+const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onSlaExtension, onEscalate, hasNote = false, onOpenNote = null }) => {
   const [hov, setHov] = useState(false);
   const assignee = resolveAssignee(task);
   const sla = slaInfo(task);
@@ -1538,6 +1705,26 @@ const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onEscalate, hasNot
             <i className="bi-arrow-up-right-circle" style={{ fontSize: 9 }} />
             Escalate
           </button>
+          {onSlaExtension && (
+            <button
+              type="button"
+              onClick={() => onSlaExtension?.()}
+              aria-label={`Request SLA extension for "${task.subject || task.id}"`}
+              title="Request to extend the SLA on this task"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '3px 8px', borderRadius: 6,
+                background: hov ? '#fff7ed' : '#f5f4f2',
+                color: hov ? '#d97706' : '#9e9e9e',
+                border: hov ? '1px solid #fed7aa' : '1px solid transparent',
+                fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}
+            >
+              <i className="bi-clock-history" style={{ fontSize: 9 }} />
+              SLA Extension
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onHide?.()}

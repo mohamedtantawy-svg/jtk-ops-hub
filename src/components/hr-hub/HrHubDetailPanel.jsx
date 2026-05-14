@@ -25,6 +25,7 @@ import {
 import { MEMBERS, MEMBERS_BY_EMAIL } from '../../../src/data/members';
 import HrHubComposer from './HrHubComposer';
 import ImageLightbox from '../ui/ImageLightbox';
+import CommentReactions from '../ui/CommentReactions';
 
 const STATUS_OPTIONS = [
   { id: 'new',         label: 'New',         color: '#0369a1', bg: '#e0f2fe' },
@@ -296,6 +297,9 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
                           // eslint-disable-next-line no-alert
                           alert(err?.message || 'Could not delete');
                         }
+                      }}
+                      onReactionsChange={(commentId, nextReactions) => {
+                        setComments(prev => prev.map(x => x.id === commentId ? { ...x, reactions: nextReactions } : x));
                       }}
                     />
                   ))}
@@ -797,7 +801,7 @@ function AttachmentsGrid({ attachments }) {
 }
 
 // ── CommentRow with mention chips + edit/delete ─────────────────────────────
-function CommentRow({ comment, currentUserEmail, onEdit, onDelete }) {
+function CommentRow({ comment, currentUserEmail, onEdit, onDelete, onReactionsChange }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(comment.body);
   const isMine = (currentUserEmail || '').toLowerCase() === (comment.authorEmail || '').toLowerCase();
@@ -854,6 +858,15 @@ function CommentRow({ comment, currentUserEmail, onEdit, onDelete }) {
           <div style={{ marginTop: 6 }}>
             <AttachmentsGrid attachments={comment.attachments} />
           </div>
+        )}
+        {!editing && (
+          <CommentReactions
+            commentType="hr_hub"
+            commentId={comment.id}
+            reactions={comment.reactions || []}
+            currentUserEmail={currentUserEmail}
+            onChange={(next) => onReactionsChange?.(comment.id, next)}
+          />
         )}
       </div>
     </div>

@@ -7,11 +7,13 @@ import { renderRichText } from '../../utils/renderRichText';
 import Avatar from '../ui/Avatar';
 import AnnouncementMedia from '../ui/AnnouncementMedia';
 import EmptyState from '../ui/EmptyState';
+import CommentReactions from '../ui/CommentReactions';
 import ComposeModal from '../modals/ComposeModal';
 import AnnouncementPopup from '../modals/AnnouncementPopup';
 import MentionTextarea from '../ui/MentionTextarea';
 import { isApprover } from '../../data/approvers';
 import { createRequest as apiCreateRequest } from '../../services/announcementRequestsApi';
+import { shortRandomId } from '../../utils/shortRandomId';
 import { useAnnouncementRequests } from '../../hooks/useAnnouncementRequests';
 import { useSavedAnnouncements } from '../../hooks/useSavedAnnouncements';
 import ApprovalQueueView from './ApprovalQueueView';
@@ -358,9 +360,9 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
   };
 
   const handleSend=async (payload)=>{
-    const {type,title,body,target,priority,status,isPopup,imageUrl,link,soundKey,scheduledFor,urgentOverride} = payload;
+    const {type,title,body,target,priority,status,isPopup,imageUrl,link,soundKey,scheduledFor} = payload;
     const now=new Date().toISOString().slice(0,10);
-    const draft={type,title,body,target,priority,isPopup:isPopup||false,imageUrl:imageUrl||'',link:link||'',soundKey:soundKey||'chime',scheduledFor:scheduledFor||null,urgentOverride:urgentOverride||false,author:{id:user.id,name:user.name}};
+    const draft={type,title,body,target,priority,isPopup:isPopup||false,imageUrl:imageUrl||'',link:link||'',soundKey:soundKey||'chime',scheduledFor:scheduledFor||null,author:{id:user.id,name:user.name}};
     try {
       if(editDraft){
         if(apiUpdate) await apiUpdate(editDraft.id, draft);
@@ -1278,7 +1280,7 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
     if (!body.trim()) return;
     const safeMentions = Array.isArray(mentions) ? mentions : [];
     const cmt = {
-      id: `cmt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: `cmt-${Date.now()}-${shortRandomId(4)}`,
       body: body.trim(),
       parentId: parentId || null,
       authorId: user.id,
@@ -1408,6 +1410,14 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
               </span>
             </div>
             <div style={{ fontSize: 12, color: '#4b5563', lineHeight: 1.4, marginTop: 1 }}>{renderCommentBody(cmt.body)}</div>
+            <CommentReactions
+              commentType="announcement"
+              commentId={cmt.id}
+              reactions={cmt.reactions || []}
+              currentUserEmail={user?.email}
+              currentUserName={user?.name}
+              compact
+            />
             {replyTo === cmt.id && (
               <div style={{ display: 'flex', gap: 4, marginTop: 4, alignItems: 'flex-end' }}>
                 <MentionTextarea

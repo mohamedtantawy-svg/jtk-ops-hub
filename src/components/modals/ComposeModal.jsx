@@ -207,19 +207,15 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
   const [scheduledFor,setScheduledFor]=useState(
     draft?.scheduledFor ? toDatetimeLocal(draft.scheduledFor) : defaultScheduledFor()
   );
-  const [urgentOverride,setUrgentOverride]=useState(!!draft?.urgentOverride);
-  const [urgentOverrideReason,setUrgentOverrideReason]=useState(draft?.urgentOverrideReason || '');
-
   const approver = isApprover(currentUser?.email);
-  const canBypassQueue = approver; // only approvers & admin-roled RMs/TLs; kept simple
-  // When the urgent flag is checked, require a reason string that matches the
-  // server-side minimum (5 chars). Mirrors the 400 we'd otherwise receive.
-  const needsUrgentReason = canBypassQueue && urgentOverride;
-  const urgentReasonOk = !needsUrgentReason || urgentOverrideReason.trim().length >= 5;
+  // `canBypassQueue` historically also gated the urgent-override UI
+  // (since removed 2026-05-14). It now only controls whether the
+  // composer offers a direct-send path vs queueing for approval — the
+  // approval workflow itself is unchanged.
+  const canBypassQueue = approver;
   const valid =
     title.trim().length > 0 &&
-    (body.trim().length > 0 || !!imageUrl) &&
-    urgentReasonOk;
+    (body.trim().length > 0 || !!imageUrl);
 
   const buildDraft = (status, extra = {}) => ({
     type, title, body,
@@ -230,10 +226,6 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
     priority, status,
     isPopup, imageUrl, link, soundKey,
     scheduledFor: scheduleLater ? new Date(scheduledFor).toISOString() : null,
-    urgentOverride: canBypassQueue && urgentOverride,
-    urgentOverrideReason: canBypassQueue && urgentOverride
-      ? urgentOverrideReason.trim()
-      : '',
     ...extra,
   });
 
@@ -569,41 +561,8 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
             )}
           </div>
 
-          {/* Urgent override — approvers only */}
-          {canBypassQueue && (
-            <div style={{marginBottom:10,padding:'10px 14px',borderRadius:10,background:'#fff7e6',border:'1px solid #fcd79a'}}>
-              <label style={{display:'flex',alignItems:'center',gap:10,cursor:'pointer'}}>
-                <input type="checkbox" checked={urgentOverride} onChange={e=>setUrgentOverride(e.target.checked)} />
-                <div>
-                  <div style={{fontSize:13,fontWeight:600,color:'#8a5a00'}}>
-                    <i className="bi-exclamation-triangle" style={{fontSize:12,marginRight:6}}></i>
-                    Urgent — override publishing limits
-                  </div>
-                  <div style={{fontSize:11,color:'#a17a2c',marginTop:2}}>Skips the 2-per-day cap and 4-hour gap rule. Only use for time-critical communications.</div>
-                </div>
-              </label>
-              {urgentOverride && (
-                <div style={{marginTop:10}}>
-                  <label style={{display:'block',fontSize:11,fontWeight:600,color:'#8a5a00',marginBottom:4}}>
-                    Reason (required, ≥ 5 characters)
-                  </label>
-                  <input
-                    type="text"
-                    value={urgentOverrideReason}
-                    onChange={e=>setUrgentOverrideReason(e.target.value)}
-                    placeholder="e.g. Critical payroll outage — must reach agents before next shift"
-                    style={{width:'100%',border:'1px solid #fcd79a',borderRadius:6,padding:'6px 10px',fontSize:12,outline:'none',fontFamily:'inherit',color:'#1b1b1b',background:'var(--surface)'}}
-                    maxLength={500}
-                  />
-                  {!urgentReasonOk && (
-                    <div style={{fontSize:11,color:'#b02020',marginTop:4}}>
-                      A reason of at least 5 characters is required to bypass the publishing rate limits.
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+          {/* Urgent override block removed 2026-05-14 — the publishing
+              rate limits it bypassed are no longer in place. */}
 
           {/* Error surface */}
           {errorMsg && (

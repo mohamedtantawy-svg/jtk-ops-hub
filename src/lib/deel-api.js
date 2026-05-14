@@ -225,16 +225,32 @@ async function _scanOnboardingByStatus(statusName, label) {
   return collected;
 }
 
-// Onboarding sub-statuses we ALSO need to scan explicitly. These are
-// actionable for HRX but historically did NOT all surface inside the
+// Sub-statuses we ALSO need to scan explicitly. These are actionable for
+// HRX but historically did NOT all surface inside the
 // `Onboarding.ActionableQueue` parent bucket — the team was missing real
 // work. We scan them per-country and merge with the actionable-queue
 // payload below; dedup happens on `onboardingId || oid`.
-const SUPPLEMENTAL_ONBOARDING_STATUSES = [
+//
+// The `Active.*` mirrors were added 2026-05-14 after Celine reported that
+// `Active.ComplianceDocs.AwaitingReview` (currently-employed compliance
+// review, e.g. VN 2026-05-12) had 3 cases visible in the Deel admin's
+// Active tab but 0 in the Ops Hub Onboarding section. Same flow steps,
+// different lifecycle root: Onboarding.* covers pre-start hires; Active.*
+// covers in-employment actions on existing employees. The flow-step
+// parser in `normalizeSourceRows.js` strips the root segment so both
+// surface as the same friendly "Compliance Docs · Awaiting Review" label;
+// `_mapOnboardingRow` is lifecycle-agnostic and works on either shape.
+// Statuses that don't exist upstream (if any) fail through the existing
+// try/catch in `_scanOnboardingByStatus` and contribute zero rows.
+const SUPPLEMENTAL_ACTIONABLE_STATUSES = [
   'Onboarding.EA.EAAdditionalDetails.AwaitingReview',
   'Onboarding.EA.EASigning.AwaitingToSendEA',
   'Onboarding.PayrollComplianceDetails.AwaitingReview',
   'Onboarding.ComplianceDocs.AwaitingReview',
+  'Active.EA.EAAdditionalDetails.AwaitingReview',
+  'Active.EA.EASigning.AwaitingToSendEA',
+  'Active.PayrollComplianceDetails.AwaitingReview',
+  'Active.ComplianceDocs.AwaitingReview',
 ];
 
 /**
@@ -268,7 +284,7 @@ export async function listOnboardingPeople(params = {}) {
   // actionable scan in the common case. Skill mistake #41.
   const supplementalSequential = async () => {
     const out = [];
-    for (const name of SUPPLEMENTAL_ONBOARDING_STATUSES) {
+    for (const name of SUPPLEMENTAL_ACTIONABLE_STATUSES) {
       const items = await _scanOnboardingByStatus(
         name,
         name.split('.').slice(-2).join('.'),
@@ -313,8 +329,8 @@ export async function listOnboardingPeople(params = {}) {
     seen.add(key);
     merged.push(_mapOnboardingRow(p));
   }
-  for (let i = 0; i < SUPPLEMENTAL_ONBOARDING_STATUSES.length; i++) {
-    const statusName = SUPPLEMENTAL_ONBOARDING_STATUSES[i];
+  for (let i = 0; i < SUPPLEMENTAL_ACTIONABLE_STATUSES.length; i++) {
+    const statusName = SUPPLEMENTAL_ACTIONABLE_STATUSES[i];
     const rows = supplementalRaw[i] || [];
     for (const p of rows) {
       const key = p.onboardingId || p.oid;

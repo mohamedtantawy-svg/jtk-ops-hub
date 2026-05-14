@@ -44,6 +44,13 @@ export const ALL_VIEWS = [
   // reporting-tree scope clips what each user actually sees.
   'ooo',
   'urgent-assist',
+  // HRX Urgent Assist MOC Schedule — calendar surface for the daily
+  // rotation across EMEA / NAM / APAC. Reached from the Urgent Assist
+  // top-right "View schedule" button; gated to managers via
+  // MANAGERIAL_ONLY_VIEWS so agents don't see the entry (the read
+  // endpoint is open to authed users but the surface is designed for
+  // managers maintaining the rotation — Duygu Cakalli 2026-05-14).
+  'urgent-assist-schedule',
   // 'notifications' is the full-page sibling of the bell dropdown
   // (src/components/views/NotificationsView.jsx). Open to every signed-in
   // user — the data is server-scoped to the JWT email so role gating is
@@ -69,7 +76,7 @@ export const ALL_VIEWS = [
 // `perms.canView('team')` now returns false everywhere (topnav, quick-
 // tile, and direct URL deep-link `?view=team`), matching the strict rule
 // "Agents must NEVER access the Team tab or Leaders Alerts".
-const MANAGERIAL_ONLY_VIEWS = new Set(['leader-alerts', 'team', 'lead-home']);
+const MANAGERIAL_ONLY_VIEWS = new Set(['leader-alerts', 'team', 'lead-home', 'urgent-assist-schedule']);
 
 export const ALL_ACTIONS = [
   // Task actions
@@ -140,6 +147,7 @@ export const VIEW_LABELS = {
   'leader-alerts': 'Leaders Hub',
   'ooo':           'OOO',
   'urgent-assist': 'Urgent Assist',
+  'urgent-assist-schedule': 'Urgent Assist Schedule',
   'notifications': 'Notifications',
   'settings':      'Settings',
 };

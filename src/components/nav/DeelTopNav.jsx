@@ -81,6 +81,7 @@ const DeelTopNav = ({
   // agent never sees it regardless of who they impersonate.
   realUser,
   onSearch, notifs, markAllRead, markRead, markUnread, onNotifClick, onViewAllNotifications,
+  notifSound,
   onLogout,
   onLoginAsAdmin,
   onCreateAnnouncement, onCreateFeedback,
@@ -319,6 +320,7 @@ const DeelTopNav = ({
               markRead={markRead}
               markUnread={markUnread}
               onViewAll={onViewAllNotifications}
+              soundPref={notifSound}
               onNotifClick={(group) => {
                 // The panel passes a *group* (collection of related notifications
                 // for the same task). Route via the App-level handler when one is

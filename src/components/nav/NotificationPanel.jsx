@@ -132,6 +132,7 @@ export default function NotificationPanel({
   markUnread,
   onClose,
   onViewAll,
+  soundPref,
 }) {
   const [filter, setFilter] = useState('all'); // 'all' | 'unread' | 'mentions'
 
@@ -202,6 +203,27 @@ export default function NotificationPanel({
               : "You're all caught up"}
           </div>
         </div>
+        {soundPref && (
+          <button
+            type="button"
+            onClick={() => soundPref.setEnabled(!soundPref.enabled)}
+            aria-label={soundPref.enabled ? 'Mute notification sounds' : 'Unmute notification sounds'}
+            aria-pressed={soundPref.enabled}
+            title={soundPref.enabled
+              ? 'Sound on — plays a chime when a new notification arrives. Click to mute.'
+              : 'Sound off — click to play a chime when a new notification arrives.'}
+            style={{
+              background: 'transparent', border: '1px solid var(--border)',
+              borderRadius: 8, padding: '6px 8px',
+              fontSize: 13, color: soundPref.enabled ? 'var(--text)' : 'var(--text-muted)',
+              cursor: 'pointer', fontFamily: 'inherit',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: 30, height: 28,
+            }}>
+            <i className={soundPref.enabled ? 'bi-volume-up-fill' : 'bi-volume-mute-fill'}
+               style={{ fontSize: 13 }} />
+          </button>
+        )}
         {unreadCount > 0 && markAllRead && (
           <button
             type="button"

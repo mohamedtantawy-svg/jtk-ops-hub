@@ -16,6 +16,27 @@ const MAX_RETRIES = 2; // up to 3 total attempts
 const BASE_DELAY = 600; // ms
 const DEFAULT_TIMEOUT_MS = 90_000; // 90s — covers cold-cache scans like terminations_v3 ~600 pages
 
+// Retry-backoff jitter — uses crypto.getRandomValues when available so
+// CodeQL's `js/insecure-randomness` dataflow analysis doesn't flag the
+// jitter as a security context (it can't tell jitter from a CSRF/token
+// generator). Returns a uniform value in [0, 0.5] so the existing
+// `delay = BASE_DELAY * 2^attempt * (0.5 + _jitter())` formula keeps
+// its original [0.5, 1.0] multiplier range — identical wall-clock
+// behaviour to the previous Math.random implementation. Falls back to
+// the midpoint when crypto isn't available; the jitter is purely for
+// retry scheduling, no security impact either way.
+function _jitter() {
+  try {
+    const g = typeof globalThis !== 'undefined' ? globalThis : self;
+    if (g?.crypto?.getRandomValues) {
+      const buf = new Uint32Array(1);
+      g.crypto.getRandomValues(buf);
+      return (buf[0] / 0xffffffff) * 0.5;
+    }
+  } catch {}
+  return 0.25; // deterministic midpoint fallback
+}
+
 // Module-level streak counter for transient 401 warnings. The 2026-05-03
 // live audit (F40) caught the console flooded with
 // "[apiFetch] 401 but token not expired locally — keeping session
@@ -177,7 +198,7 @@ export async function apiFetch(path, options = {}) {
         // 5xx (other than 504) — retry
         lastError = err;
         if (attempt < MAX_RETRIES) {
-          const delay = BASE_DELAY * Math.pow(2, attempt) * (0.5 + Math.random() * 0.5);
+          const delay = BASE_DELAY * Math.pow(2, attempt) * (0.5 + _jitter());
           await new Promise(r => setTimeout(r, delay));
           continue;
         }
@@ -213,7 +234,7 @@ export async function apiFetch(path, options = {}) {
 
       // Network error or 5xx — retry if attempts remain
       if (attempt < MAX_RETRIES) {
-        const delay = BASE_DELAY * Math.pow(2, attempt) * (0.5 + Math.random() * 0.5);
+        const delay = BASE_DELAY * Math.pow(2, attempt) * (0.5 + _jitter());
         await new Promise(r => setTimeout(r, delay));
         continue;
       }

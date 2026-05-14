@@ -1140,16 +1140,22 @@ CREATE INDEX IF NOT EXISTS idx_urgent_assist_log_request ON urgent_assist_log(re
 -- add four nullable columns that carry the queue task identity (only used
 -- when flow='hide_task_request'). Idempotent across re-runs: drop any
 -- pre-existing CHECK + add the v2 with the wider enum.
+--
+-- 2026-05-14: the same enum is extended again (v3) to include
+-- 'sla_extension_request' for the SLA Extensions feature
+-- (SLA_EXTENSIONS_PLAN.md). The v2 constraint is dropped + replaced with
+-- v3 in the same idempotent block below.
 ALTER TABLE hr_hub_request DROP CONSTRAINT IF EXISTS hr_hub_request_flow_check;
+ALTER TABLE hr_hub_request DROP CONSTRAINT IF EXISTS hr_hub_request_flow_check_v2;
 DO $$ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint
      WHERE conrelid = 'hr_hub_request'::regclass
-       AND conname  = 'hr_hub_request_flow_check_v2'
+       AND conname  = 'hr_hub_request_flow_check_v3'
   ) THEN
     ALTER TABLE hr_hub_request
-      ADD CONSTRAINT hr_hub_request_flow_check_v2
-      CHECK (flow IN ('hr_request','hr_reporting','escalation_zero','feedback','hide_task_request'));
+      ADD CONSTRAINT hr_hub_request_flow_check_v3
+      CHECK (flow IN ('hr_request','hr_reporting','escalation_zero','feedback','hide_task_request','sla_extension_request'));
   END IF;
 END $$;
 
@@ -1159,6 +1165,32 @@ ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS task_url      TEXT;
 ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS task_subject  VARCHAR(500);
 CREATE INDEX IF NOT EXISTS idx_hr_hub_request_task_pair
   ON hr_hub_request(task_source, task_id) WHERE task_source IS NOT NULL;
+
+-- SLA Extension request flow (2026-05-14) — additional columns populated
+-- only when flow='sla_extension_request'. See SLA_EXTENSIONS_PLAN.md.
+--   sla_ext_requested_days — team-member pick: 3 | 5 | 7
+--   sla_ext_reason_code    — immigration | client_unresponsive | employee_unresponsive
+--   sla_ext_acknowledged   — required true at submit (the employee/client
+--                            has been informed about the hold)
+--   sla_ext_approved_days  — manager-chosen on approval (1-7); null until then
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS sla_ext_requested_days SMALLINT;
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS sla_ext_reason_code    VARCHAR(40);
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS sla_ext_acknowledged   BOOLEAN;
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS sla_ext_approved_days  SMALLINT;
+
+-- Team Lead On Call (2026-05-14) — auto-assignment hand-off marker.
+-- When an HR Request or HR Reporting row is auto-assigned to the current
+-- Team Lead On Call at create time, assignee_manually_set stays FALSE.
+-- Any subsequent explicit assignee change (via the request detail panel)
+-- flips it to TRUE. The /settings/team-lead-on-call PUT handler reads
+-- this flag during rotation: it bulk-reassigns all FALSE rows that were
+-- assigned to the previous TLOC, but leaves manually-changed rows alone.
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS assignee_manually_set BOOLEAN DEFAULT FALSE;
+-- Partial index for the rotation bulk-update query (cheap because the
+-- false set is the common case and we filter on flow + assignee_email
+-- before this).
+CREATE INDEX IF NOT EXISTS idx_hr_hub_request_auto_assign
+  ON hr_hub_request(flow, assignee_email) WHERE assignee_manually_set = FALSE;
 
 -- Phase 2 — the active hide list. Manager-approved entries land here and
 -- every queue's render path checks (task_source, task_id) against this
@@ -1185,6 +1217,44 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_hidden_task_active
   ON hidden_task(task_source, task_id) WHERE unhidden_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_hidden_task_request ON hidden_task(request_id);
 CREATE INDEX IF NOT EXISTS idx_hidden_task_hidden_by ON hidden_task(hidden_by_email, hidden_at DESC);
+
+-- ── SLA Extension (2026-05-14) ─────────────────────────────────────────────
+-- Active SLA-extension list. Manager-approved extensions land here and the
+-- queue routes / SLA math read them on every fetch so the row's SLA window
+-- is overridden by the extension while it's active and reverts to normal
+-- (red, breached) once expires_at passes. See SLA_EXTENSIONS_PLAN.md.
+--
+-- The unique partial index enforces "only one active extension per task at
+-- a time": both the not-yet-expired window AND a not-revoked row count as
+-- active. Expired rows stay in the table for audit but don't block a fresh
+-- request.
+CREATE TABLE IF NOT EXISTS sla_extension (
+  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_source          VARCHAR(40)  NOT NULL,                  -- zendesk | jira | onboarding | offboarding | amendments | redlines | workbench | incentive_plans
+  task_id              VARCHAR(200) NOT NULL,                  -- source-side id
+  task_url             TEXT,
+  task_subject         VARCHAR(500),
+  request_id           UUID REFERENCES hr_hub_request(id) ON DELETE SET NULL,
+  reason_code          VARCHAR(40)  NOT NULL CHECK (reason_code IN ('immigration','client_unresponsive','employee_unresponsive')),
+  requested_by_email   VARCHAR(255) NOT NULL,
+  requested_by_name    VARCHAR(255),
+  approved_by_email    VARCHAR(255) NOT NULL,
+  approved_by_name     VARCHAR(255),
+  approved_days        SMALLINT     NOT NULL CHECK (approved_days BETWEEN 1 AND 7),
+  effective_from       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  expires_at           TIMESTAMPTZ  NOT NULL,
+  revoked_at           TIMESTAMPTZ
+);
+-- Active extensions are unique per task. The predicate is purely
+-- revoked_at IS NULL only, because Postgres rejects non-IMMUTABLE functions
+-- (NOW()) in partial index predicates; the natural-expiry case is
+-- handled at write time by the Phase 2 approve handler, which marks any
+-- expired-but-unrevoked row as revoked just-in-time before inserting a
+-- fresh row. See SLA_EXTENSIONS_PLAN.md "State machine" section.
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_sla_extension_unrevoked
+  ON sla_extension(task_source, task_id)
+  WHERE revoked_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_sla_extension_request ON sla_extension(request_id);
 
 -- Source-row reassignments. The Onboarding / Amendments / Redlines /
 -- Incentive Plans queues come from the Deel admin API and we cannot push an
@@ -1632,6 +1702,64 @@ CREATE INDEX IF NOT EXISTS idx_workspace_members_email_status
   ON workspace_members(LOWER(email), status);
 CREATE INDEX IF NOT EXISTS idx_workspace_members_workspace_status
   ON workspace_members(workspace_id, status);
+
+-- ── Comment Reactions (2026-05-14) ───────────────────────────────────
+-- Polymorphic emoji-reaction table used by every comment surface that
+-- isn't leader_alert (leader_alert keeps its own bespoke table — it
+-- shipped earlier with the same shape; not migrated to avoid churn).
+-- Sarah Suge feedback: "Add the ability to react to messages with
+-- emojis" applied to "all places where we have comments and replies"
+-- (Mohamed). Each row is one user reacting with one emoji on one
+-- comment. Unique on (type, id, email, emoji) so the same user can't
+-- double-react with the same emoji. The PK on email is lowercased via
+-- the index instead of by storage so we keep the original casing for
+-- audit while still matching deterministically.
+CREATE TABLE IF NOT EXISTS comment_reactions (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  comment_type  VARCHAR(40) NOT NULL,        -- hr_hub | feedback | announcement | announcement_request
+  comment_id    VARCHAR(200) NOT NULL,       -- comment's own id (UUID or numeric, stringified)
+  emoji         VARCHAR(64) NOT NULL,
+  user_email    VARCHAR(255) NOT NULL,
+  user_name     VARCHAR(255),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_comment_reaction
+  ON comment_reactions(comment_type, comment_id, LOWER(user_email), emoji);
+CREATE INDEX IF NOT EXISTS idx_comment_reactions_lookup
+  ON comment_reactions(comment_type, comment_id);
+
+-- ── HRX Urgent Assist Schedule (2026-05-14) ────────────────────────────
+-- Duygu Cakalli feedback: "we don't have HRX Urgent Assist MOC Schedule
+-- on the Ops hub". Mirrors the team's Google Sheet schedule: one row per
+-- calendar date with three regions (EMEA / NAM / APAC), each region
+-- having a main MOC and a backup. Names + emails denormalised so the
+-- table renders without joining against the members roster (members
+-- come and go; the schedule preserves the historical assignment).
+-- Managers-only access enforced at the view level.
+CREATE TABLE IF NOT EXISTS urgent_assist_schedule (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  schedule_date       DATE NOT NULL UNIQUE,
+  emea_main_email     VARCHAR(255),
+  emea_main_name      VARCHAR(255),
+  emea_backup_email   VARCHAR(255),
+  emea_backup_name    VARCHAR(255),
+  nam_main_email      VARCHAR(255),
+  nam_main_name       VARCHAR(255),
+  nam_backup_email    VARCHAR(255),
+  nam_backup_name     VARCHAR(255),
+  apac_main_email     VARCHAR(255),
+  apac_main_name      VARCHAR(255),
+  apac_backup_email   VARCHAR(255),
+  apac_backup_name    VARCHAR(255),
+  notes               TEXT,
+  updated_by_email    VARCHAR(255),
+  updated_by_name     VARCHAR(255),
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- Read path: list current + upcoming dates fast.
+CREATE INDEX IF NOT EXISTS idx_urgent_assist_schedule_date
+  ON urgent_assist_schedule(schedule_date);
 `;
 
 export async function runMigrations() {

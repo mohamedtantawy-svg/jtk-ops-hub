@@ -59,11 +59,18 @@ export async function GET(req, { params }) {
 
     const total = parseInt(countResult.rows[0].count, 10);
 
+    // Splice emoji reactions onto each comment (Sarah Suge 2026-05-14).
+    let reactionMap = new Map();
+    if (rows.length > 0) {
+      const { fetchReactionsForComments } = await import('../../../../../../src/lib/comment-reactions-helpers');
+      reactionMap = await fetchReactionsForComments('announcement', rows.map(c => c.id));
+    }
     const items = rows.map(r => ({
       id: r.id, announcementId: r.announcement_id, authorId: r.author_id,
       authorName: r.author_name, body: r.body, parentId: r.parent_id,
       mentionEmails: r.mention_emails || [],
       createdAt: r.created_at,
+      reactions: reactionMap.get(String(r.id)) || [],
     }));
     return NextResponse.json({ items, page, limit, total });
   } catch (err) {

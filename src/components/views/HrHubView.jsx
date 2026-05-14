@@ -25,6 +25,8 @@ import { approveHideTask } from '../../services/hideTaskApi';
 import HrHubDetailPanel from '../hr-hub/HrHubDetailPanel';
 import HrHubSettingsPanel from '../hr-hub/HrHubSettingsPanel';
 import DenyHideTaskModal from '../modals/DenyHideTaskModal';
+import ApproveSlaExtensionModal from '../modals/ApproveSlaExtensionModal';
+import DenySlaExtensionModal from '../modals/DenySlaExtensionModal';
 import { PermissionsContext, IntegrationsContext } from '../../App';
 
 // Single source of truth for status visuals — same shape as Feedback's
@@ -50,14 +52,16 @@ const FLOW_VISUALS = {
   escalation_zero:   { label: 'Escalation Zero',  short: 'Escalation',  icon: 'bi-stars',             color: '#7c3aed', bg: '#f3eff8' },
   feedback:          { label: 'Ops Hub Feedback', short: 'Feedback',    icon: 'bi-lightbulb-fill',    color: '#d97706', bg: '#fff8e6' },
   hide_task_request: { label: 'Hide Task',        short: 'Hide Task',   icon: 'bi-eye-slash-fill',    color: '#d42d35', bg: '#fef2f2' },
+  sla_extension_request: { label: 'SLA Extension', short: 'SLA Ext',     icon: 'bi-clock-history',     color: '#d97706', bg: '#fff7ed' },
 };
 const FLOW_FILTERS = [
-  { value: 'all',                label: 'All flows',  icon: 'bi-grid-fill',         color: 'var(--text)' },
-  { value: 'hr_request',         label: 'Requests',   icon: 'bi-send-fill',          color: '#1f74b3' },
-  { value: 'hr_reporting',       label: 'Reporting',  icon: 'bi-megaphone-fill',     color: '#dc2626' },
-  { value: 'escalation_zero',    label: 'Escalations', icon: 'bi-stars',             color: '#7c3aed' },
-  { value: 'feedback',           label: 'Feedback',   icon: 'bi-lightbulb-fill',     color: '#d97706' },
-  { value: 'hide_task_request',  label: 'Hide Task',  icon: 'bi-eye-slash-fill',     color: '#d42d35' },
+  { value: 'all',                    label: 'All flows',   icon: 'bi-grid-fill',         color: 'var(--text)' },
+  { value: 'hr_request',             label: 'Requests',    icon: 'bi-send-fill',          color: '#1f74b3' },
+  { value: 'hr_reporting',           label: 'Reporting',   icon: 'bi-megaphone-fill',     color: '#dc2626' },
+  { value: 'escalation_zero',        label: 'Escalations', icon: 'bi-stars',             color: '#7c3aed' },
+  { value: 'feedback',               label: 'Feedback',    icon: 'bi-lightbulb-fill',     color: '#d97706' },
+  { value: 'hide_task_request',      label: 'Hide Task',   icon: 'bi-eye-slash-fill',     color: '#d42d35' },
+  { value: 'sla_extension_request',  label: 'SLA Extension', icon: 'bi-clock-history',   color: '#d97706' },
 ];
 
 const PRIORITY_DOT = {
@@ -112,6 +116,12 @@ export default function HrHubView({ user, onCreateHrHub }) {
   const integrations = useContext(IntegrationsContext);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [denyModalReq, setDenyModalReq] = useState(null);
+  // SLA Extension review modals — separate state so the approve flow can
+  // carry the manager-chosen day count and the deny flow can carry a
+  // reason. Both reset on close + reload the list so the row flips to
+  // resolved.
+  const [slaApproveModalReq, setSlaApproveModalReq] = useState(null);
+  const [slaDenyModalReq, setSlaDenyModalReq] = useState(null);
   const [decisionError, setDecisionError] = useState(null);
   const initialReqId = (() => {
     try {
@@ -124,7 +134,16 @@ export default function HrHubView({ user, onCreateHrHub }) {
   const isManager = isManagerRole(user, perms);
   const [scope, setScope] = useState('mine');
   const [flowFilter, setFlowFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState(null);          // null = all statuses
+  // Default to 'new' so the landing page shows actionable work, not
+  // historical resolved tasks. Olga Pastuszak 2026-05-14 feedback:
+  // "HR HUB - Potentially defaults to Resolved" — with statusFilter=null
+  // (all statuses) + sort=updated, she saw recently-resolved tasks first
+  // because her new/in-progress queues are empty. Defaulting to 'new'
+  // means an empty queue lands on the celebratory empty state below
+  // ("You're all caught up!") instead of an old resolved-tasks list.
+  // Click "All" anytime to switch — the filter is just a default, not a
+  // lock.
+  const [statusFilter, setStatusFilter] = useState('new');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [sort, setSort] = useState('updated');
@@ -525,6 +544,13 @@ export default function HrHubView({ user, onCreateHrHub }) {
                 isAdmin={isManager && (user?.role === 'admin' || (user?.access || '').toLowerCase().includes('admin'))}
                 onApprove={async (it) => {
                   setDecisionError(null);
+                  // SLA Extension goes through its own approve modal so
+                  // the manager can pick 1-7 days. Hide Task is a
+                  // single-click approve (no extra fields).
+                  if (it.flow === 'sla_extension_request') {
+                    setSlaApproveModalReq(it);
+                    return;
+                  }
                   try {
                     await approveHideTask(it.id);
                     // Refresh the global hide list so the queue render path
@@ -536,7 +562,10 @@ export default function HrHubView({ user, onCreateHrHub }) {
                     setDecisionError(err?.message || 'Approval failed');
                   }
                 }}
-                onDeny={(it) => setDenyModalReq(it)}
+                onDeny={(it) => {
+                  if (it.flow === 'sla_extension_request') setSlaDenyModalReq(it);
+                  else setDenyModalReq(it);
+                }}
               />
             ))}
             {cursor && (
@@ -579,6 +608,31 @@ export default function HrHubView({ user, onCreateHrHub }) {
           }}
         />
       )}
+      {slaApproveModalReq && (
+        <ApproveSlaExtensionModal
+          request={slaApproveModalReq}
+          onClose={() => setSlaApproveModalReq(null)}
+          onApproved={() => {
+            setSlaApproveModalReq(null);
+            // Refresh the active-extensions list NOW so the queue's row
+            // override picks up the new extension on the very next render,
+            // not 30s from now when the next poll would fire. Phase 3 —
+            // SLA_EXTENSIONS_PLAN.md sync robustness contract.
+            try { integrations?.slaExtensions?.refresh?.(); } catch {}
+            loadFirstPage();
+          }}
+        />
+      )}
+      {slaDenyModalReq && (
+        <DenySlaExtensionModal
+          request={slaDenyModalReq}
+          onClose={() => setSlaDenyModalReq(null)}
+          onDenied={() => {
+            setSlaDenyModalReq(null);
+            loadFirstPage();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -604,12 +658,31 @@ function RequestRow({ item, active, onClick, viewerEmail, isManager, isAdmin, on
   const status = STATUS_BY_VALUE[item.status] || STATUS_BY_VALUE.new;
   const priColor = PRIORITY_DOT[item.priority] || PRIORITY_DOT.medium;
   const isHide = item.flow === 'hide_task_request';
+  const isSlaExt = item.flow === 'sla_extension_request';
+  const isDecidable = isHide || isSlaExt;
   const hideMeta = isHide
     ? [HIDE_REASON_LABELS[item.requestType] || item.requestType, item.taskSubject].filter(Boolean).join(' · ')
     : '';
+  // SLA extension meta: reason label + days requested + task subject.
+  const slaExtReasonLabel = isSlaExt
+    ? ({
+        immigration: 'Immigration',
+        client_unresponsive: 'Client unresponsive',
+        employee_unresponsive: 'Employee unresponsive',
+      }[item.slaExtReasonCode] || item.slaExtReasonCode)
+    : null;
+  const slaExtMeta = isSlaExt
+    ? [
+        slaExtReasonLabel,
+        item.slaExtRequestedDays ? `${item.slaExtRequestedDays}d requested` : null,
+        item.taskSubject,
+      ].filter(Boolean).join(' · ')
+    : '';
   const meta = isHide
     ? hideMeta
-    : [item.functionArea, item.requestType || item.reportType].filter(Boolean).join(' · ');
+    : isSlaExt
+      ? slaExtMeta
+      : [item.functionArea, item.requestType || item.reportType].filter(Boolean).join(' · ');
   // Manager-side decision affordance: visible on every pending hide
   // request to ANY manager (TL / RM / admin). The denormalised
   // `team_lead_email` is the routing target, but live audit 2026-05-04
@@ -629,7 +702,7 @@ function RequestRow({ item, active, onClick, viewerEmail, isManager, isAdmin, on
   // Backend mirrors this rule (see /api/v1/hide-task/[id]/{approve,deny}).
   const viewerLc = (viewerEmail || '').toLowerCase();
   const isSelf = (item.createdByEmail || '').toLowerCase() === viewerLc;
-  const canDecide = isHide
+  const canDecide = isDecidable
     && item.status !== 'resolved'
     && item.status !== 'rejected'
     && !!isManager
@@ -774,7 +847,23 @@ function RequestRow({ item, active, onClick, viewerEmail, isManager, isAdmin, on
 function EmptyState({ scope, flowFilter, statusFilter }) {
   let title = 'No requests yet';
   let body = 'Hit the New request button in the header to submit one.';
-  if (statusFilter) {
+  let icon = 'bi-inbox';
+  let accent = null;          // celebratory accent for the "caught up" case
+  // Olga 2026-05-14 — the default landing is `status=new`, so an empty
+  // landing is the "caught up" celebration, not a stark "no results".
+  // We branch on the common cases first so each gets bespoke copy
+  // instead of the generic "No X requests" fallback.
+  if (statusFilter === 'new' && scope === 'mine' && flowFilter === 'all') {
+    title = "You're all caught up!";
+    body = 'No new requests on your plate. Click "All" above to browse the rest.';
+    icon = 'bi-emoji-smile';
+    accent = '#7c3aed';
+  } else if (statusFilter === 'new' && scope === 'mine') {
+    title = "You're all caught up!";
+    body = `No new ${FLOW_VISUALS[flowFilter]?.label || 'requests'} on your plate. Try widening the flow filter.`;
+    icon = 'bi-emoji-smile';
+    accent = '#7c3aed';
+  } else if (statusFilter) {
     const s = STATUS_BY_VALUE[statusFilter];
     title = `No ${s?.label?.toLowerCase() || statusFilter} requests`;
     body = 'Try clearing the status filter or widening the scope.';
@@ -791,9 +880,19 @@ function EmptyState({ scope, flowFilter, statusFilter }) {
       border: '1px dashed var(--border)', borderRadius: 12,
       color: 'var(--text-muted)', fontSize: 13,
       background: 'var(--surface)',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
     }}>
-      <div style={{ fontSize: 14, color: 'var(--text-secondary)', fontWeight: 600 }}>{title}</div>
-      <div style={{ marginTop: 4 }}>{body}</div>
+      <div style={{
+        width: 48, height: 48, borderRadius: 14,
+        background: accent ? '#f3eff8' : 'var(--surface-2)',
+        color: accent || 'var(--text-muted)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        marginBottom: 4,
+      }}>
+        <i className={icon} style={{ fontSize: 22 }} />
+      </div>
+      <div style={{ fontSize: 15, color: accent || 'var(--text)', fontWeight: 700 }}>{title}</div>
+      <div style={{ maxWidth: 360, lineHeight: 1.5 }}>{body}</div>
     </div>
   );
 }

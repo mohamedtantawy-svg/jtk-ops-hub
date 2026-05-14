@@ -23,6 +23,7 @@ import {
   unlinkAnnouncement as apiUnlinkAnnouncement,
   reactToAnnouncement as apiReactToAnnouncement,
 } from '../services/announcementsApi';
+import { shortRandomId } from '../utils/shortRandomId';
 
 /**
  * Normalises an API announcement object into the shape the frontend expects.
@@ -492,7 +493,7 @@ export function useAnnouncements({ toastRef } = {}) {
   const addCommentFn = useCallback(async (id, body, parentId, mentionEmails) => {
     const safeMentions = Array.isArray(mentionEmails) ? mentionEmails : [];
     const newComment = {
-      id: `cmt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: `cmt-${Date.now()}-${shortRandomId(4)}`,
       body,
       parentId: parentId || null,
       authorId: null, // caller will set user info

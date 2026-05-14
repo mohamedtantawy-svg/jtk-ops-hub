@@ -11,6 +11,7 @@
 // page-route transitions.
 
 import { useEffect } from 'react';
+import { playAlertSound } from '../../utils/playAlertSound';
 
 export default function MocAlertModal({ mocName, onDismiss, onOpenView }) {
   // ESC closes — same affordance every other Ops Hub modal carries.
@@ -19,6 +20,12 @@ export default function MocAlertModal({ mocName, onDismiss, onOpenView }) {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [onDismiss]);
+
+  // Three-tone alarm on mount — paired with the TLOC modal so the audio
+  // cue is identical when either rotating role lands on the current
+  // user (Mohamed spec 2026-05-14: "popup with a sound exactly the same
+  // to when the manager on call changes" — applied symmetrically here).
+  useEffect(() => { try { playAlertSound(); } catch {} }, []);
 
   return (
     <div

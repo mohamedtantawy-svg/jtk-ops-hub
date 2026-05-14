@@ -101,6 +101,13 @@ function OOOView({ user, setView, addToast }) {
   const [selectedEventId, setSelectedEventId] = useState(urlInit.handover || null);
   const [wizardEventId, setWizardEventId] = useState(null);   // null = closed; an id = open w/ that event
   const [submitTimeOffOpen, setSubmitTimeOffOpen] = useState(false);
+  // Holds a handover_id received via the `ooo:openDetail` custom event
+  // until we've loaded enough events to resolve it to a time_off_event_id
+  // (the key the slide-out opens on). Cleared once resolved. Sarah Suge
+  // 2026-05-13 bug "OOO Link to Accept Handover not Working" — the bell
+  // notification carries handover_id, the slide-out wants event_id; this
+  // is the bridge.
+  const [pendingHandoverId, setPendingHandoverId] = useState(null);
 
   // `useTeamMembers` returns `{ members, membersByEmail, ... }` — the
   // previous `items` rename matched an older shape and silently produced
@@ -113,6 +120,35 @@ function OOOView({ user, setView, addToast }) {
   useEffect(() => { pushUrl({ mode, lens, from, to, handover: selectedEventId }); }, [mode, lens, from, to, selectedEventId]);
   useEffect(() => { writeLocal(MODE_KEY, mode); }, [mode]);
   useEffect(() => { if (lens !== LENS_IDS.AUTO) writeLocal(LENS_KEY, lens); }, [lens]);
+
+  // ── Notification deep-link listener (Sarah Suge 2026-05-13 bug fix) ──
+  // App.jsx dispatches `ooo:openDetail` with `{ handoverId }` when the
+  // user clicks an OOO notification from the bell. The slide-out opens
+  // on time_off_event_id, so we save the handover_id here and let the
+  // resolution effect below map it once `events` is loaded.
+  useEffect(() => {
+    const onOpen = (e) => {
+      const hid = e?.detail?.handoverId;
+      if (hid) setPendingHandoverId(String(hid));
+    };
+    window.addEventListener('ooo:openDetail', onOpen);
+    return () => window.removeEventListener('ooo:openDetail', onOpen);
+  }, []);
+
+  // Resolve pending handover_id → time_off_event_id once the events
+  // list contains a row carrying this handover. Re-runs on every events
+  // update so a deep-link from a fresh login still works after the
+  // fetch returns. Idempotent: clears pendingHandoverId once resolved
+  // so we don't keep re-applying.
+  useEffect(() => {
+    if (!pendingHandoverId) return;
+    if (!Array.isArray(events) || events.length === 0) return;
+    const match = events.find(e => e?.handover?.id && String(e.handover.id) === pendingHandoverId);
+    if (match?.id) {
+      setSelectedEventId(match.id);
+      setPendingHandoverId(null);
+    }
+  }, [pendingHandoverId, events]);
 
   // Lookup map: email → member.
   const membersByEmail = useMemo(() => {
@@ -227,6 +263,42 @@ function OOOView({ user, setView, addToast }) {
     () => filteredEvents.find(e => e.id === selectedEventId) || events.find(e => e.id === selectedEventId) || null,
     [filteredEvents, events, selectedEventId],
   );
+
+  // Emails the calendar should ALWAYS render as a row, even when they
+  // have zero events in the current window. Always includes the caller
+  // (so a newly-added member sees themselves on first login — Ines
+  // Barata 2026-05-14 bug). On the 'team' lens, also includes everyone
+  // in the caller's direct team (same managerEmail) so freshly-added
+  // teammates appear immediately rather than only after their first
+  // submission. Other lenses keep the events-first behaviour to avoid
+  // clutter.
+  const calendarAlwaysShowEmails = useMemo(() => {
+    const set = new Set();
+    const callerEmail = String(user?.email || '').toLowerCase();
+    if (callerEmail) set.add(callerEmail);
+    if (lens === LENS_IDS.TEAM && Array.isArray(members)) {
+      const callerMember = members.find(m => String(m?.email || '').toLowerCase() === callerEmail);
+      if (callerMember) {
+        const callerAccess = String(callerMember.access || '').toLowerCase();
+        const callerManagerEmail = String(callerMember.managerEmail || '').toLowerCase() || null;
+        // The team root is callerMember.email when the caller is a
+        // manager (everyone reports to them), and callerManagerEmail
+        // otherwise (everyone shares the same boss).
+        const teamRoot = (callerAccess === 'team_lead' || callerAccess === 'regional_manager' || callerAccess === 'admin')
+          ? callerEmail
+          : callerManagerEmail;
+        if (teamRoot) {
+          for (const m of members) {
+            if (!m || m.isDeleted) continue;
+            const mgr = String(m.managerEmail || '').toLowerCase() || null;
+            const me = String(m.email || '').toLowerCase();
+            if (mgr === teamRoot || me === teamRoot) set.add(me);
+          }
+        }
+      }
+    }
+    return set;
+  }, [user?.email, lens, members]);
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -452,6 +524,7 @@ function OOOView({ user, setView, addToast }) {
             to={to}
             todayIso={todayIso}
             onSelectEvent={ev => setSelectedEventId(ev?.id || null)}
+            alwaysShowEmails={calendarAlwaysShowEmails}
           />
         ) : (
           <TableMode

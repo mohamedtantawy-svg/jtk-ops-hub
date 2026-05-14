@@ -207,6 +207,7 @@ export default function SourceTable({
   onHide,                    // (row) => void — called when the row's Hide button is clicked
   onEscalate,                // (row) => void — called when the row's Escalate button is clicked
   onReassign,                // (row) => void — called when the row's Reassign button is clicked (Onb / Amend / Redline / IP only)
+  onSlaExtension,            // (row) => void — called when the row's SLA Extension button is clicked
   onBulkHide,                // (rows[]) => void — bulk variant; enables checkboxes + bulk-bar Hide button
   onBulkEscalate,            // (rows[]) => void — bulk variant; enables checkboxes + bulk-bar Escalate button
   onBulkReassign,            // (rows[]) => void — bulk variant; enables checkboxes + bulk-bar Reassign button
@@ -495,7 +496,7 @@ export default function SourceTable({
     + 1 // Task
     + (hideContract ? 0 : 1)
     + (hasNotes ? 1 : 0) // Note column when the parent wires the notes hook
-    + ((onHide || onEscalate || onReassign) ? 1 : 0) // Actions column when the parent provides any row action
+    + ((onHide || onEscalate || onReassign || onSlaExtension) ? 1 : 0) // Actions column when the parent provides any row action
     + (canBulk ? 1 : 0); // Selection checkbox column when any bulk handler is wired
 
   return (
@@ -654,7 +655,7 @@ export default function SourceTable({
                 <th style={{ ...thStyle, width: 55 }}>Task</th>
                 {!hideContract && <th style={{ ...thStyle, width: 55 }}>Contract</th>}
                 {hasNotes && <th style={{ ...thStyle, width: 50 }} title="Personal notes — saved to your browser, keyed by the task's source+id">Note</th>}
-                {(onHide || onEscalate || onReassign) && <th style={{ ...thStyle, width: 200 }}>Actions</th>}
+                {(onHide || onEscalate || onReassign || onSlaExtension) && <th style={{ ...thStyle, width: 260 }}>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -713,6 +714,7 @@ export default function SourceTable({
                     onHide={onHide ? () => onHide(row) : null}
                     onEscalate={onEscalate ? () => onEscalate(row) : null}
                     onReassign={onReassign ? () => onReassign(row) : null}
+                    onSlaExtension={onSlaExtension ? () => onSlaExtension(row) : null}
                     isSelectable={canBulk}
                     isSelected={canBulk && selectedIds.has(String(row.id))}
                     onToggleSelection={canBulk ? () => toggleRowSelection(String(row.id)) : null}
@@ -887,7 +889,7 @@ function NoteModal({ row, initialText, maxLength, onSave, onDelete, onClose }) {
 }
 
 // ── Row component ──
-const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, dateField = 'startDate', showClient = false, showType = false, hideUpdated = false, hideContract = false, onHide = null, onEscalate = null, onReassign = null, isSelectable = false, isSelected = false, onToggleSelection = null, showNoteColumn = false, hasNote = false, onOpenNote = null }) {
+const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, dateField = 'startDate', showClient = false, showType = false, hideUpdated = false, hideContract = false, onHide = null, onEscalate = null, onReassign = null, onSlaExtension = null, isSelectable = false, isSelected = false, onToggleSelection = null, showNoteColumn = false, hasNote = false, onOpenNote = null }) {
   const [hov, setHov] = useState(false);
   const sev = row.status?.severity || 'info';
   const isUrgent = sev === 'critical';
@@ -1175,7 +1177,7 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
           when the parent passed at least one handler so the column is
           opt-in. Reassign is wired in only on queues whose source rows
           can't be re-routed upstream (Onb / Amend / Redline / IP). */}
-      {(onHide || onEscalate || onReassign) && (
+      {(onHide || onEscalate || onReassign || onSlaExtension) && (
         <td style={tdStyle}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             {onEscalate && (
@@ -1216,6 +1218,26 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
               >
                 <i className="bi-arrow-left-right" style={{ fontSize: 9 }} />
                 Reassign
+              </button>
+            )}
+            {onSlaExtension && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); onSlaExtension(); }}
+                aria-label={`Request SLA extension for "${row.subject || row.id}"`}
+                title="Request to extend the SLA on this task"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '3px 8px', borderRadius: 6,
+                  background: hov ? '#fff7ed' : '#f5f4f2',
+                  color: hov ? '#d97706' : '#9e9e9e',
+                  border: hov ? '1px solid #fed7aa' : '1px solid transparent',
+                  fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
+                  cursor: 'pointer', fontFamily: 'inherit',
+                }}
+              >
+                <i className="bi-clock-history" style={{ fontSize: 9 }} />
+                SLA Extension
               </button>
             )}
             {onHide && (

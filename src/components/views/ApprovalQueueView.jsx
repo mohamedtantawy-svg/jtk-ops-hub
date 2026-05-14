@@ -4,6 +4,7 @@ import { isApprover } from '../../data/approvers';
 import { AUDIENCE_LABELS, AUDIENCES, SOUND_PRESETS, COMMS_TYPES } from '../../data/comms';
 import { renderRichText } from '../../utils/renderRichText';
 import EmptyState from '../ui/EmptyState';
+import CommentReactions from '../ui/CommentReactions';
 
 // Convert an ISO timestamp to the local-time value expected by <input type="datetime-local">.
 // The input element wants "YYYY-MM-DDTHH:MM" with no timezone suffix.
@@ -83,6 +84,7 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
   const {
     items, canApprove, loading, refresh,
     fetchDetail, approve, publishAwaitingPost, reject, askClarification, withdraw, addComment,
+    edit,
   } = useAnnouncementRequests();
   // Default tab: approvers start on Pending, everyone else on My Requests (the
   // only tab they can see). Using a lazy initializer with the roster directly
@@ -96,8 +98,8 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
   const [rejectionDraft, setRejectionDraft] = useState('');
   const [questionDraft, setQuestionDraft] = useState('');
   const [busy, setBusy] = useState(false);
-  const [urgentOverrideLocal, setUrgentOverrideLocal] = useState(false);
-  const [urgentOverrideReasonLocal, setUrgentOverrideReasonLocal] = useState('');
+  // urgent-override state removed 2026-05-14 — publishing rate limits
+  // are gone, so there's nothing left to override.
   // Approver edit mode — when true, reveals inline editable fields so the
   // approver can adjust wording/pictures/schedule/popup mode before approving.
   const [editMode, setEditMode] = useState(false);
@@ -182,16 +184,10 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
   // yet. The requester posts on Slack, then hits "Publish on Ops Hub"
   // (handler below) to complete the release.
   const handleApprove = () => {
-    if (urgentOverrideLocal && urgentOverrideReasonLocal.trim().length < 5) {
-      if (addToast) addToast('warn', 'Reason required', 'Urgent override needs a reason of at least 5 characters');
-      return;
-    }
     const overrideEdits = editMode ? { ...edits } : {};
     const scheduledForOverride = scheduledForLocal ? localInputToIso(scheduledForLocal) : null;
     runWithBusy(
       () => approve(selectedId, {
-        urgentOverride: urgentOverrideLocal,
-        urgentOverrideReason: urgentOverrideLocal ? urgentOverrideReasonLocal.trim() : '',
         scheduledFor: scheduledForOverride,
         overrideEdits,
         publishImmediately: false,
@@ -207,15 +203,9 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
   // Same semantics as the legacy one-shot approve. Useful for urgent
   // fixes or internal notices that don't need a Slack mirror.
   const handleApproveAndPublishNow = () => {
-    if (urgentOverrideLocal && urgentOverrideReasonLocal.trim().length < 5) {
-      if (addToast) addToast('warn', 'Reason required', 'Urgent override needs a reason of at least 5 characters');
-      return;
-    }
     const overrideEdits = editMode ? { ...edits } : {};
     runWithBusy(
       () => approve(selectedId, {
-        urgentOverride: urgentOverrideLocal,
-        urgentOverrideReason: urgentOverrideLocal ? urgentOverrideReasonLocal.trim() : '',
         scheduledFor: null, // force immediate publish
         overrideEdits,
         publishImmediately: true,
@@ -265,6 +255,26 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
     () => withdraw(selectedId),
     { title: 'Withdrawn', body: 'Request removed from the queue' }
   );
+
+  // Save edits made AFTER approval, while the request is in
+  // awaiting_post (Laura Llopis 2026-05-14 feedback "Edit announcement
+  // on Awaiting slack post status"). Most common edit is splicing the
+  // Slack thread URL into the link field once the requester has
+  // posted on Slack but before triggering Publish on Ops Hub.
+  // Dirty-field-only PATCH keeps the audit log clean.
+  const handleSaveAwaitingEdits = () => {
+    if (Object.keys(edits).length === 0) {
+      setEditMode(false);
+      return;
+    }
+    runWithBusy(
+      () => edit(selectedId, edits),
+      { title: 'Updated', body: 'Announcement updated. Click "Publish on Ops Hub" to release.' },
+    ).then(() => {
+      setEditMode(false);
+      setEdits({});
+    });
+  };
 
   if (!user) return null;
 
@@ -335,7 +345,6 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
                 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                   <Badge status={r.status} />
-                  {r.urgentOverride && <span style={{ fontSize: 10, fontWeight: 700, color: '#b02020', textTransform: 'uppercase', letterSpacing: '.02em' }}>Urgent</span>}
                   {r.scheduledFor && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}><i className="bi-clock" style={{ marginRight: 4 }}></i>{new Date(r.scheduledFor).toLocaleString()}</span>}
                 </div>
                 <div style={{ fontWeight: 600, color: 'var(--text)', fontSize: 14, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title}</div>
@@ -356,7 +365,6 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
               <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                   <Badge status={detail.item.status} />
-                  {detail.item.urgentOverride && <span style={{ fontSize: 10, fontWeight: 700, color: '#b02020', textTransform: 'uppercase', letterSpacing: '.02em' }}>Urgent override</span>}
                   {detail.item.scheduledFor && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}><i className="bi-calendar-event" style={{ marginRight: 4 }}></i>Scheduled {formatTime(detail.item.scheduledFor)}</span>}
                   <button onClick={() => setSelectedId(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 16 }} aria-label="Close"><i className="bi-x-lg"></i></button>
                 </div>
@@ -527,22 +535,8 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
                       )}
                     </div>
 
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 6 }}>
-                      <input type="checkbox" checked={urgentOverrideLocal} onChange={e => setUrgentOverrideLocal(e.target.checked)} />
-                      Urgent — override the 2/day + 4h-gap limits
-                    </label>
-                    {urgentOverrideLocal && (
-                      <div style={{ marginBottom: 10 }}>
-                        <input
-                          type="text"
-                          value={urgentOverrideReasonLocal}
-                          onChange={e => setUrgentOverrideReasonLocal(e.target.value)}
-                          placeholder="Reason for bypassing the limits (required, ≥ 5 characters)"
-                          style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px', fontSize: 12, background: 'var(--surface)', fontFamily: 'inherit' }}
-                          maxLength={500}
-                        />
-                      </div>
-                    )}
+                    {/* Urgent override block removed 2026-05-14 along
+                        with the publishing rate limits it bypassed. */}
                     {/* Two-stage approve (2026-05-12). Primary button releases
                         the request to the requester for Slack-first posting;
                         secondary override publishes inline without Slack
@@ -595,15 +589,83 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
                     go out). */}
                 {detail.item.status === 'awaiting_post' && (detail.isRequester || isApproverUser) && (
                   <div style={{ padding: 12, background: '#f3eff8', border: '1px solid #c4b1f9', borderRadius: 10, marginBottom: 12 }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: '#6b3fa0', marginBottom: 4 }}>
-                      <i className="bi-megaphone-fill" style={{ marginRight: 6 }} />
-                      Approved — Slack post first
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4, gap: 8 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#6b3fa0' }}>
+                        <i className="bi-megaphone-fill" style={{ marginRight: 6 }} />
+                        Approved — Slack post first
+                      </div>
+                      {/* Edit affordance added 2026-05-14 (Laura Llopis):
+                          requester needs to splice in the Slack thread URL
+                          after they post on Slack but before triggering
+                          Publish on Ops Hub. Reuses the existing
+                          editMode + edits state so the per-selection
+                          reset already handles cleanup. */}
+                      <button
+                        onClick={() => { setEditMode(m => !m); if (editMode) setEdits({}); }}
+                        disabled={busy}
+                        style={{ padding: '4px 10px', fontSize: 11, background: editMode ? '#6b3fa0' : 'var(--surface)', border: '1px solid #c4b1f9', borderRadius: 'var(--radius-pill)', color: editMode ? 'white' : '#6b3fa0', cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit' }}>
+                        <i className={`bi-${editMode ? 'x-lg' : 'pencil'}`} style={{ marginRight: 4, fontSize: 10 }} />
+                        {editMode ? 'Cancel edit' : 'Edit'}
+                      </button>
                     </div>
-                    <div style={{ fontSize: 12, color: 'var(--text)', marginBottom: 10, lineHeight: 1.5 }}>
-                      {detail.isRequester
-                        ? 'Post this announcement on Slack first. When the Slack message is out, click below to release it on Ops Hub.'
-                        : 'The requester is expected to post this on Slack first, then publish here. You can publish on their behalf if they are OOO.'}
-                    </div>
+                    {!editMode ? (
+                      <div style={{ fontSize: 12, color: 'var(--text)', marginBottom: 10, lineHeight: 1.5 }}>
+                        {detail.isRequester
+                          ? 'Post this announcement on Slack first. Add the Slack thread URL via Edit if you want it on the Ops Hub message. Click below to release.'
+                          : 'The requester is expected to post this on Slack first, then publish here. You can publish on their behalf if they are OOO.'}
+                      </div>
+                    ) : (
+                      <div style={{ padding: 10, background: 'var(--surface)', border: '1px dashed #c4b1f9', borderRadius: 8, marginBottom: 10, display: 'grid', gap: 8 }}>
+                        <div>
+                          <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Slack thread URL (link)</label>
+                          <input
+                            type="text"
+                            value={edits.link ?? detail.item.link ?? ''}
+                            onChange={e => setEdit('link', e.target.value)}
+                            placeholder="https://deel.slack.com/archives/…"
+                            autoFocus
+                            style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', fontSize: 13, fontFamily: 'inherit' }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Title</label>
+                          <input
+                            type="text"
+                            value={edits.title ?? detail.item.title ?? ''}
+                            onChange={e => setEdit('title', e.target.value)}
+                            style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', fontSize: 13, fontFamily: 'inherit' }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Body</label>
+                          <textarea
+                            rows={5}
+                            value={edits.body ?? detail.item.body ?? ''}
+                            onChange={e => setEdit('body', e.target.value)}
+                            style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 6, padding: 8, fontSize: 13, fontFamily: 'inherit', resize: 'vertical' }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Image URL</label>
+                          <input
+                            type="text"
+                            value={edits.imageUrl ?? detail.item.imageUrl ?? ''}
+                            onChange={e => setEdit('imageUrl', e.target.value)}
+                            placeholder="https://…"
+                            style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', fontSize: 12, fontFamily: 'inherit' }}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                          <button
+                            disabled={busy || Object.keys(edits).length === 0}
+                            onClick={handleSaveAwaitingEdits}
+                            style={{ padding: '6px 14px', fontSize: 12, fontWeight: 600, color: 'white', background: Object.keys(edits).length === 0 ? 'var(--text-muted)' : '#6b3fa0', border: 'none', borderRadius: 'var(--radius-pill)', cursor: busy || Object.keys(edits).length === 0 ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
+                            <i className="bi-check2" style={{ marginRight: 4 }} />
+                            Save changes
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     <button disabled={busy} onClick={handlePublishAwaitingPost}
                       style={{ padding: '8px 14px', fontSize: 12, fontWeight: 600, color: 'white', background: '#6b3fa0', border: 'none', borderRadius: 'var(--radius-pill)', cursor: busy ? 'wait' : 'pointer' }}>
                       <i className="bi-send-fill" style={{ marginRight: 4 }} />
@@ -620,6 +682,14 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
                     <div key={c.id} style={{ padding: '6px 10px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, marginBottom: 6 }}>
                       <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.authorName || c.authorEmail} · {formatTime(c.createdAt)}</div>
                       <div style={{ fontSize: 13, color: 'var(--text)', whiteSpace: 'pre-wrap' }}>{c.body}</div>
+                      <CommentReactions
+                        commentType="announcement_request"
+                        commentId={c.id}
+                        reactions={c.reactions || []}
+                        currentUserEmail={user?.email}
+                        currentUserName={user?.name}
+                        compact
+                      />
                     </div>
                   ))}
                   <textarea rows={2} value={commentDraft} onChange={e => setCommentDraft(e.target.value)} placeholder="Add a comment…" style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 6, padding: 8, fontSize: 12, fontFamily: 'inherit' }} />

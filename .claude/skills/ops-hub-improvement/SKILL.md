@@ -310,6 +310,8 @@ All data hooks follow this shape — match it:
 - Auto-refresh while visible: `visibilitychange` listener
 - Stale TTL check in `refresh()`
 
+**Empty cache ≠ "fetched and empty"** — `setLoading(false)` only when items have arrived OR a real fetch confirms an empty list. A naïve `setLoading(!cache)` flips loading off when the cache happens to be `{items: []}` (stale empty from a previous failed fetch) — the user then sees the EmptyState while a slow refresh is still in flight. Use `!cache || (cache.items?.length ?? 0) === 0` to keep the skeleton up until a real response lands. See feedback fix 2026-05-13.
+
 ### 3.5 No new files unless necessary
 
 **Never create new files (especially .md) unless explicitly requested.** Edit existing files. The only exception is when the user asks for a new component/view or when a brand new hook is structurally the right answer.
@@ -542,6 +544,43 @@ The first sign of `sync templates to ... with overrides` reverting
 your fix is the signal to STOP and escalate, not to try a different
 angle.
 
+### 3.17 Lite list + lazy-detail split for media-heavy lists
+
+Any list endpoint whose rows can carry binary blobs (`screenshot` data
+URI, `attachments[]` of `{kind, dataUri, name}`, etc.) MUST project a
+lite shape on the list path and serve the full data only on detail:
+
+  • **Server list query** projects scalar columns + an
+    `attachment_count` derived expression like
+    `(CASE WHEN screenshot IS NOT NULL THEN 1 ELSE 0 END)
+     + COALESCE(jsonb_array_length(COALESCE(attachments, '[]'::jsonb)), 0)`.
+    Never `SELECT r.*` when the table has `TEXT` / `JSONB` columns
+    that can hold base64 payloads.
+  • **Detail endpoint** (`/api/v1/<feature>/<id>`) returns the full
+    row including dataUris.
+  • **Client hook** exposes `loadDetail(id)` that fetches the detail
+    and merges it into the local item by id (`setItems(prev =>
+    prev.map(i => i.id === id ? { ...i, ...detail } : i))`).
+  • **View** fires `loadDetail` on row expand. Dedupe on
+    `attachments.length >= attachmentCount` (live state, NOT a ref
+    of "ever loaded" ids — see mistake #44). An in-flight ref blocks
+    duplicate fetches while one is mid-flight; nothing else.
+  • **List-row affordance** when the row has attachments but no
+    dataUris yet: render a generic "📎 N" placeholder instead of
+    skipping the slot entirely, so users see the row carries media
+    they can click through to.
+
+Why this matters: the 2026-05-13 Feedback audit found `SELECT r.*`
+shipping every row's full `screenshot` (≤ 3 MB) + `attachments[]`
+(≤ 12 MB × 5 per row) for up to 500 rows. Worst-case response was
+>100 MB — exactly the ~1-min cold-load Mohamed reported. The lite
+shape brought first paint to <1 s. See PR #590.
+
+Cache shape mirror: the LS-side SWR cache stores the lite shape (so
+the cold-load cache stays small). Detail-fetched dataUris live in
+in-memory state only — they go away on the next poll cycle by design,
+and the lazy-fetch refires on the next expand.
+
 ---
 
 ## Phase 4 — Post-implementation audit
@@ -639,6 +678,39 @@ Answer out loud (in a comment or in the response): "For Agent / TL / Regional / 
 ### 4.6 Skip syntax check gracefully
 
 The repo doesn't have `@babel/parser` or eslint configured for node-style invocation. If you can't run a parse check, say so and rely on careful diff review. **Do not fabricate a passing lint result.**
+
+### 4.7 Hook-order pre-push sweep — MANDATORY for any file with conditional returns
+
+Before pushing a PR that adds a new `useState` / `useEffect` / `useMemo` /
+`useCallback` to an existing component, grep the file for `return null`
+or `if (...) return` early-exits and confirm every hook sits ABOVE all
+of them. React enforces a stable hook order per render; a hook placed
+below a conditional return registers on some renders and not others,
+which trips **React error #310 ("Rendered fewer hooks than expected")**
+the moment a prop change causes the conditional path to flip.
+
+Quick check:
+```bash
+awk '/return null/{rl=NR} /useState|useEffect|useMemo|useCallback/{
+  if (rl && NR > rl) print "  hook at L" NR " after early-return at L" rl
+}' <file>
+```
+
+False positives: hooks in sub-component function scopes lower in the
+file (`DescriptionField`, `AttachmentField`, etc.) each have their own
+hook list, so the linear scan flags them spuriously. Visually confirm
+that each flagged hook lives in the SAME function scope as the
+preceding `return null`.
+
+Why this matters: dev-preview verification with `401` on every API
+call tells you "compile clean = ship clean." Wrong. Hook ordering
+ONLY manifests when the component re-renders through the conditional
+path the live data actually exercises. The 2026-05-13 OOO time-off
+fix shipped with a `useState(false)` for `deleteBusy` after the
+`if (!event) return null;` guard in `DetailSlideOut.jsx`. Compile
+green, dev preview green, prod red the moment a user clicked Submit
+or Delete (both fire onClose → event=null → re-render through the
+guard). See mistake #43.
 
 ---
 
@@ -1057,6 +1129,18 @@ Compile report
 41. **Outer `Promise.all` over inner `BATCH_SIZE` fan-outs MULTIPLIES concurrent load.** `listOnboardingPeople` runs an outer `Promise.all` over 4 supplemental statuses; each one called `_scanOnboardingByStatus` which fanned out 5 concurrent country requests. Outer 4 × inner 5 = 20 concurrent admin calls — exactly what hammered Deel's rate limit on 2026-05-08 (`[pausedOnboarding] Failed for SN/ZA: Deel API 429`). When tuning a fan-out, also check what wraps it. PR #500 dropped `BATCH_SIZE` 5 → 3 in both inner fan-outs (`_scanOnboardingByStatus` and `listPausedOnboarding`) + added 100 ms inter-batch sleep — keeps peak at 4 × 3 = 12 with breathing room. Combined with #497's Retry-After-aware retry, the 429s stopped completely.
 
 42. **Direct-to-main pushes need EXPLICIT user authorisation — "go with A" / "sounds good" doesn't pass the deny rule.** The push hook denies branches that target main with: "user said 'X' but that's not specific authorization to push a hotfix branch created off main rather than dev." Either get the user to say "yes push the hotfix branch directly to main" verbatim, OR have the user push it themselves from their terminal: `cd ~/Desktop/ops-hub && git push -u nexus <branch>`. Default to user-pushes-themselves to remove ambiguity — the user gets the final click on the actual main-modifying step, which is also better risk hygiene. See §5.9.
+
+43. **Never add a `useState` / `useEffect` / `useMemo` / `useCallback` below an `if (...) return null;` guard — React error #310.** The 2026-05-13 OOO fix shipped with `const [deleteBusy, setDeleteBusy] = useState(false);` AFTER `if (!event) return null;` in `DetailSlideOut.jsx`. When the panel re-rendered with `event` toggling (Submit/Delete both fire `onClose → setSelectedEventId(null)` → next render `event=null` → re-render through the guard), the hook count changed render-to-render. React threw #310 ("Rendered fewer hooks than expected") and the error boundary appeared on every click. **Rule**: every hook in a component must sit ABOVE every conditional return. Run the §4.7 grep before push. Dev-preview 401-everywhere does NOT catch this — the conditional path the live data exercises is the only place it manifests. See PR #596.
+
+44. **"Ever-loaded" dedup refs are wrong when source-of-truth gets mutated.** The 2026-05-13 Feedback lazy-attachment fix tracked hydrated ids in `attachmentsLoadedRef` so re-expand didn't refetch. But the 30 s background poll calls `setItems(fresh-lite-list)` which WIPES the in-memory `attachments[]` on every row. The ref still said "loaded" → next expand of the same id → no refetch → "Loading attachments…" placeholder forever. **Rule**: dedup on LIVE state (`attachments.length >= attachmentCount`), not on a side-channel ref of "ever done." Keep an in-flight ref only to block duplicate calls WHILE a fetch is mid-flight; never to remember historical fetches. See PR #597.
+
+45. **`SELECT r.*` on a list endpoint with rows that carry base64 blobs is a perf disaster.** Feedback's list endpoint shipped every row's `screenshot` (TEXT up to 3 MB) + `attachments` (JSONB array, up to 12 MB × 5 per row), times 500 rows. Worst-case response >100 MB → ~1 min cold load. **Rule**: when ANY column on a table can hold a base64 dataUri / image / video, the list endpoint MUST project specific scalar columns + counts. Detail endpoint serves the heavy fields. See §3.17. Lite shape brought first paint to <1 s. Audit pattern: `grep -rn "SELECT r.\*\|SELECT \*" app/api/` for every new list route.
+
+46. **An empty cache is NOT the same as "fetched and empty."** The Feedback hook used `setLoading(!cache)` — which flipped loading off whenever the LS cache held `{items: [], ts: ...}` from a previous failed fetch. Users saw "No feedback yet" empty state while the (slow) background refresh was still in flight. **Rule**: treat both "no cache" and "cache.items.length === 0" as not-yet-loaded → keep the skeleton up until a real response confirms an empty board. `!cache || (cache.items?.length ?? 0) === 0`. See §3.4 + PR #590.
+
+47. **Visibility scope ≠ write permission scope. Build TWO helpers.** The 2026-05-13 OOO work needed broad cross-team visibility (peer TLs / peer RMs / agent's teammates can see each other's leave) AND narrow write permission (manager edits only own subtree, agent edits only self). Conflating them either leaks (queue-style tickets exposed) or blocks coordination (TL can't see peer TL's leave). **Pattern**: separate functions — `getVisibleOOOEmails(user)` for read scope, `canManageTimeOffFor(user, targetEmail)` for write. Same hierarchy data, different cohort rules. Mirror the same split on the FE when building a person-picker. See PRs #586 + #588.
+
+48. **Dev-preview verification = compile check ONLY, not E2E.** The Ops Hub dev preview runs unauthenticated; every authed API call returns 401 before reaching the handler. That means a compile-clean PR can still ship broken: hook order bugs (mistake #43), payload-shape bugs (response not what FE expects), permission bugs (server gate too narrow), can-but-shouldn't bugs (button enabled when it ought not be). **Rule for any PR that touches a stateful component OR an auth-required route**: explicitly state in the PR description what was verified vs deferred. Don't conflate "DOM renders + chunk has my symbols" with "feature works." When the user reports a runtime bug post-merge, recognise that the dev preview gave a false-green — don't argue with the bug report, look at the live failure shape. See PR #596 retro.
 
 ---
 
