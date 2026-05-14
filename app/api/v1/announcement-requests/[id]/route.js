@@ -97,6 +97,12 @@ export async function GET(req, { params }) {
 //   Requester may edit their own pending/needs_info request.
 //   Approvers may edit any request in pending/needs_info status, including
 //   changing scheduled_for and urgent_override.
+//
+// 2026-05-14 — `awaiting_post` is now editable too (Laura Llopis
+// feedback "Edit announcement on Awaiting slack post status"): the
+// requester needs to splice in the Slack thread URL after they post on
+// Slack but before triggering the Ops Hub publish. Permissions are the
+// same as the pending/needs_info case — requester or approver only.
 export async function PATCH(req, { params }) {
   try {
     const user = getAuthUser(req);
@@ -111,7 +117,7 @@ export async function PATCH(req, { params }) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
     const r = existing[0];
-    if (!['pending', 'needs_info'].includes(r.status)) {
+    if (!['pending', 'needs_info', 'awaiting_post'].includes(r.status)) {
       return NextResponse.json({ error: `Cannot edit a ${r.status} request` }, { status: 400 });
     }
     const approver = isApprover(user.email) || (await isAnnouncementsAdmin(user.email));
