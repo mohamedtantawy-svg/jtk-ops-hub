@@ -121,7 +121,7 @@ function StatusSelect({ value, onChange, disabled }) {
   );
 }
 
-export default function UrgentAssistView({ user, onCreate, managerOnCall, onChangeManagerOnCall }) {
+export default function UrgentAssistView({ user, onCreate, managerOnCall, onChangeManagerOnCall, onOpenSchedule }) {
   const perms = useContext(PermissionsContext);
   const isAdmin = isAdminRole(user) || perms?.dataScope === 'all_tasks';
   const isManager = isManagerRole(user) || perms?.dataScope === 'team_tasks' || perms?.dataScope === 'regional_tasks';
@@ -327,6 +327,25 @@ export default function UrgentAssistView({ user, onCreate, managerOnCall, onChan
               HRX urgent-assist requests from Workbench &amp; manual entries · 6h SLA from creation
             </div>
           </div>
+          {onOpenSchedule && (
+            <button
+              type="button"
+              onClick={onOpenSchedule}
+              aria-label="Open the HRX Urgent Assist MOC schedule"
+              title="Open the HRX Urgent Assist MOC schedule"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '8px 14px', borderRadius: 8,
+                background: 'var(--surface)', color: 'var(--text)',
+                fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                border: '1px solid var(--border)',
+                fontFamily: 'inherit',
+              }}
+            >
+              <i className="bi-calendar3" style={{ fontSize: 13 }} />
+              MOC Schedule
+            </button>
+          )}
           {onCreate && (
             <button
               type="button"

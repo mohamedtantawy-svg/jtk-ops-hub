@@ -1702,6 +1702,39 @@ CREATE INDEX IF NOT EXISTS idx_workspace_members_email_status
   ON workspace_members(LOWER(email), status);
 CREATE INDEX IF NOT EXISTS idx_workspace_members_workspace_status
   ON workspace_members(workspace_id, status);
+
+-- ── HRX Urgent Assist Schedule (2026-05-14) ────────────────────────────
+-- Duygu Cakalli feedback: "we don't have HRX Urgent Assist MOC Schedule
+-- on the Ops hub". Mirrors the team's Google Sheet schedule: one row per
+-- calendar date with three regions (EMEA / NAM / APAC), each region
+-- having a main MOC and a backup. Names + emails denormalised so the
+-- table renders without joining against the members roster (members
+-- come and go; the schedule preserves the historical assignment).
+-- Managers-only access enforced at the view level.
+CREATE TABLE IF NOT EXISTS urgent_assist_schedule (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  schedule_date       DATE NOT NULL UNIQUE,
+  emea_main_email     VARCHAR(255),
+  emea_main_name      VARCHAR(255),
+  emea_backup_email   VARCHAR(255),
+  emea_backup_name    VARCHAR(255),
+  nam_main_email      VARCHAR(255),
+  nam_main_name       VARCHAR(255),
+  nam_backup_email    VARCHAR(255),
+  nam_backup_name     VARCHAR(255),
+  apac_main_email     VARCHAR(255),
+  apac_main_name      VARCHAR(255),
+  apac_backup_email   VARCHAR(255),
+  apac_backup_name    VARCHAR(255),
+  notes               TEXT,
+  updated_by_email    VARCHAR(255),
+  updated_by_name     VARCHAR(255),
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- Read path: list current + upcoming dates fast.
+CREATE INDEX IF NOT EXISTS idx_urgent_assist_schedule_date
+  ON urgent_assist_schedule(schedule_date);
 `;
 
 export async function runMigrations() {
