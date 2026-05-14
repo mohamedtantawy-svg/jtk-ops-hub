@@ -133,14 +133,16 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
       return String(a.name || '').localeCompare(String(b.name || ''));
     });
   }, [liveMembers, user?.email]);
-  // Team Lead On Call candidates: team_lead access only — RMs and admins
-  // belong on the MOC rotation, the TL rotation stays the daily-triage
-  // role for HR Hub auto-routing.
+  // Team Lead On Call candidates: any manager (team_lead, regional_manager,
+  // admin) is eligible. Originally TL-only on the assumption that the
+  // rotation was the daily-triage role, but RM/admin coverage on weekends
+  // / off-hours / TL leave means the picker has to surface every manager
+  // so HR Hub auto-routing always lands on someone who can act.
   const tlocCandidates = useMemo(() => {
     const callerEmail = (user?.email || '').toLowerCase();
     const eligible = (liveMembers && liveMembers.length ? liveMembers : TEAM_MEMBERS)
       .filter(m => !m.isDeleted)
-      .filter(m => m.access === 'team_lead');
+      .filter(m => m.access === 'team_lead' || m.access === 'regional_manager' || m.access === 'admin');
     return eligible.sort((a, b) => {
       const aSelf = (a.email || '').toLowerCase() === callerEmail ? 0 : 1;
       const bSelf = (b.email || '').toLowerCase() === callerEmail ? 0 : 1;
@@ -1277,7 +1279,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                         <div style={{padding:'6px 16px 8px',fontSize:10,fontWeight:700,color:'var(--text-muted)',letterSpacing:'.04em',textTransform:'uppercase'}}>Select Team Lead On Call</div>
                         {tlocCandidates.length === 0 && (
                           <div style={{padding:'14px 16px',fontSize:12,color:'var(--text-muted)',textAlign:'center'}}>
-                            No team leads available
+                            No managers available
                           </div>
                         )}
                         {tlocCandidates.map(m=>{
@@ -1336,7 +1338,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                       <div ref={tlocPopRef} style={{position:'fixed',top:tlocPickerPos.top,left:tlocPickerPos.left,background:'var(--surface)',borderRadius:14,border:'1px solid var(--border)',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'6px 0',minWidth:300,maxHeight:360,overflowY:'auto',zIndex:1400}}>
                         <div style={{padding:'6px 16px 8px',fontSize:10,fontWeight:700,color:'var(--text-muted)',letterSpacing:'.04em',textTransform:'uppercase'}}>Select Team Lead On Call</div>
                         {tlocCandidates.length === 0 ? (
-                          <div style={{padding:'14px 16px',fontSize:12,color:'var(--text-muted)',textAlign:'center'}}>No team leads available</div>
+                          <div style={{padding:'14px 16px',fontSize:12,color:'var(--text-muted)',textAlign:'center'}}>No managers available</div>
                         ) : tlocCandidates.map(m=>(
                           <div
                             key={m.email}
