@@ -26,8 +26,14 @@ import {
   addFollower,
   writeLog,
 } from '../../../../../src/lib/hr-hub-helpers';
+import {
+  ALLOWED_TASK_SOURCES as ALLOWED_SLA_EXT_TASK_SOURCES,
+  ALLOWED_REASON_CODES as ALLOWED_SLA_EXT_REASON_CODES,
+  ALLOWED_REQUESTED_DAYS as ALLOWED_SLA_EXT_REQUESTED_DAYS,
+  findActiveExtension,
+} from '../../../../../src/lib/sla-extension-helpers';
 
-const ALLOWED_FLOWS = new Set(['hr_request', 'hr_reporting', 'escalation_zero', 'feedback', 'hide_task_request']);
+const ALLOWED_FLOWS = new Set(['hr_request', 'hr_reporting', 'escalation_zero', 'feedback', 'hide_task_request', 'sla_extension_request']);
 const ALLOWED_HIDE_REASON_CODES = new Set(['internal_deel_employee', 'test_task', 'other']);
 const ALLOWED_STATUSES = new Set(['new', 'in_progress', 'on_hold', 'resolved', 'rejected']);
 const ALLOWED_PRIORITIES = new Set(['low', 'medium', 'high', 'critical']);
@@ -317,6 +323,62 @@ export async function POST(req) {
     }
   }
 
+  // SLA-extension flow: validate the four task_* identifiers PLUS the
+  // flow-specific fields. Pre-check the active-extension table so a fresh
+  // request can't be submitted while one is already in effect — the DB
+  // partial unique index would catch a race anyway, but failing here lets
+  // the FE show a clear "extension already active until <date>" message.
+  let slaExtRequestedDays = null, slaExtReasonCode = null, slaExtAcknowledged = null;
+  if (flow === 'sla_extension_request') {
+    taskSource = clean(body.taskSource, 40);
+    taskId = clean(body.taskId, 200);
+    taskUrl = clean(body.taskUrl, 2000);
+    taskSubject = clean(body.taskSubject, 500);
+    if (!taskSource || !taskId) {
+      return NextResponse.json({ error: 'taskSource and taskId are required for sla_extension_request' }, { status: 400 });
+    }
+    if (!ALLOWED_SLA_EXT_TASK_SOURCES.has(taskSource)) {
+      return NextResponse.json({ error: `taskSource must be one of: ${[...ALLOWED_SLA_EXT_TASK_SOURCES].join(', ')}` }, { status: 400 });
+    }
+    const requested = Number.parseInt(body.requestedDays, 10);
+    if (!ALLOWED_SLA_EXT_REQUESTED_DAYS.has(requested)) {
+      return NextResponse.json({ error: `requestedDays must be one of: ${[...ALLOWED_SLA_EXT_REQUESTED_DAYS].join(', ')}` }, { status: 400 });
+    }
+    slaExtRequestedDays = requested;
+    if (!ALLOWED_SLA_EXT_REASON_CODES.has(body.reasonCode)) {
+      return NextResponse.json({ error: `reasonCode must be one of: ${[...ALLOWED_SLA_EXT_REASON_CODES].join(', ')}` }, { status: 400 });
+    }
+    slaExtReasonCode = body.reasonCode;
+    if (body.acknowledged !== true) {
+      return NextResponse.json({ error: 'acknowledged must be true — confirm the employee/client has been informed about the hold' }, { status: 400 });
+    }
+    slaExtAcknowledged = true;
+    const existing = await findActiveExtension(taskSource, taskId);
+    if (existing) {
+      return NextResponse.json(
+        { error: 'An SLA extension is already active for this task', extension: existing },
+        { status: 409 },
+      );
+    }
+    // Also block stacking pending requests for the same task — if one is
+    // already in review, the user should wait or follow up on that one.
+    const existingPending = await query(
+      `SELECT id FROM hr_hub_request
+        WHERE flow = 'sla_extension_request'
+          AND task_source = $1
+          AND task_id     = $2
+          AND status IN ('new', 'in_progress', 'on_hold')
+        LIMIT 1`,
+      [taskSource, taskId],
+    );
+    if (existingPending.rows.length > 0) {
+      return NextResponse.json(
+        { error: 'An SLA extension request is already pending for this task', existingRequestId: existingPending.rows[0].id },
+        { status: 409 },
+      );
+    }
+  }
+
   // Optional create-time assignee — used by the Queue → HR Hub escalation
   // flow which auto-routes to the requester's direct manager. We resolve
   // the display name from the roster so the FE doesn't need to ship one.
@@ -329,6 +391,18 @@ export async function POST(req) {
       assigneeName = clean(body.assigneeName, 255) || memberByEmail(lc)?.name || null;
     }
   }
+  // SLA extension auto-routes to the requester's direct manager. Falls
+  // back to the team lead if managerEmailFor returns nothing (e.g. an
+  // agent whose TL was the only entry in the chain), and ultimately
+  // leaves assignee null so HR Hub admins pick it up via the unassigned
+  // pool. The FE's optional `assigneeEmail` overrides this.
+  if (flow === 'sla_extension_request' && !assigneeEmail) {
+    const auto = managerEmailFor(callerEmail) || teamLeadEmail || null;
+    if (auto) {
+      assigneeEmail = String(auto).toLowerCase();
+      assigneeName = memberByEmail(assigneeEmail)?.name || null;
+    }
+  }
 
   const insert = await query(
     `INSERT INTO hr_hub_request
@@ -339,7 +413,8 @@ export async function POST(req) {
         created_by_email, created_by_name,
         assignee_email, assignee_name,
         team_lead_email, cc_email,
-        task_source, task_id, task_url, task_subject)
+        task_source, task_id, task_url, task_subject,
+        sla_ext_requested_days, sla_ext_reason_code, sla_ext_acknowledged)
      VALUES ($1, $2,
              $3, $4, $5,
              $6, $7, $8,
@@ -347,7 +422,8 @@ export async function POST(req) {
              $11, $12,
              $13, $14,
              $15, $16,
-             $17, $18, $19, $20)
+             $17, $18, $19, $20,
+             $21, $22, $23)
      RETURNING id, status, created_at`,
     [
       flow, priority,
@@ -358,6 +434,7 @@ export async function POST(req) {
       assigneeEmail, assigneeName,
       teamLeadEmail || null, ccEmail || null,
       taskSource, taskId, taskUrl, taskSubject,
+      slaExtRequestedDays, slaExtReasonCode, slaExtAcknowledged,
     ],
   );
 

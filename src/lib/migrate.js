@@ -1140,16 +1140,22 @@ CREATE INDEX IF NOT EXISTS idx_urgent_assist_log_request ON urgent_assist_log(re
 -- add four nullable columns that carry the queue task identity (only used
 -- when flow='hide_task_request'). Idempotent across re-runs: drop any
 -- pre-existing CHECK + add the v2 with the wider enum.
+--
+-- 2026-05-14: the same enum is extended again (v3) to include
+-- 'sla_extension_request' for the SLA Extensions feature
+-- (SLA_EXTENSIONS_PLAN.md). The v2 constraint is dropped + replaced with
+-- v3 in the same idempotent block below.
 ALTER TABLE hr_hub_request DROP CONSTRAINT IF EXISTS hr_hub_request_flow_check;
+ALTER TABLE hr_hub_request DROP CONSTRAINT IF EXISTS hr_hub_request_flow_check_v2;
 DO $$ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_constraint
      WHERE conrelid = 'hr_hub_request'::regclass
-       AND conname  = 'hr_hub_request_flow_check_v2'
+       AND conname  = 'hr_hub_request_flow_check_v3'
   ) THEN
     ALTER TABLE hr_hub_request
-      ADD CONSTRAINT hr_hub_request_flow_check_v2
-      CHECK (flow IN ('hr_request','hr_reporting','escalation_zero','feedback','hide_task_request'));
+      ADD CONSTRAINT hr_hub_request_flow_check_v3
+      CHECK (flow IN ('hr_request','hr_reporting','escalation_zero','feedback','hide_task_request','sla_extension_request'));
   END IF;
 END $$;
 
@@ -1159,6 +1165,18 @@ ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS task_url      TEXT;
 ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS task_subject  VARCHAR(500);
 CREATE INDEX IF NOT EXISTS idx_hr_hub_request_task_pair
   ON hr_hub_request(task_source, task_id) WHERE task_source IS NOT NULL;
+
+-- SLA Extension request flow (2026-05-14) — additional columns populated
+-- only when flow='sla_extension_request'. See SLA_EXTENSIONS_PLAN.md.
+--   sla_ext_requested_days — team-member pick: 3 | 5 | 7
+--   sla_ext_reason_code    — immigration | client_unresponsive | employee_unresponsive
+--   sla_ext_acknowledged   — required true at submit (the employee/client
+--                            has been informed about the hold)
+--   sla_ext_approved_days  — manager-chosen on approval (1-7); null until then
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS sla_ext_requested_days SMALLINT;
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS sla_ext_reason_code    VARCHAR(40);
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS sla_ext_acknowledged   BOOLEAN;
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS sla_ext_approved_days  SMALLINT;
 
 -- Phase 2 — the active hide list. Manager-approved entries land here and
 -- every queue's render path checks (task_source, task_id) against this
@@ -1185,6 +1203,44 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_hidden_task_active
   ON hidden_task(task_source, task_id) WHERE unhidden_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_hidden_task_request ON hidden_task(request_id);
 CREATE INDEX IF NOT EXISTS idx_hidden_task_hidden_by ON hidden_task(hidden_by_email, hidden_at DESC);
+
+-- ── SLA Extension (2026-05-14) ─────────────────────────────────────────────
+-- Active SLA-extension list. Manager-approved extensions land here and the
+-- queue routes / SLA math read them on every fetch so the row's SLA window
+-- is overridden by the extension while it's active and reverts to normal
+-- (red, breached) once `expires_at` passes. See SLA_EXTENSIONS_PLAN.md.
+--
+-- The unique partial index enforces "only one active extension per task at
+-- a time": both the not-yet-expired window AND a not-revoked row count as
+-- active. Expired rows stay in the table for audit but don't block a fresh
+-- request.
+CREATE TABLE IF NOT EXISTS sla_extension (
+  id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_source          VARCHAR(40)  NOT NULL,                  -- zendesk | jira | onboarding | offboarding | amendments | redlines | workbench | incentive_plans
+  task_id              VARCHAR(200) NOT NULL,                  -- source-side id
+  task_url             TEXT,
+  task_subject         VARCHAR(500),
+  request_id           UUID REFERENCES hr_hub_request(id) ON DELETE SET NULL,
+  reason_code          VARCHAR(40)  NOT NULL CHECK (reason_code IN ('immigration','client_unresponsive','employee_unresponsive')),
+  requested_by_email   VARCHAR(255) NOT NULL,
+  requested_by_name    VARCHAR(255),
+  approved_by_email    VARCHAR(255) NOT NULL,
+  approved_by_name     VARCHAR(255),
+  approved_days        SMALLINT     NOT NULL CHECK (approved_days BETWEEN 1 AND 7),
+  effective_from       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  expires_at           TIMESTAMPTZ  NOT NULL,
+  revoked_at           TIMESTAMPTZ
+);
+-- Active extensions are unique per task. The predicate is purely
+-- `revoked_at IS NULL` because Postgres rejects non-IMMUTABLE functions
+-- (NOW()) in partial index predicates; the natural-expiry case is
+-- handled at write time by the Phase 2 approve handler, which marks any
+-- expired-but-unrevoked row as revoked just-in-time before inserting a
+-- fresh row. See SLA_EXTENSIONS_PLAN.md "State machine" section.
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_sla_extension_unrevoked
+  ON sla_extension(task_source, task_id)
+  WHERE revoked_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_sla_extension_request ON sla_extension(request_id);
 
 -- Source-row reassignments. The Onboarding / Amendments / Redlines /
 -- Incentive Plans queues come from the Deel admin API and we cannot push an

@@ -41,6 +41,7 @@ import {
 } from '../../utils/normalizeSourceRows';
 import { isUrgentAssistTaskType } from '../../lib/urgent-assist-task-types';
 import CreateHideTaskRequestModal from '../modals/CreateHideTaskRequestModal';
+import CreateSlaExtensionModal from '../modals/CreateSlaExtensionModal';
 import ReassignTaskModal from '../modals/ReassignTaskModal';
 import CreateHrHubRequestModal from '../modals/CreateHrHubRequestModal';
 import HiddenTasksPanel from './HiddenTasksPanel';
@@ -207,6 +208,11 @@ const Queue = ({ user, tasks, subFilter }) => {
   // the modal needs (subject + source + id + url) so the modal stays
   // shape-agnostic across the seven row types.
   const [hideModalTask, setHideModalTask] = useState(null);
+  // SLA Extension modal state — opens from the row's "SLA Extension"
+  // action in any of the 8 sources (tickets + 6 Deel sources). The modal
+  // collects duration, reason, ack, then POSTs to /hr-hub/requests with
+  // flow='sla_extension_request'. See SLA_EXTENSIONS_PLAN.md.
+  const [slaExtensionModalTask, setSlaExtensionModalTask] = useState(null);
   // Reassign modal state — only opens for source rows whose upstream
   // doesn't support reassignment (onboarding / amendments / redlines /
   // incentive plans). Same descriptor shape as hide + the row's current
@@ -976,6 +982,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             hideStatusPills
             showClient
             onHide={(row) => setHideModalTask({ source: 'onboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onSlaExtension={(row) => setSlaExtensionModalTask({ source: 'onboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'onboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onReassign={canReassign ? (row) => setReassignModalTask({ source: 'onboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country, assigneeEmail: row.assigneeEmail || null, assigneeName: row.assignee || null, hasOverride: !!row.reassignedFromEmail }) : null}
             onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'onboarding')))}
@@ -1001,6 +1008,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             showClient
             showType
             onHide={(row) => setHideModalTask({ source: 'offboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onSlaExtension={(row) => setSlaExtensionModalTask({ source: 'offboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'offboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'offboarding')))}
             hideFilterBar
@@ -1027,6 +1035,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             dateField="createdAt"
             dateLabel="Requested Date"
             onHide={(row) => setHideModalTask({ source: 'amendments', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onSlaExtension={(row) => setSlaExtensionModalTask({ source: 'amendments', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'amendments', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onReassign={canReassign ? (row) => setReassignModalTask({ source: 'amendments', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country, assigneeEmail: row.assigneeEmail || null, assigneeName: row.assignee || null, hasOverride: !!row.reassignedFromEmail }) : null}
             onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'amendments')))}
@@ -1054,6 +1063,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             dateField="createdAt"
             dateLabel="Requested Date"
             onHide={(row) => setHideModalTask({ source: 'redlines', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onSlaExtension={(row) => setSlaExtensionModalTask({ source: 'redlines', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'redlines', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onReassign={canReassign ? (row) => setReassignModalTask({ source: 'redlines', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country, assigneeEmail: row.assigneeEmail || null, assigneeName: row.assignee || null, hasOverride: !!row.reassignedFromEmail }) : null}
             onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'redlines')))}
@@ -1081,6 +1091,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             dateField="createdAt"
             dateLabel="Created"
             onHide={(row) => setHideModalTask({ source: 'workbench', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onSlaExtension={(row) => setSlaExtensionModalTask({ source: 'workbench', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'workbench', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'workbench')))}
           />
@@ -1105,6 +1116,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             dateField="createdAt"
             dateLabel="Requested Date"
             onHide={(row) => setHideModalTask({ source: 'incentive_plans', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onSlaExtension={(row) => setSlaExtensionModalTask({ source: 'incentive_plans', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'incentive_plans', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onReassign={canReassign ? (row) => setReassignModalTask({ source: 'incentive_plans', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country, assigneeEmail: row.assigneeEmail || null, assigneeName: row.assignee || null, hasOverride: !!row.reassignedFromEmail }) : null}
             onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'incentive_plans')))}
@@ -1354,6 +1366,7 @@ const Queue = ({ user, tasks, subFilter }) => {
                     slaAgeClass={slaAgeClass}
                     settings={settings}
                     onHide={() => setHideModalTask(taskDescriptor)}
+                    onSlaExtension={() => setSlaExtensionModalTask(taskDescriptor)}
                     onEscalate={() => setEscalateModalTask(taskDescriptor)}
                     hasNote={taskNotes.hasNote(task.source, task.id)}
                     onOpenNote={() => setNoteModalTask(task)}
@@ -1379,6 +1392,18 @@ const Queue = ({ user, tasks, subFilter }) => {
           task={hideModalTask}
           onClose={() => setHideModalTask(null)}
           onSubmitted={() => { try { hiddenTasks?.refresh?.(); } catch {} }}
+        />
+      )}
+
+      {/* SLA Extension request modal — opens from any row's "SLA Extension"
+          action across all 8 sources (tickets + 6 Deel sources). Phase 1
+          ships the request; Phase 2 wires the manager review in HR Hub;
+          Phase 3 propagates the override into SLA math. See
+          SLA_EXTENSIONS_PLAN.md. */}
+      {slaExtensionModalTask && (
+        <CreateSlaExtensionModal
+          task={slaExtensionModalTask}
+          onClose={() => setSlaExtensionModalTask(null)}
         />
       )}
 
@@ -1457,7 +1482,7 @@ const Queue = ({ user, tasks, subFilter }) => {
 };
 
 // ── Table row component ──
-const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onEscalate, hasNote = false, onOpenNote = null }) => {
+const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onSlaExtension, onEscalate, hasNote = false, onOpenNote = null }) => {
   const [hov, setHov] = useState(false);
   const assignee = resolveAssignee(task);
   const sla = slaInfo(task);
@@ -1575,6 +1600,26 @@ const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onEscalate, hasNot
             <i className="bi-arrow-up-right-circle" style={{ fontSize: 9 }} />
             Escalate
           </button>
+          {onSlaExtension && (
+            <button
+              type="button"
+              onClick={() => onSlaExtension?.()}
+              aria-label={`Request SLA extension for "${task.subject || task.id}"`}
+              title="Request to extend the SLA on this task"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '3px 8px', borderRadius: 6,
+                background: hov ? '#fff7ed' : '#f5f4f2',
+                color: hov ? '#d97706' : '#9e9e9e',
+                border: hov ? '1px solid #fed7aa' : '1px solid transparent',
+                fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}
+            >
+              <i className="bi-clock-history" style={{ fontSize: 9 }} />
+              SLA Extension
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onHide?.()}
