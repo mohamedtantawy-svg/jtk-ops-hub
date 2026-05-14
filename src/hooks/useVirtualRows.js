@@ -49,9 +49,32 @@ export function useVirtualRows({ rowCount, rowHeight = 44, overscan = 8, scrolle
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // When the underlying list shrinks (filter toggled, background polling
+  // refresh returning fewer rows, etc.) the browser clamps `el.scrollTop`
+  // to the new max but does NOT always fire a scroll event for the clamp.
+  // Our React `scrollTop` state then stays stale, the virtualizer computes
+  // a startIdx past the new `total`, slice(startIdx, endIdx) returns
+  // nothing, and the user sees only the topPad spacer — i.e. an empty
+  // page where rows should be ("Zendesk Q doesn't show the full list",
+  // reported 2026-05-15). Re-read scrollTop whenever rowCount changes so
+  // the React state matches what the browser actually shows.
+  useEffect(() => {
+    const el = scrollerRef?.current;
+    if (!el) return;
+    setScrollTop(el.scrollTop);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rowCount]);
+
   const total = Math.max(0, rowCount);
-  const startIdx = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
-  const endIdx = Math.min(total, Math.ceil((scrollTop + viewportHeight) / rowHeight) + overscan);
+  // Belt-and-suspenders clamp: even before the rowCount effect re-syncs
+  // scrollTop on the next tick, render against an effective scrollTop that
+  // never exceeds the actual content's max. Without this the very first
+  // render after a shrink slices an empty window and the user briefly sees
+  // a blank table — the recovery shouldn't depend on a follow-up re-render.
+  const maxScrollTop = Math.max(0, total * rowHeight - viewportHeight);
+  const effectiveScrollTop = Math.min(scrollTop, maxScrollTop);
+  const startIdx = Math.max(0, Math.floor(effectiveScrollTop / rowHeight) - overscan);
+  const endIdx = Math.min(total, Math.ceil((effectiveScrollTop + viewportHeight) / rowHeight) + overscan);
   const topPad = Math.max(0, startIdx * rowHeight);
   const bottomPad = Math.max(0, (total - endIdx) * rowHeight);
 
