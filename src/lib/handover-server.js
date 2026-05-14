@@ -359,9 +359,30 @@ export async function recomputeAfterCovererChange(client, handover, actor) {
 
 // ── Helpers shared with handlers ───────────────────────────────────────
 
-function formatRange(startIso, endIso) {
-  if (!startIso || !endIso) return '';
-  return startIso === endIso ? String(startIso) : `${startIso} → ${endIso}`;
+// Format a handover date range for notification bodies. Accepts ISO
+// strings ('2026-05-14') or Date objects (which `String()` would turn
+// into "Thu May 14 2026 00:00:00 GMT+0000 (Coordinated Universal Time)" —
+// the surprise Bea caught 2026-05-14 when handover approval notifs were
+// unreadable). Renders as "May 14" / "May 14 → May 21".
+function formatRange(start, end) {
+  if (!start || !end) return '';
+  const fmt = (v) => {
+    if (v instanceof Date) {
+      if (Number.isNaN(v.getTime())) return '';
+      return v.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    }
+    // ISO date string ('2026-05-14') or datetime ('2026-05-14T00:00:00Z')
+    const s = String(v);
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+    if (!m) return s;
+    const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  };
+  const a = fmt(start);
+  const b = fmt(end);
+  if (!a) return b || '';
+  if (!b) return a;
+  return a === b ? a : `${a} → ${b}`;
 }
 
 export { formatRange };

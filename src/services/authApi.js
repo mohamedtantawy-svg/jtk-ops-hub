@@ -18,5 +18,10 @@ export async function login(email) {
  * the actor's own scope (Kristina's 2026-05-12 bug report).
  */
 export async function fetchMe() {
-  return apiFetch('/me', { skipImpersonation: true });
+  // `/me` blocks user-keyed LS reads on first paint; if the upstream is
+  // slow we don't want to wait the full 90s default — the rest of the
+  // app stays in a half-rendered state while it hangs. 10s is plenty
+  // for one DB read; if it times out, the caller surfaces a session
+  // error and the user can refresh.
+  return apiFetch('/me', { skipImpersonation: true, timeoutMs: 10_000 });
 }

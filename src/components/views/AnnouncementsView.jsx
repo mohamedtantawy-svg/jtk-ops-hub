@@ -118,6 +118,19 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
   // sent count rather than as a sibling tab so users see saved items in
   // the same surface they were saved from.
   const [showSavedOnly,setShowSavedOnly]=useState(false);
+  // On first paint `comms` is an empty array (App.jsx seeds it pre-fetch),
+  // which the empty-state guard treats as "no announcements" and renders
+  // "All clear!" before the GET /announcements call resolves — looks like
+  // the page loaded with zero data when it's actually still loading.
+  // Show a brief loading message until either the first row arrives or
+  // ~1.5s passes, whichever comes first.
+  const [initialLoadDone,setInitialLoadDone]=useState(false);
+  useEffect(()=>{
+    if(initialLoadDone)return;
+    if((comms||[]).length>0){setInitialLoadDone(true);return;}
+    const t=setTimeout(()=>setInitialLoadDone(true),1500);
+    return ()=>clearTimeout(t);
+  },[comms,initialLoadDone]);
   const [showCompose,setShowCompose]=useState(false);
   const [editDraft,setEditDraft]=useState(null);
 
@@ -627,9 +640,11 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
         {filter === 'pending-approval' ? (
           <ApprovalQueueView user={user} addToast={addToast} embedded />
         ) : visible.length === 0 ? (
-          showSavedOnly
-            ? <EmptyState icon="bi-bookmark" title="No saved announcements" subtitle="Tap the bookmark icon on any announcement to save it for later." />
-            : <EmptyState icon="bi-inbox" title="No announcements" subtitle="All clear!" />
+          !initialLoadDone
+            ? <EmptyState icon="bi-arrow-clockwise" title="Loading announcements…" subtitle="One moment while we fetch the latest." />
+            : showSavedOnly
+              ? <EmptyState icon="bi-bookmark" title="No saved announcements" subtitle="Tap the bookmark icon on any announcement to save it for later." />
+              : <EmptyState icon="bi-inbox" title="No announcements" subtitle="All clear!" />
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
@@ -1374,14 +1389,17 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
     });
   };
 
-  const CommentItem = ({ cmt, depth = 0 }) => {
+  // Render helper (NOT a component) — defining this as a component inside
+  // the parent breaks React identity on every parent re-render, which
+  // unmounts CommentReactions and wipes its `pickerOpen` state. Calling it
+  // as a function keeps the JSX in the parent's fiber tree so the leaf
+  // CommentReactions instances stay mounted across polls.
+  const renderCommentItem = (cmt, depth = 0) => {
     const replies = getReplies(cmt.id);
     const isOwn = cmt.authorId === user.id;
-    // Highlight the row a notification deep-linked to so the user lands on
-    // the exact comment that mentioned them.
     const isHighlighted = highlightCommentId && String(cmt.id) === String(highlightCommentId);
     return (
-      <div style={{ marginLeft: depth > 0 ? 20 : 0 }}>
+      <div key={cmt.id} style={{ marginLeft: depth > 0 ? 20 : 0 }}>
         <div
           data-comment-id={String(cmt.id)}
           style={{
@@ -1440,7 +1458,7 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
             )}
           </div>
         </div>
-        {replies.map(r => <CommentItem key={r.id} cmt={r} depth={depth + 1} />)}
+        {replies.map(r => renderCommentItem(r, depth + 1))}
       </div>
     );
   };
@@ -1584,7 +1602,7 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
               <div style={{ fontSize: 11, color: '#b5b5b5', padding: '2px 0 6px' }}>No comments yet. Be the first to comment.</div>
             )}
             <div style={{ maxHeight: 220, overflowY: 'auto' }}>
-              {topLevelComments.map(cmt => <CommentItem key={cmt.id} cmt={cmt} />)}
+              {topLevelComments.map(cmt => renderCommentItem(cmt))}
             </div>
             {/* Add new comment — supports @-mentions; tagged users get a notification.
                 The textarea defaults to ~3 lines and is vertically resizable

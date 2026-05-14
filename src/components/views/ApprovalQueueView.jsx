@@ -147,7 +147,6 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
   useEffect(() => {
     setEditMode(false);
     setEdits({});
-    setUrgentOverrideLocal(false);
     setScheduledForLocal('');
     seedRef.current = selectedId;
   }, [selectedId]);

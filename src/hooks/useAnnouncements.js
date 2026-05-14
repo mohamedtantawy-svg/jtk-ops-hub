@@ -476,19 +476,27 @@ export function useAnnouncements({ toastRef } = {}) {
   // ── Comments ──────────────────────────────────────────────────────────
   const [comments, setComments] = useState({}); // map: announcementId -> comment[]
 
+  // Read `comms` + `isOnline` via refs so loadComments has a stable identity.
+  // Otherwise every poll cycle changed `comms`, gave loadComments a new
+  // function identity, and re-fired the DetailOverlay useEffect on every
+  // render — which hammered /api/v1/announcements/<id>/comments 7+ times
+  // after a single modal open (caught in QA on 2026-05-14).
+  const commsRef = useRef(comms);
+  useEffect(() => { commsRef.current = comms; }, [comms]);
+  const isOnlineRef = useRef(isOnline);
+  useEffect(() => { isOnlineRef.current = isOnline; }, [isOnline]);
   const loadComments = useCallback(async (id) => {
-    // First load from local comms data
-    const comm = comms.find(c => c.id === id);
+    const comm = commsRef.current.find(c => c.id === id);
     if (comm?.comments?.length) {
       setComments(prev => ({ ...prev, [id]: comm.comments }));
     }
-    if (isOnline) {
+    if (isOnlineRef.current) {
       try {
         const data = await apiFetchComments(id);
         if (data?.items) setComments(prev => ({ ...prev, [id]: data.items }));
       } catch (e) { console.warn('[announcements] fetch error:', e.message); }
     }
-  }, [isOnline, comms]);
+  }, []);
 
   const addCommentFn = useCallback(async (id, body, parentId, mentionEmails) => {
     const safeMentions = Array.isArray(mentionEmails) ? mentionEmails : [];
@@ -533,17 +541,18 @@ export function useAnnouncements({ toastRef } = {}) {
   const [links, setLinks] = useState({}); // map: announcementId -> linkedId[]
 
   const loadLinks = useCallback(async (id) => {
-    const comm = comms.find(c => c.id === id);
+    // Same identity-stability fix as loadComments — see commsRef block above.
+    const comm = commsRef.current.find(c => c.id === id);
     if (comm?.linkedIds) {
       setLinks(prev => ({ ...prev, [id]: comm.linkedIds }));
     }
-    if (isOnline) {
+    if (isOnlineRef.current) {
       try {
         const data = await apiFetchLinks(id);
         if (data?.items) setLinks(prev => ({ ...prev, [id]: data.items }));
       } catch (e) { console.warn('[announcements] fetch error:', e.message); }
     }
-  }, [isOnline, comms]);
+  }, []);
 
   const linkAnnouncementFn = useCallback(async (id, targetId) => {
     if (isOnline) {
