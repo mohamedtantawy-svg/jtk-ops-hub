@@ -1703,6 +1703,31 @@ CREATE INDEX IF NOT EXISTS idx_workspace_members_email_status
 CREATE INDEX IF NOT EXISTS idx_workspace_members_workspace_status
   ON workspace_members(workspace_id, status);
 
+-- ── Comment Reactions (2026-05-14) ───────────────────────────────────
+-- Polymorphic emoji-reaction table used by every comment surface that
+-- isn't leader_alert (leader_alert keeps its own bespoke table — it
+-- shipped earlier with the same shape; not migrated to avoid churn).
+-- Sarah Suge feedback: "Add the ability to react to messages with
+-- emojis" applied to "all places where we have comments and replies"
+-- (Mohamed). Each row is one user reacting with one emoji on one
+-- comment. Unique on (type, id, email, emoji) so the same user can't
+-- double-react with the same emoji. The PK on email is lowercased via
+-- the index instead of by storage so we keep the original casing for
+-- audit while still matching deterministically.
+CREATE TABLE IF NOT EXISTS comment_reactions (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  comment_type  VARCHAR(40) NOT NULL,        -- hr_hub | feedback | announcement | announcement_request
+  comment_id    VARCHAR(200) NOT NULL,       -- comment's own id (UUID or numeric, stringified)
+  emoji         VARCHAR(64) NOT NULL,
+  user_email    VARCHAR(255) NOT NULL,
+  user_name     VARCHAR(255),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_comment_reaction
+  ON comment_reactions(comment_type, comment_id, LOWER(user_email), emoji);
+CREATE INDEX IF NOT EXISTS idx_comment_reactions_lookup
+  ON comment_reactions(comment_type, comment_id);
+
 -- ── HRX Urgent Assist Schedule (2026-05-14) ────────────────────────────
 -- Duygu Cakalli feedback: "we don't have HRX Urgent Assist MOC Schedule
 -- on the Ops hub". Mirrors the team's Google Sheet schedule: one row per

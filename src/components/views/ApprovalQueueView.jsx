@@ -4,6 +4,7 @@ import { isApprover } from '../../data/approvers';
 import { AUDIENCE_LABELS, AUDIENCES, SOUND_PRESETS, COMMS_TYPES } from '../../data/comms';
 import { renderRichText } from '../../utils/renderRichText';
 import EmptyState from '../ui/EmptyState';
+import CommentReactions from '../ui/CommentReactions';
 
 // Convert an ISO timestamp to the local-time value expected by <input type="datetime-local">.
 // The input element wants "YYYY-MM-DDTHH:MM" with no timezone suffix.
@@ -681,6 +682,14 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
                     <div key={c.id} style={{ padding: '6px 10px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, marginBottom: 6 }}>
                       <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.authorName || c.authorEmail} · {formatTime(c.createdAt)}</div>
                       <div style={{ fontSize: 13, color: 'var(--text)', whiteSpace: 'pre-wrap' }}>{c.body}</div>
+                      <CommentReactions
+                        commentType="announcement_request"
+                        commentId={c.id}
+                        reactions={c.reactions || []}
+                        currentUserEmail={user?.email}
+                        currentUserName={user?.name}
+                        compact
+                      />
                     </div>
                   ))}
                   <textarea rows={2} value={commentDraft} onChange={e => setCommentDraft(e.target.value)} placeholder="Add a comment…" style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 6, padding: 8, fontSize: 12, fontFamily: 'inherit' }} />

@@ -20,6 +20,7 @@ import EmptyState from '../ui/EmptyState';
 import ImageLightbox from '../ui/ImageLightbox';
 import MentionTextarea from '../ui/MentionTextarea';
 import CreateFeedbackModal from '../modals/CreateFeedbackModal';
+import CommentReactions from '../ui/CommentReactions';
 
 // ── Visual config ──────────────────────────────────────────────────────
 // Status labels were renamed 2026-05-11 to match the team's actual lifecycle:
@@ -1037,6 +1038,15 @@ function CommentsSection({ item, fetchComments, submitComment, user, addToast })
                       <div key={i}>{line.trim() === '' ? <>&nbsp;</> : renderCommentLine(line, mentionByPrefix)}</div>
                     ))}
                   </div>
+                  <CommentReactions
+                    commentType="feedback"
+                    commentId={c.id}
+                    reactions={c.reactions || []}
+                    currentUserEmail={user?.email}
+                    currentUserName={user?.name}
+                    onChange={(next) => setComments(prev => prev.map(x => x.id === c.id ? { ...x, reactions: next } : x))}
+                    compact
+                  />
                 </div>
               </li>
             );

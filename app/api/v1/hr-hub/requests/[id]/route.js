@@ -86,6 +86,17 @@ export async function GET(req, { params }) {
     return NextResponse.json({ error: 'Not found' }, { status: 404 });
   }
   const r = reqRes.rows[0];
+
+  // Splice emoji reactions onto each comment (Sarah Suge 2026-05-14
+  // feedback "Emoji Reactions to Messages"). Single bulk query keyed on
+  // the polymorphic (comment_type, comment_id) pair.
+  const commentIds = commentsRes.rows.map(c => c.id);
+  let reactionMap = new Map();
+  if (commentIds.length > 0) {
+    const { fetchReactionsForComments } = await import('../../../../../src/lib/comment-reactions-helpers');
+    reactionMap = await fetchReactionsForComments('hr_hub', commentIds);
+  }
+
   return NextResponse.json({
     request: {
       id: r.id,
@@ -130,6 +141,7 @@ export async function GET(req, { params }) {
       attachments: c.attachments || [],
       createdAt: c.created_at,
       editedAt: c.edited_at,
+      reactions: reactionMap.get(String(c.id)) || [],
     })),
     followers: followersRes.rows,
     log: logRes.rows.map(l => ({
