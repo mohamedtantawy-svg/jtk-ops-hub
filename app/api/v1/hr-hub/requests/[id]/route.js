@@ -53,7 +53,9 @@ export async function GET(req, { params }) {
               links, attachments,
               created_by_email, created_by_name, assignee_email, assignee_name,
               team_lead_email, cc_email, created_at, updated_at, resolved_at,
-              task_source, task_id, task_url, task_subject
+              task_source, task_id, task_url, task_subject,
+              sla_ext_requested_days, sla_ext_reason_code, sla_ext_acknowledged,
+              sla_ext_approved_days
          FROM hr_hub_request WHERE id = $1`,
       [id],
     ),
@@ -112,6 +114,10 @@ export async function GET(req, { params }) {
       taskId: r.task_id,
       taskUrl: r.task_url,
       taskSubject: r.task_subject,
+      slaExtRequestedDays: r.sla_ext_requested_days,
+      slaExtReasonCode: r.sla_ext_reason_code,
+      slaExtAcknowledged: r.sla_ext_acknowledged,
+      slaExtApprovedDays: r.sla_ext_approved_days,
     },
     comments: commentsRes.rows.map(c => ({
       id: c.id,

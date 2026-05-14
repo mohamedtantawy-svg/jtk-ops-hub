@@ -214,7 +214,9 @@ export async function GET(req) {
            title, summary, ideal_solution, resolution_note, links, attachments,
            created_by_email, created_by_name, assignee_email, assignee_name,
            team_lead_email, cc_email, created_at, updated_at, resolved_at,
-           task_source, task_id, task_url, task_subject
+           task_source, task_id, task_url, task_subject,
+           sla_ext_requested_days, sla_ext_reason_code, sla_ext_acknowledged,
+           sla_ext_approved_days
       FROM hr_hub_request
       ${whereSql}
      ORDER BY created_at DESC, id DESC
@@ -248,11 +250,16 @@ export async function GET(req) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     resolvedAt: row.resolved_at,
-    // Hide-task flow only — null on every other flow.
+    // Hide-task and SLA-extension flows — null on every other flow.
     taskSource: row.task_source,
     taskId: row.task_id,
     taskUrl: row.task_url,
     taskSubject: row.task_subject,
+    // SLA-extension flow only — null on every other flow.
+    slaExtRequestedDays: row.sla_ext_requested_days,
+    slaExtReasonCode: row.sla_ext_reason_code,
+    slaExtAcknowledged: row.sla_ext_acknowledged,
+    slaExtApprovedDays: row.sla_ext_approved_days,
   }));
   const nextCursor = hasMore
     ? `${new Date(rows[limit - 1].created_at).toISOString()}|${rows[limit - 1].id}`

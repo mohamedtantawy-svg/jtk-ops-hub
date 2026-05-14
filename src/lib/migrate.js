@@ -1208,7 +1208,7 @@ CREATE INDEX IF NOT EXISTS idx_hidden_task_hidden_by ON hidden_task(hidden_by_em
 -- Active SLA-extension list. Manager-approved extensions land here and the
 -- queue routes / SLA math read them on every fetch so the row's SLA window
 -- is overridden by the extension while it's active and reverts to normal
--- (red, breached) once `expires_at` passes. See SLA_EXTENSIONS_PLAN.md.
+-- (red, breached) once expires_at passes. See SLA_EXTENSIONS_PLAN.md.
 --
 -- The unique partial index enforces "only one active extension per task at
 -- a time": both the not-yet-expired window AND a not-revoked row count as
@@ -1232,7 +1232,7 @@ CREATE TABLE IF NOT EXISTS sla_extension (
   revoked_at           TIMESTAMPTZ
 );
 -- Active extensions are unique per task. The predicate is purely
--- `revoked_at IS NULL` because Postgres rejects non-IMMUTABLE functions
+-- revoked_at IS NULL only, because Postgres rejects non-IMMUTABLE functions
 -- (NOW()) in partial index predicates; the natural-expiry case is
 -- handled at write time by the Phase 2 approve handler, which marks any
 -- expired-but-unrevoked row as revoked just-in-time before inserting a

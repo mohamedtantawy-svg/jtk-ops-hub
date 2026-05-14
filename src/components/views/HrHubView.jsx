@@ -25,6 +25,8 @@ import { approveHideTask } from '../../services/hideTaskApi';
 import HrHubDetailPanel from '../hr-hub/HrHubDetailPanel';
 import HrHubSettingsPanel from '../hr-hub/HrHubSettingsPanel';
 import DenyHideTaskModal from '../modals/DenyHideTaskModal';
+import ApproveSlaExtensionModal from '../modals/ApproveSlaExtensionModal';
+import DenySlaExtensionModal from '../modals/DenySlaExtensionModal';
 import { PermissionsContext, IntegrationsContext } from '../../App';
 
 // Single source of truth for status visuals — same shape as Feedback's
@@ -50,14 +52,16 @@ const FLOW_VISUALS = {
   escalation_zero:   { label: 'Escalation Zero',  short: 'Escalation',  icon: 'bi-stars',             color: '#7c3aed', bg: '#f3eff8' },
   feedback:          { label: 'Ops Hub Feedback', short: 'Feedback',    icon: 'bi-lightbulb-fill',    color: '#d97706', bg: '#fff8e6' },
   hide_task_request: { label: 'Hide Task',        short: 'Hide Task',   icon: 'bi-eye-slash-fill',    color: '#d42d35', bg: '#fef2f2' },
+  sla_extension_request: { label: 'SLA Extension', short: 'SLA Ext',     icon: 'bi-clock-history',     color: '#d97706', bg: '#fff7ed' },
 };
 const FLOW_FILTERS = [
-  { value: 'all',                label: 'All flows',  icon: 'bi-grid-fill',         color: 'var(--text)' },
-  { value: 'hr_request',         label: 'Requests',   icon: 'bi-send-fill',          color: '#1f74b3' },
-  { value: 'hr_reporting',       label: 'Reporting',  icon: 'bi-megaphone-fill',     color: '#dc2626' },
-  { value: 'escalation_zero',    label: 'Escalations', icon: 'bi-stars',             color: '#7c3aed' },
-  { value: 'feedback',           label: 'Feedback',   icon: 'bi-lightbulb-fill',     color: '#d97706' },
-  { value: 'hide_task_request',  label: 'Hide Task',  icon: 'bi-eye-slash-fill',     color: '#d42d35' },
+  { value: 'all',                    label: 'All flows',   icon: 'bi-grid-fill',         color: 'var(--text)' },
+  { value: 'hr_request',             label: 'Requests',    icon: 'bi-send-fill',          color: '#1f74b3' },
+  { value: 'hr_reporting',           label: 'Reporting',   icon: 'bi-megaphone-fill',     color: '#dc2626' },
+  { value: 'escalation_zero',        label: 'Escalations', icon: 'bi-stars',             color: '#7c3aed' },
+  { value: 'feedback',               label: 'Feedback',    icon: 'bi-lightbulb-fill',     color: '#d97706' },
+  { value: 'hide_task_request',      label: 'Hide Task',   icon: 'bi-eye-slash-fill',     color: '#d42d35' },
+  { value: 'sla_extension_request',  label: 'SLA Extension', icon: 'bi-clock-history',   color: '#d97706' },
 ];
 
 const PRIORITY_DOT = {
@@ -112,6 +116,12 @@ export default function HrHubView({ user, onCreateHrHub }) {
   const integrations = useContext(IntegrationsContext);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [denyModalReq, setDenyModalReq] = useState(null);
+  // SLA Extension review modals — separate state so the approve flow can
+  // carry the manager-chosen day count and the deny flow can carry a
+  // reason. Both reset on close + reload the list so the row flips to
+  // resolved.
+  const [slaApproveModalReq, setSlaApproveModalReq] = useState(null);
+  const [slaDenyModalReq, setSlaDenyModalReq] = useState(null);
   const [decisionError, setDecisionError] = useState(null);
   const initialReqId = (() => {
     try {
@@ -525,6 +535,13 @@ export default function HrHubView({ user, onCreateHrHub }) {
                 isAdmin={isManager && (user?.role === 'admin' || (user?.access || '').toLowerCase().includes('admin'))}
                 onApprove={async (it) => {
                   setDecisionError(null);
+                  // SLA Extension goes through its own approve modal so
+                  // the manager can pick 1-7 days. Hide Task is a
+                  // single-click approve (no extra fields).
+                  if (it.flow === 'sla_extension_request') {
+                    setSlaApproveModalReq(it);
+                    return;
+                  }
                   try {
                     await approveHideTask(it.id);
                     // Refresh the global hide list so the queue render path
@@ -536,7 +553,10 @@ export default function HrHubView({ user, onCreateHrHub }) {
                     setDecisionError(err?.message || 'Approval failed');
                   }
                 }}
-                onDeny={(it) => setDenyModalReq(it)}
+                onDeny={(it) => {
+                  if (it.flow === 'sla_extension_request') setSlaDenyModalReq(it);
+                  else setDenyModalReq(it);
+                }}
               />
             ))}
             {cursor && (
@@ -579,6 +599,26 @@ export default function HrHubView({ user, onCreateHrHub }) {
           }}
         />
       )}
+      {slaApproveModalReq && (
+        <ApproveSlaExtensionModal
+          request={slaApproveModalReq}
+          onClose={() => setSlaApproveModalReq(null)}
+          onApproved={() => {
+            setSlaApproveModalReq(null);
+            loadFirstPage();
+          }}
+        />
+      )}
+      {slaDenyModalReq && (
+        <DenySlaExtensionModal
+          request={slaDenyModalReq}
+          onClose={() => setSlaDenyModalReq(null)}
+          onDenied={() => {
+            setSlaDenyModalReq(null);
+            loadFirstPage();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -604,12 +644,31 @@ function RequestRow({ item, active, onClick, viewerEmail, isManager, isAdmin, on
   const status = STATUS_BY_VALUE[item.status] || STATUS_BY_VALUE.new;
   const priColor = PRIORITY_DOT[item.priority] || PRIORITY_DOT.medium;
   const isHide = item.flow === 'hide_task_request';
+  const isSlaExt = item.flow === 'sla_extension_request';
+  const isDecidable = isHide || isSlaExt;
   const hideMeta = isHide
     ? [HIDE_REASON_LABELS[item.requestType] || item.requestType, item.taskSubject].filter(Boolean).join(' · ')
     : '';
+  // SLA extension meta: reason label + days requested + task subject.
+  const slaExtReasonLabel = isSlaExt
+    ? ({
+        immigration: 'Immigration',
+        client_unresponsive: 'Client unresponsive',
+        employee_unresponsive: 'Employee unresponsive',
+      }[item.slaExtReasonCode] || item.slaExtReasonCode)
+    : null;
+  const slaExtMeta = isSlaExt
+    ? [
+        slaExtReasonLabel,
+        item.slaExtRequestedDays ? `${item.slaExtRequestedDays}d requested` : null,
+        item.taskSubject,
+      ].filter(Boolean).join(' · ')
+    : '';
   const meta = isHide
     ? hideMeta
-    : [item.functionArea, item.requestType || item.reportType].filter(Boolean).join(' · ');
+    : isSlaExt
+      ? slaExtMeta
+      : [item.functionArea, item.requestType || item.reportType].filter(Boolean).join(' · ');
   // Manager-side decision affordance: visible on every pending hide
   // request to ANY manager (TL / RM / admin). The denormalised
   // `team_lead_email` is the routing target, but live audit 2026-05-04
@@ -629,7 +688,7 @@ function RequestRow({ item, active, onClick, viewerEmail, isManager, isAdmin, on
   // Backend mirrors this rule (see /api/v1/hide-task/[id]/{approve,deny}).
   const viewerLc = (viewerEmail || '').toLowerCase();
   const isSelf = (item.createdByEmail || '').toLowerCase() === viewerLc;
-  const canDecide = isHide
+  const canDecide = isDecidable
     && item.status !== 'resolved'
     && item.status !== 'rejected'
     && !!isManager

@@ -188,20 +188,34 @@ Verification:
 - [ ] Confirmation state after submit ("Sent to your manager…").
 - [ ] Migration runs idempotently on next dev pod boot (re-run safe).
 
-### Phase 2 — Manager review in HR Hub
+### Phase 2 — Manager review in HR Hub ✓ landed in PR
 
-HR Hub category card + approve/deny modals + lifecycle endpoints.
+Per-flow approve / deny endpoints, modals, and HR Hub filter chip.
 
-- `src/components/views/HrHubView.jsx` — register new flow
-  `'sla_extension_request'` with metadata (icon, label, color)
+- `src/components/views/HrHubView.jsx` — registered new flow
+  `'sla_extension_request'` with metadata (icon, label, color), added
+  it to the FLOW_FILTERS chip rail, extended `canDecide` so the
+  inline Approve/Deny buttons render for managers on pending SLA-ext
+  rows, and wired both flow-specific modals at the view root.
 - `src/components/modals/ApproveSlaExtensionModal.jsx` (NEW) —
-  manager picks 1-7 days, optional note, approve
+  manager picks 1-7 days (1-day chips), preview of the requester /
+  reason / requested days, calls `approveSlaExtension(id, days)`.
 - `src/components/modals/DenySlaExtensionModal.jsx` (NEW) — required
-  deny reason
-- `app/api/v1/hr-hub/requests/[id]/route.js` (PATCH) — extend approve
-  branch to INSERT into `sla_extension` table with manager-chosen days
-- Notification fan-out via `user_notifications` (skill §3.12) on
-  approve/deny → requester
+  reason textarea, calls `denySlaExtension(id, reason)`.
+- `app/api/v1/sla-extension/[id]/approve/route.js` (NEW) — txn:
+  cleanup expired-unrevoked rows for the same (source, id), update
+  hr_hub_request to resolved with `sla_ext_approved_days`, INSERT
+  into `sla_extension` with `effective_from=NOW()` and
+  `expires_at=NOW()+approved_days days`, writeLog, notify requester.
+- `app/api/v1/sla-extension/[id]/deny/route.js` (NEW) — txn: update
+  request to resolved with `resolution_note=reason`, writeLog, notify
+  requester. No sla_extension row created.
+- `src/services/slaExtensionApi.js` (NEW) — `approveSlaExtension` /
+  `denySlaExtension` thin wrappers.
+- `app/api/v1/hr-hub/requests/route.js` GET — project the new
+  `sla_ext_*` columns into the list payload.
+- `app/api/v1/hr-hub/requests/[id]/route.js` GET — same columns on
+  the detail payload.
 
 ### Phase 3 — SLA override math (highest-risk)
 
