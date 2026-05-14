@@ -141,7 +141,7 @@ export async function insertSlaExtension({
              $7, $8,
              $9, $10,
              $11,
-             NOW(), NOW() + ($11 || ' days')::interval)
+             NOW(), NOW() + make_interval(days => $11))
      -- ON CONFLICT predicate MUST match the partial unique index
      -- predicate exactly (Postgres 42P10 otherwise). The index is
      -- WHERE revoked_at IS NULL only -- the expires_at > NOW() clause
