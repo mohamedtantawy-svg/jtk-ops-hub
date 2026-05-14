@@ -1760,6 +1760,42 @@ CREATE TABLE IF NOT EXISTS urgent_assist_schedule (
 -- Read path: list current + upcoming dates fast.
 CREATE INDEX IF NOT EXISTS idx_urgent_assist_schedule_date
   ON urgent_assist_schedule(schedule_date);
+
+-- ── Workbench resolution tracking (2026-05-14) ─────────────────────────
+-- Per-task snapshot of every Workbench row Ops Hub has ever seen, with
+-- last-seen timestamp + optional resolved-at. Backs the diff-based
+-- resolution model that replaces the 5-page COMPLETED+CLOSED upstream
+-- walk that was timing out at 30s+ in prod (2026-05-14 log audit).
+--
+-- Why DB-backed (vs in-memory): single replica today (replicas: 1,
+-- autoscaling.enabled: false), but the helm chart has autoscaling
+-- configured for 2-5 replicas. An in-memory snapshot would silently
+-- drift between pods if autoscaling ever turns on. The DB makes the
+-- snapshot a shared source of truth — works for N replicas.
+--
+-- Lifecycle:
+--   - Every Workbench sync UPSERTs every observed row with
+--     last_seen_at = NOW. Active statuses clear resolved_at. Terminal
+--     statuses (COMPLETED/CLOSED) set resolved_at = upstream
+--     completedAt (or NOW if missing).
+--   - Rows that were active but disappeared from the active set get
+--     resolved_at = NOW (the "derived" resolution).
+--   - Rows with resolved_at older than 24h get hard-deleted; that's
+--     the natural prune.
+--   - Rows still active (resolved_at IS NULL) get a separate
+--     "stale-active" sweep: anything not seen in the last 30 min is
+--     also pruned, since the worker likely missed a status change.
+CREATE TABLE IF NOT EXISTS workbench_known_tasks (
+  task_id        TEXT PRIMARY KEY,
+  task_data      JSONB NOT NULL,
+  status         TEXT NOT NULL,
+  last_seen_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  resolved_at    TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_workbench_known_tasks_resolved_at
+  ON workbench_known_tasks(resolved_at) WHERE resolved_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_workbench_known_tasks_last_seen
+  ON workbench_known_tasks(last_seen_at);
 `;
 
 export async function runMigrations() {
