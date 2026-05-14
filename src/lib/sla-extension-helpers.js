@@ -142,7 +142,13 @@ export async function insertSlaExtension({
              $9, $10,
              $11,
              NOW(), NOW() + ($11 || ' days')::interval)
-     ON CONFLICT (task_source, task_id) WHERE revoked_at IS NULL AND expires_at > NOW()
+     -- ON CONFLICT predicate MUST match the partial unique index
+     -- predicate exactly (Postgres 42P10 otherwise). The index is
+     -- WHERE revoked_at IS NULL only -- the expires_at > NOW() clause
+     -- was rejected as non-IMMUTABLE at index creation (see migrate.js
+     -- note). The approve route revokes any expired-unrevoked row in
+     -- the same txn before this INSERT, so the simpler predicate is safe.
+     ON CONFLICT (task_source, task_id) WHERE revoked_at IS NULL
        DO NOTHING
      RETURNING *`,
     [
