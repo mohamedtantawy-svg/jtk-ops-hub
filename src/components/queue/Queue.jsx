@@ -790,21 +790,54 @@ const Queue = ({ user, tasks, subFilter }) => {
       <div data-role="queue-header" style={{ padding: '8px 32px 12px', background: 'var(--surface)', borderBottom: '1px solid #e8e8e8', flexShrink: 0 }}>
         {/* Line 1: SLA pills (left) · Title/totals · Sync button (right) */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
-          <div onClick={() => setFSla(fSla === 'ok' ? null : 'ok')} title="Filter by SLA: On Track" role="button" tabIndex={0} style={{ display: 'flex', alignItems: 'center', gap: 5, background: fSla === 'ok' ? '#dcfce7' : '#f0fdf4', border: `${fSla === 'ok' ? '2' : '1'}px solid ${fSla === 'ok' ? '#15803d' : '#bbf7d0'}`, borderRadius: 128, padding: '5px 14px', cursor: 'pointer', transition: 'all .15s', flexShrink: 0, boxShadow: fSla === 'ok' ? '0 0 0 2px #15803d30' : 'none' }}>
-            <i className="bi-check-circle-fill" style={{ color: '#15803d', fontSize: 13 }}></i>
-            <span style={{ fontSize: 13, fontWeight: 700, color: '#166534' }}>{onTrackCount}</span>
-            <span style={{ fontSize: 11, fontWeight: 500, color: '#166534' }}>On Track</span>
-          </div>
-          <div onClick={() => setFSla(fSla === 'at_risk' ? null : 'at_risk')} title="Filter by SLA: At Risk" role="button" tabIndex={0} style={{ display: 'flex', alignItems: 'center', gap: 5, background: fSla === 'at_risk' ? '#fef3c7' : '#fff8e6', border: `${fSla === 'at_risk' ? '2' : '1'}px solid ${fSla === 'at_risk' ? '#ed8d00' : '#ffe27c'}`, borderRadius: 128, padding: '5px 14px', cursor: 'pointer', transition: 'all .15s', flexShrink: 0, boxShadow: fSla === 'at_risk' ? '0 0 0 2px #ed8d0030' : 'none' }}>
-            <i className="bi-exclamation-circle-fill" style={{ color: '#ed8d00', fontSize: 13 }}></i>
-            <span style={{ fontSize: 13, fontWeight: 700, color: '#92400E' }}>{atRiskCount}</span>
-            <span style={{ fontSize: 11, fontWeight: 500, color: '#92400E' }}>At Risk</span>
-          </div>
-          <div onClick={() => setFSla(fSla === 'breached' ? null : 'breached')} title="Filter by SLA: Breached" role="button" tabIndex={0} style={{ display: 'flex', alignItems: 'center', gap: 5, background: fSla === 'breached' ? '#fecaca' : '#ffe2de', border: `${fSla === 'breached' ? '2' : '1'}px solid ${fSla === 'breached' ? '#d42d35' : '#fca5a5'}`, borderRadius: 128, padding: '5px 14px', cursor: 'pointer', transition: 'all .15s', flexShrink: 0, boxShadow: fSla === 'breached' ? '0 0 0 2px #d42d3530' : 'none' }}>
-            <i className="bi-x-circle-fill" style={{ color: '#d42d35', fontSize: 13 }}></i>
-            <span style={{ fontSize: 13, fontWeight: 700, color: '#991b1b' }}>{breachedCount}</span>
-            <span style={{ fontSize: 11, fontWeight: 500, color: '#991b1b' }}>Breached</span>
-          </div>
+          {/* Active state strengthened 2026-05-14 (Carolina Ferreira
+              feedback): when the user clicks an SLA pill, the active
+              chip flips to a solid filled background with white text +
+              a check icon. The "is this filter on?" signal becomes
+              unmistakable. Inactive state stays the existing light
+              pastel so the row still reads as three semantic statuses.
+              Tooltips now explicitly explain what each filter does. */}
+          <SlaPill
+            active={fSla === 'ok'}
+            onClick={() => setFSla(fSla === 'ok' ? null : 'ok')}
+            tone="ok"
+            count={onTrackCount}
+            label="On Track"
+            hint="Tasks well inside their SLA window — at least 25% of the time budget still remaining."
+          />
+          <SlaPill
+            active={fSla === 'at_risk'}
+            onClick={() => setFSla(fSla === 'at_risk' ? null : 'at_risk')}
+            tone="atRisk"
+            count={atRiskCount}
+            label="At Risk"
+            hint="Tasks inside SLA but with less than 25% of the time budget left — handle next to avoid a breach."
+          />
+          <SlaPill
+            active={fSla === 'breached'}
+            onClick={() => setFSla(fSla === 'breached' ? null : 'breached')}
+            tone="breached"
+            count={breachedCount}
+            label="Breached"
+            hint="Tasks past their SLA window — handle these first."
+          />
+          {fSla && (
+            <button
+              type="button"
+              onClick={() => setFSla(null)}
+              title="Clear the SLA filter"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                background: 'transparent', border: '1px solid #e8e8e8',
+                borderRadius: 128, padding: '4px 10px', fontSize: 11,
+                color: '#616161', cursor: 'pointer', fontFamily: 'inherit',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <i className="bi-x-lg" style={{ fontSize: 9 }} />
+              Clear SLA filter
+            </button>
+          )}
 
           {(isAdmin || isLead) && (() => {
             const sourceLabels = { onboarding: 'Onboarding', offboarding: 'Offboarding', amendments: 'Amendments', redlines: 'Redlines', workbench: 'Workbench', incentive_plans: 'Incentive Plans', hidden: 'Hidden' };
@@ -1503,6 +1536,52 @@ const Queue = ({ user, tasks, subFilter }) => {
           onSubmitted={() => { try { hiddenTasks?.refresh?.(); } catch {} }}
         />
       )}
+    </div>
+  );
+};
+
+// ── SLA filter pill (workspace header) ────────────────────────────────
+// Three tones — ok / atRisk / breached. Active state is a SOLID filled
+// chip with white text + a check icon so the user can see at a glance
+// which filter is on (Carolina Ferreira 2026-05-14: "Improve the
+// visibility of the filters under the Workspace"). Inactive state is
+// the existing soft pastel so the row still reads as three semantic
+// statuses. `hint` is rendered into the tooltip so hover explains what
+// each filter does before the user has to click to find out.
+const SLA_PILL_TONES = {
+  ok:       { iconClass: 'bi-check-circle-fill',       activeBg: '#15803d', activeText: '#ffffff', inactiveBg: '#f0fdf4', inactiveText: '#166534', inactiveBorder: '#bbf7d0' },
+  atRisk:   { iconClass: 'bi-exclamation-circle-fill', activeBg: '#d97706', activeText: '#ffffff', inactiveBg: '#fff8e6', inactiveText: '#92400E', inactiveBorder: '#ffe27c' },
+  breached: { iconClass: 'bi-x-circle-fill',           activeBg: '#d42d35', activeText: '#ffffff', inactiveBg: '#ffe2de', inactiveText: '#991b1b', inactiveBorder: '#fca5a5' },
+};
+const SlaPill = ({ active, onClick, tone, count, label, hint }) => {
+  const t = SLA_PILL_TONES[tone] || SLA_PILL_TONES.ok;
+  const handleKey = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick?.(); }
+  };
+  return (
+    <div
+      onClick={onClick}
+      onKeyDown={handleKey}
+      title={`${label} — ${hint}${active ? ' (active — click again to clear)' : ' (click to filter)'}`}
+      role="button"
+      aria-pressed={active}
+      tabIndex={0}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        background: active ? t.activeBg : t.inactiveBg,
+        border: `1px solid ${active ? t.activeBg : t.inactiveBorder}`,
+        borderRadius: 128, padding: '5px 14px',
+        cursor: 'pointer', transition: 'all .15s', flexShrink: 0,
+        boxShadow: active ? '0 1px 4px rgba(15,23,42,0.18)' : 'none',
+        outline: 'none',
+      }}
+    >
+      {active && (
+        <i className="bi-check-lg" style={{ color: t.activeText, fontSize: 12 }} aria-hidden="true" />
+      )}
+      <i className={t.iconClass} style={{ color: active ? t.activeText : t.inactiveText, fontSize: 13 }} aria-hidden="true" />
+      <span style={{ fontSize: 13, fontWeight: 700, color: active ? t.activeText : t.inactiveText }}>{count}</span>
+      <span style={{ fontSize: 11, fontWeight: 600, color: active ? t.activeText : t.inactiveText }}>{label}</span>
     </div>
   );
 };
