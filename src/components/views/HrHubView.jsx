@@ -134,7 +134,16 @@ export default function HrHubView({ user, onCreateHrHub }) {
   const isManager = isManagerRole(user, perms);
   const [scope, setScope] = useState('mine');
   const [flowFilter, setFlowFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState(null);          // null = all statuses
+  // Default to 'new' so the landing page shows actionable work, not
+  // historical resolved tasks. Olga Pastuszak 2026-05-14 feedback:
+  // "HR HUB - Potentially defaults to Resolved" — with statusFilter=null
+  // (all statuses) + sort=updated, she saw recently-resolved tasks first
+  // because her new/in-progress queues are empty. Defaulting to 'new'
+  // means an empty queue lands on the celebratory empty state below
+  // ("You're all caught up!") instead of an old resolved-tasks list.
+  // Click "All" anytime to switch — the filter is just a default, not a
+  // lock.
+  const [statusFilter, setStatusFilter] = useState('new');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [sort, setSort] = useState('updated');
@@ -838,7 +847,23 @@ function RequestRow({ item, active, onClick, viewerEmail, isManager, isAdmin, on
 function EmptyState({ scope, flowFilter, statusFilter }) {
   let title = 'No requests yet';
   let body = 'Hit the New request button in the header to submit one.';
-  if (statusFilter) {
+  let icon = 'bi-inbox';
+  let accent = null;          // celebratory accent for the "caught up" case
+  // Olga 2026-05-14 — the default landing is `status=new`, so an empty
+  // landing is the "caught up" celebration, not a stark "no results".
+  // We branch on the common cases first so each gets bespoke copy
+  // instead of the generic "No X requests" fallback.
+  if (statusFilter === 'new' && scope === 'mine' && flowFilter === 'all') {
+    title = "You're all caught up!";
+    body = 'No new requests on your plate. Click "All" above to browse the rest.';
+    icon = 'bi-emoji-smile';
+    accent = '#7c3aed';
+  } else if (statusFilter === 'new' && scope === 'mine') {
+    title = "You're all caught up!";
+    body = `No new ${FLOW_VISUALS[flowFilter]?.label || 'requests'} on your plate. Try widening the flow filter.`;
+    icon = 'bi-emoji-smile';
+    accent = '#7c3aed';
+  } else if (statusFilter) {
     const s = STATUS_BY_VALUE[statusFilter];
     title = `No ${s?.label?.toLowerCase() || statusFilter} requests`;
     body = 'Try clearing the status filter or widening the scope.';
@@ -855,9 +880,19 @@ function EmptyState({ scope, flowFilter, statusFilter }) {
       border: '1px dashed var(--border)', borderRadius: 12,
       color: 'var(--text-muted)', fontSize: 13,
       background: 'var(--surface)',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
     }}>
-      <div style={{ fontSize: 14, color: 'var(--text-secondary)', fontWeight: 600 }}>{title}</div>
-      <div style={{ marginTop: 4 }}>{body}</div>
+      <div style={{
+        width: 48, height: 48, borderRadius: 14,
+        background: accent ? '#f3eff8' : 'var(--surface-2)',
+        color: accent || 'var(--text-muted)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        marginBottom: 4,
+      }}>
+        <i className={icon} style={{ fontSize: 22 }} />
+      </div>
+      <div style={{ fontSize: 15, color: accent || 'var(--text)', fontWeight: 700 }}>{title}</div>
+      <div style={{ maxWidth: 360, lineHeight: 1.5 }}>{body}</div>
     </div>
   );
 }
