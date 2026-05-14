@@ -6,6 +6,7 @@
 // Includes automatic retry with exponential backoff on transient failures.
 
 import { withRetry } from './retry';
+import { reconcileWorkbenchSnapshot } from './workbench-resolution-state';
 
 // ── Sanitize API key ─────────────────────────────────────────────────────────
 function sanitizeToken(raw) {
@@ -1484,6 +1485,11 @@ export const HRX_OPERATIONS_TEAM_ID = 'f235fd21-c5a0-4804-badf-2cc3dc76191e';
 const WORKBENCH_PAGE_SIZE = 200;
 const WORKBENCH_MAX_PAGES = 25; // 25 * 200 = 5000 item ceiling (well above current volume)
 
+// Resolution tracking for Workbench is DB-backed — see
+// `src/lib/workbench-resolution-state.js` and the `workbench_known_tasks`
+// table in migrate.js. The cycle below feeds observed rows into that
+// helper and reads back the currently-resolved window.
+
 // Country is frequently null on the task itself but carried in a custom
 // field keyed by reference "COUNTRY..." as either a dropdown string or a
 // multi-select array (e.g. ["Turkey"]). Return the first populated one —
@@ -1544,74 +1550,41 @@ export async function listWorkbenchTasks(params = {}) {
     if (!cursor) break;
   }
 
-  // Recently-completed tasks — bounded by `completedLookbackHours` (24h
-  // default) so the upstream call stays cheap. Fetch BOTH terminal
-  // states (COMPLETED + CLOSED) so the home/briefing "Resolved past
-  // 24h" count includes everything an agent finished, not just the
-  // subset that got marked COMPLETED specifically. CLOSED tasks may
-  // not carry `completedAt` (workflow archives can stamp closedAt
-  // instead), so the post-filter falls back to updatedAt.
+  // Recently-completed tasks. Replaces the previous 5-page COMPLETED+
+  // CLOSED walk (which alone cost ~10–15s and was the dominant reason
+  // for the "[workbench] Live build exceeded 30000ms" log line). New
+  // model:
   //
-  // Paginated. The 2026-05-11 production log audit caught a silent
-  // truncation here: the previous code was a single non-paginated
-  // fetch using `params.limit` (50 by default from the route handler),
-  // so anything past the first 50 finished rows in the last 24h was
-  // dropped. With ~50-100 tasks/day completed on a busy team, that
-  // meant the "Resolved Today" tally on AgentHome + BriefingView was
-  // capped at 50. Now we paginate up to FINISHED_MAX_PAGES of
-  // FINISHED_PAGE_SIZE rows. Worst case: 1000 rows / 24h, which still
-  // fits comfortably below the WORKBENCH_MAX_PAGES * WORKBENCH_PAGE_SIZE
-  // active-branch ceiling.
+  //   1. The active fetch above already walks the full active set.
+  //   2. A 2-page safety net of upstream COMPLETED+CLOSED runs each
+  //      cycle (~2–3s) so cold-start cycles still surface the recent
+  //      resolved tail.
+  //   3. `reconcileWorkbenchSnapshot` (DB-backed, see
+  //      workbench-resolution-state.js) UPSERTs everything observed +
+  //      detects rows that disappeared from the active set + reads
+  //      back the currently-resolved-in-window set.
   //
-  // No "early-stop on first all-out-of-window page" optimisation: the
-  // upstream's row ordering on a multi-status filter
-  // (COMPLETED + CLOSED) isn't documented as DESC-by-recency. If a
-  // future version of the upstream interleaves rows, an early-stop
-  // would silently drop in-window rows mid-walk. The post-filter on
-  // `cutoff` is what enforces the lookback window per row; we just
-  // walk every page the cursor surfaces and trust the filter to
-  // discard old rows. Stop conditions are: empty page, no cursor,
-  // safety cap.
+  // The snapshot lives in Postgres so it's safe across replicas (today
+  // we run 1; helm/values.yaml has autoscaling configured for 2-5).
   if (includeCompleted) {
+    const now = Date.now();
+    const cutoff = now - completedLookbackMs;
+    const seen = new Set(allItems.map(t => t.id));
+
+    // ── (1) Safety-net fetch: 2 pages (200 rows) of upstream COMPLETED+
+    //       CLOSED. Halves the cold-start gap vs 1 page, still ~3s
+    //       vs the original 5-page walk's 10–15s.
+    const safetyItems = [];
+    let safetyKept = 0;
     try {
-      // Deel admin API caps `limit` at 100 — passing 200 returns
-      // HTTP 400 ("limit must be less than or equal to 100") and the
-      // catch below swallows it, silently producing ZERO recently-
-      // finished merges (worse than the original 50-cap this branch
-      // was meant to fix). 2026-05-11 prod logs caught it firing on
-      // every sync cycle.
-      //
-      // 2026-05-12 memory audit (pod RSS spiked > 3 GiB): the
-      // ~1000-row ceiling was way more than the home "Resolved Today"
-      // KPI ever needs — even a busy team finishes ~50–100 tasks per
-      // day. Dropping the cap to 200 (2 × 100-page batches) keeps the
-      // KPI accurate AND removes a 800-row tail from the workbench
-      // cache. Combined with the projection slim above, this cuts
-      // worst-case workbench-cache memory roughly in half.
-      //
-      // 2026-05-13: bumped 2 → 5 pages (200 → 500 row ceiling) after
-      // a 3-hour prod log audit showed EVERY workbench sync emitting
-      // the truncation flag with `kept 185` — the upstream cursor was
-      // still pointing forward past the 200-row cap, so we were
-      // silently dropping a tail of recently-finished tasks each
-      // cycle. That made the home "Resolved Today" KPI under-report
-      // by an unknown amount on busy days. Extra memory cost: ~60 KB
-      // at the worst case (500 rows × ~120 bytes per row after the
-      // slim projection) — negligible vs the 1733 MiB heap we were
-      // already tolerating during peak builds.
-      const FINISHED_PAGE_SIZE = 100;
-      const FINISHED_MAX_PAGES = 5;
-      const cutoff = Date.now() - completedLookbackMs;
-      const seen = new Set(allItems.map(t => t.id));
-      let kept = 0;
-      let truncated = false;
+      const SAFETY_PAGES = 2;
       let cursor = null;
-      for (let page = 0; page < FINISHED_MAX_PAGES; page++) {
+      for (let page = 0; page < SAFETY_PAGES; page++) {
         const qs = new URLSearchParams();
         qs.append('status[]', 'COMPLETED');
         qs.append('status[]', 'CLOSED');
         for (const id of teamIds) qs.append('teamIds[]', id);
-        qs.set('limit', String(FINISHED_PAGE_SIZE));
+        qs.set('limit', '100');
         if (cursor) qs.set('cursor', cursor);
         const res = await deelFetch(`/admin/ops_workbench/tasks?${qs.toString()}`);
         const pageItems = res?.result || [];
@@ -1626,21 +1599,50 @@ export async function listWorkbenchTasks(params = {}) {
           })();
           if (!ms || ms < cutoff) continue;
           allItems.push(t);
+          safetyItems.push(t);
           seen.add(t.id);
-          kept++;
+          safetyKept++;
         }
         cursor = res?.cursor || null;
         if (!cursor) break;
-        if (page === FINISHED_MAX_PAGES - 1) truncated = true;
-      }
-      if (kept > 0) {
-        const suffix = truncated
-          ? ' (truncated at safety cap — bump FINISHED_MAX_PAGES if this fires regularly)'
-          : '';
-        console.info(`[workbench] kept ${kept} recently-finished task(s) — COMPLETED+CLOSED, last ${completedLookbackMs / 3600000}h${suffix}`);
       }
     } catch (err) {
-      console.warn('[workbench] recently-finished fetch failed (non-fatal):', err.message);
+      console.warn('[workbench] safety-net finished fetch failed (non-fatal):', err.message);
+    }
+
+    // ── (2) DB reconcile. Splits active vs completed from the upstream
+    //       fetches and hands them to the helper, which UPSERTs, marks
+    //       disappeared-from-active as resolved, prunes the 24h tail,
+    //       and returns the resolved-in-window set.
+    const activeStatusSet = new Set(statuses.map(s => String(s).toUpperCase()));
+    const currentActiveRaw = allItems.filter(
+      t => activeStatusSet.has((t.status || '').toUpperCase()),
+    );
+    try {
+      const { resolvedItems, stats } = await reconcileWorkbenchSnapshot({
+        activeItems: currentActiveRaw,
+        completedItems: safetyItems,
+        statuses,
+        now,
+        lookbackMs: completedLookbackMs,
+      });
+      // Splice the resolved-window rows into allItems, skipping any id
+      // already present (the safety net's authoritative rows win).
+      let derivedKept = 0;
+      for (const r of resolvedItems) {
+        if (!r?.id || seen.has(r.id)) continue;
+        allItems.push(r);
+        seen.add(r.id);
+        derivedKept++;
+      }
+      console.info(
+        `[workbench] resolved-in-${completedLookbackMs / 3600000}h: safety=${safetyKept} derived=${derivedKept} (new this cycle=${stats.derivedAdded}, snapshot=${stats.cold ? 'cold' : 'warm'}, observed=${stats.observed}, pruned=${stats.pruned})`,
+      );
+    } catch (err) {
+      // Reconcile is best-effort — if the DB roundtrip fails we fall
+      // back to just the safety-net rows. This preserves the prior
+      // behaviour at minimum.
+      console.warn('[workbench] DB reconcile failed (non-fatal):', err.message);
     }
   }
 
