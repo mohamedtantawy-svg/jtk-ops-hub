@@ -17,6 +17,7 @@ import { AnnouncementRequestsProvider } from './hooks/useAnnouncementRequests';
 import { useQueueSync } from './hooks/useQueueSync';
 import { useQueueUnifiedSync } from './hooks/useQueueUnifiedSync';
 import { useHiddenTasks } from './hooks/useHiddenTasks';
+import { useSlaExtensions } from './hooks/useSlaExtensions';
 import { useUrgentAssistBadge } from './hooks/useUrgentAssistBadge';
 import { useHrHubBadge } from './hooks/useHrHubBadge';
 import { DEFAULT_SETTINGS } from './data/settings';
@@ -423,6 +424,12 @@ const App=()=>{
   // with the right Set<source:id> in memory. The hook polls every 30s and
   // a manual refresh fires after Approve/Deny in HR Hub.
   const hiddenTasks = useHiddenTasks(!!user);
+  // Phase 3 of SLA Extensions — global active-extension list, polled
+  // every 30s and shared via IntegrationsContext so Queue.jsx can apply
+  // the override at the row level. Cache survives sync cycles via the
+  // server cache + LS hydration; the FE rebuilds the Map only when the
+  // list array changes (useMemo in useSlaExtensions).
+  const slaExtensions = useSlaExtensions(!!user);
   // Top-nav badge for Urgent Assist — counts unresolved items where
   // assignee = effectiveUser (covers impersonation correctly). Sources
   // both manual rows (via the API) and workbench-sourced rows from the
@@ -1277,7 +1284,7 @@ const App=()=>{
   const integrations = useIntegrations();
   const jiraData = useJiraData(integrations.isConfigured('jira'));
   const slackData = useSlackData(integrations.isConfigured('slack'));
-  const integrationsCtx = { integrations, jiraData, slackData, queueSync, queueUnified, hiddenTasks };
+  const integrationsCtx = { integrations, jiraData, slackData, queueSync, queueUnified, hiddenTasks, slaExtensions };
 
   // ── Toast helpers ──────────────────────────────────────────────────────────
   const addToast=useCallback((type,title,body,onUndo)=>{

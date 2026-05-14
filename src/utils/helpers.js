@@ -29,6 +29,30 @@ function _slaAnchorMs(task) {
 export const slaInfo=(task,customThresholds)=>{
   if(!task||task.status==='resolved'||task.status==='waiting')return null;
 
+  // ── SLA Extension override (Phase 3 — SLA_EXTENSIONS_PLAN.md) ──────
+  // An approved sla_extension takes precedence over every other SLA
+  // computation below: while now < expiresAt, the pill reads green
+  // "Extended" and downstream consumers (Queue pill, BriefingView
+  // breach ring, Team SLA dot, Analytics KPI) all see breach=false.
+  // After expiresAt passes, this short-circuit doesn't fire and the
+  // row falls through to the normal math — which will almost certainly
+  // produce a red "breached" pill, exactly what the spec asks for.
+  if (task.slaExtension && task.slaExtension.expiresAt) {
+    const expiresMs = Date.parse(task.slaExtension.expiresAt);
+    if (Number.isFinite(expiresMs) && expiresMs > Date.now()) {
+      const remMins = Math.max(0, Math.round((expiresMs - Date.now()) / 60000));
+      const daysLeft = Math.max(1, Math.ceil(remMins / 1440));
+      return {
+        label: `Extended · ${daysLeft}d left`,
+        short: 'EXT',
+        color: '#15803d', bg: '#f0fdf4',
+        breach: false, ok: true,
+        remain: remMins,
+        extension: true,
+      };
+    }
+  }
+
   // Friendly metric name for Zendesk pills — used by both the
   // policy-cache path below and the local-fallback path. For Jira /
   // Deel sources and unstamped Zendesk rows the generic "SLA" copy

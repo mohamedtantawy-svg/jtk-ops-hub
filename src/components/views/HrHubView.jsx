@@ -605,6 +605,11 @@ export default function HrHubView({ user, onCreateHrHub }) {
           onClose={() => setSlaApproveModalReq(null)}
           onApproved={() => {
             setSlaApproveModalReq(null);
+            // Refresh the active-extensions list NOW so the queue's row
+            // override picks up the new extension on the very next render,
+            // not 30s from now when the next poll would fire. Phase 3 —
+            // SLA_EXTENSIONS_PLAN.md sync robustness contract.
+            try { integrations?.slaExtensions?.refresh?.(); } catch {}
             loadFirstPage();
           }}
         />

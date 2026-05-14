@@ -6,6 +6,7 @@ import { matchesAudience } from '../../data/comms';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import { CALENDAR_EVENTS } from '../../data/calendar';
 import { slaInfo, rel, getVisibleEmails } from '../../utils/helpers';
+import { applySlaExtensionsToRows } from '../../utils/applySlaExtensions';
 // Queue data hooks are now mounted once in App.jsx and threaded through
 // IntegrationsContext — see queueUnified destructure below. Removing the
 // per-view mounts collapses 4× initial requests into 1×.
@@ -222,7 +223,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const perms=useContext(PermissionsContext);
   const settings=useContext(SettingsContext);
   // deelData removed 2026-05-13 — Deel REST-v2 wrapper retired.
-  const { jiraData, slackData, queueUnified, hiddenTasks } = useContext(IntegrationsContext);
+  const { jiraData, slackData, queueUnified, hiddenTasks, slaExtensions } = useContext(IntegrationsContext);
   // Hide-task filter — mirrors the Queue's behaviour so home aggregates
   // exclude rows the manager has approved to hide. Without this, Home
   // surfaces a count that includes hidden rows (e.g. 797 workbench) while
@@ -277,13 +278,20 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // 2026-05-03 live audit found Home Workbench=797 while Workspace=740
   // because Briefing wasn't filtering hidden rows; the gap matched the 57
   // hide-task entries managers had approved.
-  const onboardingRowsAll = useMemo(() => normalizeOnboarding(onboardingData.items, queueSla).filter(r => !isHiddenKey('onboarding', r.id)), [onboardingData.items, queueSla, isHiddenKey]);
-  const pausedOnboardingRowsAll = useMemo(() => normalizePausedOnboarding(pausedOnboardingData.items, queueSla).filter(r => !isHiddenKey('paused_onboarding', r.id) && !isHiddenKey('onboarding', r.id)), [pausedOnboardingData.items, queueSla, isHiddenKey]);
-  const offboardingRowsAll = useMemo(() => normalizeOffboarding(offboardingData.items, queueSla).filter(r => !isHiddenKey('offboarding', r.id)), [offboardingData.items, queueSla, isHiddenKey]);
-  const amendmentRowsAll = useMemo(() => normalizeAmendments(changeRequestData.amendments, queueSla).filter(r => !isHiddenKey('amendments', r.id)), [changeRequestData.amendments, queueSla, isHiddenKey]);
-  const redlineRowsAll = useMemo(() => normalizeRedlines(changeRequestData.redlines, queueSla).filter(r => !isHiddenKey('redlines', r.id)), [changeRequestData.redlines, queueSla, isHiddenKey]);
-  const workbenchRowsAll = useMemo(() => normalizeWorkbench(workbenchData.tasks, queueSla).filter(r => !isHiddenKey('workbench', r.id)), [workbenchData.tasks, queueSla, isHiddenKey]);
-  const incentivePlanRowsAll = useMemo(() => normalizeIncentivePlans(incentivePlansData.items, queueSla).filter(r => !isHiddenKey('incentive_plans', r.id)), [incentivePlansData.items, queueSla, isHiddenKey]);
+  // Phase 3 of SLA Extensions — apply the active-extension override to
+  // every Deel-source row right after normalization+hide-filter. The
+  // override rewrites slaRemaining/slaBreachStatus/slaWindowMs so the
+  // Health Score, Org Breach ring, and per-manager / per-source breach
+  // tallies below all see extended rows as "in SLA" while the timer is
+  // running. See SLA_EXTENSIONS_PLAN.md.
+  const slaExtensionMap = slaExtensions?.map || null;
+  const onboardingRowsAll = useMemo(() => applySlaExtensionsToRows(normalizeOnboarding(onboardingData.items, queueSla).filter(r => !isHiddenKey('onboarding', r.id)), slaExtensionMap, 'onboarding'), [onboardingData.items, queueSla, isHiddenKey, slaExtensionMap]);
+  const pausedOnboardingRowsAll = useMemo(() => applySlaExtensionsToRows(normalizePausedOnboarding(pausedOnboardingData.items, queueSla).filter(r => !isHiddenKey('paused_onboarding', r.id) && !isHiddenKey('onboarding', r.id)), slaExtensionMap, 'onboarding'), [pausedOnboardingData.items, queueSla, isHiddenKey, slaExtensionMap]);
+  const offboardingRowsAll = useMemo(() => applySlaExtensionsToRows(normalizeOffboarding(offboardingData.items, queueSla).filter(r => !isHiddenKey('offboarding', r.id)), slaExtensionMap, 'offboarding'), [offboardingData.items, queueSla, isHiddenKey, slaExtensionMap]);
+  const amendmentRowsAll = useMemo(() => applySlaExtensionsToRows(normalizeAmendments(changeRequestData.amendments, queueSla).filter(r => !isHiddenKey('amendments', r.id)), slaExtensionMap, 'amendments'), [changeRequestData.amendments, queueSla, isHiddenKey, slaExtensionMap]);
+  const redlineRowsAll = useMemo(() => applySlaExtensionsToRows(normalizeRedlines(changeRequestData.redlines, queueSla).filter(r => !isHiddenKey('redlines', r.id)), slaExtensionMap, 'redlines'), [changeRequestData.redlines, queueSla, isHiddenKey, slaExtensionMap]);
+  const workbenchRowsAll = useMemo(() => applySlaExtensionsToRows(normalizeWorkbench(workbenchData.tasks, queueSla).filter(r => !isHiddenKey('workbench', r.id)), slaExtensionMap, 'workbench'), [workbenchData.tasks, queueSla, isHiddenKey, slaExtensionMap]);
+  const incentivePlanRowsAll = useMemo(() => applySlaExtensionsToRows(normalizeIncentivePlans(incentivePlansData.items, queueSla).filter(r => !isHiddenKey('incentive_plans', r.id)), slaExtensionMap, 'incentive_plans'), [incentivePlansData.items, queueSla, isHiddenKey, slaExtensionMap]);
 
   // Source-row scoping — delegate to the Queue's single source of truth so
   // "Active Requests" here always matches what the user sees in each tab.

@@ -15,6 +15,7 @@ import {
   normalizeOffboarding,
   normalizeWorkbench,
 } from '../../utils/normalizeSourceRows';
+import { applySlaExtensionsToRows } from '../../utils/applySlaExtensions';
 import Avatar from '../ui/Avatar';
 import OOOBadge from '../ui/OOOBadge';
 import PageHeader from '../ui/PageHeader';
@@ -158,18 +159,23 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
   // matching what the agent sees in the Queue. Amendments/Redlines have
   // no per-agent assignee on the upstream payload, so they're not
   // attributable to a single agent and stay out of this calc.
-  const { queueUnified: teamQueueUnified } = useContext(IntegrationsContext);
+  const { queueUnified: teamQueueUnified, slaExtensions: teamSlaExtensions } = useContext(IntegrationsContext);
   const teamOnbData = teamQueueUnified?.onboardingData || { items: [] };
   const teamOffData = teamQueueUnified?.offboardingData || { items: [] };
   const teamWbData = teamQueueUnified?.workbenchData || { tasks: [] };
   const { sla: teamQueueSla } = useQueueSlaSettings();
-  const onbAgentRows = useMemo(() => normalizeOnboarding(teamOnbData.items, teamQueueSla), [teamOnbData.items, teamQueueSla]);
-  const offAgentRows = useMemo(() => normalizeOffboarding(teamOffData.items, teamQueueSla), [teamOffData.items, teamQueueSla]);
+  // SLA Extension override (Phase 3) — apply to each per-agent source row
+  // set so the per-agent SLA dot below reads the extended state and
+  // doesn't flag the row as breached while the extension is active. See
+  // SLA_EXTENSIONS_PLAN.md.
+  const teamSlaExtMap = teamSlaExtensions?.map || null;
+  const onbAgentRows = useMemo(() => applySlaExtensionsToRows(normalizeOnboarding(teamOnbData.items, teamQueueSla), teamSlaExtMap, 'onboarding'), [teamOnbData.items, teamQueueSla, teamSlaExtMap]);
+  const offAgentRows = useMemo(() => applySlaExtensionsToRows(normalizeOffboarding(teamOffData.items, teamQueueSla), teamSlaExtMap, 'offboarding'), [teamOffData.items, teamQueueSla, teamSlaExtMap]);
   // Workbench surfaces 24h of COMPLETED + CLOSED rows (for the home
   // "Resolved Today" KPI). Team rollups are active-state only — strip
   // resolved here so per-agent capacity + SLA dot reflect today's
   // backlog, not yesterday's wins.
-  const wbAgentRows  = useMemo(() => normalizeWorkbench(teamWbData.tasks, teamQueueSla).filter(r => !r.isResolved), [teamWbData.tasks, teamQueueSla]);
+  const wbAgentRows  = useMemo(() => applySlaExtensionsToRows(normalizeWorkbench(teamWbData.tasks, teamQueueSla).filter(r => !r.isResolved), teamSlaExtMap, 'workbench'), [teamWbData.tasks, teamQueueSla, teamSlaExtMap]);
 
   // UI state
   const [showAddModal, setShowAddModal] = useState(false);

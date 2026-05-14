@@ -8,6 +8,7 @@ import { useVirtualRows } from '../../hooks/useVirtualRows';
 const TICKET_ROW_HEIGHT = 44;
 import { MEMBERS_BY_EMAIL } from '../../data/members';
 import { slaInfo, getUrl } from '../../utils/helpers';
+import { applySlaExtensionsToRows } from '../../utils/applySlaExtensions';
 import {
   scopeOffboardingCases,
   scopeWorkbenchTasks,
@@ -190,7 +191,7 @@ const Queue = ({ user, tasks, subFilter }) => {
 
   const perms = useContext(PermissionsContext);
   const settings = useContext(SettingsContext);
-  const { queueSync, queueUnified, hiddenTasks } = useContext(IntegrationsContext);
+  const { queueSync, queueUnified, hiddenTasks, slaExtensions } = useContext(IntegrationsContext);
   // Personal notes attached to any queue row — user-scoped localStorage,
   // keyed by `${source}:${id}` so notes re-attach after every sync.
   const taskNotes = useTaskNotes(user?.email);
@@ -359,7 +360,23 @@ const Queue = ({ user, tasks, subFilter }) => {
   // The directory + active-member checks on the server still prevent
   // parking rows on a ghost / deactivated email.
   const canReassign = !!user;
-  const ns = (tasks || []).filter(t => t.source !== 'slack' && t.source !== 'calendar' && !isHiddenKey(t.source, t.id));
+  // Tickets: attach `slaExtension` to ZD/Jira rows so `slaInfo()` reads
+  // the override at the very top of its decision tree (helpers.js). The
+  // override map is keyed (source, id) — same key Queue.jsx uses for the
+  // hidden-task filter — so applying it inline here keeps the override
+  // out of the tickets' `tasks` state at the App.jsx level (which is
+  // shared with other surfaces that don't care about SLA).
+  const _slaExtMapForTickets = slaExtensions?.map || null;
+  const ns = (tasks || [])
+    .filter(t => t.source !== 'slack' && t.source !== 'calendar' && !isHiddenKey(t.source, t.id))
+    .map(t => {
+      if (!_slaExtMapForTickets) return t;
+      const ext = _slaExtMapForTickets.get(`${t.source}:${String(t.id)}`);
+      if (!ext || !ext.expiresAt) return t;
+      const expiresMs = Date.parse(ext.expiresAt);
+      if (!Number.isFinite(expiresMs) || expiresMs <= Date.now()) return t;
+      return { ...t, slaExtension: ext };
+    });
 
   // Emails the current viewer "owns" — their email + every teammate below
   // them in the hierarchy (used to classify each Jira ticket as Actionable
@@ -391,8 +408,17 @@ const Queue = ({ user, tasks, subFilter }) => {
   }, [fJiraActionable, fJiraRaised, jiraIsActionable, jiraIsRaised]);
 
   // ── Per-source scoping (see lib/queue-scoping.js for the full matrix) ──
-  const onboardingActionRows = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user), [onboardingRowsAll, user]);
-  const pausedOnboardingRows = useMemo(() => scopePausedOnboarding(pausedOnboardingRowsAll, user), [pausedOnboardingRowsAll, user]);
+  // After scoping, each row set is run through `applySlaExtensionsToRows`
+  // so any row carrying an approved + active sla_extension gets its
+  // `slaRemaining`/`slaBreachStatus`/`slaWindowMs` rewritten to the
+  // extended timer (Phase 3 — SLA_EXTENSIONS_PLAN.md). Downstream
+  // consumers (rowSlaSeverity, slaTier, BriefingView aggregates) read
+  // the overridden fields naturally — no per-consumer code change.
+  const slaExtensionMap = slaExtensions?.map || null;
+  const onboardingActionRowsScoped = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user), [onboardingRowsAll, user]);
+  const pausedOnboardingRowsScoped = useMemo(() => scopePausedOnboarding(pausedOnboardingRowsAll, user), [pausedOnboardingRowsAll, user]);
+  const onboardingActionRows = useMemo(() => applySlaExtensionsToRows(onboardingActionRowsScoped, slaExtensionMap, 'onboarding'), [onboardingActionRowsScoped, slaExtensionMap]);
+  const pausedOnboardingRows = useMemo(() => applySlaExtensionsToRows(pausedOnboardingRowsScoped, slaExtensionMap, 'onboarding'), [pausedOnboardingRowsScoped, slaExtensionMap]);
   const onboardingRows = useMemo(() => {
     const seen = new Set();
     const merged = [];
@@ -403,11 +429,11 @@ const Queue = ({ user, tasks, subFilter }) => {
     }
     return merged;
   }, [onboardingActionRows, pausedOnboardingRows]);
-  const offboardingRows = useMemo(() => scopeOffboardingCases(offboardingRowsAll, user), [offboardingRowsAll, user]);
-  const amendmentRows   = useMemo(() => scopeAmendmentRequests(amendmentRowsAll, user), [amendmentRowsAll, user]);
-  const redlineRows     = useMemo(() => scopeRedlineRequests(redlineRowsAll, user), [redlineRowsAll, user]);
-  const workbenchRows   = useMemo(() => scopeWorkbenchTasks(workbenchRowsAll, user), [workbenchRowsAll, user]);
-  const incentivePlanRows = useMemo(() => scopeIncentivePlans(incentivePlanRowsAll, user), [incentivePlanRowsAll, user]);
+  const offboardingRows = useMemo(() => applySlaExtensionsToRows(scopeOffboardingCases(offboardingRowsAll, user), slaExtensionMap, 'offboarding'), [offboardingRowsAll, user, slaExtensionMap]);
+  const amendmentRows   = useMemo(() => applySlaExtensionsToRows(scopeAmendmentRequests(amendmentRowsAll, user), slaExtensionMap, 'amendments'), [amendmentRowsAll, user, slaExtensionMap]);
+  const redlineRows     = useMemo(() => applySlaExtensionsToRows(scopeRedlineRequests(redlineRowsAll, user), slaExtensionMap, 'redlines'), [redlineRowsAll, user, slaExtensionMap]);
+  const workbenchRows   = useMemo(() => applySlaExtensionsToRows(scopeWorkbenchTasks(workbenchRowsAll, user), slaExtensionMap, 'workbench'), [workbenchRowsAll, user, slaExtensionMap]);
+  const incentivePlanRows = useMemo(() => applySlaExtensionsToRows(scopeIncentivePlans(incentivePlanRowsAll, user), slaExtensionMap, 'incentive_plans'), [incentivePlanRowsAll, user, slaExtensionMap]);
   // Workbench is the only Deel source that intentionally surfaces resolved
   // rows (24h of COMPLETED + CLOSED) so the "RESOLVED TODAY" section can
   // render. Strip them from the cross-source "All" aggregates so the

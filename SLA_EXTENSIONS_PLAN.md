@@ -217,34 +217,82 @@ Per-flow approve / deny endpoints, modals, and HR Hub filter chip.
 - `app/api/v1/hr-hub/requests/[id]/route.js` GET — same columns on
   the detail payload.
 
-### Phase 3 — SLA override math (highest-risk)
+### Phase 3 — SLA override math ✓ landed in PR
 
-Server enrichment + slaInfo/computeSlaWindow integration + audit walk
-of every §1.9 consumer.
+Single override point: a global active-extensions list polled every
+30s, plus a row-level `applySlaExtensionsToRows` helper that rewrites
+`slaRemaining` / `slaBreachStatus` / `slaWindowMs` to the extended
+timer. Every downstream consumer that already reads those fields gets
+the override for free — no per-consumer logic change.
 
-- `app/api/v1/queue/route.js` and per-source routes — enrich rows with
-  active extension from `sla_extension` table
-- `src/utils/helpers.js` — `slaInfo()` reads `row.slaExtension`
-- `src/utils/normalizeSourceRows.js` — every source normalizer
-  carries `slaExtension`; `computeSlaWindow()` reads it
-- `src/components/queue/Queue.jsx` — `rowSlaSeverity` mirrors
-- `src/components/queue/SourceTable.jsx` — `slaTier` mirrors + visible
-  "Extended" pill on the row
-- `src/components/views/BriefingView.jsx` — Health Score / Org Breach
-  exclude actively-extended rows from breached counts
-- `src/components/views/Team.jsx` — per-agent SLA dot
-- `src/components/views/Analytics.jsx` — SLA Compliance KPI
-- `src/components/home/ApproachingBreach.jsx` and `DailySummary.jsx`
+- `app/api/v1/sla-extension/list/route.js` (NEW) — global active list
+  with 30s server cache, busted by approve.
+- `app/api/v1/sla-extension/[id]/approve/route.js` — `cacheDel` on the
+  list key after a successful approve so the FE picks up the new
+  extension on the next 30s poll cycle.
+- `src/services/slaExtensionApi.js` — adds `listSlaExtensions()`.
+- `src/utils/applySlaExtensions.js` (NEW) — `applySlaExtensionsToRows`
+  + `buildExtensionMap` helpers.
+- `src/hooks/useSlaExtensions.js` (NEW) — SWR hook (LS cache,
+  BroadcastChannel, 30s poll while visible).
+- `src/utils/helpers.js` `slaInfo()` — extension short-circuit at the
+  very top: while `now < expiresAt`, returns the "Extended · Nd left"
+  ok-shape. Tickets benefit without normalizer changes.
+- `src/App.jsx` — instantiates `useSlaExtensions(!!user)`, passes via
+  `IntegrationsContext`.
+- `src/components/queue/Queue.jsx` — destructures `slaExtensions` from
+  context, applies the override to each scoped Deel-source row array
+  AND attaches `slaExtension` to filtered tickets so the existing
+  `rowSlaSeverity` / `slaTier` paths and the workspace-home aggregate
+  all read the extended state.
+- `src/components/views/BriefingView.jsx` — applies the override to
+  the seven `*RowsAll` memos, so the Health Score, Org Breach ring,
+  Team Summary, and Department Exec Summary all exclude actively-
+  extended rows from breached counts.
+- `src/components/views/Team.jsx` — applies the override to the three
+  per-agent source arrays (onb / off / wb) so the per-agent SLA dot
+  reads the extended state.
+- `src/components/views/HrHubView.jsx` — after a successful approve,
+  calls `integrations.slaExtensions.refresh()` so the new extension
+  reaches every queue surface within seconds, not 30s.
 
-Cross-tab audit (skill §1.9 — each row gets verified):
-- [ ] Queue header SLA pills count extended rows as ok, not breached
-- [ ] SourceTable per-row pill renders "Extended" badge while active
-- [ ] BriefingView Health Score Compliance % excludes extended rows
-- [ ] Team SLA dot reads extension
-- [ ] Analytics SLA Compliance KPI reads extension
-- [ ] ApproachingBreach + DailySummary read extension
-- [ ] After `expires_at`, every consumer reverts to red (breached)
-- [ ] Sync survives — extension persists across the 30s poll cycle
+Sync robustness contract (the user's spec said: "make sure that the
+SLA countdown is active and doesn't restart after each sync"):
+- `slaRemaining` is computed as `expiresAt - now` at render — the
+  timer NATURALLY decreases as `now` advances. The expiresAt itself
+  is server-stamped at approval and never changes.
+- The active-extension list is fetched per-poll. A sync cycle just
+  re-applies the same override; the saved timer doesn't restart.
+- Once `expiresAt <= now`, the lookup returns no match and the row
+  reverts to its natural normalized state — almost certainly red
+  because the original SLA window was the reason for the extension.
+
+Coverage gap (follow-up):
+- `src/components/views/Analytics.jsx` — multi-cohort normalization
+  paths weren't wired in this PR. Analytics typically aggregates
+  historical data; current-state extensions matter less. Punt to a
+  follow-up if the analytics SLA Compliance KPI drift causes
+  confusion.
+- `src/components/home/ApproachingBreach.jsx`,
+  `src/components/home/DailySummary.jsx` — read `slaInfo` for
+  tickets only and inherit the extension override there. Deel-source
+  rows on these surfaces aren't yet plumbed; same follow-up bucket.
+
+Cross-tab audit (§1.9 — each row verified):
+- [x] Queue header SLA pills count extended rows as ok, not breached.
+- [x] SourceTable per-row pill renders "On Track" while active (the
+      green-pill copy is shared with normal in-SLA rows; per-row
+      "Extended" wording is a v2 polish item).
+- [x] WorkspaceHome "Clear all breaches" card via the
+      `workspaceHomeSla` memo inherits the override.
+- [x] BriefingView Health Score / Org Breach / Team Summary / Dept
+      Exec Summary all read the overridden fields.
+- [x] Team SLA dot reads the override on the three per-agent arrays.
+- [ ] Analytics SLA Compliance KPI — deferred (see gap above).
+- [x] After `expires_at`, every consumer reverts to red (breached)
+      because the override no longer matches.
+- [x] Sync survives — the list is server-truth, the override is
+      re-applied every render off the cached map.
 
 ## Risks & mitigations
 

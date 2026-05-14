@@ -31,6 +31,7 @@ import {
   APPROVED_DAYS_MAX,
 } from '../../../../../../src/lib/sla-extension-helpers';
 import { memberByEmail } from '../../../../../../src/lib/hide-task-helpers';
+import { cacheDel } from '../../../../../../src/lib/server-cache';
 
 function isUuid(s) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s || ''));
@@ -142,6 +143,12 @@ export async function POST(req, { params }) {
       { status: r.status, requestedDays: r.sla_ext_requested_days },
       { status: 'resolved', approvedDays }, client);
   });
+
+  // Bust the active-extensions list cache so the next FE poll picks up
+  // the new entry on the very next /api/v1/sla-extension/list response
+  // (otherwise the 30s server-cache window would mask the new extension
+  // until it expired naturally).
+  cacheDel('sla_extension_list');
 
   if (r.created_by_email) {
     try {
