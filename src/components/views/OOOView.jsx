@@ -264,6 +264,42 @@ function OOOView({ user, setView, addToast }) {
     [filteredEvents, events, selectedEventId],
   );
 
+  // Emails the calendar should ALWAYS render as a row, even when they
+  // have zero events in the current window. Always includes the caller
+  // (so a newly-added member sees themselves on first login — Ines
+  // Barata 2026-05-14 bug). On the 'team' lens, also includes everyone
+  // in the caller's direct team (same managerEmail) so freshly-added
+  // teammates appear immediately rather than only after their first
+  // submission. Other lenses keep the events-first behaviour to avoid
+  // clutter.
+  const calendarAlwaysShowEmails = useMemo(() => {
+    const set = new Set();
+    const callerEmail = String(user?.email || '').toLowerCase();
+    if (callerEmail) set.add(callerEmail);
+    if (lens === LENS_IDS.TEAM && Array.isArray(members)) {
+      const callerMember = members.find(m => String(m?.email || '').toLowerCase() === callerEmail);
+      if (callerMember) {
+        const callerAccess = String(callerMember.access || '').toLowerCase();
+        const callerManagerEmail = String(callerMember.managerEmail || '').toLowerCase() || null;
+        // The team root is callerMember.email when the caller is a
+        // manager (everyone reports to them), and callerManagerEmail
+        // otherwise (everyone shares the same boss).
+        const teamRoot = (callerAccess === 'team_lead' || callerAccess === 'regional_manager' || callerAccess === 'admin')
+          ? callerEmail
+          : callerManagerEmail;
+        if (teamRoot) {
+          for (const m of members) {
+            if (!m || m.isDeleted) continue;
+            const mgr = String(m.managerEmail || '').toLowerCase() || null;
+            const me = String(m.email || '').toLowerCase();
+            if (mgr === teamRoot || me === teamRoot) set.add(me);
+          }
+        }
+      }
+    }
+    return set;
+  }, [user?.email, lens, members]);
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* ── Header ──────────────────────────────────────────────────── */}
@@ -488,6 +524,7 @@ function OOOView({ user, setView, addToast }) {
             to={to}
             todayIso={todayIso}
             onSelectEvent={ev => setSelectedEventId(ev?.id || null)}
+            alwaysShowEmails={calendarAlwaysShowEmails}
           />
         ) : (
           <TableMode
