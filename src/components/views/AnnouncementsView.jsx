@@ -358,9 +358,9 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
   };
 
   const handleSend=async (payload)=>{
-    const {type,title,body,target,priority,status,isPopup,imageUrl,link,soundKey,scheduledFor,urgentOverride} = payload;
+    const {type,title,body,target,priority,status,isPopup,imageUrl,link,soundKey,scheduledFor} = payload;
     const now=new Date().toISOString().slice(0,10);
-    const draft={type,title,body,target,priority,isPopup:isPopup||false,imageUrl:imageUrl||'',link:link||'',soundKey:soundKey||'chime',scheduledFor:scheduledFor||null,urgentOverride:urgentOverride||false,author:{id:user.id,name:user.name}};
+    const draft={type,title,body,target,priority,isPopup:isPopup||false,imageUrl:imageUrl||'',link:link||'',soundKey:soundKey||'chime',scheduledFor:scheduledFor||null,author:{id:user.id,name:user.name}};
     try {
       if(editDraft){
         if(apiUpdate) await apiUpdate(editDraft.id, draft);

@@ -6,7 +6,7 @@ import { canApproveAnnouncementRequests } from '../../../../../../src/lib/announ
 import { publishFromRequest, recordAudit } from '../../../../../../src/lib/announcementFlow';
 
 // POST /api/v1/announcement-requests/:id/approve
-//   Body: { scheduledFor?: ISOString | null, urgentOverride?: boolean,
+//   Body: { scheduledFor?: ISOString | null,
 //           overrideEdits?: { title?, body?, target?, priority?, isPopup?,
 //                             imageUrl?, link?, soundKey?, type? },
 //           publishImmediately?: boolean }
@@ -23,13 +23,16 @@ import { publishFromRequest, recordAudit } from '../../../../../../src/lib/annou
 //       stage and publishes inline. Same semantics as the legacy
 //       one-shot approve. Useful for urgent fixes / internal notices
 //       that don't need a Slack mirror.
-//     * Publishing (either path) checks rate limits unless
-//       urgentOverride === true.
 //     * On success:
 //         two-stage:    status='awaiting_post', awaiting_post_at=NOW().
 //         immediate:    status='approved', published_id + published_at set.
 //     * Records audit events: edited (if overrides), approved, then
 //       awaiting_post | scheduled | published.
+//
+// 2026-05-14 — Publishing rate limits + the urgent-override bypass were
+// removed (Laura Llopis feedback). The `urgent_override` request column
+// is kept but always written as FALSE so downstream callers / audit
+// queries that still read it see a stable value.
 export async function POST(req, { params }) {
   try {
     const user = getAuthUser(req);
@@ -121,24 +124,10 @@ export async function POST(req, { params }) {
     } else if (r.scheduled_for) {
       sendAt = new Date(r.scheduled_for);
     }
-    const urgentOverride = Boolean(body.urgentOverride ?? r.urgent_override);
-
-    // An approver bypassing the 2/day + 4h-gap rate limits must record a
-    // reason. The reason lands in the audit log, so anyone auditing an
-    // out-of-policy publication later has a one-line explanation. Accepts
-    // body.urgentOverrideReason; falls back to the request's
-    // rejection_reason column (unused in the approve path) for older
-    // clients, with a short default when nothing is provided.
-    const urgentOverrideReason = urgentOverride
-      ? String(body.urgentOverrideReason || '').trim()
-      : '';
-    if (urgentOverride && urgentOverrideReason.length < 5) {
-      return NextResponse.json(
-        { error: 'An urgent-override reason (≥5 chars) is required to bypass publishing rate limits' },
-        { status: 400 }
-      );
-    }
-
+    // urgent_override removed 2026-05-14 — column is still in the schema
+    // but no longer driven by the request body. We always write FALSE so
+    // any audit query keyed on this column sees consistent data going
+    // forward.
     const publishImmediately = body.publishImmediately === true;
     const scheduledISO = sendAt && sendAt.getTime() > Date.now() ? sendAt.toISOString() : null;
 
@@ -155,16 +144,15 @@ export async function POST(req, { params }) {
            decided_at = NOW(),
            awaiting_post_at = NOW(),
            scheduled_for = $4,
-           urgent_override = $5,
-           type = $6, title = $7, body = $8, target = $9, target_group_id = $10,
-           priority = $11,
-           is_popup = $12, image_url = $13, link = $14, sound_key = $15,
+           urgent_override = FALSE,
+           type = $5, title = $6, body = $7, target = $8, target_group_id = $9,
+           priority = $10,
+           is_popup = $11, image_url = $12, link = $13, sound_key = $14,
            updated_at = NOW()
-         WHERE id = $16`,
+         WHERE id = $15`,
         [
           user.id || null, user.email, user.name || null,
           scheduledISO,
-          urgentOverride,
           merged.type, merged.title, merged.body, merged.target,
           merged.target === 'group' ? (merged.target_group_id || null) : null,
           merged.priority,
@@ -173,8 +161,6 @@ export async function POST(req, { params }) {
         ],
       );
       await recordAudit(id, user, 'approved', {
-        urgentOverride,
-        urgentOverrideReason: urgentOverride ? urgentOverrideReason : undefined,
         scheduledFor: scheduledISO,
         awaitingPost: true,
       });
@@ -192,25 +178,10 @@ export async function POST(req, { params }) {
     // Override path — publishImmediately=true. Behaves like the legacy
     // one-shot approve: create the announcement row inline and mark the
     // request approved.
-    let published;
-    try {
-      published = await publishFromRequest(merged, {
-        sendAt,
-        urgentOverride,
-        // Threaded through 2026-05-13 so the [announcementFlow]
-        // urgent-override bypass log stops reading `reason: (none)`.
-        // Validated already at line ~135 (≥5 chars when urgentOverride
-        // is true), so by the time it reaches publishFromRequest it's
-        // a real string the audit can rely on.
-        urgentOverrideReason: urgentOverride ? urgentOverrideReason : undefined,
-        actor: user,
-      });
-    } catch (e) {
-      if (e.code === 'RATE_LIMIT') {
-        return NextResponse.json({ error: e.message, code: 'RATE_LIMIT' }, { status: 409 });
-      }
-      throw e;
-    }
+    const published = await publishFromRequest(merged, {
+      sendAt,
+      actor: user,
+    });
 
     await query(
       `UPDATE announcement_requests SET
@@ -218,18 +189,17 @@ export async function POST(req, { params }) {
          decided_by_id = $1, decided_by_email = $2, decided_by_name = $3,
          decided_at = NOW(),
          scheduled_for = $4,
-         urgent_override = $5,
-         type = $6, title = $7, body = $8, target = $9, target_group_id = $10,
-         priority = $11,
-         is_popup = $12, image_url = $13, link = $14, sound_key = $15,
-         published_id = $16,
-         published_at = CASE WHEN $17::timestamptz IS NULL THEN NOW() ELSE NULL END,
+         urgent_override = FALSE,
+         type = $5, title = $6, body = $7, target = $8, target_group_id = $9,
+         priority = $10,
+         is_popup = $11, image_url = $12, link = $13, sound_key = $14,
+         published_id = $15,
+         published_at = CASE WHEN $16::timestamptz IS NULL THEN NOW() ELSE NULL END,
          updated_at = NOW()
-       WHERE id = $18`,
+       WHERE id = $17`,
       [
         user.id || null, user.email, user.name || null,
         scheduledISO,
-        urgentOverride,
         merged.type, merged.title, merged.body, merged.target,
         merged.target === 'group' ? (merged.target_group_id || null) : null,
         merged.priority,
@@ -241,8 +211,6 @@ export async function POST(req, { params }) {
     );
 
     await recordAudit(id, user, 'approved', {
-      urgentOverride,
-      urgentOverrideReason: urgentOverride ? urgentOverrideReason : undefined,
       scheduledFor: scheduledISO,
       publishImmediately: true,
     });

@@ -96,8 +96,8 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
   const [rejectionDraft, setRejectionDraft] = useState('');
   const [questionDraft, setQuestionDraft] = useState('');
   const [busy, setBusy] = useState(false);
-  const [urgentOverrideLocal, setUrgentOverrideLocal] = useState(false);
-  const [urgentOverrideReasonLocal, setUrgentOverrideReasonLocal] = useState('');
+  // urgent-override state removed 2026-05-14 — publishing rate limits
+  // are gone, so there's nothing left to override.
   // Approver edit mode — when true, reveals inline editable fields so the
   // approver can adjust wording/pictures/schedule/popup mode before approving.
   const [editMode, setEditMode] = useState(false);
@@ -182,16 +182,10 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
   // yet. The requester posts on Slack, then hits "Publish on Ops Hub"
   // (handler below) to complete the release.
   const handleApprove = () => {
-    if (urgentOverrideLocal && urgentOverrideReasonLocal.trim().length < 5) {
-      if (addToast) addToast('warn', 'Reason required', 'Urgent override needs a reason of at least 5 characters');
-      return;
-    }
     const overrideEdits = editMode ? { ...edits } : {};
     const scheduledForOverride = scheduledForLocal ? localInputToIso(scheduledForLocal) : null;
     runWithBusy(
       () => approve(selectedId, {
-        urgentOverride: urgentOverrideLocal,
-        urgentOverrideReason: urgentOverrideLocal ? urgentOverrideReasonLocal.trim() : '',
         scheduledFor: scheduledForOverride,
         overrideEdits,
         publishImmediately: false,
@@ -207,15 +201,9 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
   // Same semantics as the legacy one-shot approve. Useful for urgent
   // fixes or internal notices that don't need a Slack mirror.
   const handleApproveAndPublishNow = () => {
-    if (urgentOverrideLocal && urgentOverrideReasonLocal.trim().length < 5) {
-      if (addToast) addToast('warn', 'Reason required', 'Urgent override needs a reason of at least 5 characters');
-      return;
-    }
     const overrideEdits = editMode ? { ...edits } : {};
     runWithBusy(
       () => approve(selectedId, {
-        urgentOverride: urgentOverrideLocal,
-        urgentOverrideReason: urgentOverrideLocal ? urgentOverrideReasonLocal.trim() : '',
         scheduledFor: null, // force immediate publish
         overrideEdits,
         publishImmediately: true,
@@ -335,7 +323,6 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
                 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                   <Badge status={r.status} />
-                  {r.urgentOverride && <span style={{ fontSize: 10, fontWeight: 700, color: '#b02020', textTransform: 'uppercase', letterSpacing: '.02em' }}>Urgent</span>}
                   {r.scheduledFor && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}><i className="bi-clock" style={{ marginRight: 4 }}></i>{new Date(r.scheduledFor).toLocaleString()}</span>}
                 </div>
                 <div style={{ fontWeight: 600, color: 'var(--text)', fontSize: 14, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title}</div>
@@ -356,7 +343,6 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
               <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                   <Badge status={detail.item.status} />
-                  {detail.item.urgentOverride && <span style={{ fontSize: 10, fontWeight: 700, color: '#b02020', textTransform: 'uppercase', letterSpacing: '.02em' }}>Urgent override</span>}
                   {detail.item.scheduledFor && <span style={{ fontSize: 11, color: 'var(--text-muted)' }}><i className="bi-calendar-event" style={{ marginRight: 4 }}></i>Scheduled {formatTime(detail.item.scheduledFor)}</span>}
                   <button onClick={() => setSelectedId(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 16 }} aria-label="Close"><i className="bi-x-lg"></i></button>
                 </div>
@@ -527,22 +513,8 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
                       )}
                     </div>
 
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 6 }}>
-                      <input type="checkbox" checked={urgentOverrideLocal} onChange={e => setUrgentOverrideLocal(e.target.checked)} />
-                      Urgent — override the 2/day + 4h-gap limits
-                    </label>
-                    {urgentOverrideLocal && (
-                      <div style={{ marginBottom: 10 }}>
-                        <input
-                          type="text"
-                          value={urgentOverrideReasonLocal}
-                          onChange={e => setUrgentOverrideReasonLocal(e.target.value)}
-                          placeholder="Reason for bypassing the limits (required, ≥ 5 characters)"
-                          style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 10px', fontSize: 12, background: 'var(--surface)', fontFamily: 'inherit' }}
-                          maxLength={500}
-                        />
-                      </div>
-                    )}
+                    {/* Urgent override block removed 2026-05-14 along
+                        with the publishing rate limits it bypassed. */}
                     {/* Two-stage approve (2026-05-12). Primary button releases
                         the request to the requester for Slack-first posting;
                         secondary override publishes inline without Slack

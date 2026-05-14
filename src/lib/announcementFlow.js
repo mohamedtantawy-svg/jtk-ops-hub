@@ -7,62 +7,13 @@ import { query } from './db';
 export const VALID_TARGETS = ['all', 'global', 'emea', 'apac', 'americas', 'nam', 'latam', 'leaders', 'group'];
 export const VALID_TYPES = ['announce', 'kudos', 'info', 'general', 'alert'];
 
-// Publishing rate limits
-export const MAX_PUBLISHED_PER_DAY = 2;
-export const MIN_GAP_HOURS = 4;
-
-/**
- * Check whether publishing `at` (Date) would violate rate limits.
- * Counts 'sent' and 'scheduled' announcements whose effective publish time
- * falls within the last 24h. Returns { ok, reason } — reason is a
- * human-readable string suitable for surfacing to approvers in the UI.
- */
-export async function checkPublishingRules(at) {
-  const target = at instanceof Date ? at : new Date(at);
-  if (Number.isNaN(target.getTime())) {
-    return { ok: false, reason: 'Invalid publish time' };
-  }
-
-  // Count published + scheduled announcements whose effective publish time
-  // is within a rolling 24h window centred on the candidate time. We count
-  // both past (sent) and future (scheduled) to avoid double-booking a day.
-  const { rows: dayRows } = await query(
-    `SELECT COUNT(*)::int AS n
-       FROM announcements
-      WHERE status IN ('sent', 'scheduled')
-        AND COALESCE(sent_at, scheduled_for) >= $1::timestamptz - interval '24 hours'
-        AND COALESCE(sent_at, scheduled_for) <= $1::timestamptz + interval '24 hours'`,
-    [target.toISOString()]
-  );
-  const perDay = dayRows[0]?.n || 0;
-  if (perDay >= MAX_PUBLISHED_PER_DAY) {
-    return {
-      ok: false,
-      reason: `Daily limit reached: ${MAX_PUBLISHED_PER_DAY} announcements already within 24 h of that time.`,
-    };
-  }
-
-  // Nearest neighbour — either past sent_at or future scheduled_for
-  const { rows: gapRows } = await query(
-    `SELECT ABS(EXTRACT(EPOCH FROM (COALESCE(sent_at, scheduled_for) - $1::timestamptz))) AS secs
-       FROM announcements
-      WHERE status IN ('sent', 'scheduled')
-        AND COALESCE(sent_at, scheduled_for) IS NOT NULL
-      ORDER BY secs ASC
-      LIMIT 1`,
-    [target.toISOString()]
-  );
-  const nearestSecs = gapRows[0] ? Number(gapRows[0].secs) : Infinity;
-  if (nearestSecs < MIN_GAP_HOURS * 3600) {
-    const hours = (nearestSecs / 3600).toFixed(1);
-    return {
-      ok: false,
-      reason: `Too close to another announcement (${hours} h away). Minimum gap is ${MIN_GAP_HOURS} h.`,
-    };
-  }
-
-  return { ok: true };
-}
+// Publishing rate limits removed 2026-05-14 (Laura Llopis feedback
+// "Urgent override button removal for announcements"). The 2-per-day +
+// 4-hour-gap caps used to block legitimate publish flows whenever a
+// busy day needed more than two announcements, which is why the urgent
+// override existed in the first place. Removing the limit makes the
+// override redundant — see the now-deleted checkPublishingRules and
+// the publishFromRequest signature below for the cleanup.
 
 /**
  * Insert a row into the request audit log. Non-throwing — audit failures
@@ -176,35 +127,16 @@ export async function promoteDueScheduled() {
  * Returns the announcements row created. Caller is responsible for
  * updating the request row afterwards and recording audit.
  *
- * Rate-limit checks happen here (skippable via urgentOverride).
+ * Rate-limit gating and the urgent-override bypass were removed
+ * 2026-05-14 (Laura Llopis feedback). Once the steps are completed,
+ * the publish proceeds.
  */
 export async function publishFromRequest(request, options = {}) {
   const sendAt = options.sendAt instanceof Date ? options.sendAt : null;
-  const urgentOverride = Boolean(options.urgentOverride);
-  const urgentOverrideReason = options.urgentOverrideReason
-    ? String(options.urgentOverrideReason)
-    : '';
   const actor = options.actor || {};
   const immediate = !sendAt || sendAt.getTime() <= Date.now();
 
   const effective = immediate ? new Date() : sendAt;
-
-  if (!urgentOverride) {
-    const check = await checkPublishingRules(effective);
-    if (!check.ok) {
-      const err = new Error(check.reason);
-      err.code = 'RATE_LIMIT';
-      throw err;
-    }
-  } else {
-    // Intentional: rate-limit bypasses are low-volume and must be traceable
-    // in server logs even when the direct-publish path doesn't write an
-    // announcement_request_audit row. The reason string arrives validated
-    // (min length) from the caller.
-    console.log(
-      `[announcementFlow] urgent-override bypass by ${actor.email || 'unknown'} — reason: ${urgentOverrideReason || '(none)'}`
-    );
-  }
 
   const status = immediate ? 'sent' : 'scheduled';
   const sent_at = immediate ? effective : null;
