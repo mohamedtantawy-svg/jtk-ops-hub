@@ -1139,6 +1139,29 @@ const App=()=>{
           try { window.dispatchEvent(new CustomEvent('leader-alerts:openDetail', { detail })); }
           catch {}
         }, 60);
+      } else if (n.linkView === 'ooo' && n.linkId) {
+        // OOO / Handover deep-link: handover-server.js writes
+        // link_view='ooo' + link_id=handoverId on every handover
+        // notification (assignment / approval / accept / decline /
+        // reminder). Without this branch the bell click silently
+        // no-op'd, so users had to navigate to OOO and click on
+        // the calendar to find the row — Sarah Suge 2026-05-13
+        // feedback "OOO Link to Accept Handover not Working".
+        //
+        // The detail slide-out is keyed on `time_off_event_id`, not
+        // the handover id. OOOView listens for this event and
+        // resolves the mapping by scanning the loaded events for
+        // event.handover?.id === handoverId. We defer the dispatch
+        // one tick so the view has mounted, and OOOView's listener
+        // also retries when its events list updates so a deep-link
+        // from a fresh login still resolves once the events fetch
+        // returns.
+        setView('ooo');
+        const detail = { handoverId: n.linkId };
+        setTimeout(() => {
+          try { window.dispatchEvent(new CustomEvent('ooo:openDetail', { detail })); }
+          catch {}
+        }, 60);
       } else if (n.linkView === 'feedback' && n.linkId) {
         // Feedback board deep-link: flip the view + ask FeedbackView to
         // expand the row + scroll its comment thread into view.
