@@ -80,20 +80,46 @@ export default function CommentReactions({
   const [busy, setBusy] = useState(false);
   const pickerRef = useRef(null);
   const triggerRef = useRef(null);
-  // Auto-flip up when the trigger is near the bottom of the viewport
-  // (announcement modal comments sit just above a sticky reaction strip
-  // that the downward picker would overlap with).
-  const [pickerDir, setPickerDir] = useState('down');
+  // Render the picker with position:fixed anchored to the trigger rect.
+  // Absolute positioning was being painted UNDER the announcement modal's
+  // `<textarea>` (the textarea sat in a sibling stacking context with
+  // implicit ordering, and our z-index:30 was local to the picker's own
+  // stacking context). Fixed + a high z-index sidesteps the issue and
+  // makes the picker work consistently across all comment surfaces.
+  // Also auto-flips upward when the trigger sits near the viewport
+  // bottom (announcement modal comments are right above a sticky
+  // announcement-level reaction strip).
+  const [pickerPos, setPickerPos] = useState(null);
   useEffect(() => {
-    if (!pickerOpen) return;
-    const r = triggerRef.current?.getBoundingClientRect();
-    if (r) {
+    if (!pickerOpen) { setPickerPos(null); return; }
+    const compute = () => {
+      const r = triggerRef.current?.getBoundingClientRect();
+      if (!r) return;
       const spaceBelow = window.innerHeight - r.bottom;
-      setPickerDir(spaceBelow < 200 ? 'up' : 'down');
-    }
-    const h = (e) => { if (pickerRef.current && !pickerRef.current.contains(e.target)) setPickerOpen(false); };
+      const dir = spaceBelow < 200 ? 'up' : 'down';
+      setPickerPos({
+        dir,
+        left: Math.round(r.left),
+        // when flipping up we anchor by the trigger's TOP so CSS knows
+        // to use `bottom = innerHeight - triggerTop + 6`
+        top: dir === 'down' ? Math.round(r.bottom + 6) : null,
+        bottom: dir === 'up' ? Math.round(window.innerHeight - r.top + 6) : null,
+      });
+    };
+    compute();
+    const h = (e) => {
+      if (pickerRef.current?.contains(e.target)) return;
+      if (triggerRef.current?.contains(e.target)) return;
+      setPickerOpen(false);
+    };
     document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
+    window.addEventListener('scroll', compute, true);
+    window.addEventListener('resize', compute);
+    return () => {
+      document.removeEventListener('mousedown', h);
+      window.removeEventListener('scroll', compute, true);
+      window.removeEventListener('resize', compute);
+    };
   }, [pickerOpen]);
 
   const myEmailLc = (currentUserEmail || '').toLowerCase();
@@ -180,13 +206,14 @@ export default function CommentReactions({
         >
           <i className="bi-emoji-smile" style={{ fontSize: compact ? 11 : 12 }} />
         </button>
-        {pickerOpen && (
+        {pickerOpen && pickerPos && (
           <div style={{
-            position: 'absolute',
-            ...(pickerDir === 'up'
-              ? { bottom: 'calc(100% + 6px)' }
-              : { top: 'calc(100% + 6px)' }),
-            left: 0, zIndex: 30,
+            position: 'fixed',
+            left: pickerPos.left,
+            ...(pickerPos.dir === 'up'
+              ? { bottom: pickerPos.bottom }
+              : { top: pickerPos.top }),
+            zIndex: 99999,
             display: 'flex', flexDirection: 'column', gap: 6,
             padding: 8, borderRadius: 10,
             background: 'var(--surface)', border: '1px solid var(--border)',
