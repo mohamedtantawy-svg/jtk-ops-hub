@@ -411,6 +411,38 @@ export async function POST(req) {
     }
   }
 
+  // Team Lead On Call auto-assignment (Mohamed 2026-05-14 spec). For
+  // hr_request and hr_reporting flows, if the caller didn't explicitly
+  // pass an `assigneeEmail`, default to the current Team Lead On Call.
+  // `assignee_manually_set` stays FALSE so the next TLOC rotation
+  // bulk-reassigns this row; the moment anyone explicitly PATCHes the
+  // assignee on this row, the [id]/route.js handler flips that flag to
+  // TRUE and rotation skips it.
+  //
+  // We read directly from `app_settings` (with COALESCE to handle the
+  // never-been-set case) instead of importing the settings route. Keeps
+  // the request POST a single network hop.
+  let assigneeManuallySet = !!body.assigneeEmail;
+  if ((flow === 'hr_request' || flow === 'hr_reporting') && !assigneeEmail) {
+    try {
+      const tlocRes = await query(
+        "SELECT value FROM app_settings WHERE key = 'team_lead_on_call'",
+      );
+      const tloc = tlocRes.rows[0]?.value || null;
+      const tlocEmail = tloc?.email ? String(tloc.email).toLowerCase() : null;
+      if (tlocEmail) {
+        assigneeEmail = tlocEmail;
+        assigneeName = tloc.name || memberByEmail(tlocEmail)?.name || null;
+        assigneeManuallySet = false;
+      }
+    } catch (err) {
+      // Best-effort: if the lookup fails (no DB, missing row), fall
+      // through to a null assignee — the request still creates, just
+      // lands in the unassigned pool same as before this feature.
+      console.warn('[hr-hub/requests] TLOC lookup failed, falling back to null assignee:', err.message);
+    }
+  }
+
   const insert = await query(
     `INSERT INTO hr_hub_request
        (flow, priority,
@@ -421,7 +453,8 @@ export async function POST(req) {
         assignee_email, assignee_name,
         team_lead_email, cc_email,
         task_source, task_id, task_url, task_subject,
-        sla_ext_requested_days, sla_ext_reason_code, sla_ext_acknowledged)
+        sla_ext_requested_days, sla_ext_reason_code, sla_ext_acknowledged,
+        assignee_manually_set)
      VALUES ($1, $2,
              $3, $4, $5,
              $6, $7, $8,
@@ -430,7 +463,8 @@ export async function POST(req) {
              $13, $14,
              $15, $16,
              $17, $18, $19, $20,
-             $21, $22, $23)
+             $21, $22, $23,
+             $24)
      RETURNING id, status, created_at`,
     [
       flow, priority,
@@ -442,6 +476,7 @@ export async function POST(req) {
       teamLeadEmail || null, ccEmail || null,
       taskSource, taskId, taskUrl, taskSubject,
       slaExtRequestedDays, slaExtReasonCode, slaExtAcknowledged,
+      assigneeManuallySet,
     ],
   );
 

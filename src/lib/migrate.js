@@ -1178,6 +1178,20 @@ ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS sla_ext_reason_code    VARCH
 ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS sla_ext_acknowledged   BOOLEAN;
 ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS sla_ext_approved_days  SMALLINT;
 
+-- Team Lead On Call (2026-05-14) — auto-assignment hand-off marker.
+-- When an HR Request or HR Reporting row is auto-assigned to the current
+-- Team Lead On Call at create time, assignee_manually_set stays FALSE.
+-- Any subsequent explicit assignee change (via the request detail panel)
+-- flips it to TRUE. The /settings/team-lead-on-call PUT handler reads
+-- this flag during rotation: it bulk-reassigns all FALSE rows that were
+-- assigned to the previous TLOC, but leaves manually-changed rows alone.
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS assignee_manually_set BOOLEAN DEFAULT FALSE;
+-- Partial index for the rotation bulk-update query (cheap because the
+-- false set is the common case and we filter on flow + assignee_email
+-- before this).
+CREATE INDEX IF NOT EXISTS idx_hr_hub_request_auto_assign
+  ON hr_hub_request(flow, assignee_email) WHERE assignee_manually_set = FALSE;
+
 -- Phase 2 — the active hide list. Manager-approved entries land here and
 -- every queue's render path checks (task_source, task_id) against this
 -- table. UNIQUE so a duplicate approval can't double-insert.

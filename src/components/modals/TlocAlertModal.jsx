@@ -1,30 +1,27 @@
-// ── MocAlertModal ────────────────────────────────────────────────────────
-// Red / "scary" popup that fires when the current user becomes the
-// rotating Manager on Call (Mohamed 2026-05-07 spec). Dismiss closes
-// the modal; "Open Manager on Call view" navigates to Urgent Assist
-// scoped to All so the new MOC sees every active urgent-assist row
-// across the org.
+// ── TlocAlertModal ──────────────────────────────────────────────────────
+// Mirror of MocAlertModal for the Team Lead On Call rotation. Fires when
+// the current user becomes the rotating TLOC — either via their own
+// click on the picker or another teammate flipping the assignment.
 //
-// Detection + de-dup live in App.jsx (per-email lastAcknowledgedMocAt
-// in localStorage). This component is purely the visual surface — keep
-// its logic minimal so it stays render-safe under impersonation +
-// page-route transitions.
+// Visual + audio cue is identical to the MOC alert (Mohamed 2026-05-14
+// spec: "popup with a sound exactly the same to when the manager on
+// call changes"). Status colours differ slightly to telegraph "this is
+// the TL rotation, not the MOC" — the existing MOC modal uses pure red
+// because every urgent-assist routes to the MOC; the TLOC modal uses a
+// warmer amber/red because HR-Hub work is a calmer signal than urgent
+// assist. Both stay literal so they read the same in light + dark mode.
 
 import { useEffect } from 'react';
 import { playAlertSound } from '../../utils/playAlertSound';
 
-export default function MocAlertModal({ mocName, onDismiss, onOpenView }) {
-  // ESC closes — same affordance every other Ops Hub modal carries.
+export default function TlocAlertModal({ tlocName, onDismiss, onOpenView }) {
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onDismiss?.(); };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [onDismiss]);
 
-  // Three-tone alarm on mount — paired with the TLOC modal so the audio
-  // cue is identical when either rotating role lands on the current
-  // user (Mohamed spec 2026-05-14: "popup with a sound exactly the same
-  // to when the manager on call changes" — applied symmetrically here).
+  // Same three-tone alarm as the MOC modal.
   useEffect(() => { try { playAlertSound(); } catch {} }, []);
 
   return (
@@ -32,7 +29,7 @@ export default function MocAlertModal({ mocName, onDismiss, onOpenView }) {
       onClick={(e) => { if (e.target === e.currentTarget) onDismiss?.(); }}
       role="dialog"
       aria-modal="true"
-      aria-labelledby="moc-alert-title"
+      aria-labelledby="tloc-alert-title"
       style={{
         position: 'fixed', inset: 0, zIndex: 2000,
         background: 'rgba(15,23,42,0.55)',
@@ -47,14 +44,11 @@ export default function MocAlertModal({ mocName, onDismiss, onOpenView }) {
           borderRadius: 16,
           boxShadow: '0 12px 48px rgba(0,0,0,0.32)',
           overflow: 'hidden',
-          // Top banner uses the literal red so the alert reads "scary"
-          // in both light + dark mode — status semantics stay literal
-          // per the skill UI rule.
-          border: '1px solid #d42d35',
+          border: '1px solid #d97706',
         }}
       >
         <div style={{
-          background: 'linear-gradient(135deg, #d42d35 0%, #b91c1c 100%)',
+          background: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)',
           color: '#ffffff',
           padding: '20px 24px 18px',
           display: 'flex', alignItems: 'center', gap: 14,
@@ -65,22 +59,22 @@ export default function MocAlertModal({ mocName, onDismiss, onOpenView }) {
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             flexShrink: 0,
           }}>
-            <i className="bi-exclamation-triangle-fill" style={{ fontSize: 22 }} />
+            <i className="bi-broadcast-pin" style={{ fontSize: 22 }} />
           </div>
           <div style={{ minWidth: 0 }}>
-            <div id="moc-alert-title" style={{ fontSize: 17, fontWeight: 800, letterSpacing: '-0.01em', lineHeight: 1.2 }}>
-              You are the Manager on Call now
+            <div id="tloc-alert-title" style={{ fontSize: 17, fontWeight: 800, letterSpacing: '-0.01em', lineHeight: 1.2 }}>
+              You are the Team Lead on Call now
             </div>
             <div style={{ fontSize: 13, fontWeight: 500, marginTop: 4, opacity: 0.94 }}>
-              Good luck — every urgent-assist request routes to you until rotated.
+              New HR Requests and HR Reporting items will auto-route to you until rotated.
             </div>
           </div>
         </div>
         <div style={{ padding: '18px 24px 20px' }}>
           <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-            {mocName ? <>Hi <strong style={{ color: 'var(--text)' }}>{mocName.split(' ')[0]}</strong>, you've just been set as the Manager on Call.</> : null}
+            {tlocName ? <>Hi <strong style={{ color: 'var(--text)' }}>{tlocName.split(' ')[0]}</strong>, you&apos;ve just been set as the Team Lead on Call.</> : null}
             {' '}
-            Open the Manager on Call view to see the full queue — anyone can hand off later via the same picker.
+            Existing rows that were auto-assigned to the previous TLOC and weren&apos;t manually touched have been re-routed to you. Manually-assigned rows stay with their current owners.
           </div>
           <div style={{ display: 'flex', gap: 10, marginTop: 18, justifyContent: 'flex-end' }}>
             <button
@@ -102,15 +96,15 @@ export default function MocAlertModal({ mocName, onDismiss, onOpenView }) {
               style={{
                 height: 34, padding: '0 16px', borderRadius: 8,
                 border: 'none',
-                background: '#d42d35', color: '#ffffff',
+                background: '#d97706', color: '#ffffff',
                 fontSize: 13, fontWeight: 700,
                 cursor: 'pointer', fontFamily: 'inherit',
                 display: 'inline-flex', alignItems: 'center', gap: 6,
-                boxShadow: '0 1px 3px rgba(212,45,53,0.4)',
+                boxShadow: '0 1px 3px rgba(217,119,6,0.4)',
               }}
             >
               <i className="bi-broadcast-pin" style={{ fontSize: 12 }} />
-              Open Manager on Call view
+              Open HR Hub
             </button>
           </div>
         </div>

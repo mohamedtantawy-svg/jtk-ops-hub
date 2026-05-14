@@ -117,6 +117,7 @@ import UrgentAssistView from './components/views/UrgentAssistView';
 import CreateHrHubRequestModal from './components/modals/CreateHrHubRequestModal';
 import ManageMentionGroupsModal from './components/modals/ManageMentionGroupsModal';
 import MocAlertModal from './components/modals/MocAlertModal';
+import TlocAlertModal from './components/modals/TlocAlertModal';
 import CreateLeaderAlertModal from './components/modals/CreateLeaderAlertModal';
 import CreateUrgentAssistModal from './components/modals/CreateUrgentAssistModal';
 import { getLeaderAlertsUnackedCount } from './services/leaderAlertsApi';
@@ -934,6 +935,13 @@ const App=()=>{
   const [managerOnCall, setManagerOnCall] = useState(() => {
     try { const m = localStorage.getItem('ops_hub_manager_on_call'); return m ? JSON.parse(m) : { name: 'Omar Khalil', initials: 'OK', avatarUrl: 'https://api.dicebear.com/7.x/initials/svg?seed=Omar%20Khalil&backgroundColor=6b3fa0&textColor=ffffff&fontSize=40' }; } catch(e) { return { name: 'Omar Khalil', initials: 'OK', avatarUrl: 'https://api.dicebear.com/7.x/initials/svg?seed=Omar%20Khalil&backgroundColor=6b3fa0&textColor=ffffff&fontSize=40' }; }
   });
+  // Team Lead On Call — second rotating role (Mohamed 2026-05-14). No
+  // baked-in default; the pill renders only when set. Hydrates from
+  // localStorage for instant paint, then the 15s poll below confirms
+  // against the server.
+  const [teamLeadOnCall, setTeamLeadOnCall] = useState(() => {
+    try { const t = localStorage.getItem('ops_hub_team_lead_on_call'); return t ? JSON.parse(t) : null; } catch(e) { return null; }
+  });
   // createReportModal removed 2026-05-02 with the GMReportingView retirement.
 
   // ── Fetch supplementary data from BE on mount (escalations, projects, requests) ──
@@ -1512,6 +1520,7 @@ const App=()=>{
   useEffect(()=>{try{localStorage.setItem('ops_hub_user_access_map',JSON.stringify(userAccessMap));}catch(e){}},[userAccessMap]);
   useEffect(()=>{try{localStorage.setItem('ops_hub_dismissed_popups',JSON.stringify(dismissedPopups));}catch(e){}},[dismissedPopups]);
   useEffect(() => { try { localStorage.setItem('ops_hub_manager_on_call', JSON.stringify(managerOnCall)); } catch(e) {} }, [managerOnCall]);
+  useEffect(() => { try { localStorage.setItem('ops_hub_team_lead_on_call', JSON.stringify(teamLeadOnCall)); } catch(e) {} }, [teamLeadOnCall]);
 
   // ── Manager on Call: fetch from backend + poll every 15s for cross-user sync
   useEffect(() => {
@@ -1553,6 +1562,46 @@ const App=()=>{
     }).catch(err => console.warn('[managerOnCall] Failed to save:', err.message));
   }, []);
 
+  // ── Team Lead On Call — fetch + 15s poll, identical cadence to MOC.
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+    const fetchTloc = () => {
+      apiFetch('/settings/team-lead-on-call')
+        .then(data => {
+          if (!active) return;
+          // Server may return `null` when TLOC has never been set —
+          // we honour that as "no TLOC" and clear the pill.
+          if (data && data.name) {
+            setTeamLeadOnCall(prev => {
+              const sameName = prev?.name === data.name;
+              const sameEmail = (prev?.email || '') === (data.email || '');
+              const sameUpdatedAt = (prev?.updatedAt || null) === (data.updatedAt || null);
+              if (sameName && sameEmail && sameUpdatedAt) return prev;
+              return data;
+            });
+          } else {
+            setTeamLeadOnCall(prev => (prev == null ? prev : null));
+          }
+        })
+        .catch(() => {}); // silently fail — keep localStorage value
+    };
+    fetchTloc();
+    const interval = setInterval(fetchTloc, 15000);
+    return () => { active = false; clearInterval(interval); };
+  }, [user]);
+
+  // ── Handler to change Team Lead On Call — saves to backend; server
+  // side bulk-reassigns auto-assigned HR-Hub rows from the previous TL
+  // to the new one in the same transaction.
+  const handleChangeTeamLeadOnCall = useCallback((newTloc) => {
+    setTeamLeadOnCall(newTloc);
+    apiFetch('/settings/team-lead-on-call', {
+      method: 'PUT',
+      body: JSON.stringify(newTloc),
+    }).catch(err => console.warn('[teamLeadOnCall] Failed to save:', err.message));
+  }, []);
+
   // ── MOC assignment alert (Mohamed 2026-05-07) ────────────────────────────
   // When the current user becomes the Manager on Call — either via this
   // tab or another teammate flipping the assignment — fire a
@@ -1590,6 +1639,31 @@ const App=()=>{
       window.dispatchEvent(new CustomEvent('ops-hub:urgent-assist-open-all'));
     }
   }, [dismissMocAlert, setView]);
+
+  // ── TLOC assignment alert — mirror of the MOC alert. Same per-email
+  // ack key pattern + popup + sound (see MocAlertModal). Triggered when
+  // the current user becomes the new Team Lead On Call.
+  const [tlocAlert, setTlocAlert] = useState(null); // null | { tlocUpdatedAt, tlocName }
+  useEffect(() => {
+    if (!user?.email || !teamLeadOnCall) return;
+    const myEmail = String(user.email || '').toLowerCase();
+    const tlocEmail = String(teamLeadOnCall.email || '').toLowerCase();
+    const updatedAt = teamLeadOnCall.updatedAt || null;
+    if (!updatedAt || tlocEmail !== myEmail) return;
+    let lastAck = null;
+    try { lastAck = localStorage.getItem(`ops_hub_tloc_ack:${myEmail}`); } catch {}
+    if (lastAck === updatedAt) return;
+    setTlocAlert({ tlocUpdatedAt: updatedAt, tlocName: teamLeadOnCall.name || myEmail });
+  }, [user?.email, teamLeadOnCall]);
+  const dismissTlocAlert = useCallback(() => {
+    if (!tlocAlert) return;
+    try { localStorage.setItem(`ops_hub_tloc_ack:${(user?.email || '').toLowerCase()}`, tlocAlert.tlocUpdatedAt); } catch {}
+    setTlocAlert(null);
+  }, [tlocAlert, user?.email]);
+  const openTlocView = useCallback(() => {
+    dismissTlocAlert();
+    setView('hr-hub');
+  }, [dismissTlocAlert, setView]);
 
   // ── Clean up dismissed popups — only on login, not on every comms change ──
   // Removes IDs for announcements that no longer exist. Runs once when user
@@ -1853,7 +1927,7 @@ const App=()=>{
         </div>
       )}
       <div className="deel-content" data-region="main-content" aria-label="Main content" style={{display:'flex',overflowX:'hidden',overflowY:'auto',position:'relative',flex:1}}>
-          {view==='briefing'      &&perms?.canView('briefing')!==false &&(perms?.raw?.dataScope==='all_tasks'||perms?.raw?.dataScope==='regional_tasks'||perms?.raw?.dataScope==='team_tasks') &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={()=>{}} comms={comms} escalations={[]} setSubFilter={setSubFilter} requests={[]} projects={[]} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
+          {view==='briefing'      &&perms?.canView('briefing')!==false &&(perms?.raw?.dataScope==='all_tasks'||perms?.raw?.dataScope==='regional_tasks'||perms?.raw?.dataScope==='team_tasks') &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={()=>{}} comms={comms} escalations={[]} setSubFilter={setSubFilter} requests={[]} projects={[]} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall} teamLeadOnCall={teamLeadOnCall} onChangeTeamLeadOnCall={handleChangeTeamLeadOnCall} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
           {view==='lead-home' &&<div className="page-enter"><TeamLeadHome user={effectiveUser} tasks={tasks} setView={setView} managerOnCall={managerOnCall}/></div>}
           {view==='agent-home' &&<div className="page-enter"><AgentHome user={effectiveUser} tasks={tasks} setView={setView} comms={comms}/></div>}
           {view==='my-queue'      &&perms?.canView('my-queue')!==false     &&<div className="page-enter"><Queue user={effectiveUser} tasks={tasks} subFilter={subFilter}/></div>}
@@ -1886,6 +1960,7 @@ const App=()=>{
       {hrHubCreate   &&<CreateHrHubRequestModal initialFlow={hrHubCreate.initialFlow||null} onClose={()=>setHrHubCreate(null)} onCreated={(id,flow)=>{setHrHubCreate(null);setView('hr-hub');addToast?.({kind:'success',message:`Submitted to HR Hub${flow?` (${flow.replace('_',' ')})`:''}.`});}}/>}
       {mentionGroupsOpen&&<ManageMentionGroupsModal onClose={()=>setMentionGroupsOpen(false)}/>}
       {mocAlert && <MocAlertModal mocName={mocAlert.mocName} onDismiss={dismissMocAlert} onOpenView={openMocView} />}
+      {tlocAlert && <TlocAlertModal tlocName={tlocAlert.tlocName} onDismiss={dismissTlocAlert} onOpenView={openTlocView} />}
       {leaderAlertCreate&&<CreateLeaderAlertModal onClose={()=>setLeaderAlertCreate(false)} onCreated={(alert)=>{setLeaderAlertCreate(false);setView('leader-alerts');setLeaderAlertsRefreshNonce(n=>n+1);addToast?.({kind:'success',message:`Posted${alert?.title?`: "${alert.title.slice(0,60)}${alert.title.length>60?'…':''}"`:' alert'}.`});}}/>}
       {urgentAssistCreate&&<CreateUrgentAssistModal currentUser={effectiveUser} onClose={()=>setUrgentAssistCreate(false)} onCreated={(row)=>{setUrgentAssistCreate(false);setView('urgent-assist');setUrgentAssistRefreshNonce(n=>n+1);addToast?.({kind:'success',message:`Urgent Assist created${row?.subject?`: "${row.subject.slice(0,60)}${row.subject.length>60?'…':''}"`:''}.`});}}/>}
       {projectModal  &&<CreateProjectModal onConfirm={confirmProject} onClose={()=>setProjectModal(null)} project={typeof projectModal==='object'?projectModal:null} currentUser={effectiveUser}/>}

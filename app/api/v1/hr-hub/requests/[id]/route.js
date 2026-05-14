@@ -236,10 +236,16 @@ export async function PATCH(req, { params }) {
       const newName = newEmail ? (memberByEmail(newEmail)?.name || null) : null;
       updates.push(`assignee_email = $${p++}`); values.push(newEmail);
       updates.push(`assignee_name  = $${p++}`); values.push(newName);
+      // Mark as manually-assigned so the next Team Lead On Call
+      // rotation skips this row (Mohamed 2026-05-14 spec: "the
+      // assignment should change as well with exception to anything
+      // that has been assigned manually"). Idempotent — re-flipping a
+      // row already TRUE is a no-op.
+      updates.push(`assignee_manually_set = $${p++}`); values.push(true);
       logs.push({
         event: 'assignee_change',
         before: { assigneeEmail: existing.assignee_email },
-        after: { assigneeEmail: newEmail },
+        after: { assigneeEmail: newEmail, manuallySet: true },
       });
       after.assigneeEmail = newEmail;
       // Auto-follow: any new assignee starts following.
