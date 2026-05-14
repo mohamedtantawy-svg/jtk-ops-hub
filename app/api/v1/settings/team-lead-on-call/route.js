@@ -36,8 +36,14 @@ export async function GET(req) {
   const user = getAuthUser(req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
+  // cacheGet returns null on miss/expiry — match the MOC route's truthy
+  // check so a stale `null` doesn't shadow the DB read and erase the
+  // current TLOC on the FE side. The previous `!== undefined` predicate
+  // was always true (cacheGet never returns undefined), causing every
+  // refresh after the 5s TTL to short-circuit with `null` and the FE
+  // pill to revert to empty.
   const cached = cacheGet(CACHE_KEY, CACHE_TTL);
-  if (cached !== undefined) return NextResponse.json(cached);
+  if (cached) return NextResponse.json(cached);
 
   const db = await getDb();
   if (db) {
@@ -97,22 +103,27 @@ export async function PUT(req) {
           [JSON.stringify(value), user.email],
         );
 
-        // Bulk-reassign auto-routed HR Request / HR Reporting rows from
-        // the previous TLOC → new TLOC. Skip:
+        // Bulk-reassign every auto-routed HR Request / HR Reporting row
+        // to the new TLOC — not just rows previously assigned to the
+        // previous TLOC. The narrower "from prev → new" version left
+        // behind rows with NULL or stale assignees (pre-feature rows,
+        // rows created during a brief no-TLOC window) so the user could
+        // still see un-routed work in their queue. Skip:
         //   • Manually re-assigned rows (assignee_manually_set = TRUE).
-        //   • Already-resolved rows (no point updating a closed thread).
+        //   • Already-resolved or rejected rows.
+        //   • Rows already correctly pointing at the new TLOC.
         //   • The case where the previous TLOC is the new TLOC (no-op).
-        if (previousTlocEmail && previousTlocEmail !== value.email) {
+        if (value.email && previousTlocEmail !== value.email) {
           const { rowCount } = await client.query(
             `UPDATE hr_hub_request
                 SET assignee_email = $1,
                     assignee_name  = $2,
                     updated_at     = NOW()
               WHERE flow IN ('hr_request', 'hr_reporting')
-                AND LOWER(COALESCE(assignee_email, '')) = $3
                 AND assignee_manually_set = FALSE
-                AND status NOT IN ('resolved', 'rejected')`,
-            [value.email, value.name, previousTlocEmail],
+                AND status NOT IN ('resolved', 'rejected')
+                AND LOWER(COALESCE(assignee_email, '')) IS DISTINCT FROM $1`,
+            [value.email, value.name],
           );
           reassignedCount = rowCount || 0;
         }
