@@ -59,7 +59,17 @@ export function useOnboardingData(enabled = true, userEmail = null) {
         const res = await fetchDeelOnboarding();
         const fetched = res?.items || [];
         const now = Date.now();
-        if (fetched.length > 0 || itemsRef.current.length === 0) {
+        // User-triggered refresh (force=true) MUST overwrite the local
+        // items even when the server legitimately returns an empty result.
+        // Without this, reassigning the last row in your queue, hiding
+        // it, or any other action that drops the row out of your scope
+        // leaves the stale row painted forever — the guard was only
+        // intended to defend against transient empty responses on
+        // background polls. Jessica Fowler 2026-05-15 "Reassign is not
+        // working" bug repro: 1-row queue, reassign, modal closes, row
+        // stays — server response is correctly empty but the FE
+        // suppresses the update.
+        if (force || fetched.length > 0 || itemsRef.current.length === 0) {
           setItems(fetched);
           // Fire-and-forget IDB write — doesn't block the data path.
           idbSet(cacheKeyFor(userEmail), { items: fetched, ts: now }).catch(() => {});

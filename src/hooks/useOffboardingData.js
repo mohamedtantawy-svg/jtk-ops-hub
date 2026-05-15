@@ -66,7 +66,10 @@ export function useOffboardingData(enabled = true, userEmail = null) {
           lastFetchRef.current = now;
           return itemsRef.current;
         }
-        if (fetched.length > 0 || itemsRef.current.length === 0) {
+        // `force` lets user-triggered refreshes overwrite empty fetches —
+        // critical for any user action that legitimately empties the queue
+        // (see useOnboardingData comment + the Reassign-not-working repro).
+        if (force || fetched.length > 0 || itemsRef.current.length === 0) {
           setItems(fetched);
           idbSet(cacheKeyFor(userEmail), { items: fetched, ts: now }).catch(() => {});
           broadcastSync(SOURCE_ID, fetched, null, userEmail);

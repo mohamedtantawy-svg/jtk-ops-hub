@@ -71,14 +71,18 @@ export function useChangeRequestData(enabled = true, userEmail = null) {
         if (redlineResult.status === 'rejected') console.warn('[useChangeRequestData] Redlines fetch failed:', redlineResult.reason?.message);
 
         const now = Date.now();
-        if (amendResult.status === 'fulfilled' && (fetchedAmendments.length > 0 || amendmentsRef.current.length === 0)) {
+        // `force` lets user-triggered refreshes overwrite empty fetches.
+        // Background polls keep the "preserve last-known-good" guard so a
+        // transient blip doesn't blank the list. See useOnboardingData
+        // for the matching comment + the Reassign-not-working repro.
+        if (amendResult.status === 'fulfilled' && (force || fetchedAmendments.length > 0 || amendmentsRef.current.length === 0)) {
           setAmendments(fetchedAmendments);
           idbSet(cacheKeyFor(CACHE_KEY_AMENDMENTS_BASE, userEmail), { items: fetchedAmendments, ts: now }).catch(() => {});
           broadcastSync(SOURCE_AMENDMENTS, fetchedAmendments, null, userEmail);
           lastFetchAmendmentsRef.current = now;
           liveAmendmentsRef.current = true;
         }
-        if (redlineResult.status === 'fulfilled' && (fetchedRedlines.length > 0 || redlinesRef.current.length === 0)) {
+        if (redlineResult.status === 'fulfilled' && (force || fetchedRedlines.length > 0 || redlinesRef.current.length === 0)) {
           setRedlines(fetchedRedlines);
           idbSet(cacheKeyFor(CACHE_KEY_REDLINES_BASE, userEmail), { items: fetchedRedlines, ts: now }).catch(() => {});
           broadcastSync(SOURCE_REDLINES, fetchedRedlines, null, userEmail);
