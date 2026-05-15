@@ -852,15 +852,36 @@ async function fetchAllIncentivePlansForStatus(status) {
 //   - eorContractId (so we can chain into /admin/api/contract/{oid}
 //     for the org name)
 //   - status (in case the upstream surfaces a paused/triaged sub-status)
+// LRU-bounded so the cache can't grow without limit as new plan IDs flow
+// through over hours of operation. Mirrors CONTRACT_DETAIL_CACHE further
+// down. Cap at 2000 — well above the active incentive-plan volume with
+// headroom for churn. Each entry is ~150 B → worst-case 300 KiB.
+const INCENTIVE_PLAN_DETAIL_CACHE_MAX = 2000;
 const INCENTIVE_PLAN_DETAIL_CACHE = new Map();
 const INCENTIVE_PLAN_DETAIL_TTL_MS = 60 * 60 * 1000;
 const INCENTIVE_PLAN_DETAIL_CONCURRENCY = 5;
+
+function _incentivePlanCacheTouch(key, entry) {
+  INCENTIVE_PLAN_DETAIL_CACHE.delete(key);
+  INCENTIVE_PLAN_DETAIL_CACHE.set(key, entry);
+}
+
+function _incentivePlanCacheEvict() {
+  while (INCENTIVE_PLAN_DETAIL_CACHE.size > INCENTIVE_PLAN_DETAIL_CACHE_MAX) {
+    const oldestKey = INCENTIVE_PLAN_DETAIL_CACHE.keys().next().value;
+    if (oldestKey === undefined) break;
+    INCENTIVE_PLAN_DETAIL_CACHE.delete(oldestKey);
+  }
+}
 
 async function fetchIncentivePlanDetail(planId) {
   if (!planId) return null;
   const key = String(planId);
   const hit = INCENTIVE_PLAN_DETAIL_CACHE.get(key);
-  if (hit && Date.now() - hit.ts < INCENTIVE_PLAN_DETAIL_TTL_MS) return hit.detail;
+  if (hit && Date.now() - hit.ts < INCENTIVE_PLAN_DETAIL_TTL_MS) {
+    _incentivePlanCacheTouch(key, hit);
+    return hit.detail;
+  }
   try {
     const r = await deelFetch(`/admin/eor-experience/incentive-plans/${encodeURIComponent(key)}`);
     // Field paths broadened 2026-05-01 — Mohamed reported every IP row in
@@ -900,6 +921,7 @@ async function fetchIncentivePlanDetail(planId) {
       isPaused:       r?.isPaused === true,
     };
     INCENTIVE_PLAN_DETAIL_CACHE.set(key, { detail, ts: Date.now() });
+    _incentivePlanCacheEvict();
     return detail;
   } catch (e) {
     return hit?.detail || null;
@@ -1280,8 +1302,26 @@ export async function listRedlineRequests(params = {}) {
 
 // In-memory cache: eorContractId → { clientName, ts }. Client name rarely
 // changes, so we cache for an hour and refresh opportunistically.
+// LRU-bounded so the cache can't grow without limit as new contract IDs
+// flow through over hours of operation. Cap at 4000 to mirror
+// CONTRACT_DETAIL_CACHE further down (same domain — contract IDs). Each
+// entry is ~200 B → worst-case ~800 KiB.
+const AMEND_CLIENT_CACHE_MAX = 4000;
 const AMEND_CLIENT_CACHE = new Map();
 const AMEND_CLIENT_TTL_MS = 60 * 60 * 1000;
+
+function _amendClientCacheTouch(key, entry) {
+  AMEND_CLIENT_CACHE.delete(key);
+  AMEND_CLIENT_CACHE.set(key, entry);
+}
+
+function _amendClientCacheEvict() {
+  while (AMEND_CLIENT_CACHE.size > AMEND_CLIENT_CACHE_MAX) {
+    const oldestKey = AMEND_CLIENT_CACHE.keys().next().value;
+    if (oldestKey === undefined) break;
+    AMEND_CLIENT_CACHE.delete(oldestKey);
+  }
+}
 // Concurrency cap on the per-contract enrichment fan-out. Was 5, dropped
 // to 3 after 2026-05-08 logs showed `/rest/v2/contracts/<id>` accounted
 // for 80 of 99 Deel API 429s in a single capture window — far and away
@@ -1304,13 +1344,17 @@ async function fetchClientNameForContract(contractId) {
   if (!contractId) return '';
   const key = String(contractId);
   const hit = AMEND_CLIENT_CACHE.get(key);
-  if (hit && Date.now() - hit.ts < AMEND_CLIENT_TTL_MS) return hit.clientName;
+  if (hit && Date.now() - hit.ts < AMEND_CLIENT_TTL_MS) {
+    _amendClientCacheTouch(key, hit);
+    return hit.clientName;
+  }
   try {
     const res = await deelFetch(`/rest/v2/contracts/${encodeURIComponent(key)}`);
     const c = res?.data || res || {};
     const clientName = c.client?.legal_name || c.client?.name || c.organization?.name
                     || c.client_legal_entity?.name || c.team?.name || '';
     AMEND_CLIENT_CACHE.set(key, { clientName, ts: Date.now() });
+    _amendClientCacheEvict();
     return clientName;
   } catch (e) {
     return hit?.clientName || '';
