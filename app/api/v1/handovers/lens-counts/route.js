@@ -13,12 +13,17 @@ import { NextResponse } from 'next/server';
 import { query } from '../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { getVisibleOOOEmails, isAdminUser } from '../../../../../src/lib/queue-scoping';
+import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
 
 export async function GET(req) {
   const user = getAuthUser(req);
   if (!user.email) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+  // Same fix as time-off-events GET — without hydration the visible set
+  // excludes Team-tab-added members, so the Team / All chip counts
+  // under-report newly added teammates.
+  await ensureRosterHydrated();
   const callerEmail = user.email.toLowerCase();
 
   try {

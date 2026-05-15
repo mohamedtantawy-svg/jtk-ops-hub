@@ -10,12 +10,18 @@ import { NextResponse } from 'next/server';
 import { query } from '../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { MEMBERS_BY_EMAIL } from '../../../../../src/data/members';
+import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
 
 export async function GET(req) {
   const user = getAuthUser(req);
   if (!user.email) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+  // Hydrate so the requester_name enrichment via MEMBERS_BY_EMAIL resolves
+  // for newly added members. Without this, a Team-tab add since pod boot
+  // shows up here as the raw email instead of the person's display name
+  // on the Briefing Coverage banner / card.
+  await ensureRosterHydrated();
   const callerEmail = user.email.toLowerCase();
 
   try {

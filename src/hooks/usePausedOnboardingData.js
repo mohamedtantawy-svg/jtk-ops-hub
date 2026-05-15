@@ -46,7 +46,10 @@ export function usePausedOnboardingData(enabled = true, userEmail = null) {
         const res = await fetchDeelOnboardingPaused();
         const fetched = res?.items || [];
         const now = Date.now();
-        if (fetched.length > 0 || itemsRef.current.length === 0) {
+        // `force` lets user-triggered refreshes overwrite empty fetches —
+        // critical for the post-Reassign sync path where the row legitimately
+        // drops out of the caller's scope (see useOnboardingData comment).
+        if (force || fetched.length > 0 || itemsRef.current.length === 0) {
           setItems(fetched);
           idbSet(cacheKeyFor(userEmail), { items: fetched, ts: now }).catch(() => {});
           broadcastSync(SOURCE_ID, fetched, null, userEmail);

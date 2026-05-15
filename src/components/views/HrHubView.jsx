@@ -234,7 +234,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
   // scope/flow, then count locally. Cheap because the page size is 25 +
   // the four status totals fit a single round-trip.
   const [statusCounts, setStatusCounts] = useState({ new: 0, in_progress: 0, on_hold: 0, resolved: 0, rejected: 0, total: 0 });
-  const [scopeCounts, setScopeCounts] = useState({ mine: null, assigned: null, team: null, all: null });
+  const [scopeCounts, setScopeCounts] = useState({ mine: null, assigned: null, team: null, all: null, mentioned: null });
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -265,9 +265,15 @@ export default function HrHubView({ user, onCreateHrHub }) {
   // for every role so non-managers also see what's been routed to them.
   useEffect(() => {
     let cancelled = false;
-    const scopes = isManager ? ['mine', 'assigned', 'team', 'all'] : ['mine', 'assigned', 'all'];
+    // `mentioned` is available to every role — anyone can be tagged in a
+    // comment regardless of access level. Ordered last so it sits at the
+    // right end of the segmented control (matches Slack's "Mentions" tab
+    // sitting after "Home" / "DMs").
+    const scopes = isManager
+      ? ['mine', 'assigned', 'team', 'all', 'mentioned']
+      : ['mine', 'assigned', 'all', 'mentioned'];
     (async () => {
-      const out = { mine: null, assigned: null, team: null, all: null };
+      const out = { mine: null, assigned: null, team: null, all: null, mentioned: null };
       for (const sc of scopes) {
         try {
           const r = await listHrHubRequests({ flow: flowQuery, scope: sc, limit: 100 });
@@ -390,12 +396,15 @@ export default function HrHubView({ user, onCreateHrHub }) {
         </button>
       </div>
 
-      {/* Scope toggle (My / Team / All / Assigned to me) with count badges */}
+      {/* Scope toggle (My / Team / All / Assigned to me / Mentioned) with count
+          badges. "Mentioned" mirrors Slack's @mentions tab — surfaces every
+          request where the viewer was tagged in a comment, regardless of who
+          created it or whether it's on their team. Visible to all roles. */}
       <div style={scopeRow}>
         <div role="tablist" aria-label="Request scope" style={segmentedControl}>
           {(isManager
-            ? [{ value: 'mine', label: 'My Requests' }, { value: 'team', label: 'Team Requests' }, { value: 'all', label: 'All Requests' }, { value: 'assigned', label: 'Assigned to me' }]
-            : [{ value: 'mine', label: 'My Requests' }, { value: 'all', label: 'All Requests' }, { value: 'assigned', label: 'Assigned to me' }]
+            ? [{ value: 'mine', label: 'My Requests' }, { value: 'team', label: 'Team Requests' }, { value: 'all', label: 'All Requests' }, { value: 'assigned', label: 'Assigned to me' }, { value: 'mentioned', label: 'Mentioned', icon: 'bi-at' }]
+            : [{ value: 'mine', label: 'My Requests' }, { value: 'all', label: 'All Requests' }, { value: 'assigned', label: 'Assigned to me' }, { value: 'mentioned', label: 'Mentioned', icon: 'bi-at' }]
           ).map(seg => {
             const active = scope === seg.value;
             const cnt = scopeCounts[seg.value];
@@ -407,6 +416,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
                 onClick={() => setScope(seg.value)}
                 style={{ ...segmentBtn, ...(active ? segmentBtnActive : null) }}
               >
+                {seg.icon && <i className={seg.icon} style={{ fontSize: 13 }} />}
                 {seg.label}
                 {cnt != null && (
                   <span style={{ ...segmentCount, ...(active ? segmentCountActive : null) }}>{cnt}</span>
@@ -822,6 +832,25 @@ function RequestRow({ item, active, onClick, viewerEmail, isManager, isAdmin, on
             </span>
           </span>
         )}
+        {item.mentionedMe && (
+          /* Purple "@you" chip — same palette as the mention chips inside
+             comment bodies (HrHubDetailPanel:913) so the visual semantics
+             "you were tagged here" stays consistent across the surface.
+             Sits left of the status pill so the eye lands on the mention
+             cue before the workflow state. */
+          <span
+            title="You were @-mentioned in a comment"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 3,
+              fontSize: 10.5, fontWeight: 700,
+              padding: '3px 8px', borderRadius: 999,
+              background: '#f3eff8', color: '#5b21b6',
+            }}
+          >
+            <i className="bi-at" style={{ fontSize: 11 }} />
+            you
+          </span>
+        )}
         <span style={{
           display: 'inline-flex', alignItems: 'center', gap: 4,
           fontSize: 11, fontWeight: 700,
@@ -853,7 +882,14 @@ function EmptyState({ scope, flowFilter, statusFilter }) {
   // landing is the "caught up" celebration, not a stark "no results".
   // We branch on the common cases first so each gets bespoke copy
   // instead of the generic "No X requests" fallback.
-  if (statusFilter === 'new' && scope === 'mine' && flowFilter === 'all') {
+  if (scope === 'mentioned') {
+    // Dedicated copy for the Mentions segment — generic "No new requests"
+    // would mislead since the segment is cross-status by intent.
+    title = 'No mentions yet';
+    body = 'When someone tags you with @your.name in a comment, the request will appear here.';
+    icon = 'bi-at';
+    accent = '#7c3aed';
+  } else if (statusFilter === 'new' && scope === 'mine' && flowFilter === 'all') {
     title = "You're all caught up!";
     body = 'No new requests on your plate. Click "All" above to browse the rest.';
     icon = 'bi-emoji-smile';

@@ -89,7 +89,13 @@ function OOOView({ user, setView, addToast }) {
       : readLocal(MODE_KEY, 'calendar'),
   );
   const [lens, setLens] = useState(urlInit.lens || readLocal(LENS_KEY, LENS_IDS.AUTO));
-  const [from, setFrom] = useState(urlInit.from || isoOffsetFromToday(-7));
+  // Default `from` widened from -7d to -90d (Megan Lawrence 2026-05-15) so
+  // old + mass-imported PTO entries surface without the user having to
+  // manually expand the date picker. The +60d forward window stays — most
+  // users land here to plan or audit upcoming OOO, not to scroll into the
+  // distant future. Users can still narrow / extend either side via the
+  // date pickers on the filter row.
+  const [from, setFrom] = useState(urlInit.from || isoOffsetFromToday(-90));
   const [to,   setTo]   = useState(urlInit.to   || isoOffsetFromToday(DEFAULT_RANGE_DAYS));
   const [search, setSearch] = useState('');
   const [country, setCountry] = useState('all');
@@ -101,6 +107,10 @@ function OOOView({ user, setView, addToast }) {
   const [selectedEventId, setSelectedEventId] = useState(urlInit.handover || null);
   const [wizardEventId, setWizardEventId] = useState(null);   // null = closed; an id = open w/ that event
   const [submitTimeOffOpen, setSubmitTimeOffOpen] = useState(false);
+  // When non-null, the SubmitTimeOffModal opens in edit mode prefilled
+  // from this event. Editing is gated server-side by canManageTimeOffFor;
+  // FE surfaces the Edit button via DetailSlideOut + TableMode row affordance.
+  const [editTimeOffEvent, setEditTimeOffEvent] = useState(null);
   // Holds a handover_id received via the `ooo:openDetail` custom event
   // until we've loaded enough events to resolve it to a time_off_event_id
   // (the key the slide-out opens on). Cleared once resolved. Sarah Suge
@@ -534,6 +544,9 @@ function OOOView({ user, setView, addToast }) {
             onSelectEvent={ev => setSelectedEventId(ev?.id || null)}
             currentUserEmail={user?.email}
             currentUserRole={user?.role}
+            onEditEvent={(ev) => setEditTimeOffEvent(ev)}
+            onUpdated={refreshAll}
+            onToast={addToast}
             onBulkApprove={async (eventIds) => {
               // Convert event ids → handover ids using the events array.
               const ids = events
@@ -578,6 +591,7 @@ function OOOView({ user, setView, addToast }) {
         onClose={() => setSelectedEventId(null)}
         onUpdated={refreshAll}
         onSubmitDraft={(ev) => setWizardEventId(ev?.id || '')}
+        onEdit={(ev) => setEditTimeOffEvent(ev)}
         onToast={addToast}
       />
 
@@ -606,6 +620,23 @@ function OOOView({ user, setView, addToast }) {
           members={members}
           onClose={() => setSubmitTimeOffOpen(false)}
           onCreated={(item) => {
+            refreshAll();
+            if (item?.id) setSelectedEventId(item.id);
+          }}
+          onToast={addToast}
+        />
+      )}
+
+      {editTimeOffEvent && (
+        <SubmitTimeOffModal
+          currentUserEmail={user?.email}
+          currentUserAccess={user?.role}
+          members={members}
+          editEvent={editTimeOffEvent}
+          onClose={() => setEditTimeOffEvent(null)}
+          onCreated={(item) => {
+            // `onCreated` is also fired in edit mode — refresh so the
+            // calendar bar / table row picks up the new dates + reason.
             refreshAll();
             if (item?.id) setSelectedEventId(item.id);
           }}

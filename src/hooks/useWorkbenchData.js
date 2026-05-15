@@ -61,7 +61,10 @@ export function useWorkbenchData(enabled = true, userEmail = null) {
           lastFetchRef.current = now;
           return tasksRef.current;
         }
-        if (fetched.length > 0 || tasksRef.current.length === 0) {
+        // `force` lets user-triggered refreshes overwrite empty fetches —
+        // critical for any user action that legitimately empties the queue
+        // (see useOnboardingData comment + the Reassign-not-working repro).
+        if (force || fetched.length > 0 || tasksRef.current.length === 0) {
           setTasks(fetched);
           idbSet(cacheKeyFor(userEmail), { items: fetched, ts: now }).catch(() => {});
           broadcastSync(SOURCE_ID, fetched, null, userEmail);
