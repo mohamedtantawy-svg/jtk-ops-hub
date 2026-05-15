@@ -100,6 +100,20 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
   // announcements" surfaced the entire admin table to agents (A-F25 from
   // the agent audit). Tightening to approver-or-admin only.
   const isLA = isApprover(user?.email) || isAnnAdmin;
+  // Ack-tracker visibility — Ljubica Andjelic 2026-05-15: managers want to
+  // see whether their direct reports have acked announcements. The tracker
+  // was previously gated `isLA` (approver/admin only), which excluded TLs
+  // and RMs even though `scopeAckMembers` already narrows the visible
+  // roster to their team / region. Widening only the view-side gate —
+  // write actions (send reminder, edit, archive, etc.) stay on the
+  // original `isLA` so managers can see status without suddenly gaining
+  // publish powers.
+  //
+  // `dataScope` values: `own_tasks_only` (agent) / `team_tasks` (TL) /
+  // `regional_tasks` (RM) / `all_tasks` (admin). Anything above agent
+  // gets the tracker — the scoping helper handles what they actually see.
+  const isManagerOrAbove = perms?.dataScope === 'team_tasks' || perms?.dataScope === 'regional_tasks' || perms?.dataScope === 'all_tasks';
+  const canViewAckTracker = isLA || isManagerOrAbove;
   const canPin = perms?.canDo('can_pin_announcement')||isAnnAdmin||false;
   // Archive/unarchive: Regional Managers, Directors, and per-user
   // announcements admins. Team Leads keep compose/edit/send/pin but cannot
@@ -719,7 +733,7 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
                 <th style={thStyle}>Date</th>
                 <th style={thStyle}>Target</th>
                 <th style={thStyle}>Status</th>
-                {isLA && <th style={thStyle}>Ack Rate</th>}
+                {canViewAckTracker && <th style={thStyle}>Ack Rate</th>}
                 <th style={thStyle}>Actions</th>
               </tr>
             </thead>
@@ -800,8 +814,11 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
                         <span style={{ fontSize: 11, color: '#616161', fontWeight: 600 }}>Sent</span>
                       )}
                     </td>
-                    {/* Ack rate (leads) */}
-                    {isLA && (
+                    {/* Ack rate (managers + approvers + admins). For TLs and
+                        RMs the percentage reflects only the scoped roster
+                        (self + direct reports / region), so the number is
+                        meaningful for "how many of my team have acked". */}
+                    {canViewAckTracker && (
                       <td style={tdStyle}>
                         {comm.status === 'sent' && ackMembers.length > 0 ? (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -874,8 +891,11 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
                             </button>
                           );
                         })()}
-                        {/* Leads: expand ack tracker */}
-                        {isLA && comm.status === 'sent' && ackMembers.length > 0 && settings.comms_show_member_ack_list !== false && (
+                        {/* Managers + Approvers + Admins: expand ack tracker.
+                            scopeAckMembers narrows what each role sees — TLs
+                            get self + direct reports, RMs/Admins get the full
+                            audience. */}
+                        {canViewAckTracker && comm.status === 'sent' && ackMembers.length > 0 && settings.comms_show_member_ack_list !== false && (
                           <button onClick={() => setExpandedAck(isAckOpen ? null : comm.id)} title="Ack details"
                             style={actionBtnStyle(isAckOpen ? '#6b3fa0' : '#f2f2f2', isAckOpen ? 'white' : '#616161')}>
                             <i className={isAckOpen ? 'bi-chevron-up' : 'bi-people'} style={{ fontSize: 11 }}></i>
@@ -937,9 +957,9 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
                     </td>
                   </tr>,
                   // Expanded ack tracker row
-                  isAckOpen && isLA && (
+                  isAckOpen && canViewAckTracker && (
                     <tr key={comm.id + '-ack'}>
-                      <td colSpan={isLA ? 10 : 9} style={{ padding: '0 16px 16px', background: '#f9f8f6', borderBottom: '1px solid #e8e8e8' }}>
+                      <td colSpan={canViewAckTracker ? 10 : 9} style={{ padding: '0 16px 16px', background: '#f9f8f6', borderBottom: '1px solid #e8e8e8' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, paddingTop: 8 }}>
                           <span style={{ fontSize: 12, fontWeight: 700, color: '#1b1b1b' }}>Acknowledgement Tracker</span>
                           <span style={{ fontSize: 11, color: '#616161', fontVariantNumeric: 'tabular-nums' }}>{ackedCount}/{ackMembers.length}</span>
