@@ -40,7 +40,12 @@ const ALLOWED_PRIORITIES = new Set(['low', 'medium', 'high', 'critical']);
 // `assigned` = items where assignee_email matches the caller. Distinct from
 // `mine` (which keys off created_by_email) — a manager who triages a request
 // they didn't submit needs the "Assigned to me" filter to surface it.
-const ALLOWED_SCOPES = new Set(['mine', 'team', 'all', 'assigned']);
+// `mentioned` = items where the caller's email appears in any non-deleted
+// comment's mention_emails array. Ewa K. 2026-05-15 feedback: mentions in
+// HR Hub were only discoverable via the bell or by opening every request;
+// surfacing them as a dedicated scope mirrors Slack's "Mentions" tab so
+// users can audit "what was I tagged into" in one queue.
+const ALLOWED_SCOPES = new Set(['mine', 'team', 'all', 'assigned', 'mentioned']);
 
 // Same caps as the existing Feedback route — keeps the migration in
 // Stage 5 a straight shape-match. Tweak in one place across both routes
@@ -167,6 +172,19 @@ export async function GET(req) {
   } else if (effectiveScope === 'assigned') {
     where.push(`LOWER(assignee_email) = $${p++}`);
     params.push(callerEmail);
+  } else if (effectiveScope === 'mentioned') {
+    // Scope = "anywhere I was @-mentioned in a comment". mention_emails is
+    // stored lowercase at write time by the comments POST handler, so a
+    // direct ANY() match is sufficient (no LOWER() on the array element).
+    // deleted_at IS NULL excludes mentions in comments that were later
+    // deleted — keeps the segment focused on live tags.
+    where.push(`EXISTS (
+      SELECT 1 FROM hr_hub_comment c
+       WHERE c.request_id = hr_hub_request.id
+         AND c.deleted_at IS NULL
+         AND $${p++} = ANY(c.mention_emails)
+    )`);
+    params.push(callerEmail);
   } else if (effectiveScope === 'team') {
     // "Team" = creator is anyone in caller's management chain (excluding
     // self — those go under 'mine'). The denormalised team_lead_email
@@ -208,6 +226,14 @@ export async function GET(req) {
     }
   }
 
+  // mentioned_me is a per-row boolean: true iff the caller's email appears in
+  // at least one live comment's mention_emails. Cheap because the same EXISTS
+  // pattern runs on every row (hr_hub_comment is indexed on request_id).
+  // Driven off the SAME placeholder slot ($p) so we don't double-count
+  // params; we push callerEmail once below and reference it twice in the
+  // generated SQL.
+  const mentionedMePlaceholder = `$${p++}`;
+  params.push(callerEmail);
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const sql = `
     SELECT id, flow, status, priority, function_area, request_type, report_type,
@@ -216,7 +242,13 @@ export async function GET(req) {
            team_lead_email, cc_email, created_at, updated_at, resolved_at,
            task_source, task_id, task_url, task_subject,
            sla_ext_requested_days, sla_ext_reason_code, sla_ext_acknowledged,
-           sla_ext_approved_days
+           sla_ext_approved_days,
+           EXISTS (
+             SELECT 1 FROM hr_hub_comment c
+              WHERE c.request_id = hr_hub_request.id
+                AND c.deleted_at IS NULL
+                AND ${mentionedMePlaceholder} = ANY(c.mention_emails)
+           ) AS mentioned_me
       FROM hr_hub_request
       ${whereSql}
      ORDER BY created_at DESC, id DESC
@@ -260,6 +292,10 @@ export async function GET(req) {
     slaExtReasonCode: row.sla_ext_reason_code,
     slaExtAcknowledged: row.sla_ext_acknowledged,
     slaExtApprovedDays: row.sla_ext_approved_days,
+    // True iff the caller is @-mentioned in any live comment. FE uses this
+    // to render the "@you" pill on rows in every scope, not just under the
+    // dedicated `mentioned` segment.
+    mentionedMe: row.mentioned_me === true,
   }));
   const nextCursor = hasMore
     ? `${new Date(rows[limit - 1].created_at).toISOString()}|${rows[limit - 1].id}`
