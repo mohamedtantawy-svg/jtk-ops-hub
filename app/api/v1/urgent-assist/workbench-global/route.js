@@ -36,7 +36,13 @@ import { buildWithTimeout } from '../../../../../src/lib/scan-timeout';
 const WORKBENCH_CACHE_KEY = 'deel_workbench';
 const FRESH_TTL = 3 * 60 * 1000;
 const STALE_TTL = 30 * 60 * 1000;
-const SCAN_TIMEOUT_MS = 30_000;
+// Mirror the canonical workbench route's 45s ceiling — both share the same
+// `_inFlight` Promise via `buildWithTimeout(WORKBENCH_CACHE_KEY, ...)`, and
+// the natural cycle time is ~32-35s. A 30s ceiling here would fire ~3-5s
+// before the shared build finishes, handing the user a stale-cache fallback
+// that the very next call would have caught fresh. Keep in sync with
+// app/api/v1/integrations/deel/workbench/route.js.
+const SCAN_TIMEOUT_MS = 45_000;
 
 function filterUrgentAssist(items) {
   if (!Array.isArray(items)) return [];
