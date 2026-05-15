@@ -75,6 +75,13 @@ export default function HrHubComposer({ onSubmit }) {
   const [error, setError] = useState(null);
   const [showEmoji, setShowEmoji] = useState(false);
   const [mentionState, setMentionState] = useState(null);   // { query, anchor, options, highlighted }
+  // Drag-drop visual state. Counter-based so nested dragenter/dragleave
+  // events (which fire as the cursor moves between child elements) don't
+  // flicker the overlay off/on. Duygu Cakalli 2026-05-15 ask — drop a
+  // screenshot directly onto the comment composer instead of clicking
+  // Attach + navigating a folder picker.
+  const [dragDepth, setDragDepth] = useState(0);
+  const dragActive = dragDepth > 0;
   const taRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -196,8 +203,52 @@ export default function HrHubComposer({ onSubmit }) {
     if (e.key === 'Escape') { setBody(''); setAttachments([]); }
   };
 
+  // Drop handlers — wired to the root wrapper so the whole composer area
+  // (textarea + thumbnail rail + action bar) is a valid drop target. The
+  // counter pattern tolerates nested dragenter/dragleave fired by child
+  // elements without flickering the visual outline.
+  const onDragEnter = (e) => {
+    if (!e.dataTransfer?.types?.includes?.('Files')) return;
+    e.preventDefault();
+    setDragDepth(d => d + 1);
+  };
+  const onDragOver = (e) => {
+    if (!e.dataTransfer?.types?.includes?.('Files')) return;
+    e.preventDefault();
+    // Hint the OS cursor — "drop here will copy the file in".
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+  };
+  const onDragLeave = (e) => {
+    if (!e.dataTransfer?.types?.includes?.('Files')) return;
+    e.preventDefault();
+    setDragDepth(d => Math.max(0, d - 1));
+  };
+  const onDrop = (e) => {
+    if (!e.dataTransfer?.types?.includes?.('Files')) return;
+    e.preventDefault();
+    setDragDepth(0);
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length) addFiles(files);
+  };
+
   return (
-    <div style={{ position: 'relative' }}>
+    <div
+      style={{
+        position: 'relative',
+        // Drag-active outline + faint purple tint so users see a clear
+        // drop target. Uses the same purple as the rest of the HR Hub
+        // chrome (#7c3aed) so the cue stays on-brand.
+        borderRadius: 12,
+        outline: dragActive ? '2px dashed #7c3aed' : 'none',
+        outlineOffset: dragActive ? 2 : 0,
+        background: dragActive ? 'rgba(124, 58, 237, 0.04)' : 'transparent',
+        transition: 'outline-color .1s, background .1s',
+      }}
+      onDragEnter={onDragEnter}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+    >
       <textarea
         ref={taRef}
         value={body}
@@ -299,9 +350,9 @@ export default function HrHubComposer({ onSubmit }) {
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          aria-label="Attach"
+          aria-label="Attach file"
           style={iconBtnStyle}
-          title="Attach (or drag/paste)"
+          title="Attach a file — or drag and drop / paste a screenshot directly"
         ><i className="bi bi-paperclip" /></button>
         <button
           type="button"
