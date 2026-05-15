@@ -92,7 +92,19 @@ export async function reconcileWorkbenchSnapshot({
   lookbackMs = 24 * 60 * 60_000,
 }) {
   const activeStatusSet = new Set(statuses.map(s => String(s).toUpperCase()));
-  const observed = [...activeItems, ...completedItems];
+  // Dedupe by task_id before the UPSERT. Upstream cursor pagination can yield
+  // the same task on consecutive pages when the row mutates mid-walk, which
+  // lands two entries with the same `task_id` in `activeItems`. The Step-1
+  // multi-row INSERT then trips Postgres' "ON CONFLICT DO UPDATE command
+  // cannot affect row a second time" (verified live 2026-05-15 — 14 misfires
+  // in a 4h window). Map.set keeps the LATER observation, mirroring the
+  // intended ON CONFLICT semantics; for cross-list collisions the safety-net
+  // loop in deel-api.js already excludes anything in `activeItems` via its
+  // `seen` set, so practical collisions are within-list only.
+  const observedMap = new Map();
+  for (const t of activeItems) if (t?.id) observedMap.set(t.id, t);
+  for (const t of completedItems) if (t?.id) observedMap.set(t.id, t);
+  const observed = Array.from(observedMap.values());
 
   // Step 0 — figure out if this is a cold-start cycle. If the DB has zero
   // rows we treat this cycle as cold and skip the "disappeared = resolved"
