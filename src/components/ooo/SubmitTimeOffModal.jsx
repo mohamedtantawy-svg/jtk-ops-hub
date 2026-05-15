@@ -11,7 +11,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Avatar from '../ui/Avatar';
-import { createTimeOffEvent } from '../../services/timeOffApi';
+import { createTimeOffEvent, updateTimeOffEvent } from '../../services/timeOffApi';
 
 function isoToday() {
   const d = new Date();
@@ -69,7 +69,15 @@ function buildManageableEmails(callerEmail, callerAccess, members) {
   return out;
 }
 
-export default function SubmitTimeOffModal({ currentUserEmail, currentUserAccess, members, onClose, onCreated, onToast }) {
+export default function SubmitTimeOffModal({ currentUserEmail, currentUserAccess, members, onClose, onCreated, onToast, editEvent = null }) {
+  // editEvent (optional) — when set, the modal runs in edit mode:
+  //   • person picker is locked to the event's work_email (read-only chip);
+  //   • dates + reason prefill from the event row;
+  //   • submit calls PATCH /time-off-events/:id instead of POST.
+  // Megan Lawrence 2026-05-15 feedback: old + mass-imported entries need to
+  // be editable + deletable. Reusing this modal keeps the field layout +
+  // permission gate identical to the create path.
+  const isEditing = !!editEvent?.id;
   const callerLc = (currentUserEmail || '').toLowerCase();
   const candidates = useMemo(() => {
     const allowed = buildManageableEmails(callerLc, currentUserAccess, members);
@@ -83,12 +91,12 @@ export default function SubmitTimeOffModal({ currentUserEmail, currentUserAccess
       });
   }, [callerLc, currentUserAccess, members]);
 
-  const [workEmail, setWorkEmail] = useState(callerLc);
+  const [workEmail, setWorkEmail] = useState(isEditing ? String(editEvent.work_email || '').toLowerCase() : callerLc);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [startDate, setStartDate] = useState(isoToday());
-  const [endDate, setEndDate] = useState(isoToday());
-  const [reason, setReason] = useState('');
+  const [startDate, setStartDate] = useState(isEditing ? (editEvent.start_date || isoToday()) : isoToday());
+  const [endDate, setEndDate] = useState(isEditing ? (editEvent.end_date || isoToday()) : isoToday());
+  const [reason, setReason] = useState(isEditing ? (editEvent.reason || '') : '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const pickerRef = useRef(null);
@@ -132,17 +140,28 @@ export default function SubmitTimeOffModal({ currentUserEmail, currentUserAccess
     setBusy(true);
     setError(null);
     try {
-      const res = await createTimeOffEvent({
-        workEmail,
-        startDate,
-        endDate,
-        reason: reason.trim() || null,
-      });
+      const res = isEditing
+        ? await updateTimeOffEvent(editEvent.id, {
+            startDate,
+            endDate,
+            reason: reason.trim() || null,
+          })
+        : await createTimeOffEvent({
+            workEmail,
+            startDate,
+            endDate,
+            reason: reason.trim() || null,
+          });
       onCreated?.(res?.item || null);
-      onToast?.({ kind: 'success', message: `Time off submitted for ${selectedMember?.name || workEmail}.` });
+      onToast?.({
+        kind: 'success',
+        message: isEditing
+          ? `Time off updated for ${selectedMember?.name || workEmail}.`
+          : `Time off submitted for ${selectedMember?.name || workEmail}.`,
+      });
       onClose?.();
     } catch (err) {
-      const msg = err?.body?.error || err?.message || 'Failed to submit time off';
+      const msg = err?.body?.error || err?.message || (isEditing ? 'Failed to update time off' : 'Failed to submit time off');
       setError(msg);
       onToast?.({ kind: 'error', message: msg });
     } finally {
@@ -151,8 +170,10 @@ export default function SubmitTimeOffModal({ currentUserEmail, currentUserAccess
   };
 
   // Manager OR admin — show the picker. Agents only ever submit for
-  // themselves, so we lock the field to a read-only display.
-  const canPickPerson = isManagerAccess(currentUserAccess);
+  // themselves, so we lock the field to a read-only display. In edit
+  // mode the picker is locked regardless of role since work_email is
+  // immutable on the server.
+  const canPickPerson = !isEditing && isManagerAccess(currentUserAccess);
 
   return (
     <>
@@ -160,7 +181,7 @@ export default function SubmitTimeOffModal({ currentUserEmail, currentUserAccess
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Submit time off"
+        aria-label={isEditing ? 'Edit time off' : 'Submit time off'}
         style={{
           position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
           width: 'min(480px, 92vw)', maxHeight: '90vh',
@@ -188,9 +209,11 @@ export default function SubmitTimeOffModal({ currentUserEmail, currentUserAccess
             <i className="bi-calendar-plus" style={{ fontSize: 18, color: '#7c3aed' }}></i>
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>Submit time off</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>{isEditing ? 'Edit time off' : 'Submit time off'}</div>
             <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
-              Add an entry the Deel sync missed or got wrong. {canPickPerson ? 'You can submit for yourself or anyone reporting to you.' : 'You can only submit for yourself.'}
+              {isEditing
+                ? 'Change the dates or reason. The person on the entry stays the same — delete + recreate if you need to move it to someone else.'
+                : `Add an entry the Deel sync missed or got wrong. ${canPickPerson ? 'You can submit for yourself or anyone reporting to you.' : 'You can only submit for yourself.'}`}
             </div>
           </div>
           <button
@@ -331,9 +354,14 @@ export default function SubmitTimeOffModal({ currentUserEmail, currentUserAccess
               }}>
                 {selectedMember && <Avatar name={selectedMember.name} initials={selectedMember.initials} src={selectedMember.avatarUrl} size="sm" />}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{selectedMember?.name || currentUserEmail}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{currentUserEmail}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{selectedMember?.name || workEmail || currentUserEmail}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{workEmail || currentUserEmail}</div>
                 </div>
+                {isEditing && (
+                  <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }} title="Person is immutable in edit mode">
+                    locked
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -464,7 +492,9 @@ export default function SubmitTimeOffModal({ currentUserEmail, currentUserAccess
               fontFamily: 'inherit',
             }}
           >
-            {busy ? 'Submitting…' : 'Submit'}
+            {busy
+              ? (isEditing ? 'Updating…' : 'Submitting…')
+              : (isEditing ? 'Update' : 'Submit')}
           </button>
         </div>
       </div>

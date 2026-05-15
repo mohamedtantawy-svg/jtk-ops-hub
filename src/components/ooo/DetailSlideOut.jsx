@@ -133,6 +133,7 @@ function DetailSlideOut({
   currentUserRole,
   onUpdated,        // optional — called whenever a write completes so OOOView can refresh
   onSubmitDraft,    // optional — called when caller clicks "Open wizard for missing-handover"
+  onEdit,           // optional — called with the event when caller clicks Edit; OOOView opens the modal
   onToast,
 }) {
   const [fullHandover, setFullHandover] = useState(null);
@@ -396,6 +397,32 @@ function DetailSlideOut({
               )}
             </div>
           </div>
+          {canDelete && onEdit && (
+            <button
+              type="button"
+              onClick={() => onEdit(event)}
+              disabled={deleteBusy}
+              aria-label="Edit time-off entry"
+              title="Change dates or reason"
+              style={{
+                background: 'transparent',
+                border: '1px solid var(--border)',
+                padding: '5px 10px',
+                cursor: deleteBusy ? 'not-allowed' : 'pointer',
+                color: 'var(--text)',
+                fontFamily: 'inherit',
+                fontSize: 11,
+                fontWeight: 600,
+                borderRadius: 6,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+              }}
+            >
+              <i className="bi-pencil" style={{ fontSize: 11 }} />
+              Edit
+            </button>
+          )}
           {canDelete && (
             <button
               type="button"

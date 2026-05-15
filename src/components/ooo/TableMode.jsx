@@ -9,6 +9,34 @@
 import { useMemo, useState } from 'react';
 import Avatar from '../ui/Avatar';
 import { isoDate, eventTiming, handoverStateColor, daysBetween } from '../../lib/handover-helpers';
+import { deleteTimeOffEvent } from '../../services/timeOffApi';
+
+// Mirror of canCallerManageTarget in DetailSlideOut — duplicated here so the
+// inline row actions can gate without an import cycle. Keep both copies in
+// sync if the rules change. Server-side `canManageTimeOffFor` is the
+// authority; this is UX-only.
+function canCallerManageTarget(callerEmail, callerRole, targetEmail, membersByEmail) {
+  if (!callerEmail || !targetEmail) return false;
+  const callerLc = String(callerEmail).toLowerCase();
+  const targetLc = String(targetEmail).toLowerCase();
+  if (callerLc === targetLc) return true;
+  if (callerRole === 'admin') return true;
+  const targetMember = membersByEmail?.get?.(targetLc);
+  if (!targetMember) return false;
+  const directMgr = String(targetMember.managerEmail || '').toLowerCase();
+  if (callerRole === 'team_lead') return directMgr === callerLc;
+  if (callerRole === 'regional_manager') {
+    let cursor = directMgr;
+    let safety = 0;
+    while (cursor && safety++ < 20) {
+      if (cursor === callerLc) return true;
+      const next = membersByEmail?.get?.(cursor);
+      cursor = String(next?.managerEmail || '').toLowerCase();
+    }
+    return false;
+  }
+  return false;
+}
 
 const STATUS_COLOURS = {
   green: { bg: '#DCFCE7', fg: '#166534', border: '#86EFAC', label: 'Approved / Active' },
@@ -51,15 +79,46 @@ function statusLabel(ev, today) {
 function TableMode({
   events, membersByEmail, todayIso, onSelectEvent,
   currentUserEmail, currentUserRole, onBulkApprove, onBulkReject,
+  // Per-row edit/delete affordances. Megan Lawrence 2026-05-15 ask: surface
+  // inline pencil + trash on rows the caller can manage, so users don't have
+  // to dig into the slide-out to update or remove an entry.
+  onEditEvent,
+  onUpdated,
+  onToast,
 }) {
   const today = todayIso || isoDate();
   const [sortBy, setSortBy] = useState('start_date');
   const [sortDir, setSortDir] = useState('asc');
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [busy, setBusy] = useState(false);
+  // Per-row delete busy state — keyed by event id so multiple deletes can be
+  // in flight without one row blocking the rest.
+  const [deletingId, setDeletingId] = useState(null);
 
   const callerLc = (currentUserEmail || '').toLowerCase();
   const isAdminish = currentUserRole === 'admin' || currentUserRole === 'regional_manager';
+
+  // Pre-compute which rows the caller can manage so the actions column
+  // visibility is cheap inside the row map.
+  const canManageEmail = (email) => canCallerManageTarget(currentUserEmail, currentUserRole, email, membersByEmail);
+
+  const handleRowDelete = async (ev) => {
+    if (!ev?.id || deletingId) return;
+    const confirmed = typeof window !== 'undefined'
+      ? window.confirm(`Delete this time-off entry?\n\n${ev.work_email} · ${ev.start_date} → ${ev.end_date}\n\nThis can't be undone.`)
+      : false;
+    if (!confirmed) return;
+    setDeletingId(ev.id);
+    try {
+      await deleteTimeOffEvent(ev.id);
+      onToast?.({ kind: 'success', message: 'Time-off entry removed.' });
+      onUpdated?.();
+    } catch (err) {
+      onToast?.({ kind: 'error', message: err?.body?.error || err?.message || 'Delete failed' });
+    } finally {
+      setDeletingId(null);
+    }
+  };
   function eligibleForBulk(ev) {
     if (!ev?.handover) return false;
     if (ev.handover.status !== 'pending_manager_approval') return false;
@@ -140,7 +199,12 @@ function TableMode({
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    /* flex:1 + minHeight:0 lets the wrapper claim the OOO body's available
+       height so the inner `overflow:auto` actually scrolls. Without it the
+       table renders at natural height and the parent's `overflow:hidden`
+       clips the bottom rows — Megan Lawrence 2026-05-15 "the pages are
+       not showing full" repro. */
+    <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {selectedCount > 0 && (
         <div style={{
           position: 'sticky', top: 0, zIndex: 3,
@@ -208,6 +272,7 @@ function TableMode({
               { id: 'status',     label: 'Status',  w: 160 },
               { id: null,         label: 'Coverer(s)', w: 220 },
               { id: null,         label: 'Countries',  w: 140 },
+              { id: null,         label: '',          w: 90  },   // actions column (edit/delete)
             ].map(col => (
               <th
                 key={col.label}
@@ -320,6 +385,54 @@ function TableMode({
                 </td>
                 <td style={{ padding: '10px 14px', color: 'var(--text-secondary)' }}>
                   {r.member?.country || <span>—</span>}
+                </td>
+                <td
+                  onClick={(e) => e.stopPropagation()}
+                  style={{ padding: '8px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}
+                >
+                  {canManageEmail(r.event.work_email) && (
+                    <span style={{ display: 'inline-flex', gap: 4 }}>
+                      {onEditEvent && (
+                        <button
+                          type="button"
+                          onClick={() => onEditEvent(r.event)}
+                          aria-label={`Edit ${r.name}'s time off`}
+                          title="Edit dates or reason"
+                          style={{
+                            width: 26, height: 26, padding: 0,
+                            border: '1px solid var(--border)',
+                            background: 'var(--surface)',
+                            color: 'var(--text-secondary)',
+                            borderRadius: 6,
+                            cursor: 'pointer',
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            fontFamily: 'inherit',
+                          }}
+                        >
+                          <i className="bi-pencil" style={{ fontSize: 11 }} />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleRowDelete(r.event)}
+                        disabled={deletingId === r.event.id}
+                        aria-label={`Delete ${r.name}'s time off`}
+                        title="Delete this entry"
+                        style={{
+                          width: 26, height: 26, padding: 0,
+                          border: '1px solid var(--border)',
+                          background: 'var(--surface)',
+                          color: deletingId === r.event.id ? 'var(--text-secondary)' : '#b91c1c',
+                          borderRadius: 6,
+                          cursor: deletingId === r.event.id ? 'wait' : 'pointer',
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          fontFamily: 'inherit',
+                        }}
+                      >
+                        <i className={deletingId === r.event.id ? 'bi-arrow-repeat' : 'bi-trash'} style={{ fontSize: 11 }} />
+                      </button>
+                    </span>
+                  )}
                 </td>
               </tr>
             );

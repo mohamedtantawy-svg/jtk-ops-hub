@@ -58,6 +58,24 @@ export async function createTimeOffEvent({ workEmail, startDate, endDate, reason
 }
 
 /**
+ * Edit a time-off entry's start_date, end_date, or reason. Same
+ * permission gate as create/delete (canManageTimeOffFor). work_email
+ * is immutable — for "wrong person" cases the right path is delete +
+ * recreate so audit history stays clean.
+ */
+export async function updateTimeOffEvent(id, { startDate, endDate, reason } = {}) {
+  const body = {};
+  if (startDate !== undefined) body.start_date = startDate;
+  if (endDate !== undefined)   body.end_date   = endDate;
+  if (reason !== undefined)    body.reason     = reason;
+  return apiFetch(`/time-off-events/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+/**
  * Delete a time-off entry by id. 403 if the caller can't manage the
  * row's work_email; 409 if a non-terminal handover is attached (the
  * UI surfaces the cancel-handover-first guidance from the body).

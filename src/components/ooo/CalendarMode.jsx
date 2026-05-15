@@ -120,7 +120,12 @@ function CalendarMode({
   const todayWithinWindow = todayOffset >= 0 && todayOffset < totalDays;
 
   return (
-    <div style={{ overflowX: 'auto', overflowY: 'auto', position: 'relative' }}>
+    /* flex:1 + minHeight:0 so the calendar claims its parent's full height
+       (the OOO body uses `overflow:hidden` + flex column). Without this the
+       grid stretches to natural row × ROW_H height and overflows past the
+       viewport's bottom edge — Megan Lawrence 2026-05-15 "the pages are
+       not showing full" repro. */
+    <div style={{ flex: 1, minHeight: 0, overflowX: 'auto', overflowY: 'auto', position: 'relative' }}>
       <div style={{ minWidth: LEFT_COL_PX + gridWidth }}>
         {/* ── Sticky day header ──────────────────────────────────────── */}
         <div
