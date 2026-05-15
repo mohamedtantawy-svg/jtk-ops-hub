@@ -14,6 +14,7 @@ import { NextResponse } from 'next/server';
 import { query, withTransaction } from '../../../../src/lib/db';
 import { getAuthUser } from '../../../../src/lib/auth-helpers';
 import { getVisibleEmails, isAdminUser } from '../../../../src/lib/queue-scoping';
+import { ensureRosterHydrated } from '../../../../src/lib/roster-server';
 import {
   loadHandoverWithDetails,
   isAdminOrRm,
@@ -45,6 +46,11 @@ export async function POST(req) {
   if (!user.email) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  // Hydrate so MEMBERS_BY_EMAIL[event.work_email] resolves for newly added
+  // members (Team-tab adds since pod boot). Manager + name lookups during
+  // handover creation depend on this being populated.
+  await ensureRosterHydrated();
 
   let body;
   try { body = await req.json(); }
@@ -211,6 +217,9 @@ export async function GET(req) {
   if (!user.email) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+  // Same fix as time-off-events GET — getVisibleEmails needs hydration
+  // so handovers raised by newly added team members surface to peers.
+  await ensureRosterHydrated();
   const callerEmail = lc(user.email);
 
   const url = new URL(req.url);

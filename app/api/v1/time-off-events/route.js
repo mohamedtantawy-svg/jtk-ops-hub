@@ -36,6 +36,15 @@ export async function GET(req) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  // Hydrate the server-side roster so getVisibleOOOEmails / canManageTimeOffFor
+  // see members added via the Team tab. Without this, a freshly-booted pod
+  // only knows the static TEAM_MEMBERS baseline (104 names) — any member
+  // added since boot is invisible to scoping, so their OOO events get
+  // filtered out at the SQL `LOWER(e.work_email) = ANY(visible)` check
+  // even when they DO have approved entries. Madeleine Decuir 2026-05-15
+  // repro: "I don't see Katarina, Victor or Amanda on the OOO calendar".
+  await ensureRosterHydrated();
+
   const url = new URL(req.url);
   const from = normaliseDate(url.searchParams.get('from'));
   const to   = normaliseDate(url.searchParams.get('to'));

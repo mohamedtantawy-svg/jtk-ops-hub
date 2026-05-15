@@ -4,6 +4,7 @@ import { getAuthUser } from '../../../../src/lib/auth-helpers';
 import { isApprover } from '../../../../src/data/approvers';
 import { isAnnouncementsAdmin, canManageAnnouncements } from '../../../../src/lib/announcements-admin';
 import { MEMBERS_BY_EMAIL } from '../../../../src/data/members';
+import { ensureRosterHydrated } from '../../../../src/lib/roster-server';
 import {
   VALID_TARGETS,
   publishFromRequest,
@@ -64,6 +65,13 @@ export async function GET(req) {
     if (!user.email) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    // Hydrate so resolveCallerProfile()'s MEMBERS_BY_EMAIL baseline fallback
+    // sees Team-tab-added members. Without this, a freshly-added member whose
+    // override row has team=null AND who isn't in TEAM_MEMBERS would resolve
+    // to callerTeam=null, dropping every region-targeted announcement from
+    // their feed.
+    await ensureRosterHydrated();
 
     // Lazy-promote any scheduled rows whose time has arrived.
     await promoteDueScheduled();
@@ -256,6 +264,12 @@ export async function POST(req) {
   try {
     const user = getAuthUser(req);
     if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    // Hydrate so role/team checks against MEMBERS_BY_EMAIL see new members
+    // (Team-tab-added managers who haven't been bounced through pod boot
+    // can still publish from the announcements composer).
+    await ensureRosterHydrated();
+
     const allowedRoles = ['admin', 'regional_manager', 'manager', 'team_lead'];
     const approver = isApprover(user.email);
     const annAdmin = await isAnnouncementsAdmin(user.email);

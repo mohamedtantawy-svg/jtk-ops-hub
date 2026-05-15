@@ -28,6 +28,7 @@ import {
   HANDOVER_NOTIFICATION_TYPES,
 } from '../../../../../../src/lib/handover-helpers';
 import { MEMBERS_BY_EMAIL } from '../../../../../../src/data/members';
+import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
 
 const CRON_ACTOR = { email: 'cron@ops-hub', name: 'Reminders cron' };
 
@@ -36,6 +37,13 @@ export async function POST(req) {
   if (!auth.authorized) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
+
+  // Hydrate before the manager-fanout loop. The 24h reminder notifies both
+  // the OOO person AND their manager (resolved via MEMBERS_BY_EMAIL). On a
+  // freshly-rolled pod that only has the static baseline, a Team-tab-added
+  // member's manager would be missed entirely, leaving them blind to a
+  // direct report's upcoming OOO.
+  await ensureRosterHydrated();
 
   const summary = { pre_48h: 0, pre_24h: 0, handback_due: 0, errors: [] };
 
