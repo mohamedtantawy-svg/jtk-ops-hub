@@ -137,6 +137,11 @@ const Queue = ({ user, tasks, subFilter }) => {
   const [fJiraActionable, setFJiraActionable] = useState(true);
   const [fJiraRaised, setFJiraRaised] = useState(false);
   const [fUnassigned, setFUnassigned] = useState(false);
+  // Country filter — array of uppercase ISO-2 codes. Multi-select so
+  // managers can scope to e.g. {NAM, LATAM} regions in one click. Empty =
+  // no filter. Insiya Jasdanwalla 2026-05-15 ask: "Request to filter team
+  // queue by country — cannot filter the queue by specific country".
+  const [fCountry, setFCountry] = useState([]);
 
   // Post-mount filter rehydration — runs once per signed-in identity.
   useEffect(() => {
@@ -149,6 +154,7 @@ const Queue = ({ user, tasks, subFilter }) => {
     if (typeof saved.fJiraActionable === 'boolean') setFJiraActionable(saved.fJiraActionable);
     if (typeof saved.fJiraRaised === 'boolean') setFJiraRaised(saved.fJiraRaised);
     if (saved.fUnassigned) setFUnassigned(true);
+    if (Array.isArray(saved.fCountry)) setFCountry(saved.fCountry);
   }, [user?.email]);
 
   // Cross-view filter intent — fires when a Briefing/AgentHome card asks the
@@ -167,6 +173,7 @@ const Queue = ({ user, tasks, subFilter }) => {
       setFTool(null);
       setFStatus([]);
       setFUnassigned(false);
+      setFCountry([]);
       setSearch('');
     };
     window.addEventListener('queue:setSlaFilter', handler);
@@ -469,6 +476,7 @@ const Queue = ({ user, tasks, subFilter }) => {
     if (fTool)          _vis = _vis.filter(t => t.source === fTool);
     if (fStatus.length) _vis = _vis.filter(t => fStatus.includes(t.status));
     if (fUnassigned)    _vis = _vis.filter(t => !t.assigneeId && !t.assigneeEmail);
+    if (fCountry.length) _vis = _vis.filter(t => fCountry.includes(String(t.country || '').toUpperCase()));
     const _visPreSla = _vis.filter(t => !t.isCalendarBooking);
     if (fSla === 'ok')       _vis = _vis.filter(t => { const s = slaInfo(t); return s && s.ok; });
     if (fSla === 'at_risk')  _vis = _vis.filter(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; });
@@ -537,10 +545,10 @@ const Queue = ({ user, tasks, subFilter }) => {
     const _done = _vis.filter(t => t.status === 'resolved');
     const _all = [..._sorted, ..._snoozed, ..._done];
     return { baseVis: _baseVis, visPreSla: _visPreSla, active: _sorted, snoozed: _snoozed, done: _done, all: _all };
-  }, [ns, user, fTool, fStatus, fUnassigned, fSla, search, settings.sla_enabled, passesJiraRoleFilter, sortCol, sortDir]);
+  }, [ns, user, fTool, fStatus, fUnassigned, fCountry, fSla, search, settings.sla_enabled, passesJiraRoleFilter, sortCol, sortDir]);
 
   const jiraRoleFilterActive = fJiraActionable !== true || fJiraRaised !== false;
-  const hasActiveFilters = useMemo(() => !!(fTool || fStatus.length > 0 || fSla || fUnassigned || search || jiraRoleFilterActive), [fTool, fStatus, fSla, fUnassigned, search, jiraRoleFilterActive]);
+  const hasActiveFilters = useMemo(() => !!(fTool || fStatus.length > 0 || fSla || fUnassigned || fCountry.length > 0 || search || jiraRoleFilterActive), [fTool, fStatus, fSla, fUnassigned, fCountry, search, jiraRoleFilterActive]);
 
   // ── Source-panel filter (status severity + unassigned) ──
   // SLA filter is applied SEPARATELY (below) so the SLA pill counts stay
@@ -550,8 +558,9 @@ const Queue = ({ user, tasks, subFilter }) => {
     let r = Array.isArray(rows) ? rows : [];
     if (fStatus.length) r = r.filter(row => fStatus.includes(row?.status?.severity));
     if (fUnassigned)    r = r.filter(row => !row?.assigneeEmail);
+    if (fCountry.length) r = r.filter(row => fCountry.includes(String(row?.country || '').toUpperCase()));
     return r;
-  }, [fStatus, fUnassigned]);
+  }, [fStatus, fUnassigned, fCountry]);
 
   // Pre-computed post-status/unassigned row sets. Drive the SLA pill counts.
   const visOnboardingRows  = useMemo(() => applyPanelFilter(onboardingRows),  [onboardingRows, applyPanelFilter]);
@@ -733,10 +742,10 @@ const Queue = ({ user, tasks, subFilter }) => {
     try {
       localStorage.setItem(
         queueFiltersKey(user?.email),
-        JSON.stringify({ fTool, fStatus, fSla, fUnassigned, fJiraActionable, fJiraRaised }),
+        JSON.stringify({ fTool, fStatus, fSla, fUnassigned, fCountry, fJiraActionable, fJiraRaised }),
       );
     } catch {}
-  }, [user?.email, fTool, fStatus, fSla, fUnassigned, fJiraActionable, fJiraRaised]);
+  }, [user?.email, fTool, fStatus, fSla, fUnassigned, fCountry, fJiraActionable, fJiraRaised]);
 
   // Flatten Active → SNOOZED header → snoozed → DONE header → done into
   // one virtual list. Each item carries `kind: 'row' | 'header'`; both
@@ -902,6 +911,27 @@ const Queue = ({ user, tasks, subFilter }) => {
               { value: 'resolved', label: 'Resolved', dotColor: '#15803d' },
             ];
           }
+          // Country options derived from every row the caller can currently
+          // see — tickets via `baseVis`, Deel sources via `allSourceRows`.
+          // Filtering to only countries that actually appear keeps the
+          // dropdown lean (no offering EMEA codes to a NAM-only TL). Counts
+          // reflect the union pre-country-filter so the user can see how
+          // many rows each option would surface.
+          const countryCounts = new Map();
+          const tally = (cc) => {
+            const code = String(cc || '').toUpperCase();
+            if (!code) return;
+            countryCounts.set(code, (countryCounts.get(code) || 0) + 1);
+          };
+          for (const t of baseVis) tally(t.country);
+          for (const r of allSourceRows) tally(r?.country);
+          const countryOptions = Array.from(countryCounts.entries())
+            .map(([code, count]) => ({
+              value: code,
+              label: `${getFlag(code) || ''} ${getCountryName(code) || code}`.trim(),
+              count,
+            }))
+            .sort((a, b) => a.label.localeCompare(b.label));
           return (
             // overflow:visible + flex-wrap so the Status filter popover (which
             // is position:absolute) is not clipped by the parent's scroll
@@ -977,6 +1007,17 @@ const Queue = ({ user, tasks, subFilter }) => {
                 activeColor="#7c3aed"
               />
 
+              {countryOptions.length > 0 && (
+                <MultiFilterDropdown
+                  icon="bi-globe2"
+                  label="Country"
+                  selected={fCountry}
+                  options={countryOptions}
+                  onChange={setFCountry}
+                  activeColor="#1f74b3"
+                />
+              )}
+
               <button onClick={() => setFUnassigned(!fUnassigned)} style={{ height: 32, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '0 12px', borderRadius: 8, border: fUnassigned ? '1px solid #d42d35' : '1px solid #e8e8e8', background: fUnassigned ? '#fef2f2' : 'white', color: fUnassigned ? '#d42d35' : '#616161', fontSize: 12, fontWeight: fUnassigned ? 600 : 500, cursor: 'pointer', transition: 'all .15s', whiteSpace: 'nowrap' }}>
                 <i className="bi-person-dash" style={{ fontSize: 11 }}></i>Unassigned
               </button>
@@ -1002,7 +1043,7 @@ const Queue = ({ user, tasks, subFilter }) => {
               {hasActiveFilters && hiddenByFilters > 0 && (
                 <button
                   type="button"
-                  onClick={() => { setFTool(null); setFStatus([]); setFSla(null); setFUnassigned(false); setSearch(''); setFJiraActionable(true); setFJiraRaised(false); }}
+                  onClick={() => { setFTool(null); setFStatus([]); setFSla(null); setFUnassigned(false); setFCountry([]); setSearch(''); setFJiraActionable(true); setFJiraRaised(false); }}
                   title={`Your active filters are hiding ${hiddenByFilters} ${hiddenByFilters === 1 ? 'task' : 'tasks'}. Click to clear all filters.`}
                   style={{ height: 32, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '0 10px', borderRadius: 8, background: '#fff7ed', border: '1px solid #fed7aa', color: '#b45309', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap', cursor: 'pointer', fontFamily: 'inherit' }}
                   onMouseEnter={e => { e.currentTarget.style.background = '#ffedd5'; }}
@@ -1014,7 +1055,7 @@ const Queue = ({ user, tasks, subFilter }) => {
               )}
 
               {hasActiveFilters && (
-                <button onClick={() => { setFTool(null); setFStatus([]); setFSla(null); setFUnassigned(false); setSearch(''); setFJiraActionable(true); setFJiraRaised(false); }} style={{ height: 32, display: 'inline-flex', alignItems: 'center', gap: 4, padding: '0 10px', borderRadius: 8, border: 'none', background: 'transparent', color: '#9e9e9e', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap', textDecoration: 'underline' }}>
+                <button onClick={() => { setFTool(null); setFStatus([]); setFSla(null); setFUnassigned(false); setFCountry([]); setSearch(''); setFJiraActionable(true); setFJiraRaised(false); }} style={{ height: 32, display: 'inline-flex', alignItems: 'center', gap: 4, padding: '0 10px', borderRadius: 8, border: 'none', background: 'transparent', color: '#9e9e9e', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap', textDecoration: 'underline' }}>
                   Clear all
                 </button>
               )}
@@ -1355,7 +1396,7 @@ const Queue = ({ user, tasks, subFilter }) => {
                               </div>
                               <button
                                 type="button"
-                                onClick={() => { setFTool(null); setFStatus([]); setFSla(null); setFUnassigned(false); setSearch(''); setFJiraActionable(true); setFJiraRaised(false); }}
+                                onClick={() => { setFTool(null); setFStatus([]); setFSla(null); setFUnassigned(false); setFCountry([]); setSearch(''); setFJiraActionable(true); setFJiraRaised(false); }}
                                 style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 8, border: '1px solid #1f74b3', background: '#1f74b3', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
                               >
                                 <i className="bi-x-circle" style={{ fontSize: 12 }}></i>
