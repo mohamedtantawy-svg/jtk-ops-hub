@@ -243,7 +243,7 @@
 
 /* ── Page Transitions ─────────────────────────────────────────────── */
 @keyframes pageIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
-.page-enter{animation:pageIn .18s ease-out both;width:100%;min-width:0;}
+.page-enter{animation:pageIn .18s ease-out both;width:100%;min-width:0;display:flex;flex-direction:column;min-height:0;}
 
 /* ── Loading Skeleton ─────────────────────────────────────────────── */
 @keyframes skeleton-pulse{0%,100%{opacity:1}50%{opacity:.4}}
@@ -676,11 +676,29 @@ button:focus-visible,[role="button"]:focus-visible{outline:2px solid var(--purpl
 .deel-badge-blue   { background: var(--blue-light);   color: var(--blue); }
 .deel-badge-grey   { background: var(--surface-3);    color: var(--text-secondary); }
 
-/* Page transition */
+/* Page transition.
+   `display: flex; flex-direction: column; min-height: 0;` makes .page-enter
+   a flex column that inherits `.deel-content`'s row-stretched height.
+   Without it, .page-enter is a block element with natural content height —
+   so any view that sets `flex: 1` on its outer wrapper (Queue, OOOView,
+   CalendarView, LeaderAlertsView, etc.) computes flex:1 against an
+   unconstrained parent. The view ends up rendering at natural content
+   height, its `overflow: hidden` outer never clips, and the inner
+   `overflowY: auto` scroller never scrolls — the page-level `.deel-content`
+   scrolls instead. For virtualised tables (Queue.jsx + SourceTable.jsx via
+   useVirtualRows) this is catastrophic: the inner scroller's `scrollTop`
+   stays at 0 forever, so the virtualizer renders only rows 0–N at the top
+   and a ~50000-pixel empty bottom-spacer where the rest of the list
+   should be — Mohamed Tantawy 2026-05-15 "Zendesk Q doesn't show the full
+   list" repro, surviving PR #629's stale-scrollTop fix because that PR
+   addressed state recovery, not the underlying layout issue. */
 .page-enter {
   animation: pageIn 0.18s ease-out both;
   width: 100%;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 /* Checkbox custom style */
