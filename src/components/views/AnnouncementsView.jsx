@@ -113,6 +113,17 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
 
   // ── State ──
   const [filter,setFilter]=useState('all');
+  // Title + body keyword search (Madeleine Decuir 2026-05-15 feedback, 4
+  // votes). Debounced 250 ms so each keystroke doesn't re-run the visible
+  // memo. Case-insensitive ILIKE-style substring match on title + body.
+  // `#hashtag` style keywords work for free — typing `#release` matches
+  // any announcement whose body includes that token.
+  const [search,setSearch]=useState('');
+  const [debouncedSearch,setDebouncedSearch]=useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 250);
+    return () => clearTimeout(t);
+  }, [search]);
   // "Show saved only" — secondary toggle that stacks on top of the type
   // filter (All / Alerts / Updates / etc.). Lives in the header beside the
   // sent count rather than as a sibling tab so users see saved items in
@@ -269,18 +280,33 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
     return c.author && (c.author.id === user.id || c.author.id === serverUserId);
   };
 
+  // Search needle is lowercased once per memo run; the per-row check just
+  // does two substring tests. Empty string short-circuits to a pass so the
+  // hot path (no search) stays free. Hashtags fall out naturally because
+  // the body match is plain substring — typing `#release` matches any
+  // announcement whose body literally contains that token.
+  const searchNeedle = debouncedSearch.trim().toLowerCase();
+  const matchesSearch = (c) => {
+    if (!searchNeedle) return true;
+    const title = String(c.title || '').toLowerCase();
+    if (title.includes(searchNeedle)) return true;
+    const body = String(c.body || '').toLowerCase();
+    if (body.includes(searchNeedle)) return true;
+    return false;
+  };
+
   const visible=useMemo(()=>comms.filter(c=>{
-    if(filter==='drafts')return c.status==='draft'&&isLA;
-    if(filter==='archived')return c.status==='archived'&&isLA;
-    if(filter==='scheduled')return canSeeScheduled(c);
+    if(filter==='drafts')return c.status==='draft'&&isLA&&matchesSearch(c);
+    if(filter==='archived')return c.status==='archived'&&isLA&&matchesSearch(c);
+    if(filter==='scheduled')return canSeeScheduled(c)&&matchesSearch(c);
     // For sent surfaces ('all' + type filters), the optional "Saved only"
     // toggle stacks on top — empty saved set just renders the empty
     // state, not a phantom missing announcement.
     const passes = filter==='all'
       ? (c.status==='sent'&&canSee(c))
       : (c.type===filter&&c.status==='sent'&&canSee(c));
-    return passes && (!showSavedOnly || isSaved(c.id));
-  }),[comms,filter,isLA,user,serverUserId,isApproverUser,showSavedOnly,savedCount]); // eslint-disable-line react-hooks/exhaustive-deps
+    return passes && (!showSavedOnly || isSaved(c.id)) && matchesSearch(c);
+  }),[comms,filter,isLA,user,serverUserId,isApproverUser,showSavedOnly,savedCount,debouncedSearch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const uid=Number(user.id);
   // Ack check — EMAIL-FIRST, drift-proof. The static MEMBERS array uses
@@ -565,6 +591,41 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
             </div>
           )}
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+            {/* Title + body search. Lives in the header's right-side cluster
+                so the layout doesn't grow vertically. 32 px height + 8 px
+                radius keeps it visually consistent with the "Saved only"
+                pill next to it. Magnifying-glass icon left, clear-x icon
+                right when something is typed (one-click reset). */}
+            <div style={{ position: 'relative', width: 220 }}>
+              <i className="bi-search" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: '#9e9e9e' }} />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search title or body…"
+                aria-label="Search announcements"
+                style={{
+                  width: '100%', height: 32,
+                  paddingLeft: 28, paddingRight: search ? 26 : 10,
+                  borderRadius: 8, border: '1px solid #e8e8e8',
+                  fontSize: 12, background: 'white', color: '#1b1b1b', outline: 'none',
+                }}
+              />
+              {search && (
+                <button
+                  onClick={() => setSearch('')}
+                  aria-label="Clear search"
+                  title="Clear"
+                  style={{
+                    position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
+                    width: 18, height: 18, borderRadius: 999, padding: 0,
+                    border: 'none', background: 'transparent', cursor: 'pointer',
+                    color: '#9e9e9e', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  }}
+                >
+                  <i className="bi-x-circle-fill" style={{ fontSize: 12 }} />
+                </button>
+              )}
+            </div>
             {/* Saved-only secondary toggle. Pill style + bookmark icon so it
                 feels different from the type filter tabs below. Hidden on
                 drafts/archived/scheduled where saving doesn't apply. */}
@@ -642,9 +703,11 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
         ) : visible.length === 0 ? (
           !initialLoadDone
             ? <EmptyState icon="bi-arrow-clockwise" title="Loading announcements…" subtitle="One moment while we fetch the latest." />
-            : showSavedOnly
-              ? <EmptyState icon="bi-bookmark" title="No saved announcements" subtitle="Tap the bookmark icon on any announcement to save it for later." />
-              : <EmptyState icon="bi-inbox" title="No announcements" subtitle="All clear!" />
+            : searchNeedle
+              ? <EmptyState icon="bi-search" title={`No matches for "${debouncedSearch}"`} subtitle="Try a different keyword, or clear the search to see everything." />
+              : showSavedOnly
+                ? <EmptyState icon="bi-bookmark" title="No saved announcements" subtitle="Tap the bookmark icon on any announcement to save it for later." />
+                : <EmptyState icon="bi-inbox" title="No announcements" subtitle="All clear!" />
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
