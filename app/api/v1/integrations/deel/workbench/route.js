@@ -15,11 +15,19 @@ const CACHE_KEY = 'deel_workbench';
 const CACHE_TTL = 3 * 60 * 1000;    // fresh for 3 minutes
 const STALE_TTL = 30 * 60 * 1000;   // serve stale up to 30 minutes
 // Workbench occasionally pages slowly during peak hours; cap the user-visible
-// wait at 30s. Beyond this, fall back to stale cache (or empty + _warming
-// flag if cold). The previous 90s ceiling produced the
+// wait at 45s. Beyond this, fall back to stale cache (or empty + _warming
+// flag if cold). The 90s ceiling before 2026-05-01 produced
 // "[useWorkbenchData] Failed: ... timed out after 90000ms" console warnings
-// every poll cycle when upstream was slow.
-const SCAN_TIMEOUT_MS = 30_000;
+// every poll cycle when upstream was slow. The 30s ceiling set on
+// 2026-05-01 was *too* tight — the natural cycle time (active fetch ~25-28s
+// + 2-page safety net ~2-3s + DB reconcile ~1-2s) lands at ~32-35s, so the
+// 30s ceiling fired on virtually every cold-cache cycle (145 warnings in
+// the 2026-05-15 4h log window) and users got stale-cache responses that
+// the in-flight build superseded ~3-5s later. 45s matches onboarding's
+// already-tuned ceiling and the FE timeout block in
+// src/services/integrationsApi.js::fetchDeelWorkbench (FE waits 60s,
+// giving the warming-payload fallback a clean 15s window to land).
+const SCAN_TIMEOUT_MS = 45_000;
 
 function scoped(data, user) {
   if (!data?.items) return data;

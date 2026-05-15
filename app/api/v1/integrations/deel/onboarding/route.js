@@ -15,7 +15,18 @@ import { getReassignmentMap, applyReassignments } from '../../../../../../src/li
 const CACHE_KEY = 'deel_onboarding';
 const CACHE_TTL = 5 * 60 * 1000;    // fresh for 5 minutes
 const STALE_TTL = 30 * 60 * 1000;   // serve stale up to 30 minutes
-const SCAN_TIMEOUT_MS = 45_000;
+// Onboarding has the deepest fan-out of any Deel route: the actionable
+// queue paginates up to 6 pages, AND we run 4 supplemental status scans
+// sequentially, each doing per-country fan-out (BATCH_SIZE=3) across ~80
+// countries → up to ~108 sequential admin calls in the supplemental
+// branch alone. When upstream rate-limits (`Retry-After`), the cumulative
+// 1.5s waits compound — verified live 2026-05-15 (8 simultaneous 429s
+// on the ComplianceDocs.AwaitingReview status at 07:25 pushed two
+// concurrent users past the 45s ceiling). 60s absorbs ~10s of additional
+// retry slop without changing concurrency limits. Still well below the
+// FE's 90s `DEFAULT_TIMEOUT_MS` in src/services/api.js, so the warming-
+// fallback path has clean headroom.
+const SCAN_TIMEOUT_MS = 60_000;
 
 // Scope the cached payload for this user (country-based for onboarding).
 // Cache stores the full payload; each request filters on the way out.
