@@ -361,10 +361,92 @@ export async function runZendeskSlaSync({ force = false } = {}) {
   }
 
   const durationMs = Date.now() - startedAt;
-  const summary = { ticketsSeen, fetched, upserted, errors, notFound, durationMs };
+  // Coverage % = how much of the actionable set this run actually
+  // refreshed. Drops when Zendesk 429s or 500s; staying low across
+  // multiple cycles is the signal that the hot-warm path is going to
+  // be doing most of the work. Logged at INFO so it's graphable in
+  // log aggregators without parsing the success-message string.
+  const coveragePct = ticketsSeen > 0 ? Math.round((upserted / ticketsSeen) * 100) : 100;
+  const summary = { ticketsSeen, fetched, upserted, errors, notFound, durationMs, coveragePct };
   await setLastRun(summary);
-  console.log(`[zd-sla-sync] done: ${upserted}/${ticketsSeen} cached in ${durationMs}ms (${notFound} no-policy, ${errors} error(s))`);
+  console.log(`[zd-sla-sync] done: ${upserted}/${ticketsSeen} cached (${coveragePct}% coverage) in ${durationMs}ms (${notFound} no-policy, ${errors} error(s))`);
   return { ran: true, ...summary };
+}
+
+// In-flight dedupe for the hot-warm path. The queue route fires this
+// fire-and-forget on every request that has cache-miss tickets — without
+// dedupe, two simultaneous queue refreshes would issue overlapping warm
+// loops for the same IDs and overspend Zendesk's rate limit. Cleared
+// automatically when the loop settles.
+const _warmInflight = new Set();
+
+// ── Hot-path warm helper ───────────────────────────────────────────────
+// Called by the queue route fire-and-forget for IDs that came back from
+// `loadSlaRowsForTicketIds` empty. Runs the same per-ticket fetch + UPSERT
+// loop as the main sync, but capped tight so it can't overspend Zendesk's
+// rate limit during a hot path: only the first WARM_BATCH_MAX IDs are
+// fetched, with the same PER_TICKET_DELAY_MS pacing. Subsequent queue
+// refreshes pick up the enriched rows.
+//
+// Why this matters: without warm, a ticket the main sync hasn't reached
+// yet falls through `slaInfo` to the local biz-day math which used to
+// produce false-positive breach pills (2026-05-18 audit). The 2026-05-18
+// FE fix in helpers.js now renders "SLA syncing" instead — warm makes
+// that transient label resolve to real policy data within one refresh.
+const WARM_BATCH_MAX = 25;
+
+export async function warmSlaCacheForTicketIds(ticketIds) {
+  if (!isZendeskConfigured()) return { ran: false, reason: 'zendesk_not_configured' };
+  if (!process.env.DATABASE_URL) return { ran: false, reason: 'database_not_configured' };
+  if (!Array.isArray(ticketIds) || ticketIds.length === 0) return { ran: false, reason: 'no_ids' };
+
+  const ids = Array.from(new Set(
+    ticketIds.map(n => Number(n)).filter(n => Number.isFinite(n) && n > 0)
+  )).slice(0, WARM_BATCH_MAX);
+  if (ids.length === 0) return { ran: false, reason: 'no_valid_ids' };
+
+  // Skip IDs already being warmed by another in-flight call.
+  const todo = ids.filter(id => !_warmInflight.has(id));
+  if (todo.length === 0) return { ran: false, reason: 'all_inflight' };
+  for (const id of todo) _warmInflight.add(id);
+
+  let fetched = 0, upserted = 0, errors = 0, notFound = 0;
+  const buffer = [];
+  const startedAt = Date.now();
+  try {
+    for (const id of todo) {
+      let res = null;
+      try {
+        res = await fetchTicketSlaPolicyMetrics(id);
+        fetched++;
+      } catch (err) {
+        errors++;
+        // Don't log every warm error — they're expected during upstream
+        // hiccups and would flood the pod logs. Aggregate count is logged
+        // at the end.
+        continue;
+      }
+      if (!res) { notFound++; continue; }
+      buffer.push(extractSlaFromPolicyMetricsResponse(id, res));
+      if (PER_TICKET_DELAY_MS > 0) {
+        await new Promise(r => setTimeout(r, PER_TICKET_DELAY_MS));
+      }
+    }
+    if (buffer.length > 0) {
+      try {
+        upserted = await upsertSlaBatch(buffer);
+      } catch (err) {
+        console.warn(`[zd-sla-warm] upsert of ${buffer.length} rows failed:`, err?.message);
+      }
+    }
+  } finally {
+    for (const id of todo) _warmInflight.delete(id);
+  }
+  const durationMs = Date.now() - startedAt;
+  if (fetched > 0 || errors > 0) {
+    console.log(`[zd-sla-warm] ${upserted}/${todo.length} warmed in ${durationMs}ms (${notFound} no-policy, ${errors} error(s))`);
+  }
+  return { ran: true, requested: ids.length, attempted: todo.length, fetched, upserted, errors, notFound, durationMs };
 }
 
 // Read helper used by the queue route to merge SLA rows in one round-trip.
