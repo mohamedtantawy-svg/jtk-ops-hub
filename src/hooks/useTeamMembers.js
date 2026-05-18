@@ -93,6 +93,44 @@ export function useTeamMembers() {
 
   useEffect(() => { fetchMembers(); }, [fetchMembers]);
 
+  // ── Cross-session refresh ─────────────────────────────────────────────
+  // The hook used to fetch on mount only, so a country / manager edit made
+  // by Admin A in one browser stayed invisible to every other open session
+  // (Insiya's, the affected agent's, the agent's old/new manager's, …)
+  // until they manually reloaded. That stranded stale OWNER_COUNTRIES +
+  // direct-report trees client-side and made cross-team scope changes
+  // look like "the bug" (Mohamed + Insiya, 2026-05-18). Refetch on:
+  //   • visibilitychange (user tabs back in)
+  //   • window focus (user clicks back into the tab)
+  //   • a soft 5-minute interval (safety net for users who never tab out)
+  // All gated on document.visibilityState === 'visible' so background tabs
+  // don't hammer the endpoint.
+  useEffect(() => {
+    const refreshIfVisible = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        fetchMembers();
+      }
+    };
+    const onVis = () => { if (document.visibilityState === 'visible') fetchMembers(); };
+    const onFocus = () => fetchMembers();
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', onVis);
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', onFocus);
+    }
+    const intervalId = setInterval(refreshIfVisible, 5 * 60 * 1000);
+    return () => {
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', onVis);
+      }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('focus', onFocus);
+      }
+      clearInterval(intervalId);
+    };
+  }, [fetchMembers]);
+
   // ── Hydrate the module-level roster whenever `members` changes ────────
   // This is the bridge that makes Team-tab edits (add, move, access-change,
   // remove) visible to every static import of members.js in the app:
@@ -174,18 +212,30 @@ export function useTeamMembers() {
       lastLoginAt: null,
       loginCount: 0,
     };
-    setMembers(prev => [...prev, optimistic]);
+    setMembers(prev => {
+      const next = [...prev, optimistic];
+      writeCache(next);
+      return next;
+    });
 
     try {
       const saved = await apiFetch('/team-members', {
         method: 'POST',
         body: JSON.stringify(payload),
       });
-      setMembers(prev => prev.map(m => m.email.toLowerCase() === email ? { ...optimistic, ...saved } : m));
+      setMembers(prev => {
+        const next = prev.map(m => m.email.toLowerCase() === email ? { ...optimistic, ...saved } : m);
+        writeCache(next);
+        return next;
+      });
       return { ok: true, member: saved };
     } catch (err) {
       // Roll back the optimistic insert and refetch to resync.
-      setMembers(prev => prev.filter(m => m.email.toLowerCase() !== email));
+      setMembers(prev => {
+        const next = prev.filter(m => m.email.toLowerCase() !== email);
+        writeCache(next);
+        return next;
+      });
       fetchMembers();
       return { ok: false, error: err.message || 'Failed to add member' };
     }
@@ -197,18 +247,30 @@ export function useTeamMembers() {
     if (!previous) return { ok: false, error: 'Member not found' };
 
     // Optimistic
-    setMembers(prev => prev.map(m => m.email.toLowerCase() === lc ? { ...m, ...patch } : m));
+    setMembers(prev => {
+      const next = prev.map(m => m.email.toLowerCase() === lc ? { ...m, ...patch } : m);
+      writeCache(next);
+      return next;
+    });
 
     try {
       const saved = await apiFetch(`/team-members/${encodeURIComponent(lc)}`, {
         method: 'PATCH',
         body: JSON.stringify(patch),
       });
-      setMembers(prev => prev.map(m => m.email.toLowerCase() === lc ? { ...m, ...saved } : m));
+      setMembers(prev => {
+        const next = prev.map(m => m.email.toLowerCase() === lc ? { ...m, ...saved } : m);
+        writeCache(next);
+        return next;
+      });
       return { ok: true, member: saved };
     } catch (err) {
       // Roll back the optimistic patch
-      setMembers(prev => prev.map(m => m.email.toLowerCase() === lc ? previous : m));
+      setMembers(prev => {
+        const next = prev.map(m => m.email.toLowerCase() === lc ? previous : m);
+        writeCache(next);
+        return next;
+      });
       return { ok: false, error: err.message || 'Failed to update member' };
     }
   }, [members]);
@@ -226,7 +288,11 @@ export function useTeamMembers() {
     // the source of truth.
     if (previous) {
       // Optimistic remove
-      setMembers(prev => prev.filter(m => m.email.toLowerCase() !== lc));
+      setMembers(prev => {
+        const next = prev.filter(m => m.email.toLowerCase() !== lc);
+        writeCache(next);
+        return next;
+      });
     }
 
     try {
@@ -235,7 +301,11 @@ export function useTeamMembers() {
     } catch (err) {
       if (previous) {
         // Roll back the optimistic remove
-        setMembers(prev => [...prev, previous]);
+        setMembers(prev => {
+          const next = [...prev, previous];
+          writeCache(next);
+          return next;
+        });
       }
       return { ok: false, error: err.message || 'Failed to remove member' };
     }
@@ -262,7 +332,11 @@ export function useTeamMembers() {
         .filter(c => /^[A-Z]{2}$/.test(c)),
     )).sort();
 
-    setMembers(prev => prev.map(m => m.email.toLowerCase() === lc ? { ...m, countries: cleaned } : m));
+    setMembers(prev => {
+      const next = prev.map(m => m.email.toLowerCase() === lc ? { ...m, countries: cleaned } : m);
+      writeCache(next);
+      return next;
+    });
 
     try {
       const saved = await apiFetch(`/team-members/${encodeURIComponent(lc)}/countries`, {
@@ -270,10 +344,18 @@ export function useTeamMembers() {
         body: JSON.stringify({ countries: cleaned }),
       });
       const finalCountries = Array.isArray(saved?.countries) ? saved.countries : cleaned;
-      setMembers(prev => prev.map(m => m.email.toLowerCase() === lc ? { ...m, countries: finalCountries } : m));
+      setMembers(prev => {
+        const next = prev.map(m => m.email.toLowerCase() === lc ? { ...m, countries: finalCountries } : m);
+        writeCache(next);
+        return next;
+      });
       return { ok: true, countries: finalCountries };
     } catch (err) {
-      setMembers(prev => prev.map(m => m.email.toLowerCase() === lc ? previous : m));
+      setMembers(prev => {
+        const next = prev.map(m => m.email.toLowerCase() === lc ? previous : m);
+        writeCache(next);
+        return next;
+      });
       return { ok: false, error: err.message || 'Failed to save countries' };
     }
   }, [members]);

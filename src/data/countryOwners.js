@@ -140,6 +140,29 @@ let _countryOwners = {
 export let COUNTRY_OWNERS = _countryOwners;
 export let OWNER_COUNTRIES = _buildReverseMap(_countryOwners);
 
+// ── Version + subscribers ──────────────────────────────────────────────────
+// Live-binding mutations (COUNTRY_OWNERS / OWNER_COUNTRIES rebuild on every
+// hydrateOwnerCountries call) don't trigger React re-renders on their own —
+// downstream useMemo deps key on `[rows, user]` and can't see the map
+// reference change. The version counter gives memos a stable dep to track:
+// every hydration bumps the counter and notifies subscribers, so e.g. the
+// Queue's scope memos can re-derive immediately when an admin edits a
+// member's country ownership in another tab (or another user's session
+// triggers a roster refresh on focus/visibility). Same pattern members.js
+// uses for the roster.
+let _ownersVersion = 0;
+const _ownersSubscribers = new Set();
+
+export function getCountryOwnersVersion() {
+  return _ownersVersion;
+}
+
+export function subscribeCountryOwners(cb) {
+  if (typeof cb !== 'function') return () => {};
+  _ownersSubscribers.add(cb);
+  return () => { _ownersSubscribers.delete(cb); };
+}
+
 function _buildReverseMap(owners) {
   const map = new Map();
   for (const [cc, emails] of Object.entries(owners || {})) {
@@ -163,6 +186,9 @@ function _buildReverseMap(owners) {
  * Both COUNTRY_OWNERS (cc → emails[]) and OWNER_COUNTRIES (email → Set<cc>)
  * are rebuilt from scratch so a row that disappears from the DB also
  * disappears from the in-memory map. No-op if `rows` is missing.
+ *
+ * Bumps the version counter + notifies subscribers so memo'd downstream
+ * scopers (Queue, Briefing) re-derive on the next render.
  */
 export function hydrateOwnerCountries(rows) {
   if (!Array.isArray(rows)) return;
@@ -176,6 +202,15 @@ export function hydrateOwnerCountries(rows) {
   }
   COUNTRY_OWNERS = owners;
   OWNER_COUNTRIES = _buildReverseMap(owners);
+  _ownersVersion += 1;
+  for (const cb of _ownersSubscribers) {
+    try { cb(_ownersVersion); }
+    catch (err) {
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn('[countryOwners subscribeCountryOwners]', err?.message || err);
+      }
+    }
+  }
 }
 
 // ── Helper: get country codes owned by a given email ──

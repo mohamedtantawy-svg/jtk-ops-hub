@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef, useContext, useCallback, Fragment
 import { TOOLS, STATUSES, FUNCTIONS, FLAGS } from '../../data/constants';
 import { MEMBERS, MEMBERS_BY_EMAIL, TEAM_MEMBERS, getDirectReports, getAllReports } from '../../data/members';
 import { useTeamMembers } from '../../hooks/useTeamMembers';
+import { useTeamDataVersion } from '../../hooks/useTeamDataVersion';
 import { matchesAudience } from '../../data/comms';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import { CALENDAR_EVENTS } from '../../data/calendar';
@@ -369,8 +370,15 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // streams under one pill. Without this Home reported 115 (active only)
   // while Workspace reported 330 (active + 215 paused) — F3 in the
   // 2026-05-03 live audit.
-  const onboardingActionRows = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user), [onboardingRowsAll, user]);
-  const pausedOnboardingRows = useMemo(() => scopePausedOnboarding(pausedOnboardingRowsAll, user), [pausedOnboardingRowsAll, user]);
+  // Bumps when the roster or country-ownership map mutates (Team-tab edit
+  // here or in another user's session pulling fresh data via useTeamMembers'
+  // visibility/focus/poll refetch). Threaded into every scope memo below so
+  // client-side scoping re-derives the moment the underlying live bindings
+  // change — fixes Insiya + Mohamed 2026-05-18 "manager change / country
+  // removal stays visible until a hard refresh".
+  const teamDataVersion = useTeamDataVersion();
+  const onboardingActionRows = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user), [onboardingRowsAll, user, teamDataVersion]);
+  const pausedOnboardingRows = useMemo(() => scopePausedOnboarding(pausedOnboardingRowsAll, user), [pausedOnboardingRowsAll, user, teamDataVersion]);
   const onboardingRows = useMemo(() => {
     const seen = new Set();
     const merged = [];
@@ -381,10 +389,10 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     }
     return merged;
   }, [onboardingActionRows, pausedOnboardingRows]);
-  const offboardingRows = useMemo(() => scopeOffboardingCases(offboardingRowsAll, user), [offboardingRowsAll, user]);
-  const amendmentRows = useMemo(() => scopeAmendmentRequests(amendmentRowsAll, user), [amendmentRowsAll, user]);
-  const redlineRows = useMemo(() => scopeRedlineRequests(redlineRowsAll, user), [redlineRowsAll, user]);
-  const workbenchRows = useMemo(() => scopeWorkbenchTasks(workbenchRowsAll, user), [workbenchRowsAll, user]);
+  const offboardingRows = useMemo(() => scopeOffboardingCases(offboardingRowsAll, user), [offboardingRowsAll, user, teamDataVersion]);
+  const amendmentRows = useMemo(() => scopeAmendmentRequests(amendmentRowsAll, user), [amendmentRowsAll, user, teamDataVersion]);
+  const redlineRows = useMemo(() => scopeRedlineRequests(redlineRowsAll, user), [redlineRowsAll, user, teamDataVersion]);
+  const workbenchRows = useMemo(() => scopeWorkbenchTasks(workbenchRowsAll, user), [workbenchRowsAll, user, teamDataVersion]);
   // Workbench is the only Deel source that intentionally surfaces a 24h
   // window of COMPLETED + CLOSED rows (so the home "Resolved Today" KPI
   // can include workbench). Active aggregates — capacity bands, SLA

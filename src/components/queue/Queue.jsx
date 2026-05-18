@@ -27,6 +27,7 @@ import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../
 import Avatar from '../ui/Avatar';
 import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
 import { useTaskNotes } from '../../hooks/useTaskNotes';
+import { useTeamDataVersion } from '../../hooks/useTeamDataVersion';
 import UnifiedSyncButton from './UnifiedSyncButton';
 import SourceTable from './SourceTable';
 import ErrorBoundary from '../ui/ErrorBoundary';
@@ -422,8 +423,18 @@ const Queue = ({ user, tasks, subFilter }) => {
   // consumers (rowSlaSeverity, slaTier, BriefingView aggregates) read
   // the overridden fields naturally — no per-consumer code change.
   const slaExtensionMap = slaExtensions?.map || null;
-  const onboardingActionRowsScoped = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user), [onboardingRowsAll, user]);
-  const pausedOnboardingRowsScoped = useMemo(() => scopePausedOnboarding(pausedOnboardingRowsAll, user), [pausedOnboardingRowsAll, user]);
+  // Bumps when the roster or country-ownership map mutates (Team-tab edit
+  // in this session OR another user's session pulling fresh data via the
+  // visibility/focus/poll refetch). Threaded into every scope memo so
+  // client-side scoping re-derives on the same tick — Insiya + Mohamed
+  // 2026-05-18 ("the new manager still sees the old team Qs / the old
+  // team member still sees old countries that have been removed from
+  // them"). scope* helpers read OWNER_COUNTRIES + the live roster via
+  // live bindings, so the value itself doesn't go INTO the memo body —
+  // it only triggers re-derive.
+  const teamDataVersion = useTeamDataVersion();
+  const onboardingActionRowsScoped = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user), [onboardingRowsAll, user, teamDataVersion]);
+  const pausedOnboardingRowsScoped = useMemo(() => scopePausedOnboarding(pausedOnboardingRowsAll, user), [pausedOnboardingRowsAll, user, teamDataVersion]);
   const onboardingActionRows = useMemo(() => applySlaExtensionsToRows(onboardingActionRowsScoped, slaExtensionMap, 'onboarding'), [onboardingActionRowsScoped, slaExtensionMap]);
   const pausedOnboardingRows = useMemo(() => applySlaExtensionsToRows(pausedOnboardingRowsScoped, slaExtensionMap, 'onboarding'), [pausedOnboardingRowsScoped, slaExtensionMap]);
   const onboardingRows = useMemo(() => {
@@ -436,11 +447,11 @@ const Queue = ({ user, tasks, subFilter }) => {
     }
     return merged;
   }, [onboardingActionRows, pausedOnboardingRows]);
-  const offboardingRows = useMemo(() => applySlaExtensionsToRows(scopeOffboardingCases(offboardingRowsAll, user), slaExtensionMap, 'offboarding'), [offboardingRowsAll, user, slaExtensionMap]);
-  const amendmentRows   = useMemo(() => applySlaExtensionsToRows(scopeAmendmentRequests(amendmentRowsAll, user), slaExtensionMap, 'amendments'), [amendmentRowsAll, user, slaExtensionMap]);
-  const redlineRows     = useMemo(() => applySlaExtensionsToRows(scopeRedlineRequests(redlineRowsAll, user), slaExtensionMap, 'redlines'), [redlineRowsAll, user, slaExtensionMap]);
-  const workbenchRows   = useMemo(() => applySlaExtensionsToRows(scopeWorkbenchTasks(workbenchRowsAll, user), slaExtensionMap, 'workbench'), [workbenchRowsAll, user, slaExtensionMap]);
-  const incentivePlanRows = useMemo(() => applySlaExtensionsToRows(scopeIncentivePlans(incentivePlanRowsAll, user), slaExtensionMap, 'incentive_plans'), [incentivePlanRowsAll, user, slaExtensionMap]);
+  const offboardingRows = useMemo(() => applySlaExtensionsToRows(scopeOffboardingCases(offboardingRowsAll, user), slaExtensionMap, 'offboarding'), [offboardingRowsAll, user, slaExtensionMap, teamDataVersion]);
+  const amendmentRows   = useMemo(() => applySlaExtensionsToRows(scopeAmendmentRequests(amendmentRowsAll, user), slaExtensionMap, 'amendments'), [amendmentRowsAll, user, slaExtensionMap, teamDataVersion]);
+  const redlineRows     = useMemo(() => applySlaExtensionsToRows(scopeRedlineRequests(redlineRowsAll, user), slaExtensionMap, 'redlines'), [redlineRowsAll, user, slaExtensionMap, teamDataVersion]);
+  const workbenchRows   = useMemo(() => applySlaExtensionsToRows(scopeWorkbenchTasks(workbenchRowsAll, user), slaExtensionMap, 'workbench'), [workbenchRowsAll, user, slaExtensionMap, teamDataVersion]);
+  const incentivePlanRows = useMemo(() => applySlaExtensionsToRows(scopeIncentivePlans(incentivePlanRowsAll, user), slaExtensionMap, 'incentive_plans'), [incentivePlanRowsAll, user, slaExtensionMap, teamDataVersion]);
   // Workbench is the only Deel source that intentionally surfaces resolved
   // rows (24h of COMPLETED + CLOSED) so the "RESOLVED TODAY" section can
   // render. Strip them from the cross-source "All" aggregates so the
