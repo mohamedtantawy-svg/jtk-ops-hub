@@ -1781,48 +1781,6 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
         </div>}
 
         {/* ══════════════════════════════════════════════════════════════════
-            LIVE INTEGRATION DATA — shows real counts when APIs are connected.
-            Deel Workers + Active Contracts tiles removed 2026-05-13 with
-            the REST-v2 deprecation; admin-API counts flow through the
-            queue-source tiles above instead.
-            ═════════════════════════════════════════════════════════════════ */}
-        {(jiraData?.isAvailable||slackData?.isAvailable)&&(
-          <div style={{marginTop:16,background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16,padding:'16px 20px',boxShadow:'0 1px 2px rgba(0,0,0,0.04)'}}>
-            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14}}>
-              <div style={{width:28,height:28,background:'#dcfce7',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center'}}>
-                <i className="bi-cloud-arrow-down-fill" style={{color:'#16a34a',fontSize:12}}></i>
-              </div>
-              <div style={{fontSize:13,fontWeight:600,color:'#16a34a',textTransform:'none',letterSpacing:'normal'}}>Live Data</div>
-              <span style={{fontSize:10,color:'#9e9e9e',marginLeft:'auto'}}>Auto-refreshing</span>
-            </div>
-            <div style={{display:'flex',gap:0,border:'1px solid #e8e8e8',borderRadius:12,overflow:'hidden'}}>
-              {[
-                jiraData?.isAvailable && {
-                  label: 'Jira Open Issues',
-                  value: Array.isArray(jiraData.issues) ? jiraData.issues.length : '—',
-                  icon: 'bi-kanban', color: '#0052CC', bg: '#e6efff',
-                },
-                slackData?.isAvailable && {
-                  label: 'Slack Escalations',
-                  value: Array.isArray(slackData.escalationMessages) ? slackData.escalationMessages.length : '—',
-                  icon: 'bi-chat-square-dots', color: '#611f69', bg: '#f3e8f9',
-                },
-              ].filter(Boolean).map((s,i,arr)=>(
-                <div key={s.label} style={{flex:1,padding:'12px 16px',borderRight:i<arr.length-1?'1px solid #e8e8e8':'none',display:'flex',alignItems:'center',gap:10}}>
-                  <div style={{width:32,height:32,background:s.bg,borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                    <i className={s.icon} style={{color:s.color,fontSize:14}}></i>
-                  </div>
-                  <div>
-                    <div style={{fontSize:22,fontWeight:800,color:s.color,lineHeight:1,fontVariantNumeric:'tabular-nums'}}>{s.value}</div>
-                    <div style={{fontSize:11,color:'#616161',marginTop:2,fontWeight:500}}>{s.label}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ══════════════════════════════════════════════════════════════════
             AGENT METRICS — bigger boxes with clear numbers
         ══════════════════════════════════════════════════════════════════ */}
         {isOwnScope&&<div style={{padding:'12px 24px'}}>
