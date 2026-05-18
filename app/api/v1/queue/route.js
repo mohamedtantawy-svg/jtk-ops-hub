@@ -9,7 +9,7 @@
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../src/lib/auth-helpers';
 import { searchTickets, showManyUsers, isZendeskConfigured } from '../../../../src/lib/zendesk-api';
-import { loadSlaRowsForTicketIds } from '../../../../src/lib/zendesk-sla-sync';
+import { loadSlaRowsForTicketIds, warmSlaCacheForTicketIds } from '../../../../src/lib/zendesk-sla-sync';
 import { searchIssues, isJiraConfigured, resolveHrxOwnerFields, emailsFromJiraFieldValue } from '../../../../src/lib/jira-api';
 
 // Jira custom fields (by display-name substring) that, together with the
@@ -686,6 +686,25 @@ async function fetchZendeskQueue() {
         if (_enriched > 0) {
           console.log(`[queue] Zendesk SLA cache: ${_enriched}/${items.length} tickets enriched from policy_metrics`);
         }
+      }
+      // Fire-and-forget hot-warm for IDs still in local-fallback mode
+      // (cache miss). The 2026-05-18 helpers.js change renders those as
+      // "SLA syncing" instead of the previous biz-day-math breach; this
+      // warm closes the gap so the next refresh (~30 s) carries real
+      // Zendesk policy_metrics. Capped at 25 IDs per call inside the
+      // sync helper to respect Zendesk's rate limit.
+      const missingIds = items
+        .filter(it => it.slaSource === 'local_metric_set')
+        .map(it => Number(it.externalId))
+        .filter(Number.isFinite);
+      if (missingIds.length > 0) {
+        // Use setImmediate so the warm starts AFTER the response has
+        // been queued for the caller. .catch() prevents an unhandled
+        // rejection if the warm loop trips during a Zendesk outage.
+        setImmediate(() => {
+          warmSlaCacheForTicketIds(missingIds)
+            .catch(err => console.warn('[queue] Zendesk SLA warm failed:', err?.message));
+        });
       }
     }
 

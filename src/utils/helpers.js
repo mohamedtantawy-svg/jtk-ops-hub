@@ -122,6 +122,31 @@ export const slaInfo=(task,customThresholds)=>{
     return { label: 'OK', short: 'OK', color: '#15803d', bg: '#f0fdf4', breach: false, remain: null, ok: true };
   }
 
+  // ── Zendesk local-fallback honesty (2026-05-18) ─────────────────────
+  // When slaSource === 'local_metric_set' AND slaMetric is set (FRT/NRT
+  // clock supposedly running), we DON'T have Zendesk's policy truth yet.
+  // The previous biz-day math below produced false-positive breach pills
+  // for long-running tickets whose policy_metrics confirm "achieved" but
+  // our cache hasn't seen yet — Mohamed 2026-05-18: "lots of SLA are not
+  // being pulled in correctly and creating a lot of fake positives".
+  //
+  // Render a neutral "SLA syncing" pill instead of guessing. The
+  // queue route now fires a hot-warm against the SLA cache on missed
+  // IDs (zendesk-sla-sync.warmSlaCacheForTicketIds), so the pill flips
+  // to authoritative policy data on the next refresh (~30 s).
+  if (task.source === 'zendesk' && task.slaSource === 'local_metric_set') {
+    return {
+      label: 'SLA syncing',
+      short: 'SYNC',
+      color: '#616161',
+      bg: '#f5f5f5',
+      breach: false,
+      remain: null,
+      ok: true,
+      pendingSync: true,
+    };
+  }
+
   // SLA uses task-type-specific thresholds from SLA_MINS (or custom overrides).
   // Per-task `slaMinsOverride` wins over everything — e.g. Jira tickets are
   // pinned at 48h from the latest update regardless of the type detected
