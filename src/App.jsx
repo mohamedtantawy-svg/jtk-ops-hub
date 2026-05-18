@@ -1766,8 +1766,16 @@ const App=()=>{
       const until = snoozedPopups?.[id];
       return Number.isFinite(until) && until > now;
     };
+    // Authors don't need to acknowledge their own broadcast — popping
+    // an announcement back at the person who just sent it is noise.
+    // 2026-05-18: caught when Mohamed's own POPUP fired at him, he
+    // snoozed it, and the briefing tile kept counting it as unacked
+    // forever because the unacked count had the same author-OR bug.
+    // Removed `|| (c.author && c.author.id === user.id)` and re-applied
+    // the author exclusion as an explicit AND.
+    const isAuthor = (c) => c.author && c.author.id === user.id;
     return comms.filter(c=>
-      c.isPopup&&c.status==='sent'&&!isAckedByMe(c)&&!dismissedPopups.includes(c.id)&&!isSnoozed(c.id)&&(targetMatch(c)||(c.author&&c.author.id===user.id))
+      c.isPopup&&c.status==='sent'&&!isAckedByMe(c)&&!dismissedPopups.includes(c.id)&&!isSnoozed(c.id)&&targetMatch(c)&&!isAuthor(c)
     );
   },[comms,user,dismissedPopups,snoozedPopups,popupTick,apiServerUserId,apiServerUserEmail]);
 
@@ -1775,9 +1783,31 @@ const App=()=>{
   // increments a counter so the memo re-runs and re-checks snooze
   // expiries. visibilitychange also nudges it so a tab that was hidden
   // for hours catches up the moment it comes back into focus.
+  //
+  // On every tick we ALSO prune expired snooze entries from state +
+  // localStorage. The popup memo already handles expiry via the
+  // `until > now` check, but pruning state-side means: (a) the map
+  // doesn't grow without bound on a long-running tab; (b) any
+  // downstream consumer reading `snoozedPopups` sees a clean view of
+  // "what's actually still snoozed".
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
-    const bump = () => setPopupTick((t) => (t + 1) % 1000000);
+    const bump = () => {
+      setPopupTick((t) => (t + 1) % 1000000);
+      setSnoozedPopups((prev) => {
+        if (!prev || typeof prev !== 'object') return prev;
+        const now = Date.now();
+        let mutated = false;
+        const next = {};
+        for (const [id, until] of Object.entries(prev)) {
+          if (Number.isFinite(until) && until > now) next[id] = until;
+          else mutated = true;
+        }
+        if (!mutated) return prev;
+        try { localStorage.setItem('ops_hub_snoozed_popups', JSON.stringify(next)); } catch (e) {}
+        return next;
+      });
+    };
     const id = setInterval(bump, 60_000);
     const onVis = () => { if (!document.hidden) bump(); };
     document.addEventListener('visibilitychange', onVis);

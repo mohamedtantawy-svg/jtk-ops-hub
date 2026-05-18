@@ -1600,7 +1600,12 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               sign-off, not every pending escalation in the org — avoids a
               useless 50+ number). */}
           {(()=>{
-            const inAudExec=(c)=>matchesAudience(c.target,user.team)||(c.author&&c.author.id===user.id);
+            // Author's own announcements don't count as "needing my ack" —
+            // they already broadcast it; an author re-acking their own
+            // post is a noise notification. 2026-05-18: caught when an
+            // admin's "1 unacked" badge couldn't be cleared because the
+            // unacked item was their own published announcement.
+            const inAudExec=(c)=>matchesAudience(c.target,user.team)&&!(c.author&&c.author.id===user.id);
             const execUnackedCount=comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='alert'||c.type==='guidance')&&!isAckedByMe(c)&&inAudExec(c)).length;
             return(
               <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:10,marginBottom:16}}>
@@ -1614,7 +1619,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   // Requests; the underlying count is unchanged (sum of
                   // open items across every queue source).
                   {icon:'bi-inbox-fill',label:'Open Tasks',value:activeRequestsCount,color:'var(--g)',sub:isOwnScope?'mine':isTeamScope?'team':'org-wide',nav:()=>setView('my-queue')},
-                  {icon:'bi-megaphone-fill',label:'Announcements',value:execUnackedCount,color:execUnackedCount>0?'#ed8d00':'#616161',alert:execUnackedCount>0,nav:()=>setView('announcements'),accent:execUnackedCount>0?'#fff8e6':null,sub:'unacked'},
+                  {icon:'bi-megaphone-fill',label:'Announcements',value:execUnackedCount,color:execUnackedCount>0?'#ed8d00':'#616161',alert:execUnackedCount>0,nav:()=>{setView('announcements');try{window.dispatchEvent(new CustomEvent('announcements:setFilter',{detail:{filter:'needs-ack'}}));}catch(_){}}, accent:execUnackedCount>0?'#fff8e6':null,sub:'unacked'},
                 ].map(m=>(
                   <DeelCard key={m.label}
                     onClick={m.nav}
@@ -1746,7 +1751,10 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
         {isOwnScope&&<div style={{padding:'12px 24px'}}>
           {/* ── Stat cards ──── */}
           {(()=>{
-            const inAudience=(c)=>matchesAudience(c.target,user.team)||(c.author&&c.author.id===user.id);
+            // See exec block above for the author-exclusion rationale —
+            // mirrored here so the Agent briefing tile has the same
+            // semantics.
+            const inAudience=(c)=>matchesAudience(c.target,user.team)&&!(c.author&&c.author.id===user.id);
             const unackedComms=comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='alert'||c.type==='guidance')&&!isAckedByMe(c)&&inAudience(c));
             const unackedCount=unackedComms.length;
             // Source breakdown for Active-Requests expand — must include every
@@ -1770,7 +1778,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               // My To-Do tiles dropped per audit F6 + F10 — features
               // deleted from the product.
               {icon:'bi-inbox-fill',label:'Open Tasks',value:activeRequestsCount,color:'var(--g)',sub:isOwnScope?'mine':isTeamScope?`team · avg ${teamAvg.toFixed(1)}`:`avg ${teamAvg.toFixed(1)}`,tr:trend(),expandKey:'active-breakdown'},
-              {icon:'bi-megaphone-fill',label:'Announcements',value:unackedCount,color:unackedCount>0?'#ed8d00':'#616161',alert:unackedCount>0,nav:()=>setView('announcements'),accent:unackedCount>0?'#fff8e6':null,sub:'unacked'},
+              {icon:'bi-megaphone-fill',label:'Announcements',value:unackedCount,color:unackedCount>0?'#ed8d00':'#616161',alert:unackedCount>0,nav:()=>{setView('announcements');try{window.dispatchEvent(new CustomEvent('announcements:setFilter',{detail:{filter:'needs-ack'}}));}catch(_){}}, accent:unackedCount>0?'#fff8e6':null,sub:'unacked'},
             ].map((m,i)=>(
               <DeelCard key={m.label}
                 onClick={m.expandKey?()=>setExpandedSla(expandedSla===m.expandKey?null:m.expandKey):m.nav?m.nav:undefined}
