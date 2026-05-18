@@ -361,6 +361,77 @@ async function paginatedZendeskSearch(query, { maxPages = 10, perPage = 100 } = 
   return { results: allResults, truncated, serverTotal };
 }
 
+// Zendesk Search's documented hard cap is 1000 hits per query — even
+// with unlimited pages, results beyond the 1000th are dropped. When a
+// status query exceeds that we silently lost the older tail, and the
+// FE rendered a "Some tickets may be hidden" banner. Mohamed 2026-05-18
+// reported the banner firing with 2171 / 4053 — ~1882 tickets missing.
+//
+// Fix: when the unbucketed query trips the cap, fan out by `created`
+// date range. Zendesk's relative-time syntax (`created<7days`,
+// `created>30days`) splits the result set into disjoint windows, each
+// well under the 1000-hit cap unless one calendar bucket is genuinely
+// huge. We dedup by ticket id at merge time as a belt-and-braces guard
+// against window-edge overlap.
+//
+// Sequential bucket fetch keeps peak memory bounded (mirrors the
+// status-by-status fetch in fetchZendeskQueue). Only fires when the
+// unbucketed first attempt is truncated, so the average case still
+// costs one query per status.
+const ZENDESK_DATE_BUCKETS = [
+  // (older-than, newer-than) — both optional. Order is most-recent first
+  // so the fast-path "recent tickets" bucket lands rows the FE renders
+  // at the top of the table sooner.
+  { older: null,       newer: '7days'   }, // last 7 days
+  { older: '7days',    newer: '30days'  }, // 7-30 days ago
+  { older: '30days',   newer: '180days' }, // 30-180 days ago
+  { older: '180days',  newer: '730days' }, // 180 days - 2 years ago
+  { older: '730days',  newer: null      }, // older than 2 years
+];
+
+async function paginatedZendeskSearchAllTime(baseQuery, { maxPages = 10, perPage = 100 } = {}) {
+  // Fast path: try one unbucketed query. Most statuses (incl. solved
+  // updated<24h) fit comfortably under 1000. No splitting cost when not
+  // needed.
+  const first = await paginatedZendeskSearch(baseQuery, { maxPages, perPage });
+  if (!first.truncated) return first;
+
+  console.log(`[queue] Zendesk query "${baseQuery}" truncated at 1000-hit cap — splitting into date buckets`);
+  const allResults = [];
+  const seenIds = new Set();
+  let stillTruncated = false;
+  let serverTotalSum = 0;
+  let everSawServerTotal = false;
+
+  for (const b of ZENDESK_DATE_BUCKETS) {
+    // Compose date range. `created<Xdays` = newer than X days ago,
+    // `created>Xdays` = older than X days ago. Combined they form a
+    // disjoint window.
+    const dateParts = [];
+    if (b.newer) dateParts.push(`created<${b.newer}`);
+    if (b.older) dateParts.push(`created>${b.older}`);
+    const subQuery = `${baseQuery} ${dateParts.join(' ')}`.trim();
+    const { results, truncated, serverTotal } = await paginatedZendeskSearch(subQuery, { maxPages, perPage });
+    for (const t of results) {
+      if (t?.id == null || seenIds.has(t.id)) continue;
+      seenIds.add(t.id);
+      allResults.push(t);
+    }
+    if (truncated) stillTruncated = true;
+    if (typeof serverTotal === 'number') {
+      serverTotalSum += serverTotal;
+      everSawServerTotal = true;
+    }
+  }
+
+  console.log(`[queue] Zendesk bucket-split of "${baseQuery}" recovered ${allResults.length} tickets (${stillTruncated ? 'one or more sub-buckets still truncated' : 'fully covered'})`);
+  return {
+    results: allResults,
+    truncated: stillTruncated,
+    serverTotal: everSawServerTotal ? serverTotalSum : null,
+  };
+}
+
 // ── Batch user lookup with pagination (handles >100 users) ───────────────────
 async function batchFetchUsers(userIds) {
   const userMap = {};
@@ -400,9 +471,13 @@ async function fetchZendeskQueue() {
     const statusQueries = ['new', 'open', 'pending', 'hold'].map(
       s => `group:"${ZD_GROUP_NAME}" status:${s}`
     );
-    // Fetch each status sequentially (not parallel) to reduce peak memory
+    // Fetch each status sequentially (not parallel) to reduce peak memory.
+    // Uses paginatedZendeskSearchAllTime so a status with > 1000 actionable
+    // tickets is auto-split by date range and we recover the full set
+    // (2026-05-18 fix — the "2171 of 4053" banner was caused by the 1000
+    // hard cap dropping older tickets silently).
     for (const q of statusQueries) {
-      const { results, truncated, serverTotal } = await paginatedZendeskSearch(q, { maxPages: 10 });
+      const { results, truncated, serverTotal } = await paginatedZendeskSearchAllTime(q, { maxPages: 10 });
       for (const t of results) {
         if (!seenZd.has(t.id)) { seenZd.add(t.id); allTickets.push(t); }
       }
@@ -412,13 +487,14 @@ async function fetchZendeskQueue() {
     // Recently solved (last 24 hours) — keeps resolved tickets visible in
     // the queue for a full day after they leave the active state. Pilar's
     // rule: "always show the resolved items in the past 24h with no data
-    // loss across all Qs". Was 4 hours; bumped so a ticket Trish solved
-    // overnight is still represented in this morning's "resolved today"
-    // count. Page count bumped to 5 to keep the 24h window fully covered
-    // for high-volume teams.
+    // loss across all Qs". The 24h window naturally fits under the 1000
+    // hard cap for every team we've observed, so we keep the plain
+    // pagination path here (no date-bucket split needed) — but the
+    // helper is still used to surface truncation if a team ever resolves
+    // > 1000 tickets in 24 hours.
     const solvedQuery = `group:"${ZD_GROUP_NAME}" status:solved updated<24hours`;
     const { results: solvedResults, truncated: solvedTruncated, serverTotal: solvedServerTotal } =
-      await paginatedZendeskSearch(solvedQuery, { maxPages: 5 });
+      await paginatedZendeskSearchAllTime(solvedQuery, { maxPages: 5 });
     for (const t of solvedResults) {
       if (!seenZd.has(t.id)) { seenZd.add(t.id); allTickets.push(t); }
     }
