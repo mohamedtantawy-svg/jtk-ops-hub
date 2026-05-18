@@ -10,7 +10,7 @@ import { apiFetch } from './api';
 /**
  * Visible-scope time-off events, joined with their in-flight handover.
  * @param {Object} params
- * @param {string} [params.lens]       — 'mine' | 'covering' | 'team' | 'approvals' | 'drafts' | 'all'
+ * @param {string} [params.lens]       — 'mine' | 'covering' | 'team' | 'drafts' | 'all'
  * @param {string} [params.from]       — YYYY-MM-DD inclusive lower bound on end_date
  * @param {string} [params.to]         — YYYY-MM-DD inclusive upper bound on start_date
  * @param {string} [params.workEmail]  — restrict to one person (detail panel)

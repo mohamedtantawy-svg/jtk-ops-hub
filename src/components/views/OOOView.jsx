@@ -1,12 +1,14 @@
 // ── OOOView ───────────────────────────────────────────────────────────
-// Single-tab OOO surface. Two view modes (Calendar Gantt, Table) and six
-// lens chips (Mine / Covering me / My team / Approvals / Drafts / All).
-// Phase 1 ships read-only — events render with their handover status,
-// but no creation / acceptance / approval is wired yet (that's Phase 2).
+// Single-tab OOO surface. Two view modes (Calendar Gantt, Table) and five
+// lens chips (Mine / Covering me / My team / Drafts / All). Phase 1
+// ships read-only — events render with their handover status, but no
+// creation / acceptance is wired yet (that's Phase 2). The "Approvals"
+// chip was removed 2026-05-18 — TL approval is no longer part of the
+// state machine (HANDOVER_TEMPLATE_REVAMP_PLAN.md §4.2).
 //
 // URL state contract:
 //   ?mode=calendar|table        — view mode, sticky per-user
-//   ?lens=mine|covering|team|approvals|drafts|all|auto
+//   ?lens=mine|covering|team|drafts|all|auto
 //   ?from=YYYY-MM-DD&to=YYYY-MM-DD — visible window
 //   ?handover=<event-id>        — opens the detail slide-out anchored to
 //                                  the time-off event (Phase 2 will key on
@@ -196,7 +198,7 @@ function OOOView({ user, setView, addToast }) {
       setCounts({
         mine: 0, mine_missing_handover: 0,
         covering: 0, covering_pending: 0,
-        team: 0, approvals: 0, drafts: 0, all: 0,
+        team: 0, drafts: 0, all: 0,
         _failed: true,
       });
     }
@@ -210,7 +212,6 @@ function OOOView({ user, setView, addToast }) {
     if (autoResolved) return;
     if (!counts || Object.keys(counts).length === 0) return;
     const resolved = autoLens({
-      approvalsCount: counts.approvals,
       coveringPendingCount: counts.covering_pending,
       mineMissingCount: counts.mine_missing_handover,
       isManager: isManagerRole(user?.role),
