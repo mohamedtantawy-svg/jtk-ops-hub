@@ -1987,6 +1987,80 @@ export async function runMigrations() {
     console.warn('[db] Country handover docs seed failed:', err?.message);
   }
 
+  // Phase C 2026-05-18: when HANDOVER_DEFAULTS_VERSION bumps, refresh the
+  // `handover_checklist_items` rows for every *draft* handover so they
+  // surface the v2 SOP items. Submitted handovers (status != 'draft') are
+  // left untouched — their snapshot is historical record. The strategy
+  // per the plan §4.1 + §11:
+  //   • For each draft handover, replace its checklist_items rows with the
+  //     v2 default items. Preserve `completed` state where the item_id
+  //     survives both versions (currently only `hr_hub_followups`).
+  //   • Items that disappeared (`active_tickets`, `escalations`, …) are
+  //     dropped — they no longer exist on the template, and a stale row
+  //     would render a non-existent item the wizard can't reason about.
+  // Idempotent: we only run when the version marker says we need to and
+  // each row is rebuilt deterministically. Failure is logged but doesn't
+  // block boot.
+  try {
+    const { DEFAULT_CHECKLIST_ITEMS_V2, HANDOVER_DEFAULTS_VERSION } = await import('./handover-defaults-seed');
+    const { rows: marker } = await query(
+      `SELECT value FROM app_settings WHERE key = 'handover_defaults_checklist_migration_version'`,
+    );
+    const lastMigrationVersion = Number(marker[0]?.value?.version) || 0;
+    if (lastMigrationVersion < HANDOVER_DEFAULTS_VERSION) {
+      const { rows: drafts } = await query(
+        `SELECT id FROM handovers WHERE status = 'draft'`,
+      );
+      let updatedCount = 0;
+      for (const draft of drafts) {
+        const { rows: existing } = await query(
+          `SELECT item_id, completed, completed_at, completed_by, note
+             FROM handover_checklist_items
+            WHERE handover_id = $1`,
+          [draft.id],
+        );
+        const oldById = new Map(existing.map(r => [r.item_id, r]));
+        await query('BEGIN');
+        try {
+          await query(`DELETE FROM handover_checklist_items WHERE handover_id = $1`, [draft.id]);
+          for (const it of DEFAULT_CHECKLIST_ITEMS_V2) {
+            const carried = oldById.get(it.id) || null;
+            await query(
+              `INSERT INTO handover_checklist_items
+                 (handover_id, item_id, label, required, completed, completed_at, completed_by, note)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+               ON CONFLICT (handover_id, item_id) DO NOTHING`,
+              [
+                draft.id, it.id, it.label, it.required ?? true,
+                carried?.completed === true,
+                carried?.completed_at || null,
+                carried?.completed_by || null,
+                carried?.note || null,
+              ],
+            );
+          }
+          await query('COMMIT');
+          updatedCount += 1;
+        } catch (innerErr) {
+          try { await query('ROLLBACK'); } catch {}
+          console.warn(`[db] Phase C: draft ${draft.id} migration failed:`, innerErr?.message);
+        }
+      }
+      await query(
+        `INSERT INTO app_settings (key, value, updated_by, updated_at)
+           VALUES ('handover_defaults_checklist_migration_version', $1::jsonb, 'phase-c-migration', NOW())
+           ON CONFLICT (key) DO UPDATE
+             SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+        [JSON.stringify({ version: HANDOVER_DEFAULTS_VERSION })],
+      );
+      if (updatedCount > 0 || drafts.length > 0) {
+        console.log(`[db] Phase C checklist migration v${HANDOVER_DEFAULTS_VERSION}: ${updatedCount}/${drafts.length} draft handovers refreshed (was v${lastMigrationVersion})`);
+      }
+    }
+  } catch (err) {
+    console.warn('[db] Phase C checklist migration failed:', err?.message);
+  }
+
   // Phase A 2026-05-18: TL approval is removed from the handover state
   // machine. Any in-flight row sitting in pending_manager_approval gets
   // auto-transitioned at boot:

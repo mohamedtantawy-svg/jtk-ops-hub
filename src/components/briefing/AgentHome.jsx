@@ -32,6 +32,7 @@ import { TOOLS } from '../../data/constants';
 import { slaInfo, getUrl } from '../../utils/helpers';
 import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
 import { useCapacitySettings } from '../../hooks/useCapacitySettings';
+import { useTeamMembers } from '../../hooks/useTeamMembers';
 import {
   normalizeOnboarding, normalizePausedOnboarding, normalizeOffboarding,
   normalizeAmendments, normalizeRedlines, normalizeWorkbench, normalizeIncentivePlans,
@@ -40,6 +41,7 @@ import { matchesAudience } from '../../data/comms';
 import { apiFetch } from '../../services/api';
 import PersonalChecklist from '../home/PersonalChecklist';
 import PendingAcksBanner from './PendingAcksBanner';
+import StaleCountryDocsBanner from './StaleCountryDocsBanner';
 
 function rowSlaSeverity(row) {
   if (!row) return 'ok';
@@ -84,6 +86,7 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
   const { queueUnified, hiddenTasks } = useContext(IntegrationsContext);
   const { sla: queueSla } = useQueueSlaSettings();
   const { data: capData } = useCapacitySettings();
+  const { members: teamMembers } = useTeamMembers();
   const capLow = Number.isFinite(capData?.capacity?.lowMax) ? capData.capacity.lowMax : 40;
   const capHigh = Number.isFinite(capData?.capacity?.highMin) ? capData.capacity.highMin : 100;
 
@@ -523,6 +526,11 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
           Surfaces anything a comms author has sent that this agent hasn't
           acked yet. Self-hides when nothing's pending. */}
       <PendingAcksBanner user={user} comms={comms} setView={setView} isAckedByMe={isAckedByMeProp} noPadding />
+
+      {/* ── Stale country handover docs (Phase D) ──────────────────────
+          For country owners only. Self-hides when every owned doc is
+          fresh + published. Click jumps to OOO → Country docs sub-tab. */}
+      <StaleCountryDocsBanner user={user} members={teamMembers} setView={setView} />
       <div style={{ height: 12 }} aria-hidden />
 
       {/* ── Your SLA status section ──────────────────────────────────── */}

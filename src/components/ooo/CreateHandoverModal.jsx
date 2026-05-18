@@ -23,13 +23,17 @@ import {
   fetchDefaultChecklistTemplate,
 } from '../../services/handoversApi';
 import { listMyTimeOffEvents } from '../../services/timeOffApi';
+import { listCountryHandoverDocs } from '../../services/countryHandoverDocsApi';
 
 const STEPS = [
   { id: 1, label: 'Dates' },
   { id: 2, label: 'Coverers' },
-  { id: 3, label: 'Checklist' },
-  { id: 4, label: 'Review' },
+  { id: 3, label: 'Country docs' },
+  { id: 4, label: 'Checklist' },
+  { id: 5, label: 'Review' },
 ];
+
+const STALE_DAYS = 90;
 
 function fmt(iso) {
   if (!iso) return '';
@@ -118,6 +122,15 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
   const [error, setError] = useState(null);
   const pickerRef = useRef(null);
 
+  // Phase D: country handover doc snapshot per CC the user is handing off.
+  // Acknowledgements live in state: when a CC has no published doc OR the
+  // doc is stale/missing required fields, the requester either fixes the
+  // doc (jumps to the editor) OR ticks "I'll brief directly" with a reason.
+  // Map shape: { [CC]: { ack: true, reason: '...' } }
+  const [countryDocs, setCountryDocs] = useState([]);          // [{ country_code, status, freshness, counts }]
+  const [countryDocsLoaded, setCountryDocsLoaded] = useState(false);
+  const [countryAcks, setCountryAcks] = useState({});
+
   // Load my upcoming events for Step 1.
   useEffect(() => {
     setEventsLoading(true);
@@ -127,7 +140,7 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
       .finally(() => setEventsLoading(false));
   }, []);
 
-  // Load default checklist template for Step 3.
+  // Load default checklist template for Step 4 (was Step 3 pre-Phase-D).
   useEffect(() => {
     fetchDefaultChecklistTemplate()
       .then(res => {
@@ -135,6 +148,19 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
         setDefaultTemplateLoaded(true);
       })
       .catch(() => setDefaultTemplateLoaded(true));
+  }, []);
+
+  // Load the country handover docs summary so Step 3 can render per-CC
+  // status pills. We need the freshness/status for every CC the user is
+  // about to hand off — the API returns the full list, so we just keep
+  // it cached in state and filter in the render.
+  useEffect(() => {
+    listCountryHandoverDocs()
+      .then(res => {
+        setCountryDocs(Array.isArray(res?.items) ? res.items : []);
+        setCountryDocsLoaded(true);
+      })
+      .catch(() => setCountryDocsLoaded(true));
   }, []);
 
   // Close the people-picker on outside click.
@@ -183,8 +209,67 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
   // Step gating.
   const step1Ok = selectedEventIds.length > 0;
   const step2Ok = coverers.length > 0;
+
+  // Country codes the coverers cover, deduped + uppercased. Empty
+  // `country_codes` on a coverer = "full coverage", which we represent
+  // here by the union of the user's owned countries (read from members).
+  // If we have neither (e.g. the picker didn't load), Step 3 still renders
+  // an empty state so the user can advance.
+  const myCountries = useMemo(() => {
+    const me = (members || []).find(m => (m?.email || '').toLowerCase() === (currentUserEmail || '').toLowerCase());
+    return Array.from(new Set((me?.countries || []).map(c => String(c).toUpperCase())));
+  }, [members, currentUserEmail]);
+
+  const handedOffCountries = useMemo(() => {
+    const set = new Set();
+    for (const c of coverers) {
+      const explicit = (c.country_codes || []).map(x => String(x || '').toUpperCase()).filter(Boolean);
+      if (explicit.length === 0) {
+        // Full coverage from this coverer — falls back to the requester's
+        // own country roster.
+        for (const cc of myCountries) set.add(cc);
+      } else {
+        for (const cc of explicit) set.add(cc);
+      }
+    }
+    return Array.from(set).sort();
+  }, [coverers, myCountries]);
+
+  // Per-CC doc state used by Step 3.
+  function docFor(cc) {
+    return countryDocs.find(d => (d.country_code || '').toUpperCase() === cc);
+  }
+  function docStateFor(cc) {
+    const d = docFor(cc);
+    if (!d) return 'missing';                       // no row in DB at all
+    if (d.status !== 'published') return 'draft';
+    if (d.freshness === 'stale') return 'stale';
+    if ((d.counts?.sections_filled || 0) < 3) return 'thin';
+    return 'fresh';
+  }
+  function needsAck(cc) {
+    const s = docStateFor(cc);
+    return s !== 'fresh';
+  }
+  function setAck(cc, patch) {
+    setCountryAcks(prev => ({ ...prev, [cc]: { ...prev[cc], ...patch } }));
+  }
+
+  const step3Ok = useMemo(() => {
+    // Allow advance when every CC needing-attention is either freshly
+    // published OR has been explicitly acknowledged with a reason.
+    for (const cc of handedOffCountries) {
+      if (!needsAck(cc)) continue;
+      const a = countryAcks[cc];
+      if (!a?.ack) return false;
+      if (!a?.reason || a.reason.trim().length === 0) return false;
+    }
+    return true;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [handedOffCountries, countryAcks, countryDocs]);
+
   const requiredMissing = checklistItems.filter(i => i.required && !i.completed).length;
-  const step3Ok = checklistItems.length > 0;
+  const step4Ok = checklistItems.length > 0;
 
   function addCoverer(email) {
     if (!email) return;
@@ -238,11 +323,27 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
       }));
       const preChecked = checklistItems.filter(i => i.completed);
 
+      // Phase D: append any "brief directly" acknowledgements to the reason
+      // so the coverer + audit log retain the explicit override. We can't
+      // store this server-side as a structured field without a schema
+      // change, and the reason column already exists as a free-text note.
+      const ackLines = handedOffCountries
+        .filter(cc => needsAck(cc))
+        .map(cc => {
+          const a = countryAcks[cc];
+          if (!a?.ack) return null;
+          return `[${cc} brief-directly] ${(a.reason || '').trim()}`;
+        })
+        .filter(Boolean);
+      const reasonOut = ackLines.length > 0
+        ? `${reason ? reason + '\n\n' : ''}${ackLines.join('\n')}`
+        : (reason || null);
+
       const created = [];
       for (const eventId of selectedEventIds) {
         const res = await createHandover({
           time_off_event_id: eventId,
-          reason: reason || null,
+          reason: reasonOut,
           coverers: sharedCoverers,
           checklist_items: sharedChecklist,
         });
@@ -271,7 +372,7 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
     }
   }
 
-  function next() { if (step < 4) setStep(step + 1); }
+  function next() { if (step < STEPS.length) setStep(step + 1); }
   function back() { if (step > 1) setStep(step - 1); }
 
   return (
@@ -499,8 +600,135 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
           {step === 3 && (
             <>
               <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                Verify each country handover doc the coverer will rely on. A fresh published doc is the
+                bridge — for stale, draft, or missing docs you can fix the doc now OR acknowledge that
+                you'll brief the coverer directly.
+              </div>
+              {!countryDocsLoaded ? (
+                <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Loading country doc status…</div>
+              ) : handedOffCountries.length === 0 ? (
+                <div style={{ padding: 14, borderRadius: 10, background: 'rgba(15,23,42,0.03)', border: '1px dashed var(--border)', fontSize: 12, color: 'var(--text-secondary)' }}>
+                  No countries handed off — either your coverers have explicit country splits set, or you
+                  don't own any countries in the Team tab. Step is a no-op.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {handedOffCountries.map(cc => {
+                    const d = docFor(cc);
+                    const state = docStateFor(cc);
+                    const ack = countryAcks[cc] || {};
+                    const stateMeta = {
+                      fresh:   { bg: '#D1FAE5', fg: '#065F46', label: 'Fresh — published, < 90d', icon: 'bi-check-circle' },
+                      stale:   { bg: '#FEF3C7', fg: '#92400E', label: 'Stale — updated > 90d ago',  icon: 'bi-clock-history' },
+                      thin:    { bg: '#FEF3C7', fg: '#92400E', label: 'Thin — < 3 sections filled', icon: 'bi-exclamation-circle' },
+                      draft:   { bg: '#FEE2E2', fg: '#991B1B', label: 'Draft — not yet published', icon: 'bi-pencil' },
+                      missing: { bg: '#FEE2E2', fg: '#991B1B', label: 'Missing — no doc row yet',  icon: 'bi-x-circle' },
+                    }[state];
+                    return (
+                      <div key={cc} style={{
+                        padding: '12px 14px',
+                        borderRadius: 10, border: '1px solid var(--border)',
+                        background: 'var(--surface)',
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <span style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 6,
+                            fontFamily: 'ui-monospace, SFMono-Regular, monospace',
+                            fontSize: 13, fontWeight: 700, color: 'var(--text)',
+                            minWidth: 32,
+                          }}>{cc}</span>
+                          <span style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                            padding: '3px 10px', borderRadius: 999,
+                            background: stateMeta.bg, color: stateMeta.fg,
+                            fontSize: 11, fontWeight: 700,
+                          }}>
+                            <i className={`bi ${stateMeta.icon}`} />
+                            {stateMeta.label}
+                          </span>
+                          <span style={{ flex: 1 }} />
+                          {d && (
+                            <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                              {d.counts?.sections_filled || 0}/10 sections
+                              {d.counts?.stakeholders ? ` · ${d.counts.stakeholders} stakeholders` : ''}
+                              {d.counts?.faqs ? ` · ${d.counts.faqs} FAQs` : ''}
+                            </span>
+                          )}
+                        </div>
+                        {state !== 'fresh' && (
+                          <div style={{
+                            marginTop: 10,
+                            display: 'flex', flexDirection: 'column', gap: 8,
+                            paddingTop: 10, borderTop: '1px dashed var(--border)',
+                          }}>
+                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  // Phase B editor lives behind the OOO → Country docs sub-tab.
+                                  // We open it in a new tab so the wizard state survives the edit.
+                                  if (typeof window !== 'undefined') {
+                                    const opened = window.open('/', '_blank');
+                                    if (opened) {
+                                      // Pre-set the sub-tab so the new window lands on Country docs.
+                                      try { localStorage.setItem('ops_hub_ooo_sub_tab', 'country_docs'); } catch {}
+                                    }
+                                  }
+                                }}
+                                style={{
+                                  padding: '5px 10px', borderRadius: 8,
+                                  border: '1px solid var(--border)', background: 'var(--surface)',
+                                  color: 'var(--text)', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                                  fontFamily: 'inherit',
+                                }}
+                              >
+                                <i className="bi-pencil-square" style={{ marginRight: 4 }} />
+                                Fix doc in new tab
+                              </button>
+                              <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-secondary)' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={!!ack.ack}
+                                  onChange={e => setAck(cc, { ack: e.target.checked })}
+                                />
+                                I'll brief the coverer directly for {cc}
+                              </label>
+                            </div>
+                            {ack.ack && (
+                              <textarea
+                                value={ack.reason || ''}
+                                onChange={e => setAck(cc, { reason: e.target.value.slice(0, 400) })}
+                                placeholder={`Why are you skipping the ${cc} doc? (required, shown to the coverer)`}
+                                rows={2}
+                                style={{
+                                  width: '100%', resize: 'vertical', padding: 8,
+                                  border: '1px solid var(--border)', borderRadius: 8,
+                                  fontFamily: 'inherit', fontSize: 12, color: 'var(--text)',
+                                  background: 'var(--surface)',
+                                }}
+                              />
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {!step3Ok && (
+                    <div style={{ fontSize: 11, color: '#92400E' }}>
+                      Acknowledge each non-fresh country before continuing — either fix the doc or check the
+                      "I'll brief directly" box and add a reason.
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+
+          {step === 4 && (
+            <>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>
                 {defaultTemplateLoaded
-                  ? 'Pre-filled from the org default. Tick items you have done before submitting. Required items block submit until checked.'
+                  ? 'Pre-filled from the HRX SOP. Tick items you have done before submitting. Required items block submit until checked.'
                   : 'Loading template…'}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -575,7 +803,7 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
             </>
           )}
 
-          {step === 4 && (
+          {step === 5 && (
             <>
               <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>
                 Review and submit. You can always come back and edit while the handover is in draft / pending state.
@@ -604,7 +832,31 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
                 })}
               </div>
               <div style={{ padding: 14, borderRadius: 12, border: '1px solid var(--border-light)' }}>
-                <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', marginBottom: 6, fontWeight: 700 }}>Checklist</div>
+                <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', marginBottom: 6, fontWeight: 700 }}>Country docs</div>
+                {handedOffCountries.length === 0 ? (
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>No countries handed off.</div>
+                ) : (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, fontSize: 12 }}>
+                    {handedOffCountries.map(cc => {
+                      const state = docStateFor(cc);
+                      const ack = countryAcks[cc] || {};
+                      const fresh = state === 'fresh';
+                      return (
+                        <span key={cc} style={{
+                          padding: '2px 8px', borderRadius: 999,
+                          background: fresh ? '#D1FAE5' : ack.ack ? 'rgba(15,23,42,0.06)' : '#FEF3C7',
+                          color:      fresh ? '#065F46' : ack.ack ? 'var(--text)'      : '#92400E',
+                          fontWeight: 600, fontSize: 11,
+                        }}>
+                          {cc} · {fresh ? 'fresh' : ack.ack ? 'brief directly' : state}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              <div style={{ padding: 14, borderRadius: 12, border: '1px solid var(--border-light)' }}>
+                <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', marginBottom: 6, fontWeight: 700 }}>SOP checklist</div>
                 <div style={{ fontSize: 12 }}>{checklistItems.length} item{checklistItems.length === 1 ? '' : 's'} · {checklistItems.filter(i => i.completed).length} ticked · {checklistItems.filter(i => i.required !== false).length} required</div>
               </div>
             </>
@@ -627,23 +879,33 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
             ← Back
           </button>
           <div style={{ display: 'flex', gap: 8 }}>
-            {step < 4 && (
+            {step < STEPS.length && (
               <button
                 type="button"
                 onClick={next}
-                disabled={busy || (step === 1 && !step1Ok) || (step === 2 && !step2Ok) || (step === 3 && !step3Ok)}
+                disabled={
+                  busy
+                    || (step === 1 && !step1Ok)
+                    || (step === 2 && !step2Ok)
+                    || (step === 3 && !step3Ok)
+                    || (step === 4 && !step4Ok)
+                }
                 style={{
                   padding: '8px 16px', borderRadius: 8,
                   background: 'var(--purple, #7c3aed)',
                   color: 'white', border: 'none', fontWeight: 700, fontSize: 12,
                   cursor: 'pointer', fontFamily: 'inherit',
-                  opacity: (busy || (step === 1 && !step1Ok) || (step === 2 && !step2Ok) || (step === 3 && !step3Ok)) ? 0.55 : 1,
+                  opacity: (busy
+                    || (step === 1 && !step1Ok)
+                    || (step === 2 && !step2Ok)
+                    || (step === 3 && !step3Ok)
+                    || (step === 4 && !step4Ok)) ? 0.55 : 1,
                 }}
               >
                 Continue
               </button>
             )}
-            {step === 4 && (
+            {step === STEPS.length && (
               <>
                 <button type="button" onClick={() => save({ submit: false })} disabled={busy || !step1Ok}
                   style={{
@@ -656,13 +918,13 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
                 >
                   Save draft
                 </button>
-                <button type="button" onClick={() => save({ submit: true })} disabled={busy || !step1Ok || !step2Ok || requiredMissing > 0}
+                <button type="button" onClick={() => save({ submit: true })} disabled={busy || !step1Ok || !step2Ok || !step3Ok || requiredMissing > 0}
                   style={{
                     padding: '8px 16px', borderRadius: 8,
                     background: 'var(--purple, #7c3aed)',
                     color: 'white', border: 'none', fontWeight: 700, fontSize: 12,
                     cursor: 'pointer', fontFamily: 'inherit',
-                    opacity: (busy || !step1Ok || !step2Ok || requiredMissing > 0) ? 0.55 : 1,
+                    opacity: (busy || !step1Ok || !step2Ok || !step3Ok || requiredMissing > 0) ? 0.55 : 1,
                   }}
                 >
                   Submit for coverage

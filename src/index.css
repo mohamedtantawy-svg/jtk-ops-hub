@@ -457,6 +457,19 @@
       body{background:white !important;}
     }
 
+    /* Country Handover Doc — print view (Phase F). Hides the chrome
+       (header, left rail, history pane), pages every section, sets a
+       serif body for legibility. Triggered by the editor's Print button
+       (window.print). */
+    @media print {
+      [data-print-hide], aside, header, footer { display: none !important; }
+      main { overflow: visible !important; }
+      main > * { padding: 0 !important; }
+      section { page-break-inside: avoid; break-inside: avoid; }
+      body { background: white !important; color: black !important; font-family: Georgia, 'Times New Roman', serif !important; }
+      main, [role="main"] { max-width: 720px; margin: 0 auto; }
+    }
+
 /* NOTE: bi-slack does not exist in Bootstrap Icons — use bi-chat-square-dots as fallback */
 
 /* ── DARK MODE component overrides ───────────────────────────────────── */

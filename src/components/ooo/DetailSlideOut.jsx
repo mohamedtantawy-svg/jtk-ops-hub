@@ -16,15 +16,16 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Avatar from '../ui/Avatar';
 import {
   acceptHandover,
-  approveHandover,
   cancelHandover,
   declineHandover,
   getHandover,
-  rejectHandover,
   submitHandover,
   toggleChecklistItem,
+  listHandoverComments,
+  postHandoverComment,
 } from '../../services/handoversApi';
 import { deleteTimeOffEvent } from '../../services/timeOffApi';
+import { listCountryHandoverDocs, getCountryHandoverDoc } from '../../services/countryHandoverDocsApi';
 import LogHandbackModal from './LogHandbackModal';
 import {
   HANDOVER_STATUSES,
@@ -150,6 +151,17 @@ function DetailSlideOut({
   // hooks in the same order.
   const [deleteBusy, setDeleteBusy] = useState(false);
 
+  // Phase E: country-doc summaries (left-rail-style cards) + per-CC
+  // expanded reader cache. We fetch the doc summaries once per handover
+  // load and the full doc lazily when the user expands the card.
+  const [countryDocList, setCountryDocList] = useState([]);
+  const [countryDocOpen, setCountryDocOpen] = useState(() => new Set());
+  const [countryDocFull, setCountryDocFull] = useState({}); // { CC: doc }
+  // Phase E: coverer ↔ requester comment thread.
+  const [comments, setComments] = useState([]);
+  const [commentDraft, setCommentDraft] = useState('');
+  const [postingComment, setPostingComment] = useState(false);
+
   const handoverId = event?.handover?.id || null;
 
   // Hydrate full handover (with coverers + checklist + log) when one exists.
@@ -172,6 +184,61 @@ function DetailSlideOut({
   }, [handoverId]);
 
   useEffect(() => { reload(); }, [reload]);
+
+  // Phase E: fetch the country docs summary + comments whenever a
+  // handover is loaded. The summary fetch returns the union; we filter
+  // to the handover's covered countries in render.
+  useEffect(() => {
+    if (!handoverId) {
+      setCountryDocList([]);
+      setComments([]);
+      return;
+    }
+    let cancelled = false;
+    listCountryHandoverDocs()
+      .then(res => { if (!cancelled) setCountryDocList(Array.isArray(res?.items) ? res.items : []); })
+      .catch(() => { if (!cancelled) setCountryDocList([]); });
+    listHandoverComments(handoverId)
+      .then(res => { if (!cancelled) setComments(Array.isArray(res?.items) ? res.items : []); })
+      .catch(() => { if (!cancelled) setComments([]); });
+    return () => { cancelled = true; };
+  }, [handoverId]);
+
+  const toggleCountryDoc = useCallback(async (cc) => {
+    setCountryDocOpen(prev => {
+      const next = new Set(prev);
+      if (next.has(cc)) next.delete(cc);
+      else next.add(cc);
+      return next;
+    });
+    if (!countryDocFull[cc]) {
+      try {
+        const res = await getCountryHandoverDoc(cc);
+        if (res?.item) setCountryDocFull(prev => ({ ...prev, [cc]: res.item }));
+      } catch (err) {
+        // Surface a soft error inline — we don't toast to avoid noise on
+        // a coverer who lacks read access to a draft (the API will 403
+        // and the card stays collapsed).
+        // eslint-disable-next-line no-console
+        console.warn('[DetailSlideOut] country doc fetch failed:', err?.message);
+      }
+    }
+  }, [countryDocFull]);
+
+  async function postComment() {
+    if (!handoverId || !commentDraft.trim() || postingComment) return;
+    setPostingComment(true);
+    try {
+      const eventType = isCoverer ? 'coverer_question' : 'requester_reply';
+      const res = await postHandoverComment(handoverId, { text: commentDraft, event_type: eventType });
+      if (res?.item) setComments(prev => [...prev, res.item]);
+      setCommentDraft('');
+    } catch (err) {
+      onToast?.({ kind: 'error', message: err?.body?.error || err?.message || 'Comment failed' });
+    } finally {
+      setPostingComment(false);
+    }
+  }
 
   // Close on ESC.
   useEffect(() => {
@@ -297,30 +364,10 @@ function DetailSlideOut({
       }),
     });
   }
-  if (handover && (isManager || isAdminish) && status === HANDOVER_STATUSES.PENDING_MANAGER_APPROVAL) {
-    footerButtons.push({
-      id: 'approve',
-      kind: 'primary',
-      label: 'Approve',
-      onClick: () => runAction('approve', () => approveHandover(handoverId, null), {
-        successMsg: 'Approved',
-      }),
-    });
-    footerButtons.push({
-      id: 'reject',
-      kind: 'danger',
-      label: 'Reject',
-      onClick: () => askReason('reject', '', async (reason) => {
-        if (!reason) {
-          onToast?.({ kind: 'error', message: 'A rejection reason is required.' });
-          return;
-        }
-        await runAction('reject', () => rejectHandover(handoverId, reason), {
-          successMsg: 'Rejected',
-        });
-      }),
-    });
-  }
+  // Approve / Reject removed 2026-05-18 — TL approval is no longer part
+  // of the state machine (HANDOVER_TEMPLATE_REVAMP_PLAN.md §4.2).
+  // Managers still see the handover via the TEAM lens and can post
+  // questions via the comment thread above, but they don't gate it.
   if (handover && status === HANDOVER_STATUSES.ACTIVE && (isCoverer || isAdminish)) {
     footerButtons.push({
       id: 'log_handback',
@@ -549,6 +596,221 @@ function DetailSlideOut({
                     </label>
                   );
                 })}
+              </div>
+            </section>
+          )}
+
+          {/* ── Country handover docs (Phase E) ──────────────────────────
+              For each country covered by this handover, render a
+              collapsible read-only card. Coverer sees this inline so they
+              don't have to leave the slide-out to brush up on a country. */}
+          {handover && (() => {
+            // Union of covered country codes across coverers. Empty
+            // country_codes on a coverer means "everything the requester
+            // owns" — without the requester's country list here we fall
+            // back to whatever non-empty rows are present.
+            const ccs = new Set();
+            for (const c of coverers) {
+              const arr = Array.isArray(c.country_codes) ? c.country_codes : [];
+              for (const cc of arr) if (cc) ccs.add(String(cc).toUpperCase());
+            }
+            const list = Array.from(ccs).sort();
+            if (list.length === 0) return null;
+            return (
+              <section>
+                <h3 style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', marginBottom: 8, fontWeight: 700 }}>
+                  Country handover docs
+                </h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {list.map(cc => {
+                    const summary = countryDocList.find(d => (d.country_code || '').toUpperCase() === cc);
+                    const open = countryDocOpen.has(cc);
+                    const full = countryDocFull[cc];
+                    const fresh = summary && summary.status === 'published' && summary.freshness !== 'stale';
+                    return (
+                      <div key={cc} style={{
+                        border: '1px solid var(--border-light)', borderRadius: 10,
+                        background: 'var(--surface)', overflow: 'hidden',
+                      }}>
+                        <button
+                          type="button"
+                          onClick={() => toggleCountryDoc(cc)}
+                          aria-expanded={open}
+                          style={{
+                            display: 'flex', alignItems: 'center', gap: 10,
+                            width: '100%', padding: '10px 12px',
+                            background: 'transparent', border: 'none',
+                            cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
+                          }}
+                        >
+                          <span style={{
+                            fontFamily: 'ui-monospace, SFMono-Regular, monospace',
+                            fontSize: 12, fontWeight: 700, color: 'var(--text)', minWidth: 28,
+                          }}>{cc}</span>
+                          {summary ? (
+                            <span style={{
+                              padding: '2px 8px', borderRadius: 999,
+                              background: fresh ? '#D1FAE5' : '#FEF3C7',
+                              color:      fresh ? '#065F46' : '#92400E',
+                              fontSize: 10, fontWeight: 700,
+                            }}>
+                              {summary.status === 'published'
+                                ? (summary.freshness === 'stale' ? 'stale' : 'published')
+                                : summary.status}
+                            </span>
+                          ) : (
+                            <span style={{
+                              padding: '2px 8px', borderRadius: 999,
+                              background: '#FEE2E2', color: '#991B1B',
+                              fontSize: 10, fontWeight: 700,
+                            }}>no doc</span>
+                          )}
+                          <span style={{ flex: 1, fontSize: 11, color: 'var(--text-secondary)' }}>
+                            {summary
+                              ? `${summary.counts?.sections_filled || 0}/10 filled · ${summary.counts?.stakeholders || 0} stakeholders · ${summary.counts?.faqs || 0} FAQs`
+                              : 'Owner hasn’t created a country doc yet.'}
+                          </span>
+                          <i className={`bi ${open ? 'bi-chevron-up' : 'bi-chevron-down'}`} style={{ color: 'var(--text-secondary)' }} />
+                        </button>
+                        {open && (
+                          <div style={{ padding: '6px 14px 14px', borderTop: '1px dashed var(--border)', fontSize: 12, color: 'var(--text)' }}>
+                            {!full ? (
+                              <div style={{ color: 'var(--text-secondary)' }}>Loading {cc} doc…</div>
+                            ) : (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                {full.scope_responsibilities && (
+                                  <div>
+                                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 4 }}>Scope</div>
+                                    <div style={{ whiteSpace: 'pre-wrap' }}>{full.scope_responsibilities}</div>
+                                  </div>
+                                )}
+                                {(full.signatory || full.payroll_cycle || full.payroll_cutoff_date) && (
+                                  <div>
+                                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 4 }}>Payroll</div>
+                                    <div>
+                                      {full.signatory && <div>Signatory: <strong>{full.signatory}</strong></div>}
+                                      {full.payroll_cycle && <div>Cycle: <strong>{full.payroll_cycle}</strong></div>}
+                                      {full.payroll_cutoff_date && <div>Cut-off: <strong>{full.payroll_cutoff_date}</strong></div>}
+                                    </div>
+                                  </div>
+                                )}
+                                {Array.isArray(full.stakeholders) && full.stakeholders.length > 0 && (
+                                  <div>
+                                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 4 }}>Stakeholders</div>
+                                    {full.stakeholders.map((s, i) => (
+                                      <div key={i}>{s.role}{s.label ? ` (${s.label})` : ''}: <strong>{s.name || '—'}</strong>{s.email ? ` · ${s.email}` : ''}</div>
+                                    ))}
+                                  </div>
+                                )}
+                                {Array.isArray(full.benefits) && full.benefits.length > 0 && (
+                                  <div>
+                                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 4 }}>Benefits</div>
+                                    {full.benefits.map((b, i) => (
+                                      <div key={i}>{b.benefit_type || '—'}: <strong>{b.provider_name || '—'}</strong>{b.slack_channel ? ` · ${b.slack_channel}` : ''}</div>
+                                    ))}
+                                  </div>
+                                )}
+                                {(full.termination_process || full.resignation_process) && (
+                                  <div>
+                                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 4 }}>Offboarding</div>
+                                    {full.termination_process && <div style={{ whiteSpace: 'pre-wrap', marginBottom: 6 }}><em>Termination:</em> {full.termination_process}</div>}
+                                    {full.resignation_process && <div style={{ whiteSpace: 'pre-wrap' }}><em>Resignation:</em> {full.resignation_process}</div>}
+                                  </div>
+                                )}
+                                {Array.isArray(full.faqs) && full.faqs.length > 0 && (
+                                  <div>
+                                    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 4 }}>FAQs</div>
+                                    {full.faqs.map((q, i) => (
+                                      <div key={i} style={{ marginBottom: 6 }}>
+                                        <div><strong>Q:</strong> {q.question}</div>
+                                        <div style={{ whiteSpace: 'pre-wrap', color: 'var(--text-secondary)' }}>{q.answer}</div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                {full.docs_folder_url && (
+                                  <div>
+                                    <a href={full.docs_folder_url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--purple)' }}>Country docs folder ↗</a>
+                                  </div>
+                                )}
+                                <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>Updated {full.updated_at ? relTime(full.updated_at) : '—'}{full.updated_by_email ? ` · ${full.updated_by_email}` : ''}</div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            );
+          })()}
+
+          {/* ── Question for the requester (Phase E) ─────────────────────
+              Lightweight comment thread keyed on the handover. Both
+              parties can read + post; the requester's view sees the same
+              messages with reversed defaults. */}
+          {handover && (isOwn || isCoverer || isManager || isAdminish) && (
+            <section>
+              <h3 style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', marginBottom: 8, fontWeight: 700 }}>
+                {isCoverer && !isOwn ? 'Question for the requester' : 'Comment thread'}
+              </h3>
+              {comments.length === 0 ? (
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                  No comments yet — ask anything the requester should answer before going OOO.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {comments.map(c => {
+                    const fromCoverer = c.event_type === 'coverer_question';
+                    return (
+                      <div key={c.id} style={{
+                        padding: '10px 12px',
+                        border: '1px solid var(--border-light)',
+                        borderRadius: 10,
+                        background: fromCoverer ? 'rgba(124, 58, 237, 0.05)' : 'var(--surface)',
+                        fontSize: 13, color: 'var(--text)',
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
+                          <strong>{c.actor_name || c.actor_email}</strong>
+                          <span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>{relTime(c.created_at)}</span>
+                        </div>
+                        <div style={{ whiteSpace: 'pre-wrap' }}>{c.text}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <textarea
+                  value={commentDraft}
+                  onChange={e => setCommentDraft(e.target.value.slice(0, 4000))}
+                  placeholder={isCoverer && !isOwn ? 'Ask the requester for clarification…' : 'Add a comment for the coverer / team…'}
+                  rows={2}
+                  style={{
+                    width: '100%', resize: 'vertical', padding: 8,
+                    border: '1px solid var(--border)', borderRadius: 8,
+                    fontFamily: 'inherit', fontSize: 13, color: 'var(--text)',
+                    background: 'var(--surface)',
+                  }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <button
+                    type="button"
+                    onClick={postComment}
+                    disabled={!commentDraft.trim() || postingComment}
+                    style={{
+                      padding: '6px 14px', borderRadius: 8, border: 'none',
+                      background: 'var(--purple, #7c3aed)', color: 'white',
+                      fontSize: 12, fontWeight: 700,
+                      cursor: postingComment || !commentDraft.trim() ? 'not-allowed' : 'pointer',
+                      fontFamily: 'inherit',
+                      opacity: postingComment || !commentDraft.trim() ? 0.55 : 1,
+                    }}
+                  >
+                    {postingComment ? 'Posting…' : 'Send'}
+                  </button>
+                </div>
               </div>
             </section>
           )}

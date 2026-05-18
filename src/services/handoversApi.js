@@ -213,3 +213,18 @@ export async function deleteHandoverTemplate(id) {
 export async function listTimeOffImportBatches() {
   return apiFetch('/time-off-import-batches');
 }
+
+// ── Phase E: Coverer-question comment thread ──────────────────────────────
+// Reads + writes a polymorphic comment thread piggybacked on handover_log.
+// `event_type` is 'coverer_question' for messages the coverer writes back
+// to the requester, 'requester_reply' when the requester answers.
+export async function listHandoverComments(handoverId) {
+  return apiFetch(`/handovers/${encodeURIComponent(handoverId)}/comments`);
+}
+export async function postHandoverComment(handoverId, { text, event_type } = {}) {
+  return apiFetch(`/handovers/${encodeURIComponent(handoverId)}/comments`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ text, event_type }),
+  });
+}
