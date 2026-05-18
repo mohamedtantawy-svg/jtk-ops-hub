@@ -348,6 +348,23 @@ export default function HrHubView({ user, onCreateHrHub }) {
     return () => window.removeEventListener('hr-hub:openDetail', handler);
   }, []);
 
+  // Briefing DecisionsStrip tiles dispatch `hr-hub:setFilters` to pre-set
+  // scope / flow / status when they land here so the user sees the exact
+  // list the tile summarized (e.g. the HR Hub tile lands on scope=team,
+  // status=null; the SLA+Hide tile lands on scope=team flow=hide_task).
+  // detail keys default to "leave unchanged" when undefined.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = (e) => {
+      const d = e?.detail || {};
+      if (typeof d.scope === 'string') setScope(d.scope);
+      if (typeof d.flow === 'string') setFlowFilter(d.flow);
+      if ('status' in d) setStatusFilter(d.status); // null is explicit "show all"
+    };
+    window.addEventListener('hr-hub:setFilters', handler);
+    return () => window.removeEventListener('hr-hub:setFilters', handler);
+  }, []);
+
   const refreshDetail = useCallback(() => {
     if (detailId) loadDetail(detailId);
   }, [detailId, loadDetail]);

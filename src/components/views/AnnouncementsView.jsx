@@ -127,6 +127,19 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
 
   // ── State ──
   const [filter,setFilter]=useState('all');
+  // Briefing's "Unacked" tile dispatches `announcements:setFilter` with
+  // `{filter:'needs-ack'}` so clicking the badge lands the user on the
+  // matching tab. Same pattern as `hr-hub:setFilters` from the
+  // DecisionsStrip.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = (e) => {
+      const f = e?.detail?.filter;
+      if (typeof f === 'string' && f.length > 0) setFilter(f);
+    };
+    window.addEventListener('announcements:setFilter', handler);
+    return () => window.removeEventListener('announcements:setFilter', handler);
+  }, []);
   // Title + body keyword search (Madeleine Decuir 2026-05-15 feedback, 4
   // votes). Debounced 250 ms so each keystroke doesn't re-run the visible
   // memo. Case-insensitive ILIKE-style substring match on title + body.
@@ -309,19 +322,6 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
     return false;
   };
 
-  const visible=useMemo(()=>comms.filter(c=>{
-    if(filter==='drafts')return c.status==='draft'&&isLA&&matchesSearch(c);
-    if(filter==='archived')return c.status==='archived'&&isLA&&matchesSearch(c);
-    if(filter==='scheduled')return canSeeScheduled(c)&&matchesSearch(c);
-    // For sent surfaces ('all' + type filters), the optional "Saved only"
-    // toggle stacks on top — empty saved set just renders the empty
-    // state, not a phantom missing announcement.
-    const passes = filter==='all'
-      ? (c.status==='sent'&&canSee(c))
-      : (c.type===filter&&c.status==='sent'&&canSee(c));
-    return passes && (!showSavedOnly || isSaved(c.id)) && matchesSearch(c);
-  }),[comms,filter,isLA,user,serverUserId,isApproverUser,showSavedOnly,savedCount,debouncedSearch]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const uid=Number(user.id);
   // Ack check — EMAIL-FIRST, drift-proof. The static MEMBERS array uses
   // array-position ids that collide with DB `members.id` values. If we allow
@@ -365,6 +365,24 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
     }
     return false;
   };
+
+  const visible=useMemo(()=>comms.filter(c=>{
+    if(filter==='drafts')return c.status==='draft'&&isLA&&matchesSearch(c);
+    if(filter==='archived')return c.status==='archived'&&isLA&&matchesSearch(c);
+    if(filter==='scheduled')return canSeeScheduled(c)&&matchesSearch(c);
+    // "Needs my ack" tab — sent items I'm in the audience of, haven't
+    // yet acked, and didn't author. Mirrors the pendingForMe memo so
+    // the briefing's "N unacked" tile and this tab show the same rows.
+    if(filter==='needs-ack')return c.status==='sent'&&targetMatch(c)&&!isAckedByMe(c)&&!isAuthoredByMe(c)&&matchesSearch(c);
+    // For sent surfaces ('all' + type filters), the optional "Saved only"
+    // toggle stacks on top — empty saved set just renders the empty
+    // state, not a phantom missing announcement.
+    const passes = filter==='all'
+      ? (c.status==='sent'&&canSee(c))
+      : (c.type===filter&&c.status==='sent'&&canSee(c));
+    return passes && (!showSavedOnly || isSaved(c.id)) && matchesSearch(c);
+  }),[comms,filter,isLA,user,serverUserId,isApproverUser,showSavedOnly,savedCount,debouncedSearch]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const pendingForMe=useMemo(()=>comms.filter(c=>c.status==='sent'&&targetMatch(c)&&!isAckedByMe(c)&&!isAuthoredByMe(c)),[comms,user,uid,serverUid,myEmailLc,serverEmailLc]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const acknowledge=(id)=>{
@@ -518,6 +536,11 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
   const approvalTabLabel = isApproverUser ? 'Pending Approval' : 'My Requests';
   const FILTERS=[
     {id:'all',label:'All',icon:'bi-grid'},
+    // "Needs my ack" — surfaces the unacked items the briefing tile
+    // counts. Always rendered so a user clicking the briefing badge
+    // lands on this tab even when its count is 0 (which would also
+    // explain "the count is zero").
+    {id:'needs-ack',label:'Needs my ack',icon:'bi-bell-fill',highlight:true},
     ...(enabledTypes.alert!==false?[{id:'alert',label:'Alerts',icon:'bi-exclamation-triangle-fill'}]:[]),
     ...(enabledTypes.announce!==false?[{id:'announce',label:'Announcements',icon:'bi-megaphone-fill'}]:[]),
     ...(enabledTypes.update!==false?[{id:'update',label:'Updates',icon:'bi-arrow-up-circle-fill'}]:[]),
@@ -687,17 +710,21 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
           {FILTERS.map(f => {
             let ct;
             if (f.id === 'all') ct = visible.length;
+            else if (f.id === 'needs-ack') ct = pendingForMe.length;
             else if (f.id === 'drafts') ct = comms.filter(c => c.status === 'draft').length;
             else if (f.id === 'archived') ct = comms.filter(c => c.status === 'archived').length;
             else if (f.id === 'scheduled') ct = comms.filter(c => canSeeScheduled(c)).length;
             else if (f.id === 'pending-approval') ct = pendingApprovalCount;
             else ct = comms.filter(c => c.type === f.id && c.status === 'sent' && (!showSavedOnly || isSaved(c.id))).length;
             const isPendingTab = f.id === 'pending-approval';
-            // Pending-Approval tab gets a red badge (urgency cue) when count > 0.
-            const badgeBg = isPendingTab && ct > 0
+            const isNeedsAckTab = f.id === 'needs-ack';
+            // Pending-Approval AND Needs-my-ack tabs get a red badge
+            // (urgency cue) when count > 0 — both surface work the
+            // caller still has to action.
+            const badgeBg = (isPendingTab || isNeedsAckTab) && ct > 0
               ? '#fce8ea'
               : filter === f.id ? 'rgba(107,63,160,0.15)' : '#f2f2f2';
-            const badgeColor = isPendingTab && ct > 0
+            const badgeColor = (isPendingTab || isNeedsAckTab) && ct > 0
               ? '#d42d35'
               : filter === f.id ? '#6b3fa0' : '#616161';
             return (

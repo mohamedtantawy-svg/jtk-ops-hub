@@ -204,10 +204,10 @@ export function TriageStrip({ sourceRows = [], tickets = [], onNavigate }) {
 // ── DecisionsStrip ───────────────────────────────────────────────────────
 
 export function DecisionsStrip({ onNavigate }) {
-  const [approvalsCount, setApprovalsCount] = useState(null);
+  const [hrHubPending, setHrHubPending] = useState(null);
   const [leaderAlerts, setLeaderAlerts] = useState(null);
   const [urgentAssist, setUrgentAssist] = useState(null);
-  const [hrHubPending, setHrHubPending] = useState(null);
+  const [approvalsCount, setApprovalsCount] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -224,69 +224,106 @@ export function DecisionsStrip({ onNavigate }) {
     (async () => {
       // Count semantics (each tile answers "what's waiting on me?"):
       //
-      //   • approvalsCount  — HR-Hub requests of flow=hide_task_request that
-      //                       are still in `new` (not yet resolved) AND were
-      //                       created by someone in my reports chain. The
-      //                       endpoint maps `?scope=team` to the caller's
-      //                       full subtree (admin/RM = getAllReports, TL =
-      //                       direct reports).
+      //   • hrHubPending    — open HR Hub requests across every flow that
+      //                       were either raised by someone in the caller's
+      //                       subtree (scope=team) OR assigned to the caller
+      //                       (scope=assigned). De-duped by id since the
+      //                       same row can appear in both scopes.
       //   • leaderAlerts    — sidebar-badge unacked count, server filters by
       //                       severity threshold + caller's ack rows.
       //   • urgentAssist    — open Urgent-Assist where someone in my subtree
       //                       is the assignee. Endpoint takes a single
       //                       status; we make 3 parallel calls and sum.
-      //   • hrHubPending    — broader "open HR Hub items in my team" across
-      //                       every flow (NOT scoped to hide_task only).
-      //                       Some overlap with approvalsCount is expected.
+      //   • approvalsCount  — HR-Hub requests of flow IN (hide_task_request,
+      //                       sla_extension_request) that are still
+      //                       actionable (not yet resolved). scope=team
+      //                       covers caller's full subtree.
       const [
-        approvalsNew, approvalsInProg, approvalsOnHold,
+        // HR Hub team-raised — 3 open statuses
+        hrTeamNew, hrTeamInProg, hrTeamOnHold,
+        // HR Hub assigned-to-me — 3 open statuses
+        hrAssignedNew, hrAssignedInProg, hrAssignedOnHold,
+        // Leader alerts
         alerts,
+        // Urgent Assist — team scope, 3 open statuses
         urgentNew, urgentInProg, urgentOnHold,
-        hrNew, hrInProg, hrOnHold,
+        // Hide-task approvals — team scope, 3 open statuses
+        hideTaskNew, hideTaskInProg, hideTaskOnHold,
+        // SLA Extension approvals — team scope, 3 open statuses
+        slaExtNew, slaExtInProg, slaExtOnHold,
       ] = await Promise.all([
-        safe('/hr-hub/requests?flow=hide_task_request&status=new&scope=team&limit=100'),
-        safe('/hr-hub/requests?flow=hide_task_request&status=in_progress&scope=team&limit=100'),
-        safe('/hr-hub/requests?flow=hide_task_request&status=on_hold&scope=team&limit=100'),
+        safe('/hr-hub/requests?status=new&scope=team&limit=100'),
+        safe('/hr-hub/requests?status=in_progress&scope=team&limit=100'),
+        safe('/hr-hub/requests?status=on_hold&scope=team&limit=100'),
+        safe('/hr-hub/requests?status=new&scope=assigned&limit=100'),
+        safe('/hr-hub/requests?status=in_progress&scope=assigned&limit=100'),
+        safe('/hr-hub/requests?status=on_hold&scope=assigned&limit=100'),
         safe('/leader-alerts/unacked-count'),
         safe('/urgent-assist?scope=team&status=new&limit=200'),
         safe('/urgent-assist?scope=team&status=in_progress&limit=200'),
         safe('/urgent-assist?scope=team&status=on_hold&limit=200'),
-        safe('/hr-hub/requests?status=new&scope=team&limit=100'),
-        safe('/hr-hub/requests?status=in_progress&scope=team&limit=100'),
-        safe('/hr-hub/requests?status=on_hold&scope=team&limit=100'),
+        safe('/hr-hub/requests?flow=hide_task_request&status=new&scope=team&limit=100'),
+        safe('/hr-hub/requests?flow=hide_task_request&status=in_progress&scope=team&limit=100'),
+        safe('/hr-hub/requests?flow=hide_task_request&status=on_hold&scope=team&limit=100'),
+        safe('/hr-hub/requests?flow=sla_extension_request&status=new&scope=team&limit=100'),
+        safe('/hr-hub/requests?flow=sla_extension_request&status=in_progress&scope=team&limit=100'),
+        safe('/hr-hub/requests?flow=sla_extension_request&status=on_hold&scope=team&limit=100'),
       ]);
       if (cancelled) return;
-      const lenOf = (j) => Array.isArray(j?.items) ? j.items.length : 0;
-      // Hide-task approvals — sum every status below resolved so the
-      // tile reflects "anything still actionable in my team's hide-task
-      // pipeline" (not just `new`). Mirrors the HR Hub + Urgent Assist
-      // tiles' 3-status sum semantics.
-      const approvalsSum = (approvalsNew || approvalsInProg || approvalsOnHold)
-        ? lenOf(approvalsNew) + lenOf(approvalsInProg) + lenOf(approvalsOnHold)
-        : null;
-      if (approvalsSum != null) setApprovalsCount(approvalsSum);
+      const itemsOf = (j) => Array.isArray(j?.items) ? j.items : [];
+      // HR Hub: union team-raised + assigned-to-me, dedup by id so a row
+      // assigned to the caller AND raised by a team member counts once.
+      const hrTeamRows = [...itemsOf(hrTeamNew), ...itemsOf(hrTeamInProg), ...itemsOf(hrTeamOnHold)];
+      const hrAssignedRows = [...itemsOf(hrAssignedNew), ...itemsOf(hrAssignedInProg), ...itemsOf(hrAssignedOnHold)];
+      const hrAnyResp = hrTeamNew || hrTeamInProg || hrTeamOnHold || hrAssignedNew || hrAssignedInProg || hrAssignedOnHold;
+      if (hrAnyResp) {
+        const seenIds = new Set();
+        let unique = 0;
+        for (const r of [...hrTeamRows, ...hrAssignedRows]) {
+          const id = r?.id;
+          if (id == null || seenIds.has(id)) continue;
+          seenIds.add(id);
+          unique++;
+        }
+        setHrHubPending(unique);
+      }
       if (alerts) setLeaderAlerts(alerts?.count ?? 0);
-      // Sum the three open buckets — endpoint paginates beyond ~200 but
-      // 200/bucket × 3 = 600 ceiling is comfortably above every team.
-      const urgentSum = (urgentNew || urgentInProg || urgentOnHold)
-        ? lenOf(urgentNew) + lenOf(urgentInProg) + lenOf(urgentOnHold)
-        : null;
-      if (urgentSum != null) setUrgentAssist(urgentSum);
-      const hrSum = (hrNew || hrInProg || hrOnHold)
-        ? lenOf(hrNew) + lenOf(hrInProg) + lenOf(hrOnHold)
-        : null;
-      if (hrSum != null) setHrHubPending(hrSum);
+      // Urgent Assist: sum the three open buckets — endpoint paginates
+      // beyond ~200 but 200/bucket × 3 = 600 ceiling is above every team.
+      const urgentAnyResp = urgentNew || urgentInProg || urgentOnHold;
+      if (urgentAnyResp) {
+        setUrgentAssist(itemsOf(urgentNew).length + itemsOf(urgentInProg).length + itemsOf(urgentOnHold).length);
+      }
+      // Approvals: sum hide_task_request + sla_extension_request across
+      // the three open statuses. Two disjoint flows → no dedup needed.
+      const approvalsAnyResp = hideTaskNew || hideTaskInProg || hideTaskOnHold || slaExtNew || slaExtInProg || slaExtOnHold;
+      if (approvalsAnyResp) {
+        const hideSum = itemsOf(hideTaskNew).length + itemsOf(hideTaskInProg).length + itemsOf(hideTaskOnHold).length;
+        const slaSum = itemsOf(slaExtNew).length + itemsOf(slaExtInProg).length + itemsOf(slaExtOnHold).length;
+        setApprovalsCount(hideSum + slaSum);
+      }
     })();
     return () => { cancelled = true; };
   }, []);
 
-  const tile = ({ icon, label, count, hint, color, target }) => {
+  // Tiles dispatch a CustomEvent to the destination view (with the desired
+  // scope/flow/status filter) BEFORE calling onNavigate. The destination
+  // view listens on mount and applies the filters so the user lands on the
+  // exact list the tile claims to summarize.
+  const handleTileClick = (target, eventName, detail) => {
+    if (eventName && typeof window !== 'undefined') {
+      try { window.dispatchEvent(new CustomEvent(eventName, { detail })); } catch (_) {}
+    }
+    onNavigate?.(target);
+  };
+
+  const tile = ({ icon, label, count, hint, color, onClick }) => {
     const n = count == null ? '—' : count;
     const has = typeof count === 'number' && count > 0;
     return (
       <button
         key={label}
-        onClick={() => onNavigate?.(target)}
+        onClick={onClick}
         style={{
           flex: 1,
           padding: '14px 16px',
@@ -329,12 +366,12 @@ export function DecisionsStrip({ onNavigate }) {
   return (
     <div style={{ display: 'flex', gap: 12 }}>
       {tile({
-        icon: 'bi-eye-slash-fill',
-        label: 'Hide-task approvals',
-        hint: 'from your reports',
-        count: approvalsCount,
-        color: '#d42d35',
-        target: 'approval-queue',
+        icon: 'bi-clipboard-check-fill',
+        label: 'HR Hub',
+        hint: 'team raised or assigned to me',
+        count: hrHubPending,
+        color: '#0e7490',
+        onClick: () => handleTileClick('hr-hub', 'hr-hub:setFilters', { scope: 'team', flow: 'all', status: null }),
       })}
       {tile({
         icon: 'bi-bell-fill',
@@ -342,23 +379,23 @@ export function DecisionsStrip({ onNavigate }) {
         hint: 'targeted at your team',
         count: leaderAlerts,
         color: '#7c3aed',
-        target: 'leader-alerts',
+        onClick: () => handleTileClick('leader-alerts', 'leader-alerts:setFilters', { unackedOnly: true }),
       })}
       {tile({
         icon: 'bi-lightning-fill',
         label: 'Urgent Assist',
-        hint: 'open requests',
+        hint: 'open requests in my team',
         count: urgentAssist,
         color: '#ed8d00',
-        target: 'urgent-assist',
+        onClick: () => handleTileClick('urgent-assist', 'urgent-assist:setFilters', { scope: 'team', status: null }),
       })}
       {tile({
-        icon: 'bi-clipboard-check-fill',
-        label: 'HR Hub pending',
-        hint: 'open requests in HR Hub',
-        count: hrHubPending,
-        color: '#0e7490',
-        target: 'hr-hub',
+        icon: 'bi-eye-slash-fill',
+        label: 'SLA Extension & Hide-Task',
+        hint: 'approvals from your reports',
+        count: approvalsCount,
+        color: '#d42d35',
+        onClick: () => handleTileClick('hr-hub', 'hr-hub:setFilters', { scope: 'team', flow: 'hide_task_request', status: null }),
       })}
     </div>
   );

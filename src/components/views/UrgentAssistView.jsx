@@ -145,6 +145,21 @@ export default function UrgentAssistView({ user, onCreate, managerOnCall, onChan
     return () => window.removeEventListener('ops-hub:urgent-assist-open-all', onOpenAll);
   }, []);
   const [statusFilter, setStatusFilter] = useState(null);
+
+  // Briefing DecisionsStrip "Urgent Assist" tile dispatches
+  // `urgent-assist:setFilters` so the user lands on scope=team
+  // (matching the tile count's scoping). detail keys default to "leave
+  // unchanged" when undefined.
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const handler = (e) => {
+      const d = e?.detail || {};
+      if (typeof d.scope === 'string') setScope(d.scope);
+      if ('status' in d) setStatusFilter(d.status); // null = show all
+    };
+    window.addEventListener('urgent-assist:setFilters', handler);
+    return () => window.removeEventListener('urgent-assist:setFilters', handler);
+  }, []);
   const [search, setSearch] = useState('');
   const [actionError, setActionError] = useState(null);
 

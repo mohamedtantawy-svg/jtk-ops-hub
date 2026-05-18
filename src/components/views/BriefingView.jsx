@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef, useContext, useCallback, Fragment
 import { TOOLS, STATUSES, FUNCTIONS, FLAGS } from '../../data/constants';
 import { MEMBERS, MEMBERS_BY_EMAIL, TEAM_MEMBERS, getDirectReports, getAllReports } from '../../data/members';
 import { useTeamMembers } from '../../hooks/useTeamMembers';
+import { useTeamDataVersion } from '../../hooks/useTeamDataVersion';
 import { matchesAudience } from '../../data/comms';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import { CALENDAR_EVENTS } from '../../data/calendar';
@@ -369,8 +370,15 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // streams under one pill. Without this Home reported 115 (active only)
   // while Workspace reported 330 (active + 215 paused) — F3 in the
   // 2026-05-03 live audit.
-  const onboardingActionRows = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user), [onboardingRowsAll, user]);
-  const pausedOnboardingRows = useMemo(() => scopePausedOnboarding(pausedOnboardingRowsAll, user), [pausedOnboardingRowsAll, user]);
+  // Bumps when the roster or country-ownership map mutates (Team-tab edit
+  // here or in another user's session pulling fresh data via useTeamMembers'
+  // visibility/focus/poll refetch). Threaded into every scope memo below so
+  // client-side scoping re-derives the moment the underlying live bindings
+  // change — fixes Insiya + Mohamed 2026-05-18 "manager change / country
+  // removal stays visible until a hard refresh".
+  const teamDataVersion = useTeamDataVersion();
+  const onboardingActionRows = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user), [onboardingRowsAll, user, teamDataVersion]);
+  const pausedOnboardingRows = useMemo(() => scopePausedOnboarding(pausedOnboardingRowsAll, user), [pausedOnboardingRowsAll, user, teamDataVersion]);
   const onboardingRows = useMemo(() => {
     const seen = new Set();
     const merged = [];
@@ -381,10 +389,10 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     }
     return merged;
   }, [onboardingActionRows, pausedOnboardingRows]);
-  const offboardingRows = useMemo(() => scopeOffboardingCases(offboardingRowsAll, user), [offboardingRowsAll, user]);
-  const amendmentRows = useMemo(() => scopeAmendmentRequests(amendmentRowsAll, user), [amendmentRowsAll, user]);
-  const redlineRows = useMemo(() => scopeRedlineRequests(redlineRowsAll, user), [redlineRowsAll, user]);
-  const workbenchRows = useMemo(() => scopeWorkbenchTasks(workbenchRowsAll, user), [workbenchRowsAll, user]);
+  const offboardingRows = useMemo(() => scopeOffboardingCases(offboardingRowsAll, user), [offboardingRowsAll, user, teamDataVersion]);
+  const amendmentRows = useMemo(() => scopeAmendmentRequests(amendmentRowsAll, user), [amendmentRowsAll, user, teamDataVersion]);
+  const redlineRows = useMemo(() => scopeRedlineRequests(redlineRowsAll, user), [redlineRowsAll, user, teamDataVersion]);
+  const workbenchRows = useMemo(() => scopeWorkbenchTasks(workbenchRowsAll, user), [workbenchRowsAll, user, teamDataVersion]);
   // Workbench is the only Deel source that intentionally surfaces a 24h
   // window of COMPLETED + CLOSED rows (so the home "Resolved Today" KPI
   // can include workbench). Active aggregates — capacity bands, SLA
@@ -970,12 +978,6 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   }).join(' ');
 
   // ── Team data ─────────────────────────────────────────────────────────
-  const leads=MEMBERS.filter(m=>m.role==='team_lead'||m.role==='regional_manager').map(ld=>{
-    const ag=allAgentsWL.filter(a=>a.team===ld.team);
-    const tt=ag.reduce((s,a)=>s+a.tc,0);const tb=ag.reduce((s,a)=>s+a.br,0);const avg=ag.length?tt/ag.length:0;
-    const r=teamAvg>0?avg/teamAvg:0;
-    return {...ld,ag,tt,tb,avg,wl:r>=1.4?'High':r>=0.7?'Medium':'Low',wc:r>=1.4?'#d42d35':r>=0.7?'#ed8d00':'#29811e'};
-  });
   const helpers=isOwnScope?allAgentsWL.filter(m=>m.team===user.team&&m.id!==user.id&&m.tc<personal.length).slice(0,3):[];
   // Team Summary — render for every manager. allAgentsWL is already scoped
   // via scopeIds, so no team-string re-filter is needed (and it actively
@@ -984,68 +986,86 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // both branches of the previous ternary and got an empty list).
   const hmMembers = isManager ? allAgentsWL : [];
 
-  // Hierarchical view of the team: for each direct manager-report under the
-  // user (TL or RM), build a group with aggregated stats + the agents
-  // transitively below. Admins see RM groups; RMs see TL groups; TLs (whose
-  // direct reports are all agents) get an empty groups list and the table
-  // falls back to the flat agent list — same behaviour as before.
-  // Per Mohamed: a regional manager should see "their team-leads with their
-  // teams under them is a proper table" rather than one flat list.
-  const teamSummaryGroups = useMemo(() => {
-    if (!isManager || !user?.email) return [];
-    const directs = getDirectReports(user.email);
-    const managerRows = directs.filter(m => m.access && m.access !== 'agent');
-    if (managerRows.length === 0) return [];
+  // Recursive hierarchical view of the team. Each group represents a
+  // manager (RM or TL) with their immediate sub-managers AND any agents
+  // reporting directly to them (no intermediate manager). Stats are
+  // aggregated over the FULL subtree below the manager.
+  //
+  // Admin viewing → groups are RMs at L1, their TLs at L2, agents at L3.
+  // RM viewing    → groups are TLs at L1, agents at L2.
+  // TL viewing    → no groups (only directAgents at L1, rendered flat).
+  //
+  // Before this rework, the builder collapsed RMs straight to their full
+  // transitive agent list — TLs vanished entirely from an admin's Team
+  // Summary (Mohamed 2026-05-18: "i can see everyone but i can't see any
+  // team leads"). The recursive build preserves the chain.
+  const teamSummaryTree = useMemo(() => {
+    if (!isManager || !user?.email) return { groups: [], directAgents: [], allAgentCount: 0 };
     const allAgentsByEmail = new Map(
       allAgentsWL.map(a => [(a.email || '').toLowerCase(), a])
     );
-    return managerRows.map(mgr => {
-      const subtree = new Set([mgr.email, ...getAllReports(mgr.email)].map(e => e.toLowerCase()));
-      const agents = allAgentsWL.filter(a => subtree.has((a.email || '').toLowerCase()));
-      const tc        = agents.reduce((s, a) => s + (a.tc || 0), 0);
-      const open      = agents.reduce((s, a) => s + (a.open || 0), 0);
-      const paused    = agents.reduce((s, a) => s + (a.paused || 0), 0);
-      const escalated = agents.reduce((s, a) => s + (a.escalated || 0), 0);
-      const br        = agents.reduce((s, a) => s + (a.br || 0), 0);
-      const headcount = Math.max(agents.length, 1);
-      const avgTc    = tc / headcount;
+    function buildGroup(member) {
+      const directs = getDirectReports(member.email);
+      const subMgrs = directs.filter(m => m.access && m.access !== 'agent' && !m.isDeleted);
+      const directAgentMembers = directs.filter(m => (!m.access || m.access === 'agent') && !m.isDeleted);
+      const subGroups = subMgrs.map(buildGroup);
+      const directAgents = directAgentMembers
+        .map(m => allAgentsByEmail.get(m.email.toLowerCase()))
+        .filter(Boolean);
+      // Agents in this manager's full subtree (transitive) — used for
+      // aggregate totals AND to dedup across sub-trees if shared.
+      const allAgentsBelow = [
+        ...subGroups.flatMap(sg => sg.allAgentsBelow),
+        ...directAgents,
+      ];
+      const tc        = allAgentsBelow.reduce((s, a) => s + (a.tc || 0), 0);
+      const open      = allAgentsBelow.reduce((s, a) => s + (a.open || 0), 0);
+      const paused    = allAgentsBelow.reduce((s, a) => s + (a.paused || 0), 0);
+      const escalated = allAgentsBelow.reduce((s, a) => s + (a.escalated || 0), 0);
+      const br        = allAgentsBelow.reduce((s, a) => s + (a.br || 0), 0);
+      const headcount = allAgentsBelow.length;
+      const avgTc    = headcount > 0 ? tc / headcount : 0;
       const capPct   = Math.min(200, Math.round((avgTc / BASELINE_CAPACITY) * 100));
       const band     = classifyWorkload(avgTc);
       return {
-        manager: { ...mgr, _self: allAgentsByEmail.get(mgr.email.toLowerCase()) || null },
-        agents,
+        manager: { ...member, _self: allAgentsByEmail.get(member.email.toLowerCase()) || null },
+        subGroups,
+        directAgents,
+        allAgentsBelow,
         tc, open, paused, escalated, br, capPct, wl: band.wl, wc: band.wc,
-        headcount: agents.length,
+        headcount,
       };
-    }).filter(g => g.agents.length > 0);
+    }
+    const directs = getDirectReports(user.email);
+    const topMgrs = directs.filter(m => m.access && m.access !== 'agent' && !m.isDeleted);
+    const topDirectAgentMembers = directs.filter(m => (!m.access || m.access === 'agent') && !m.isDeleted);
+    const groups = topMgrs.map(buildGroup);
+    const directAgents = topDirectAgentMembers
+      .map(m => allAgentsByEmail.get(m.email.toLowerCase()))
+      .filter(Boolean);
+    const agentEmails = new Set([
+      ...groups.flatMap(g => g.allAgentsBelow.map(a => (a.email || '').toLowerCase())),
+      ...directAgents.map(a => (a.email || '').toLowerCase()),
+    ]);
+    return { groups, directAgents, allAgentCount: agentEmails.size };
   }, [isManager, user?.email, allAgentsWL]);
 
-  // Agents who report directly to the user with no intermediate manager
-  // (e.g. an RM who carries an agent without a TL in between). Rendered as
-  // a "Direct reports" group so they aren't dropped from the summary.
-  const directAgentRows = useMemo(() => {
-    if (!isManager || teamSummaryGroups.length === 0 || !user?.email) return [];
-    const claimed = new Set();
-    for (const g of teamSummaryGroups) {
-      for (const a of g.agents) claimed.add((a.email || '').toLowerCase());
-    }
-    const userEmail = user.email.toLowerCase();
-    return allAgentsWL.filter(a => {
-      const e = (a.email || '').toLowerCase();
-      if (claimed.has(e)) return false;
-      const m = MEMBERS_BY_EMAIL[e];
-      return m && (m.managerEmail || '').toLowerCase() === userEmail;
+  // Expansion state — Set of manager emails whose groups are expanded.
+  // Default is collapsed so an admin sees only RMs at first (per the
+  // 2026-05-18 spec: "show only RM, then clicking the arrow to show TLs
+  // and their totals then team etc.").
+  const [expandedManagers, setExpandedManagers] = useState(() => new Set());
+  const toggleManagerExpanded = useCallback((email) => {
+    if (!email) return;
+    setExpandedManagers(prev => {
+      const next = new Set(prev);
+      if (next.has(email)) next.delete(email);
+      else next.add(email);
+      return next;
     });
-  }, [isManager, teamSummaryGroups, allAgentsWL, user?.email]);
+  }, []);
 
   const ROLE_LABEL = { regional_manager: 'Regional Manager', team_lead: 'Team Lead', admin: 'Admin' };
-  const regions=['EMEA','APAC','LATAM','NAM'];
-  const regionIcons={EMEA:'bi-globe-europe-africa',APAC:'bi-globe-asia-australia',LATAM:'bi-globe-americas',NAM:'bi-globe-americas'};
-  const rStats=regions.map(r=>{
-    const ra=allAgentsWL.filter(a=>a.team===r);const tt=ra.reduce((s,a)=>s+a.tc,0);const tb=ra.reduce((s,a)=>s+a.br,0);
-    const avg=ra.length?tt/ra.length:0;const ratio=teamAvg>0?avg/teamAvg:0;
-    return {r,n:ra.length,tt,tb,avg,wl:ratio>=1.4?'High':ratio>=0.7?'Medium':'Low',wc:ratio>=1.4?'#d42d35':ratio>=0.7?'#ed8d00':'#29811e',ld:leads.find(l=>l.team===r)};
-  });
 
   // ── Recent activity ───────────────────────────────────────────────────
   const recentAct=[...scope].filter(t=>t.updatedMinsAgo!==undefined&&t.updatedMinsAgo<t.minutesAgo).sort((a,b)=>a.updatedMinsAgo-b.updatedMinsAgo).slice(0,4).map(t=>{
@@ -1580,7 +1600,12 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               sign-off, not every pending escalation in the org — avoids a
               useless 50+ number). */}
           {(()=>{
-            const inAudExec=(c)=>matchesAudience(c.target,user.team)||(c.author&&c.author.id===user.id);
+            // Author's own announcements don't count as "needing my ack" —
+            // they already broadcast it; an author re-acking their own
+            // post is a noise notification. 2026-05-18: caught when an
+            // admin's "1 unacked" badge couldn't be cleared because the
+            // unacked item was their own published announcement.
+            const inAudExec=(c)=>matchesAudience(c.target,user.team)&&!(c.author&&c.author.id===user.id);
             const execUnackedCount=comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='alert'||c.type==='guidance')&&!isAckedByMe(c)&&inAudExec(c)).length;
             return(
               <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:10,marginBottom:16}}>
@@ -1594,7 +1619,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   // Requests; the underlying count is unchanged (sum of
                   // open items across every queue source).
                   {icon:'bi-inbox-fill',label:'Open Tasks',value:activeRequestsCount,color:'var(--g)',sub:isOwnScope?'mine':isTeamScope?'team':'org-wide',nav:()=>setView('my-queue')},
-                  {icon:'bi-megaphone-fill',label:'Announcements',value:execUnackedCount,color:execUnackedCount>0?'#ed8d00':'#616161',alert:execUnackedCount>0,nav:()=>setView('announcements'),accent:execUnackedCount>0?'#fff8e6':null,sub:'unacked'},
+                  {icon:'bi-megaphone-fill',label:'Announcements',value:execUnackedCount,color:execUnackedCount>0?'#ed8d00':'#616161',alert:execUnackedCount>0,nav:()=>{setView('announcements');try{window.dispatchEvent(new CustomEvent('announcements:setFilter',{detail:{filter:'needs-ack'}}));}catch(_){}}, accent:execUnackedCount>0?'#fff8e6':null,sub:'unacked'},
                 ].map(m=>(
                   <DeelCard key={m.label}
                     onClick={m.nav}
@@ -1718,101 +1743,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               </div>
             </DeelCard>
           </div>
-          {/* ── Admin Actions card — Workbench platform tasks ──────────────
-              // ✅ Admin tasks section present
-          ─────────────────────────────────────────────────────────────── */}
-          {settings.briefing_show_admin_actions!==false&&(()=>{
-            const wbNew=tasks.filter(t=>t.source==='workbench'&&t.status==='new');
-            const onboardingsPending=wbNew.filter(t=>/(onboard|new hire|welcome)/i.test(t.subject||t.type||'')).length||Math.max(0,wbNew.length-Math.floor(wbNew.length*0.6));
-            const amendmentsPending=wbNew.filter(t=>/(amend|change|update|salary|contract)/i.test(t.subject||t.type||'')).length||Math.max(0,Math.floor(wbNew.length*0.3));
-            const complianceDocs=tasks.filter(t=>t.source==='workbench'&&t.status!=='resolved'&&/(compliance|doc|legal|sign)/i.test(t.subject||t.type||'')).length||3;
-            return(
-              <div style={{marginTop:16,background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16,padding:'16px 20px',boxShadow:'0 1px 2px rgba(0,0,0,0.04)'}}>
-                <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14}}>
-                  <div style={{width:28,height:28,background:'#f7f5f2',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center'}}>
-                    <i className="bi-tools" style={{color:'#616161',fontSize:12}}></i>
-                  </div>
-                  <div style={{fontSize:13,fontWeight:600,color:'#9e9e9e',textTransform:'none',letterSpacing:'normal'}}>Admin actions</div>
-                </div>
-                <div style={{display:'flex',gap:0,border:'1px solid #e8e8e8',borderRadius:12,overflow:'hidden'}}>
-                  {[
-                    {label:'Onboardings pending',value:onboardingsPending,icon:'bi-person-plus-fill',color:'#1f74b3',bg:'#e8f0fe'},
-                    {label:'Amendments pending', value:amendmentsPending, icon:'bi-file-earmark-text-fill',color:'#ed8d00',bg:'#fff8e6'},
-                    {label:'Compliance docs',    value:complianceDocs,    icon:'bi-shield-check',color:'#29811e',bg:'#e8f5e3'},
-                  ].map((s,i)=>(
-                    <div key={s.label} onClick={()=>setView('my-queue')}
-                      style={{flex:1,padding:'12px 16px',borderRight:i<2?'1px solid #e8e8e8':'none',cursor:'pointer',transition:'background .15s',display:'flex',alignItems:'center',gap:10}}
-                      onMouseEnter={e=>e.currentTarget.style.background='#fafaf9'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                      <div style={{width:32,height:32,background:s.bg,borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                        <i className={s.icon} style={{color:s.color,fontSize:14}}></i>
-                      </div>
-                      <div>
-                        <div style={{fontSize:22,fontWeight:800,color:s.color,lineHeight:1,fontVariantNumeric:'tabular-nums'}}>{s.value}</div>
-                        <div style={{fontSize:11,color:'#616161',marginTop:2,fontWeight:500}}>{s.label}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Volume sparkline for exec */}
-          {settings.briefing_show_volume_trend!==false&&<div style={{display:'flex',alignItems:'center',gap:14,marginTop:16,padding:'10px 16px',borderRadius:12,background:'var(--surface)',border:'1px solid #e8e8e8'}}>
-            <svg width={spW} height={spH} viewBox={`0 0 ${spW} ${spH}`} style={{overflow:'visible'}}>
-              <defs><linearGradient id="spGradEx" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--g)" stopOpacity=".15"/><stop offset="100%" stopColor="var(--g)" stopOpacity="0"/></linearGradient></defs>
-              <path d={sparkPath+` L${spW},${spH} L0,${spH} Z`} fill="url(#spGradEx)"/>
-              <path d={sparkPath} fill="none" stroke="var(--g)" strokeWidth="1.5" className="spark-line"/>
-              <circle cx={spW} cy={spH-((sparkData[sparkData.length-1]-spMin)/((spMax-spMin)||1))*spH} r="3" fill="var(--g)"/>
-            </svg>
-            <div style={{fontSize:11,color:'#616161'}}>
-              <span style={{fontWeight:700,color:'#1b1b1b'}}>Volume Trend</span> — {orgOpen.length+orgResolved.length} tasks today
-              {trend().pct>0&&<span style={{marginLeft:6,fontWeight:700,color:trend().c}}>{trend().dir}{trend().pct}% vs yesterday</span>}
-            </div>
-          </div>}
         </div>}
-
-        {/* ══════════════════════════════════════════════════════════════════
-            LIVE INTEGRATION DATA — shows real counts when APIs are connected.
-            Deel Workers + Active Contracts tiles removed 2026-05-13 with
-            the REST-v2 deprecation; admin-API counts flow through the
-            queue-source tiles above instead.
-            ═════════════════════════════════════════════════════════════════ */}
-        {(jiraData?.isAvailable||slackData?.isAvailable)&&(
-          <div style={{marginTop:16,background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16,padding:'16px 20px',boxShadow:'0 1px 2px rgba(0,0,0,0.04)'}}>
-            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14}}>
-              <div style={{width:28,height:28,background:'#dcfce7',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center'}}>
-                <i className="bi-cloud-arrow-down-fill" style={{color:'#16a34a',fontSize:12}}></i>
-              </div>
-              <div style={{fontSize:13,fontWeight:600,color:'#16a34a',textTransform:'none',letterSpacing:'normal'}}>Live Data</div>
-              <span style={{fontSize:10,color:'#9e9e9e',marginLeft:'auto'}}>Auto-refreshing</span>
-            </div>
-            <div style={{display:'flex',gap:0,border:'1px solid #e8e8e8',borderRadius:12,overflow:'hidden'}}>
-              {[
-                jiraData?.isAvailable && {
-                  label: 'Jira Open Issues',
-                  value: Array.isArray(jiraData.issues) ? jiraData.issues.length : '—',
-                  icon: 'bi-kanban', color: '#0052CC', bg: '#e6efff',
-                },
-                slackData?.isAvailable && {
-                  label: 'Slack Escalations',
-                  value: Array.isArray(slackData.escalationMessages) ? slackData.escalationMessages.length : '—',
-                  icon: 'bi-chat-square-dots', color: '#611f69', bg: '#f3e8f9',
-                },
-              ].filter(Boolean).map((s,i,arr)=>(
-                <div key={s.label} style={{flex:1,padding:'12px 16px',borderRight:i<arr.length-1?'1px solid #e8e8e8':'none',display:'flex',alignItems:'center',gap:10}}>
-                  <div style={{width:32,height:32,background:s.bg,borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                    <i className={s.icon} style={{color:s.color,fontSize:14}}></i>
-                  </div>
-                  <div>
-                    <div style={{fontSize:22,fontWeight:800,color:s.color,lineHeight:1,fontVariantNumeric:'tabular-nums'}}>{s.value}</div>
-                    <div style={{fontSize:11,color:'#616161',marginTop:2,fontWeight:500}}>{s.label}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* ══════════════════════════════════════════════════════════════════
             AGENT METRICS — bigger boxes with clear numbers
@@ -1820,7 +1751,10 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
         {isOwnScope&&<div style={{padding:'12px 24px'}}>
           {/* ── Stat cards ──── */}
           {(()=>{
-            const inAudience=(c)=>matchesAudience(c.target,user.team)||(c.author&&c.author.id===user.id);
+            // See exec block above for the author-exclusion rationale —
+            // mirrored here so the Agent briefing tile has the same
+            // semantics.
+            const inAudience=(c)=>matchesAudience(c.target,user.team)&&!(c.author&&c.author.id===user.id);
             const unackedComms=comms.filter(c=>c.status==='sent'&&(c.type==='announce'||c.type==='alert'||c.type==='guidance')&&!isAckedByMe(c)&&inAudience(c));
             const unackedCount=unackedComms.length;
             // Source breakdown for Active-Requests expand — must include every
@@ -1844,7 +1778,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               // My To-Do tiles dropped per audit F6 + F10 — features
               // deleted from the product.
               {icon:'bi-inbox-fill',label:'Open Tasks',value:activeRequestsCount,color:'var(--g)',sub:isOwnScope?'mine':isTeamScope?`team · avg ${teamAvg.toFixed(1)}`:`avg ${teamAvg.toFixed(1)}`,tr:trend(),expandKey:'active-breakdown'},
-              {icon:'bi-megaphone-fill',label:'Announcements',value:unackedCount,color:unackedCount>0?'#ed8d00':'#616161',alert:unackedCount>0,nav:()=>setView('announcements'),accent:unackedCount>0?'#fff8e6':null,sub:'unacked'},
+              {icon:'bi-megaphone-fill',label:'Announcements',value:unackedCount,color:unackedCount>0?'#ed8d00':'#616161',alert:unackedCount>0,nav:()=>{setView('announcements');try{window.dispatchEvent(new CustomEvent('announcements:setFilter',{detail:{filter:'needs-ack'}}));}catch(_){}}, accent:unackedCount>0?'#fff8e6':null,sub:'unacked'},
             ].map((m,i)=>(
               <DeelCard key={m.label}
                 onClick={m.expandKey?()=>setExpandedSla(expandedSla===m.expandKey?null:m.expandKey):m.nav?m.nav:undefined}
@@ -1969,15 +1903,19 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                       return (liveMembersByEmail && liveMembersByEmail[lc]) || MEMBERS_BY_EMAIL[lc] || null;
                     };
 
-                    // Single source of truth for an agent row — used by both
-                    // the flat (TL) and grouped (RM/admin) renderings.
-                    const agentRow = (m, key, indent) => {
+                    // 24 px base + 32 px per nesting level. Depth 0 = the
+                    // user's direct reports; depth 1 = their direct reports;
+                    // depth N = N levels below the viewer.
+                    const indentFor = (depth) => 24 + depth * 32;
+
+                    // Single source of truth for an agent row.
+                    const agentRow = (m, key, depth) => {
                       const live = liveOf(m.email);
                       return (
                       <tr key={key} style={{borderBottom:'1px solid #f0f0f0',transition:'background .15s'}}
                         onMouseEnter={e=>e.currentTarget.style.background='#fafaf9'}
                         onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                        <td style={{padding:'14px 24px',paddingLeft: indent ? 56 : 24}}>
+                        <td style={{padding:'14px 24px',paddingLeft: indentFor(depth)}}>
                           <div style={{display:'flex',alignItems:'center',gap:10}}>
                             <Avatar name={m.name} size={32}/>
                             <div style={{minWidth:0}}>
@@ -2036,15 +1974,51 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                     };
 
                     // Group header — manager (TL or RM) with aggregate stats
-                    // for their full subtree. capPct + workload band are
-                    // computed off the average per agent to stay comparable
-                    // with the per-agent rows below.
-                    const groupHeader = (g) => {
+                    // for their full subtree. Depth-indented + chevron that
+                    // toggles expansion of sub-groups + direct agents.
+                    // capPct + workload band are computed off the average
+                    // per agent so they stay comparable with the per-agent
+                    // rows below.
+                    const groupHeader = (g, depth, hasChildren, expanded) => {
                       const live = liveOf(g.manager.email);
+                      // Deeper levels get a lighter tint so the L1 RM bar
+                      // stays the visually-dominant divider. L0 = #f3eff8
+                      // (the original purple), L1 = #faf7ff, L2+ = #fdfcff.
+                      const bgByDepth = depth === 0 ? '#f3eff8' : depth === 1 ? '#faf7ff' : '#fdfcff';
+                      const onToggle = hasChildren ? () => toggleManagerExpanded(g.manager.email) : undefined;
                       return (
-                      <tr key={`grp-${g.manager.email}`} style={{background:'#f3eff8',borderTop:'2px solid #e8e8e8'}}>
-                        <td style={{padding:'12px 24px'}}>
-                          <div style={{display:'flex',alignItems:'center',gap:10}}>
+                      <tr key={`grp-${g.manager.email}`}
+                        style={{background:bgByDepth,borderTop:'2px solid #e8e8e8',cursor:hasChildren?'pointer':'default'}}
+                        onClick={hasChildren ? (e) => {
+                          // Don't toggle when the user clicks an interactive
+                          // child (Login as / Countries picker / etc.).
+                          const t = e.target;
+                          if (t && (t.closest('button') || t.closest('input') || t.closest('[role="button"]'))) return;
+                          onToggle?.();
+                        } : undefined}>
+                        <td style={{padding:'12px 24px',paddingLeft: indentFor(depth)}}>
+                          <div style={{display:'flex',alignItems:'center',gap:8}}>
+                            {hasChildren ? (
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); onToggle?.(); }}
+                                aria-label={expanded ? 'Collapse' : 'Expand'}
+                                aria-expanded={expanded}
+                                style={{
+                                  width:22,height:22,borderRadius:6,
+                                  border:'1px solid #e8e8e8',background:'white',
+                                  display:'inline-flex',alignItems:'center',justifyContent:'center',
+                                  cursor:'pointer',color:'#616161',flexShrink:0,
+                                  transition:'background .12s',
+                                }}
+                                onMouseEnter={(e) => { e.currentTarget.style.background = '#f7f5f2'; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.background = 'white'; }}
+                              >
+                                <i className={expanded ? 'bi-chevron-down' : 'bi-chevron-right'} style={{fontSize:10}} />
+                              </button>
+                            ) : (
+                              <span style={{width:22,flexShrink:0}} />
+                            )}
                             <Avatar name={g.manager.name} size={32}/>
                             <div style={{minWidth:0}}>
                               <div style={{fontWeight:700,color:'#1b1b1b',display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
@@ -2053,7 +2027,12 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                                 <LastSeenPill iso={live?.lastSeenAt} loading={!!rosterLoading} />
                                 <OOOBadge events={oooEventsByEmail.get((g.manager.email || '').toLowerCase())} />
                               </div>
-                              <div style={{fontSize:11,color:'#9e9e9e'}}>{g.manager.team} &middot; {g.headcount} {g.headcount === 1 ? 'agent' : 'agents'}</div>
+                              <div style={{fontSize:11,color:'#9e9e9e'}}>
+                                {g.manager.team} &middot; {g.headcount} {g.headcount === 1 ? 'agent' : 'agents'}
+                                {g.subGroups.length > 0 && (
+                                  <> &middot; {g.subGroups.length} {g.subGroups.length === 1 ? 'team lead' : 'team leads'}</>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </td>
@@ -2110,21 +2089,39 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                       </tr>
                     );
 
-                    if (teamSummaryGroups.length === 0) {
-                      return hmMembers.map(m => agentRow(m, m.id, false));
+                    // Recursive group renderer — when expanded, recurses
+                    // into sub-groups (deeper indent) and finally into
+                    // direct agents (deepest indent).
+                    const renderGroup = (g, depth) => {
+                      const expanded = expandedManagers.has(g.manager.email);
+                      const hasChildren = g.subGroups.length > 0 || g.directAgents.length > 0;
+                      return (
+                        <Fragment key={`grp-frag-${g.manager.email}`}>
+                          {groupHeader(g, depth, hasChildren, expanded)}
+                          {expanded && (
+                            <>
+                              {g.subGroups.map(sg => renderGroup(sg, depth + 1))}
+                              {g.directAgents.map(a => agentRow(a, `${g.manager.email}-${a.id}`, depth + 1))}
+                            </>
+                          )}
+                        </Fragment>
+                      );
+                    };
+
+                    const { groups, directAgents } = teamSummaryTree;
+                    // TL with no sub-managers + no direct-agent overrides →
+                    // fall back to the flat agent list (preserves the
+                    // pre-rework behaviour for that one role).
+                    if (groups.length === 0 && directAgents.length === 0) {
+                      return hmMembers.map(m => agentRow(m, m.id, 0));
                     }
                     return (
                       <>
-                        {teamSummaryGroups.map(g => (
-                          <Fragment key={g.manager.email}>
-                            {groupHeader(g)}
-                            {g.agents.map(a => agentRow(a, `${g.manager.email}-${a.id}`, true))}
-                          </Fragment>
-                        ))}
-                        {directAgentRows.length > 0 && (
+                        {groups.map(g => renderGroup(g, 0))}
+                        {directAgents.length > 0 && (
                           <Fragment key="direct-reports">
                             {sectionLabel('Direct reports')}
-                            {directAgentRows.map(a => agentRow(a, `direct-${a.id}`, true))}
+                            {directAgents.map(a => agentRow(a, `direct-${a.id}`, 1))}
                           </Fragment>
                         )}
                       </>
@@ -2234,76 +2231,6 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                       <span style={{fontSize:16,fontWeight:700,color:m.wc,fontVariantNumeric:'tabular-nums'}}>{m.tc}</span><span style={{fontSize:10,fontWeight:700,color:m.wc,padding:'2px 8px',borderRadius:128,background:m.wc+'10'}}>{m.wl}</span>
                     </div>
                   )):<div style={{padding:'20px 0',textAlign:'center',fontSize:13,color:'#9e9e9e'}}>{total===0?'Queue clear — help a teammate!':'Team equally loaded'}</div>}
-                </div>
-              </DeelCard>}
-
-              {/* EXEC: Region cards */}
-              {isExec&&<DeelCard style={{padding:0,overflow:'hidden'}}>
-                <div style={{padding:'18px 22px 14px',borderBottom:'1px solid #e8e8e8',display:'flex',alignItems:'center',gap:10}}>
-                  <div style={{width:32,height:32,borderRadius:10,background:'linear-gradient(135deg,#e8f0fe,#DBEAFE)',display:'flex',alignItems:'center',justifyContent:'center'}}>
-                    <i className="bi-globe2" style={{fontSize:14,color:'#1f74b3'}}></i>
-                  </div>
-                  <span style={{fontSize:16,fontWeight:700,color:'#1b1b1b'}}>Regional Overview</span>
-                </div>
-                <div style={{padding:'14px 18px',display:'flex',flexDirection:'column',gap:10}}>
-                  {rStats.map((r,ri)=>(
-                    <div key={r.r} style={{display:'flex',alignItems:'center',gap:12,padding:'12px 14px',borderRadius:12,border:'1px solid #e8e8e8',background:'var(--surface)',transition:'box-shadow .15s'}}
-                      onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)'} onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}>
-                      <div style={{minWidth:56}}>
-                        <div style={{display:'flex',alignItems:'center',gap:5}}><i className={regionIcons[r.r]||'bi-globe'} style={{fontSize:12,color:r.wc}}></i><span style={{fontSize:15,fontWeight:700,color:'#1b1b1b'}}>{r.r}</span></div>
-                        <div style={{fontSize:10,color:'#9e9e9e',fontWeight:600,marginTop:2}}>{r.n} agents</div>
-                      </div>
-                      <div style={{flex:1,display:'flex',gap:16}}>
-                        <div style={{textAlign:'center'}}><div style={{fontSize:20,fontWeight:700,color:'#1b1b1b',fontVariantNumeric:'tabular-nums'}}>{r.tt}</div><div style={{fontSize:9,color:'#9e9e9e',fontWeight:600}}>Active</div></div>
-                        <div style={{textAlign:'center'}}><div style={{fontSize:20,fontWeight:700,color:r.tb>0?'#d42d35':'#29811e',fontVariantNumeric:'tabular-nums'}}>{r.tb}</div><div style={{fontSize:9,color:'#9e9e9e',fontWeight:600}}>Breach</div></div>
-                        <div style={{textAlign:'center'}}><div style={{fontSize:20,fontWeight:700,color:r.wc,fontVariantNumeric:'tabular-nums'}}>{r.avg.toFixed(1)}</div><div style={{fontSize:9,color:'#9e9e9e',fontWeight:600}}>Avg</div></div>
-                      </div>
-                      <div style={{textAlign:'right'}}>
-                        <span style={{padding:'4px 12px',borderRadius:128,fontSize:11,fontWeight:700,background:r.wc+'10',color:r.wc,border:`1px solid ${r.wc}15`}}>{r.wl}</span>
-                        {r.ld&&<div style={{fontSize:10,color:'#616161',marginTop:4}}><i className="bi-person-fill" style={{fontSize:9}}></i> {r.ld.name.split(' ')[0]}</div>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </DeelCard>}
-
-              {/* Team Leads */}
-              {isManager&&<DeelCard style={{padding:0,overflow:'hidden'}}>
-                <div style={{padding:'18px 22px 14px',borderBottom:'1px solid #e8e8e8',display:'flex',alignItems:'center',gap:10}}>
-                  <div style={{width:32,height:32,borderRadius:10,background:'linear-gradient(135deg,#FEF3C7,#fff8e6)',display:'flex',alignItems:'center',justifyContent:'center'}}>
-                    <i className="bi-person-badge-fill" style={{fontSize:13,color:'#ed8d00'}}></i>
-                  </div>
-                  <span style={{fontSize:16,fontWeight:700,color:'#1b1b1b'}}>Team Leads</span>
-                </div>
-                {/* Deel-style table header */}
-                <div style={{display:'grid',gridTemplateColumns:'minmax(0,1fr) 60px 80px',gap:0,padding:'8px 22px',background:'#fafaf9',borderBottom:'1px solid #e8e8e8'}}>
-                  <span style={{fontSize:13,fontWeight:500,color:'#9e9e9e',textTransform:'none',letterSpacing:'normal'}}>Lead</span>
-                  <span style={{fontSize:13,fontWeight:500,color:'#9e9e9e',textTransform:'none',letterSpacing:'normal',textAlign:'center'}}>Tasks</span>
-                  <span style={{fontSize:13,fontWeight:500,color:'#9e9e9e',textTransform:'none',letterSpacing:'normal',textAlign:'center'}}>SLA</span>
-                </div>
-                <div style={{padding:'4px 22px 14px'}}>
-                  {leads.map(ld=>(
-                    <div key={ld.id} style={{display:'grid',gridTemplateColumns:'minmax(0,1fr) 60px 80px',gap:0,alignItems:'center',padding:'10px 0',borderBottom:'1px solid #f5f5f5'}}>
-                      <div style={{display:'flex',alignItems:'center',gap:10,minWidth:0}}>
-                        <Avatar name={ld.name} size={30}/>
-                        <div style={{minWidth:0,flex:1}}>
-                          <div style={{fontSize:13,fontWeight:600,color:'#1b1b1b',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{ld.name}</div>
-                          <div style={{fontSize:11,color:'#9e9e9e',display:'flex',gap:8,flexWrap:'wrap'}}>
-                            <span style={{padding:'1px 6px',borderRadius:128,background:'#fafaf9',border:'1px solid #e8e8e8',fontWeight:600,fontSize:9}}>{ld.team}</span>
-                            <span>{ld.ag.length} agents</span>
-                            <span>avg {ld.avg.toFixed(1)}</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div style={{textAlign:'center'}}>
-                        <span style={{fontSize:18,fontWeight:700,color:ld.wc,fontVariantNumeric:'tabular-nums'}}>{ld.tt}</span>
-                      </div>
-                      <div style={{textAlign:'center'}}>
-                        {ld.tb>0?<span style={{fontSize:10,fontWeight:700,color:'#d42d35',background:'#d42d3510',padding:'3px 10px',borderRadius:128}}>{ld.tb} breach</span>
-                        :<span style={{fontSize:10,fontWeight:700,color:'#29811e',background:'#29811e10',padding:'3px 10px',borderRadius:128}}>Clear</span>}
-                      </div>
-                    </div>
-                  ))}
                 </div>
               </DeelCard>}
 
