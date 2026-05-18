@@ -101,9 +101,27 @@ export async function GET(req) {
   // 'team' and 'all' use the visible-scope clip below; no extra predicate.
 
   // Visible-scope clip — admins skip the filter; everyone else is bounded
-  // by their reporting tree. Skipped for 'mine'/'drafts' since the
-  // caller-email predicate already narrows further.
-  if (!isAdminUser(user) && lens !== LENS_IDS.MINE && lens !== LENS_IDS.DRAFTS) {
+  // by their reporting tree. Skipped for lenses whose own predicate already
+  // authorises the caller on each row:
+  //   • 'mine' / 'drafts'      — filter by caller-email directly
+  //   • 'covering' / 'approvals' — EXISTS predicate already requires the
+  //     caller to be the explicit coverer / approver. Coverage invitations
+  //     and approval requests routinely cross reporting-tree boundaries
+  //     (peer TL covering for a peer, RM approving for a team that isn't
+  //     in their org sub-tree, etc.), so layering the visible-scope clip on
+  //     top stranded those rows — Megan reported 2026-05-15 that her
+  //     "1 coverage invitation needs your response" banner showed but the
+  //     list rendered empty because the requester sat outside her tree.
+  //     `getVisibleOOOEmails` is the right read scope for "browse other
+  //     people's OOO" (Team/All), but it's the wrong scope when the row's
+  //     own authorisation says you belong on it.
+  if (
+    !isAdminUser(user) &&
+    lens !== LENS_IDS.MINE &&
+    lens !== LENS_IDS.DRAFTS &&
+    lens !== LENS_IDS.COVERING &&
+    lens !== LENS_IDS.APPROVALS
+  ) {
     const visible = Array.from(getVisibleOOOEmails(user));
     if (visible.length === 0) {
       where.push('FALSE');

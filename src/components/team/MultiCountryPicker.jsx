@@ -76,20 +76,62 @@ export default function MultiCountryPicker({
   const [query, setQuery] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
-  const ref = useRef(null);
+  // Popover position — computed from the trigger's bounding rect every time
+  // open flips true, and on scroll / resize while open. Stored as either
+  // {top, left} (align='left') or {top, right} (align='right'). Null while
+  // closed, drives the position:fixed dropdown render below.
+  const [pos, setPos] = useState(null);
+  const ref = useRef(null);      // trigger wrapper
+  const popRef = useRef(null);   // popover (when open)
   const inputRef = useRef(null);
 
   // Keep the draft in sync if the parent re-pushes a new selection (e.g.
   // after a successful save the optimistic update flows back through).
   useEffect(() => { setDraft(normaliseList(selected)); }, [selected]);
 
+  // Anchor the popover to the trigger via position:fixed. Same pattern
+  // BriefingView already uses for its MOC / TLOC pickers so the dropdown
+  // escapes ancestor `overflow:hidden` (Home tab's Team Leaders <table>,
+  // Leaders Hub's two-layer overflow:hidden wrapper) and z-orders cleanly
+  // above subsequent table rows. Before this, the position:absolute
+  // dropdown was clipped + visually overlapped by the next row, and
+  // mousedowns aimed at the visible part of the popover frequently landed
+  // on the overlapping <tr> — outside ref.current — so the outside-click
+  // handler fired and the dropdown closed (Madeleine + Mohamed reported
+  // 2026-05-15 the picker "automatically closes" on Home + Leaders Hub).
+  useEffect(() => {
+    if (!open) { setPos(null); return; }
+    const update = () => {
+      const r = ref.current?.getBoundingClientRect();
+      if (!r) return;
+      const next = { top: Math.round(r.bottom + 6) };
+      if (align === 'right') {
+        next.right = Math.max(8, Math.round(window.innerWidth - r.right));
+      } else {
+        next.left = Math.round(r.left);
+      }
+      setPos(next);
+    };
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [open, align]);
+
   // Outside-click closes the popover (without saving — Save / Clear are
   // explicit). Mousedown so we close before the next click hits another
-  // chip / button.
+  // chip / button. With the popover rendered at position:fixed it lives
+  // outside ref.current in the visual stacking order, so the check has to
+  // exempt the popover ref as well.
   useEffect(() => {
     if (!open) return;
     const onDocClick = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+      if (ref.current?.contains(e.target)) return;
+      if (popRef.current?.contains(e.target)) return;
+      setOpen(false);
     };
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
@@ -219,20 +261,21 @@ export default function MultiCountryPicker({
         {canEdit && <i className={open ? 'bi-chevron-up' : 'bi-chevron-down'} style={{ fontSize: 9, opacity: 0.6 }} />}
       </button>
 
-      {open && (
+      {open && pos && (
         <div
+          ref={popRef}
           role="dialog"
           aria-label="Country ownership picker"
           style={{
-            position: 'absolute',
-            top: 'calc(100% + 6px)',
-            [align === 'right' ? 'right' : 'left']: 0,
+            position: 'fixed',
+            top: pos.top,
+            ...(pos.right != null ? { right: pos.right } : { left: pos.left }),
             width: 320,
             background: 'var(--surface)',
             border: '1px solid #e8e8e8',
             borderRadius: 12,
             boxShadow: '0 8px 24px rgba(0,0,0,0.14)',
-            zIndex: 200,
+            zIndex: 1400,
             display: 'flex',
             flexDirection: 'column',
             maxHeight: 420,

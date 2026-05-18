@@ -1843,7 +1843,8 @@ export async function runMigrations() {
   try {
     const seedResult = await seedLeaderAlertsSettingsIfNeeded();
     if (!seedResult?.skipped) {
-      console.log(`[db] Leaders Alerts settings seeded to v${seedResult.version}: ${seedResult.inserted} rows`);
+      const painNote = seedResult.painPointIconUpdated ? ', pain_point icon migrated' : '';
+      console.log(`[db] Leaders Alerts settings seeded to v${seedResult.version}: ${seedResult.inserted} rows${painNote}`);
     }
   } catch (err) {
     console.warn('[db] Leaders Alerts settings seed failed:', err?.message);

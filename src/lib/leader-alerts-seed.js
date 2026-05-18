@@ -16,7 +16,7 @@
 
 import { query } from './db';
 
-export const LEADER_ALERTS_SEED_VERSION = 1;
+export const LEADER_ALERTS_SEED_VERSION = 2;
 
 // Status lifecycle is uniform — see LEADER_ALERTS_PLAN.md decision log.
 // Adding a status here also requires a matching update to the CHECK
@@ -33,7 +33,7 @@ const DEFAULT_STATUSES = [
 // can edit them in the Settings panel.
 const DEFAULT_CATEGORIES = [
   { id: 'operational_risk', label: 'Operational Risk', color: '#d97706', icon: 'bi-exclamation-triangle-fill' },
-  { id: 'pain_point',       label: 'Pain Point',       color: '#dc2626', icon: 'bi-heart-fill' },
+  { id: 'pain_point',       label: 'Pain Point',       color: '#dc2626', icon: 'bi-bandaid-fill' },
   { id: 'team_update',      label: 'Team Update',      color: '#15803d', icon: 'bi-people-fill' },
   { id: 'others',           label: 'Others',           color: '#6b7280', icon: 'bi-three-dots' },
   { id: 'country_update',   label: 'Country Update',   color: '#0369a1', icon: 'bi-globe2' },
@@ -108,8 +108,38 @@ export async function seedLeaderAlertsSettingsIfNeeded() {
     if (result.rowCount > 0) inserted++;
   }
 
+  // v1 → v2: the original Pain Point seed shipped `bi-heart-fill`, which
+  // reads as "love" rather than pain. Replace it with `bi-bandaid-fill`
+  // on existing rows, but ONLY where the v1 default is still in place —
+  // any admin edit (different icon, renamed label, recoloured) is left
+  // untouched. Other categories are not touched.
+  let painPointIconUpdated = 0;
+  if (installedVersion < 2) {
+    const { rows: catRows } = await query(
+      `SELECT value_json FROM leader_alert_settings WHERE key = 'categories'`,
+    );
+    const cats = catRows[0]?.value_json;
+    if (Array.isArray(cats)) {
+      let changed = false;
+      const next = cats.map((c) => {
+        if (c && c.id === 'pain_point' && c.icon === 'bi-heart-fill') {
+          changed = true;
+          return { ...c, icon: 'bi-bandaid-fill' };
+        }
+        return c;
+      });
+      if (changed) {
+        await query(
+          `UPDATE leader_alert_settings SET value_json = $1::jsonb WHERE key = 'categories'`,
+          [JSON.stringify(next)],
+        );
+        painPointIconUpdated = 1;
+      }
+    }
+  }
+
   await setSeedVersion(LEADER_ALERTS_SEED_VERSION);
-  return { skipped: false, version: LEADER_ALERTS_SEED_VERSION, inserted };
+  return { skipped: false, version: LEADER_ALERTS_SEED_VERSION, inserted, painPointIconUpdated };
 }
 
 // Re-exported so other modules (composer defaults, settings panel reset)

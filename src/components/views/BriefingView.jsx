@@ -414,6 +414,19 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const scope=tasks.filter(t=>inScope(t)&&t.status!=='resolved');
   const personal=tasks.filter(t=>(t.assigneeId===user.id||(t.assigneeEmail&&t.assigneeEmail.toLowerCase()===user.email?.toLowerCase()))&&t.status!=='resolved');
 
+  // DailySummary expects the full ticket set (open + resolved) inside the
+  // viewer's scope so its internal filters can derive today's resolved,
+  // all-time resolved, and Completion% off one source. Pre-stripping
+  // resolved (via the `scope` / `personal` filters above) forced
+  // DailySummary's "Resolved" tile to 0 and Completion% to 0 even when the
+  // same FE state held a real resolved count — Ljubica reported this
+  // 2026-05-15 ("Daily overview at the top does not match the other one"):
+  // the top KPI strip read "88 Resolved" while DailySummary read "0".
+  // These two membership rules mirror `scope` / `personal` exactly — only
+  // the status filter is dropped.
+  const scopeWithResolved=tasks.filter(t=>inScope(t));
+  const personalWithResolved=tasks.filter(t=>(t.assigneeId===user.id||(t.assigneeEmail&&t.assigneeEmail.toLowerCase()===user.email?.toLowerCase())));
+
   // ── Resolved cross-source, scoped per role (no time cap) ───────────────
   // 2026-05-07 Mohamed: the previous "Resolved (24h)" tile artificially
   // capped the count at 24 h, so an admin saw "50" while DailySummary
@@ -2176,8 +2189,11 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               />
 
               {/* ── DailySummary — role-adaptive ─────────────────────────────── */}
-              {isOwnScope && <DailySummary tasks={personal} escalations={escalations} scope="personal" />}
-              {isTeamScope && <DailySummary tasks={scope} escalations={escalations} scope="team" />}
+              {/* `*WithResolved` keep resolved tickets in scope so the
+                  Resolved tile + Completion% reflect the same FE state the
+                  top KPI strip reads — see the scope/personal defs above. */}
+              {isOwnScope && <DailySummary tasks={personalWithResolved} escalations={escalations} scope="personal" />}
+              {isTeamScope && <DailySummary tasks={scopeWithResolved} escalations={escalations} scope="team" />}
               {isExec && <DailySummary tasks={allOrgTasks} escalations={escalations} scope="org" />}
 
               {/* ── ApproachingBreach — all roles ────────────────────────────── */}
