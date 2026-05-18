@@ -101,6 +101,10 @@ const LeaderAlertsView = ({ user, perms, refreshNonce = 0 }) => {
   const [statusFilter, setStatusF]  = useState(null);     // null = all
   const [severityFilter, setSevF]   = useState(null);
   const [categoryFilter, setCatF]   = useState(null);
+  // Unacked-only is a client-side filter on the loaded list (each row
+  // already carries `i_acked`). Toggled by the briefing tile so the
+  // user lands on the same set the unacked-count badge advertised.
+  const [unackedOnly, setUnackedOnly] = useState(false);
   const [search, setSearch]         = useState('');
   const [sort, setSort]             = useState('newest'); // newest | oldest | most_acks
   const [alerts, setAlerts]         = useState([]);
@@ -125,6 +129,22 @@ const LeaderAlertsView = ({ user, perms, refreshNonce = 0 }) => {
     };
     window.addEventListener('leader-alerts:openDetail', handler);
     return () => window.removeEventListener('leader-alerts:openDetail', handler);
+  }, []);
+
+  // Briefing DecisionsStrip "Unacked Leader Alerts" tile dispatches
+  // `leader-alerts:setFilters` so the user lands on the unacked-only
+  // view that matches the tile count. detail keys default to "leave
+  // unchanged" when undefined.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = (e) => {
+      const d = e?.detail || {};
+      if (typeof d.unackedOnly === 'boolean') setUnackedOnly(d.unackedOnly);
+      if (typeof d.scope === 'string') setScope(d.scope);
+      if ('status' in d) setStatusF(d.status);
+    };
+    window.addEventListener('leader-alerts:setFilters', handler);
+    return () => window.removeEventListener('leader-alerts:setFilters', handler);
   }, []);
 
   // Settings — categories + statuses reference list. Re-fetches on
@@ -240,14 +260,14 @@ const LeaderAlertsView = ({ user, perms, refreshNonce = 0 }) => {
     return () => ac.abort();
   }, [refreshTick, refreshNonce]);
 
-  // Local sort — backend always returns newest-first; we resort client-side
-  // for the secondary sort options.
+  // Local sort + optional unacked-only filter (server doesn't accept an
+  // ack filter param — each row already carries `i_acked`).
   const sortedAlerts = useMemo(() => {
-    const arr = [...alerts];
+    const arr = unackedOnly ? alerts.filter(a => !a.i_acked) : [...alerts];
     if (sort === 'oldest') arr.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
     else if (sort === 'most_acks') arr.sort((a, b) => (b.ack_count || 0) - (a.ack_count || 0));
     return arr;
-  }, [alerts, sort]);
+  }, [alerts, sort, unackedOnly]);
 
   // Categories list for the chip rail in the filter bar.
   const categories = Array.isArray(settings?.categories) ? settings.categories : [];
@@ -524,16 +544,17 @@ const LeaderAlertsView = ({ user, perms, refreshNonce = 0 }) => {
         </div>
 
         {/* Active-filter strip with clear-all */}
-        {(statusFilter || severityFilter || categoryFilter || search) && (
+        {(statusFilter || severityFilter || categoryFilter || search || unackedOnly) && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <span style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>Filtered by</span>
+            {unackedOnly && <ChipPill label="Unacked only" onClear={() => setUnackedOnly(false)} accent="#7c3aed" />}
             {statusFilter && <ChipPill label={STATUS_META[statusFilter].label} onClear={() => setStatusF(null)} accent={STATUS_META[statusFilter].color} />}
             {severityFilter && <ChipPill label={SEVERITY_META[severityFilter].label} onClear={() => setSevF(null)} accent={SEVERITY_META[severityFilter].color} />}
             {categoryFilter && <ChipPill label={categoryFilter} onClear={() => setCatF(null)} />}
             {search && <ChipPill label={`"${search}"`} onClear={() => setSearch('')} />}
             <button
               type="button"
-              onClick={() => { setStatusF(null); setSevF(null); setCatF(null); setSearch(''); }}
+              onClick={() => { setStatusF(null); setSevF(null); setCatF(null); setSearch(''); setUnackedOnly(false); }}
               style={{
                 fontSize: 11, padding: '2px 8px', borderRadius: 128,
                 border: 'none', background: 'transparent',
