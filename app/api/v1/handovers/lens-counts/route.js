@@ -3,11 +3,13 @@
 // the chip badges and the auto-lens selector (HANDOVERS_PLAN.md §3.1).
 //
 // Phase 1 sketch: the handovers table is empty until Phase 2 ships the
-// write path, so approvals / drafts / covering counts are 0 by design.
-// 'mine' counts the caller's upcoming events (any handover status), and
-// 'team' counts every visible-scope upcoming event so the chip is useful
-// from day 1. The shape is forward-compatible — once Phase 2 lands the
-// counts naturally reflect real handover state without an API change.
+// write path, so drafts / covering counts are 0 by design. 'mine' counts
+// the caller's upcoming events (any handover status), and 'team' counts
+// every visible-scope upcoming event so the chip is useful from day 1.
+//
+// The `approvals` count was removed 2026-05-18 — TL approval is no
+// longer part of the state machine (HANDOVER_TEMPLATE_REVAMP_PLAN.md
+// §4.2). The shape stays forward-compatible.
 
 import { NextResponse } from 'next/server';
 import { query } from '../../../../../src/lib/db';
@@ -71,14 +73,6 @@ export async function GET(req) {
       [callerEmail],
     );
 
-    const approvalsQ = await query(
-      `SELECT COUNT(*)::int AS c
-         FROM handovers
-        WHERE status = 'pending_manager_approval'
-          AND LOWER(manager_email) = $1`,
-      [callerEmail],
-    );
-
     const draftsQ = await query(
       `SELECT COUNT(*)::int AS c
          FROM handovers
@@ -130,7 +124,6 @@ export async function GET(req) {
         covering:  coveringQ.rows[0]?.total || 0,
         covering_pending: coveringQ.rows[0]?.pending || 0,
         team:      teamCount,
-        approvals: approvalsQ.rows[0]?.c || 0,
         drafts:    draftsQ.rows[0]?.c || 0,
         all:       allCount,
       },

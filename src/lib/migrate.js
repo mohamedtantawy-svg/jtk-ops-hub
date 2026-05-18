@@ -5,6 +5,7 @@ import { seedLeaderAlertsSettingsIfNeeded } from './leader-alerts-seed';
 import { seedTimeOffEventsIfNeeded } from './time-off-seed';
 import { seedHandoverDefaultsIfNeeded } from './handover-defaults-seed';
 import { seedWorkspaceMembersIfNeeded } from './workspace-members-seed';
+import { seedCountryHandoverDocsIfNeeded } from './country-handover-docs-seed';
 
 const SCHEMA_SQL = `
 -- Members
@@ -846,6 +847,89 @@ CREATE TABLE IF NOT EXISTS team_member_countries (
 );
 CREATE INDEX IF NOT EXISTS idx_tmc_country ON team_member_countries(country_code);
 CREATE INDEX IF NOT EXISTS idx_tmc_email   ON team_member_countries(email);
+
+-- ── Country Handover Doc (2026-05-18) ──────────────────────────────────────
+-- Long-lived per-country knowledge doc that the HRX team currently maintains
+-- in Google Docs. One row per ISO-2 country. Owned by whoever has the
+-- country in team_member_countries; coverers / org members read the
+-- published version. Replaces the per-vacation copy-paste pattern in the
+-- legacy template. See HANDOVER_TEMPLATE_REVAMP_PLAN.md §3 for the field
+-- rationale (why JSONB for repeating sections, why per-column scalars
+-- elsewhere).
+CREATE TABLE IF NOT EXISTS country_handover_docs (
+  id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  country_code                CHAR(2) NOT NULL UNIQUE,
+  -- §1 Overview of HR Operations
+  scope_responsibilities      TEXT,
+  prepared_by_email           VARCHAR(255),
+  signatory                   TEXT,
+  official_languages          TEXT[],
+  wet_ink_required            BOOLEAN,
+  payroll_cycle               VARCHAR(20),
+  payroll_cutoff_date         TEXT,
+  stakeholders                JSONB NOT NULL DEFAULT '[]'::jsonb,
+  -- §2 Payroll & Key Stakeholders
+  slack_channel_name          TEXT,
+  country_validation_url      TEXT,
+  onboarding_buffer           TEXT,
+  -- §3 Onboarding process
+  pre_onboarding_steps        JSONB NOT NULL DEFAULT '[]'::jsonb,
+  manual_start_date_push      TEXT,
+  onboarding_team_handles     BOOLEAN,
+  onboarding_guide_url        TEXT,
+  country_specific_onboarding TEXT,
+  -- §4 Post-Onboarding
+  post_onboarding_steps       TEXT,
+  -- §5 Amendments review process
+  legal_amendment_handover_url TEXT,
+  amendments_country_notes     TEXT,
+  -- §6 Offboarding
+  termination_process         TEXT,
+  termination_handover_url    TEXT,
+  resignation_process         TEXT,
+  -- §7 Benefits management — repeating
+  benefits                    JSONB NOT NULL DEFAULT '[]'::jsonb,
+  -- §8 Employment verification
+  evl_template_url            TEXT,
+  evl_process_description     TEXT,
+  evl_sop_urls                TEXT[],
+  -- §9 Country-specific processes
+  visas_supported             BOOLEAN,
+  pto_sop_urls                TEXT[],
+  pto_key_aspects             TEXT,
+  pto_carry_over_rules        TEXT,
+  other_country_processes     TEXT,
+  -- §10 FAQ — repeating
+  faqs                        JSONB NOT NULL DEFAULT '[]'::jsonb,
+  -- Misc
+  docs_folder_url             TEXT,
+  -- Metadata
+  status                      VARCHAR(20) NOT NULL DEFAULT 'draft'
+                                CHECK (status IN ('draft','published','archived')),
+  updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by_email            VARCHAR(255),
+  created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_country_handover_docs_status
+  ON country_handover_docs(status, updated_at DESC);
+
+-- Audit log for country_handover_docs edits. One row per PATCH that
+-- changes >=1 field. The diff JSONB has shape
+--   { field_key: { from: <old>, to: <new> } }
+-- limited to changed fields so the surface can render "Edited by - 4
+-- fields changed" without recomputing diffs at read time. Same shape as
+-- leader_alert_settings_history.
+CREATE TABLE IF NOT EXISTS country_handover_doc_history (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  doc_id          UUID NOT NULL REFERENCES country_handover_docs(id) ON DELETE CASCADE,
+  country_code    CHAR(2) NOT NULL,
+  edited_by_email VARCHAR(255) NOT NULL,
+  edited_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  diff            JSONB NOT NULL,
+  comment         TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_chd_history_doc
+  ON country_handover_doc_history(doc_id, edited_at DESC);
 
 -- ── HR Hub: unified intake for HR Request / HR Reporting / Escalation Zero
 --    / Ops Hub Feedback (2026-05-02). See HR_HUB_PLAN.md for the full spec
@@ -1888,5 +1972,56 @@ export async function runMigrations() {
     }
   } catch (err) {
     console.warn('[db] Workspace members seed failed:', err?.message);
+  }
+
+  // Country Handover Docs (Phase A 2026-05-18): pre-create a draft row per
+  // ISO-2 country we already know about so the editor (Phase B) always
+  // edits an existing row. Idempotent + version-marked — manual edits via
+  // the Phase B editor are preserved across boots.
+  try {
+    const seedResult = await seedCountryHandoverDocsIfNeeded();
+    if (seedResult?.reseeded) {
+      console.log(`[db] Country handover docs seeded to v${seedResult.version}: ${seedResult.inserted}/${seedResult.candidates} draft rows`);
+    }
+  } catch (err) {
+    console.warn('[db] Country handover docs seed failed:', err?.message);
+  }
+
+  // Phase A 2026-05-18: TL approval is removed from the handover state
+  // machine. Any in-flight row sitting in pending_manager_approval gets
+  // auto-transitioned at boot:
+  //   • → 'accepted'                          when ≥1 coverer has accepted
+  //   • → 'pending_coverage_acceptance'       otherwise
+  // 'accepted' isn't a status today (we use 'approved' as the post-coverage
+  // ready state), but the revamp plan adopts 'accepted' as the new label
+  // for that bucket — we map to 'approved' on the way through so the rest
+  // of the pipeline (cron + UI) keeps working unchanged. The backfill is
+  // idempotent: once no row is in pending_manager_approval, subsequent
+  // boots do nothing.
+  try {
+    const backfillRes = await query(
+      `WITH coverer_state AS (
+         SELECT h.id,
+                BOOL_OR(hc.acceptance_status = 'accepted') AS any_accepted
+           FROM handovers h
+      LEFT JOIN handover_coverers hc ON hc.handover_id = h.id
+          WHERE h.status = 'pending_manager_approval'
+          GROUP BY h.id
+       )
+       UPDATE handovers h
+          SET status = CASE
+                         WHEN cs.any_accepted IS TRUE THEN 'approved'
+                         ELSE 'pending_coverage_acceptance'
+                       END,
+              updated_at = NOW()
+         FROM coverer_state cs
+        WHERE cs.id = h.id
+        RETURNING h.id, h.status`,
+    );
+    if (backfillRes.rowCount > 0) {
+      console.log(`[db] TL-approval teardown: ${backfillRes.rowCount} pending_manager_approval row(s) re-bucketed`);
+    }
+  } catch (err) {
+    console.warn('[db] TL-approval backfill failed:', err?.message);
   }
 }
