@@ -18,29 +18,81 @@
 
 import { query } from './db';
 
-export const HANDOVER_DEFAULTS_VERSION = 1;
+// Bumped to 2 on 2026-05-18 (Phase C of HANDOVER_TEMPLATE_REVAMP_PLAN.md):
+// the v1 items list was a generic 12-item checklist; the team uses a
+// 16-item HRX SOP. The migration paths are handled in `migrate.js` after
+// this seed runs — submitted handovers keep their v1 snapshot; unsubmitted
+// drafts get their `handover_checklist_items` refreshed in-place.
+export const HANDOVER_DEFAULTS_VERSION = 2;
 const VERSION_KEY = 'handover_defaults_seed_version';
 
-const DEFAULT_TEMPLATE_NAME = 'Standard HRX handover checklist';
+const DEFAULT_TEMPLATE_NAME = 'HRX OOO handover SOP';
 const DEFAULT_SETTINGS_NAME = 'Global default';
 
-// Items reflect what an HRX operator actually needs to hand over before
-// going OOO. Order matters — these render top-to-bottom in the wizard.
-// Required items block submit if unchecked; optional items don't.
+// HRX SOP — translated verbatim from the team's "OOO handover SOP" doc
+// into actionable pre-vacation steps (HANDOVER_TEMPLATE_REVAMP_PLAN.md
+// §4.1). 16 required items + 2 optional override items. Ordering matches
+// the SOP doc sections so a team member can scan top-to-bottom and recognise
+// the items in the order they'd otherwise do them.
 const DEFAULT_CHECKLIST_ITEMS = [
-  { id: 'active_tickets',     label: 'Active tickets shared with coverer + status briefing',     required: true,  hint: 'Workspace + Queue rows; flag anything in-flight with the customer' },
-  { id: 'onboardings',        label: 'Open onboarding / paused onboarding cases listed',         required: true,  hint: 'Including any that are blocked on Deel / EOR' },
-  { id: 'offboardings',       label: 'Open offboarding cases handed over',                       required: true,  hint: 'Especially those with payroll cut-off implications' },
-  { id: 'amendments',         label: 'In-flight amendments + redlines briefed',                  required: true,  hint: 'Country-owner queue items the coverer should see' },
-  { id: 'urgent_assist',      label: 'Urgent Assist threads acknowledged + handed over',         required: true,  hint: 'Both yours and any you were second on' },
-  { id: 'escalations',        label: 'Open escalations / Leaders Hub items shared',              required: false, hint: 'For managers — surface any unresolved manager-level threads' },
-  { id: 'slack_threads',      label: 'Critical Slack threads flagged to coverer',                required: true,  hint: 'Account-level chats, customer DMs, channel pings' },
-  { id: 'pending_approvals',  label: 'Pending approvals / countersigns listed',                  required: true,  hint: 'Hide-task, amendments, EOR documents — anything awaiting your sign-off' },
-  { id: 'hr_hub_followups',   label: 'HR Hub requests you authored or assignee on',              required: false, hint: 'So the coverer knows what to expect responses on' },
-  { id: 'inbox_zero_email',   label: 'Email inbox triaged + auto-responder set',                 required: true,  hint: 'Auto-respond to externals, internals get a forward to the coverer' },
-  { id: 'meetings_calendar',  label: 'Calendar reviewed — meetings declined or coverer added',   required: true,  hint: 'Coverer attends in your place where ownership matters' },
-  { id: 'eor_compliance',     label: 'EOR / compliance deadlines noted',                         required: false, hint: 'Country-specific cut-offs falling in the OOO window' },
+  // a) Backup Awareness
+  { id: 'backup_identified',       label: 'Backup team member identified',                                            required: true,  hint: 'Communicate the specific countries you are handing over' },
+  { id: 'country_faq_shared',      label: 'Country FAQ doc(s) shared with backup',                                    required: true,  hint: 'See your Country Handover Doc — section 10' },
+  { id: 'critical_tasks_flagged',  label: 'Critical tasks / deadlines flagged to backup',                             required: true,  hint: 'Urgent terminations, project deadlines, outstanding client comms' },
+  // b) Google Calendar
+  { id: 'google_calendar_ooo',     label: 'Marked OOO in Google Calendar',                                            required: true },
+  // c) Workbench
+  { id: 'workbench_offline',       label: 'Workbench status set to Offline',                                          required: true,  hint: 'Profile → Status (top right) → Offline' },
+  // d) Zendesk
+  { id: 'zendesk_ooo',             label: 'Zendesk profile toggled to Out of Office',                                 required: true,  hint: 'Profile icon → View profile → Toggle OOO' },
+  // e) Jira & Slack visibility
+  { id: 'jira_ooo',                label: 'Jira OOO set via Out-of-Office Assistant',                                 required: true },
+  { id: 'hrx_workflow_submitted',  label: 'HRX / GIX handover request submitted in the Slack workflow',               required: true,  hint: 'Submit at least 1 hour before your follower logs off' },
+  { id: 'slack_status',            label: 'Slack status updated with backup details',                                 required: true },
+  { id: 'calendar_meetings',       label: 'Calendar meetings rescheduled or coverer added',                           required: true,  hint: 'Including Cal.com bookings' },
+  { id: 'country_channels_backup', label: 'Backup added to country Slack channels',                                   required: true },
+  { id: 'email_autoresponder',     label: 'Email autoresponder set with backup contact',                              required: true },
+  // 3. Task Management
+  { id: 'tickets_reassigned',      label: 'Open / on-hold / pending Zendesk + Workbench tickets reassigned to backup',required: true },
+  { id: 'jira_reassigned',         label: 'Open / on-hold / pending Jira tickets reassigned (incl. HRX responsible)', required: true,  hint: 'Offboarding tickets: update the HRX responsible field on the right' },
+  { id: 'tickets_notes_added',     label: 'Internal notes / context added to handed-over tickets',                    required: true },
+  // 4. Country team notification
+  { id: 'country_team_notified',   label: 'Country Slack channel(s) notified of vacation + backup',                   required: true },
+  // Optional overrides — kept for non-HRX teams that still use this surface
+  { id: 'escalations_shared',      label: 'Open escalations / Leaders Hub items shared',                              required: false, hint: 'For managers — surface any unresolved manager-level threads' },
+  { id: 'hr_hub_followups',        label: 'HR Hub requests you authored or are assignee on',                          required: false, hint: 'So the coverer knows what to expect responses on' },
 ];
+
+// Items present in v1 but dropped in v2. The migration in `migrate.js`
+// keeps these on existing draft `handover_checklist_items` rows with a
+// retired-marker note so the wizard renders them visually distinct
+// instead of silently dropping the user's progress. New drafts won't see
+// these (they're not in DEFAULT_CHECKLIST_ITEMS above).
+export const RETIRED_V1_ITEM_IDS = Object.freeze([
+  'active_tickets',
+  'onboardings',
+  'offboardings',
+  'amendments',
+  'urgent_assist',
+  'escalations',          // renamed → escalations_shared (optional)
+  'slack_threads',
+  'pending_approvals',
+  'inbox_zero_email',
+  'meetings_calendar',
+  'eor_compliance',
+]);
+
+// Item-id remaps for the migration: a key that maps to a value means
+// "preserve the completed state from the legacy item under the new id".
+// Anything not in this map and not in DEFAULT_CHECKLIST_ITEMS is treated
+// as retired and gets the marker note instead.
+export const V1_TO_V2_ITEM_REMAP = Object.freeze({
+  // No 1:1 semantic renames in v2 — most v1 items are now subsumed by
+  // tickets_reassigned + jira_reassigned + slack_status. Only the
+  // `hr_hub_followups` id survives as-is (still optional in v2).
+});
+
+export const DEFAULT_CHECKLIST_ITEMS_V2 = DEFAULT_CHECKLIST_ITEMS;
 
 async function getStoredVersion() {
   try {
@@ -102,6 +154,19 @@ export async function seedHandoverDefaultsIfNeeded() {
         ],
       );
       templateId = ins.rows[0]?.id;
+    } else if (HANDOVER_DEFAULTS_VERSION > currentVersion) {
+      // Phase C 2026-05-18: refresh the existing default template's items
+      // to the v2 SOP list. We DON'T touch the template's name/description
+      // here because admins may have personalised either via Settings.
+      // Re-seeding is gated on the version bump, so a manual `items` edit
+      // outside the version-bump window is preserved across boots.
+      await query(
+        `UPDATE handover_checklist_templates
+            SET items = $1::jsonb,
+                updated_at = NOW()
+          WHERE id = $2`,
+        [JSON.stringify(DEFAULT_CHECKLIST_ITEMS), templateId],
+      );
     }
 
     // Default settings preset — single global row pinned to the
