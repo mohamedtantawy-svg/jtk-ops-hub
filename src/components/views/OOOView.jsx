@@ -318,6 +318,34 @@ function OOOView({ user, setView, addToast }) {
     return set;
   }, [user?.email, lens, members]);
 
+  // When the handover wizard is open, fill the OOO tab with it as a
+  // full-page surface (no modal popup). This addresses two issues
+  // 2026-05-18: the team-member picker was capped + the modal got
+  // cropped under the impersonation banner. As a page, the wizard
+  // gets the entire OOO tab's viewport.
+  if (wizardEventId !== null) {
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
+        <CreateHandoverModal
+          pageMode
+          initialEventId={wizardEventId || null}
+          currentUserEmail={user?.email}
+          members={members}
+          onClose={() => setWizardEventId(null)}
+          onCreated={(handover) => {
+            setWizardEventId(null);
+            refreshAll();
+            addToast?.({ kind: 'success', message: handover?.status === 'draft'
+              ? 'Handover saved as draft.'
+              : 'Handover submitted — coverers notified.',
+            });
+            if (handover?.time_off_event_id) setSelectedEventId(handover.time_off_event_id);
+          }}
+        />
+      </div>
+    );
+  }
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* ── Header ──────────────────────────────────────────────────── */}
@@ -650,23 +678,11 @@ function OOOView({ user, setView, addToast }) {
         onToast={addToast}
       />
 
-      {wizardEventId !== null && (
-        <CreateHandoverModal
-          initialEventId={wizardEventId || null}
-          currentUserEmail={user?.email}
-          members={members}
-          onClose={() => setWizardEventId(null)}
-          onCreated={(handover) => {
-            setWizardEventId(null);
-            refreshAll();
-            addToast?.({ kind: 'success', message: handover?.status === 'draft'
-              ? 'Handover saved as draft.'
-              : 'Handover submitted — coverers notified.',
-            });
-            if (handover?.time_off_event_id) setSelectedEventId(handover.time_off_event_id);
-          }}
-        />
-      )}
+      {/* CreateHandoverModal mounts as a full-page surface above (early
+          return). The old inline modal here was removed 2026-05-18 — the
+          page-mode flow uses the entire OOO tab so the team-picker can
+          show every member and the checklist isn't cropped under the
+          impersonation banner. */}
 
       {submitTimeOffOpen && (
         <SubmitTimeOffModal

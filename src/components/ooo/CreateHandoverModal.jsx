@@ -100,7 +100,11 @@ function groupWeekendAdjacent(events) {
   return groups;
 }
 
-function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClose, onCreated }) {
+// `pageMode=true` renders the wizard as a full in-page surface (no
+// backdrop, no fixed positioning) so the 5-step flow has the full
+// viewport height. The default modal mode is kept for callers that
+// still want the popup pattern.
+function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClose, onCreated, pageMode = false }) {
   const [step, setStep] = useState(1);
   const [myEvents, setMyEvents] = useState([]);
   const [eventsLoading, setEventsLoading] = useState(true);
@@ -196,14 +200,16 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
     const q = coverQuery.trim().toLowerCase();
     const callerLc = (currentUserEmail || '').toLowerCase();
     const taken = new Set(coverers.map(c => (c.email || '').toLowerCase()));
+    // No artificial cap — the dropdown is scrollable. The old slice(0, 12)
+    // hid most of the HRX roster from the coverer picker when the user
+    // had no search term entered.
     return (members || [])
       .filter(m => m?.email && m.email.toLowerCase() !== callerLc && !taken.has(m.email.toLowerCase()))
       .filter(m => {
         if (!q) return true;
         const hay = `${m.name || ''} ${m.email || ''}`.toLowerCase();
         return hay.includes(q);
-      })
-      .slice(0, 12);
+      });
   }, [members, coverQuery, coverers, currentUserEmail]);
 
   // Step gating.
@@ -375,38 +381,83 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
   function next() { if (step < STEPS.length) setStep(step + 1); }
   function back() { if (step > 1) setStep(step - 1); }
 
+  // Outer wrappers differ between modal (fixed, backdrop, capped width)
+  // and page mode (in-flow, fills the host container, no backdrop). The
+  // header & body markup below is shared.
+  const Wrapper = pageMode
+    ? ({ children }) => (
+        <div
+          role="region"
+          aria-label="Create handover"
+          style={{
+            width: '100%',
+            minHeight: '100%',
+            background: 'var(--surface)',
+            display: 'flex', flexDirection: 'column',
+            fontFamily: 'inherit',
+          }}
+        >
+          {children}
+        </div>
+      )
+    : ({ children }) => (
+        <>
+          <div role="presentation" onClick={onClose}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', zIndex: 60 }} />
+          <div role="dialog" aria-modal="true" aria-label="Create handover"
+            style={{
+              position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+              width: 'min(640px, 95vw)', maxHeight: '92vh',
+              background: 'var(--surface)',
+              borderRadius: 16,
+              boxShadow: '0 20px 60px rgba(15,23,42,0.20)',
+              display: 'flex', flexDirection: 'column',
+              zIndex: 61,
+              fontFamily: 'inherit',
+            }}
+          >
+            {children}
+          </div>
+        </>
+      );
+
   return (
-    <>
-      <div role="presentation" onClick={onClose}
-        style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', zIndex: 60 }} />
-      <div role="dialog" aria-modal="true" aria-label="Create handover"
-        style={{
-          position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-          width: 'min(640px, 95vw)', maxHeight: '92vh',
-          background: 'var(--surface)',
-          borderRadius: 16,
-          boxShadow: '0 20px 60px rgba(15,23,42,0.20)',
-          display: 'flex', flexDirection: 'column',
-          zIndex: 61,
-          fontFamily: 'inherit',
-        }}>
+    <Wrapper>
         <header style={{
-          padding: '18px 22px',
+          padding: pageMode ? '18px 32px' : '18px 22px',
           borderBottom: '1px solid var(--border-light)',
           display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0,
         }}>
+          {pageMode && (
+            <button
+              type="button"
+              onClick={onClose}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '6px 12px', borderRadius: 8,
+                border: '1px solid var(--border)', background: 'var(--surface)',
+                color: 'var(--text)', fontSize: 12, fontWeight: 600,
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}
+            >
+              <i className="bi-arrow-left" />
+              Back to OOO
+            </button>
+          )}
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 16, fontWeight: 700 }}>New handover</div>
+            <div style={{ fontSize: pageMode ? 20 : 16, fontWeight: 700 }}>New handover</div>
             <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Step {step} of {STEPS.length}: {STEPS[step - 1].label}</div>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close" style={{
-            background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: 6, fontFamily: 'inherit',
-          }}>
-            <i className="bi-x-lg" style={{ fontSize: 16 }} />
-          </button>
+          {!pageMode && (
+            <button type="button" onClick={onClose} aria-label="Close" style={{
+              background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: 6, fontFamily: 'inherit',
+            }}>
+              <i className="bi-x-lg" style={{ fontSize: 16 }} />
+            </button>
+          )}
         </header>
 
-        <div style={{ display: 'flex', gap: 6, padding: '10px 22px 0' }}>
+        <div style={{ display: 'flex', gap: 6, padding: pageMode ? '14px 32px 0' : '10px 22px 0', maxWidth: pageMode ? 960 : 'none', width: '100%', margin: pageMode ? '0 auto' : 0 }}>
           {STEPS.map(s => (
             <div key={s.id} style={{
               flex: 1, height: 4, borderRadius: 2,
@@ -416,7 +467,13 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
           ))}
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{
+          flex: 1, overflowY: 'auto',
+          padding: pageMode ? '24px 32px' : '18px 22px',
+          display: 'flex', flexDirection: 'column', gap: 14,
+          maxWidth: pageMode ? 960 : 'none', width: '100%',
+          margin: pageMode ? '0 auto' : 0, alignSelf: 'stretch',
+        }}>
           {error && (
             <div style={{ padding: '10px 12px', background: '#FEE2E2', border: '1px solid #FCA5A5', color: '#991B1B', borderRadius: 10, fontSize: 12, fontWeight: 500 }}>
               {error}
@@ -528,7 +585,7 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
                     position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 6,
                     background: 'var(--surface)', border: '1px solid var(--border)',
                     borderRadius: 10, boxShadow: '0 8px 24px rgba(15,23,42,0.10)',
-                    maxHeight: 240, overflowY: 'auto', zIndex: 5,
+                    maxHeight: pageMode ? 420 : 240, overflowY: 'auto', zIndex: 5,
                   }}>
                     {candidateMembers.map(m => (
                       <button
@@ -864,10 +921,13 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
         </div>
 
         <footer style={{
-          padding: '14px 22px',
+          padding: pageMode ? '16px 32px' : '14px 22px',
           borderTop: '1px solid var(--border-light)',
           display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
           flexShrink: 0,
+          maxWidth: pageMode ? 960 : 'none', width: '100%',
+          margin: pageMode ? '0 auto' : 0,
+          background: 'var(--surface)',
         }}>
           <button type="button" onClick={back} disabled={step === 1 || busy} style={{
             padding: '8px 14px', borderRadius: 8,
@@ -933,8 +993,7 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
             )}
           </div>
         </footer>
-      </div>
-    </>
+    </Wrapper>
   );
 }
 
