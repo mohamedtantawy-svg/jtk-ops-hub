@@ -986,59 +986,84 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // both branches of the previous ternary and got an empty list).
   const hmMembers = isManager ? allAgentsWL : [];
 
-  // Hierarchical view of the team: for each direct manager-report under the
-  // user (TL or RM), build a group with aggregated stats + the agents
-  // transitively below. Admins see RM groups; RMs see TL groups; TLs (whose
-  // direct reports are all agents) get an empty groups list and the table
-  // falls back to the flat agent list — same behaviour as before.
-  // Per Mohamed: a regional manager should see "their team-leads with their
-  // teams under them is a proper table" rather than one flat list.
-  const teamSummaryGroups = useMemo(() => {
-    if (!isManager || !user?.email) return [];
-    const directs = getDirectReports(user.email);
-    const managerRows = directs.filter(m => m.access && m.access !== 'agent');
-    if (managerRows.length === 0) return [];
+  // Recursive hierarchical view of the team. Each group represents a
+  // manager (RM or TL) with their immediate sub-managers AND any agents
+  // reporting directly to them (no intermediate manager). Stats are
+  // aggregated over the FULL subtree below the manager.
+  //
+  // Admin viewing → groups are RMs at L1, their TLs at L2, agents at L3.
+  // RM viewing    → groups are TLs at L1, agents at L2.
+  // TL viewing    → no groups (only directAgents at L1, rendered flat).
+  //
+  // Before this rework, the builder collapsed RMs straight to their full
+  // transitive agent list — TLs vanished entirely from an admin's Team
+  // Summary (Mohamed 2026-05-18: "i can see everyone but i can't see any
+  // team leads"). The recursive build preserves the chain.
+  const teamSummaryTree = useMemo(() => {
+    if (!isManager || !user?.email) return { groups: [], directAgents: [], allAgentCount: 0 };
     const allAgentsByEmail = new Map(
       allAgentsWL.map(a => [(a.email || '').toLowerCase(), a])
     );
-    return managerRows.map(mgr => {
-      const subtree = new Set([mgr.email, ...getAllReports(mgr.email)].map(e => e.toLowerCase()));
-      const agents = allAgentsWL.filter(a => subtree.has((a.email || '').toLowerCase()));
-      const tc        = agents.reduce((s, a) => s + (a.tc || 0), 0);
-      const open      = agents.reduce((s, a) => s + (a.open || 0), 0);
-      const paused    = agents.reduce((s, a) => s + (a.paused || 0), 0);
-      const escalated = agents.reduce((s, a) => s + (a.escalated || 0), 0);
-      const br        = agents.reduce((s, a) => s + (a.br || 0), 0);
-      const headcount = Math.max(agents.length, 1);
-      const avgTc    = tc / headcount;
+    function buildGroup(member) {
+      const directs = getDirectReports(member.email);
+      const subMgrs = directs.filter(m => m.access && m.access !== 'agent' && !m.isDeleted);
+      const directAgentMembers = directs.filter(m => (!m.access || m.access === 'agent') && !m.isDeleted);
+      const subGroups = subMgrs.map(buildGroup);
+      const directAgents = directAgentMembers
+        .map(m => allAgentsByEmail.get(m.email.toLowerCase()))
+        .filter(Boolean);
+      // Agents in this manager's full subtree (transitive) — used for
+      // aggregate totals AND to dedup across sub-trees if shared.
+      const allAgentsBelow = [
+        ...subGroups.flatMap(sg => sg.allAgentsBelow),
+        ...directAgents,
+      ];
+      const tc        = allAgentsBelow.reduce((s, a) => s + (a.tc || 0), 0);
+      const open      = allAgentsBelow.reduce((s, a) => s + (a.open || 0), 0);
+      const paused    = allAgentsBelow.reduce((s, a) => s + (a.paused || 0), 0);
+      const escalated = allAgentsBelow.reduce((s, a) => s + (a.escalated || 0), 0);
+      const br        = allAgentsBelow.reduce((s, a) => s + (a.br || 0), 0);
+      const headcount = allAgentsBelow.length;
+      const avgTc    = headcount > 0 ? tc / headcount : 0;
       const capPct   = Math.min(200, Math.round((avgTc / BASELINE_CAPACITY) * 100));
       const band     = classifyWorkload(avgTc);
       return {
-        manager: { ...mgr, _self: allAgentsByEmail.get(mgr.email.toLowerCase()) || null },
-        agents,
+        manager: { ...member, _self: allAgentsByEmail.get(member.email.toLowerCase()) || null },
+        subGroups,
+        directAgents,
+        allAgentsBelow,
         tc, open, paused, escalated, br, capPct, wl: band.wl, wc: band.wc,
-        headcount: agents.length,
+        headcount,
       };
-    }).filter(g => g.agents.length > 0);
+    }
+    const directs = getDirectReports(user.email);
+    const topMgrs = directs.filter(m => m.access && m.access !== 'agent' && !m.isDeleted);
+    const topDirectAgentMembers = directs.filter(m => (!m.access || m.access === 'agent') && !m.isDeleted);
+    const groups = topMgrs.map(buildGroup);
+    const directAgents = topDirectAgentMembers
+      .map(m => allAgentsByEmail.get(m.email.toLowerCase()))
+      .filter(Boolean);
+    const agentEmails = new Set([
+      ...groups.flatMap(g => g.allAgentsBelow.map(a => (a.email || '').toLowerCase())),
+      ...directAgents.map(a => (a.email || '').toLowerCase()),
+    ]);
+    return { groups, directAgents, allAgentCount: agentEmails.size };
   }, [isManager, user?.email, allAgentsWL]);
 
-  // Agents who report directly to the user with no intermediate manager
-  // (e.g. an RM who carries an agent without a TL in between). Rendered as
-  // a "Direct reports" group so they aren't dropped from the summary.
-  const directAgentRows = useMemo(() => {
-    if (!isManager || teamSummaryGroups.length === 0 || !user?.email) return [];
-    const claimed = new Set();
-    for (const g of teamSummaryGroups) {
-      for (const a of g.agents) claimed.add((a.email || '').toLowerCase());
-    }
-    const userEmail = user.email.toLowerCase();
-    return allAgentsWL.filter(a => {
-      const e = (a.email || '').toLowerCase();
-      if (claimed.has(e)) return false;
-      const m = MEMBERS_BY_EMAIL[e];
-      return m && (m.managerEmail || '').toLowerCase() === userEmail;
+  // Expansion state — Set of manager emails whose groups are expanded.
+  // Default is collapsed so an admin sees only RMs at first (per the
+  // 2026-05-18 spec: "show only RM, then clicking the arrow to show TLs
+  // and their totals then team etc.").
+  const [expandedManagers, setExpandedManagers] = useState(() => new Set());
+  const toggleManagerExpanded = useCallback((email) => {
+    if (!email) return;
+    setExpandedManagers(prev => {
+      const next = new Set(prev);
+      if (next.has(email)) next.delete(email);
+      else next.add(email);
+      return next;
     });
-  }, [isManager, teamSummaryGroups, allAgentsWL, user?.email]);
+  }, []);
 
   const ROLE_LABEL = { regional_manager: 'Regional Manager', team_lead: 'Team Lead', admin: 'Admin' };
 
@@ -1870,15 +1895,19 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                       return (liveMembersByEmail && liveMembersByEmail[lc]) || MEMBERS_BY_EMAIL[lc] || null;
                     };
 
-                    // Single source of truth for an agent row — used by both
-                    // the flat (TL) and grouped (RM/admin) renderings.
-                    const agentRow = (m, key, indent) => {
+                    // 24 px base + 32 px per nesting level. Depth 0 = the
+                    // user's direct reports; depth 1 = their direct reports;
+                    // depth N = N levels below the viewer.
+                    const indentFor = (depth) => 24 + depth * 32;
+
+                    // Single source of truth for an agent row.
+                    const agentRow = (m, key, depth) => {
                       const live = liveOf(m.email);
                       return (
                       <tr key={key} style={{borderBottom:'1px solid #f0f0f0',transition:'background .15s'}}
                         onMouseEnter={e=>e.currentTarget.style.background='#fafaf9'}
                         onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                        <td style={{padding:'14px 24px',paddingLeft: indent ? 56 : 24}}>
+                        <td style={{padding:'14px 24px',paddingLeft: indentFor(depth)}}>
                           <div style={{display:'flex',alignItems:'center',gap:10}}>
                             <Avatar name={m.name} size={32}/>
                             <div style={{minWidth:0}}>
@@ -1937,15 +1966,51 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                     };
 
                     // Group header — manager (TL or RM) with aggregate stats
-                    // for their full subtree. capPct + workload band are
-                    // computed off the average per agent to stay comparable
-                    // with the per-agent rows below.
-                    const groupHeader = (g) => {
+                    // for their full subtree. Depth-indented + chevron that
+                    // toggles expansion of sub-groups + direct agents.
+                    // capPct + workload band are computed off the average
+                    // per agent so they stay comparable with the per-agent
+                    // rows below.
+                    const groupHeader = (g, depth, hasChildren, expanded) => {
                       const live = liveOf(g.manager.email);
+                      // Deeper levels get a lighter tint so the L1 RM bar
+                      // stays the visually-dominant divider. L0 = #f3eff8
+                      // (the original purple), L1 = #faf7ff, L2+ = #fdfcff.
+                      const bgByDepth = depth === 0 ? '#f3eff8' : depth === 1 ? '#faf7ff' : '#fdfcff';
+                      const onToggle = hasChildren ? () => toggleManagerExpanded(g.manager.email) : undefined;
                       return (
-                      <tr key={`grp-${g.manager.email}`} style={{background:'#f3eff8',borderTop:'2px solid #e8e8e8'}}>
-                        <td style={{padding:'12px 24px'}}>
-                          <div style={{display:'flex',alignItems:'center',gap:10}}>
+                      <tr key={`grp-${g.manager.email}`}
+                        style={{background:bgByDepth,borderTop:'2px solid #e8e8e8',cursor:hasChildren?'pointer':'default'}}
+                        onClick={hasChildren ? (e) => {
+                          // Don't toggle when the user clicks an interactive
+                          // child (Login as / Countries picker / etc.).
+                          const t = e.target;
+                          if (t && (t.closest('button') || t.closest('input') || t.closest('[role="button"]'))) return;
+                          onToggle?.();
+                        } : undefined}>
+                        <td style={{padding:'12px 24px',paddingLeft: indentFor(depth)}}>
+                          <div style={{display:'flex',alignItems:'center',gap:8}}>
+                            {hasChildren ? (
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); onToggle?.(); }}
+                                aria-label={expanded ? 'Collapse' : 'Expand'}
+                                aria-expanded={expanded}
+                                style={{
+                                  width:22,height:22,borderRadius:6,
+                                  border:'1px solid #e8e8e8',background:'white',
+                                  display:'inline-flex',alignItems:'center',justifyContent:'center',
+                                  cursor:'pointer',color:'#616161',flexShrink:0,
+                                  transition:'background .12s',
+                                }}
+                                onMouseEnter={(e) => { e.currentTarget.style.background = '#f7f5f2'; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.background = 'white'; }}
+                              >
+                                <i className={expanded ? 'bi-chevron-down' : 'bi-chevron-right'} style={{fontSize:10}} />
+                              </button>
+                            ) : (
+                              <span style={{width:22,flexShrink:0}} />
+                            )}
                             <Avatar name={g.manager.name} size={32}/>
                             <div style={{minWidth:0}}>
                               <div style={{fontWeight:700,color:'#1b1b1b',display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
@@ -1954,7 +2019,12 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                                 <LastSeenPill iso={live?.lastSeenAt} loading={!!rosterLoading} />
                                 <OOOBadge events={oooEventsByEmail.get((g.manager.email || '').toLowerCase())} />
                               </div>
-                              <div style={{fontSize:11,color:'#9e9e9e'}}>{g.manager.team} &middot; {g.headcount} {g.headcount === 1 ? 'agent' : 'agents'}</div>
+                              <div style={{fontSize:11,color:'#9e9e9e'}}>
+                                {g.manager.team} &middot; {g.headcount} {g.headcount === 1 ? 'agent' : 'agents'}
+                                {g.subGroups.length > 0 && (
+                                  <> &middot; {g.subGroups.length} {g.subGroups.length === 1 ? 'team lead' : 'team leads'}</>
+                                )}
+                              </div>
                             </div>
                           </div>
                         </td>
@@ -2011,21 +2081,39 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                       </tr>
                     );
 
-                    if (teamSummaryGroups.length === 0) {
-                      return hmMembers.map(m => agentRow(m, m.id, false));
+                    // Recursive group renderer — when expanded, recurses
+                    // into sub-groups (deeper indent) and finally into
+                    // direct agents (deepest indent).
+                    const renderGroup = (g, depth) => {
+                      const expanded = expandedManagers.has(g.manager.email);
+                      const hasChildren = g.subGroups.length > 0 || g.directAgents.length > 0;
+                      return (
+                        <Fragment key={`grp-frag-${g.manager.email}`}>
+                          {groupHeader(g, depth, hasChildren, expanded)}
+                          {expanded && (
+                            <>
+                              {g.subGroups.map(sg => renderGroup(sg, depth + 1))}
+                              {g.directAgents.map(a => agentRow(a, `${g.manager.email}-${a.id}`, depth + 1))}
+                            </>
+                          )}
+                        </Fragment>
+                      );
+                    };
+
+                    const { groups, directAgents } = teamSummaryTree;
+                    // TL with no sub-managers + no direct-agent overrides →
+                    // fall back to the flat agent list (preserves the
+                    // pre-rework behaviour for that one role).
+                    if (groups.length === 0 && directAgents.length === 0) {
+                      return hmMembers.map(m => agentRow(m, m.id, 0));
                     }
                     return (
                       <>
-                        {teamSummaryGroups.map(g => (
-                          <Fragment key={g.manager.email}>
-                            {groupHeader(g)}
-                            {g.agents.map(a => agentRow(a, `${g.manager.email}-${a.id}`, true))}
-                          </Fragment>
-                        ))}
-                        {directAgentRows.length > 0 && (
+                        {groups.map(g => renderGroup(g, 0))}
+                        {directAgents.length > 0 && (
                           <Fragment key="direct-reports">
                             {sectionLabel('Direct reports')}
-                            {directAgentRows.map(a => agentRow(a, `direct-${a.id}`, true))}
+                            {directAgents.map(a => agentRow(a, `direct-${a.id}`, 1))}
                           </Fragment>
                         )}
                       </>
