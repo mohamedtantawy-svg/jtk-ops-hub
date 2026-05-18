@@ -11,7 +11,7 @@
 import { LENSES } from '../../lib/handover-helpers';
 
 // Lenses with this flag hide their chip when count = 0 unless active.
-const HIDE_WHEN_EMPTY = new Set(['approvals', 'drafts']);
+const HIDE_WHEN_EMPTY = new Set(['drafts']);
 
 function chipCount(counts, lensId) {
   if (!counts) return 0;

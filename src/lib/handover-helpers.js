@@ -4,8 +4,12 @@
 // of pg / fetch / React imports so it can run on the server or client.
 
 // ── State machine ──────────────────────────────────────────────────────
-// HANDOVERS_PLAN.md §8. Only the lifecycle cron writes active / completed
-// / expired; everything else is user-driven via the explicit transitions.
+// HANDOVERS_PLAN.md §8 + HANDOVER_TEMPLATE_REVAMP_PLAN.md §4.2 (TL
+// approval removed 2026-05-18). The post-coverage ready state is now
+// 'approved' (skipping pending_manager_approval); the lifecycle cron is
+// what flips approved → active → completed. PENDING_MANAGER_APPROVAL is
+// retained as a constant so historical rows + migrate.js's backfill have
+// a name to refer to, but no transition writes it anymore.
 export const HANDOVER_STATUSES = Object.freeze({
   DRAFT:                          'draft',
   PENDING_COVERAGE_ACCEPTANCE:    'pending_coverage_acceptance',
@@ -116,13 +120,14 @@ export function unionCoveredCountries(coverers) {
 // ── Lens definitions ───────────────────────────────────────────────────
 // One source of truth for the OOO surface's lens IDs. The FE consumes
 // LENS_IDS; the API's /handovers/lens-counts returns counts keyed on
-// these same IDs. Keep in sync with HANDOVERS_PLAN.md §3.
+// these same IDs. Keep in sync with HANDOVERS_PLAN.md §3. The APPROVALS
+// lens was removed 2026-05-18 (HANDOVER_TEMPLATE_REVAMP_PLAN.md §4.2 —
+// TL approval is no longer part of the state machine).
 export const LENS_IDS = Object.freeze({
   AUTO:      'auto',
   MINE:      'mine',
   COVERING:  'covering',
   TEAM:      'team',
-  APPROVALS: 'approvals',
   DRAFTS:    'drafts',
   ALL:       'all',
 });
@@ -133,20 +138,17 @@ export const LENSES = Object.freeze([
   { id: 'mine',      label: 'Mine',         hint: 'My upcoming OOO' },
   { id: 'covering',  label: 'Covering me',  hint: 'OOO handed over to me' },
   { id: 'team',      label: 'My team',      hint: 'OOO in my reporting tree' },
-  { id: 'approvals', label: 'Approvals',    hint: 'Awaiting my approval' },
   { id: 'drafts',    label: 'Drafts',       hint: 'My unfinished drafts' },
   { id: 'all',       label: 'All',          hint: 'Everything in scope' },
 ]);
 
 // Pick the most actionable lens for first-visit users when ?lens= is
 // not in the URL. HANDOVERS_PLAN.md §3.1.
-//   1. approvals if any pending
-//   2. covering if any pending acceptance
-//   3. mine if any upcoming OOO missing handover
-//   4. team for managers
-//   5. mine for everyone else
-export function autoLens({ approvalsCount, coveringPendingCount, mineMissingCount, isManager }) {
-  if (approvalsCount > 0) return LENS_IDS.APPROVALS;
+//   1. covering if any pending acceptance
+//   2. mine if any upcoming OOO missing handover
+//   3. team for managers
+//   4. mine for everyone else
+export function autoLens({ coveringPendingCount, mineMissingCount, isManager }) {
   if (coveringPendingCount > 0) return LENS_IDS.COVERING;
   if (mineMissingCount > 0) return LENS_IDS.MINE;
   if (isManager) return LENS_IDS.TEAM;

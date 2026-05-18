@@ -8,9 +8,11 @@
 //   ?from=YYYY-MM-DD     — clip to events ending on or after this date
 //   ?to=YYYY-MM-DD       — clip to events starting on or before this date
 //   ?work_email=foo@bar  — single-person filter (used by the detail panel)
-//   ?lens=mine|covering|team|approvals|drafts|all
+//   ?lens=mine|covering|team|drafts|all
 //       — server-side narrowing matching the FE chip the user picked.
 //         Defaults to `all` (caller filters client-side if needed).
+//         The `approvals` lens was removed 2026-05-18 (TL approval
+//         teardown — HANDOVER_TEMPLATE_REVAMP_PLAN.md §4.2).
 //
 // Visibility is enforced via getVisibleOOOEmails(user) — the OOO-specific
 // cohort (Fernanda 2026-05-13). Broader than the Queue / HR scoping so
@@ -79,15 +81,6 @@ export async function GET(req) {
            AND LOWER(hc.coverer_email) = $${p++}
       )`);
     params.push(callerEmail);
-  } else if (lens === LENS_IDS.APPROVALS) {
-    where.push(`
-      EXISTS (
-        SELECT 1 FROM handovers h
-         WHERE h.time_off_event_id = e.id
-           AND h.status = 'pending_manager_approval'
-           AND LOWER(h.manager_email) = $${p++}
-      )`);
-    params.push(callerEmail);
   } else if (lens === LENS_IDS.DRAFTS) {
     where.push(`
       EXISTS (
@@ -103,24 +96,22 @@ export async function GET(req) {
   // Visible-scope clip — admins skip the filter; everyone else is bounded
   // by their reporting tree. Skipped for lenses whose own predicate already
   // authorises the caller on each row:
-  //   • 'mine' / 'drafts'      — filter by caller-email directly
-  //   • 'covering' / 'approvals' — EXISTS predicate already requires the
-  //     caller to be the explicit coverer / approver. Coverage invitations
-  //     and approval requests routinely cross reporting-tree boundaries
-  //     (peer TL covering for a peer, RM approving for a team that isn't
-  //     in their org sub-tree, etc.), so layering the visible-scope clip on
-  //     top stranded those rows — Megan reported 2026-05-15 that her
-  //     "1 coverage invitation needs your response" banner showed but the
-  //     list rendered empty because the requester sat outside her tree.
-  //     `getVisibleOOOEmails` is the right read scope for "browse other
-  //     people's OOO" (Team/All), but it's the wrong scope when the row's
-  //     own authorisation says you belong on it.
+  //   • 'mine' / 'drafts' — filter by caller-email directly
+  //   • 'covering'        — EXISTS predicate already requires the caller
+  //     to be the explicit coverer. Coverage invitations routinely cross
+  //     reporting-tree boundaries (peer TL covering for a peer, etc.),
+  //     so layering the visible-scope clip on top stranded those rows —
+  //     Megan reported 2026-05-15 that her "1 coverage invitation needs
+  //     your response" banner showed but the list rendered empty because
+  //     the requester sat outside her tree. `getVisibleOOOEmails` is the
+  //     right read scope for "browse other people's OOO" (Team/All), but
+  //     it's the wrong scope when the row's own authorisation says you
+  //     belong on it.
   if (
     !isAdminUser(user) &&
     lens !== LENS_IDS.MINE &&
     lens !== LENS_IDS.DRAFTS &&
-    lens !== LENS_IDS.COVERING &&
-    lens !== LENS_IDS.APPROVALS
+    lens !== LENS_IDS.COVERING
   ) {
     const visible = Array.from(getVisibleOOOEmails(user));
     if (visible.length === 0) {

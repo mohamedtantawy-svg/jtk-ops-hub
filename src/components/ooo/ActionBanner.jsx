@@ -4,11 +4,14 @@
 // with the one thing they should do next visible in one glance.
 //
 // Priority order (highest first):
-//   1. Approvals pending      → manager call to action
-//   2. Coverer invitations    → caller has been asked to cover
-//   3. Mine missing handover  → caller hasn't submitted their handover
-//   4. Drafts                 → caller has an unfinished draft
+//   1. Coverer invitations    → caller has been asked to cover
+//   2. Mine missing handover  → caller hasn't submitted their handover
+//   3. Drafts                 → caller has an unfinished draft
 // None → no banner.
+//
+// The "Approvals pending" branch was removed 2026-05-18 — TL approval is
+// no longer part of the state machine (HANDOVER_TEMPLATE_REVAMP_PLAN.md
+// §4.2).
 
 // Each banner exposes its CTA via an `action` key — the parent maps that to
 // either a lens-jump (`onJumpToLens`) or a wizard-open (`onCreateHandover`).
@@ -16,16 +19,6 @@
 // nothing" because the mine_missing CTA only flipped the lens and didn't
 // open the wizard — now `action: 'create'` triggers the create flow.
 const BANNERS = [
-  {
-    key: 'approvals',
-    test: (c) => (c?.approvals || 0) > 0,
-    intent: 'amber',
-    icon: 'bi-shield-check',
-    body: (c) => `${c.approvals} handover${c.approvals === 1 ? '' : 's'} awaiting your approval.`,
-    cta: 'Review',
-    action: 'lens',
-    lens: 'approvals',
-  },
   {
     key: 'covering_pending',
     test: (c) => (c?.covering_pending || 0) > 0,

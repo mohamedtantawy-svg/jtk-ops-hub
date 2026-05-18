@@ -1,19 +1,21 @@
 // ── OOOView ───────────────────────────────────────────────────────────
-// Single-tab OOO surface. Two view modes (Calendar Gantt, Table) and six
-// lens chips (Mine / Covering me / My team / Approvals / Drafts / All).
-// Phase 1 ships read-only — events render with their handover status,
-// but no creation / acceptance / approval is wired yet (that's Phase 2).
+// Single-tab OOO surface. Two view modes (Calendar Gantt, Table) and five
+// lens chips (Mine / Covering me / My team / Drafts / All). Phase 1
+// ships read-only — events render with their handover status, but no
+// creation / acceptance is wired yet (that's Phase 2). The "Approvals"
+// chip was removed 2026-05-18 — TL approval is no longer part of the
+// state machine (HANDOVER_TEMPLATE_REVAMP_PLAN.md §4.2).
 //
 // URL state contract:
 //   ?mode=calendar|table        — view mode, sticky per-user
-//   ?lens=mine|covering|team|approvals|drafts|all|auto
+//   ?lens=mine|covering|team|drafts|all|auto
 //   ?from=YYYY-MM-DD&to=YYYY-MM-DD — visible window
 //   ?handover=<event-id>        — opens the detail slide-out anchored to
 //                                  the time-off event (Phase 2 will key on
 //                                  handover id once those exist)
 // All keys round-trip on reload + browser back/forward.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import LensChips from '../ooo/LensChips';
 import ActionBanner from '../ooo/ActionBanner';
 import CalendarMode from '../ooo/CalendarMode';
@@ -21,6 +23,7 @@ import TableMode from '../ooo/TableMode';
 import DetailSlideOut from '../ooo/DetailSlideOut';
 import CreateHandoverModal from '../ooo/CreateHandoverModal';
 import SubmitTimeOffModal from '../ooo/SubmitTimeOffModal';
+import CountryHandoverDocView from '../country-handover-docs/CountryHandoverDocView';
 import { useTeamMembers } from '../../hooks/useTeamMembers';
 import { listTimeOffEvents } from '../../services/timeOffApi';
 import {
@@ -32,6 +35,7 @@ import { LENS_IDS, autoLens, isoDate } from '../../lib/handover-helpers';
 
 const MODE_KEY  = 'ops_hub_ooo_mode';
 const LENS_KEY  = 'ops_hub_ooo_lens';
+const SUB_TAB_KEY = 'ops_hub_ooo_sub_tab';
 
 const DEFAULT_RANGE_DAYS = 60;
 
@@ -118,6 +122,11 @@ function OOOView({ user, setView, addToast }) {
   // notification carries handover_id, the slide-out wants event_id; this
   // is the bridge.
   const [pendingHandoverId, setPendingHandoverId] = useState(null);
+  // Sub-tab toggles between the OOO calendar/table surface and the Phase B
+  // Country Handover Doc editor. Sticky per-user so refreshes don't bounce
+  // you back to OOO if you were knee-deep in editing France.
+  const [subTab, setSubTab] = useState(readLocal(SUB_TAB_KEY, 'ooo'));
+  useEffect(() => { writeLocal(SUB_TAB_KEY, subTab); }, [subTab]);
 
   // `useTeamMembers` returns `{ members, membersByEmail, ... }` — the
   // previous `items` rename matched an older shape and silently produced
@@ -196,7 +205,7 @@ function OOOView({ user, setView, addToast }) {
       setCounts({
         mine: 0, mine_missing_handover: 0,
         covering: 0, covering_pending: 0,
-        team: 0, approvals: 0, drafts: 0, all: 0,
+        team: 0, drafts: 0, all: 0,
         _failed: true,
       });
     }
@@ -210,7 +219,6 @@ function OOOView({ user, setView, addToast }) {
     if (autoResolved) return;
     if (!counts || Object.keys(counts).length === 0) return;
     const resolved = autoLens({
-      approvalsCount: counts.approvals,
       coveringPendingCount: counts.covering_pending,
       mineMissingCount: counts.mine_missing_handover,
       isManager: isManagerRole(user?.role),
@@ -326,7 +334,42 @@ function OOOView({ user, setView, addToast }) {
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>OOO &amp; Handovers</div>
             <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
-              Calendar of every upcoming OOO in your reporting tree, plus the handovers around them.
+              {subTab === 'country_docs'
+                ? 'Long-lived per-country handover docs — fill once, every OOO reuses them.'
+                : 'Calendar of every upcoming OOO in your reporting tree, plus the handovers around them.'}
+            </div>
+            {/* Sub-tab toggle */}
+            <div role="tablist" aria-label="OOO section" style={{ display: 'inline-flex', marginTop: 10, borderRadius: 8, background: 'rgba(15,23,42,0.05)', padding: 2 }}>
+              {[
+                { id: 'ooo',           label: 'OOO calendar', icon: 'bi-calendar3' },
+                { id: 'country_docs',  label: 'Country docs', icon: 'bi-journal-text' },
+              ].map(opt => {
+                const active = subTab === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    role="tab"
+                    type="button"
+                    aria-selected={active}
+                    onClick={() => setSubTab(opt.id)}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      padding: '6px 14px',
+                      border: 'none',
+                      background: active ? 'var(--surface)' : 'transparent',
+                      color: active ? 'var(--text)' : 'var(--text-secondary)',
+                      fontWeight: active ? 700 : 500,
+                      fontSize: 12, fontFamily: 'inherit',
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                      boxShadow: active ? '0 1px 2px rgba(15,23,42,0.08)' : 'none',
+                    }}
+                  >
+                    <i className={`bi ${opt.icon}`} style={{ fontSize: 12 }} />
+                    {opt.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
           <button
@@ -345,42 +388,48 @@ function OOOView({ user, setView, addToast }) {
           >
             <i className="bi-gear" style={{ fontSize: 14 }} />
           </button>
-          <button
-            type="button"
-            onClick={() => setSubmitTimeOffOpen(true)}
-            title="Submit a manual time-off entry"
-            style={{
-              height: 32, padding: '0 14px', borderRadius: 8,
-              background: 'var(--surface)',
-              color: 'var(--text)',
-              border: '1px solid var(--border)',
-              fontWeight: 600, fontSize: 12,
-              cursor: 'pointer',
-              fontFamily: 'inherit',
-            }}
-          >
-            <i className="bi-calendar-plus" style={{ marginRight: 6 }} />
-            Submit time off
-          </button>
-          <button
-            type="button"
-            onClick={() => setWizardEventId('')}
-            title="Create a new handover"
-            style={{
-              height: 32, padding: '0 14px', borderRadius: 8,
-              background: 'var(--purple, #7c3aed)',
-              color: 'white',
-              border: 'none',
-              fontWeight: 700, fontSize: 12,
-              cursor: 'pointer',
-              fontFamily: 'inherit',
-            }}
-          >
-            <i className="bi-plus-lg" style={{ marginRight: 6 }} />
-            New handover
-          </button>
+          {subTab === 'ooo' && (
+            <>
+              <button
+                type="button"
+                onClick={() => setSubmitTimeOffOpen(true)}
+                title="Submit a manual time-off entry"
+                style={{
+                  height: 32, padding: '0 14px', borderRadius: 8,
+                  background: 'var(--surface)',
+                  color: 'var(--text)',
+                  border: '1px solid var(--border)',
+                  fontWeight: 600, fontSize: 12,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                <i className="bi-calendar-plus" style={{ marginRight: 6 }} />
+                Submit time off
+              </button>
+              <button
+                type="button"
+                onClick={() => setWizardEventId('')}
+                title="Create a new handover"
+                style={{
+                  height: 32, padding: '0 14px', borderRadius: 8,
+                  background: 'var(--purple, #7c3aed)',
+                  color: 'white',
+                  border: 'none',
+                  fontWeight: 700, fontSize: 12,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                <i className="bi-plus-lg" style={{ marginRight: 6 }} />
+                New handover
+              </button>
+            </>
+          )}
         </div>
 
+        {subTab === 'ooo' && (
+        <React.Fragment>
         {/* Mode toggle + lens chips */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
           <div role="tablist" aria-label="View mode" style={{ display: 'inline-flex', borderRadius: 8, background: 'rgba(15,23,42,0.05)', padding: 2 }}>
@@ -517,9 +566,14 @@ function OOOView({ user, setView, addToast }) {
           onJumpToLens={setLens}
           onCreateHandover={() => setWizardEventId('')}
         />
+        </React.Fragment>
+        )}
       </div>
 
       {/* ── Body ────────────────────────────────────────────────────── */}
+      {subTab === 'country_docs' ? (
+        <CountryHandoverDocView user={user} />
+      ) : (
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
         {loading && events.length === 0 ? (
           <div style={{ padding: 48, textAlign: 'center', color: 'var(--text-secondary)', fontSize: 13 }}>
@@ -581,6 +635,7 @@ function OOOView({ user, setView, addToast }) {
           />
         )}
       </div>
+      )}
 
       <DetailSlideOut
         event={selectedEvent}
