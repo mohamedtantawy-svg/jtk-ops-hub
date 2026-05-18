@@ -978,12 +978,6 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   }).join(' ');
 
   // ── Team data ─────────────────────────────────────────────────────────
-  const leads=MEMBERS.filter(m=>m.role==='team_lead'||m.role==='regional_manager').map(ld=>{
-    const ag=allAgentsWL.filter(a=>a.team===ld.team);
-    const tt=ag.reduce((s,a)=>s+a.tc,0);const tb=ag.reduce((s,a)=>s+a.br,0);const avg=ag.length?tt/ag.length:0;
-    const r=teamAvg>0?avg/teamAvg:0;
-    return {...ld,ag,tt,tb,avg,wl:r>=1.4?'High':r>=0.7?'Medium':'Low',wc:r>=1.4?'#d42d35':r>=0.7?'#ed8d00':'#29811e'};
-  });
   const helpers=isOwnScope?allAgentsWL.filter(m=>m.team===user.team&&m.id!==user.id&&m.tc<personal.length).slice(0,3):[];
   // Team Summary — render for every manager. allAgentsWL is already scoped
   // via scopeIds, so no team-string re-filter is needed (and it actively
@@ -1047,13 +1041,6 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   }, [isManager, teamSummaryGroups, allAgentsWL, user?.email]);
 
   const ROLE_LABEL = { regional_manager: 'Regional Manager', team_lead: 'Team Lead', admin: 'Admin' };
-  const regions=['EMEA','APAC','LATAM','NAM'];
-  const regionIcons={EMEA:'bi-globe-europe-africa',APAC:'bi-globe-asia-australia',LATAM:'bi-globe-americas',NAM:'bi-globe-americas'};
-  const rStats=regions.map(r=>{
-    const ra=allAgentsWL.filter(a=>a.team===r);const tt=ra.reduce((s,a)=>s+a.tc,0);const tb=ra.reduce((s,a)=>s+a.br,0);
-    const avg=ra.length?tt/ra.length:0;const ratio=teamAvg>0?avg/teamAvg:0;
-    return {r,n:ra.length,tt,tb,avg,wl:ratio>=1.4?'High':ratio>=0.7?'Medium':'Low',wc:ratio>=1.4?'#d42d35':ratio>=0.7?'#ed8d00':'#29811e',ld:leads.find(l=>l.team===r)};
-  });
 
   // ── Recent activity ───────────────────────────────────────────────────
   const recentAct=[...scope].filter(t=>t.updatedMinsAgo!==undefined&&t.updatedMinsAgo<t.minutesAgo).sort((a,b)=>a.updatedMinsAgo-b.updatedMinsAgo).slice(0,4).map(t=>{
@@ -1726,58 +1713,6 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               </div>
             </DeelCard>
           </div>
-          {/* ── Admin Actions card — Workbench platform tasks ──────────────
-              // ✅ Admin tasks section present
-          ─────────────────────────────────────────────────────────────── */}
-          {settings.briefing_show_admin_actions!==false&&(()=>{
-            const wbNew=tasks.filter(t=>t.source==='workbench'&&t.status==='new');
-            const onboardingsPending=wbNew.filter(t=>/(onboard|new hire|welcome)/i.test(t.subject||t.type||'')).length||Math.max(0,wbNew.length-Math.floor(wbNew.length*0.6));
-            const amendmentsPending=wbNew.filter(t=>/(amend|change|update|salary|contract)/i.test(t.subject||t.type||'')).length||Math.max(0,Math.floor(wbNew.length*0.3));
-            const complianceDocs=tasks.filter(t=>t.source==='workbench'&&t.status!=='resolved'&&/(compliance|doc|legal|sign)/i.test(t.subject||t.type||'')).length||3;
-            return(
-              <div style={{marginTop:16,background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16,padding:'16px 20px',boxShadow:'0 1px 2px rgba(0,0,0,0.04)'}}>
-                <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14}}>
-                  <div style={{width:28,height:28,background:'#f7f5f2',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center'}}>
-                    <i className="bi-tools" style={{color:'#616161',fontSize:12}}></i>
-                  </div>
-                  <div style={{fontSize:13,fontWeight:600,color:'#9e9e9e',textTransform:'none',letterSpacing:'normal'}}>Admin actions</div>
-                </div>
-                <div style={{display:'flex',gap:0,border:'1px solid #e8e8e8',borderRadius:12,overflow:'hidden'}}>
-                  {[
-                    {label:'Onboardings pending',value:onboardingsPending,icon:'bi-person-plus-fill',color:'#1f74b3',bg:'#e8f0fe'},
-                    {label:'Amendments pending', value:amendmentsPending, icon:'bi-file-earmark-text-fill',color:'#ed8d00',bg:'#fff8e6'},
-                    {label:'Compliance docs',    value:complianceDocs,    icon:'bi-shield-check',color:'#29811e',bg:'#e8f5e3'},
-                  ].map((s,i)=>(
-                    <div key={s.label} onClick={()=>setView('my-queue')}
-                      style={{flex:1,padding:'12px 16px',borderRight:i<2?'1px solid #e8e8e8':'none',cursor:'pointer',transition:'background .15s',display:'flex',alignItems:'center',gap:10}}
-                      onMouseEnter={e=>e.currentTarget.style.background='#fafaf9'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                      <div style={{width:32,height:32,background:s.bg,borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                        <i className={s.icon} style={{color:s.color,fontSize:14}}></i>
-                      </div>
-                      <div>
-                        <div style={{fontSize:22,fontWeight:800,color:s.color,lineHeight:1,fontVariantNumeric:'tabular-nums'}}>{s.value}</div>
-                        <div style={{fontSize:11,color:'#616161',marginTop:2,fontWeight:500}}>{s.label}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* Volume sparkline for exec */}
-          {settings.briefing_show_volume_trend!==false&&<div style={{display:'flex',alignItems:'center',gap:14,marginTop:16,padding:'10px 16px',borderRadius:12,background:'var(--surface)',border:'1px solid #e8e8e8'}}>
-            <svg width={spW} height={spH} viewBox={`0 0 ${spW} ${spH}`} style={{overflow:'visible'}}>
-              <defs><linearGradient id="spGradEx" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--g)" stopOpacity=".15"/><stop offset="100%" stopColor="var(--g)" stopOpacity="0"/></linearGradient></defs>
-              <path d={sparkPath+` L${spW},${spH} L0,${spH} Z`} fill="url(#spGradEx)"/>
-              <path d={sparkPath} fill="none" stroke="var(--g)" strokeWidth="1.5" className="spark-line"/>
-              <circle cx={spW} cy={spH-((sparkData[sparkData.length-1]-spMin)/((spMax-spMin)||1))*spH} r="3" fill="var(--g)"/>
-            </svg>
-            <div style={{fontSize:11,color:'#616161'}}>
-              <span style={{fontWeight:700,color:'#1b1b1b'}}>Volume Trend</span> — {orgOpen.length+orgResolved.length} tasks today
-              {trend().pct>0&&<span style={{marginLeft:6,fontWeight:700,color:trend().c}}>{trend().dir}{trend().pct}% vs yesterday</span>}
-            </div>
-          </div>}
         </div>}
 
         {/* ══════════════════════════════════════════════════════════════════
@@ -2200,76 +2135,6 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                       <span style={{fontSize:16,fontWeight:700,color:m.wc,fontVariantNumeric:'tabular-nums'}}>{m.tc}</span><span style={{fontSize:10,fontWeight:700,color:m.wc,padding:'2px 8px',borderRadius:128,background:m.wc+'10'}}>{m.wl}</span>
                     </div>
                   )):<div style={{padding:'20px 0',textAlign:'center',fontSize:13,color:'#9e9e9e'}}>{total===0?'Queue clear — help a teammate!':'Team equally loaded'}</div>}
-                </div>
-              </DeelCard>}
-
-              {/* EXEC: Region cards */}
-              {isExec&&<DeelCard style={{padding:0,overflow:'hidden'}}>
-                <div style={{padding:'18px 22px 14px',borderBottom:'1px solid #e8e8e8',display:'flex',alignItems:'center',gap:10}}>
-                  <div style={{width:32,height:32,borderRadius:10,background:'linear-gradient(135deg,#e8f0fe,#DBEAFE)',display:'flex',alignItems:'center',justifyContent:'center'}}>
-                    <i className="bi-globe2" style={{fontSize:14,color:'#1f74b3'}}></i>
-                  </div>
-                  <span style={{fontSize:16,fontWeight:700,color:'#1b1b1b'}}>Regional Overview</span>
-                </div>
-                <div style={{padding:'14px 18px',display:'flex',flexDirection:'column',gap:10}}>
-                  {rStats.map((r,ri)=>(
-                    <div key={r.r} style={{display:'flex',alignItems:'center',gap:12,padding:'12px 14px',borderRadius:12,border:'1px solid #e8e8e8',background:'var(--surface)',transition:'box-shadow .15s'}}
-                      onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)'} onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}>
-                      <div style={{minWidth:56}}>
-                        <div style={{display:'flex',alignItems:'center',gap:5}}><i className={regionIcons[r.r]||'bi-globe'} style={{fontSize:12,color:r.wc}}></i><span style={{fontSize:15,fontWeight:700,color:'#1b1b1b'}}>{r.r}</span></div>
-                        <div style={{fontSize:10,color:'#9e9e9e',fontWeight:600,marginTop:2}}>{r.n} agents</div>
-                      </div>
-                      <div style={{flex:1,display:'flex',gap:16}}>
-                        <div style={{textAlign:'center'}}><div style={{fontSize:20,fontWeight:700,color:'#1b1b1b',fontVariantNumeric:'tabular-nums'}}>{r.tt}</div><div style={{fontSize:9,color:'#9e9e9e',fontWeight:600}}>Active</div></div>
-                        <div style={{textAlign:'center'}}><div style={{fontSize:20,fontWeight:700,color:r.tb>0?'#d42d35':'#29811e',fontVariantNumeric:'tabular-nums'}}>{r.tb}</div><div style={{fontSize:9,color:'#9e9e9e',fontWeight:600}}>Breach</div></div>
-                        <div style={{textAlign:'center'}}><div style={{fontSize:20,fontWeight:700,color:r.wc,fontVariantNumeric:'tabular-nums'}}>{r.avg.toFixed(1)}</div><div style={{fontSize:9,color:'#9e9e9e',fontWeight:600}}>Avg</div></div>
-                      </div>
-                      <div style={{textAlign:'right'}}>
-                        <span style={{padding:'4px 12px',borderRadius:128,fontSize:11,fontWeight:700,background:r.wc+'10',color:r.wc,border:`1px solid ${r.wc}15`}}>{r.wl}</span>
-                        {r.ld&&<div style={{fontSize:10,color:'#616161',marginTop:4}}><i className="bi-person-fill" style={{fontSize:9}}></i> {r.ld.name.split(' ')[0]}</div>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </DeelCard>}
-
-              {/* Team Leads */}
-              {isManager&&<DeelCard style={{padding:0,overflow:'hidden'}}>
-                <div style={{padding:'18px 22px 14px',borderBottom:'1px solid #e8e8e8',display:'flex',alignItems:'center',gap:10}}>
-                  <div style={{width:32,height:32,borderRadius:10,background:'linear-gradient(135deg,#FEF3C7,#fff8e6)',display:'flex',alignItems:'center',justifyContent:'center'}}>
-                    <i className="bi-person-badge-fill" style={{fontSize:13,color:'#ed8d00'}}></i>
-                  </div>
-                  <span style={{fontSize:16,fontWeight:700,color:'#1b1b1b'}}>Team Leads</span>
-                </div>
-                {/* Deel-style table header */}
-                <div style={{display:'grid',gridTemplateColumns:'minmax(0,1fr) 60px 80px',gap:0,padding:'8px 22px',background:'#fafaf9',borderBottom:'1px solid #e8e8e8'}}>
-                  <span style={{fontSize:13,fontWeight:500,color:'#9e9e9e',textTransform:'none',letterSpacing:'normal'}}>Lead</span>
-                  <span style={{fontSize:13,fontWeight:500,color:'#9e9e9e',textTransform:'none',letterSpacing:'normal',textAlign:'center'}}>Tasks</span>
-                  <span style={{fontSize:13,fontWeight:500,color:'#9e9e9e',textTransform:'none',letterSpacing:'normal',textAlign:'center'}}>SLA</span>
-                </div>
-                <div style={{padding:'4px 22px 14px'}}>
-                  {leads.map(ld=>(
-                    <div key={ld.id} style={{display:'grid',gridTemplateColumns:'minmax(0,1fr) 60px 80px',gap:0,alignItems:'center',padding:'10px 0',borderBottom:'1px solid #f5f5f5'}}>
-                      <div style={{display:'flex',alignItems:'center',gap:10,minWidth:0}}>
-                        <Avatar name={ld.name} size={30}/>
-                        <div style={{minWidth:0,flex:1}}>
-                          <div style={{fontSize:13,fontWeight:600,color:'#1b1b1b',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{ld.name}</div>
-                          <div style={{fontSize:11,color:'#9e9e9e',display:'flex',gap:8,flexWrap:'wrap'}}>
-                            <span style={{padding:'1px 6px',borderRadius:128,background:'#fafaf9',border:'1px solid #e8e8e8',fontWeight:600,fontSize:9}}>{ld.team}</span>
-                            <span>{ld.ag.length} agents</span>
-                            <span>avg {ld.avg.toFixed(1)}</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div style={{textAlign:'center'}}>
-                        <span style={{fontSize:18,fontWeight:700,color:ld.wc,fontVariantNumeric:'tabular-nums'}}>{ld.tt}</span>
-                      </div>
-                      <div style={{textAlign:'center'}}>
-                        {ld.tb>0?<span style={{fontSize:10,fontWeight:700,color:'#d42d35',background:'#d42d3510',padding:'3px 10px',borderRadius:128}}>{ld.tb} breach</span>
-                        :<span style={{fontSize:10,fontWeight:700,color:'#29811e',background:'#29811e10',padding:'3px 10px',borderRadius:128}}>Clear</span>}
-                      </div>
-                    </div>
-                  ))}
                 </div>
               </DeelCard>}
 
