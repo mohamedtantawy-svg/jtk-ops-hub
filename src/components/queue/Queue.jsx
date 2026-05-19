@@ -647,8 +647,14 @@ const Queue = ({ user, tasks, subFilter }) => {
   // mineOnlyForSla is a no-op for them. The result is passed down to
   // WorkspaceHome so the card reads the same number.
   const workspaceHomeSla = useMemo(() => {
+    // 2026-05-19: pending+hold Zendesk tickets now carry rwt/put SLA
+    // anchors (Track B). Including them here so the workspace-home
+    // SLA card aggregates active + paused Zendesk into one number,
+    // matching the user's "bring in their SLA as well" ask. `slaInfo`
+    // still returns null for resolved Zendesk rows so the filter only
+    // drops resolved.
     const tickets = mineOnlyForSla(
-      visPreSla.filter(t => t.source === 'zendesk' && t.status !== 'resolved' && t.status !== 'waiting'),
+      visPreSla.filter(t => t.source === 'zendesk' && t.status !== 'resolved'),
     );
     let atRisk = 0, breached = 0, onTrack = 0;
     for (const t of tickets) {
@@ -690,7 +696,10 @@ const Queue = ({ user, tasks, subFilter }) => {
     if (workSource === 'jira') slaBase = visPreSla.filter(t => t.source === 'jira');
     else if (workSource === 'zendesk') slaBase = visPreSla.filter(t => t.source === 'zendesk');
     else slaBase = visPreSla;
-    slaBase = mineOnlyForSla(slaBase.filter(t => t.status !== 'resolved' && t.status !== 'waiting'));
+    // Drop resolved unconditionally. Drop waiting only for non-Zendesk
+    // sources (Jira/Deel have separate pause semantics, no per-source pill).
+    // Zendesk waiting (pending/hold) keeps its rwt/put SLA pill (Track B).
+    slaBase = mineOnlyForSla(slaBase.filter(t => t.status !== 'resolved' && (t.source === 'zendesk' || t.status !== 'waiting')));
     const atRisk = slaBase.filter(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; }).length;
     const breached = slaBase.filter(t => { const s = slaInfo(t); return s && s.breach; }).length;
     return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: slaBase.length - atRisk - breached };

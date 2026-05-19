@@ -485,7 +485,10 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   }, [tasks, workbenchData?.tasks, user?.email, isAllScope, isOwnScope, visibleEmails]);
   const total=scope.length;
   // Exclude waiting (snoozed) tasks from SLA counts — matches Queue.jsx behaviour
-  const slaScope=scope.filter(t=>t.status!=='waiting');
+  // Zendesk waiting (pending/hold) now carry rwt/put SLA — include them
+  // so the personal/team Breached + At-Risk counts honor Mohamed's
+  // 2026-05-19 spec. Non-Zendesk waiting still excluded (no SLA semantics).
+  const slaScope=scope.filter(t=>t.source==='zendesk'||t.status!=='waiting');
   const breached=slaScope.filter(t=>{const s=slaInfo(t);return s&&s.breach;});
   const atRisk=slaScope.filter(t=>{const s=slaInfo(t);return s&&!s.ok&&!s.breach;});
   // Per-row SLA fields are populated by normalizeSourceRows.js — windows
@@ -918,9 +921,11 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const orgWait=orgOpen.filter(t=>t.status==='waiting').length;
   // 2026-05-01 spec: exclude Jira from the SLA calculation and the breach
   // count on the home page, but keep it counted everywhere else (Queue,
-  // Team, Analytics). orgSlaPool drops Jira tickets and any Q's paused
-  // tickets (slaInfo() already returns null for `waiting`).
-  const orgSlaPool = orgOpen.filter(t => t.status !== 'waiting' && t.source !== 'jira');
+  // Team, Analytics). orgSlaPool drops Jira tickets entirely. Zendesk
+  // waiting (pending/hold) is INCLUDED post-Track-B (2026-05-19) since
+  // those rows now carry rwt/put SLA anchors; non-Zendesk non-Jira
+  // waiting still excluded.
+  const orgSlaPool = orgOpen.filter(t => t.source !== 'jira' && (t.source === 'zendesk' || t.status !== 'waiting'));
   // Proportional at-risk band — same rule as the per-row pill.
   const deelAtRisk = (rows) => rows.filter(r => {
     if (r.slaBreachStatus === 'SLA_BREACHED') return false;
