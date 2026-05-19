@@ -16,6 +16,7 @@
 // All keys round-trip on reload + browser back/forward.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { getFlag, getCountryName } from '../../data/constants';
 import LensChips from '../ooo/LensChips';
 import ActionBanner from '../ooo/ActionBanner';
 import CalendarMode from '../ooo/CalendarMode';
@@ -536,7 +537,7 @@ function OOOView({ user, setView, addToast }) {
             }}
           >
             <option value="all">All countries</option>
-            {countryOptions.map(cc => <option key={cc} value={cc}>{cc}</option>)}
+            {countryOptions.map(cc => <option key={cc} value={cc}>{getFlag(cc)} {getCountryName(cc) || cc}</option>)}
           </select>
           <label style={{
             display: 'inline-flex', alignItems: 'center', gap: 6,

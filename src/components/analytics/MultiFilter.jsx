@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { FUNCTIONS } from '../../data/constants';
+import { FUNCTIONS, getFlag, getCountryName } from '../../data/constants';
 
 // ---------------------------------------------------------------------------
 // MultiFilter — multi-dimensional filter bar (used on Home + Analytics)
@@ -91,7 +91,7 @@ function Checkbox({ checked }) {
   );
 }
 
-function DropdownFilter({ label, icon, options, selected, onToggle, onSelectAll, onClear }) {
+function DropdownFilter({ label, icon, options, selected, onToggle, onSelectAll, onClear, formatOption }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -103,12 +103,14 @@ function DropdownFilter({ label, icon, options, selected, onToggle, onSelectAll,
     return () => document.removeEventListener('mousedown', handleClick);
   }, [open]);
 
+  const display = (opt) => (typeof formatOption === 'function' ? formatOption(opt) : opt);
+
   const isAll = selected.includes('all') || selected.length === options.length;
   const pillLabel =
     isAll
       ? `${label}: All`
       : selected.length === 1
-        ? `${label}: ${selected[0]}`
+        ? `${label}: ${display(selected[0])}`
         : `${label}: ${selected.length}`;
 
   return (
@@ -153,7 +155,7 @@ function DropdownFilter({ label, icon, options, selected, onToggle, onSelectAll,
                 onMouseLeave={(e) => { e.currentTarget.style.background = isChecked ? '#f9f5ff' : 'transparent'; }}
               >
                 <Checkbox checked={isChecked} />
-                <span style={{ fontWeight: isChecked ? 600 : 400 }}>{opt}</span>
+                <span style={{ fontWeight: isChecked ? 600 : 400 }}>{display(opt)}</span>
               </div>
             );
           })}
@@ -271,6 +273,7 @@ export default function MultiFilter({
         onToggle={makeToggle(setCountryFilter, countryOptions)}
         onSelectAll={makeSelectAll(setCountryFilter)}
         onClear={makeClear(setCountryFilter)}
+        formatOption={(cc) => `${getFlag(cc)} ${getCountryName(cc) || cc}`.trim()}
       />
 
       {/* Type */}

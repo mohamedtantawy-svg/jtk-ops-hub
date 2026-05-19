@@ -1684,11 +1684,10 @@ const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onSlaExtension, on
       <td style={tdStyle}>
         {fn ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 8px', borderRadius: 128, background: fn.bg || '#f2f2f2', color: fn.color || '#616161', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' }}>{fn.label}</span> : <span style={{ color: '#d5d5d5' }}>--</span>}
       </td>
-      {/* Country — flag + ISO code, full name in title for hover. Standardised
-          across tabs so users no longer see "🇩🇪 DE" on Zendesk and "🇩🇪 Germany"
-          on Onboarding for the same country. */}
+      {/* Country — flag + full name. Standard agreed 2026-05-19 (Mohamed):
+          country NAME everywhere, not the ISO code. */}
       <td title={task.country ? getCountryName(task.country) : ''} style={{ ...tdStyle, fontSize: 12 }}>
-        {task.country && <span>{getFlag(task.country)} <span style={{ color: '#616161', fontWeight: 500 }}>{task.country}</span></span>}
+        {task.country && <span>{getFlag(task.country)} <span style={{ color: '#616161', fontWeight: 500 }}>{getCountryName(task.country) || task.country}</span></span>}
       </td>
       {/* Assignee — full name in title attr; cell only displays first name. */}
       <td title={assignee.name || 'Unassigned'} style={tdStyle}>

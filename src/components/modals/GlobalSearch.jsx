@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { MEMBERS } from '../../data/members';
 import { KB_SEARCH_INDEX } from '../../data/knowledge';
-import { FLAGS } from '../../data/constants';
+import { getFlag, getCountryName } from '../../data/constants';
 import { ToolBadge, StatusBadge } from '../ui/Badges';
 
 const GlobalSearch=({tasks,setView,setSelTask,onClose})=>{
@@ -90,7 +90,7 @@ const GlobalSearch=({tasks,setView,setSelTask,onClose})=>{
             {qTasks.map(t=>{globalIdx++;const gi=globalIdx;return(
               <Row key={t.id} isHighlighted={hlIdx===gi} onClick={()=>{setSelTask(t);setView('my-queue');onClose();}}>
                 <ToolBadge source={t.source}/>
-                <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:500,color:'#1b1b1b',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{t.subject}</div><div style={{fontSize:11,color:'#9e9e9e'}}>{t.id} · {FLAGS[t.country]} {t.country}</div></div>
+                <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:500,color:'#1b1b1b',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{t.subject}</div><div style={{fontSize:11,color:'#9e9e9e'}}>{t.id} · {getFlag(t.country)} {getCountryName(t.country) || t.country}</div></div>
                 <StatusBadge status={t.status}/>
               </Row>
             );})}

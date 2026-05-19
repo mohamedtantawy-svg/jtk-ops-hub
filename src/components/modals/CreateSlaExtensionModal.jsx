@@ -15,6 +15,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createHrHubRequest } from '../../services/hrHubApi';
+import { getCountryName } from '../../data/constants';
 
 const DURATION_OPTIONS = [1, 2, 3, 4, 5, 6, 7];
 
@@ -141,7 +142,7 @@ export default function CreateSlaExtensionModal({ task, onClose, onSubmitted }) 
             </div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
               {task?.subject
-                ? <span><strong style={{ color: 'var(--text)' }}>{task.subject}</strong>{task.country ? ` · ${task.country}` : ''}</span>
+                ? <span><strong style={{ color: 'var(--text)' }}>{task.subject}</strong>{task.country ? ` · ${getCountryName(task.country) || task.country}` : ''}</span>
                 : 'Hold the SLA on this task while you resolve a blocker'}
             </div>
           </div>

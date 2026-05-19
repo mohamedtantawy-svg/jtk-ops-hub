@@ -28,7 +28,7 @@
 
 import { useContext, useMemo, useState, useEffect, useCallback } from 'react';
 import { IntegrationsContext } from '../../App';
-import { TOOLS } from '../../data/constants';
+import { TOOLS, getCountryName } from '../../data/constants';
 import { slaInfo, getUrl } from '../../utils/helpers';
 import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
 import { useCapacitySettings } from '../../hooks/useCapacitySettings';
@@ -927,7 +927,7 @@ function FocusRow({ row }) {
           {row.subject}
         </div>
         <div style={{ fontSize: 10, color: '#9e9e9e', marginTop: 2 }}>
-          {row.country ? `${row.country} · ` : ''}{row.clientName || row.id}
+          {row.country ? `${getCountryName(row.country) || row.country} · ` : ''}{row.clientName || row.id}
         </div>
       </div>
       {row.sev === 'breached' ? (

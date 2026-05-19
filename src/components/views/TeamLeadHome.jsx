@@ -15,7 +15,7 @@
 import { useContext, useMemo, useState, useEffect, useCallback } from 'react';
 import { IntegrationsContext, PermissionsContext } from '../../App';
 import { MEMBERS_BY_EMAIL, getDirectReports, getAllReports } from '../../data/members';
-import { TOOLS } from '../../data/constants';
+import { TOOLS, getCountryName } from '../../data/constants';
 import { slaInfo, getUrl } from '../../utils/helpers';
 import {
   normalizeOnboarding, normalizePausedOnboarding, normalizeOffboarding,
@@ -595,7 +595,7 @@ function HotRow({ row }) {
           {row.subject || row.id}
         </div>
         <div style={{ fontSize: 10, color: '#9e9e9e' }}>
-          {row.country ? `${row.country} · ` : ''}{row.assignee || row.assigneeEmail || 'unassigned'}
+          {row.country ? `${getCountryName(row.country) || row.country} · ` : ''}{row.assignee || row.assigneeEmail || 'unassigned'}
         </div>
       </div>
       <div style={{ fontSize: 11, fontWeight: 700, color: '#d42d35' }} title="Overdue by">

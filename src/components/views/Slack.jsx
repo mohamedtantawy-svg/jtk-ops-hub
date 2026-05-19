@@ -1,7 +1,7 @@
 import { useState, useContext } from 'react';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import { MEMBERS } from '../../data/members';
-import { FLAGS } from '../../data/constants';
+import { getFlag, getCountryName } from '../../data/constants';
 import { rel, getUrl } from '../../utils/helpers';
 import Avatar from '../ui/Avatar';
 import EmptyState from '../ui/EmptyState';
@@ -127,7 +127,7 @@ const Slack=({tasks,setTasks,onEscalMgr,addToast,user})=>{
                     {perms?.canDo('can_resolve_task')!==false&&<button onClick={()=>{const tid=setTimeout(()=>{setTasks(prev=>prev.map(t=>t.id===task.id?{...t,status:'resolved'}:t));},4000);addToast&&addToast('success','Addressed: '+task.id,task.subject.slice(0,46),()=>{clearTimeout(tid);});}} style={{...msgActionStyle,color:'#29811e'}}><i className="bi-check-circle"></i>Addressed</button>}
                     {perms?.canDo('can_escalate')!==false&&<button onClick={()=>onEscalMgr&&onEscalMgr(task)} style={{...msgActionStyle,color:'#d42d35'}}><i className="bi-arrow-up-circle" style={{fontSize:10}}></i>Escalate</button>}
                     {/* Country flag badge — flex aligned, no collapse */}
-                    <span style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:4,flexShrink:0,color:'#9e9e9e',fontSize:12}}>{FLAGS[task.country]} {task.country}</span>
+                    <span style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:4,flexShrink:0,color:'#9e9e9e',fontSize:12}}>{getFlag(task.country)} {getCountryName(task.country) || task.country}</span>
                   </div>}
                   {isO&&!isSent&&<div className="fade-in" style={{margin:'0 18px 14px'}}>
                     {settings.slack_ai_suggested_reply!==false&&<><div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8,padding:'8px 12px',background:'#f9f8f6',borderRadius:12}}><div style={{width:18,height:18,background:'linear-gradient(135deg,#29811e,#1f74b3)',borderRadius:6,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><i className="bi-stars" style={{color:'white',fontSize:9}}></i></div><span style={{fontSize:12,fontWeight:700,color:'#1f74b3'}}>AI Suggested Reply</span><span style={{fontSize:11,color:'#9e9e9e',marginLeft:4}}>— edit freely before sending</span></div>
@@ -186,7 +186,7 @@ const Slack=({tasks,setTasks,onEscalMgr,addToast,user})=>{
                       {/* Top row: case ref + country + status */}
                       <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6,flexWrap:'wrap'}}>
                         <span style={{background:'#1b1b1b',color:'white',padding:'3px 10px',borderRadius:128,fontSize:11,fontWeight:700,letterSpacing:'.03em'}}>{lit.caseRef}</span>
-                        <span style={{fontSize:13,fontWeight:500,color:'#616161'}}>{FLAGS[lit.country]||'🌐'} {lit.country}</span>
+                        <span style={{fontSize:13,fontWeight:500,color:'#616161'}}>{getFlag(lit.country)||'🌐'} {getCountryName(lit.country) || lit.country}</span>
                         <span style={{background:sc.bg,color:sc.color,padding:'3px 10px',borderRadius:128,fontSize:11,fontWeight:700,marginLeft:'auto'}}>{sc.label}</span>
                       </div>
                       {/* Employee + issue */}
