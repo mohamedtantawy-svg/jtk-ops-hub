@@ -158,8 +158,21 @@ function extractSlaFromPolicyMetricsResponse(ticketId, response) {
   const pm = Array.isArray(response?.policy_metrics) ? response.policy_metrics : [];
   let frt = null;
   let nrt = null;
+  let rwt = null;
+  let put = null;
   let active_stage = null;
   let active_breach_at = null;
+  // Active-metric precedence on a single ticket:
+  //   1. FRT — assignee owes the first agent reply (active when ticket has
+  //      no agent comment yet). When done, Zendesk flips it to 'achieved'.
+  //   2. NRT — assignee owes a reply because the requester replied after
+  //      the assignee's last action.
+  //   3. RWT — requester owes a reply (paused-status anchor for pending
+  //      tickets). The clock ticks while the agent is waiting.
+  //   4. PUT — periodic update cadence on long-running tickets; can be
+  //      active alongside RWT but takes lowest priority because the
+  //      user-facing breach is usually one of the response-time metrics.
+  // The `!active_stage` guard preserves the first-wins precedence.
   for (const m of pm) {
     if (!m || typeof m !== 'object') continue;
     if (m.metric === 'first_reply_time') {
@@ -170,12 +183,20 @@ function extractSlaFromPolicyMetricsResponse(ticketId, response) {
       }
     } else if (m.metric === 'next_reply_time') {
       nrt = m;
-      // FRT takes precedence over NRT — once first reply is done, NRT
-      // takes over and FRT is "achieved", so they shouldn't both be
-      // active. The `!active_stage` guard handles the rare overlap
-      // gracefully.
       if (m.stage === 'active' && !active_stage) {
         active_stage = 'nrt';
+        active_breach_at = m.breach_at || null;
+      }
+    } else if (m.metric === 'requester_wait_time') {
+      rwt = m;
+      if (m.stage === 'active' && !active_stage) {
+        active_stage = 'rwt';
+        active_breach_at = m.breach_at || null;
+      }
+    } else if (m.metric === 'periodic_update_time') {
+      put = m;
+      if (m.stage === 'active' && !active_stage) {
+        active_stage = 'put';
         active_breach_at = m.breach_at || null;
       }
     }
@@ -188,6 +209,10 @@ function extractSlaFromPolicyMetricsResponse(ticketId, response) {
     frt_minutes:      frt ? _toMinutes(frt) : null,
     nrt_breach_at:    nrt?.breach_at || null,
     nrt_minutes:      nrt ? _toMinutes(nrt) : null,
+    rwt_breach_at:    rwt?.breach_at || null,
+    rwt_minutes:      rwt ? _toMinutes(rwt) : null,
+    put_breach_at:    put?.breach_at || null,
+    put_minutes:      put ? _toMinutes(put) : null,
     // Per-ticket endpoint doesn't return policy_id. Leave null; the
     // schema column is nullable and no consumer reads it yet.
     policy_id:        null,
@@ -205,7 +230,7 @@ async function upsertSlaBatch(rows) {
   let p = 1;
   for (const r of rows) {
     if (!Number.isFinite(r.ticket_id)) continue;
-    values.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, NOW(), NOW())`);
+    values.push(`($${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, $${p++}, NOW(), NOW())`);
     params.push(
       r.ticket_id,
       r.active_stage,
@@ -214,6 +239,10 @@ async function upsertSlaBatch(rows) {
       r.frt_minutes,
       r.nrt_breach_at,
       r.nrt_minutes,
+      r.rwt_breach_at,
+      r.rwt_minutes,
+      r.put_breach_at,
+      r.put_minutes,
       r.policy_id,
     );
   }
@@ -221,7 +250,8 @@ async function upsertSlaBatch(rows) {
   const sql = `
     INSERT INTO zendesk_ticket_sla
       (ticket_id, active_stage, active_breach_at, frt_breach_at, frt_minutes,
-       nrt_breach_at, nrt_minutes, policy_id, fetched_at, updated_at)
+       nrt_breach_at, nrt_minutes, rwt_breach_at, rwt_minutes,
+       put_breach_at, put_minutes, policy_id, fetched_at, updated_at)
     VALUES ${values.join(', ')}
     ON CONFLICT (ticket_id) DO UPDATE SET
       active_stage     = EXCLUDED.active_stage,
@@ -230,6 +260,10 @@ async function upsertSlaBatch(rows) {
       frt_minutes      = EXCLUDED.frt_minutes,
       nrt_breach_at    = EXCLUDED.nrt_breach_at,
       nrt_minutes      = EXCLUDED.nrt_minutes,
+      rwt_breach_at    = EXCLUDED.rwt_breach_at,
+      rwt_minutes      = EXCLUDED.rwt_minutes,
+      put_breach_at    = EXCLUDED.put_breach_at,
+      put_minutes      = EXCLUDED.put_minutes,
       policy_id        = EXCLUDED.policy_id,
       fetched_at       = NOW(),
       updated_at       = NOW()
@@ -465,6 +499,8 @@ export async function loadSlaRowsForTicketIds(ticketIds) {
       `SELECT ticket_id, active_stage, active_breach_at,
               frt_breach_at, frt_minutes,
               nrt_breach_at, nrt_minutes,
+              rwt_breach_at, rwt_minutes,
+              put_breach_at, put_minutes,
               policy_id, fetched_at
          FROM zendesk_ticket_sla
         WHERE ticket_id = ANY($1::bigint[])`,
@@ -478,6 +514,10 @@ export async function loadSlaRowsForTicketIds(ticketIds) {
         frtMinutes:     Number.isFinite(r.frt_minutes) ? r.frt_minutes : null,
         nrtBreachAt:    r.nrt_breach_at ? new Date(r.nrt_breach_at).toISOString() : null,
         nrtMinutes:     Number.isFinite(r.nrt_minutes) ? r.nrt_minutes : null,
+        rwtBreachAt:    r.rwt_breach_at ? new Date(r.rwt_breach_at).toISOString() : null,
+        rwtMinutes:     Number.isFinite(r.rwt_minutes) ? r.rwt_minutes : null,
+        putBreachAt:    r.put_breach_at ? new Date(r.put_breach_at).toISOString() : null,
+        putMinutes:     Number.isFinite(r.put_minutes) ? r.put_minutes : null,
         policyId:       r.policy_id != null ? Number(r.policy_id) : null,
         fetchedAt:      r.fetched_at ? new Date(r.fetched_at).toISOString() : null,
       });

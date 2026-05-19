@@ -27,7 +27,17 @@ function _slaAnchorMs(task) {
 }
 
 export const slaInfo=(task,customThresholds)=>{
-  if(!task||task.status==='resolved'||task.status==='waiting')return null;
+  if(!task||task.status==='resolved')return null;
+  // Waiting tickets (Zendesk pending / hold) historically returned null
+  // here, suppressing the pill. As of 2026-05-19 the queue route stamps
+  // a paused-metric anchor on them — slaMetric='rwt' for pending
+  // (requester_wait_time) or 'put' for hold (periodic_update_time) —
+  // so the pill can render against the assignee's last action + the
+  // configured paused threshold. Non-Zendesk waiting rows still
+  // short-circuit (Jira/Deel have their own pause semantics).
+  if (task.status === 'waiting' && !(task.source === 'zendesk' && (task.slaMetric === 'rwt' || task.slaMetric === 'put'))) {
+    return null;
+  }
 
   // ── SLA Extension override (Phase 3 — SLA_EXTENSIONS_PLAN.md) ──────
   // An approved sla_extension takes precedence over every other SLA
@@ -60,6 +70,8 @@ export const slaInfo=(task,customThresholds)=>{
   const metricLabel = task.source === 'zendesk'
     ? (task.slaMetric === 'frt' ? 'first reply'
       : task.slaMetric === 'nrt' ? 'next reply'
+      : task.slaMetric === 'rwt' ? 'customer reply'
+      : task.slaMetric === 'put' ? 'agent update'
       : null)
     : null;
 
@@ -93,9 +105,13 @@ export const slaInfo=(task,customThresholds)=>{
       // as at-risk (a sensible default for the most common policy windows).
       const targetMins = task.slaMetric === 'frt' && Number.isFinite(task.slaFrtMinutes) && task.slaFrtMinutes > 0
         ? task.slaFrtMinutes
-        : (task.slaMetric === 'nrt' && Number.isFinite(task.slaNrtMinutes) && task.slaNrtMinutes > 0
-          ? task.slaNrtMinutes
-          : null);
+        : task.slaMetric === 'nrt' && Number.isFinite(task.slaNrtMinutes) && task.slaNrtMinutes > 0
+        ? task.slaNrtMinutes
+        : task.slaMetric === 'rwt' && Number.isFinite(task.slaRwtMinutes) && task.slaRwtMinutes > 0
+        ? task.slaRwtMinutes
+        : task.slaMetric === 'put' && Number.isFinite(task.slaPutMinutes) && task.slaPutMinutes > 0
+        ? task.slaPutMinutes
+        : null;
       const atRiskCutoffMins = targetMins ? Math.max(15, Math.floor(targetMins / 4)) : 6 * 60;
       if (rem <= atRiskCutoffMins) {
         const h = Math.floor(rem / 60), m = rem % 60;
@@ -134,7 +150,14 @@ export const slaInfo=(task,customThresholds)=>{
   // queue route now fires a hot-warm against the SLA cache on missed
   // IDs (zendesk-sla-sync.warmSlaCacheForTicketIds), so the pill flips
   // to authoritative policy data on the next refresh (~30 s).
-  if (task.source === 'zendesk' && task.slaSource === 'local_metric_set') {
+  // SLA-syncing pill is only meaningful for active-status FRT/NRT where
+  // a missing policy_metrics row produces a false-positive local-fallback
+  // breach (Mohamed 2026-05-18). For paused-status RWT/PUT the local
+  // fallback is a straightforward "anchor + threshold" against the
+  // assignee's last action — no false-positive risk — so let those rows
+  // fall through to the local-fallback math below.
+  if (task.source === 'zendesk' && task.slaSource === 'local_metric_set'
+      && (task.slaMetric === 'frt' || task.slaMetric === 'nrt')) {
     return {
       label: 'SLA syncing',
       short: 'SYNC',

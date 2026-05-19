@@ -22,19 +22,21 @@ export const ALLOWED_TASK_SOURCES = new Set([
   'incentive_plans',
 ]);
 
-// Three reason codes from the user-facing spec. The team-member picks one
+// Reason codes from the user-facing spec. The team-member picks one
 // at submit; the same value flows through to the approved
-// `sla_extension.reason_code` column.
+// `sla_extension.reason_code` column. `long_process` added 2026-05-19
+// to cover multi-stage tasks that exceed the standard SLA window.
 export const ALLOWED_REASON_CODES = new Set([
   'immigration',
   'client_unresponsive',
   'employee_unresponsive',
+  'long_process',
 ]);
 
 // Team-member-pickable durations on the request form. The manager can
-// choose any value in 1..7 on approval, so this set only governs what
-// the request form lets through.
-export const ALLOWED_REQUESTED_DAYS = new Set([3, 5, 7]);
+// choose any value in 1..7 on approval; matching the request form to
+// the same range (2026-05-19) so requesters can ask for short holds too.
+export const ALLOWED_REQUESTED_DAYS = new Set([1, 2, 3, 4, 5, 6, 7]);
 
 // Manager-approval cap. Server-side validation only — UI uses the same
 // range as a slider.

@@ -16,7 +16,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createHrHubRequest } from '../../services/hrHubApi';
 
-const DURATION_OPTIONS = [3, 5, 7];
+const DURATION_OPTIONS = [1, 2, 3, 4, 5, 6, 7];
 
 const REASON_OPTIONS = [
   {
@@ -42,6 +42,14 @@ const REASON_OPTIONS = [
     icon: 'bi-person-x',
     color: '#7c3aed',
     bg: '#f5f3ff',
+  },
+  {
+    value: 'long_process',
+    label: 'Long process',
+    desc: 'Multi-stage task that exceeds the standard SLA window.',
+    icon: 'bi-hourglass-split',
+    color: '#0f766e',
+    bg: '#ecfdf5',
   },
 ];
 

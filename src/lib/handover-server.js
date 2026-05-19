@@ -136,11 +136,20 @@ export async function loadHandoverWithDetails(id, { client } = {}) {
     err.status = 404;
     throw err;
   }
-  const [coverers, checklistItems, log] = await Promise.all([
-    loadCoverers(id, client),
-    loadChecklistItems(id, client),
-    loadLog(id, client),
-  ]);
+  let coverers, checklistItems, log;
+  if (client) {
+    // Transaction context: must serialize on the shared client — pg@9
+    // will reject parallel client.query() on the same client.
+    coverers = await loadCoverers(id, client);
+    checklistItems = await loadChecklistItems(id, client);
+    log = await loadLog(id, client);
+  } else {
+    [coverers, checklistItems, log] = await Promise.all([
+      loadCoverers(id, null),
+      loadChecklistItems(id, null),
+      loadLog(id, null),
+    ]);
+  }
   return { ...h, coverers, checklist_items: checklistItems, log };
 }
 
