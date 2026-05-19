@@ -28,12 +28,42 @@ export function useVirtualRows({ rowCount, rowHeight = 44, overscan = 8, scrolle
   useEffect(() => {
     const el = scrollerRef?.current;
     if (!el) return;
-    const onScroll = () => setScrollTop(el.scrollTop);
+
+    // 2026-05-19 — windowed-vs-element scroll fallback. The Queue scroller
+    // div uses `flex: 1, overflowY: auto` inside a flex parent that
+    // sometimes isn't height-constrained (no `100vh` up the chain). When
+    // that's the case the div's content overflows the viewport and the
+    // WINDOW scrolls instead — el.scrollTop stays 0 forever, the
+    // virtualizer renders only the first window of rows, and the user
+    // sees a giant empty spacer below them. Detect at sync time which
+    // scroller is actually doing the work and listen to that one.
+    const isElScrollable = () => el.scrollHeight > el.clientHeight + 10;
+    const elTopInDoc = () => {
+      let top = 0;
+      let node = el;
+      while (node) { top += node.offsetTop || 0; node = node.offsetParent; }
+      return top;
+    };
+    const onScroll = () => {
+      if (isElScrollable()) {
+        setScrollTop(el.scrollTop);
+      } else {
+        // Translate window scroll into el-relative scroll. Below the
+        // el's top in the document → effective scrollTop. Above → 0.
+        const effective = Math.max(0, (window.scrollY || 0) - elTopInDoc());
+        setScrollTop(effective);
+      }
+    };
     const sync = () => {
-      setScrollTop(el.scrollTop);
-      setViewportHeight(el.clientHeight || 600);
+      onScroll();
+      // Viewport: if the el itself scrolls, its clientHeight is what
+      // we render against. If the window scrolls, the window's
+      // innerHeight is the visible band.
+      setViewportHeight(isElScrollable() ? (el.clientHeight || 600) : (window.innerHeight || 600));
     };
     el.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('resize', sync, { passive: true });
     sync();
     let ro;
     if (typeof ResizeObserver !== 'undefined') {
@@ -42,6 +72,8 @@ export function useVirtualRows({ rowCount, rowHeight = 44, overscan = 8, scrolle
     }
     return () => {
       el.removeEventListener('scroll', onScroll);
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('resize', sync);
       if (ro) ro.disconnect();
     };
     // scrollerRef is a ref object — not part of the dep array intentionally;
