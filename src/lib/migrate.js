@@ -220,16 +220,32 @@ CREATE TABLE IF NOT EXISTS app_settings (
 -- All breach_at values are absolute UTC timestamps from Zendesk.
 CREATE TABLE IF NOT EXISTS zendesk_ticket_sla (
   ticket_id BIGINT PRIMARY KEY,
-  active_stage TEXT,                    -- 'frt' | 'nrt' | null (clock currently running)
+  active_stage TEXT,                    -- 'frt' | 'nrt' | 'rwt' | 'put' | null (clock currently running)
   active_breach_at TIMESTAMPTZ,         -- breach_at of the active stage
   frt_breach_at TIMESTAMPTZ,            -- First Reply Time breach
   frt_minutes INT,                      -- FRT target minutes (business or calendar)
   nrt_breach_at TIMESTAMPTZ,            -- Next Reply Time breach
   nrt_minutes INT,                      -- NRT target minutes
+  rwt_breach_at TIMESTAMPTZ,            -- Requester Wait Time breach (paused-status anchor)
+  rwt_minutes INT,                      -- RWT target minutes
+  put_breach_at TIMESTAMPTZ,            -- Periodic Update Time breach (long-running ticket cadence)
+  put_minutes INT,                      -- PUT target minutes
   policy_id BIGINT,                     -- Zendesk SLA policy id
   fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Additive columns for existing installs (2026-05-19, Track B SLA extension).
+-- RWT (requester_wait_time) ticks for paused statuses (pending/hold) — the
+-- canonical "waiting on requester" SLA from Zendesk's policy engine.
+-- PUT (periodic_update_time) ticks for long-running tickets that need a
+-- regular agent update cadence regardless of replies. Both stay null on
+-- tickets without an attached Zendesk policy; queue route falls back to
+-- local-computed anchors in that case.
+ALTER TABLE zendesk_ticket_sla ADD COLUMN IF NOT EXISTS rwt_breach_at TIMESTAMPTZ;
+ALTER TABLE zendesk_ticket_sla ADD COLUMN IF NOT EXISTS rwt_minutes   INT;
+ALTER TABLE zendesk_ticket_sla ADD COLUMN IF NOT EXISTS put_breach_at TIMESTAMPTZ;
+ALTER TABLE zendesk_ticket_sla ADD COLUMN IF NOT EXISTS put_minutes   INT;
 
 -- Migrations tracking
 CREATE TABLE IF NOT EXISTS _migrations (
