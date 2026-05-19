@@ -1325,7 +1325,33 @@ export async function listRedlineRequests(params = {}) {
     }
   }
 
-  const items = rawItems.map(r => {
+  // Defensive: drop redlines whose own `r.status` is terminal — Lorraine
+  // Muketo 2026-05-19 ("Closed redline still appears in my queue"). Same
+  // pattern as PR #691 for incentive_plans: Deel's bucket index
+  // (preparingDocuments.legalReview / HRXToExecute) can lag a real close
+  // by minutes, so a redline that just completed still appears in the
+  // bucket we asked for. Trust the row's own `status` field as the most
+  // recent signal; if it matches a known terminal value, drop the row
+  // even though it was returned in an actionable bucket. Workbench task
+  // status is intentionally NOT consulted here — see the comment a few
+  // lines below ("secondary signals like workbenchProcess... are
+  // unreliable because review-bucket redlines pre-create an execution
+  // task in a pending state"). Empty `r.status` → keep (signal missing
+  // shouldn't empty the queue from one transient).
+  let droppedClosedRedlines = 0;
+  const REDLINE_TERMINAL_RE = /^(COMPLETED|CLOSED|CANCELLED|CANCELED|EXECUTED|DONE|RESOLVED|FINISHED|REJECTED)$/i;
+  const liveItems = rawItems.filter(r => {
+    if (r.status && REDLINE_TERMINAL_RE.test(r.status)) {
+      droppedClosedRedlines++;
+      return false;
+    }
+    return true;
+  });
+  if (droppedClosedRedlines > 0) {
+    console.warn(`[redlines] dropped ${droppedClosedRedlines}/${rawItems.length} terminal-status redlines (upstream returned them in the actionable bucket but their own status is closed/executed)`);
+  }
+
+  const items = liveItems.map(r => {
     // Trust the upstream status bucket we fetched with — secondary signals
     // like `workbenchProcess.redlineExecutionTask` are unreliable because
     // review-bucket redlines pre-create an execution task in a pending state.
@@ -1587,7 +1613,37 @@ export async function listAmendmentRequests(params = {}) {
     }
   }
 
-  const items = rawItems.map(a => {
+  // Defensive: drop amendments whose resolved currentStatus is no longer
+  // actionable — Paulina Furmaniuk 2026-05-19 ("Completed Admin task
+  // still visible — and now turned breached. Processed IP Amendment, and
+  // yet it is still hanging in the Hub as breached"). Same pattern as PR
+  // #691 for incentive_plans: the upstream `statuses=` filter has the
+  // same Joi-asymmetry quirk other admin endpoints carry (skill #25 /
+  // terminations_v3 precedent), and a row can flip past `PreparingDocuments.*`
+  // between the list page fetch and our response. The allowlist matches
+  // the route's DEFAULT_STATUSES exactly: the two action-needed states
+  // plus the three Paused.* sub-states. Empty currentStatus → keep
+  // (defensive against a single missing-history payload). Anything else
+  // — Completed, Cancelled, Approved, etc. — drops, so the row clears
+  // from every consumer's queue on the next 5-min refresh cycle.
+  const AMENDMENT_ACTIONABLE_STATUSES = new Set([
+    'PreparingDocuments.AmendmentRequested',
+    'PreparingDocuments.WaitingHrxAction',
+  ]);
+  let droppedClosedAmendments = 0;
+  const liveRawItems = rawItems.filter(a => {
+    const cs = resolveCurrentStatus(a.amendmentStatuses);
+    if (!cs) return true;
+    if (AMENDMENT_ACTIONABLE_STATUSES.has(cs)) return true;
+    if (/^PreparingDocuments\.Paused(\.|$)/.test(cs)) return true;
+    droppedClosedAmendments++;
+    return false;
+  });
+  if (droppedClosedAmendments > 0) {
+    console.warn(`[amendments] dropped ${droppedClosedAmendments}/${rawItems.length} non-actionable amendments (upstream returned them but currentStatus is closed/completed/cancelled)`);
+  }
+
+  const items = liveRawItems.map(a => {
     const currentStatus = resolveCurrentStatus(a.amendmentStatuses);
     const pausedAt = resolvePausedAt(a.amendmentStatuses);
     const actionableSince = resolveActionableSince(a.amendmentStatuses);
