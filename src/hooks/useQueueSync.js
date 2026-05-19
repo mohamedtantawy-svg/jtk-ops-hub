@@ -79,6 +79,26 @@ function normalizeQueueItem(item) {
     minutesSinceLastResponse,
     lastCustomerResponseAt: item.lastCustomerResponseAt || null,
     slaMinsOverride: Number.isFinite(item.slaMinsOverride) ? item.slaMinsOverride : null,
+    // SLA fields stamped by the queue route's policy-cache enrichment +
+    // metric_set detection (FRT / NRT / RWT / PUT). 2026-05-19 — these
+    // were missing from the normalised shape, so `slaInfo`'s strict-
+    // equality `task.slaMetric === null` check failed on undefined,
+    // fell through to the legacy biz-day fallback, and produced
+    // false-positive multi-month breach pills on caught-up tickets
+    // (anchor = lastCustomerResponseAt = ticket creation date).
+    // Passing them through verbatim restores the route's intent.
+    slaMetric: item.slaMetric ?? null,
+    slaSource: item.slaSource || null,
+    slaBreachAt: item.slaBreachAt || null,
+    slaFrtBreachAt: item.slaFrtBreachAt || null,
+    slaFrtMinutes: Number.isFinite(item.slaFrtMinutes) ? item.slaFrtMinutes : null,
+    slaNrtBreachAt: item.slaNrtBreachAt || null,
+    slaNrtMinutes: Number.isFinite(item.slaNrtMinutes) ? item.slaNrtMinutes : null,
+    slaRwtBreachAt: item.slaRwtBreachAt || null,
+    slaRwtMinutes: Number.isFinite(item.slaRwtMinutes) ? item.slaRwtMinutes : null,
+    slaPutBreachAt: item.slaPutBreachAt || null,
+    slaPutMinutes: Number.isFinite(item.slaPutMinutes) ? item.slaPutMinutes : null,
+    pausedAt: item.pausedAt || null,
     secondaryAssigneeEmails: Array.isArray(item.secondaryAssigneeEmails)
       ? item.secondaryAssigneeEmails.map(e => (e || '').toLowerCase()).filter(Boolean)
       : [],
