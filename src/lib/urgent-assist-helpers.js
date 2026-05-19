@@ -46,6 +46,30 @@ export function teamLeadEmailFor(email) {
 // ── Permission guard ───────────────────────────────────────────────────────
 
 /**
+ * Resolve the current Manager-on-Call email from app_settings.
+ * Returns lowercased email string or '' when the MoC has no email set
+ * (legacy rows store `{ name }` only). Fire-and-forget — never throws;
+ * a DB hiccup degrades to "MoC has no edit rights this request", which
+ * still leaves admin/creator/assignee/TL/RM paths intact.
+ *
+ * Used by canEdit() so the rotating MoC can manage every urgent-assist
+ * row, not just ones they personally raised — Laura Llopis 2026-05-19
+ * feedback "MOCs cannot change the status for these UA requests
+ * manually raised by our team".
+ */
+export async function getCurrentMocEmail() {
+  try {
+    const { rows } = await query(
+      "SELECT value FROM app_settings WHERE key = 'manager_on_call' LIMIT 1"
+    );
+    const email = rows[0]?.value?.email;
+    return email ? String(email).toLowerCase() : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
  * Edit/delete predicate for /api/v1/urgent-assist/[id]. Returns true when:
  *   • caller's JWT role is 'admin' (set by middleware after ADMIN_EMAILS
  *     check at login) — honors the admin gate the FE already trusts
@@ -54,6 +78,7 @@ export function teamLeadEmailFor(email) {
  *   • caller is the row's assignee
  *   • caller is the assignee's denormalised team_lead_email (TL)
  *   • caller is anywhere in the assignee/creator's report chain (RM/admin)
+ *   • caller is the current Manager-on-Call (passed via options.mocEmail)
  *
  * The whole row is read-only for everyone else (e.g. peer agents in the
  * same team can VIEW it via the list scoping but cannot mutate it).
@@ -65,8 +90,14 @@ export function teamLeadEmailFor(email) {
  * The old "MEMBERS.access==='admin' only" gate locked her out of
  * deleting/resolving manual urgent-assist rows she could plainly see in
  * her queue (`forbidden` error in the screenshot).
+ *
+ * The MoC branch (options.mocEmail) was added 2026-05-19 after Laura
+ * Llopis reported the rotating MoC pool couldn't mutate manual rows
+ * raised by other team members. Urgent Assist's whole premise is that
+ * the on-call manager owns the queue — they need full edit rights,
+ * regardless of who raised the row.
  */
-export function canEdit(user, row) {
+export function canEdit(user, row, { mocEmail = '' } = {}) {
   if (!user?.email || !row) return false;
   const callerEmailLc = String(user.email).toLowerCase();
   // JWT-asserted admin — middleware stamps `role` from the auth/google
@@ -78,6 +109,7 @@ export function canEdit(user, row) {
   if (callerEmailLc === String(row.created_by_email || '').toLowerCase()) return true;
   if (callerEmailLc === String(row.assignee_email || '').toLowerCase()) return true;
   if (callerEmailLc === String(row.team_lead_email || '').toLowerCase()) return true;
+  if (mocEmail && callerEmailLc === String(mocEmail).toLowerCase()) return true;
   // RM-style chain check — caller's reports include the assignee/creator.
   // getAllReports returns an Array (`return [...reports]` on the Set
   // built internally — see src/data/members.js:319), so use Array methods.
