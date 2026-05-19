@@ -18,7 +18,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MEMBERS, MEMBERS_BY_EMAIL } from '../../data/members';
-import { FLAGS } from '../../data/constants';
+import { FLAGS, getFlag, getCountryName } from '../../data/constants';
 import { createUrgentAssist } from '../../services/urgentAssistApi';
 
 // Match the canonical workbench task-type labels surfaced on the Urgent
@@ -200,7 +200,7 @@ export default function CreateUrgentAssistModal({ onClose, onCreated, currentUse
               <label htmlFor="ua-country" style={labelStyle}>Country</label>
               <select id="ua-country" value={country} onChange={e => setCountry(e.target.value)} style={inputStyle}>
                 <option value="">— None —</option>
-                {countryOptions.map(c => <option key={c} value={c}>{FLAGS[c]} {c}</option>)}
+                {countryOptions.map(c => <option key={c} value={c}>{getFlag(c)} {getCountryName(c) || c}</option>)}
               </select>
             </div>
           </div>

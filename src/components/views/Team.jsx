@@ -1,7 +1,7 @@
 import { useState, useContext, useMemo, useRef, useEffect } from 'react';
 import ReactDOM from 'react-dom';
 import { PermissionsContext, IntegrationsContext } from '../../App';
-import { FLAGS } from '../../data/constants';
+import { FLAGS, getFlag, getCountryName } from '../../data/constants';
 import { slaInfo } from '../../utils/helpers';
 import { useTeamMembers } from '../../hooks/useTeamMembers';
 import MultiCountryPicker from '../team/MultiCountryPicker';
@@ -1089,7 +1089,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                           >
                             <td style={{ padding: '11px 16px', fontWeight: 600, color: '#1b1b1b', whiteSpace: 'nowrap' }}>{p.name}</td>
-                            <td style={{ padding: '11px 16px', color: '#616161', whiteSpace: 'nowrap' }}>{FLAGS[p.country] || '\u{1F310}'} {p.country}</td>
+                            <td style={{ padding: '11px 16px', color: '#616161', whiteSpace: 'nowrap' }}>{getFlag(p.country) || '\u{1F310}'} {getCountryName(p.country) || p.country}</td>
                             <td style={{ padding: '11px 16px', color: '#616161', whiteSpace: 'nowrap' }}>{p.type}</td>
                             <td style={{ padding: '11px 16px', color: '#616161', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{p.startDate}</td>
                             <td style={{ padding: '11px 16px', color: '#616161', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{p.endDate}</td>

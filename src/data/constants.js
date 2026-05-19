@@ -64,6 +64,15 @@ export const FLAGS={
   TZ:'🇹🇿',UG:'🇺🇬',ET:'🇪🇹',SN:'🇸🇳',RW:'🇷🇼',MA:'🇲🇦',TN:'🇹🇳',
   CY:'🇨🇾',MT:'🇲🇹',IS:'🇮🇸',
   PR:'🇵🇷',TT:'🇹🇹',JM:'🇯🇲',
+  // 2026-05-19 spec coverage — the spec list Mohamed approved. These were
+  // missing from FLAGS so MultiCountryPicker (which builds options from
+  // Object.keys(FLAGS)) never offered them; the Team-tab Countries column
+  // and other code-only displays were the symptom.
+  AL:'🇦🇱',AQ:'🇦🇶',BA:'🇧🇦',BW:'🇧🇼',CI:'🇨🇮',CM:'🇨🇲',HN:'🇭🇳',KG:'🇰🇬',
+  MD:'🇲🇩',ME:'🇲🇪',MG:'🇲🇬',MK:'🇲🇰',MN:'🇲🇳',MO:'🇲🇴',MR:'🇲🇷',MU:'🇲🇺',
+  MW:'🇲🇼',MZ:'🇲🇿',NA:'🇳🇦',NI:'🇳🇮',RU:'🇷🇺',SR:'🇸🇷',SV:'🇸🇻',XK:'🇽🇰',ZM:'🇿🇲',
+  // Operational codes from countryOwners.js that pre-date the spec
+  AD:'🇦🇩',BZ:'🇧🇿',JE:'🇯🇪',MC:'🇲🇨',
   // Legacy alias — our codebase used "UK" but ISO uses "GB"
   UK:'🇬🇧',
 };
@@ -90,21 +99,70 @@ const COUNTRY_NAME_TO_CODE={
   'Tanzania':'TZ','Uganda':'UG','Ethiopia':'ET','Senegal':'SN','Rwanda':'RW','Morocco':'MA','Tunisia':'TN',
   'Cyprus':'CY','Malta':'MT','Iceland':'IS',
   'Puerto Rico':'PR','Trinidad and Tobago':'TT','Jamaica':'JM',
+  // 2026-05-19 spec additions — every name in Mohamed's approved list must
+  // resolve. Includes alternate spellings APIs send back (e.g. "Moldova,
+  // Republic of", "Russian Federation", "Macau", "Côte d'Ivoire").
+  'Albania':'AL','Antarctica':'AQ','Bosnia and Herzegovina':'BA','Botswana':'BW',
+  'Cameroon':'CM',"Cote D'Ivoire":'CI',"Côte d'Ivoire":'CI',"Cote d'Ivoire":'CI',
+  'El Salvador':'SV','Honduras':'HN','Kosovo':'XK','Kyrgyzstan':'KG',
+  'Macao':'MO','Macau':'MO','Madagascar':'MG','Malawi':'MW',
+  'Mauritania':'MR','Mauritius':'MU','Moldova':'MD','Moldova, Republic of':'MD',
+  'Mongolia':'MN','Montenegro':'ME','Mozambique':'MZ','Namibia':'NA',
+  'Nicaragua':'NI','North Macedonia':'MK','Russia':'RU','Russian Federation':'RU',
+  'Suriname':'SR','Zambia':'ZM',
+  // Operational codes from countryOwners.js that pre-date the spec
+  'Andorra':'AD','Belize':'BZ','Jersey':'JE','Monaco':'MC',
 };
 // Reverse lookup: code → name
 const COUNTRY_CODE_TO_NAME = Object.fromEntries(
   Object.entries(COUNTRY_NAME_TO_CODE).map(([name, code]) => [code, name])
 );
-// Also add the UK alias to code→name
+// Canonical display overrides — the reverse map of COUNTRY_NAME_TO_CODE
+// hits the FIRST entry per code in insertion order. For codes with multiple
+// names (e.g. "Côte d'Ivoire" vs "Cote D'Ivoire"), pin the form we want
+// users to see.
 COUNTRY_CODE_TO_NAME['UK'] = 'United Kingdom';
+COUNTRY_CODE_TO_NAME['CI'] = "Côte d'Ivoire";
+COUNTRY_CODE_TO_NAME['CZ'] = 'Czech Republic';
+COUNTRY_CODE_TO_NAME['MO'] = 'Macao';
+COUNTRY_CODE_TO_NAME['RU'] = 'Russia';
+COUNTRY_CODE_TO_NAME['TR'] = 'Turkey';
+COUNTRY_CODE_TO_NAME['MD'] = 'Moldova';
+
+// ── Dynamic fallback — Intl.DisplayNames ─────────────────────────────────
+// Any ISO-2 code we haven't enumerated above (e.g. a brand-new country an
+// upstream feed starts shipping) resolves through the platform's built-in
+// region table instead of degrading to the raw code. Guarantees no data
+// loss: if Deel admin / Zendesk / Workbench surfaces a new country, the
+// queue cell renders the proper name immediately. Cached as a singleton
+// because instantiating Intl.DisplayNames is non-trivial.
+let _displayNamesEN = null;
+try {
+  if (typeof Intl !== 'undefined' && typeof Intl.DisplayNames === 'function') {
+    _displayNamesEN = new Intl.DisplayNames(['en'], { type: 'region' });
+  }
+} catch (_) {
+  _displayNamesEN = null;
+}
 /**
  * Resolve a country code ("PH") to full name ("Philippines").
- * Returns the original string if no match (already a name or unknown code).
+ * Resolution order:
+ *   1. Explicit map (handles overrides like "Côte d'Ivoire", "Czech Republic")
+ *   2. Intl.DisplayNames (any valid ISO-2 → localised English region name)
+ *   3. Fall through to the input string (already a name, or truly unknown)
  */
 export function getCountryName(country) {
   if (!country) return '';
   if (COUNTRY_CODE_TO_NAME[country]) return COUNTRY_CODE_TO_NAME[country];
-  if (COUNTRY_CODE_TO_NAME[country.toUpperCase()]) return COUNTRY_CODE_TO_NAME[country.toUpperCase()];
+  const upper = String(country).toUpperCase();
+  if (COUNTRY_CODE_TO_NAME[upper]) return COUNTRY_CODE_TO_NAME[upper];
+  if (_displayNamesEN && /^[A-Z]{2}$/.test(upper)) {
+    try {
+      const name = _displayNamesEN.of(upper);
+      // Intl returns the input code (e.g. "ZZ") when it doesn't recognise it
+      if (name && name !== upper) return name;
+    } catch (_) { /* swallow */ }
+  }
   return country;
 }
 /**

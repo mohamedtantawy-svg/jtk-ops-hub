@@ -1,5 +1,5 @@
 import { useState, useMemo, useContext, useCallback } from 'react';
-import { TOOLS, FUNCTIONS, FLAGS, SLA_MINS } from '../../data/constants';
+import { TOOLS, FUNCTIONS, FLAGS, SLA_MINS, getFlag, getCountryName } from '../../data/constants';
 import { MEMBERS } from '../../data/members';
 import { HOURLY_VOLUME } from '../../data/feed';
 import { SettingsContext, PermissionsContext, IntegrationsContext } from '../../App';
@@ -534,7 +534,7 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
                 {byCtry.map(x => (
                   <div key={x.c} style={{ marginBottom: 10 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-                      <span style={{ fontSize: 13, color: '#616161' }}>{FLAGS[x.c]} {x.c}</span>
+                      <span style={{ fontSize: 13, color: '#616161' }}>{getFlag(x.c)} {getCountryName(x.c) || x.c}</span>
                       <span style={{ fontSize: 13, fontWeight: 700, color: '#616161', fontVariantNumeric: 'tabular-nums' }}>{x.count}</span>
                     </div>
                     <Bar pct={(x.count / maxCtry) * 100} color='#29811e' value={x.count} />

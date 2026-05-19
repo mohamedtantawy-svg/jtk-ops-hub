@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { TOOLS, FLAGS } from '../../data/constants';
+import { TOOLS, getFlag, getCountryName } from '../../data/constants';
 import { MEMBERS } from '../../data/members';
 import { getUrl } from '../../utils/helpers';
 import { ToolBadge, FnBadge } from '../ui/Badges';
@@ -58,7 +58,7 @@ const Alerts=({tasks,setTasks})=>{
                 <div style={{fontSize:13,color:'#616161',lineHeight:1.6,wordBreak:'break-word'}}>{a.body.slice(0,180)}{a.body.length>180?'...':''}</div>
                 <div style={{marginTop:10,display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
                   <ToolBadge source={a.source}/>
-                  <span style={{color:'#616161',fontSize:12}}>{FLAGS[a.country]} {a.country} · {a.receivedAt}</span>
+                  <span style={{color:'#616161',fontSize:12}}>{getFlag(a.country)} {getCountryName(a.country) || a.country} · {a.receivedAt}</span>
                   <a href={getUrl(a)} target="_blank" rel="noreferrer" style={{color:'#1f74b3',fontSize:12,textDecoration:'none',fontWeight:600,display:'flex',alignItems:'center',gap:4,background:'#e8f0fe',padding:'4px 12px',borderRadius:128}}>
                     <i className="bi-box-arrow-up-right" style={{fontSize:10}}></i>Open in {TOOLS[a.source]?.label}
                   </a>

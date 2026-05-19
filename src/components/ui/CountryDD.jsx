@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { FLAGS } from '../../data/constants';
+import { getFlag, getCountryName } from '../../data/constants';
 
 const CountryDD=({all,sel,onChange})=>{
   const [open,setOpen]=useState(false); const ref=useRef(null);
   useEffect(()=>{ const h=e=>{ if(ref.current&&!ref.current.contains(e.target))setOpen(false); }; document.addEventListener('mousedown',h); return()=>document.removeEventListener('mousedown',h); },[]);
   const toggle=c=>onChange(sel.includes(c)?sel.filter(x=>x!==c):[...sel,c]);
-  const label=sel.length===0?'All Countries':sel.length<=2?sel.map(c=>`${FLAGS[c]} ${c}`).join(', '):`${sel.length} Countries`;
+  const label=sel.length===0?'All Countries':sel.length<=2?sel.map(c=>`${getFlag(c)} ${getCountryName(c) || c}`).join(', '):`${sel.length} Countries`;
   return(
     <div ref={ref} style={{position:'relative'}}>
       <button aria-expanded={open} aria-haspopup="listbox" onClick={()=>setOpen(!open)} style={{display:'flex',alignItems:'center',gap:6,padding:'6px 14px',border:`1px solid ${open||sel.length>0?'#1b1b1b':'#e8e8e8'}`,borderRadius:128,background:'var(--surface)',color:sel.length>0?'#1b1b1b':'#616161',fontSize:12.5,cursor:'pointer',fontWeight:500}}>
@@ -17,7 +17,7 @@ const CountryDD=({all,sel,onChange})=>{
         <div role="listbox" aria-label="Country filter" style={{maxHeight:220,overflowY:'auto'}}>
           {all.map(c=><label key={c} style={{display:'flex',alignItems:'center',gap:8,padding:'7px 14px',cursor:'pointer',fontSize:13,transition:'background .1s'}}
             onMouseEnter={e=>e.currentTarget.style.background='#f7f5f2'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-            <input type="checkbox" checked={sel.includes(c)} onChange={()=>toggle(c)} style={{accentColor:'#1b1b1b',width:16,height:16}}/><span>{FLAGS[c]}</span><span style={{color:'#616161',fontWeight:sel.includes(c)?600:400}}>{c}</span>
+            <input type="checkbox" checked={sel.includes(c)} onChange={()=>toggle(c)} style={{accentColor:'#1b1b1b',width:16,height:16}}/><span>{getFlag(c)}</span><span style={{color:'#616161',fontWeight:sel.includes(c)?600:400}}>{getCountryName(c) || c}</span>
           </label>)}
         </div>
       </div>}

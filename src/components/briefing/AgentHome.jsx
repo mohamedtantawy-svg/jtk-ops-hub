@@ -28,7 +28,7 @@
 
 import { useContext, useMemo, useState, useEffect, useCallback } from 'react';
 import { IntegrationsContext } from '../../App';
-import { TOOLS } from '../../data/constants';
+import { TOOLS, getCountryName } from '../../data/constants';
 import { slaInfo, getUrl } from '../../utils/helpers';
 import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
 import { useCapacitySettings } from '../../hooks/useCapacitySettings';
@@ -37,6 +37,7 @@ import {
   normalizeOnboarding, normalizePausedOnboarding, normalizeOffboarding,
   normalizeAmendments, normalizeRedlines, normalizeWorkbench, normalizeIncentivePlans,
 } from '../../utils/normalizeSourceRows';
+import { applySlaExtensionsToRows } from '../../utils/applySlaExtensions';
 import { matchesAudience } from '../../data/comms';
 import { apiFetch } from '../../services/api';
 import PersonalChecklist from '../home/PersonalChecklist';
@@ -45,6 +46,10 @@ import StaleCountryDocsBanner from './StaleCountryDocsBanner';
 
 function rowSlaSeverity(row) {
   if (!row) return 'ok';
+  // Resolved rows have a final SLA evaluation — they don't tick. Excluding
+  // them keeps the home-page tally consistent with the Queue's pill counts,
+  // which also exclude resolved (see Queue.jsx::rowSlaSeverity).
+  if (row.isResolved) return 'ok';
   if (row.slaBreachStatus === 'SLA_BREACHED' || (typeof row.slaRemaining === 'number' && row.slaRemaining <= 0)) return 'breached';
   if (typeof row.slaRemaining !== 'number') return 'ok';
   const windowSeconds = Number.isFinite(row.slaWindowMs) && row.slaWindowMs > 0
@@ -83,7 +88,14 @@ function fmtDuration(secs) {
 }
 
 export default function AgentHome({ user, tasks = [], setView, comms = [], ackEmails = null, isAckedByMe: isAckedByMeProp = null }) {
-  const { queueUnified, hiddenTasks } = useContext(IntegrationsContext);
+  const { queueUnified, hiddenTasks, slaExtensions } = useContext(IntegrationsContext);
+  // Approved SLA extensions push the per-row deadline out. Queue.jsx and
+  // BriefingView.jsx both apply this overlay so their breach counts
+  // reflect the extended windows. AgentHome must do the same — without it
+  // the home-page tally counts rows as breached that the Queue already
+  // shows as on-track (Lyall Genade 2026-05-19 feedback: "Breaches on
+  // home screen do not match breaches on other pages").
+  const slaExtensionMap = slaExtensions?.map || null;
   const { sla: queueSla } = useQueueSlaSettings();
   const { data: capData } = useCapacitySettings();
   const { members: teamMembers } = useTeamMembers();
@@ -111,19 +123,35 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
 
   const myRows = useMemo(() => {
     const matches = (r) => (r.assigneeEmail || '').toLowerCase() === myEmail;
-    const a = normalizeOnboarding(onb.items, queueSla).filter(r => !isHidden('onboarding', r.id) && matches(r));
-    const b = normalizePausedOnboarding(pob.items, queueSla).filter(r => !isHidden('paused_onboarding', r.id) && !isHidden('onboarding', r.id) && matches(r));
-    const c = normalizeOffboarding(off.items, queueSla).filter(r => !isHidden('offboarding', r.id) && matches(r));
-    const d = normalizeAmendments(cr.amendments, queueSla).filter(r => !isHidden('amendments', r.id) && matches(r));
-    const e = normalizeRedlines(cr.redlines, queueSla).filter(r => !isHidden('redlines', r.id) && matches(r));
+    // Apply approved SLA extensions to every source set before any
+    // breach/at-risk tally consumes the rows — matches Queue.jsx + BriefingView.
+    const a = applySlaExtensionsToRows(
+      normalizeOnboarding(onb.items, queueSla).filter(r => !isHidden('onboarding', r.id) && matches(r)),
+      slaExtensionMap, 'onboarding');
+    const b = applySlaExtensionsToRows(
+      normalizePausedOnboarding(pob.items, queueSla).filter(r => !isHidden('paused_onboarding', r.id) && !isHidden('onboarding', r.id) && matches(r)),
+      slaExtensionMap, 'onboarding');
+    const c = applySlaExtensionsToRows(
+      normalizeOffboarding(off.items, queueSla).filter(r => !isHidden('offboarding', r.id) && matches(r)),
+      slaExtensionMap, 'offboarding');
+    const d = applySlaExtensionsToRows(
+      normalizeAmendments(cr.amendments, queueSla).filter(r => !isHidden('amendments', r.id) && matches(r)),
+      slaExtensionMap, 'amendments');
+    const e = applySlaExtensionsToRows(
+      normalizeRedlines(cr.redlines, queueSla).filter(r => !isHidden('redlines', r.id) && matches(r)),
+      slaExtensionMap, 'redlines');
     // myRows feeds the agent's "open across sources" rollup — skip the 24h
     // COMPLETED + CLOSED workbench tail so finished work doesn't re-inflate
     // today's active count. The dedicated `wbResolved` block below already
     // surfaces the agent's resolved-today contribution for the KPI tile.
-    const f = normalizeWorkbench(wb.tasks, queueSla).filter(r => !isHidden('workbench', r.id) && matches(r) && !r.isResolved);
-    const g = normalizeIncentivePlans(ip.items, queueSla).filter(r => !isHidden('incentive_plans', r.id) && matches(r));
+    const f = applySlaExtensionsToRows(
+      normalizeWorkbench(wb.tasks, queueSla).filter(r => !isHidden('workbench', r.id) && matches(r) && !r.isResolved),
+      slaExtensionMap, 'workbench');
+    const g = applySlaExtensionsToRows(
+      normalizeIncentivePlans(ip.items, queueSla).filter(r => !isHidden('incentive_plans', r.id) && matches(r)),
+      slaExtensionMap, 'incentive_plans');
     return [...a, ...b, ...c, ...d, ...e, ...f, ...g];
-  }, [onb.items, pob.items, off.items, cr.amendments, cr.redlines, wb.tasks, ip.items, queueSla, isHidden, myEmail]);
+  }, [onb.items, pob.items, off.items, cr.amendments, cr.redlines, wb.tasks, ip.items, queueSla, isHidden, myEmail, slaExtensionMap]);
 
   const myTickets = useMemo(() => (tasks || [])
     .filter(t => (t.source === 'zendesk' || t.source === 'jira'))
@@ -927,7 +955,7 @@ function FocusRow({ row }) {
           {row.subject}
         </div>
         <div style={{ fontSize: 10, color: '#9e9e9e', marginTop: 2 }}>
-          {row.country ? `${row.country} · ` : ''}{row.clientName || row.id}
+          {row.country ? `${getCountryName(row.country) || row.country} · ` : ''}{row.clientName || row.id}
         </div>
       </div>
       {row.sev === 'breached' ? (

@@ -10,7 +10,7 @@ import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { query } from '../../../../../src/lib/db';
 import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
-import { memberByEmail, teamLeadEmailFor, writeLog, canEdit } from '../../../../../src/lib/urgent-assist-helpers';
+import { memberByEmail, teamLeadEmailFor, writeLog, canEdit, getCurrentMocEmail } from '../../../../../src/lib/urgent-assist-helpers';
 
 const ALLOWED_STATUSES = new Set(['new', 'in_progress', 'on_hold', 'resolved']);
 const ALLOWED_PRIORITIES = new Set(['low', 'medium', 'high', 'critical']);
@@ -86,7 +86,8 @@ export async function PATCH(req, { params }) {
   if (!before) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const callerEmail = String(user.email).toLowerCase();
-  if (!canEdit(user, before)) {
+  const mocEmail = await getCurrentMocEmail();
+  if (!canEdit(user, before, { mocEmail })) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
@@ -218,7 +219,8 @@ export async function DELETE(req, { params }) {
   if (!before) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const callerEmail = String(user.email).toLowerCase();
-  if (!canEdit(user, before)) {
+  const mocEmail = await getCurrentMocEmail();
+  if (!canEdit(user, before, { mocEmail })) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 

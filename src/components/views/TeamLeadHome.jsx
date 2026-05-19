@@ -15,12 +15,13 @@
 import { useContext, useMemo, useState, useEffect, useCallback } from 'react';
 import { IntegrationsContext, PermissionsContext } from '../../App';
 import { MEMBERS_BY_EMAIL, getDirectReports, getAllReports } from '../../data/members';
-import { TOOLS } from '../../data/constants';
+import { TOOLS, getCountryName } from '../../data/constants';
 import { slaInfo, getUrl } from '../../utils/helpers';
 import {
   normalizeOnboarding, normalizePausedOnboarding, normalizeOffboarding,
   normalizeAmendments, normalizeRedlines, normalizeWorkbench, normalizeIncentivePlans,
 } from '../../utils/normalizeSourceRows';
+import { applySlaExtensionsToRows } from '../../utils/applySlaExtensions';
 import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
 import { useCapacitySettings } from '../../hooks/useCapacitySettings';
 import { COUNTRY_OWNERS, OWNER_COUNTRIES } from '../../data/countryOwners';
@@ -73,7 +74,13 @@ function fmtDuration(secs) {
 }
 
 export default function TeamLeadHome({ user, tasks = [], setView, managerOnCall }) {
-  const { queueUnified, hiddenTasks } = useContext(IntegrationsContext);
+  const { queueUnified, hiddenTasks, slaExtensions } = useContext(IntegrationsContext);
+  // Approved SLA extensions push per-row deadlines out. Queue.jsx and
+  // BriefingView.jsx apply this overlay so their breach counts honour
+  // extended windows — TeamLeadHome must do the same or its strip
+  // counts drift from the Queue (Lyall Genade 2026-05-19 feedback on
+  // AgentHome — same divergence class for TL preview).
+  const slaExtensionMap = slaExtensions?.map || null;
   const perms = useContext(PermissionsContext);
   const { sla: queueSla } = useQueueSlaSettings();
   const { data: capacityData } = useCapacitySettings();
@@ -119,15 +126,29 @@ export default function TeamLeadHome({ user, tasks = [], setView, managerOnCall 
   const incentivePlansData = queueUnified?.incentivePlansData || { items: [] };
 
   const sourceRows = useMemo(() => {
-    const ob = normalizeOnboarding(onboardingData.items, queueSla).filter(r => !isHiddenKey('onboarding', r.id));
-    const pob = normalizePausedOnboarding(pausedOnboardingData.items, queueSla).filter(r => !isHiddenKey('paused_onboarding', r.id) && !isHiddenKey('onboarding', r.id));
-    const off = normalizeOffboarding(offboardingData.items, queueSla).filter(r => !isHiddenKey('offboarding', r.id));
-    const am = normalizeAmendments(changeRequestData.amendments, queueSla).filter(r => !isHiddenKey('amendments', r.id));
-    const rl = normalizeRedlines(changeRequestData.redlines, queueSla).filter(r => !isHiddenKey('redlines', r.id));
-    const wb = normalizeWorkbench(workbenchData.tasks, queueSla).filter(r => !isHiddenKey('workbench', r.id));
-    const ip = normalizeIncentivePlans(incentivePlansData.items, queueSla).filter(r => !isHiddenKey('incentive_plans', r.id));
+    const ob = applySlaExtensionsToRows(
+      normalizeOnboarding(onboardingData.items, queueSla).filter(r => !isHiddenKey('onboarding', r.id)),
+      slaExtensionMap, 'onboarding');
+    const pob = applySlaExtensionsToRows(
+      normalizePausedOnboarding(pausedOnboardingData.items, queueSla).filter(r => !isHiddenKey('paused_onboarding', r.id) && !isHiddenKey('onboarding', r.id)),
+      slaExtensionMap, 'onboarding');
+    const off = applySlaExtensionsToRows(
+      normalizeOffboarding(offboardingData.items, queueSla).filter(r => !isHiddenKey('offboarding', r.id)),
+      slaExtensionMap, 'offboarding');
+    const am = applySlaExtensionsToRows(
+      normalizeAmendments(changeRequestData.amendments, queueSla).filter(r => !isHiddenKey('amendments', r.id)),
+      slaExtensionMap, 'amendments');
+    const rl = applySlaExtensionsToRows(
+      normalizeRedlines(changeRequestData.redlines, queueSla).filter(r => !isHiddenKey('redlines', r.id)),
+      slaExtensionMap, 'redlines');
+    const wb = applySlaExtensionsToRows(
+      normalizeWorkbench(workbenchData.tasks, queueSla).filter(r => !isHiddenKey('workbench', r.id)),
+      slaExtensionMap, 'workbench');
+    const ip = applySlaExtensionsToRows(
+      normalizeIncentivePlans(incentivePlansData.items, queueSla).filter(r => !isHiddenKey('incentive_plans', r.id)),
+      slaExtensionMap, 'incentive_plans');
     return [...ob, ...pob, ...off, ...am, ...rl, ...wb, ...ip];
-  }, [onboardingData.items, pausedOnboardingData.items, offboardingData.items, changeRequestData.amendments, changeRequestData.redlines, workbenchData.tasks, incentivePlansData.items, queueSla, isHiddenKey]);
+  }, [onboardingData.items, pausedOnboardingData.items, offboardingData.items, changeRequestData.amendments, changeRequestData.redlines, workbenchData.tasks, incentivePlansData.items, queueSla, isHiddenKey, slaExtensionMap]);
 
   // ── Merge ZD/Jira/Workbench tasks (assignee-based) with source rows ────
   const ticketRows = useMemo(() => {
@@ -595,7 +616,7 @@ function HotRow({ row }) {
           {row.subject || row.id}
         </div>
         <div style={{ fontSize: 10, color: '#9e9e9e' }}>
-          {row.country ? `${row.country} · ` : ''}{row.assignee || row.assigneeEmail || 'unassigned'}
+          {row.country ? `${getCountryName(row.country) || row.country} · ` : ''}{row.assignee || row.assigneeEmail || 'unassigned'}
         </div>
       </div>
       <div style={{ fontSize: 11, fontWeight: 700, color: '#d42d35' }} title="Overdue by">

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { MEMBERS } from '../../data/members';
-import { SLA_MINS, FLAGS, TOOLS } from '../../data/constants';
+import { SLA_MINS, FLAGS, TOOLS, getFlag, getCountryName } from '../../data/constants';
 
 const CreateTaskModal=({onConfirm,onClose,currentUser})=>{
   const [form,setForm]=useState({source:'zendesk',type:'Access Issue',country:'UK',assigneeId:currentUser.id,subject:'',body:'',link:'',deadline:''});
@@ -42,7 +42,7 @@ const CreateTaskModal=({onConfirm,onClose,currentUser})=>{
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10}}>
             <div><label style={labelStyle}>SOURCE</label><select value={form.source} onChange={e=>upd('source',e.target.value)} style={sel}>{sources.map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select></div>
             <div><label style={labelStyle}>TYPE / FUNCTION</label><select value={form.type} onChange={e=>upd('type',e.target.value)} style={sel}>{types.map(t=><option key={t} value={t}>{t}</option>)}</select></div>
-            <div><label style={labelStyle}>COUNTRY</label><select value={form.country} onChange={e=>upd('country',e.target.value)} style={sel}>{countries.map(c=><option key={c} value={c}>{FLAGS[c]} {c}</option>)}</select></div>
+            <div><label style={labelStyle}>COUNTRY</label><select value={form.country} onChange={e=>upd('country',e.target.value)} style={sel}>{countries.map(c=><option key={c} value={c}>{getFlag(c)} {getCountryName(c) || c}</option>)}</select></div>
             <div><label style={labelStyle}>ASSIGN TO</label><select value={form.assigneeId} onChange={e=>upd('assigneeId',parseInt(e.target.value))} style={sel}>{agents.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select></div>
           </div>
           <div style={{marginBottom:10}}>

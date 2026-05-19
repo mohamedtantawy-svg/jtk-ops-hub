@@ -592,7 +592,7 @@ function UrgentRow({ row, managerOnCall, onStatusChange, onDelete }) {
       </td>
       <td style={{ ...tdStyle, fontSize: 12, whiteSpace: 'nowrap' }} title={countryLabel}>
         {flag && <span style={{ marginRight: 3 }}>{flag}</span>}
-        <span style={{ color: '#616161', fontWeight: 500 }}>{row.country || '--'}</span>
+        <span style={{ color: '#616161', fontWeight: 500 }}>{countryLabel || '--'}</span>
       </td>
       <td style={tdStyle} title={row.assigneeName || 'Unassigned'}>
         {row.assigneeName ? (
