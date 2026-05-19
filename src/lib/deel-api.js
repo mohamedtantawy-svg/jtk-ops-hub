@@ -1061,9 +1061,33 @@ export async function listIncentivePlans(params = {}) {
 
   // Deeler-tag filter removed 2026-05-04 — see actionable-onboarding note.
   let missingCountry = 0, missingOrg = 0;
+  let droppedClosed = 0;
   const items = [];
   for (const r of rawItems) {
     const d = detailMap.get(r.id) || {};
+    // Closed-plan defensive filter — Jojo Zhao 2026-05-19: "Closed IP
+    // ticket not synced to close on Ops Hub." Two things let closed
+    // plans leak into the queue today:
+    //   1. The upstream `status=PENDING_IP_PREPARATION` list filter has
+    //      the same asymmetric-Joi quirk other admin endpoints carry
+    //      (mistake #25 — `terminations_v3`'s AWAITING_PTO precedent):
+    //      some closed states slip through the filter and appear in the
+    //      list payload anyway.
+    //   2. Even when the list is filter-honest, a plan can be closed
+    //      BETWEEN the list fetch and the per-row detail fan-out, so
+    //      d.status reflects the post-close state while r.status is the
+    //      stale list snapshot.
+    // Prefer the detail's status when present (most recent); fall back
+    // to the list payload's r.status; if neither is available (detail
+    // failed AND list omitted), keep the row so a single transient
+    // failure can't empty the queue. Drop only when we have a positive
+    // signal that the plan is no longer actionable. Workbench applies
+    // the same pattern via isResolved → SourceTable filter.
+    const actualStatus = String(d.status || r.status || '').toUpperCase();
+    if (actualStatus && actualStatus !== 'PENDING_IP_PREPARATION' && !actualStatus.includes('PAUSED')) {
+      droppedClosed++;
+      continue;
+    }
     const oid = pickOid(r, d);
     const cd = oid ? contractDetails.get(String(oid)) : null;
     // Country / orgName lookup chain — same priority order as offboarding:
@@ -1113,6 +1137,11 @@ export async function listIncentivePlans(params = {}) {
   // changed shape and a new path needs to be added above.
   if (items.length > 0 && (missingCountry > 0 || missingOrg > 0)) {
     console.warn(`[incentive-plans] enrichment gaps: ${missingCountry}/${items.length} missing country, ${missingOrg}/${items.length} missing orgName`);
+  }
+  // Surface closed-plan drops so future "still showing in queue" reports
+  // can be diagnosed from the deploy logs without redeploying with debug.
+  if (droppedClosed > 0) {
+    console.warn(`[incentive-plans] dropped ${droppedClosed}/${rawItems.length} non-actionable plans (upstream list returned them but detail status is closed/completed/cancelled)`);
   }
   return { items, total: items.length };
 }
