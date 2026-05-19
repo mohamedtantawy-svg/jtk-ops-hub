@@ -221,88 +221,89 @@ export function DecisionsStrip({ onNavigate }) {
       try { return await apiFetch(path); }
       catch { return null; }
     };
-    (async () => {
-      // Count semantics (each tile answers "what's waiting on me?"):
-      //
-      //   • hrHubPending    — open HR Hub requests across every flow that
-      //                       were either raised by someone in the caller's
-      //                       subtree (scope=team) OR assigned to the caller
-      //                       (scope=assigned). De-duped by id since the
-      //                       same row can appear in both scopes.
-      //   • leaderAlerts    — sidebar-badge unacked count, server filters by
-      //                       severity threshold + caller's ack rows.
-      //   • urgentAssist    — open Urgent-Assist where someone in my subtree
-      //                       is the assignee. Endpoint takes a single
-      //                       status; we make 3 parallel calls and sum.
-      //   • approvalsCount  — HR-Hub requests of flow IN (hide_task_request,
-      //                       sla_extension_request) that are still
-      //                       actionable (not yet resolved). scope=team
-      //                       covers caller's full subtree.
-      const [
-        // HR Hub team-raised — 3 open statuses
-        hrTeamNew, hrTeamInProg, hrTeamOnHold,
-        // HR Hub assigned-to-me — 3 open statuses
-        hrAssignedNew, hrAssignedInProg, hrAssignedOnHold,
-        // Leader alerts
-        alerts,
-        // Urgent Assist — team scope, 3 open statuses
-        urgentNew, urgentInProg, urgentOnHold,
-        // Hide-task approvals — team scope, 3 open statuses
-        hideTaskNew, hideTaskInProg, hideTaskOnHold,
-        // SLA Extension approvals — team scope, 3 open statuses
-        slaExtNew, slaExtInProg, slaExtOnHold,
-      ] = await Promise.all([
-        safe('/hr-hub/requests?status=new&scope=team&limit=100'),
-        safe('/hr-hub/requests?status=in_progress&scope=team&limit=100'),
-        safe('/hr-hub/requests?status=on_hold&scope=team&limit=100'),
-        safe('/hr-hub/requests?status=new&scope=assigned&limit=100'),
-        safe('/hr-hub/requests?status=in_progress&scope=assigned&limit=100'),
-        safe('/hr-hub/requests?status=on_hold&scope=assigned&limit=100'),
-        safe('/leader-alerts/unacked-count'),
-        safe('/urgent-assist?scope=team&status=new&limit=200'),
-        safe('/urgent-assist?scope=team&status=in_progress&limit=200'),
-        safe('/urgent-assist?scope=team&status=on_hold&limit=200'),
-        safe('/hr-hub/requests?flow=hide_task_request&status=new&scope=team&limit=100'),
-        safe('/hr-hub/requests?flow=hide_task_request&status=in_progress&scope=team&limit=100'),
-        safe('/hr-hub/requests?flow=hide_task_request&status=on_hold&scope=team&limit=100'),
-        safe('/hr-hub/requests?flow=sla_extension_request&status=new&scope=team&limit=100'),
-        safe('/hr-hub/requests?flow=sla_extension_request&status=in_progress&scope=team&limit=100'),
-        safe('/hr-hub/requests?flow=sla_extension_request&status=on_hold&scope=team&limit=100'),
-      ]);
+    const itemsOf = (j) => Array.isArray(j?.items) ? j.items : [];
+
+    // Count semantics (each tile answers "what's waiting on me?"):
+    //
+    //   • hrHubPending    — open HR Hub requests across every flow that
+    //                       were either raised by someone in the caller's
+    //                       subtree (scope=team) OR assigned to the caller
+    //                       (scope=assigned). De-duped by id since the
+    //                       same row can appear in both scopes.
+    //   • leaderAlerts    — sidebar-badge unacked count, server filters by
+    //                       severity threshold + caller's ack rows.
+    //   • urgentAssist    — open Urgent-Assist where someone in my subtree
+    //                       is the assignee. Endpoint takes a single
+    //                       status; we make 3 parallel calls and sum.
+    //   • approvalsCount  — HR-Hub requests of flow IN (hide_task_request,
+    //                       sla_extension_request) that are still
+    //                       actionable (not yet resolved). scope=team
+    //                       covers caller's full subtree.
+    //
+    // Per-tile independent dispatch — Mohamed 2026-05-19: "the numbers
+    // doesn't show until its loaded which doesn't make sense." Before
+    // this, all 16 calls sat behind a single `await Promise.all(...)`
+    // and every tile rendered "—" until the SLOWEST call returned —
+    // dominated by the heavy `/hr-hub/requests` list payload. Splitting
+    // into 4 parallel-but-independent tile blocks lets each tile flip
+    // from "—" to its count as its own data arrives. Leader alerts
+    // (1 call) shows fastest; the others follow as their fan-outs
+    // settle.
+
+    // ── HR Hub tile — union team-raised + assigned-to-me, dedup by id ──
+    Promise.all([
+      safe('/hr-hub/requests?status=new&scope=team&limit=100'),
+      safe('/hr-hub/requests?status=in_progress&scope=team&limit=100'),
+      safe('/hr-hub/requests?status=on_hold&scope=team&limit=100'),
+      safe('/hr-hub/requests?status=new&scope=assigned&limit=100'),
+      safe('/hr-hub/requests?status=in_progress&scope=assigned&limit=100'),
+      safe('/hr-hub/requests?status=on_hold&scope=assigned&limit=100'),
+    ]).then(([tn, tip, toh, an, aip, aoh]) => {
       if (cancelled) return;
-      const itemsOf = (j) => Array.isArray(j?.items) ? j.items : [];
-      // HR Hub: union team-raised + assigned-to-me, dedup by id so a row
-      // assigned to the caller AND raised by a team member counts once.
-      const hrTeamRows = [...itemsOf(hrTeamNew), ...itemsOf(hrTeamInProg), ...itemsOf(hrTeamOnHold)];
-      const hrAssignedRows = [...itemsOf(hrAssignedNew), ...itemsOf(hrAssignedInProg), ...itemsOf(hrAssignedOnHold)];
-      const hrAnyResp = hrTeamNew || hrTeamInProg || hrTeamOnHold || hrAssignedNew || hrAssignedInProg || hrAssignedOnHold;
-      if (hrAnyResp) {
-        const seenIds = new Set();
-        let unique = 0;
-        for (const r of [...hrTeamRows, ...hrAssignedRows]) {
-          const id = r?.id;
-          if (id == null || seenIds.has(id)) continue;
-          seenIds.add(id);
-          unique++;
-        }
-        setHrHubPending(unique);
+      if (!tn && !tip && !toh && !an && !aip && !aoh) return;
+      const seenIds = new Set();
+      let unique = 0;
+      for (const r of [...itemsOf(tn), ...itemsOf(tip), ...itemsOf(toh),
+                       ...itemsOf(an), ...itemsOf(aip), ...itemsOf(aoh)]) {
+        const id = r?.id;
+        if (id == null || seenIds.has(id)) continue;
+        seenIds.add(id);
+        unique++;
       }
-      if (alerts) setLeaderAlerts(alerts?.count ?? 0);
-      // Urgent Assist: sum the three open buckets — endpoint paginates
-      // beyond ~200 but 200/bucket × 3 = 600 ceiling is above every team.
-      const urgentAnyResp = urgentNew || urgentInProg || urgentOnHold;
-      if (urgentAnyResp) {
-        setUrgentAssist(itemsOf(urgentNew).length + itemsOf(urgentInProg).length + itemsOf(urgentOnHold).length);
-      }
-      // Approvals: sum hide_task_request + sla_extension_request across
-      // the three open statuses. Two disjoint flows → no dedup needed.
-      const approvalsAnyResp = hideTaskNew || hideTaskInProg || hideTaskOnHold || slaExtNew || slaExtInProg || slaExtOnHold;
-      if (approvalsAnyResp) {
-        const hideSum = itemsOf(hideTaskNew).length + itemsOf(hideTaskInProg).length + itemsOf(hideTaskOnHold).length;
-        const slaSum = itemsOf(slaExtNew).length + itemsOf(slaExtInProg).length + itemsOf(slaExtOnHold).length;
-        setApprovalsCount(hideSum + slaSum);
-      }
-    })();
+      setHrHubPending(unique);
+    });
+
+    // ── Leader Alerts tile — single endpoint, fastest path ──
+    safe('/leader-alerts/unacked-count').then(j => {
+      if (cancelled) return;
+      if (j) setLeaderAlerts(j.count ?? 0);
+    });
+
+    // ── Urgent Assist tile — 3 status buckets, sum lengths ──
+    Promise.all([
+      safe('/urgent-assist?scope=team&status=new&limit=200'),
+      safe('/urgent-assist?scope=team&status=in_progress&limit=200'),
+      safe('/urgent-assist?scope=team&status=on_hold&limit=200'),
+    ]).then(([n, ip, oh]) => {
+      if (cancelled) return;
+      if (!n && !ip && !oh) return;
+      setUrgentAssist(itemsOf(n).length + itemsOf(ip).length + itemsOf(oh).length);
+    });
+
+    // ── SLA Ext + Hide-Task approvals tile — 6 calls (2 flows × 3 statuses) ──
+    Promise.all([
+      safe('/hr-hub/requests?flow=hide_task_request&status=new&scope=team&limit=100'),
+      safe('/hr-hub/requests?flow=hide_task_request&status=in_progress&scope=team&limit=100'),
+      safe('/hr-hub/requests?flow=hide_task_request&status=on_hold&scope=team&limit=100'),
+      safe('/hr-hub/requests?flow=sla_extension_request&status=new&scope=team&limit=100'),
+      safe('/hr-hub/requests?flow=sla_extension_request&status=in_progress&scope=team&limit=100'),
+      safe('/hr-hub/requests?flow=sla_extension_request&status=on_hold&scope=team&limit=100'),
+    ]).then((all) => {
+      if (cancelled || all.every(x => !x)) return;
+      const sum = all.reduce((acc, j) => acc + itemsOf(j).length, 0);
+      setApprovalsCount(sum);
+    });
+
     return () => { cancelled = true; };
   }, []);
 
