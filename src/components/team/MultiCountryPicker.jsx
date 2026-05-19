@@ -11,6 +11,7 @@
 // country ownership.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import ReactDOM from 'react-dom';
 import { FLAGS, getCountryName, getFlag } from '../../data/constants';
 
 // Build the canonical country option list once. Source: every 2-letter ISO
@@ -89,16 +90,28 @@ export default function MultiCountryPicker({
   // after a successful save the optimistic update flows back through).
   useEffect(() => { setDraft(normaliseList(selected)); }, [selected]);
 
-  // Anchor the popover to the trigger via position:fixed. Same pattern
-  // BriefingView already uses for its MOC / TLOC pickers so the dropdown
-  // escapes ancestor `overflow:hidden` (Home tab's Team Leaders <table>,
-  // Leaders Hub's two-layer overflow:hidden wrapper) and z-orders cleanly
-  // above subsequent table rows. Before this, the position:absolute
-  // dropdown was clipped + visually overlapped by the next row, and
-  // mousedowns aimed at the visible part of the popover frequently landed
-  // on the overlapping <tr> — outside ref.current — so the outside-click
-  // handler fired and the dropdown closed (Madeleine + Mohamed reported
-  // 2026-05-15 the picker "automatically closes" on Home + Leaders Hub).
+  // Anchor the popover to the trigger via position:fixed AND render it
+  // through a portal to document.body. The portal is the load-bearing
+  // half: every top-level view is wrapped in `<div className="page-enter">`
+  // which carries a CSS `pageIn` animation with `transform: translateY(…)`.
+  // Any non-`none` transform on an ancestor makes that ancestor the new
+  // containing block for position:fixed descendants — so without the
+  // portal, the popover's `top:` coordinates were being interpreted
+  // relative to `.page-enter` instead of the viewport. When the user had
+  // scrolled the Home/Team/Leaders-Hub table down past the first row,
+  // `.page-enter` sat above the viewport (e.g. viewport-y -1232), and the
+  // popover rendered at viewport-y ≈ `.page-enter.top + r.bottom + 6`
+  // ≈ -833 — i.e. hidden above the viewport. Clicking the trigger again
+  // toggled `open` back to false, so to the user it looked like the
+  // picker "automatically closed" on click (Madeleine 2026-05-19, same
+  // symptom Mohamed/Madeleine reported 2026-05-15 which PR #652's
+  // position:fixed fix solved for `overflow:hidden` but NOT for the
+  // transform-creates-containing-block edge case).
+  //
+  // Portaling the popover under document.body escapes the transformed
+  // ancestor entirely so `top:` reads against the viewport again; the
+  // outside-click + scroll-recalc effects below keep working because
+  // refs propagate through portals.
   useEffect(() => {
     if (!open) { setPos(null); return; }
     const update = () => {
@@ -261,7 +274,7 @@ export default function MultiCountryPicker({
         {canEdit && <i className={open ? 'bi-chevron-up' : 'bi-chevron-down'} style={{ fontSize: 9, opacity: 0.6 }} />}
       </button>
 
-      {open && pos && (
+      {open && pos && typeof document !== 'undefined' && ReactDOM.createPortal(
         <div
           ref={popRef}
           role="dialog"
@@ -469,7 +482,8 @@ export default function MultiCountryPicker({
               {saving ? 'Saving…' : (dirty ? 'Save' : 'No changes')}
             </button>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
