@@ -15,7 +15,29 @@
 //     subsequent calls. This means the second user to hit the route gets
 //     fresh data immediately even if the first user's wait timed out.
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { cacheGet, cacheSet } from './server-cache';
+
+// ── Per-build AbortSignal propagation ─────────────────────────────────────
+// 2026-05-19 (CRASH_AUDIT phase 3): every Deel admin scan walks 30-60 cursor
+// pages over 30-70 seconds. Each individual fetch already has its own
+// 40s AbortSignal.timeout (deel-api.js:_deelFetch), so a single page can't
+// hang forever. But the BUILDER walks N pages while holding all rows
+// in memory; if the outer buildWithTimeout has already returned stale to
+// the user, the builder keeps walking for 30+ extra seconds, retaining
+// the accumulated row arrays + the raw response strings the whole time.
+//
+// `_scanContext` is the AsyncLocalStorage that lets the builder's nested
+// fetches see a per-build AbortSignal. deelFetch reads
+// `_scanContext.getStore()?.signal` and merges it with its own per-fetch
+// timeout via AbortSignal.any. When buildWithTimeout fires the per-build
+// abort (at timeoutMs × 2), every pending and subsequent fetch in that
+// build chain bails immediately, the builder rejects, and the closure
+// (with its retained rows) becomes GC-eligible.
+//
+// Zero caller changes — builders don't even know the signal exists; only
+// the bottom-of-stack deelFetch reads it.
+export const _scanContext = new AsyncLocalStorage();
 
 // In-flight dedupe map, keyed by cacheKey. When two requests miss cache
 // at the same moment, the second one piggybacks on the first request's
@@ -28,6 +50,68 @@ import { cacheGet, cacheSet } from './server-cache';
 // Cleared automatically when the underlying Promise settles (success or
 // failure), so a stuck-forever scan can't poison the slot indefinitely.
 const _inFlight = new Map();
+
+// ── Global scan concurrency semaphore ─────────────────────────────────────
+// 2026-05-19 (CRASH_AUDIT phase 2): the in-flight dedupe above only stops
+// duplicate work for the SAME cacheKey. Different scan types — offboarding
+// + onboarding + workbench + redlines + incentive-plans + amendments —
+// each have their own cacheKey, so 6 different routes can each run their
+// own ~50-page Deel admin walk concurrently. Each walk retains its row
+// array + raw response buffers in heap until the merge completes; live
+// logs at 09:23 UTC showed 3 concurrent scans pushing RSS from 2019 →
+// 2329 MiB in under 2 minutes, with the kernel OOM-killing the pod
+// shortly after.
+//
+// MAX_CONCURRENT_SCANS is a HARD cap on how many builder() functions can
+// be executing at the same time across ALL cacheKeys. The 4th builder
+// waits in the queue until a slot frees up; if it can't acquire one
+// before the outer timeoutMs expires, the existing stale-cache fallback
+// path serves the response. Routes already tolerate stale data on
+// timeout (`Live build exceeded ... — serving stale cache` lines), so
+// the queued-wait fallback is a no-op behaviour change.
+//
+// Default: 2. Tunable via MAX_CONCURRENT_SCANS env var for diagnostic
+// purposes. Two is empirically sufficient for ~5 concurrent users
+// average (the typical Ops Hub load). Three would let three different
+// admin scans pile up — that's the climb shape we want to prevent.
+const MAX_CONCURRENT_SCANS = (() => {
+  const env = Number(process.env.MAX_CONCURRENT_SCANS);
+  return Number.isFinite(env) && env > 0 ? Math.floor(env) : 2;
+})();
+
+let _activeScans = 0;
+const _waiters = [];
+
+function _acquireScanSlot() {
+  if (_activeScans < MAX_CONCURRENT_SCANS) {
+    _activeScans++;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    _waiters.push(resolve);
+  });
+}
+
+function _releaseScanSlot() {
+  const next = _waiters.shift();
+  if (next) {
+    // Hand the slot directly to the next waiter — _activeScans stays at
+    // its current value (which is === MAX_CONCURRENT_SCANS, so this just
+    // transfers ownership).
+    next();
+  } else {
+    _activeScans--;
+  }
+}
+
+/** Diagnostic export — current semaphore state. Used by /api/v1/diagnostics. */
+export function getScanSemaphoreState() {
+  return {
+    active: _activeScans,
+    queued: _waiters.length,
+    max: MAX_CONCURRENT_SCANS,
+  };
+}
 
 /**
  * Run `builder()` with a `timeoutMs` ceiling. On timeout, return the
@@ -48,20 +132,41 @@ export async function buildWithTimeout(cacheKey, builder, opts = {}) {
   const timeoutMs = Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0 ? opts.timeoutMs : 45_000;
   const staleTtl = Number.isFinite(opts.staleTtl) && opts.staleTtl > 0 ? opts.staleTtl : 60 * 60_000;
 
-  // Dedupe: if a build for this cacheKey is already running, reuse it.
-  // Otherwise spawn a new builder and cache the Promise so concurrent
-  // callers can join the same flight.
+  // Otherwise spawn a new builder under TWO gates:
+  //   1. A per-build AsyncLocalStorage context exposing an AbortSignal that
+  //      fires at timeoutMs × 2 — gives nested deelFetch calls a way to
+  //      bail out so a stuck builder releases its retained row arrays.
+  //   2. The MAX_CONCURRENT_SCANS semaphore — caps concurrent admin scans
+  //      across all cacheKeys so 3+ different scan types can't pile their
+  //      working sets in heap at once.
+  //
+  // Concurrent callers with the SAME cacheKey still piggyback on a single
+  // flight (and share its slot + signal) — only NEW builders queue for
+  // slots and get their own signal.
   let buildPromise = _inFlight.get(cacheKey);
   if (!buildPromise) {
-    buildPromise = (async () => {
-      try {
-        const result = await builder();
-        cacheSet(cacheKey, result);
-        return result;
-      } catch (err) {
-        throw err;
-      }
-    })();
+    const hardKillController = new AbortController();
+    const hardKillMs = timeoutMs * 2;
+    const hardKillTimer = setTimeout(() => {
+      hardKillController.abort(
+        new Error(`scan-timeout hard-kill after ${hardKillMs}ms (cacheKey=${cacheKey})`),
+      );
+    }, hardKillMs);
+
+    buildPromise = _scanContext.run(
+      { signal: hardKillController.signal, cacheKey },
+      async () => {
+        await _acquireScanSlot();
+        try {
+          const result = await builder();
+          cacheSet(cacheKey, result);
+          return result;
+        } finally {
+          _releaseScanSlot();
+          clearTimeout(hardKillTimer);
+        }
+      },
+    );
     _inFlight.set(cacheKey, buildPromise);
     // Always clear the slot when the Promise settles so a stuck/failed
     // build can't keep callers piggybacking on a dead Promise forever.
