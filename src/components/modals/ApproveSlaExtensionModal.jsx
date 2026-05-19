@@ -12,6 +12,7 @@ const REASON_LABELS = {
   immigration: 'Immigration',
   client_unresponsive: 'Client unresponsive',
   employee_unresponsive: 'Employee unresponsive',
+  long_process: 'Long process',
 };
 
 const labelStyle = {
