@@ -6,6 +6,7 @@
 // Includes automatic retry with exponential backoff on transient failures.
 
 import { withRetry } from './retry';
+import { _scanContext } from './scan-timeout';
 import { reconcileWorkbenchSnapshot } from './workbench-resolution-state';
 
 // ── Sanitize API key ─────────────────────────────────────────────────────────
@@ -60,24 +61,56 @@ async function _deelFetch(path, options = {}) {
   const token = isAdminPath && DEEL_ADMIN_TOKEN ? DEEL_ADMIN_TOKEN : DEEL_API_KEY;
 
   const url = `${DEEL_BASE}${path}`;
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      'x-auth-token': token,
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/json, text/plain, */*',
-      'Content-Type': 'application/json',
-      Origin: 'https://admin.deel.network',
-      Referer: 'https://admin.deel.network/',
-      'x-app-host': 'app.deel.com',
-      'x-proxy-to': 'payments',
-      ...options.headers,
-    },
-    // Admin endpoints can take 10-20s per page under load. 20s was too tight
-    // and produced intermittent "code 23" timeout retries during the scan loop.
-    signal: options.signal || AbortSignal.timeout(40000),
-    cache: 'no-store',
-  });
+
+  // Merge three potential abort sources so a stuck scan can be cancelled at
+  // any of three levels:
+  //   1. `options.signal` — explicit per-call signal (rare; mostly unused)
+  //   2. The 40s per-fetch timeout (a single admin page can't hang forever)
+  //   3. The ambient scan-level signal from scan-timeout's AsyncLocalStorage
+  //      (set when this fetch runs inside a buildWithTimeout builder; fires
+  //      at builder's timeoutMs × 2 to release retained row arrays / buffers)
+  const ambientSignal = _scanContext.getStore()?.signal;
+  const perFetchTimeout = AbortSignal.timeout(40000);
+  const signals = [perFetchTimeout, ambientSignal, options.signal].filter(Boolean);
+  const mergedSignal = signals.length > 1
+    ? (typeof AbortSignal.any === 'function' ? AbortSignal.any(signals) : signals[0])
+    : signals[0];
+
+  let res;
+  try {
+    res = await fetch(url, {
+      ...options,
+      headers: {
+        'x-auth-token': token,
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json, text/plain, */*',
+        'Content-Type': 'application/json',
+        Origin: 'https://admin.deel.network',
+        Referer: 'https://admin.deel.network/',
+        'x-app-host': 'app.deel.com',
+        'x-proxy-to': 'payments',
+        ...options.headers,
+      },
+      signal: mergedSignal,
+      cache: 'no-store',
+    });
+  } catch (err) {
+    // If the ambient scan-level signal aborted us (builder ran past
+    // timeoutMs × 2), surface a non-retriable error so withRetry doesn't
+    // burn retries on a build the caller has already given up on.
+    // status=499 ("client closed connection") slots into the same
+    // non-retriable 4xx branch as a regular client error.
+    if (ambientSignal?.aborted) {
+      const reason = ambientSignal.reason;
+      const e = new Error(
+        `Deel API aborted by scan-timeout @ ${url}: ${reason?.message || reason || 'unknown'}`,
+      );
+      e.code = 'SCAN_ABORTED';
+      e.status = 499;
+      throw e;
+    }
+    throw err;
+  }
 
   if (!res.ok) {
     let body = await res.text().catch(() => '');

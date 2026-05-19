@@ -15,7 +15,29 @@
 //     subsequent calls. This means the second user to hit the route gets
 //     fresh data immediately even if the first user's wait timed out.
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { cacheGet, cacheSet } from './server-cache';
+
+// ── Per-build AbortSignal propagation ─────────────────────────────────────
+// 2026-05-19 (CRASH_AUDIT phase 3): every Deel admin scan walks 30-60 cursor
+// pages over 30-70 seconds. Each individual fetch already has its own
+// 40s AbortSignal.timeout (deel-api.js:_deelFetch), so a single page can't
+// hang forever. But the BUILDER walks N pages while holding all rows
+// in memory; if the outer buildWithTimeout has already returned stale to
+// the user, the builder keeps walking for 30+ extra seconds, retaining
+// the accumulated row arrays + the raw response strings the whole time.
+//
+// `_scanContext` is the AsyncLocalStorage that lets the builder's nested
+// fetches see a per-build AbortSignal. deelFetch reads
+// `_scanContext.getStore()?.signal` and merges it with its own per-fetch
+// timeout via AbortSignal.any. When buildWithTimeout fires the per-build
+// abort (at timeoutMs × 2), every pending and subsequent fetch in that
+// build chain bails immediately, the builder rejects, and the closure
+// (with its retained rows) becomes GC-eligible.
+//
+// Zero caller changes — builders don't even know the signal exists; only
+// the bottom-of-stack deelFetch reads it.
+export const _scanContext = new AsyncLocalStorage();
 
 // In-flight dedupe map, keyed by cacheKey. When two requests miss cache
 // at the same moment, the second one piggybacks on the first request's
@@ -110,23 +132,41 @@ export async function buildWithTimeout(cacheKey, builder, opts = {}) {
   const timeoutMs = Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0 ? opts.timeoutMs : 45_000;
   const staleTtl = Number.isFinite(opts.staleTtl) && opts.staleTtl > 0 ? opts.staleTtl : 60 * 60_000;
 
-  // Dedupe: if a build for this cacheKey is already running, reuse it.
-  // Otherwise spawn a new builder, gated behind the global semaphore so
-  // at most MAX_CONCURRENT_SCANS distinct builders run at once. Concurrent
-  // callers with the SAME cacheKey still piggyback on a single flight
-  // (and share its slot) — only NEW builders queue for slots.
+  // Otherwise spawn a new builder under TWO gates:
+  //   1. A per-build AsyncLocalStorage context exposing an AbortSignal that
+  //      fires at timeoutMs × 2 — gives nested deelFetch calls a way to
+  //      bail out so a stuck builder releases its retained row arrays.
+  //   2. The MAX_CONCURRENT_SCANS semaphore — caps concurrent admin scans
+  //      across all cacheKeys so 3+ different scan types can't pile their
+  //      working sets in heap at once.
+  //
+  // Concurrent callers with the SAME cacheKey still piggyback on a single
+  // flight (and share its slot + signal) — only NEW builders queue for
+  // slots and get their own signal.
   let buildPromise = _inFlight.get(cacheKey);
   if (!buildPromise) {
-    buildPromise = (async () => {
-      await _acquireScanSlot();
-      try {
-        const result = await builder();
-        cacheSet(cacheKey, result);
-        return result;
-      } finally {
-        _releaseScanSlot();
-      }
-    })();
+    const hardKillController = new AbortController();
+    const hardKillMs = timeoutMs * 2;
+    const hardKillTimer = setTimeout(() => {
+      hardKillController.abort(
+        new Error(`scan-timeout hard-kill after ${hardKillMs}ms (cacheKey=${cacheKey})`),
+      );
+    }, hardKillMs);
+
+    buildPromise = _scanContext.run(
+      { signal: hardKillController.signal, cacheKey },
+      async () => {
+        await _acquireScanSlot();
+        try {
+          const result = await builder();
+          cacheSet(cacheKey, result);
+          return result;
+        } finally {
+          _releaseScanSlot();
+          clearTimeout(hardKillTimer);
+        }
+      },
+    );
     _inFlight.set(cacheKey, buildPromise);
     // Always clear the slot when the Promise settles so a stuck/failed
     // build can't keep callers piggybacking on a dead Promise forever.
