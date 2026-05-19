@@ -29,6 +29,68 @@ import { cacheGet, cacheSet } from './server-cache';
 // failure), so a stuck-forever scan can't poison the slot indefinitely.
 const _inFlight = new Map();
 
+// ── Global scan concurrency semaphore ─────────────────────────────────────
+// 2026-05-19 (CRASH_AUDIT phase 2): the in-flight dedupe above only stops
+// duplicate work for the SAME cacheKey. Different scan types — offboarding
+// + onboarding + workbench + redlines + incentive-plans + amendments —
+// each have their own cacheKey, so 6 different routes can each run their
+// own ~50-page Deel admin walk concurrently. Each walk retains its row
+// array + raw response buffers in heap until the merge completes; live
+// logs at 09:23 UTC showed 3 concurrent scans pushing RSS from 2019 →
+// 2329 MiB in under 2 minutes, with the kernel OOM-killing the pod
+// shortly after.
+//
+// MAX_CONCURRENT_SCANS is a HARD cap on how many builder() functions can
+// be executing at the same time across ALL cacheKeys. The 4th builder
+// waits in the queue until a slot frees up; if it can't acquire one
+// before the outer timeoutMs expires, the existing stale-cache fallback
+// path serves the response. Routes already tolerate stale data on
+// timeout (`Live build exceeded ... — serving stale cache` lines), so
+// the queued-wait fallback is a no-op behaviour change.
+//
+// Default: 2. Tunable via MAX_CONCURRENT_SCANS env var for diagnostic
+// purposes. Two is empirically sufficient for ~5 concurrent users
+// average (the typical Ops Hub load). Three would let three different
+// admin scans pile up — that's the climb shape we want to prevent.
+const MAX_CONCURRENT_SCANS = (() => {
+  const env = Number(process.env.MAX_CONCURRENT_SCANS);
+  return Number.isFinite(env) && env > 0 ? Math.floor(env) : 2;
+})();
+
+let _activeScans = 0;
+const _waiters = [];
+
+function _acquireScanSlot() {
+  if (_activeScans < MAX_CONCURRENT_SCANS) {
+    _activeScans++;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    _waiters.push(resolve);
+  });
+}
+
+function _releaseScanSlot() {
+  const next = _waiters.shift();
+  if (next) {
+    // Hand the slot directly to the next waiter — _activeScans stays at
+    // its current value (which is === MAX_CONCURRENT_SCANS, so this just
+    // transfers ownership).
+    next();
+  } else {
+    _activeScans--;
+  }
+}
+
+/** Diagnostic export — current semaphore state. Used by /api/v1/diagnostics. */
+export function getScanSemaphoreState() {
+  return {
+    active: _activeScans,
+    queued: _waiters.length,
+    max: MAX_CONCURRENT_SCANS,
+  };
+}
+
 /**
  * Run `builder()` with a `timeoutMs` ceiling. On timeout, return the
  * stale cache value (or surface the timeout as a structured error if
@@ -49,17 +111,20 @@ export async function buildWithTimeout(cacheKey, builder, opts = {}) {
   const staleTtl = Number.isFinite(opts.staleTtl) && opts.staleTtl > 0 ? opts.staleTtl : 60 * 60_000;
 
   // Dedupe: if a build for this cacheKey is already running, reuse it.
-  // Otherwise spawn a new builder and cache the Promise so concurrent
-  // callers can join the same flight.
+  // Otherwise spawn a new builder, gated behind the global semaphore so
+  // at most MAX_CONCURRENT_SCANS distinct builders run at once. Concurrent
+  // callers with the SAME cacheKey still piggyback on a single flight
+  // (and share its slot) — only NEW builders queue for slots.
   let buildPromise = _inFlight.get(cacheKey);
   if (!buildPromise) {
     buildPromise = (async () => {
+      await _acquireScanSlot();
       try {
         const result = await builder();
         cacheSet(cacheKey, result);
         return result;
-      } catch (err) {
-        throw err;
+      } finally {
+        _releaseScanSlot();
       }
     })();
     _inFlight.set(cacheKey, buildPromise);
