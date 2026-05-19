@@ -493,7 +493,16 @@ const Queue = ({ user, tasks, subFilter }) => {
     if (fSla === 'at_risk')  _vis = _vis.filter(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; });
     if (fSla === 'breached') _vis = _vis.filter(t => { const s = slaInfo(t); return s && s.breach; });
     _vis = _vis.filter(t => !t.isCalendarBooking);
-    if (search) { const sl = search.toLowerCase(); _vis = _vis.filter(t => t.subject.toLowerCase().includes(sl) || t.id.toLowerCase().includes(sl) || t.type.toLowerCase().includes(sl)); }
+    if (search) {
+      const sl = search.toLowerCase();
+      _vis = _vis.filter(t =>
+        t.subject.toLowerCase().includes(sl)
+        || t.id.toLowerCase().includes(sl)
+        || t.type.toLowerCase().includes(sl)
+        || (t.requesterName || '').toLowerCase().includes(sl)
+        || (t.requesterEmail || '').toLowerCase().includes(sl)
+      );
+    }
 
     // SLA tier for tickets — 0=breached, 1=at-risk, 2=on-track. Mirrors the
     // SLA pill counts so this sort and the pill counts agree on which row
@@ -525,13 +534,14 @@ const Queue = ({ user, tasks, subFilter }) => {
     };
     const getColVal = (t) => {
       switch (sortCol) {
-        case 'source':   return (t.source || '').toLowerCase();
-        case 'subject':  return (t.subject || '').toLowerCase();
-        case 'function': return (FUNCTIONS[t.type]?.label || t.type || '').toLowerCase();
-        case 'country':  return (t.country || '').toLowerCase();
-        case 'assignee': return ((resolveAssignee(t).name) || '').toLowerCase();
-        case 'received': return ticketCreatedMs(t);
-        case 'status':   return (t.status || '').toLowerCase();
+        case 'source':    return (t.source || '').toLowerCase();
+        case 'subject':   return (t.subject || '').toLowerCase();
+        case 'function':  return (FUNCTIONS[t.type]?.label || t.type || '').toLowerCase();
+        case 'country':   return (t.country || '').toLowerCase();
+        case 'requester': return (t.requesterName || '').toLowerCase();
+        case 'assignee':  return ((resolveAssignee(t).name) || '').toLowerCase();
+        case 'received':  return ticketCreatedMs(t);
+        case 'status':    return (t.status || '').toLowerCase();
         default: return 0; // 'sla' handled separately
       }
     };
@@ -1444,6 +1454,14 @@ const Queue = ({ user, tasks, subFilter }) => {
                   <SortableTh col="subject"  label="Subject"  minWidth={200} align="left" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <SortableTh col="function" label="Function" width={90}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <SortableTh col="country"  label="Country"  width={50}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  {/* Requester — the employee/customer who raised the ticket.
+                      Anne Sanmartin 2026-05-19 feedback "when going through
+                      the ZD tickets, searching with the requester can be
+                      helpful, specially is you have several tickets with
+                      the same topic". Source: `task.requesterName` (and
+                      `requesterEmail` for the hover tooltip), both already
+                      populated by /api/v1/queue for Zendesk + Jira. */}
+                  <SortableTh col="requester" label="Requester" width={120} align="left" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <SortableTh col="assignee" label="Assignee" width={80}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <SortableTh col="received" label="Received" width={68}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   {settings.sla_enabled !== false && (
@@ -1688,6 +1706,27 @@ const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onSlaExtension, on
           country NAME everywhere, not the ISO code. */}
       <td title={task.country ? getCountryName(task.country) : ''} style={{ ...tdStyle, fontSize: 12 }}>
         {task.country && <span>{getFlag(task.country)} <span style={{ color: '#616161', fontWeight: 500 }}>{getCountryName(task.country) || task.country}</span></span>}
+      </td>
+      {/* Requester — the employee/customer who raised the ticket. Hover
+          tooltip carries the email so the user can spot multiple tickets
+          from the same person at a glance (Anne Sanmartin 2026-05-19). */}
+      <td
+        title={task.requesterName
+          ? `${task.requesterName}${task.requesterEmail ? ` <${task.requesterEmail}>` : ''}`
+          : 'Requester unknown'}
+        style={{ ...tdStyle, textAlign: 'left', fontSize: 12, color: '#1b1b1b', maxWidth: 140 }}
+      >
+        {task.requesterName
+          ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+              <Avatar name={task.requesterName} size="xs"/>
+              <span style={{
+                fontWeight: 500, whiteSpace: 'nowrap',
+                overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>{task.requesterName}</span>
+            </div>
+          )
+          : <span style={{ color: '#d5d5d5' }}>--</span>}
       </td>
       {/* Assignee — full name in title attr; cell only displays first name. */}
       <td title={assignee.name || 'Unassigned'} style={tdStyle}>
