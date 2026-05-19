@@ -466,59 +466,107 @@ async function batchFetchUsers(userIds) {
   return userMap;
 }
 
+// ── In-memory diff-based "recently solved" tracking ─────────────────────────
+// 2026-05-19 — replaces the expensive `status:solved updated<24hours` Zendesk
+// fetch (which fan-out + maxPages combined could exceed the FE's 90s timeout
+// and return 503). Insight from Mohamed: a ticket that was in our actionable
+// set last sync and isn't this sync has either been solved, reassigned, or
+// closed — for the queue's "recently resolved" surface, treating it as solved
+// is right ~always. We snapshot the raw Zendesk rows on every successful
+// fetch, diff against the next sync, and stamp dropouts as solved with the
+// sync timestamp. 24h aging keeps the cache bounded.
+//
+// In-memory + per-pod. Multi-pod inconsistency is acceptable — within a
+// single pod the diff is internally consistent, and the 2-min response
+// cache means a single user's view is stable. Survives across requests but
+// not across pod restarts; after a restart the recently-solved list rebuilds
+// over the next sync cycle.
+const _zdLastActionableSnapshot = new Map(); // id → raw Zendesk row
+const _zdRecentlySolvedCache    = new Map(); // id → { row, solvedAt (ms) }
+const ZD_RECENTLY_SOLVED_TTL_MS = 24 * 60 * 60 * 1000;
+
+function _diffAndStampSolved(currentActionableRows) {
+  const now = Date.now();
+  const currentIds = new Set();
+  for (const t of currentActionableRows) {
+    if (t?.id != null) currentIds.add(t.id);
+  }
+  // 1. Anything in last snapshot that isn't in current → just-solved.
+  //    Copy the row from the snapshot (Zendesk-side data was correct at the
+  //    moment we last saw it) and stamp our own solvedAt.
+  for (const [id, row] of _zdLastActionableSnapshot) {
+    if (!currentIds.has(id)) {
+      _zdRecentlySolvedCache.set(id, { row: { ...row, status: 'solved' }, solvedAt: now });
+    }
+  }
+  // 2. Anything that came BACK into actionable (re-opened) drops from cache.
+  for (const id of currentIds) {
+    if (_zdRecentlySolvedCache.has(id)) _zdRecentlySolvedCache.delete(id);
+  }
+  // 3. Age out entries older than 24h.
+  for (const [id, entry] of _zdRecentlySolvedCache) {
+    if (now - entry.solvedAt > ZD_RECENTLY_SOLVED_TTL_MS) {
+      _zdRecentlySolvedCache.delete(id);
+    }
+  }
+  // 4. Refresh snapshot for next sync.
+  _zdLastActionableSnapshot.clear();
+  for (const t of currentActionableRows) {
+    if (t?.id != null) _zdLastActionableSnapshot.set(t.id, t);
+  }
+}
+
 // ── Fetch ALL Zendesk tickets (paginated) ────────────────────────────────────
 async function fetchZendeskQueue() {
   if (!isZendeskConfigured()) return { items: [], status: 'skipped', error: null };
 
   try {
     // Zendesk Search API caps at 1,000 results per query.
-    // Each status is queried independently so we can pull up to 1,000 per
-    // status (10 pages × 100). Sequential to limit peak memory.
-    const seenZd = new Set();
-    const allTickets = [];
-    // Track if ANY status query was truncated by the page cap. When true the
-    // FE renders a "showing N — refine to see more" banner above the table.
-    let zdTruncated = false;
-    let zdServerTotal = 0; // Sum of per-status server-reported totals.
-
+    // We pull the 4 actionable statuses in parallel (was sequential before
+    // 2026-05-19 — sequential added ~30s of wall-time and pushed the
+    // route over the FE's 90s timeout once the semaphore from PR #680
+    // started serializing scans). The memory cost is bounded because each
+    // status query is itself bounded at 1000 rows; peak holds 4 × 1000
+    // raw rows = ~4000 small JSON objects, well under the V8 budget that
+    // the watchdog from PR #679 polices.
     const statusQueries = ['new', 'open', 'pending', 'hold'].map(
       s => `group:"${ZD_GROUP_NAME}" status:${s}`
     );
-    // Fetch each status sequentially (not parallel) to reduce peak memory.
-    // Uses paginatedZendeskSearchAllTime so a status with > 1000 actionable
-    // tickets is auto-split by date range and we recover the full set
-    // (2026-05-18 fix — the "2171 of 4053" banner was caused by the 1000
-    // hard cap dropping older tickets silently).
-    for (const q of statusQueries) {
-      const { results, truncated, serverTotal } = await paginatedZendeskSearchAllTime(q, { maxPages: 10 });
+    const actionableResults = await Promise.all(
+      statusQueries.map(q => paginatedZendeskSearchAllTime(q, { maxPages: 10 })),
+    );
+
+    // Track if any status query was truncated AND accumulate the
+    // first-probe serverTotal (NOT the bucket-sum — see paginatedZendesk
+    // SearchAllTime for the rationale).
+    let zdTruncated = false;
+    let zdServerTotal = 0;
+    const seenZd = new Set();
+    const actionableRows = [];
+    for (const { results, truncated, serverTotal } of actionableResults) {
       for (const t of results) {
-        if (!seenZd.has(t.id)) { seenZd.add(t.id); allTickets.push(t); }
+        if (!seenZd.has(t.id)) { seenZd.add(t.id); actionableRows.push(t); }
       }
       if (truncated) zdTruncated = true;
       if (typeof serverTotal === 'number') zdServerTotal += serverTotal;
     }
-    // Recently solved (last 24 hours) — keeps resolved tickets visible in
-    // the queue for a full day after they leave the active state. Pilar's
-    // rule: "always show the resolved items in the past 24h with no data
-    // loss across all Qs". The 24h window naturally fits under the 1000
-    // hard cap for every team we've observed, so we keep the plain
-    // pagination path here (no date-bucket split needed) — but the
-    // helper is still used to surface truncation if a team ever resolves
-    // > 1000 tickets in 24 hours.
-    const solvedQuery = `group:"${ZD_GROUP_NAME}" status:solved updated<24hours`;
-    // maxPages bumped 5 → 10 on 2026-05-19. Solved-24h regularly exceeds
-    // 1000 hits on HR Experience (~2156 verified) so the previous 500-row
-    // cap stripped ~1300 resolved tickets from the queue, producing the
-    // "888 of ~2156" discrepancy. 10 pages × 100 = 1000 per bucket
-    // matches the unbucketed first probe, and the bucket fan-out covers
-    // the rest of the range.
-    const { results: solvedResults, truncated: solvedTruncated, serverTotal: solvedServerTotal } =
-      await paginatedZendeskSearchAllTime(solvedQuery, { maxPages: 10 });
-    for (const t of solvedResults) {
-      if (!seenZd.has(t.id)) { seenZd.add(t.id); allTickets.push(t); }
+
+    // Diff against the previous sync's actionable set + stamp dropouts as
+    // "recently solved". Mohamed's 2026-05-19 spec: replace the Zendesk
+    // `status:solved updated<24hours` query entirely, which was the perf
+    // bottleneck — 5-bucket fan-out + 10 pages each = up to 50 Zendesk
+    // calls just for resolved. Internal diff is O(actionable) + zero
+    // upstream calls.
+    _diffAndStampSolved(actionableRows);
+    const recentlySolvedRows = [];
+    for (const entry of _zdRecentlySolvedCache.values()) {
+      if (!seenZd.has(entry.row.id)) {
+        seenZd.add(entry.row.id);
+        recentlySolvedRows.push(entry.row);
+      }
     }
-    if (solvedTruncated) zdTruncated = true;
-    if (typeof solvedServerTotal === 'number') zdServerTotal += solvedServerTotal;
+
+    const allTickets = [...actionableRows, ...recentlySolvedRows];
     if (allTickets.length === 0) return { items: [], status: 'ok', count: 0, truncated: zdTruncated, serverTotal: zdServerTotal || 0, error: null };
 
     // Collect unique user IDs for batch lookup
