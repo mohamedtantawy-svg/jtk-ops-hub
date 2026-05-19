@@ -400,8 +400,16 @@ async function paginatedZendeskSearchAllTime(baseQuery, { maxPages = 10, perPage
   const allResults = [];
   const seenIds = new Set();
   let stillTruncated = false;
-  let serverTotalSum = 0;
-  let everSawServerTotal = false;
+  // Anchor the user-facing "of X" hint on the unbucketed first probe.
+  // Summing each bucket's `res.count` produced bogus inflated totals
+  // (verified 2026-05-19: solved-24h probe count = 2156, but the
+  // bucket-sum returned 2794 because Zendesk's `count` field is
+  // documented as approximate, and one bucket query returned 2156
+  // again as its own approximation). The first probe is a single
+  // approximation; bucketSum is a sum of approximations and amplifies
+  // the slop. We still iterate every bucket to retrieve rows, but the
+  // ground-truth count comes from the unbucketed call.
+  const firstProbeServerTotal = (typeof first.serverTotal === 'number') ? first.serverTotal : null;
 
   for (const b of ZENDESK_DATE_BUCKETS) {
     // Compose date range. `created<Xdays` = newer than X days ago,
@@ -411,24 +419,29 @@ async function paginatedZendeskSearchAllTime(baseQuery, { maxPages = 10, perPage
     if (b.newer) dateParts.push(`created<${b.newer}`);
     if (b.older) dateParts.push(`created>${b.older}`);
     const subQuery = `${baseQuery} ${dateParts.join(' ')}`.trim();
-    const { results, truncated, serverTotal } = await paginatedZendeskSearch(subQuery, { maxPages, perPage });
+    const { results, truncated } = await paginatedZendeskSearch(subQuery, { maxPages, perPage });
     for (const t of results) {
       if (t?.id == null || seenIds.has(t.id)) continue;
       seenIds.add(t.id);
       allResults.push(t);
     }
     if (truncated) stillTruncated = true;
-    if (typeof serverTotal === 'number') {
-      serverTotalSum += serverTotal;
-      everSawServerTotal = true;
-    }
   }
 
-  console.log(`[queue] Zendesk bucket-split of "${baseQuery}" recovered ${allResults.length} tickets (${stillTruncated ? 'one or more sub-buckets still truncated' : 'fully covered'})`);
+  // Honest truncation signal: only flag truncated when retrieved set
+  // is meaningfully smaller than what Zendesk says exists. Within a
+  // generous 5% tolerance for approximation noise on the count field.
+  const honestTruncated = stillTruncated || (
+    firstProbeServerTotal !== null
+    && allResults.length > 0
+    && allResults.length < firstProbeServerTotal * 0.95
+  );
+
+  console.log(`[queue] Zendesk bucket-split of "${baseQuery}" recovered ${allResults.length} tickets (${honestTruncated ? 'truncated — refine filter' : 'fully covered'}, upstream estimate=${firstProbeServerTotal})`);
   return {
     results: allResults,
-    truncated: stillTruncated,
-    serverTotal: everSawServerTotal ? serverTotalSum : null,
+    truncated: honestTruncated,
+    serverTotal: firstProbeServerTotal,
   };
 }
 
@@ -493,8 +506,14 @@ async function fetchZendeskQueue() {
     // helper is still used to surface truncation if a team ever resolves
     // > 1000 tickets in 24 hours.
     const solvedQuery = `group:"${ZD_GROUP_NAME}" status:solved updated<24hours`;
+    // maxPages bumped 5 → 10 on 2026-05-19. Solved-24h regularly exceeds
+    // 1000 hits on HR Experience (~2156 verified) so the previous 500-row
+    // cap stripped ~1300 resolved tickets from the queue, producing the
+    // "888 of ~2156" discrepancy. 10 pages × 100 = 1000 per bucket
+    // matches the unbucketed first probe, and the bucket fan-out covers
+    // the rest of the range.
     const { results: solvedResults, truncated: solvedTruncated, serverTotal: solvedServerTotal } =
-      await paginatedZendeskSearchAllTime(solvedQuery, { maxPages: 5 });
+      await paginatedZendeskSearchAllTime(solvedQuery, { maxPages: 10 });
     for (const t of solvedResults) {
       if (!seenZd.has(t.id)) { seenZd.add(t.id); allTickets.push(t); }
     }
@@ -620,8 +639,20 @@ async function fetchZendeskQueue() {
       // 2026-05-07 spec ("im fine with the margin of error"). Switch
       // to Zendesk's policy_metrics via background cron + DB cache for
       // 100% accuracy if needed later.
-      let slaMetric = null; // 'frt' | 'nrt' | null
+      let slaMetric = null; // 'frt' | 'nrt' | 'rwt' | 'put' | null
       let activeAnchorMs = null;
+      // Local default for paused statuses (2026-05-19, Track B SLA fix):
+      // pending = "waiting on requester" → requester_wait_time (RWT)
+      // hold    = "agent paused, needs periodic update" → periodic_update_time (PUT)
+      // Both anchor on pausedAnchorMs (the assignee's last action, typically
+      // the reply that flipped the ticket into the paused state) and use
+      // zendeskPausedMins for the threshold. When the Zendesk SLA cache has
+      // a row for this ticket, `it.slaMetric = row.activeStage` below
+      // overwrites with Zendesk's truth (also possibly 'rwt' / 'put').
+      if (isPausedStatus && appStatus !== 'resolved') {
+        if (t.status === 'pending') slaMetric = 'rwt';
+        else if (t.status === 'hold') slaMetric = 'put';
+      }
       if (!isPausedStatus && appStatus !== 'resolved') {
         const hasMetricSet = !!t.metric_set;
         const rtm = metric.reply_time_in_minutes;
@@ -728,6 +759,8 @@ async function fetchZendeskQueue() {
         slaBreachAt: null,
         slaFrtBreachAt: null,
         slaNrtBreachAt: null,
+        slaRwtBreachAt: null,
+        slaPutBreachAt: null,
       };
     });
 
@@ -751,6 +784,9 @@ async function fetchZendeskQueue() {
           // Zendesk's policy is the truth — overwrite the local FRT/NRT
           // detection. activeStage may be null (assignee caught up); that
           // path is intentional and slaInfo() short-circuits to OK on it.
+          // For paused statuses, activeStage typically comes back as 'rwt'
+          // (requester_wait_time) or 'put' (periodic_update_time) which
+          // overrides the local-default we set above for pending/hold.
           it.slaSource      = 'zendesk_policy';
           it.slaMetric      = row.activeStage;
           it.slaBreachAt    = row.activeBreachAt;
@@ -758,6 +794,10 @@ async function fetchZendeskQueue() {
           it.slaFrtMinutes  = row.frtMinutes;
           it.slaNrtBreachAt = row.nrtBreachAt;
           it.slaNrtMinutes  = row.nrtMinutes;
+          it.slaRwtBreachAt = row.rwtBreachAt;
+          it.slaRwtMinutes  = row.rwtMinutes;
+          it.slaPutBreachAt = row.putBreachAt;
+          it.slaPutMinutes  = row.putMinutes;
         }
         if (_enriched > 0) {
           console.log(`[queue] Zendesk SLA cache: ${_enriched}/${items.length} tickets enriched from policy_metrics`);
