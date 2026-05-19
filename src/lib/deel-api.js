@@ -278,10 +278,24 @@ export async function listOnboardingPeople(params = {}) {
     }
     return out;
   };
-  const [actionableRes, supplementalRaw] = await Promise.all([
+  // Promise.allSettled (not Promise.all) so a delayed rejection in one
+  // branch after the other fails cannot escape as an unhandled rejection
+  // during upstream 500-storms. Actionable is canonical — its failure
+  // still bubbles up so the route handler's stale-cache fallback fires.
+  // Supplemental failures degrade gracefully to actionable-only rows.
+  const _settled = await Promise.allSettled([
     deelFetch(`/admin/eor/employee-manager/list/Onboarding.ActionableQueue?${qs}`),
     supplementalSequential(),
   ]);
+  if (_settled[0].status === 'rejected') throw _settled[0].reason;
+  const actionableRes = _settled[0].value;
+  let supplementalRaw;
+  if (_settled[1].status === 'fulfilled') {
+    supplementalRaw = _settled[1].value;
+  } else {
+    console.warn('[onboarding] supplemental scan failed, continuing with actionable-only rows:', _settled[1].reason?.message || _settled[1].reason);
+    supplementalRaw = [];
+  }
 
   const rawItems = actionableRes?.result || [];
 
@@ -950,7 +964,21 @@ export async function listIncentivePlans(params = {}) {
     ? params.status
     : [params.status || 'PENDING_IP_PREPARATION'];
 
-  const batches = await Promise.all(statusList.map(fetchAllIncentivePlansForStatus));
+  // Per-element .catch so one Deel 500 doesn't reject the whole Promise.all
+  // (which would also let sibling rejections leak as unhandledRejection
+  // during a storm). Mirrors the offboarding pattern further down in this
+  // file. If every status failed we re-throw the first error so the route
+  // handler's stale-cache fallback fires — otherwise an empty queue would
+  // be indistinguishable from "nothing to do".
+  const _failures = new Array(statusList.length).fill(null);
+  const batches = await Promise.all(statusList.map((s, idx) => fetchAllIncentivePlansForStatus(s).catch(err => {
+    _failures[idx] = err;
+    console.warn('[incentive-plans] status stream failed:', s, err?.message || err);
+    return [];
+  })));
+  if (_failures.filter(Boolean).length === statusList.length) {
+    throw _failures.find(Boolean);
+  }
 
   const seen = new Set();
   const rawItems = [];
@@ -1206,7 +1234,17 @@ export async function listRedlineRequests(params = {}) {
     ? params.status
     : [params.status || 'preparingDocuments.legalReview'];
 
-  const batches = await Promise.all(statusList.map(fetchAllRedlinesForStatus));
+  // Per-element .catch — see the matching listIncentivePlans block above
+  // for the rationale (storm-time leak guard + all-failed throw).
+  const _failures = new Array(statusList.length).fill(null);
+  const batches = await Promise.all(statusList.map((s, idx) => fetchAllRedlinesForStatus(s).catch(err => {
+    _failures[idx] = err;
+    console.warn('[redlines] status stream failed:', s, err?.message || err);
+    return [];
+  })));
+  if (_failures.filter(Boolean).length === statusList.length) {
+    throw _failures.find(Boolean);
+  }
 
   // Dedupe by redline id (retry overlap guard).
   const seen = new Set();
@@ -1459,7 +1497,17 @@ export async function listAmendmentRequests(params = {}) {
     return res?.data || [];
   }
 
-  const batches = await Promise.all(statuses.map(fetchStatus));
+  // Per-element .catch — see the matching listIncentivePlans block for the
+  // rationale (storm-time leak guard + all-failed throw).
+  const _failures = new Array(statuses.length).fill(null);
+  const batches = await Promise.all(statuses.map((s, idx) => fetchStatus(s).catch(err => {
+    _failures[idx] = err;
+    console.warn('[amendments] status stream failed:', s, err?.message || err);
+    return [];
+  })));
+  if (_failures.filter(Boolean).length === statuses.length) {
+    throw _failures.find(Boolean);
+  }
 
   // Merge + dedupe by amendment id (same amendment never appears twice in one
   // bucket, but a retry could in theory return overlap).
