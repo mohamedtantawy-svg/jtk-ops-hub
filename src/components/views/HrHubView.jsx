@@ -133,6 +133,11 @@ export default function HrHubView({ user, onCreateHrHub }) {
 
   // ── Filters & toggles ─────────────────────────────────────────────────────
   const isManager = isManagerRole(user, perms);
+  // Admin gate — required to self-approve on the approval flows (TL / RM
+  // are blocked from approving their own row to preserve 4-eyes). Mirrors
+  // the inline check on the RequestRow at line below; lifted so the
+  // detail panel can read the same value.
+  const isAdmin = isManager && (user?.role === 'admin' || (user?.access || '').toLowerCase().includes('admin'));
   const [scope, setScope] = useState('mine');
   const [flowFilter, setFlowFilter] = useState('all');
   // Default to 'new' so the landing page shows actionable work, not
@@ -375,6 +380,38 @@ export default function HrHubView({ user, onCreateHrHub }) {
     setItems(prev => prev.map(it => it.id === updated.id ? { ...it, ...updated } : it));
   }, []);
 
+  // Approve/Deny dispatch for the two row-anchored approval flows. Lifted
+  // out of the inline RequestRow JSX so the detail panel can share the
+  // exact same workflow — Mohamed 2026-05-19: "SLA extension, when the
+  // task is open, you need to add approval or Denial similar to what you
+  // see on the table. Right now if you change the status from here, it
+  // doesn't impact anything and it goes to solved queue whether you
+  // approved or deny." Status-picker PATCH only bumps the status; it
+  // doesn't insert the sla_extension row or hidden_task row that the
+  // workflow actually needs.
+  const handleTaskApprove = useCallback(async (it) => {
+    setDecisionError(null);
+    // SLA Extension routes through its own modal so the manager can pick
+    // 1-7 days. Hide Task is a single-click approve (no extra fields).
+    if (it.flow === 'sla_extension_request') {
+      setSlaApproveModalReq(it);
+      return;
+    }
+    try {
+      await approveHideTask(it.id);
+      try { integrations?.hiddenTasks?.refresh?.(); } catch {}
+      loadFirstPage();
+      refreshDetail();
+    } catch (err) {
+      setDecisionError(err?.message || 'Approval failed');
+    }
+  }, [integrations, loadFirstPage, refreshDetail]);
+
+  const handleTaskDeny = useCallback((it) => {
+    if (it.flow === 'sla_extension_request') setSlaDenyModalReq(it);
+    else setDenyModalReq(it);
+  }, []);
+
   // ── Render ───────────────────────────────────────────────────────────────
   return (
     <div style={page}>
@@ -569,31 +606,9 @@ export default function HrHubView({ user, onCreateHrHub }) {
                 onClick={() => setDetailId(item.id)}
                 viewerEmail={user?.email}
                 isManager={isManager}
-                isAdmin={isManager && (user?.role === 'admin' || (user?.access || '').toLowerCase().includes('admin'))}
-                onApprove={async (it) => {
-                  setDecisionError(null);
-                  // SLA Extension goes through its own approve modal so
-                  // the manager can pick 1-7 days. Hide Task is a
-                  // single-click approve (no extra fields).
-                  if (it.flow === 'sla_extension_request') {
-                    setSlaApproveModalReq(it);
-                    return;
-                  }
-                  try {
-                    await approveHideTask(it.id);
-                    // Refresh the global hide list so the queue render path
-                    // picks up the new entry on the next render. Then reload
-                    // this view so the row flips to "resolved" status.
-                    try { integrations?.hiddenTasks?.refresh?.(); } catch {}
-                    loadFirstPage();
-                  } catch (err) {
-                    setDecisionError(err?.message || 'Approval failed');
-                  }
-                }}
-                onDeny={(it) => {
-                  if (it.flow === 'sla_extension_request') setSlaDenyModalReq(it);
-                  else setDenyModalReq(it);
-                }}
+                isAdmin={isAdmin}
+                onApprove={handleTaskApprove}
+                onDeny={handleTaskDeny}
               />
             ))}
             {cursor && (
@@ -621,6 +636,10 @@ export default function HrHubView({ user, onCreateHrHub }) {
           loading={detailLoading}
           error={detailError}
           user={user}
+          isManager={isManager}
+          isAdmin={isAdmin}
+          onApproveTask={handleTaskApprove}
+          onDenyTask={handleTaskDeny}
           onClose={() => setDetailId(null)}
           onRefresh={refreshDetail}
           onItemUpdated={onItemUpdated}
@@ -633,6 +652,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
           onDenied={() => {
             setDenyModalReq(null);
             loadFirstPage();
+            refreshDetail();
           }}
         />
       )}
@@ -648,6 +668,11 @@ export default function HrHubView({ user, onCreateHrHub }) {
             // SLA_EXTENSIONS_PLAN.md sync robustness contract.
             try { integrations?.slaExtensions?.refresh?.(); } catch {}
             loadFirstPage();
+            // Refresh the open detail panel too so its status pill +
+            // Approved-days field reflect the decision without a manual
+            // reload (the panel can be the surface where the manager
+            // triggered Approve, not just the list row).
+            refreshDetail();
           }}
         />
       )}
@@ -658,6 +683,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
           onDenied={() => {
             setSlaDenyModalReq(null);
             loadFirstPage();
+            refreshDetail();
           }}
         />
       )}

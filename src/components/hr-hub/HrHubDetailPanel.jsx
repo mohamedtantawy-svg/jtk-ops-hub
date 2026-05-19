@@ -72,7 +72,7 @@ function formatRelative(iso) {
   return new Date(iso).toLocaleDateString();
 }
 
-export default function HrHubDetailPanel({ requestId, detail, loading, error, user, onClose, onRefresh, onItemUpdated }) {
+export default function HrHubDetailPanel({ requestId, detail, loading, error, user, isManager, isAdmin, onApproveTask, onDenyTask, onClose, onRefresh, onItemUpdated }) {
   const request = detail?.request;
   const initialComments = detail?.comments || [];
   const followers = detail?.followers || [];
@@ -139,6 +139,26 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
   if (!requestId) return null;
   const flowLabel = FLOW_LABELS[request?.flow] || request?.flow || '';
 
+  // Approve/Deny gate — mirrors RequestRow's canDecide (HrHubView line
+  // 730+) so the row + drawer enforce the same workflow. Mohamed
+  // 2026-05-19: "SLA extension, when the task is open, you need to add
+  // approval or Denial similar to what you see on the table. Right now
+  // if you change the status from here, it doesn't impact anything and
+  // it goes to solved queue whether you approved or deny." The picker
+  // PATCH only updates the status column; it doesn't insert the
+  // sla_extension row (or hidden_task row) the workflow actually needs.
+  const isApprovalFlow = request?.flow === 'sla_extension_request' || request?.flow === 'hide_task_request';
+  const isUnresolved = request?.status && request.status !== 'resolved' && request.status !== 'rejected';
+  const viewerLc = (user?.email || '').toLowerCase();
+  const isSelf = request && (request.createdByEmail || '').toLowerCase() === viewerLc;
+  const canDecide = isApprovalFlow && isUnresolved && !!isManager && (!isSelf || !!isAdmin);
+  // Disable the status picker on approval flows whose decision hasn't
+  // landed yet — the picker only PATCHes status, bypassing the
+  // approve/deny endpoints that actually grant the extension / hide the
+  // row. Picker stays interactive on every other flow + on already-
+  // resolved approval rows (rare admin reopen path).
+  const statusPickerLocked = isApprovalFlow && isUnresolved;
+
   return (
     <div
       onClick={onClose}
@@ -169,6 +189,40 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
             textTransform: 'uppercase', color: 'var(--text-muted)',
           }}>{flowLabel}</div>
           <div style={{ flex: 1 }} />
+          {canDecide && (
+            <>
+              <button
+                type="button"
+                onClick={() => onApproveTask?.(request)}
+                title="Approve this request"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '6px 14px', borderRadius: 999,
+                  background: '#15803d', color: 'white',
+                  border: 'none', cursor: 'pointer',
+                  fontSize: 12, fontWeight: 700, fontFamily: 'inherit',
+                }}
+              >
+                <i className="bi bi-check2" style={{ fontSize: 13 }} />
+                Approve
+              </button>
+              <button
+                type="button"
+                onClick={() => onDenyTask?.(request)}
+                title="Deny this request"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '6px 14px', borderRadius: 999,
+                  background: 'var(--surface)', color: '#d42d35',
+                  border: '1px solid #fca5a5', cursor: 'pointer',
+                  fontSize: 12, fontWeight: 700, fontFamily: 'inherit',
+                }}
+              >
+                <i className="bi bi-x" style={{ fontSize: 13 }} />
+                Deny
+              </button>
+            </>
+          )}
           <CopyLinkButton requestId={requestId} />
           <FollowButton
             isFollowing={isFollowing}
@@ -218,7 +272,12 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
                 flexWrap: 'wrap',
               }}>
                 <LabeledPicker label="Status">
-                  <PickerStatus value={request.status} onChange={v => updateField({ status: v })} disabled={savingField === 'status'} />
+                  <PickerStatus
+                    value={request.status}
+                    onChange={v => updateField({ status: v })}
+                    disabled={savingField === 'status' || statusPickerLocked}
+                    title={statusPickerLocked ? 'Status is driven by Approve / Deny on this flow — use the buttons in the header.' : undefined}
+                  />
                 </LabeledPicker>
                 <LabeledPicker label="Priority">
                   <PickerPriority value={request.priority} onChange={v => updateField({ priority: v })} disabled={savingField === 'priority'} />
@@ -463,12 +522,13 @@ function LabeledPicker({ label, children }) {
   );
 }
 
-function PickerStatus({ value, onChange, disabled }) {
+function PickerStatus({ value, onChange, disabled, title }) {
   return (
     <select
       value={value || ''}
       onChange={e => onChange(e.target.value)}
       disabled={disabled}
+      title={title}
       style={pickerStyle(STATUS_OPTIONS.find(s => s.id === value)?.bg, STATUS_OPTIONS.find(s => s.id === value)?.color)}
     >
       {STATUS_OPTIONS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
