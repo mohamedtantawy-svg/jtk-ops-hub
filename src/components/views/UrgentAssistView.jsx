@@ -518,6 +518,13 @@ export default function UrgentAssistView({ user, onCreate, managerOnCall, onChan
                     Auto-updates when the MoC rotates because the value
                     flows through the prop chain from App.jsx. */}
                 <Th label="Urgent Assist Assignee" width={160} />
+                {/* Added by — Duygu 2026-05-19: "we dont see who is
+                    adding these manual urgent assist requests" — manual
+                    rows with the wrong request type were untraceable.
+                    Surfaces createdByName for both manual + workbench
+                    rows so managers can route the request-type confusion
+                    back to the person who created it. */}
+                <Th label="Added by" width={130} />
                 <Th label="Created"  width={120} />
                 <Th label="SLA (6h)" width={90} />
                 <Th label="Status"   width={150} />
@@ -629,6 +636,35 @@ function UrgentRow({ row, managerOnCall, onStatusChange, onDelete }) {
         ) : (
           <span style={{ fontSize: 11, color: '#9e9e9e' }}>—</span>
         )}
+      </td>
+      {/* Added by — surfaces the row's creator so manual rows with the
+          wrong request type can be traced back to the person who added
+          them. Manual rows carry the Ops Hub user; workbench rows carry
+          the Deel-admin creator. Falls back to the email's local-part
+          when no display name is available so the column never reads
+          blank for a real creator. Em-dash only when neither is set. */}
+      <td
+        style={tdStyle}
+        title={row.createdByName || row.createdByEmail
+          ? `${row.createdByName || ''}${row.createdByEmail ? ` <${row.createdByEmail}>` : ''}`.trim()
+          : 'Creator unknown'}
+      >
+        {(() => {
+          const name = row.createdByName || (row.createdByEmail ? row.createdByEmail.split('@')[0] : '');
+          if (!name) return <span style={{ fontSize: 11, color: '#9e9e9e' }}>—</span>;
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
+              <Avatar name={name} size="xs" />
+              <span style={{
+                fontSize: 11, color: '#1b1b1b', fontWeight: 500,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                maxWidth: 90,
+              }}>
+                {name.split(/[ .]/)[0]}
+              </span>
+            </div>
+          );
+        })()}
       </td>
       <td style={{ ...tdStyle, fontSize: 11, color: '#616161', whiteSpace: 'nowrap' }} title={row.createdAt ? new Date(row.createdAt).toLocaleString() : ''}>
         <div>{fmtDate(row.createdAt)}</div>

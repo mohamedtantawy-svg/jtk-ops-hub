@@ -235,14 +235,29 @@ export async function GET(req) {
   const mentionedMePlaceholder = `$${p++}`;
   params.push(callerEmail);
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  // Lite-shape SELECT — Mohamed 2026-05-19: "very very slow to load."
+  // The list endpoint used to project four heavy fields per row that the
+  // row UI never reads (attachments JSONB up to ~12 MB × N per row,
+  // ideal_solution TEXT, resolution_note TEXT, links JSONB). Every
+  // DecisionsStrip mount fires 12 of these list calls in parallel +
+  // HrHubView fires another on tab open, so the wasted bytes
+  // multiply quickly.
+  //
+  // Same fix as PR #590 (skill mistake #45 — Feedback list disaster).
+  // attachments is replaced with an in-DB length expression so we ship
+  // an integer instead of the JSONB blob; ideal_solution / resolution_note
+  // / links are only rendered in HrHubDetailPanel (which fetches
+  // /hr-hub/requests/[id] for the full row), so they're safe to drop
+  // from the list shape entirely.
   const sql = `
     SELECT id, flow, status, priority, function_area, request_type, report_type,
-           title, summary, ideal_solution, resolution_note, links, attachments,
+           title, summary,
            created_by_email, created_by_name, assignee_email, assignee_name,
            team_lead_email, cc_email, created_at, updated_at, resolved_at,
            task_source, task_id, task_url, task_subject,
            sla_ext_requested_days, sla_ext_reason_code, sla_ext_acknowledged,
            sla_ext_approved_days,
+           COALESCE(jsonb_array_length(COALESCE(attachments, '[]'::jsonb)), 0) AS attachment_count,
            EXISTS (
              SELECT 1 FROM hr_hub_comment c
               WHERE c.request_id = hr_hub_request.id
@@ -267,12 +282,9 @@ export async function GET(req) {
     reportType: row.report_type,
     title: row.title,
     summary: row.summary,
-    idealSolution: row.ideal_solution,
-    resolutionNote: row.resolution_note,
-    links: row.links || [],
-    // Don't return full data URIs in the list — just count + first thumbnail
-    // shape — keeps payload small. Detail view returns the full attachments.
-    attachmentCount: Array.isArray(row.attachments) ? row.attachments.length : 0,
+    // ideal_solution / resolution_note / links — detail-only fields,
+    // served by /api/v1/hr-hub/requests/[id]. Not projected here.
+    attachmentCount: Number(row.attachment_count) || 0,
     createdByEmail: row.created_by_email,
     createdByName: row.created_by_name,
     assigneeEmail: row.assignee_email,

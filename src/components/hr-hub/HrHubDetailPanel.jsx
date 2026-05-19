@@ -23,9 +23,17 @@ import {
   unfollowHrHubRequest,
 } from '../../../src/services/hrHubApi';
 import { MEMBERS, MEMBERS_BY_EMAIL } from '../../../src/data/members';
+import { TASK_SOURCE_DISPLAY } from '../../../src/utils/applySlaExtensions';
 import HrHubComposer from './HrHubComposer';
 import ImageLightbox from '../ui/ImageLightbox';
 import CommentReactions from '../ui/CommentReactions';
+
+const SLA_EXT_REASON_LABELS = {
+  immigration: 'Immigration',
+  client_unresponsive: 'Client unresponsive',
+  employee_unresponsive: 'Employee unresponsive',
+  long_process: 'Long process',
+};
 
 const STATUS_OPTIONS = [
   { id: 'new',         label: 'New',         color: '#0369a1', bg: '#e0f2fe' },
@@ -64,7 +72,7 @@ function formatRelative(iso) {
   return new Date(iso).toLocaleDateString();
 }
 
-export default function HrHubDetailPanel({ requestId, detail, loading, error, user, onClose, onRefresh, onItemUpdated }) {
+export default function HrHubDetailPanel({ requestId, detail, loading, error, user, isManager, isAdmin, onApproveTask, onDenyTask, onClose, onRefresh, onItemUpdated }) {
   const request = detail?.request;
   const initialComments = detail?.comments || [];
   const followers = detail?.followers || [];
@@ -131,6 +139,26 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
   if (!requestId) return null;
   const flowLabel = FLOW_LABELS[request?.flow] || request?.flow || '';
 
+  // Approve/Deny gate — mirrors RequestRow's canDecide (HrHubView line
+  // 730+) so the row + drawer enforce the same workflow. Mohamed
+  // 2026-05-19: "SLA extension, when the task is open, you need to add
+  // approval or Denial similar to what you see on the table. Right now
+  // if you change the status from here, it doesn't impact anything and
+  // it goes to solved queue whether you approved or deny." The picker
+  // PATCH only updates the status column; it doesn't insert the
+  // sla_extension row (or hidden_task row) the workflow actually needs.
+  const isApprovalFlow = request?.flow === 'sla_extension_request' || request?.flow === 'hide_task_request';
+  const isUnresolved = request?.status && request.status !== 'resolved' && request.status !== 'rejected';
+  const viewerLc = (user?.email || '').toLowerCase();
+  const isSelf = request && (request.createdByEmail || '').toLowerCase() === viewerLc;
+  const canDecide = isApprovalFlow && isUnresolved && !!isManager && (!isSelf || !!isAdmin);
+  // Disable the status picker on approval flows whose decision hasn't
+  // landed yet — the picker only PATCHes status, bypassing the
+  // approve/deny endpoints that actually grant the extension / hide the
+  // row. Picker stays interactive on every other flow + on already-
+  // resolved approval rows (rare admin reopen path).
+  const statusPickerLocked = isApprovalFlow && isUnresolved;
+
   return (
     <div
       onClick={onClose}
@@ -161,6 +189,40 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
             textTransform: 'uppercase', color: 'var(--text-muted)',
           }}>{flowLabel}</div>
           <div style={{ flex: 1 }} />
+          {canDecide && (
+            <>
+              <button
+                type="button"
+                onClick={() => onApproveTask?.(request)}
+                title="Approve this request"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '6px 14px', borderRadius: 999,
+                  background: '#15803d', color: 'white',
+                  border: 'none', cursor: 'pointer',
+                  fontSize: 12, fontWeight: 700, fontFamily: 'inherit',
+                }}
+              >
+                <i className="bi bi-check2" style={{ fontSize: 13 }} />
+                Approve
+              </button>
+              <button
+                type="button"
+                onClick={() => onDenyTask?.(request)}
+                title="Deny this request"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  padding: '6px 14px', borderRadius: 999,
+                  background: 'var(--surface)', color: '#d42d35',
+                  border: '1px solid #fca5a5', cursor: 'pointer',
+                  fontSize: 12, fontWeight: 700, fontFamily: 'inherit',
+                }}
+              >
+                <i className="bi bi-x" style={{ fontSize: 13 }} />
+                Deny
+              </button>
+            </>
+          )}
           <CopyLinkButton requestId={requestId} />
           <FollowButton
             isFollowing={isFollowing}
@@ -210,7 +272,12 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
                 flexWrap: 'wrap',
               }}>
                 <LabeledPicker label="Status">
-                  <PickerStatus value={request.status} onChange={v => updateField({ status: v })} disabled={savingField === 'status'} />
+                  <PickerStatus
+                    value={request.status}
+                    onChange={v => updateField({ status: v })}
+                    disabled={savingField === 'status' || statusPickerLocked}
+                    title={statusPickerLocked ? 'Status is driven by Approve / Deny on this flow — use the buttons in the header.' : undefined}
+                  />
                 </LabeledPicker>
                 <LabeledPicker label="Priority">
                   <PickerPriority value={request.priority} onChange={v => updateField({ priority: v })} disabled={savingField === 'priority'} />
@@ -219,6 +286,24 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
                   <PickerAssignee value={request.assigneeEmail} valueName={request.assigneeName} onChange={(email, name) => updateField({ assigneeEmail: email, assigneeName: name })} disabled={savingField === 'assigneeEmail'} />
                 </LabeledPicker>
               </div>
+
+              {/* Task context — only for the two flows that anchor on a
+                  queue row (hide_task_request + sla_extension_request).
+                  Surfaces the originating source + subject + a clickable
+                  link so reviewers can verify which row they're acting on
+                  before approving / denying. */}
+              {(request.flow === 'hide_task_request' || request.flow === 'sla_extension_request') && request.taskSource && (
+                <TaskContextBlock
+                  taskSource={request.taskSource}
+                  taskUrl={request.taskUrl}
+                  taskSubject={request.taskSubject}
+                  taskId={request.taskId}
+                  slaExtRequestedDays={request.slaExtRequestedDays}
+                  slaExtApprovedDays={request.slaExtApprovedDays}
+                  slaExtReasonCode={request.slaExtReasonCode}
+                  isSlaExt={request.flow === 'sla_extension_request'}
+                />
+              )}
 
               {/* Fields */}
               <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -437,12 +522,13 @@ function LabeledPicker({ label, children }) {
   );
 }
 
-function PickerStatus({ value, onChange, disabled }) {
+function PickerStatus({ value, onChange, disabled, title }) {
   return (
     <select
       value={value || ''}
       onChange={e => onChange(e.target.value)}
       disabled={disabled}
+      title={title}
       style={pickerStyle(STATUS_OPTIONS.find(s => s.id === value)?.bg, STATUS_OPTIONS.find(s => s.id === value)?.color)}
     >
       {STATUS_OPTIONS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
@@ -661,6 +747,86 @@ function FieldRow({ label, value, multiline }) {
         fontSize: 14, color: 'var(--text)', lineHeight: 1.55,
         whiteSpace: multiline ? 'pre-wrap' : 'normal',
       }}>{value}</div>
+    </div>
+  );
+}
+
+// Task context for the two row-anchored flows: source chip, subject, ID,
+// View-task link, plus the SLA extension's reason and day count when the
+// flow is sla_extension_request. Renders nothing when taskSource isn't a
+// known source — guards against future flow additions that re-use the
+// task_* columns without a registered display entry.
+function TaskContextBlock({ taskSource, taskUrl, taskSubject, taskId, slaExtRequestedDays, slaExtApprovedDays, slaExtReasonCode, isSlaExt }) {
+  const meta = taskSource ? TASK_SOURCE_DISPLAY[taskSource] : null;
+  if (!meta) return null;
+  const reasonLabel = slaExtReasonCode ? (SLA_EXT_REASON_LABELS[slaExtReasonCode] || slaExtReasonCode) : null;
+  return (
+    <div style={{
+      marginTop: 18, padding: '12px 14px',
+      borderRadius: 12, border: '1px solid var(--border-light)',
+      background: 'var(--surface-2)',
+      display: 'flex', flexDirection: 'column', gap: 8,
+    }}>
+      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
+        Task
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          padding: '4px 10px', borderRadius: 999,
+          background: meta.bg, color: meta.color,
+          fontSize: 12, fontWeight: 700,
+        }}>
+          <i className={meta.icon} style={{ fontSize: 11 }} />
+          {meta.label}
+        </span>
+        {taskId && (
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+            #{taskId}
+          </span>
+        )}
+        {taskUrl && (
+          <a
+            href={taskUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: '4px 10px', borderRadius: 8,
+              border: '1px solid var(--border)', background: 'var(--surface)',
+              color: '#1f74b3', textDecoration: 'none',
+              fontSize: 12, fontWeight: 600,
+            }}
+            title="Open this task in a new tab"
+          >
+            <i className="bi-box-arrow-up-right" style={{ fontSize: 11 }} />
+            View task
+          </a>
+        )}
+      </div>
+      {taskSubject && (
+        <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.4 }}>
+          {taskSubject}
+        </div>
+      )}
+      {isSlaExt && (reasonLabel || slaExtRequestedDays || slaExtApprovedDays) && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, fontSize: 12, color: 'var(--text-secondary)' }}>
+          {reasonLabel && (
+            <div><strong style={{ color: 'var(--text)', fontWeight: 600 }}>Reason</strong> · {reasonLabel}</div>
+          )}
+          {slaExtRequestedDays && (
+            <div><strong style={{ color: 'var(--text)', fontWeight: 600 }}>Requested</strong> · {slaExtRequestedDays} business day{slaExtRequestedDays === 1 ? '' : 's'}</div>
+          )}
+          {slaExtApprovedDays && (
+            <div>
+              <strong style={{ color: 'var(--text)', fontWeight: 600 }}>Approved</strong> ·{' '}
+              <span style={{ color: '#15803d', fontWeight: 600 }}>
+                {slaExtApprovedDays} business day{slaExtApprovedDays === 1 ? '' : 's'}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

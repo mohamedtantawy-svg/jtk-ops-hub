@@ -26,6 +26,21 @@
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// Human-readable display metadata for the 8 queue sources accepted by
+// SLA Extension / Hide Task requests. Centralised so the request card,
+// detail panel, and approve modal all label the source consistently.
+// Keep in sync with ALLOWED_TASK_SOURCES in src/lib/sla-extension-helpers.js.
+export const TASK_SOURCE_DISPLAY = {
+  zendesk:         { label: 'Zendesk',         icon: 'bi-headset',           color: '#15803d', bg: '#f0fdf4' },
+  jira:            { label: 'Jira',            icon: 'bi-kanban-fill',       color: '#1f74b3', bg: '#e0f2fe' },
+  workbench:       { label: 'Workbench',       icon: 'bi-tools',             color: '#7c3aed', bg: '#f5f3ff' },
+  onboarding:      { label: 'Onboarding',      icon: 'bi-person-check-fill', color: '#15803d', bg: '#f0fdf4' },
+  offboarding:     { label: 'Offboarding',     icon: 'bi-box-arrow-right',   color: '#dc2626', bg: '#fef2f2' },
+  amendments:      { label: 'Amendments',      icon: 'bi-file-earmark-text', color: '#ea580c', bg: '#fff7ed' },
+  redlines:        { label: 'Redlines',        icon: 'bi-pencil-square',     color: '#b91c1c', bg: '#fef2f2' },
+  incentive_plans: { label: 'Incentive Plans', icon: 'bi-trophy-fill',       color: '#a16207', bg: '#fffbeb' },
+};
+
 /**
  * Apply the active-extension override to a list of normalized rows.
  *
@@ -58,6 +73,34 @@ export function applySlaExtensionsToRows(rows, extensionMap, source) {
       slaWindowMs: approvedDays * DAY_MS,
     };
   });
+}
+
+/**
+ * Attach the active-extension to a flat `tasks` array (zendesk + jira tickets).
+ * Mirrors `applySlaExtensionsToRows` but for the App-level `tasks` state —
+ * tickets only carry a `slaExtension` reference (no slaRemaining rewrite
+ * needed because `slaInfo()` in helpers.js reads the extension at the top
+ * of its decision tree and short-circuits with the "Extended" pill).
+ *
+ * Returns the SAME array reference when no row matches an active extension,
+ * so downstream `useMemo` consumers don't re-render unnecessarily.
+ */
+export function attachSlaExtensionToTickets(tasks, extensionMap) {
+  if (!Array.isArray(tasks) || tasks.length === 0) return tasks;
+  if (!extensionMap || typeof extensionMap.get !== 'function' || extensionMap.size === 0) return tasks;
+  const now = Date.now();
+  let mutated = false;
+  const out = tasks.map(t => {
+    if (!t || !t.source || t.id == null) return t;
+    if (t.source !== 'zendesk' && t.source !== 'jira') return t;
+    const ext = extensionMap.get(`${t.source}:${String(t.id)}`);
+    if (!ext || !ext.expiresAt) return t;
+    const expiresMs = Date.parse(ext.expiresAt);
+    if (!Number.isFinite(expiresMs) || expiresMs <= now) return t;
+    mutated = true;
+    return { ...t, slaExtension: ext };
+  });
+  return mutated ? out : tasks;
 }
 
 /**

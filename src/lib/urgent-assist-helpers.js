@@ -47,29 +47,49 @@ export function teamLeadEmailFor(email) {
 
 /**
  * Edit/delete predicate for /api/v1/urgent-assist/[id]. Returns true when:
+ *   • caller's JWT role is 'admin' (set by middleware after ADMIN_EMAILS
+ *     check at login) — honors the admin gate the FE already trusts
+ *   • caller's MEMBERS roster entry has access='admin'
  *   • caller is the row's creator
  *   • caller is the row's assignee
  *   • caller is the assignee's denormalised team_lead_email (TL)
  *   • caller is anywhere in the assignee/creator's report chain (RM/admin)
- *   • caller is a system admin
  *
  * The whole row is read-only for everyone else (e.g. peer agents in the
  * same team can VIEW it via the list scoping but cannot mutate it).
+ *
+ * Accepts `user` rather than just an email so the JWT-asserted role can
+ * be honoured — Duygu Cakalli 2026-05-19: she's in ADMIN_EMAILS (JWT
+ * role=admin) but her MEMBERS roster row carries access='agent' because
+ * she's a frontline lead, not a platform-admin in the roster taxonomy.
+ * The old "MEMBERS.access==='admin' only" gate locked her out of
+ * deleting/resolving manual urgent-assist rows she could plainly see in
+ * her queue (`forbidden` error in the screenshot).
  */
-export function canEdit(callerEmailLc, row) {
-  if (!callerEmailLc || !row) return false;
+export function canEdit(user, row) {
+  if (!user?.email || !row) return false;
+  const callerEmailLc = String(user.email).toLowerCase();
+  // JWT-asserted admin — middleware stamps `role` from the auth/google
+  // callback, which itself flips to 'admin' when the email is in
+  // ADMIN_EMAILS_LIST. Honour it as the canonical admin signal.
+  if (user.role === 'admin') return true;
   const me = MEMBERS_BY_EMAIL[callerEmailLc];
   if (me?.access === 'admin') return true;
   if (callerEmailLc === String(row.created_by_email || '').toLowerCase()) return true;
   if (callerEmailLc === String(row.assignee_email || '').toLowerCase()) return true;
   if (callerEmailLc === String(row.team_lead_email || '').toLowerCase()) return true;
   // RM-style chain check — caller's reports include the assignee/creator.
+  // getAllReports returns an Array (`return [...reports]` on the Set
+  // built internally — see src/data/members.js:319), so use Array methods.
+  // The previous Set-shaped checks (`reports?.size` / `reports.has(...)`)
+  // silently no-op'd against an array, leaking every non-admin manager
+  // out of the chain branch and onto `return false`.
   const reports = getAllReports(callerEmailLc);
-  if (reports?.size) {
+  if (reports?.length) {
     const a = String(row.assignee_email || '').toLowerCase();
     const c = String(row.created_by_email || '').toLowerCase();
-    if (a && reports.has(a)) return true;
-    if (c && reports.has(c)) return true;
+    if (a && reports.includes(a)) return true;
+    if (c && reports.includes(c)) return true;
   }
   return false;
 }

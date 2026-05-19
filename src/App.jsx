@@ -26,6 +26,7 @@ import { ADMIN_LIST_VERSION } from './data/adminEmails';
 import { usePermissions } from './hooks/usePermissions';
 import ErrorBoundary from './components/ui/ErrorBoundary';
 import { slaInfo } from './utils/helpers';
+import { attachSlaExtensionToTickets } from './utils/applySlaExtensions';
 import { useIntegrations } from './hooks/useIntegrations';
 // useDeelData removed 2026-05-13 — REST-v2 endpoints retired (see
 // src/lib/deel-api.js for the deprecation rationale).
@@ -450,6 +451,20 @@ const App=()=>{
   // server cache + LS hydration; the FE rebuilds the Map only when the
   // list array changes (useMemo in useSlaExtensions).
   const slaExtensions = useSlaExtensions(!!user);
+  // Tickets (Zendesk + Jira) carry their SLA extension as a row-level
+  // `slaExtension` field that `slaInfo()` short-circuits on. Attach it at
+  // App.jsx so every downstream consumer that reads from `tasks` —
+  // BriefingView (org-breach %, health score), TeamLeadHome, AgentHome,
+  // LeadersHubView (Team + Analytics), Alerts — sees the override too.
+  // Without this, only Queue.jsx (which did its own inline attach) reflected
+  // an approved extension; the aggregate surfaces showed the row as
+  // breached even though the extension was active. Returns the SAME array
+  // reference when nothing matches an active extension so the useMemo is
+  // a no-op for tickets without extensions.
+  const tasksWithSlaExt = React.useMemo(
+    () => attachSlaExtensionToTickets(tasks, slaExtensions?.map || null),
+    [tasks, slaExtensions?.map],
+  );
   // Top-nav badge for Urgent Assist — counts unresolved items where
   // assignee = effectiveUser (covers impersonation correctly). Sources
   // both manual rows (via the API) and workbench-sourced rows from the
@@ -1999,15 +2014,15 @@ const App=()=>{
         </div>
       )}
       <div className="deel-content" data-region="main-content" aria-label="Main content" style={{display:'flex',overflowX:'hidden',overflowY:'auto',position:'relative',flex:1}}>
-          {view==='briefing'      &&perms?.canView('briefing')!==false &&(perms?.raw?.dataScope==='all_tasks'||perms?.raw?.dataScope==='regional_tasks'||perms?.raw?.dataScope==='team_tasks') &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={()=>{}} comms={comms} escalations={[]} setSubFilter={setSubFilter} requests={[]} projects={[]} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall} teamLeadOnCall={teamLeadOnCall} onChangeTeamLeadOnCall={handleChangeTeamLeadOnCall} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
-          {view==='lead-home' &&<div className="page-enter"><TeamLeadHome user={effectiveUser} tasks={tasks} setView={setView} managerOnCall={managerOnCall}/></div>}
-          {view==='agent-home' &&<div className="page-enter"><AgentHome user={effectiveUser} tasks={tasks} setView={setView} comms={comms}/></div>}
-          {view==='my-queue'      &&perms?.canView('my-queue')!==false     &&<div className="page-enter"><Queue user={effectiveUser} tasks={tasks} subFilter={subFilter}/></div>}
+          {view==='briefing'      &&perms?.canView('briefing')!==false &&(perms?.raw?.dataScope==='all_tasks'||perms?.raw?.dataScope==='regional_tasks'||perms?.raw?.dataScope==='team_tasks') &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasksWithSlaExt,MEMBERS)||tasksWithSlaExt} setView={setView} setSelTask={()=>{}} comms={comms} escalations={[]} setSubFilter={setSubFilter} requests={[]} projects={[]} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall} teamLeadOnCall={teamLeadOnCall} onChangeTeamLeadOnCall={handleChangeTeamLeadOnCall} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
+          {view==='lead-home' &&<div className="page-enter"><TeamLeadHome user={effectiveUser} tasks={tasksWithSlaExt} setView={setView} managerOnCall={managerOnCall}/></div>}
+          {view==='agent-home' &&<div className="page-enter"><AgentHome user={effectiveUser} tasks={tasksWithSlaExt} setView={setView} comms={comms}/></div>}
+          {view==='my-queue'      &&perms?.canView('my-queue')!==false     &&<div className="page-enter"><Queue user={effectiveUser} tasks={tasksWithSlaExt} subFilter={subFilter}/></div>}
           {view==='announcements' &&perms?.canView('announcements')!==false&&<div className="page-enter"><AnnouncementsView user={effectiveUser} serverUserId={apiServerUserId} serverUserEmail={apiServerUserEmail} comms={comms} setComms={setComms} addToast={addToast} tasks={tasks} apiAcknowledge={apiAcknowledge} apiCreate={apiCreate} apiSend={apiSend} apiUpdate={apiUpdate} apiArchive={apiArchive} apiRemove={apiRemove} apiTogglePin={apiTogglePin} openCompose={announceCompose} onComposeOpened={()=>setAnnounceCompose(false)} apiUnarchive={apiUnarchive} apiComments={apiComments} apiSetComments={apiSetComments} apiLoadComments={apiLoadComments} apiAddComment={apiAddCommentFn} apiDeleteComment={apiDeleteCommentFn} apiLinks={apiLinks} apiLoadLinks={apiLoadLinks} apiLinkAnnouncement={apiLinkAnnouncementFn} apiUnlinkAnnouncement={apiUnlinkAnnouncementFn} apiReact={apiReactFn}/></div>}
           {view==='approval-queue' &&<div className="page-enter"><ApprovalQueueView user={effectiveUser} addToast={addToast}/></div>}
           {view==='settings'      &&perms?.canView('settings')!==false     &&<div className="page-enter"><SettingsView settings={settings} setSettings={setSettings} user={user} addToast={addToast} tasks={tasks} setTasks={setTasks} subFilter={subFilter} accessTypes={accessTypes} setAccessTypes={setAccessTypes} userAccessMap={userAccessMap} setUserAccessMap={setUserAccessMap} perms={perms}/></div>}
           {view==='slack'         &&perms?.canView('slack')!==false        &&<div className="page-enter"><Slack tasks={tasks.filter(t=>t.source==='slack')} setTasks={setTasks} onEscalMgr={()=>{}} addToast={addToast} user={effectiveUser}/></div>}
-          {view==='alerts'        &&perms?.canView('alerts')!==false       &&<div className="page-enter"><Alerts tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setTasks={setTasks}/></div>}
+          {view==='alerts'        &&perms?.canView('alerts')!==false       &&<div className="page-enter"><Alerts tasks={perms?.scopeTasks?.(tasksWithSlaExt,MEMBERS)||tasksWithSlaExt} setTasks={setTasks}/></div>}
           {view==='feedback'      &&perms?.canView('feedback')!==false     &&<div className="page-enter"><FeedbackView user={effectiveUser} addToast={addToast} openCompose={feedbackCompose} onComposeOpened={()=>setFeedbackCompose(false)}/></div>}
           {view==='hr-hub'        &&perms?.canView('hr-hub')!==false       &&<div className="page-enter"><HrHubView user={effectiveUser} onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}/></div>}
           {view==='notifications' &&<div className="page-enter"><NotificationsView notifs={mergedNotifs} unreadCount={mergedNotifs.filter(n=>!n.read).length} markAllRead={markAllRead} markRead={(serverId)=>serverNotifs.markRead(serverId)} markUnread={(serverId)=>serverNotifs.markUnread(serverId)} onNotifClick={handleNotifClick}/></div>}
@@ -2020,14 +2035,14 @@ const App=()=>{
               evaluates to undefined / null (e.g. mid-impersonation
               hand-off) get an empty render instead of leaking the view
               while perms re-hydrate (audit 2026-05-04 hardening). */}
-          {view==='leader-alerts' && perms?.canView('leader-alerts') === true &&<div className="page-enter"><LeadersHubView user={effectiveUser} perms={perms} refreshNonce={leaderAlertsRefreshNonce} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
+          {view==='leader-alerts' && perms?.canView('leader-alerts') === true &&<div className="page-enter"><LeadersHubView user={effectiveUser} perms={perms} refreshNonce={leaderAlertsRefreshNonce} tasks={perms?.scopeTasks?.(tasksWithSlaExt,MEMBERS)||tasksWithSlaExt} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
           {view==='ooo' && perms?.canView('ooo')!==false &&<div className="page-enter"><OOOView user={effectiveUser} setView={setView} addToast={addToast}/></div>}
           {/* Legacy direct route — keeps deep-links to ?view=team working
               by sending the user to Leaders Hub (which contains the Team
               sub-view). Avoids 404s on bookmarks/notifications from the
               pre-2026-05-03 nav. Same strict canView gate as Leaders Hub
               above; agents never get past this even via legacy URL. */}
-          {view==='team'          && perms?.canView('team') === true       &&<div className="page-enter"><LeadersHubView user={effectiveUser} perms={perms} refreshNonce={leaderAlertsRefreshNonce} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
+          {view==='team'          && perms?.canView('team') === true       &&<div className="page-enter"><LeadersHubView user={effectiveUser} perms={perms} refreshNonce={leaderAlertsRefreshNonce} tasks={perms?.scopeTasks?.(tasksWithSlaExt,MEMBERS)||tasksWithSlaExt} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
       </div>
       {createModal   &&<CreateTaskModal onConfirm={confirmCreate} onClose={()=>setCreateModal(false)} currentUser={effectiveUser}/>}
       {hrHubCreate   &&<CreateHrHubRequestModal initialFlow={hrHubCreate.initialFlow||null} onClose={()=>setHrHubCreate(null)} onCreated={(id,flow)=>{setHrHubCreate(null);setView('hr-hub');addToast?.({kind:'success',message:`Submitted to HR Hub${flow?` (${flow.replace('_',' ')})`:''}.`});}}/>}
