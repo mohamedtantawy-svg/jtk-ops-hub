@@ -10,7 +10,14 @@ export function getPool() {
     }
     pool = new Pool({
       connectionString,
-      max: 25,
+      // Trimmed from 25 → 12 on 2026-05-19 after the 2026-05-18 log audit
+      // showed RSS climbing past the 1024 MiB ceiling during an upstream
+      // Deel 500-storm. Each pg client pins ~10–30 MiB of native + JS
+      // state on a long-lived connection; 25 clients ≈ up to 750 MiB held
+      // outside the V8 heap. Ops Hub's traffic pattern doesn't need 25
+      // concurrent DB queries — 12 leaves comfortable headroom while
+      // shaving the worst-case off-heap footprint.
+      max: 12,
       min: 5,
       idleTimeoutMillis: 60000,
       connectionTimeoutMillis: 5000,

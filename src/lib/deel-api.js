@@ -80,13 +80,17 @@ async function _deelFetch(path, options = {}) {
   });
 
   if (!res.ok) {
-    const body = await res.text().catch(() => '');
+    let body = await res.text().catch(() => '');
     const isS3Error = body.includes('<Error>') || body.includes('NoSuchBucket') || body.includes('Unsupported Authorization');
     const hint = isS3Error
       ? ` [CDN/S3 error — request to ${url} did not reach the Deel API. Check DEEL_API_BASE_URL env var.]`
       : '';
     const err = new Error(`Deel API ${res.status} @ ${url}: ${body.substring(0, 200)}${hint}`);
     err.status = res.status;
+    // Drop the full response-body reference so V8 can release the buffer
+    // before this rejection propagates through withRetry's retry loop.
+    // Only the 200-char prefix lives on in err.message; the rest goes.
+    body = null;
     if (res.status === 429) {
       // Deel admin API sends Retry-After in seconds when it throttles.
       // Forward to withRetry so the backoff matches the upstream cool-down.
