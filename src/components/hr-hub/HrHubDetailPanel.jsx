@@ -23,9 +23,17 @@ import {
   unfollowHrHubRequest,
 } from '../../../src/services/hrHubApi';
 import { MEMBERS, MEMBERS_BY_EMAIL } from '../../../src/data/members';
+import { TASK_SOURCE_DISPLAY } from '../../../src/utils/applySlaExtensions';
 import HrHubComposer from './HrHubComposer';
 import ImageLightbox from '../ui/ImageLightbox';
 import CommentReactions from '../ui/CommentReactions';
+
+const SLA_EXT_REASON_LABELS = {
+  immigration: 'Immigration',
+  client_unresponsive: 'Client unresponsive',
+  employee_unresponsive: 'Employee unresponsive',
+  long_process: 'Long process',
+};
 
 const STATUS_OPTIONS = [
   { id: 'new',         label: 'New',         color: '#0369a1', bg: '#e0f2fe' },
@@ -219,6 +227,24 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
                   <PickerAssignee value={request.assigneeEmail} valueName={request.assigneeName} onChange={(email, name) => updateField({ assigneeEmail: email, assigneeName: name })} disabled={savingField === 'assigneeEmail'} />
                 </LabeledPicker>
               </div>
+
+              {/* Task context — only for the two flows that anchor on a
+                  queue row (hide_task_request + sla_extension_request).
+                  Surfaces the originating source + subject + a clickable
+                  link so reviewers can verify which row they're acting on
+                  before approving / denying. */}
+              {(request.flow === 'hide_task_request' || request.flow === 'sla_extension_request') && request.taskSource && (
+                <TaskContextBlock
+                  taskSource={request.taskSource}
+                  taskUrl={request.taskUrl}
+                  taskSubject={request.taskSubject}
+                  taskId={request.taskId}
+                  slaExtRequestedDays={request.slaExtRequestedDays}
+                  slaExtApprovedDays={request.slaExtApprovedDays}
+                  slaExtReasonCode={request.slaExtReasonCode}
+                  isSlaExt={request.flow === 'sla_extension_request'}
+                />
+              )}
 
               {/* Fields */}
               <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -661,6 +687,86 @@ function FieldRow({ label, value, multiline }) {
         fontSize: 14, color: 'var(--text)', lineHeight: 1.55,
         whiteSpace: multiline ? 'pre-wrap' : 'normal',
       }}>{value}</div>
+    </div>
+  );
+}
+
+// Task context for the two row-anchored flows: source chip, subject, ID,
+// View-task link, plus the SLA extension's reason and day count when the
+// flow is sla_extension_request. Renders nothing when taskSource isn't a
+// known source — guards against future flow additions that re-use the
+// task_* columns without a registered display entry.
+function TaskContextBlock({ taskSource, taskUrl, taskSubject, taskId, slaExtRequestedDays, slaExtApprovedDays, slaExtReasonCode, isSlaExt }) {
+  const meta = taskSource ? TASK_SOURCE_DISPLAY[taskSource] : null;
+  if (!meta) return null;
+  const reasonLabel = slaExtReasonCode ? (SLA_EXT_REASON_LABELS[slaExtReasonCode] || slaExtReasonCode) : null;
+  return (
+    <div style={{
+      marginTop: 18, padding: '12px 14px',
+      borderRadius: 12, border: '1px solid var(--border-light)',
+      background: 'var(--surface-2)',
+      display: 'flex', flexDirection: 'column', gap: 8,
+    }}>
+      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
+        Task
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          padding: '4px 10px', borderRadius: 999,
+          background: meta.bg, color: meta.color,
+          fontSize: 12, fontWeight: 700,
+        }}>
+          <i className={meta.icon} style={{ fontSize: 11 }} />
+          {meta.label}
+        </span>
+        {taskId && (
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+            #{taskId}
+          </span>
+        )}
+        {taskUrl && (
+          <a
+            href={taskUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: '4px 10px', borderRadius: 8,
+              border: '1px solid var(--border)', background: 'var(--surface)',
+              color: '#1f74b3', textDecoration: 'none',
+              fontSize: 12, fontWeight: 600,
+            }}
+            title="Open this task in a new tab"
+          >
+            <i className="bi-box-arrow-up-right" style={{ fontSize: 11 }} />
+            View task
+          </a>
+        )}
+      </div>
+      {taskSubject && (
+        <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.4 }}>
+          {taskSubject}
+        </div>
+      )}
+      {isSlaExt && (reasonLabel || slaExtRequestedDays || slaExtApprovedDays) && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, fontSize: 12, color: 'var(--text-secondary)' }}>
+          {reasonLabel && (
+            <div><strong style={{ color: 'var(--text)', fontWeight: 600 }}>Reason</strong> · {reasonLabel}</div>
+          )}
+          {slaExtRequestedDays && (
+            <div><strong style={{ color: 'var(--text)', fontWeight: 600 }}>Requested</strong> · {slaExtRequestedDays} business day{slaExtRequestedDays === 1 ? '' : 's'}</div>
+          )}
+          {slaExtApprovedDays && (
+            <div>
+              <strong style={{ color: 'var(--text)', fontWeight: 600 }}>Approved</strong> ·{' '}
+              <span style={{ color: '#15803d', fontWeight: 600 }}>
+                {slaExtApprovedDays} business day{slaExtApprovedDays === 1 ? '' : 's'}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

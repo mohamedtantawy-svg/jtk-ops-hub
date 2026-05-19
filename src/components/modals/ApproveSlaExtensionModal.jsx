@@ -7,6 +7,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { approveSlaExtension } from '../../services/slaExtensionApi';
+import { TASK_SOURCE_DISPLAY } from '../../utils/applySlaExtensions';
 
 const REASON_LABELS = {
   immigration: 'Immigration',
@@ -51,6 +52,9 @@ export default function ApproveSlaExtensionModal({ request, onClose, onApproved 
 
   const reasonCode = request?.slaExtReasonCode || request?.sla_ext_reason_code || null;
   const reasonLabel = reasonCode ? (REASON_LABELS[reasonCode] || reasonCode) : null;
+  const taskSource = request?.taskSource || request?.task_source || null;
+  const taskUrl = request?.taskUrl || request?.task_url || null;
+  const sourceMeta = taskSource ? TASK_SOURCE_DISPLAY[taskSource] : null;
 
   return (
     <div
@@ -94,7 +98,11 @@ export default function ApproveSlaExtensionModal({ request, onClose, onApproved 
         </div>
 
         <form onSubmit={handleSubmit} style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Context — requester + reason + their ask */}
+          {/* Context — requester + reason + their ask + source + task link.
+              The source chip + View task link land here (not the header)
+              so managers can verify they're approving the right row before
+              committing the override; one click opens the task in a new
+              tab for a final sanity check. */}
           <div style={{
             padding: '10px 12px', borderRadius: 10, background: 'var(--surface-2, #fafaf9)',
             border: '1px solid var(--border-light, #f0efed)', fontSize: 12, color: 'var(--text-secondary, #616161)', lineHeight: 1.55,
@@ -102,6 +110,37 @@ export default function ApproveSlaExtensionModal({ request, onClose, onApproved 
             <div><strong style={{ color: 'var(--text)' }}>Requester</strong> &middot; {request?.createdByName || request?.created_by_name || request?.createdByEmail || request?.created_by_email || '—'}</div>
             {reasonLabel && <div><strong style={{ color: 'var(--text)' }}>Reason</strong> &middot; {reasonLabel}</div>}
             {requested && <div><strong style={{ color: 'var(--text)' }}>Requested</strong> &middot; {requested} business day{requested === 1 ? '' : 's'}</div>}
+            {sourceMeta && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                <strong style={{ color: 'var(--text)' }}>Source</strong>
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '2px 8px', borderRadius: 999,
+                  background: sourceMeta.bg, color: sourceMeta.color,
+                  fontSize: 11, fontWeight: 600,
+                }}>
+                  <i className={sourceMeta.icon} style={{ fontSize: 10 }} />
+                  {sourceMeta.label}
+                </span>
+                {taskUrl && (
+                  <a
+                    href={taskUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                      fontSize: 11, fontWeight: 600,
+                      color: '#1f74b3', textDecoration: 'none',
+                    }}
+                    title="Open this task in a new tab"
+                  >
+                    <i className="bi-box-arrow-up-right" style={{ fontSize: 10 }} />
+                    View task
+                  </a>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Day picker — 1..7 chips */}

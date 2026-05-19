@@ -27,6 +27,7 @@ import HrHubSettingsPanel from '../hr-hub/HrHubSettingsPanel';
 import DenyHideTaskModal from '../modals/DenyHideTaskModal';
 import ApproveSlaExtensionModal from '../modals/ApproveSlaExtensionModal';
 import DenySlaExtensionModal from '../modals/DenySlaExtensionModal';
+import { TASK_SOURCE_DISPLAY } from '../../utils/applySlaExtensions';
 import { PermissionsContext, IntegrationsContext } from '../../App';
 
 // Single source of truth for status visuals — same shape as Feedback's
@@ -803,6 +804,45 @@ function RequestRow({ item, active, onClick, viewerEmail, isManager, isAdmin, on
 
       {/* Right: status pill + meta cluster */}
       <span style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+        {/* Source chip + task link (SLA Extension / Hide Task rows).
+            Both flows carry (task_source, task_id, task_url) — making the
+            originating queue visible at a glance lets managers triage
+            without opening the drawer, and the icon link lets them jump
+            straight to the row in Zendesk/Jira/Workbench/etc. */}
+        {(isSlaExt || isHide) && item.taskSource && TASK_SOURCE_DISPLAY[item.taskSource] && (() => {
+          const meta = TASK_SOURCE_DISPLAY[item.taskSource];
+          return (
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: '3px 9px', borderRadius: 999,
+              background: meta.bg, color: meta.color,
+              fontSize: 10.5, fontWeight: 700,
+            }} title={`Source: ${meta.label}`}>
+              <i className={meta.icon} style={{ fontSize: 10 }} />
+              {meta.label}
+            </span>
+          );
+        })()}
+        {(isSlaExt || isHide) && item.taskUrl && (
+          <a
+            href={item.taskUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => { e.stopPropagation(); }}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') e.stopPropagation(); }}
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: 22, height: 22, borderRadius: 6,
+              background: 'transparent', color: 'var(--text-muted)',
+              textDecoration: 'none',
+              border: '1px solid var(--border-light)',
+            }}
+            title="Open task in a new tab"
+            aria-label="Open task in a new tab"
+          >
+            <i className="bi-box-arrow-up-right" style={{ fontSize: 11 }} />
+          </a>
+        )}
         {canDecide && (
           <span
             // Render the two buttons as a plain span (NOT nested button) —
