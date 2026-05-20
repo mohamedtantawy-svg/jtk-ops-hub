@@ -549,6 +549,87 @@ assert('OrgChartCanvas NodeCard guards Login button on root-dept + leadEmail',
 assert('OrgChartCanvas Login button invokes onLoginAsDeptAdmin',
   /onLoginAsDeptAdmin\?\.\(node\.leadEmail\)/.test(chartSrcPhase10a));
 
+// ── Section 18: Phase 11a — Multi-tenant foundation ──────────────────────
+console.log('\n── Phase 11a: multi-tenant foundation ──');
+const migrateSrcPhase11a = read('src/lib/migrate.js');
+
+// Schema ALTERs for every surface table
+for (const tbl of [
+  'announcements', 'hr_hub_request', 'leader_alert',
+  'urgent_assist_request', 'urgent_assist_schedule',
+  'time_off_events', 'handovers', 'tasks', 'workspace_members',
+]) {
+  assert(`migrate.js adds org_node_id to ${tbl}`,
+    new RegExp(`ALTER TABLE ${tbl}\\s+ADD COLUMN IF NOT EXISTS org_node_id UUID REFERENCES org_nodes\\(id\\) ON DELETE SET NULL`).test(migrateSrcPhase11a));
+  assert(`migrate.js indexes ${tbl}.org_node_id`,
+    new RegExp(`CREATE INDEX IF NOT EXISTS idx_${tbl}_org_node`).test(migrateSrcPhase11a));
+}
+assert('migrate.js imports backfillHrExperienceTenancyIfNeeded',
+  /import \{ backfillHrExperienceTenancyIfNeeded \} from '\.\/dept-backfill'/.test(migrateSrcPhase11a));
+assert('migrate.js calls backfillHrExperienceTenancyIfNeeded after seedOrgDefaultIfNeeded',
+  /seedOrgDefaultIfNeeded\(\);[\s\S]*?backfillHrExperienceTenancyIfNeeded\(\)/.test(migrateSrcPhase11a));
+
+const deptScopeSrc = read('src/lib/dept-scope.js');
+assert('dept-scope exports GLOBAL_SUPER_ADMIN_EMAIL = mohamed.tantawy@deel.com',
+  /export const GLOBAL_SUPER_ADMIN_EMAIL = 'mohamed\.tantawy@deel\.com'/.test(deptScopeSrc));
+assert('dept-scope exports SUPER_ADMIN_DEPT_COOKIE',
+  /export const SUPER_ADMIN_DEPT_COOKIE = 'ops_hub_super_admin_dept'/.test(deptScopeSrc));
+assert('dept-scope getCurrentDeptId honors super-admin cookie',
+  /isGlobalSuperAdmin\(user\)[\s\S]*?readSuperAdminCookie/.test(deptScopeSrc));
+assert('dept-scope getCurrentDeptId validates cookie against active dept',
+  /parent_id IS NULL AND is_archived = false/.test(deptScopeSrc));
+assert('dept-scope walks parent_id chain to top-level dept',
+  /WITH RECURSIVE chain AS[\s\S]+parent_id IS NULL/.test(deptScopeSrc));
+assert('dept-scope caches resolution with TTL',
+  /TTL_MS = 30_000/.test(deptScopeSrc));
+assert('dept-scope exposes clearDeptScopeCache for invalidation',
+  /export function clearDeptScopeCache/.test(deptScopeSrc));
+
+const backfillSrc = read('src/lib/dept-backfill.js');
+assert('dept-backfill exports backfillHrExperienceTenancyIfNeeded',
+  /export async function backfillHrExperienceTenancyIfNeeded/.test(backfillSrc));
+assert('dept-backfill targets exactly the 9 isolated surfaces',
+  /'announcements'[\s\S]+'hr_hub_request'[\s\S]+'leader_alert'[\s\S]+'urgent_assist_request'[\s\S]+'urgent_assist_schedule'[\s\S]+'time_off_events'[\s\S]+'handovers'[\s\S]+'tasks'[\s\S]+'workspace_members'/.test(backfillSrc));
+assert('dept-backfill resolves HRX UUID via slug (not name)',
+  /HR_EXPERIENCE_SLUG = 'hr-experience'/.test(backfillSrc)
+  && /WHERE slug = \$1/.test(backfillSrc));
+assert('dept-backfill UPDATE only targets NULL org_node_id (idempotent)',
+  /SET org_node_id = \$1 WHERE org_node_id IS NULL/.test(backfillSrc));
+assert('dept-backfill version-marked in app_settings',
+  /BACKFILL_KEY = 'dept_backfill_version'/.test(backfillSrc)
+  && /app_settings/.test(backfillSrc));
+assert('dept-backfill writes dept.backfill_hrx audit row',
+  /'dept\.backfill_hrx'/.test(backfillSrc));
+
+const scopeRouteSrc = read('app/api/v1/dept-scope/current/route.js');
+assert('dept-scope GET endpoint returns deptId + isGlobalSuperAdmin',
+  /isGlobalSuperAdmin: superAdmin/.test(scopeRouteSrc));
+assert('dept-scope POST endpoint is super-admin-only (Forbidden otherwise)',
+  /if \(!isGlobalSuperAdmin\(user\)\)[\s\S]*Forbidden/.test(scopeRouteSrc));
+assert('dept-scope POST validates dept is top-level + active',
+  /parent_id IS NULL AND is_archived = false/.test(scopeRouteSrc));
+assert('dept-scope POST sets sameSite=lax + 30-day cookie',
+  /sameSite: 'lax'/.test(scopeRouteSrc)
+  && /maxAge: 60 \* 60 \* 24 \* 30/.test(scopeRouteSrc));
+
+const hookSrc = read('src/hooks/useCurrentDept.js');
+assert('useCurrentDept exposes setDept that reloads on success',
+  /export function useCurrentDept/.test(hookSrc)
+  && /window\.location\.reload/.test(hookSrc));
+assert('useCurrentDept tolerates 401 silently during initial paint',
+  /res\.status === 401/.test(hookSrc));
+
+const topNavSrc = read('src/components/nav/DeelTopNav.jsx');
+assert('DeelTopNav imports useCurrentDept',
+  /import \{ useCurrentDept \} from '\.\.\/\.\.\/hooks\/useCurrentDept'/.test(topNavSrc));
+assert('DeelTopNav gates dept picker on isGlobalSuperAdmin',
+  /deptState\.isGlobalSuperAdmin/.test(topNavSrc));
+assert('DeelTopNav dept picker offers Reset to home',
+  /Reset to home dept/.test(topNavSrc));
+assert('DeelTopNav dept picker click invokes setDept',
+  /deptState\.setDept\(d\.id\)/.test(topNavSrc)
+  && /deptState\.setDept\(null\)/.test(topNavSrc));
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
