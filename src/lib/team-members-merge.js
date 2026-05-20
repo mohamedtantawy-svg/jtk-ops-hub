@@ -56,6 +56,10 @@ function normaliseOverrideRow(row) {
     isAccessAdmin: row.is_access_admin === true,
     isHrHubAdmin: row.is_hr_hub_admin === true,
     isLeaderAlertsAdmin: row.is_leader_alerts_admin === true,
+    // Org Tab (Phase 0): org_node_id is nullable during the migration window
+    // — null means the merge consumer falls back to `team` for grouping until
+    // Phase 6 retires the legacy column.
+    orgNodeId: row.org_node_id || null,
   };
 }
 
@@ -88,6 +92,7 @@ function applyOverride(base, override, loginsByEmail) {
     isAccessAdmin: false,
     isHrHubAdmin: false,
     isLeaderAlertsAdmin: false,
+    orgNodeId: null,
   };
   const merged = { ...base };
   // Only overwrite when the override has a non-null value for the field.
@@ -111,6 +116,7 @@ function applyOverride(base, override, loginsByEmail) {
   merged.isAccessAdmin = override.isAccessAdmin === true;
   merged.isHrHubAdmin = override.isHrHubAdmin === true;
   merged.isLeaderAlertsAdmin = override.isLeaderAlertsAdmin === true;
+  merged.orgNodeId = override.orgNodeId || null;
   return merged;
 }
 
@@ -178,6 +184,7 @@ export function mergeTeamMembers(overrideRows = [], loginRows = []) {
       isAccessAdmin: override.isAccessAdmin === true,
       isHrHubAdmin: override.isHrHubAdmin === true,
       isLeaderAlertsAdmin: override.isLeaderAlertsAdmin === true,
+      orgNodeId: override.orgNodeId || null,
     });
   }
 

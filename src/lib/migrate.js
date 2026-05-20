@@ -6,6 +6,7 @@ import { seedTimeOffEventsIfNeeded } from './time-off-seed';
 import { seedHandoverDefaultsIfNeeded } from './handover-defaults-seed';
 import { seedWorkspaceMembersIfNeeded } from './workspace-members-seed';
 import { seedCountryHandoverDocsIfNeeded } from './country-handover-docs-seed';
+import { seedOrgDefaultIfNeeded } from './org-default-seed';
 
 const SCHEMA_SQL = `
 -- Members
@@ -1908,6 +1909,90 @@ CREATE INDEX IF NOT EXISTS idx_workbench_known_tasks_resolved_at
   ON workbench_known_tasks(resolved_at) WHERE resolved_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_workbench_known_tasks_last_seen
   ON workbench_known_tasks(last_seen_at);
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Org Structure (Phase 0 — 2026-05-20)
+--
+-- Hierarchical org chart: a single recursive node table holds departments and
+-- teams. A department can be the child of nothing (root) or another department
+-- (= sub-department). A team can be the child of a department or another team
+-- (= sub-team). Members attach to any node via team_member_overrides.org_node_id.
+-- Soft-delete only — never DELETE from these tables via UI, only set is_archived.
+-- ────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS org_nodes (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  parent_id       UUID REFERENCES org_nodes(id) ON DELETE RESTRICT,
+  kind            VARCHAR(20) NOT NULL CHECK (kind IN ('department','team')),
+  name            VARCHAR(120) NOT NULL,
+  slug            VARCHAR(160) NOT NULL UNIQUE,
+  description     TEXT,
+  lead_email      VARCHAR(255),
+  color           VARCHAR(20),
+  icon            VARCHAR(60),
+  slack_channel   VARCHAR(120),
+  country_codes   TEXT[],
+  sort_order      INT NOT NULL DEFAULT 0,
+  is_archived     BOOLEAN NOT NULL DEFAULT false,
+  config          JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_by      VARCHAR(255),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_org_nodes_parent ON org_nodes(parent_id);
+CREATE INDEX IF NOT EXISTS idx_org_nodes_kind ON org_nodes(kind);
+CREATE INDEX IF NOT EXISTS idx_org_nodes_active ON org_nodes(is_archived) WHERE is_archived = false;
+-- Unique active name within siblings under same parent (root nodes share parent_id IS NULL).
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_org_nodes_sibling_name
+  ON org_nodes (COALESCE(parent_id::text, ''), LOWER(name))
+  WHERE is_archived = false;
+
+-- Vacant role placeholders — shown as ghost cards on the chart.
+CREATE TABLE IF NOT EXISTS org_vacant_roles (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  node_id         UUID NOT NULL REFERENCES org_nodes(id) ON DELETE CASCADE,
+  title           VARCHAR(255) NOT NULL,
+  notes           TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_by      VARCHAR(255)
+);
+CREATE INDEX IF NOT EXISTS idx_org_vacant_roles_node ON org_vacant_roles(node_id);
+
+-- Delegated team-admins — per-node grant (a team lead can administer their
+-- subtree). Global admins / regional managers are NOT listed here; their
+-- power comes from access type. This table is for delegation only.
+CREATE TABLE IF NOT EXISTS org_node_admins (
+  node_id         UUID NOT NULL REFERENCES org_nodes(id) ON DELETE CASCADE,
+  email           VARCHAR(255) NOT NULL,
+  granted_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  granted_by      VARCHAR(255),
+  PRIMARY KEY (node_id, email)
+);
+CREATE INDEX IF NOT EXISTS idx_org_node_admins_email ON org_node_admins(LOWER(email));
+
+-- Append-only audit log for every org mutation. UPDATE/DELETE on this table
+-- is never performed by application code — admins can only INSERT.
+CREATE TABLE IF NOT EXISTS org_audit (
+  id              BIGSERIAL PRIMARY KEY,
+  actor_email     VARCHAR(255) NOT NULL,
+  action          VARCHAR(60) NOT NULL,
+  target_kind     VARCHAR(20),
+  target_id       VARCHAR(255),
+  before_json     JSONB,
+  after_json      JSONB,
+  metadata        JSONB,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_org_audit_target ON org_audit(target_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_org_audit_actor  ON org_audit(LOWER(actor_email), created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_org_audit_created ON org_audit(created_at DESC);
+
+-- Member assignment FK — additive, nullable. The legacy "team" column on the
+-- same row stays populated through Phase 5 for backwards-compat; Phase 6
+-- drops it after all consumers migrate. ON DELETE SET NULL so an archived
+-- node doesn't orphan rows (archiving forces a manual reassignment first).
+ALTER TABLE team_member_overrides
+  ADD COLUMN IF NOT EXISTS org_node_id UUID REFERENCES org_nodes(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_tmo_org_node ON team_member_overrides(org_node_id);
 `;
 
 export async function runMigrations() {
@@ -2013,6 +2098,19 @@ export async function runMigrations() {
     }
   } catch (err) {
     console.warn('[db] Country handover docs seed failed:', err?.message);
+  }
+
+  // Org Default (Phase 0 — 2026-05-20): seed HR Experience department +
+  // EOR Operations + Next-Gen HR teams on first boot, then backfill every
+  // existing override row with org_node_id = EOR Operations. Idempotent via
+  // a version sentinel; renames done via the Org tab are preserved.
+  try {
+    const seedResult = await seedOrgDefaultIfNeeded();
+    if (!seedResult?.skipped) {
+      console.log(`[db] Org default seeded to v${seedResult.version}: HRX dept + 2 teams, ${seedResult.backfilled_overrides} member overrides backfilled`);
+    }
+  } catch (err) {
+    console.warn('[db] Org default seed failed:', err?.message);
   }
 
   // Phase C 2026-05-18: when HANDOVER_DEFAULTS_VERSION bumps, refresh the
