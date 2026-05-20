@@ -9,12 +9,27 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '../services/api';
 
+// Phase 13a (2026-05-20): visibleSources tells the FE which Deel-source
+// sections to render in Briefing / Home / etc. The server is the source
+// of truth (per-dept profile in src/lib/dept-integrations.js); this
+// default matches an "empty" dept profile so we fail-closed before the
+// first fetch lands rather than briefly flashing HRX-style sections.
+const EMPTY_VISIBLE_SOURCES = Object.freeze({
+  onboarding: false,
+  offboarding: false,
+  amendments: false,
+  redlines: false,
+  incentivePlans: false,
+  workbench: false,
+});
+
 export function useCurrentDept() {
   const [state, setState] = useState({
     deptId: null,
     dept: null,
     isGlobalSuperAdmin: false,
     depts: [],
+    visibleSources: EMPTY_VISIBLE_SOURCES,
     loading: true,
     error: null,
   });
@@ -37,6 +52,9 @@ export function useCurrentDept() {
         dept: data.dept || null,
         isGlobalSuperAdmin: data.isGlobalSuperAdmin === true,
         depts: Array.isArray(data.depts) ? data.depts : [],
+        visibleSources: (data.visibleSources && typeof data.visibleSources === 'object')
+          ? { ...EMPTY_VISIBLE_SOURCES, ...data.visibleSources }
+          : EMPTY_VISIBLE_SOURCES,
         loading: false,
         error: null,
       });

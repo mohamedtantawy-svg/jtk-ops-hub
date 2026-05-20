@@ -37,8 +37,9 @@ export function clearDeptScopeCache(email) {
   _cache.delete(String(email).toLowerCase());
 }
 
-// Returns { deptId, deptName } for the user's top-level dept, or null when
-// they have no org_node_id (= unassigned).
+// Returns { deptId, deptName, deptSlug } for the user's top-level dept,
+// or null when they have no org_node_id (= unassigned). The slug is the
+// key Phase 13a uses to look up per-department integration config.
 export async function getTopLevelDeptForMember(email) {
   if (!email) return null;
   const lc = String(email).toLowerCase();
@@ -47,20 +48,22 @@ export async function getTopLevelDeptForMember(email) {
   try {
     const { rows } = await query(
       `WITH RECURSIVE chain AS (
-         SELECT n.id, n.parent_id, n.name, 1 AS depth
+         SELECT n.id, n.parent_id, n.name, n.slug, 1 AS depth
            FROM team_member_overrides tmo
            JOIN org_nodes n ON n.id = tmo.org_node_id
           WHERE LOWER(tmo.email) = $1 AND n.is_archived = false
          UNION ALL
-         SELECT p.id, p.parent_id, p.name, c.depth + 1
+         SELECT p.id, p.parent_id, p.name, p.slug, c.depth + 1
            FROM chain c
            JOIN org_nodes p ON p.id = c.parent_id
           WHERE p.is_archived = false
        )
-       SELECT id, name FROM chain WHERE parent_id IS NULL LIMIT 1`,
+       SELECT id, name, slug FROM chain WHERE parent_id IS NULL LIMIT 1`,
       [lc],
     );
-    const value = rows[0] ? { deptId: rows[0].id, deptName: rows[0].name } : null;
+    const value = rows[0]
+      ? { deptId: rows[0].id, deptName: rows[0].name, deptSlug: rows[0].slug }
+      : null;
     _cache.set(lc, { value, ts: Date.now() });
     return value;
   } catch (err) {
@@ -99,6 +102,30 @@ export async function getCurrentDeptId(user, req) {
   }
   const top = await getTopLevelDeptForMember(user.email);
   return top?.deptId || null;
+}
+
+// Phase 13a (2026-05-20): resolve the slug + id for the caller's effective
+// dept (super-admin cookie wins when set; everyone else gets their own).
+// Returns { deptId, deptSlug } or null. The slug is what dept-integrations
+// uses to look up per-dept Zendesk/Jira/Workbench/Deel-source config.
+export async function getCurrentDeptSlugAndId(user, req) {
+  if (!user?.email) return null;
+  if (isGlobalSuperAdmin(user)) {
+    const cookieDeptId = readSuperAdminCookie(req);
+    if (cookieDeptId) {
+      try {
+        const { rows } = await query(
+          `SELECT id, slug FROM org_nodes
+            WHERE id = $1 AND parent_id IS NULL AND is_archived = false LIMIT 1`,
+          [cookieDeptId],
+        );
+        if (rows[0]) return { deptId: rows[0].id, deptSlug: rows[0].slug };
+      } catch { /* fall through */ }
+    }
+  }
+  const top = await getTopLevelDeptForMember(user.email);
+  if (!top) return null;
+  return { deptId: top.deptId, deptSlug: top.deptSlug };
 }
 
 // List every active top-level dept for the super-admin picker.

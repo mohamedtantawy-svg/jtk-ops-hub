@@ -14,6 +14,7 @@ import {
   listTopLevelDepts,
   SUPER_ADMIN_DEPT_COOKIE,
 } from '../../../../../src/lib/dept-scope';
+import { visibleDeelSourcesFor } from '../../../../../src/lib/dept-integrations';
 
 export async function GET(req) {
   const user = getAuthUser(req);
@@ -34,11 +35,20 @@ export async function GET(req) {
     }
   }
   const depts = superAdmin ? await listTopLevelDepts() : [];
+  // Phase 13a (2026-05-20): per-dept visibility for Deel-source sections.
+  // The FE checks this to hide entire surfaces (Onboarding / Offboarding /
+  // Amendments / Redlines / Incentive Plans / Workbench) when the current
+  // dept's profile doesn't include them — e.g. Global Immigration only
+  // shows Workbench (with its own team filter), not the EOR-flavor
+  // Onboarding / Offboarding flows. Server-side routes also defense-in-
+  // depth check the same flag.
+  const visibleSources = visibleDeelSourcesFor(dept?.slug || null);
   return NextResponse.json({
     deptId,
     dept,
     isGlobalSuperAdmin: superAdmin,
     depts,
+    visibleSources,
   });
 }
 
