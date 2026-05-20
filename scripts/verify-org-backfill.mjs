@@ -890,6 +890,58 @@ assert('urgent-assist-schedule POST uses composite ON CONFLICT with partial pred
 assert('urgent-assist-schedule POST no longer references the legacy single-column ON CONFLICT',
   !/ON CONFLICT \(schedule_date\) DO UPDATE/.test(schedRouteSrcPhase11j));
 
+// ── Section 28: Phase 12a — Smart chart redesign ─────────────────────────
+console.log('\n── Phase 12a: smart chart redesign ──');
+
+const layoutSrcPhase12a = read('src/utils/orgChartLayout.js');
+assert('orgChartLayout exports new card dimensions (CARD_W >= 240)',
+  /export const CARD_W = (2[4-9]\d|[3-9]\d\d)/.test(layoutSrcPhase12a));
+assert('orgChartLayout accepts expansion in args',
+  /layoutOrgChart\(\{[\s\S]*expansion[\s\S]*\}\)/.test(layoutSrcPhase12a));
+assert('orgChartLayout gates sub-tree descent on expansion.expandedTeamId',
+  /expansion\.expandedTeamId === node\.id/.test(layoutSrcPhase12a));
+assert('orgChartLayout gates members on expansion.showMembers',
+  /expansion\.showMembers\.has\(node\.id\)/.test(layoutSrcPhase12a));
+assert('orgChartLayout always descends from department to teams',
+  /if \(node\.kind === 'department'\)[\s\S]+?descend = true/.test(layoutSrcPhase12a));
+
+const canvasSrcPhase12a = read('src/components/org/OrgChartCanvas.jsx');
+assert('OrgChartCanvas threads expansion to layoutOrgChart',
+  /layoutOrgChart\(\{ tree, rootNodes, members, expansion \}\)/.test(canvasSrcPhase12a));
+assert('OrgChartCanvas builds membersByEmail for lead lookup',
+  /const membersByEmail = useMemo/.test(canvasSrcPhase12a));
+assert('OrgChartCanvas builds per-node subtreeStats helper',
+  /const subtreeStats = useMemo/.test(canvasSrcPhase12a)
+  && /descendantMembers/.test(canvasSrcPhase12a)
+  && /directTeams/.test(canvasSrcPhase12a));
+assert('OrgChartCanvas accepts expansion + callbacks props',
+  /onToggleTeamExpansion/.test(canvasSrcPhase12a)
+  && /onToggleShowMembers/.test(canvasSrcPhase12a));
+assert('NodeCard accepts lead + stats + toggle props',
+  /function NodeCard\([\s\S]+?lead,[\s\S]+?stats,[\s\S]+?canToggleExpand,[\s\S]+?isExpanded,[\s\S]+?isShowingMembers,/.test(canvasSrcPhase12a));
+assert('NodeCard renders an embedded lead row with Avatar',
+  /Avatar size=\{22\} name=\{lead\.name\}/.test(canvasSrcPhase12a));
+assert('NodeCard exposes the Expand button (gated on canToggleExpand)',
+  /canToggleExpand && \(/.test(canvasSrcPhase12a)
+  && /onClick=\{onToggleExpand\}/.test(canvasSrcPhase12a));
+assert('NodeCard exposes the Show members button (gated on memberCount > 0)',
+  /memberCount > 0 && \(/.test(canvasSrcPhase12a)
+  && /onClick=\{onToggleShowMembers\}/.test(canvasSrcPhase12a));
+assert('NodeCard preserves Phase 10a Login-as-dept-admin pill',
+  /onLoginAsDeptAdmin\?\.\(node\.leadEmail\)/.test(canvasSrcPhase12a));
+
+const viewSrcPhase12a = read('src/components/views/OrgView.jsx');
+assert('OrgView holds chartExpansion state with the three slots',
+  /const \[chartExpansion, setChartExpansion\] = useState/.test(viewSrcPhase12a)
+  && /expandedTeamId: null/.test(viewSrcPhase12a)
+  && /expandedSubTeamId: null/.test(viewSrcPhase12a)
+  && /showMembers: new Set\(\)/.test(viewSrcPhase12a));
+assert('OrgView toggleTeamExpansion auto-collapses prior sub-team on team change',
+  /expandedSubTeamId: null/.test(viewSrcPhase12a)
+  && /expandedTeamId === nodeId \? null : nodeId/.test(viewSrcPhase12a));
+assert('OrgView wires expansion + callbacks into OrgChartCanvas',
+  /expansion=\{chartExpansion\}[\s\S]+?onToggleTeamExpansion=\{toggleTeamExpansion\}[\s\S]+?onToggleShowMembers=\{toggleShowMembers\}/.test(viewSrcPhase12a));
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
