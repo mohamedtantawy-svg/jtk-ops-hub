@@ -691,6 +691,32 @@ assert('hr-hub/requests/[id] PATCH refuses cross-dept SELECT + UPDATE',
   /SELECT \* FROM hr_hub_request WHERE id = \$1 AND org_node_id = \$2/.test(hrHubIdSrc)
   && /AND org_node_id = \$\$\{p \+ 1\}/.test(hrHubIdSrc));
 
+// ── Section 21: Phase 11d — Leaders Hub isolation ────────────────────────
+console.log('\n── Phase 11d: Leaders Hub isolation ──');
+const leaderListSrc = read('app/api/v1/leader-alerts/alerts/route.js');
+assert('leader-alerts list imports getCurrentDeptId',
+  /import \{ getCurrentDeptId \}/.test(leaderListSrc));
+assert('leader-alerts list filters by currentDeptId / FALSE fail-closed',
+  /where\.push\(`org_node_id = \$/.test(leaderListSrc)
+  && /where\.push\(`FALSE`\)/.test(leaderListSrc));
+assert('leader-alerts list stamps creatorDeptId on INSERT',
+  /creatorDeptId,/.test(leaderListSrc)
+  && /org_node_id\)\s*VALUES \('new'/.test(leaderListSrc));
+
+const leaderIdSrc = read('app/api/v1/leader-alerts/alerts/[id]/route.js');
+assert('leader-alerts/[id] imports getCurrentDeptId',
+  /import \{ getCurrentDeptId \}/.test(leaderIdSrc));
+assert('leader-alerts/[id] GET filters by org_node_id',
+  /WHERE a\.id = \$1 AND a\.org_node_id = \$3/.test(leaderIdSrc));
+assert('leader-alerts/[id] PATCH refuses cross-dept',
+  /SELECT \* FROM leader_alert WHERE id = \$1 AND org_node_id = \$2/.test(leaderIdSrc));
+assert('leader-alerts/[id] DELETE refuses cross-dept',
+  /DELETE FROM leader_alert WHERE id = \$1 AND org_node_id = \$2/.test(leaderIdSrc));
+
+const unackedSrc = read('app/api/v1/leader-alerts/unacked-count/route.js');
+assert('leader-alerts unacked-count is dept-scoped',
+  /a\.org_node_id = \$3/.test(unackedSrc));
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
