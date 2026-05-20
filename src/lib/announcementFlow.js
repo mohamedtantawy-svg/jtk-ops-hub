@@ -142,11 +142,20 @@ export async function publishFromRequest(request, options = {}) {
   const sent_at = immediate ? effective : null;
   const scheduled_for = immediate ? null : effective;
 
+  // Phase 11b (2026-05-20): every announcement is tenanted to a dept. The
+  // caller passes orgNodeId explicitly — direct-publish routes pass the
+  // actor's currentDeptId; approval routes pass the requester's resolved
+  // dept (the rule is "isolation follows the submitter"). Null is permitted
+  // only as a temporary safety valve so a publish doesn't 500 if dept
+  // resolution fails; the dept-backfill sweep will pick up null rows on
+  // the next boot.
+  const orgNodeId = options.orgNodeId || null;
+
   const { rows } = await query(
     `INSERT INTO announcements
        (type, title, body, target, target_group_id, priority, is_popup, image_url, link,
-        author_id, sound_key, status, sent_at, scheduled_for)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+        author_id, sound_key, status, sent_at, scheduled_for, org_node_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
      RETURNING *`,
     [
       request.type || 'announce',
@@ -167,6 +176,7 @@ export async function publishFromRequest(request, options = {}) {
       status,
       sent_at,
       scheduled_for,
+      orgNodeId,
     ]
   );
   return rows[0];

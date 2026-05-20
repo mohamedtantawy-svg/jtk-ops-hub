@@ -630,6 +630,44 @@ assert('DeelTopNav dept picker click invokes setDept',
   /deptState\.setDept\(d\.id\)/.test(topNavSrc)
   && /deptState\.setDept\(null\)/.test(topNavSrc));
 
+// ── Section 19: Phase 11b — Announcements isolation ──────────────────────
+console.log('\n── Phase 11b: announcements isolation ──');
+const annFlowSrc = read('src/lib/announcementFlow.js');
+assert('announcementFlow accepts options.orgNodeId',
+  /const orgNodeId = options\.orgNodeId \|\| null/.test(annFlowSrc));
+assert('announcementFlow INSERT includes org_node_id column',
+  /INSERT INTO announcements[\s\S]+org_node_id\)/.test(annFlowSrc));
+
+const annListRouteSrc = read('app/api/v1/announcements/route.js');
+assert('announcements GET imports getCurrentDeptId',
+  /import \{ getCurrentDeptId \}/.test(annListRouteSrc));
+assert('announcements GET filters by currentDeptId',
+  /currentDeptId[\s\S]+AND org_node_id = \$/.test(annListRouteSrc));
+assert('announcements GET fails closed when no dept (1=0 deny)',
+  /AND 1=0/.test(annListRouteSrc));
+assert('announcements POST stamps orgNodeId from actor currentDeptId',
+  /const orgNodeId = await getCurrentDeptId\(user, req\)[\s\S]+orgNodeId,/.test(annListRouteSrc));
+
+const annIdRouteSrc = read('app/api/v1/announcements/[id]/route.js');
+assert('announcements/id GET filters by currentDeptId',
+  /WHERE id = \$1 AND org_node_id = \$2/.test(annIdRouteSrc));
+assert('announcements/id PATCH refuses cross-dept edits',
+  /AND org_node_id = \$\$\{idx \+ 1\}/.test(annIdRouteSrc));
+assert('announcements/id DELETE refuses cross-dept deletes',
+  /DELETE FROM announcements WHERE id = \$1 AND org_node_id = \$2/.test(annIdRouteSrc));
+
+const approveSrc = read('app/api/v1/announcement-requests/[id]/approve/route.js');
+assert('announcement-requests approve resolves requester dept',
+  /getTopLevelDeptForMember\(r\.requested_by_email\)/.test(approveSrc));
+assert('announcement-requests approve passes orgNodeId to publishFromRequest',
+  /publishFromRequest\([\s\S]+orgNodeId: requesterDept\?\.deptId/.test(approveSrc));
+
+const publishSrc = read('app/api/v1/announcement-requests/[id]/publish/route.js');
+assert('announcement-requests publish resolves requester dept',
+  /getTopLevelDeptForMember\(r\.requested_by_email\)/.test(publishSrc));
+assert('announcement-requests publish passes orgNodeId to publishFromRequest',
+  /publishFromRequest\([\s\S]+orgNodeId: requesterDept\?\.deptId/.test(publishSrc));
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
