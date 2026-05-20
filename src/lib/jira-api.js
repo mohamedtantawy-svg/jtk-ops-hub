@@ -17,12 +17,24 @@ export function isJiraConfigured() {
  * Raw fetch wrapper — no retry.
  */
 async function _jiraFetch(endpoint, options = {}) {
-  if (!isJiraConfigured()) {
+  // Phase 13b (2026-05-20): callers can override the auth tuple via
+  // options.tokenOverride / .baseUrlOverride / .emailOverride to point
+  // at a per-dept Jira instance (e.g. Global Immigration's JIRA_GIX).
+  // When all three are unset, module-level JIRA_* env vars are used —
+  // HRX behavior is byte-identical.
+  const tokenOverride = options.tokenOverride || null;
+  const baseUrlOverride = options.baseUrlOverride || null;
+  const emailOverride = options.emailOverride || null;
+  const effBase = baseUrlOverride || JIRA_BASE_URL;
+  const effEmail = emailOverride || JIRA_USER_EMAIL;
+  const effToken = tokenOverride || JIRA_API_TOKEN;
+
+  if (!effBase || !effEmail || !effToken) {
     throw new Error('Jira API is not configured (JIRA_BASE_URL, JIRA_USER_EMAIL, JIRA_API_TOKEN)');
   }
 
-  const auth = Buffer.from(`${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}`).toString('base64');
-  const url = `${JIRA_BASE_URL}/rest/api/3${endpoint}`;
+  const auth = Buffer.from(`${effEmail}:${effToken}`).toString('base64');
+  const url = `${effBase}/rest/api/3${endpoint}`;
 
   const res = await fetch(url, {
     ...options,
@@ -167,7 +179,7 @@ export function emailsFromJiraFieldValue(value) {
 //
 // Response shape: { issues: [...], nextPageToken?: "...", isLast: boolean }
 
-export async function searchIssues(jql, params = {}) {
+export async function searchIssues(jql, params = {}, opts = {}) {
   const fields = params.fields || [
     'summary', 'status', 'assignee', 'reporter', 'priority',
     'created', 'updated', 'issuetype', 'project', 'labels',
@@ -178,9 +190,14 @@ export async function searchIssues(jql, params = {}) {
   const body = { jql, maxResults, fields };
   if (params.nextPageToken) body.nextPageToken = params.nextPageToken;
 
+  // Phase 13b: pass per-dept auth overrides through to jiraFetch when
+  // provided. HRX path (opts = {}) is byte-identical to pre-Phase-13b.
   return jiraFetch('/search/jql', {
     method: 'POST',
     body: JSON.stringify(body),
+    tokenOverride: opts.tokenOverride,
+    baseUrlOverride: opts.baseUrlOverride,
+    emailOverride: opts.emailOverride,
   });
 }
 
@@ -276,7 +293,7 @@ export async function createIssue(projectKey, summary, description, issueType = 
 
 // ── Add Comment ──────────────────────────────────────────────────────────────
 
-export async function addComment(issueKey, commentText) {
+export async function addComment(issueKey, commentText, opts = {}) {
   const body = {
     body: {
       type: 'doc',
@@ -287,29 +304,46 @@ export async function addComment(issueKey, commentText) {
   return jiraFetch(`/issue/${issueKey}/comment`, {
     method: 'POST',
     body: JSON.stringify(body),
+    tokenOverride: opts.tokenOverride,
+    baseUrlOverride: opts.baseUrlOverride,
+    emailOverride: opts.emailOverride,
   });
 }
 
 // ── Transition Issue ─────────────────────────────────────────────────────────
 
-export async function transitionIssue(issueKey, transitionId) {
+export async function transitionIssue(issueKey, transitionId, opts = {}) {
   return jiraFetch(`/issue/${issueKey}/transitions`, {
     method: 'POST',
     body: JSON.stringify({ transition: { id: transitionId } }),
+    tokenOverride: opts.tokenOverride,
+    baseUrlOverride: opts.baseUrlOverride,
+    emailOverride: opts.emailOverride,
   });
 }
 
 // ── Get Transitions ──────────────────────────────────────────────────────────
 
-export async function getTransitions(issueKey) {
-  return jiraFetch(`/issue/${issueKey}/transitions`);
+export async function getTransitions(issueKey, opts = {}) {
+  return jiraFetch(`/issue/${issueKey}/transitions`, {
+    tokenOverride: opts.tokenOverride,
+    baseUrlOverride: opts.baseUrlOverride,
+    emailOverride: opts.emailOverride,
+  });
 }
 
 // ── Reassign Issue ──────────────────────────────────────────────────────
 
-export async function reassignIssue(issueKey, assigneeEmail) {
+export async function reassignIssue(issueKey, assigneeEmail, opts = {}) {
+  // Phase 13b: per-dept auth overrides apply to BOTH the user lookup and
+  // the assign call — Jira account IDs are per-instance.
+  const authOpts = {
+    tokenOverride: opts.tokenOverride,
+    baseUrlOverride: opts.baseUrlOverride,
+    emailOverride: opts.emailOverride,
+  };
   // Look up Jira account by email
-  const users = await jiraFetch(`/user/search?query=${encodeURIComponent(assigneeEmail)}`);
+  const users = await jiraFetch(`/user/search?query=${encodeURIComponent(assigneeEmail)}`, authOpts);
   const user = users?.[0];
   if (!user) throw new Error(`Jira user not found for email: ${assigneeEmail}`);
 
@@ -317,6 +351,7 @@ export async function reassignIssue(issueKey, assigneeEmail) {
   return jiraFetch(`/issue/${issueKey}/assignee`, {
     method: 'PUT',
     body: JSON.stringify({ accountId: user.accountId }),
+    ...authOpts,
   });
 }
 

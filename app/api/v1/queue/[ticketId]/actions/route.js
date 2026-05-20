@@ -18,7 +18,8 @@ import { getVisibleCountries } from '../../../../../../src/lib/queue-scoping';
 import { canAssignTo } from '../../../../../../src/lib/task-scope-guard';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
 import { resolveZendeskUserIdByEmail, updateTicket as updateZdTicket, reassignTicket as reassignZdTicket } from '../../../../../../src/lib/zendesk-api';
-import { getCurrentDeptId } from '../../../../../../src/lib/dept-scope';
+import { getCurrentDeptId, getCurrentDeptSlugAndId } from '../../../../../../src/lib/dept-scope';
+import { resolveZendeskConfig, resolveJiraConfig, SLUGS } from '../../../../../../src/lib/dept-integrations';
 
 const STALE_TTL_MS = 30 * 60_000;
 
@@ -102,13 +103,24 @@ function isZendeskTicket(ticketId) {
 // X-On-Behalf-Of via opts.actAsEmail so every Zendesk write attributes
 // to the authenticated team member, not the API token's owner.
 
-async function addJiraComment(issueKey, message) {
-  if (!JIRA_BASE || !JIRA_TOKEN) throw new Error('Jira API not configured');
-  const url = `${JIRA_BASE}/rest/api/3/issue/${issueKey}/comment`;
-  const auth = Buffer.from(`${JIRA_EMAIL}:${JIRA_TOKEN}`).toString('base64');
+// Phase 13b: per-call jiraAuth — defaults to module-level HRX env vars.
+// When the caller's currentDept is non-HRX, the route resolves the dept's
+// Jira config + passes its base URL / email / token through here. HRX
+// callers pass `null` (or omit) and the module-level constants apply.
+function _jiraAuthOf(jiraAuthOverride) {
+  const base = jiraAuthOverride?.baseUrl || JIRA_BASE;
+  const email = jiraAuthOverride?.email || JIRA_EMAIL;
+  const token = jiraAuthOverride?.token || JIRA_TOKEN;
+  return { base, email, token, header: Buffer.from(`${email}:${token}`).toString('base64') };
+}
+
+async function addJiraComment(issueKey, message, jiraAuthOverride = null) {
+  const { base, header, token } = _jiraAuthOf(jiraAuthOverride);
+  if (!base || !token) throw new Error('Jira API not configured');
+  const url = `${base}/rest/api/3/issue/${issueKey}/comment`;
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/json' },
+    headers: { 'Authorization': `Basic ${header}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ body: { type: 'doc', version: 1, content: [{ type: 'paragraph', content: [{ type: 'text', text: message }] }] } }),
   });
   if (!res.ok) {
@@ -118,12 +130,12 @@ async function addJiraComment(issueKey, message) {
   return res.json();
 }
 
-async function transitionJiraIssue(issueKey, status) {
-  if (!JIRA_BASE || !JIRA_TOKEN) throw new Error('Jira API not configured');
-  const auth = Buffer.from(`${JIRA_EMAIL}:${JIRA_TOKEN}`).toString('base64');
+async function transitionJiraIssue(issueKey, status, jiraAuthOverride = null) {
+  const { base, header, token } = _jiraAuthOf(jiraAuthOverride);
+  if (!base || !token) throw new Error('Jira API not configured');
   // First get available transitions
-  const tRes = await fetch(`${JIRA_BASE}/rest/api/3/issue/${issueKey}/transitions`, {
-    headers: { 'Authorization': `Basic ${auth}`, 'Accept': 'application/json' },
+  const tRes = await fetch(`${base}/rest/api/3/issue/${issueKey}/transitions`, {
+    headers: { 'Authorization': `Basic ${header}`, 'Accept': 'application/json' },
   });
   if (!tRes.ok) throw new Error(`Jira transitions fetch failed: ${tRes.status}`);
   const { transitions } = await tRes.json();
@@ -131,9 +143,9 @@ async function transitionJiraIssue(issueKey, status) {
   const targetName = statusMap[status] || status;
   const match = transitions.find(t => t.name.toLowerCase() === targetName.toLowerCase());
   if (!match) return { ok: true, note: `No transition found for "${targetName}"` };
-  const res = await fetch(`${JIRA_BASE}/rest/api/3/issue/${issueKey}/transitions`, {
+  const res = await fetch(`${base}/rest/api/3/issue/${issueKey}/transitions`, {
     method: 'POST',
-    headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/json' },
+    headers: { 'Authorization': `Basic ${header}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ transition: { id: match.id } }),
   });
   if (!res.ok) {
@@ -149,11 +161,15 @@ async function transitionJiraIssue(issueKey, status) {
 const JIRA_ACCOUNT_ID_TTL_MS = 60 * 60 * 1000;
 const jiraAccountIdCache = new Map();
 
-async function resolveJiraAccountId(email, auth) {
-  const key = email.toLowerCase();
+async function resolveJiraAccountId(email, auth, base) {
+  // Cache is keyed by (base, email) so two dept Jira instances don't share
+  // a (potentially conflicting) account ID. base is the resolved Jira host
+  // URL — for HRX it's JIRA_BASE_URL; for Global Immigration the same host
+  // is used today (only the token differs) so the cache still de-dupes.
+  const key = `${base}|${email.toLowerCase()}`;
   const hit = jiraAccountIdCache.get(key);
   if (hit && Date.now() - hit.ts < JIRA_ACCOUNT_ID_TTL_MS) return hit.accountId;
-  const searchRes = await fetch(`${JIRA_BASE}/rest/api/3/user/search?query=${encodeURIComponent(email)}`, {
+  const searchRes = await fetch(`${base}/rest/api/3/user/search?query=${encodeURIComponent(email)}`, {
     headers: { 'Authorization': `Basic ${auth}`, 'Accept': 'application/json' },
   });
   if (!searchRes.ok) throw new Error(`Jira user search failed: ${searchRes.status}`);
@@ -164,20 +180,20 @@ async function resolveJiraAccountId(email, auth) {
   return jiraUser.accountId;
 }
 
-async function assignJiraIssue(issueKey, email) {
-  if (!JIRA_BASE || !JIRA_TOKEN) throw new Error('Jira API not configured');
-  const auth = Buffer.from(`${JIRA_EMAIL}:${JIRA_TOKEN}`).toString('base64');
-  const accountId = await resolveJiraAccountId(email, auth);
-  const res = await fetch(`${JIRA_BASE}/rest/api/3/issue/${issueKey}/assignee`, {
+async function assignJiraIssue(issueKey, email, jiraAuthOverride = null) {
+  const { base, header, token } = _jiraAuthOf(jiraAuthOverride);
+  if (!base || !token) throw new Error('Jira API not configured');
+  const accountId = await resolveJiraAccountId(email, header, base);
+  const res = await fetch(`${base}/rest/api/3/issue/${issueKey}/assignee`, {
     method: 'PUT',
-    headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/json' },
+    headers: { 'Authorization': `Basic ${header}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ accountId }),
   });
   if (!res.ok) {
     const body = await res.text();
     // If the accountId we had cached has since been deactivated/removed, drop
     // it so the next attempt forces a fresh lookup.
-    if (res.status === 400 || res.status === 404) jiraAccountIdCache.delete(email.toLowerCase());
+    if (res.status === 400 || res.status === 404) jiraAccountIdCache.delete(`${base}|${email.toLowerCase()}`);
     throw new Error(`Jira assign failed ${res.status}: ${body.substring(0, 200)}`);
   }
   return { ok: true };
@@ -242,6 +258,24 @@ export async function POST(req, { params }) {
   // shadow-row insert so the row is tenanted from creation.
   const orgNodeId = await getCurrentDeptId(user, req);
 
+  // Phase 13b (2026-05-20): resolve the actor's dept + per-dept integration
+  // tokens. HRX path (no overrides) is byte-identical to pre-Phase-13b;
+  // non-HRX path routes Zendesk + Jira writes to that dept's instance.
+  const deptInfo = await getCurrentDeptSlugAndId(user, req);
+  const isHrx = !deptInfo || deptInfo.deptSlug === SLUGS.HR_EXPERIENCE;
+  const zdCfg = isHrx ? null : resolveZendeskConfig(deptInfo.deptSlug);
+  const jiraCfg = isHrx ? null : resolveJiraConfig(deptInfo.deptSlug);
+  const zdAuthOpts = zdCfg ? {
+    tokenOverride: zdCfg.token,
+    subdomainOverride: zdCfg.subdomain,
+    emailOverride: zdCfg.email,
+  } : {};
+  const jiraAuthOverride = jiraCfg ? {
+    token: jiraCfg.token,
+    baseUrl: jiraCfg.baseUrl || undefined,
+    email: jiraCfg.email || undefined,
+  } : null;
+
   const { ticketId } = await params;
   const body = await req.json();
   const { action } = body;
@@ -289,9 +323,9 @@ export async function POST(req, { params }) {
         } else {
           console.warn(`[queue/actions/reply] no ZD user for ${user.email} — comment author may fall back to API token owner`);
         }
-        await updateZdTicket(zdId, { comment }, { actAsEmail: user.email });
+        await updateZdTicket(zdId, { comment }, { actAsEmail: user.email, ...zdAuthOpts });
       } else {
-        await addJiraComment(ticketId, body.message);
+        await addJiraComment(ticketId, body.message, jiraAuthOverride);
       }
       await upsertShadowAndLog({
         ticketId, source, eventType: 'reply',
@@ -313,9 +347,9 @@ export async function POST(req, { params }) {
         // app-level 'waiting' bucket but mean different things in Zendesk.
         const statusMap = { new: 'new', in_progress: 'open', waiting: 'pending', on_hold: 'hold', resolved: 'solved' };
         const zdStatus = statusMap[body.status] || body.status;
-        await updateZdTicket(zdId, { status: zdStatus }, { actAsEmail: user.email });
+        await updateZdTicket(zdId, { status: zdStatus }, { actAsEmail: user.email, ...zdAuthOpts });
       } else {
-        await transitionJiraIssue(ticketId, body.status);
+        await transitionJiraIssue(ticketId, body.status, jiraAuthOverride);
       }
       await upsertShadowAndLog({
         ticketId, source, eventType: 'status',
@@ -340,9 +374,9 @@ export async function POST(req, { params }) {
         // visibly reverted. Use the shared helper which does the
         // email → user.id lookup before issuing the PUT (Bug 6 —
         // Fernanda 2026-04-28).
-        await reassignZdTicket(zdId, body.assigneeEmail, { actAsEmail: user.email });
+        await reassignZdTicket(zdId, body.assigneeEmail, { actAsEmail: user.email, ...zdAuthOpts });
       } else {
-        await assignJiraIssue(ticketId, body.assigneeEmail);
+        await assignJiraIssue(ticketId, body.assigneeEmail, jiraAuthOverride);
       }
       const asgn = await query(
         'SELECT id FROM members WHERE LOWER(email) = LOWER($1) LIMIT 1',
