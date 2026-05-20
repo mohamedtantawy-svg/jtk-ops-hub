@@ -823,6 +823,57 @@ assert('queue/actions shadow upsert stamps org_node_id',
 assert('queue/actions resolves orgNodeId once per POST',
   /const orgNodeId = await getCurrentDeptId\(user, req\)/.test(actionsSrc));
 
+// ── Section 26: Phase 11i — Integration sweep + HRX-no-impact contract ───
+console.log('\n── Phase 11i: integration sweep + HRX-no-impact contract ──');
+
+// Spot-checked gaps fixed in this PR:
+const readSrc = read('app/api/v1/announcements/[id]/read/route.js');
+assert('announcements/[id]/read dept-scopes existence check (no cross-dept ack)',
+  /AND org_node_id = \$2/.test(readSrc)
+  && /getCurrentDeptId/.test(readSrc));
+
+const importSrc = read('app/api/v1/time-off-events/import/route.js');
+assert('time-off-events/import stamps subject dept per row',
+  /getTopLevelDeptForMember/.test(importSrc)
+  && /org_node_id\)/.test(importSrc));
+
+// HRX-no-impact contract: every isolated surface read filters by org_node_id.
+// Spot-check that the canonical pattern (WHERE ... org_node_id = $deptId)
+// appears in each surface's primary route.
+const HRX_NO_IMPACT_ROUTES = [
+  ['app/api/v1/announcements/route.js',                'AND org_node_id = \\$'],
+  ['app/api/v1/hr-hub/requests/route.js',              '`org_node_id = \\$'],
+  ['app/api/v1/leader-alerts/alerts/route.js',         '`org_node_id = \\$'],
+  ['app/api/v1/urgent-assist/route.js',                '`org_node_id = \\$'],
+  ['app/api/v1/time-off-events/route.js',              'e\\.org_node_id = \\$'],
+  ['app/api/v1/handovers/route.js',                    'h\\.org_node_id = \\$'],
+  ['app/api/v1/tasks/route.js',                        't\\.org_node_id = \\$'],
+];
+for (const [path, pattern] of HRX_NO_IMPACT_ROUTES) {
+  const src = read(path);
+  assert(`HRX-no-impact: ${path} reads filter by org_node_id`,
+    new RegExp(pattern).test(src));
+}
+
+// And that the legacy `team` column is NEVER written from the new lead-seed
+// helper — the queue-scoping boundary for ~84 HRX agents must stay untouched.
+const leadSeedFinalSrc = read('src/lib/org-lead-admin-seed.js');
+assert('HRX-no-impact: org-lead-admin-seed never writes legacy team column',
+  !/UPDATE team_member_overrides[\s\S]+\bteam\s*=/.test(leadSeedFinalSrc));
+
+// dept-backfill targets every surface — single sweep guarantees HRX
+// stamping across the whole product on first prod boot after this deploys.
+const backfillFinalSrc = read('src/lib/dept-backfill.js');
+const REQUIRED_SURFACES = [
+  'announcements', 'hr_hub_request', 'leader_alert',
+  'urgent_assist_request', 'urgent_assist_schedule',
+  'time_off_events', 'handovers', 'tasks', 'workspace_members',
+];
+for (const tbl of REQUIRED_SURFACES) {
+  assert(`HRX-no-impact: backfill stamps ${tbl}`,
+    new RegExp(`'${tbl}'`).test(backfillFinalSrc));
+}
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
