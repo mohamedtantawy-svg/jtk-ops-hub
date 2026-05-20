@@ -4,6 +4,7 @@ import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { isApprover } from '../../../../../../src/data/approvers';
 import { canApproveAnnouncementRequests } from '../../../../../../src/lib/announcements-admin';
 import { publishFromRequest, recordAudit } from '../../../../../../src/lib/announcementFlow';
+import { getTopLevelDeptForMember } from '../../../../../../src/lib/dept-scope';
 
 // POST /api/v1/announcement-requests/:id/approve
 //   Body: { scheduledFor?: ISOString | null,
@@ -178,9 +179,16 @@ export async function POST(req, { params }) {
     // Override path — publishImmediately=true. Behaves like the legacy
     // one-shot approve: create the announcement row inline and mark the
     // request approved.
+    //
+    // Phase 11b (2026-05-20): the published announcement lands in the
+    // REQUESTER's dept, not the approver's — isolation follows the
+    // submitter. Approver's currentDeptId is irrelevant here; we resolve
+    // the requester's top-level dept from the request row.
+    const requesterDept = await getTopLevelDeptForMember(r.requested_by_email);
     const published = await publishFromRequest(merged, {
       sendAt,
       actor: user,
+      orgNodeId: requesterDept?.deptId || null,
     });
 
     await query(

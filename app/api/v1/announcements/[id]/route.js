@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { query } from '../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { canManageAnnouncements, canArchiveAnnouncements } from '../../../../../src/lib/announcements-admin';
+import { getCurrentDeptId } from '../../../../../src/lib/dept-scope';
 
 export async function GET(req, { params }) {
   try {
@@ -11,7 +12,17 @@ export async function GET(req, { params }) {
     }
 
     const { id } = await params;
-    const { rows } = await query('SELECT id, type, title, body, target, priority, is_popup, image_url, link, status, author_id, pinned, sound_key, sent_at, created_at, updated_at FROM announcements WHERE id = $1', [id]);
+    // Phase 11b: filter by current dept so cross-tenant reads 404 instead
+    // of leaking. NULL org_node_id post-backfill should never happen, but
+    // we 404 those too rather than guess.
+    const currentDeptId = await getCurrentDeptId(user, req);
+    if (!currentDeptId) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    const { rows } = await query(
+      `SELECT id, type, title, body, target, priority, is_popup, image_url, link,
+              status, author_id, pinned, sound_key, sent_at, created_at, updated_at
+         FROM announcements WHERE id = $1 AND org_node_id = $2`,
+      [id, currentDeptId],
+    );
     if (rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     const r = rows[0];
 
@@ -108,9 +119,13 @@ export async function PATCH(req, { params }) {
     if (sets.length === 0) return NextResponse.json({ error: 'No valid fields' }, { status: 400 });
     sets.push('updated_at = NOW()');
     vals.push(id);
+    // Phase 11b: refuse to edit announcements from a different dept.
+    const currentDeptId = await getCurrentDeptId(user, req);
+    if (!currentDeptId) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    vals.push(currentDeptId);
 
     const { rows } = await query(
-      `UPDATE announcements SET ${sets.join(', ')} WHERE id = $${idx} RETURNING *`,
+      `UPDATE announcements SET ${sets.join(', ')} WHERE id = $${idx} AND org_node_id = $${idx + 1} RETURNING *`,
       vals
     );
     if (rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -137,9 +152,16 @@ export async function DELETE(req, { params }) {
     }
 
     const { id } = await params;
+    // Phase 11b: refuse to delete announcements from a different dept.
+    const currentDeptId = await getCurrentDeptId(user, req);
+    if (!currentDeptId) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     // Hard delete — announcement_acks, comments, reactions, links all cascade
     // via ON DELETE CASCADE on their FKs. No orphan rows left behind.
-    await query('DELETE FROM announcements WHERE id = $1', [id]);
+    const delRes = await query(
+      'DELETE FROM announcements WHERE id = $1 AND org_node_id = $2',
+      [id, currentDeptId],
+    );
+    if (!delRes.rowCount) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     return new NextResponse(null, { status: 204 });
   } catch (err) {
     console.error('[announcements/id DELETE]', err.message);
