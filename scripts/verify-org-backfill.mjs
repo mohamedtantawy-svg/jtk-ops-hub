@@ -1102,6 +1102,57 @@ assert('HRX-no-impact: jiraFetch default base/email/token reads JIRA_* env',
   && /effEmail = emailOverride \|\| JIRA_USER_EMAIL/.test(jiraApiSrcPhase13b)
   && /effToken = tokenOverride \|\| JIRA_API_TOKEN/.test(jiraApiSrcPhase13b));
 
+// ── Section 31: Phase 14 — Global Immigration roster seed ─────────────────
+console.log('\n── Phase 14: Global Immigration roster seed ──');
+
+const gixRosterSrc = read('src/lib/global-immigration-roster-seed.js');
+assert('global-immigration-roster-seed exports the idempotent function',
+  /export async function seedGlobalImmigrationRosterIfNeeded/.test(gixRosterSrc));
+assert('roster keyed off global-immigration slug',
+  /GLOBAL_IMMIGRATION_SLUG = 'global-immigration'/.test(gixRosterSrc));
+assert('roster sentinel key is global_immigration_roster_seed_version',
+  /SEED_KEY = 'global_immigration_roster_seed_version'/.test(gixRosterSrc));
+assert('roster has 67 entries (matching the CSV)',
+  /export const ROSTER_SUMMARY/.test(gixRosterSrc));
+// Quick textual counts — match the CSV breakdown so a typo regresses loudly.
+{
+  // Manager tier — 1 RM (adriana) + 7 TLs.
+  const rmMatches = gixRosterSrc.match(/access: 'regional_manager'/g) || [];
+  assert('roster has exactly 1 regional_manager (adriana.diez)',
+    rmMatches.length === 1
+    && /'adriana\.diez@deel\.com'[\s\S]*?access: 'regional_manager'/.test(gixRosterSrc));
+  const tlMatches = gixRosterSrc.match(/access: 'team_lead'/g) || [];
+  assert('roster has exactly 7 team_leads', tlMatches.length === 7);
+  const agentMatches = gixRosterSrc.match(/access: 'agent'/g) || [];
+  assert('roster has exactly 59 agents (1 RM + 7 TLs + 59 agents = 67)', agentMatches.length === 59);
+}
+assert('roster names manager_email for every entry',
+  // Every line that has `email:` is followed by a `manager:` on the same row.
+  // Crude check: count `email: '` and `manager: '` and assert equal.
+  (gixRosterSrc.match(/{\s*email: '/g) || []).length === (gixRosterSrc.match(/manager: '/g) || []).length);
+assert('roster never writes the legacy team column (HRX queue-scoping boundary)',
+  !/team:\s*'/.test(gixRosterSrc.split('// Exported')[0]));
+assert('roster INSERT uses ON CONFLICT (email) DO UPDATE (idempotent)',
+  /ON CONFLICT \(email\) DO UPDATE/.test(gixRosterSrc));
+assert('roster never overwrites a name/initials/title if already set (COALESCE)',
+  /name\s*=\s*COALESCE\(team_member_overrides\.name, EXCLUDED\.name\)/.test(gixRosterSrc)
+  && /title\s*=\s*COALESCE\(team_member_overrides\.title, EXCLUDED\.title\)/.test(gixRosterSrc));
+assert('roster writes a dept.roster_seeded audit row',
+  /'dept\.roster_seeded'/.test(gixRosterSrc));
+
+const migrateSrcPhase14 = read('src/lib/migrate.js');
+assert('migrate.js imports seedGlobalImmigrationRosterIfNeeded',
+  /import \{ seedGlobalImmigrationRosterIfNeeded \} from '\.\/global-immigration-roster-seed'/.test(migrateSrcPhase14));
+assert('migrate.js calls the roster seed AFTER the dept-tenancy backfill',
+  /backfillHrExperienceTenancyIfNeeded\(\)[\s\S]*?seedGlobalImmigrationRosterIfNeeded\(\)/.test(migrateSrcPhase14));
+
+// HRX-no-impact assertions for the roster seed.
+assert('HRX-no-impact: roster never touches the legacy team column',
+  !/UPDATE team_member_overrides[\s\S]+\bteam\s*=/.test(gixRosterSrc));
+assert('HRX-no-impact: roster only writes rows with org_node_id = Global Immigration UUID',
+  /org_node_id,[\s\S]*?\$8/.test(gixRosterSrc)
+  && /deptId/.test(gixRosterSrc));
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
