@@ -17,6 +17,7 @@ import {
   archiveOrgNode,
   moveOrgNode,
   reorderOrgNode,
+  restoreOrgNode,
 } from '../services/orgApi';
 
 const CACHE_KEY = 'ops_hub_org_nodes_cache';
@@ -66,10 +67,13 @@ export function useOrgNodes() {
   const [loading, setLoading] = useState(() => !cached);
   const [error, setError] = useState(null);
   const [version, setVersion] = useState(0);
+  // Phase 8: archived nodes are hidden by default; admins toggle this on
+  // to see the soft-deleted set and restore from there.
+  const [includeArchived, setIncludeArchived] = useState(false);
 
   const reload = useCallback(async () => {
     try {
-      const res = await listOrgNodes();
+      const res = await listOrgNodes({ includeArchived });
       setNodes(res.nodes || []);
       setEditPowers(res.editPowers || { canManageGlobal: false });
       writeCache({ nodes: res.nodes || [], editPowers: res.editPowers });
@@ -79,7 +83,7 @@ export function useOrgNodes() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [includeArchived]);
 
   useEffect(() => {
     reload();
@@ -140,6 +144,11 @@ export function useOrgNodes() {
     setVersion(v => v + 1);
     return res.node;
   }, []);
+  const restoreNode = useCallback(async (id) => {
+    const res = await restoreOrgNode(id);
+    setVersion(v => v + 1);
+    return res.node;
+  }, []);
 
   return {
     nodes,
@@ -156,5 +165,8 @@ export function useOrgNodes() {
     archiveNode,
     moveNode,
     reorderNode,
+    restoreNode,
+    includeArchived,
+    setIncludeArchived,
   };
 }

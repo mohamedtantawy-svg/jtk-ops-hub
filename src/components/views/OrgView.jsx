@@ -110,6 +110,16 @@ export default function OrgView({ user }) {
   const openEdit = (node) => setFormState({ mode: 'edit', node, parent: node.parentId ? org.tree.byId.get(node.parentId) : null });
   const closeForm = () => setFormState(null);
 
+  // Phase 8: clicking Archive on an already-archived node restores it.
+  const handleArchiveOrRestore = async (node) => {
+    if (node.isArchived) {
+      try { await org.restoreNode(node.id); }
+      catch (err) { alert(err?.message || 'Could not restore'); }
+      return;
+    }
+    setArchiveTarget(node);
+  };
+
   const onSaveForm = async (payload) => {
     if (formState.mode === 'create') {
       await org.createNode(payload);
@@ -331,6 +341,23 @@ export default function OrgView({ user }) {
             fontSize: 12, color: 'var(--text-secondary)',
             flexWrap: 'wrap',
           }}>
+            {/* Phase 8: include-archived toggle, admin-only */}
+            {canEdit && (
+              <label style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                fontSize: 'var(--font-xs)', fontWeight: 600,
+                color: org.includeArchived ? 'var(--orange)' : 'var(--text-muted)',
+                cursor: 'pointer', userSelect: 'none',
+              }}>
+                <input
+                  type="checkbox"
+                  checked={org.includeArchived}
+                  onChange={e => org.setIncludeArchived(e.target.checked)}
+                  style={{ accentColor: 'var(--orange)' }}
+                />
+                <i className="bi bi-archive" /> Show archived
+              </label>
+            )}
             <SummaryPill icon="bi-building"        label="Depts"      value={summary.departments} />
             <SummaryPill icon="bi-people"          label="Teams"      value={summary.teams} />
             <SummaryPill icon="bi-person-fill"     label="Total"      value={summary.total} />
@@ -373,7 +400,7 @@ export default function OrgView({ user }) {
             onSelectNode={openEdit}
             onEdit={openEdit}
             onAddChild={openCreateChild}
-            onArchive={(node) => setArchiveTarget(node)}
+            onArchive={handleArchiveOrRestore}
             onAddMember={(node) => setAddMemberTo(node)}
             onSelectMember={(m) => setSelectedMember(m)}
             selectedEmails={selectedEmails}
@@ -389,7 +416,7 @@ export default function OrgView({ user }) {
             sumDescendants={org.sumDescendants}
             onEdit={openEdit}
             onAddChild={openCreateChild}
-            onArchive={(node) => setArchiveTarget(node)}
+            onArchive={handleArchiveOrRestore}
             onAddMember={(node) => setAddMemberTo(node)}
             onSelect={openEdit}
           />
