@@ -47,3 +47,37 @@ export async function reorderOrgNode(id, newSortOrder) {
     body: JSON.stringify({ newSortOrder }),
   });
 }
+
+// ── Delegated admins (Phase 5) ───────────────────────────────────────────
+export async function listNodeAdmins(id) {
+  return apiFetch(`/org/nodes/${encodeURIComponent(id)}/admins`);
+}
+export async function grantNodeAdmin(id, email) {
+  return apiFetch(`/org/nodes/${encodeURIComponent(id)}/admins`, {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+}
+export async function revokeNodeAdmin(id, email) {
+  return apiFetch(`/org/nodes/${encodeURIComponent(id)}/admins`, {
+    method: 'DELETE',
+    body: JSON.stringify({ email }),
+  });
+}
+
+// ── Vacancies (Phase 5) ──────────────────────────────────────────────────
+export async function listNodeVacancies(id) {
+  return apiFetch(`/org/nodes/${encodeURIComponent(id)}/vacancies`);
+}
+export async function addNodeVacancy(id, { title, notes }) {
+  return apiFetch(`/org/nodes/${encodeURIComponent(id)}/vacancies`, {
+    method: 'POST',
+    body: JSON.stringify({ title, notes }),
+  });
+}
+export async function removeNodeVacancy(id, vacancyId) {
+  return apiFetch(`/org/nodes/${encodeURIComponent(id)}/vacancies`, {
+    method: 'DELETE',
+    body: JSON.stringify({ vacancyId }),
+  });
+}
