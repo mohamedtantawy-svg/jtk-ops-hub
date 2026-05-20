@@ -24,6 +24,8 @@ import MemberDetailDrawer from '../org/MemberDetailDrawer';
 import AddMemberModal from '../org/AddMemberModal';
 import OrgMovePreviewModal from '../org/OrgMovePreviewModal';
 import BulkMoveBar from '../org/BulkMoveBar';
+import OrgAuditDrawer from '../org/OrgAuditDrawer';
+import { buildStructureCsv, buildMembersCsv, downloadCsv } from '../../utils/orgCsvExport';
 
 const VIEW_MODES = [
   { id: 'chart', label: 'Chart', icon: 'bi-diagram-3-fill' },
@@ -46,6 +48,19 @@ export default function OrgView({ user }) {
   // ── Phase 4: multi-select + drag-to-move ────────────────────────────────
   const [selectedEmails, setSelectedEmails] = useState(() => new Set());
   const [movePayload, setMovePayload] = useState(null);
+  // ── Phase 7: audit drawer + CSV export menu ─────────────────────────────
+  const [auditOpen, setAuditOpen] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const exportStructure = () => {
+    downloadCsv(`org-structure-${new Date().toISOString().slice(0, 10)}.csv`,
+      buildStructureCsv(org.nodes, org.tree));
+    setExportMenuOpen(false);
+  };
+  const exportMembers = () => {
+    downloadCsv(`org-members-${new Date().toISOString().slice(0, 10)}.csv`,
+      buildMembersCsv(members || [], org.tree));
+    setExportMenuOpen(false);
+  };
   const toggleSelected = (email) => {
     setSelectedEmails(prev => {
       const next = new Set(prev);
@@ -152,27 +167,90 @@ export default function OrgView({ user }) {
               margin: '4px 0 0', lineHeight: 1.4,
             }}>Departments, teams, sub-teams, and the people that power them.</p>
           </div>
-          {canEdit && (
-            <button
-              type="button"
-              onClick={openCreateRoot}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                height: 36, padding: '0 14px',
-                background: 'var(--purple)', color: 'white',
-                border: 'none', borderRadius: 'var(--radius-lg)',
-                fontSize: 13, fontWeight: 600,
-                fontFamily: 'inherit',
-                cursor: 'pointer', flexShrink: 0,
-                transition: 'background .12s',
-              }}
-              onMouseEnter={e => e.currentTarget.style.background = 'var(--purple-hover, #6d28d9)'}
-              onMouseLeave={e => e.currentTarget.style.background = 'var(--purple)'}
-            >
-              <i className="bi bi-plus-lg" />
-              New department
-            </button>
-          )}
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            {/* Phase 7: export menu */}
+            <div style={{ position: 'relative' }}>
+              <button
+                type="button"
+                onClick={() => setExportMenuOpen(p => !p)}
+                aria-label="Export"
+                title="Export CSV"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  height: 36, padding: '0 12px',
+                  background: 'transparent',
+                  color: 'var(--text-secondary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-lg)',
+                  fontSize: 13, fontWeight: 600,
+                  fontFamily: 'inherit',
+                  cursor: 'pointer', transition: 'background .12s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              >
+                <i className="bi bi-download" /> Export
+              </button>
+              {exportMenuOpen && (
+                <div style={{
+                  position: 'absolute', top: 'calc(100% + 6px)', right: 0,
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-lg)',
+                  boxShadow: '0 12px 30px rgba(0,0,0,0.14)',
+                  minWidth: 220, padding: 6, zIndex: 200,
+                }} onMouseLeave={() => setExportMenuOpen(false)}>
+                  <ExportItem icon="bi-diagram-3" label="Org structure (CSV)" onClick={exportStructure} />
+                  <ExportItem icon="bi-people" label="Members roster (CSV)" onClick={exportMembers} />
+                </div>
+              )}
+            </div>
+            {/* Phase 7: audit drawer toggle, admin-only */}
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => setAuditOpen(true)}
+                aria-label="Audit log"
+                title="Audit log"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  height: 36, padding: '0 12px',
+                  background: 'transparent',
+                  color: 'var(--text-secondary)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-lg)',
+                  fontSize: 13, fontWeight: 600,
+                  fontFamily: 'inherit',
+                  cursor: 'pointer', transition: 'background .12s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              >
+                <i className="bi bi-journal-text" /> Audit
+              </button>
+            )}
+            {canEdit && (
+              <button
+                type="button"
+                onClick={openCreateRoot}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  height: 36, padding: '0 14px',
+                  background: 'var(--purple)', color: 'white',
+                  border: 'none', borderRadius: 'var(--radius-lg)',
+                  fontSize: 13, fontWeight: 600,
+                  fontFamily: 'inherit',
+                  cursor: 'pointer',
+                  transition: 'background .12s',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--purple-hover, #6d28d9)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'var(--purple)'}
+              >
+                <i className="bi bi-plus-lg" />
+                New department
+              </button>
+            )}
+          </div>
         </div>
 
         {/* ── Toolbar ─────────────────────────────────────────────────────── */}
@@ -376,7 +454,29 @@ export default function OrgView({ user }) {
           onChooseTarget={(node) => openMovePreview(Array.from(selectedEmails), node)}
         />
       )}
+      <OrgAuditDrawer open={auditOpen} onClose={() => setAuditOpen(false)} />
     </div>
+  );
+}
+
+function ExportItem({ icon, label, onClick }) {
+  return (
+    <button type="button" onClick={onClick}
+      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        width: '100%', padding: '8px 10px',
+        background: 'transparent', border: 'none',
+        textAlign: 'left',
+        fontSize: 'var(--font-sm)', fontWeight: 500,
+        color: 'var(--text)',
+        cursor: 'pointer', borderRadius: 6,
+        fontFamily: 'inherit',
+      }}>
+      <i className={`bi ${icon}`} style={{ fontSize: 13, color: 'var(--text-secondary)' }} />
+      {label}
+    </button>
   );
 }
 
