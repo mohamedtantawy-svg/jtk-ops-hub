@@ -8,6 +8,7 @@ import { seedWorkspaceMembersIfNeeded } from './workspace-members-seed';
 import { seedCountryHandoverDocsIfNeeded } from './country-handover-docs-seed';
 import { seedOrgDefaultIfNeeded } from './org-default-seed';
 import { backfillHrExperienceTenancyIfNeeded } from './dept-backfill';
+import { seedGlobalImmigrationRosterIfNeeded } from './global-immigration-roster-seed';
 
 const SCHEMA_SQL = `
 -- Members
@@ -2193,6 +2194,21 @@ export async function runMigrations() {
     }
   } catch (err) {
     console.warn('[db] Dept-tenancy backfill failed:', err?.message);
+  }
+
+  // Global Immigration roster seed (Phase 14 — 2026-05-20): mohamed's
+  // 67-person Global Immigration team from "Deelers Information May 20 2026"
+  // CSV. UPSERTs team_member_overrides rows + assigns tiers (1 RM, 7 team
+  // leads, 58 agents) per the locked rule. Runs AFTER the dept-tenancy
+  // backfill so org_node_id stays consistent on each row from creation.
+  // Idempotent via global_immigration_roster_seed_version sentinel.
+  try {
+    const rosterResult = await seedGlobalImmigrationRosterIfNeeded();
+    if (!rosterResult?.skipped) {
+      console.log(`[db] Global Immigration roster seeded to v${rosterResult.version}: inserted=${rosterResult.inserted} failed=${rosterResult.failed} roster_size=${rosterResult.roster_size}`);
+    }
+  } catch (err) {
+    console.warn('[db] Global Immigration roster seed failed:', err?.message);
   }
 
   // Phase C 2026-05-18: when HANDOVER_DEFAULTS_VERSION bumps, refresh the
