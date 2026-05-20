@@ -18,6 +18,7 @@ import { query } from '../../../../src/lib/db';
 import { ensureRosterHydrated } from '../../../../src/lib/roster-server';
 import { memberByEmail, teamLeadEmailFor, writeLog } from '../../../../src/lib/urgent-assist-helpers';
 import { MEMBERS_BY_EMAIL, getDirectReports, getAllReports } from '../../../../src/data/members';
+import { getCurrentDeptId } from '../../../../src/lib/dept-scope';
 
 const ALLOWED_STATUSES = new Set(['new', 'in_progress', 'on_hold', 'resolved']);
 const ALLOWED_PRIORITIES = new Set(['low', 'medium', 'high', 'critical']);
@@ -95,6 +96,15 @@ export async function GET(req) {
   const where = [];
   const params = [];
   let p = 1;
+
+  // Phase 11f (2026-05-20): dept-isolate every read. Fails closed.
+  const currentDeptId = await getCurrentDeptId(user, req);
+  if (currentDeptId) {
+    where.push(`org_node_id = $${p++}`);
+    params.push(currentDeptId);
+  } else {
+    where.push(`FALSE`);
+  }
 
   if (status) { where.push(`status = $${p++}`); params.push(status); }
   if (search) {
@@ -219,18 +229,23 @@ export async function POST(req) {
   // Denormalised at create-time so the Team scope is a single index scan.
   const teamLeadEmail = teamLeadEmailFor(assigneeEmail || callerEmail);
 
+  // Phase 11f: stamp the submitter's currentDeptId on the new request.
+  const submitterDeptId = await getCurrentDeptId(user, req);
+
   const insert = await query(
     `INSERT INTO urgent_assist_request
        (subject, request_type, country,
         assignee_email, assignee_name,
         created_by_email, created_by_name, team_lead_email,
         link_url, description,
-        status, priority)
+        status, priority,
+        org_node_id)
      VALUES ($1, $2, $3,
              $4, $5,
              $6, $7, $8,
              $9, $10,
-             $11, $12)
+             $11, $12,
+             $13)
      RETURNING id, subject, request_type, country, assignee_email, assignee_name,
                created_by_email, created_by_name, team_lead_email,
                link_url, description, status, priority,
@@ -241,6 +256,7 @@ export async function POST(req) {
       callerEmail, callerName, teamLeadEmail || null,
       linkUrl, description,
       status, priority,
+      submitterDeptId,
     ],
   );
 
