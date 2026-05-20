@@ -7,6 +7,7 @@ import { seedHandoverDefaultsIfNeeded } from './handover-defaults-seed';
 import { seedWorkspaceMembersIfNeeded } from './workspace-members-seed';
 import { seedCountryHandoverDocsIfNeeded } from './country-handover-docs-seed';
 import { seedOrgDefaultIfNeeded } from './org-default-seed';
+import { backfillHrExperienceTenancyIfNeeded } from './dept-backfill';
 
 const SCHEMA_SQL = `
 -- Members
@@ -1993,6 +1994,71 @@ CREATE INDEX IF NOT EXISTS idx_org_audit_created ON org_audit(created_at DESC);
 ALTER TABLE team_member_overrides
   ADD COLUMN IF NOT EXISTS org_node_id UUID REFERENCES org_nodes(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_tmo_org_node ON team_member_overrides(org_node_id);
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Multi-tenant isolation tagging (Phase 11a — 2026-05-20)
+--
+-- Every surface that hosts dept-scoped data gets a nullable org_node_id
+-- FK to org_nodes. Nullable on ADD so the migration succeeds even on rows
+-- that pre-date isolation; the boot-time backfillHrExperienceTenancyIfNeeded
+-- (called below from runMigrations) stamps every NULL row with HR Experience
+-- UUID right after the schema lands.
+--
+-- HRX-no-impact contract: after backfill, every existing row has
+-- org_node_id = HR Experience. Read filters added in Phase 11b+ use
+-- WHERE org_node_id = currentDeptId. HRX users resolve to HRX (via the
+-- recursive CTE in src/lib/dept-scope.js) so the filter matches every
+-- existing row exactly — zero data shifts for the ~100 HRX agents.
+-- The legacy team column is never touched.
+-- ────────────────────────────────────────────────────────────────────────────
+ALTER TABLE announcements          ADD COLUMN IF NOT EXISTS org_node_id UUID REFERENCES org_nodes(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_announcements_org_node           ON announcements(org_node_id);
+
+ALTER TABLE hr_hub_request         ADD COLUMN IF NOT EXISTS org_node_id UUID REFERENCES org_nodes(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_hr_hub_request_org_node          ON hr_hub_request(org_node_id);
+
+ALTER TABLE leader_alert           ADD COLUMN IF NOT EXISTS org_node_id UUID REFERENCES org_nodes(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_leader_alert_org_node            ON leader_alert(org_node_id);
+
+ALTER TABLE urgent_assist_request  ADD COLUMN IF NOT EXISTS org_node_id UUID REFERENCES org_nodes(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_urgent_assist_request_org_node   ON urgent_assist_request(org_node_id);
+
+ALTER TABLE urgent_assist_schedule ADD COLUMN IF NOT EXISTS org_node_id UUID REFERENCES org_nodes(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_urgent_assist_schedule_org_node  ON urgent_assist_schedule(org_node_id);
+
+ALTER TABLE time_off_events        ADD COLUMN IF NOT EXISTS org_node_id UUID REFERENCES org_nodes(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_time_off_events_org_node         ON time_off_events(org_node_id);
+
+ALTER TABLE handovers              ADD COLUMN IF NOT EXISTS org_node_id UUID REFERENCES org_nodes(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_handovers_org_node               ON handovers(org_node_id);
+
+ALTER TABLE tasks                  ADD COLUMN IF NOT EXISTS org_node_id UUID REFERENCES org_nodes(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_tasks_org_node                   ON tasks(org_node_id);
+
+ALTER TABLE workspace_members      ADD COLUMN IF NOT EXISTS org_node_id UUID REFERENCES org_nodes(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_workspace_members_org_node       ON workspace_members(org_node_id);
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Phase 11j (2026-05-20) — fix urgent_assist_schedule unique constraint
+--
+-- The original CREATE TABLE declares schedule_date UNIQUE at column level,
+-- generating constraint urgent_assist_schedule_schedule_date_key. With
+-- Phase 11f isolation, two depts MUST be able to own their own (date, dept)
+-- row independently — the column-level UNIQUE blocks that, causing the ON
+-- CONFLICT in /urgent-assist-schedule POST to silently overwrite dept A's
+-- slots with dept B's writes on a same-date INSERT collision.
+--
+-- Fix: drop the legacy single-column UNIQUE; add a composite UNIQUE on
+-- (schedule_date, org_node_id) so each dept has its own per-date row.
+-- Partial WHERE org_node_id IS NOT NULL because the brief boot-time
+-- window between this schema landing and the dept-backfill running has
+-- NULL rows; the backfill stamps them within the same runMigrations call.
+-- ────────────────────────────────────────────────────────────────────────────
+ALTER TABLE urgent_assist_schedule
+  DROP CONSTRAINT IF EXISTS urgent_assist_schedule_schedule_date_key;
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_urgent_assist_schedule_date_dept
+  ON urgent_assist_schedule(schedule_date, org_node_id)
+  WHERE org_node_id IS NOT NULL;
 `;
 
 export async function runMigrations() {
@@ -2111,6 +2177,22 @@ export async function runMigrations() {
     }
   } catch (err) {
     console.warn('[db] Org default seed failed:', err?.message);
+  }
+
+  // Dept-tenancy backfill (Phase 11a — 2026-05-20): stamps every existing
+  // row in every isolated surface table with HR Experience's UUID, so
+  // Phase 11b+ read filters match every legacy row when HRX users resolve
+  // to HRX. Runs AFTER seedOrgDefaultIfNeeded so the HRX node exists.
+  // Version-sentinelled; idempotent.
+  try {
+    const backfillResult = await backfillHrExperienceTenancyIfNeeded();
+    if (!backfillResult?.skipped) {
+      const summary = Object.entries(backfillResult.perTable || {})
+        .map(([t, n]) => `${t}=${n}`).join(' ');
+      console.log(`[db] Dept-tenancy backfilled to v${backfillResult.version}: ${summary}`);
+    }
+  } catch (err) {
+    console.warn('[db] Dept-tenancy backfill failed:', err?.message);
   }
 
   // Phase C 2026-05-18: when HANDOVER_DEFAULTS_VERSION bumps, refresh the

@@ -11,6 +11,7 @@ import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { query } from '../../../../../src/lib/db';
 import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
 import { memberByEmail, teamLeadEmailFor, writeLog, canEdit, getCurrentMocEmail } from '../../../../../src/lib/urgent-assist-helpers';
+import { getCurrentDeptId } from '../../../../../src/lib/dept-scope';
 
 const ALLOWED_STATUSES = new Set(['new', 'in_progress', 'on_hold', 'resolved']);
 const ALLOWED_PRIORITIES = new Set(['low', 'medium', 'high', 'critical']);
@@ -53,15 +54,18 @@ function rowToJson(row) {
   };
 }
 
-async function loadRow(id) {
+async function loadRow(id, currentDeptId) {
+  // Phase 11f: every loadRow caller passes the current dept so cross-dept
+  // reads return null (= 404 upstream). Centralises the dept gate.
+  if (!currentDeptId) return null;
   const { rows } = await query(
     `SELECT id, subject, request_type, country, assignee_email, assignee_name,
             created_by_email, created_by_name, team_lead_email,
             link_url, description, status, priority,
             created_at, updated_at, resolved_at
        FROM urgent_assist_request
-       WHERE id = $1`,
-    [id],
+       WHERE id = $1 AND org_node_id = $2`,
+    [id, currentDeptId],
   );
   return rows[0] || null;
 }
@@ -70,7 +74,8 @@ export async function GET(req, { params }) {
   const user = getAuthUser(req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { id } = await params;
-  const row = await loadRow(id);
+  const currentDeptId = await getCurrentDeptId(user, req);
+  const row = await loadRow(id, currentDeptId);
   if (!row) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   return NextResponse.json(rowToJson(row));
 }
@@ -82,7 +87,9 @@ export async function PATCH(req, { params }) {
   await ensureRosterHydrated();
 
   const { id } = await params;
-  const before = await loadRow(id);
+  // Phase 11f: refuse cross-dept edits.
+  const currentDeptId = await getCurrentDeptId(user, req);
+  const before = await loadRow(id, currentDeptId);
   if (!before) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const callerEmail = String(user.email).toLowerCase();
@@ -167,8 +174,9 @@ export async function PATCH(req, { params }) {
   }
 
   sets.push(`updated_at = NOW()`);
-  vals.push(id);
-  const sql = `UPDATE urgent_assist_request SET ${sets.join(', ')} WHERE id = $${p} RETURNING *`;
+  vals.push(id, currentDeptId);
+  // Phase 11f: dept-scope the UPDATE too — race condition guard.
+  const sql = `UPDATE urgent_assist_request SET ${sets.join(', ')} WHERE id = $${p} AND org_node_id = $${p + 1} RETURNING *`;
   const { rows } = await query(sql, vals);
   const updated = rows[0];
 
@@ -215,7 +223,9 @@ export async function DELETE(req, { params }) {
   await ensureRosterHydrated();
 
   const { id } = await params;
-  const before = await loadRow(id);
+  // Phase 11f: refuse cross-dept deletes.
+  const currentDeptId = await getCurrentDeptId(user, req);
+  const before = await loadRow(id, currentDeptId);
   if (!before) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const callerEmail = String(user.email).toLowerCase();
@@ -236,6 +246,9 @@ export async function DELETE(req, { params }) {
     createdByEmail: before.created_by_email,
   }, null);
 
-  await query('DELETE FROM urgent_assist_request WHERE id = $1', [id]);
+  await query(
+    'DELETE FROM urgent_assist_request WHERE id = $1 AND org_node_id = $2',
+    [id, currentDeptId],
+  );
   return NextResponse.json({ ok: true });
 }

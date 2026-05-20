@@ -10,7 +10,7 @@
 // light/dark/responsive parity is automatic. No hardcoded hex outside the
 // per-node accent slot.
 
-import { useContext, useMemo, useState } from 'react';
+import { useCallback, useContext, useMemo, useState } from 'react';
 import { PermissionsContext } from '../../App';
 import { useTeamMembers } from '../../hooks/useTeamMembers';
 import { useOrgNodes } from '../../hooks/useOrgNodes';
@@ -33,11 +33,25 @@ const VIEW_MODES = [
   { id: 'table', label: 'Table', icon: 'bi-table' },
 ];
 
-export default function OrgView({ user }) {
+// Phase 10a (2026-05-20): the only "global super-admin" allowed to use the
+// per-row "Login as dept admin" affordance. Every other access=admin user is
+// expected to live inside one department's tenancy. Phase 11 swaps this for
+// a real `is_global_super_admin` flag — the constant lives in one place so
+// the migration is a single grep.
+const GLOBAL_SUPER_ADMIN_EMAIL = 'mohamed.tantawy@deel.com';
+
+export default function OrgView({ user, realUser, onImpersonate }) {
   const perms = useContext(PermissionsContext);
   const tm = useTeamMembers();
   const { members } = tm;
   const org = useOrgNodes();
+  // Resolved on the REAL user — impersonation doesn't grant the button.
+  const isGlobalSuperAdmin =
+    (realUser?.email || user?.email || '').toLowerCase() === GLOBAL_SUPER_ADMIN_EMAIL;
+  const handleLoginAsDeptAdmin = useCallback((leadEmail) => {
+    if (!isGlobalSuperAdmin || !leadEmail || !onImpersonate) return;
+    onImpersonate(String(leadEmail).toLowerCase());
+  }, [isGlobalSuperAdmin, onImpersonate]);
   const [viewMode, setViewMode] = useState('chart');
   const [search, setSearch] = useState('');
 
@@ -100,6 +114,31 @@ export default function OrgView({ user }) {
   // canonical property name is `canManageOrg` — `canDo()` only covers
   // ALL_ACTIONS, not ALL_ADMIN_POWERS.
   const canEdit = org.canEdit || perms?.canManageOrg === true;
+
+  // Phase 10b (2026-05-20): for the lead-email warning in OrgNodeFormDrawer.
+  // Resolves an email to its current top-level department so the drawer can
+  // say "moving them out of <dept>" when an admin types a lead email that
+  // already belongs somewhere else. Walks up parent_id chains because a
+  // member may sit under a sub-team but the isolation boundary is the
+  // top-level dept (per the locked multi-tenant decisions, 2026-05-20).
+  const getCurrentDeptForEmail = useCallback((email) => {
+    if (!email || !Array.isArray(members)) return null;
+    const lc = String(email).toLowerCase().trim();
+    if (!lc) return null;
+    const m = members.find(x => x.email && x.email.toLowerCase() === lc);
+    if (!m?.orgNodeId) return null;
+    const node = org.tree.byId?.get(m.orgNodeId);
+    if (!node) return null;
+    let topLevel = node;
+    let guard = 0;
+    while (topLevel.parentId && guard < 16) {
+      const parent = org.tree.byId.get(topLevel.parentId);
+      if (!parent) break;
+      topLevel = parent;
+      guard += 1;
+    }
+    return { node, topLevel, memberName: m.name || m.email };
+  }, [members, org.tree]);
 
   // ── Modals ─────────────────────────────────────────────────────────────
   const [formState, setFormState] = useState(null); // { mode, parent?, defaultKind?, node? }
@@ -407,6 +446,8 @@ export default function OrgView({ user }) {
             selectedEmails={selectedEmails}
             onToggleSelect={toggleSelected}
             onDropMembers={openMovePreview}
+            isGlobalSuperAdmin={isGlobalSuperAdmin}
+            onLoginAsDeptAdmin={handleLoginAsDeptAdmin}
           />
         ) : viewMode === 'list' ? (
           <OrgTreeView
@@ -420,6 +461,8 @@ export default function OrgView({ user }) {
             onArchive={handleArchiveOrRestore}
             onAddMember={(node) => setAddMemberTo(node)}
             onSelect={openEdit}
+            isGlobalSuperAdmin={isGlobalSuperAdmin}
+            onLoginAsDeptAdmin={handleLoginAsDeptAdmin}
           />
         ) : (
           <TablePreview nodes={org.nodes} members={members} tree={org.tree} search={search} onSelectMember={(m) => setSelectedMember(m)} />
@@ -436,6 +479,7 @@ export default function OrgView({ user }) {
           node={formState.node}
           onClose={closeForm}
           onSave={onSaveForm}
+          getCurrentDeptForEmail={getCurrentDeptForEmail}
         />
       )}
       <OrgArchiveConfirm

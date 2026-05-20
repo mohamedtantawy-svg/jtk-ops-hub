@@ -21,6 +21,7 @@ import { getAuthUser } from '../../../../src/lib/auth-helpers';
 import { query } from '../../../../src/lib/db';
 import { ensureRosterHydrated } from '../../../../src/lib/roster-server';
 import { memberByEmail, isManagerOrAdmin } from '../../../../src/lib/hide-task-helpers';
+import { getCurrentDeptId } from '../../../../src/lib/dept-scope';
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -81,6 +82,16 @@ export async function GET(req) {
   const where = [];
   const params = [];
   let p = 1;
+  // Phase 11f (2026-05-20): dept-isolate the MOC schedule so each dept's
+  // on-call rotation is independent. Mohamed switching the picker shows
+  // the per-dept rotation he's viewing.
+  const currentDeptId = await getCurrentDeptId(user, req);
+  if (currentDeptId) {
+    where.push(`org_node_id = $${p++}`);
+    params.push(currentDeptId);
+  } else {
+    where.push(`FALSE`);
+  }
   if (from) { where.push(`schedule_date >= $${p++}::date`); params.push(from); }
   else      { where.push(`schedule_date >= ${defaultFromSql}`); }
   if (to)   { where.push(`schedule_date <= $${p++}::date`); params.push(to); }
@@ -136,6 +147,18 @@ export async function POST(req) {
   }
 
   const notes = cleanStr(body.notes, 2000);
+  // Phase 11f + 11j (2026-05-20): stamp the actor's currentDeptId so each
+  // dept owns its own (date, dept) row. ON CONFLICT now keys on the
+  // composite (schedule_date, org_node_id) — matching the unique index
+  // landed by the Phase 11j schema migration. Fail-closed when there's
+  // no resolvable dept so a stray null can't create an orphan row.
+  const currentDeptId = await getCurrentDeptId(user, req);
+  if (!currentDeptId) {
+    return NextResponse.json(
+      { error: 'Cannot save schedule without a department context' },
+      { status: 400 },
+    );
+  }
 
   const { rows } = await query(
     `INSERT INTO urgent_assist_schedule
@@ -147,7 +170,7 @@ export async function POST(req) {
         apac_main_email,   apac_main_name,
         apac_backup_email, apac_backup_name,
         notes,
-        updated_by_email, updated_by_name, updated_at)
+        updated_by_email, updated_by_name, updated_at, org_node_id)
      VALUES ($1,
              $2, $3,
              $4, $5,
@@ -156,8 +179,8 @@ export async function POST(req) {
              $10, $11,
              $12, $13,
              $14,
-             $15, $16, NOW())
-     ON CONFLICT (schedule_date) DO UPDATE SET
+             $15, $16, NOW(), $17)
+     ON CONFLICT (schedule_date, org_node_id) WHERE org_node_id IS NOT NULL DO UPDATE SET
        emea_main_email   = EXCLUDED.emea_main_email,
        emea_main_name    = EXCLUDED.emea_main_name,
        emea_backup_email = EXCLUDED.emea_backup_email,
@@ -185,6 +208,7 @@ export async function POST(req) {
       slots.apacBackup.email, slots.apacBackup.name,
       notes,
       callerEmail, callerName,
+      currentDeptId,
     ],
   );
 

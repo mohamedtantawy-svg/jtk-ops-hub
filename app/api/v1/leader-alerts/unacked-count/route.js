@@ -12,6 +12,7 @@ import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { query } from '../../../../../src/lib/db';
 import { readAllSettings } from '../../../../../src/lib/leader-alerts-helpers';
+import { getCurrentDeptId } from '../../../../../src/lib/dept-scope';
 
 const SEVERITY_RANK = { low: 0, medium: 1, high: 2, critical: 3 };
 
@@ -27,17 +28,24 @@ export async function GET(req) {
       .filter(([_, rank]) => rank >= minRank)
       .map(([k]) => k);
 
+    // Phase 11d: dept-scope the unacked count so the sidebar badge only
+    // counts the caller's dept's alerts.
+    const currentDeptId = await getCurrentDeptId(user, req);
+    if (!currentDeptId) {
+      return NextResponse.json({ count: 0, threshold: minSev });
+    }
     const { rows } = await query(
       `SELECT COUNT(*)::int AS count
          FROM leader_alert a
         WHERE a.status <> 'resolved'
           AND a.severity = ANY($2::text[])
+          AND a.org_node_id = $3
           AND NOT EXISTS (
             SELECT 1 FROM leader_alert_ack ack
              WHERE ack.alert_id = a.id
                AND LOWER(ack.email) = $1
           )`,
-      [user.email.toLowerCase(), allowed],
+      [user.email.toLowerCase(), allowed, currentDeptId],
     );
     return NextResponse.json({ count: rows[0]?.count || 0, threshold: minSev });
   } catch (err) {

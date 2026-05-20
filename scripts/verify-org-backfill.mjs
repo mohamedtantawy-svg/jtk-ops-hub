@@ -462,6 +462,434 @@ assert('OrgView toggles Show archived',
 assert('OrgView uses handleArchiveOrRestore so archived nodes are restorable',
   /handleArchiveOrRestore/.test(orgViewSrcPhase8));
 
+// ── Section 16: Phase 10b — auto-seed lead as dept admin ─────────────────
+console.log('\n── Phase 10b: lead-as-admin auto-seed ──');
+const leadSeedSrc = read('src/lib/org-lead-admin-seed.js');
+assert('lead-admin-seed exports ensureLeadIsDeptAdmin',
+  /export async function ensureLeadIsDeptAdmin/.test(leadSeedSrc));
+assert('lead-admin-seed UPSERTs team_member_overrides with access=admin',
+  /INSERT INTO team_member_overrides[\s\S]+ON CONFLICT \(email\) DO UPDATE/.test(leadSeedSrc)
+  && /access\s*=\s*'admin'/.test(leadSeedSrc));
+assert('lead-admin-seed never writes the legacy team column',
+  !/UPDATE team_member_overrides[\s\S]+\bteam\s*=/.test(leadSeedSrc));
+assert('lead-admin-seed grants delegated admin via org_node_admins',
+  /INSERT INTO org_node_admins[\s\S]+ON CONFLICT \(node_id, email\) DO NOTHING/.test(leadSeedSrc));
+assert('lead-admin-seed writes node.lead_seeded audit row',
+  /'node\.lead_seeded'/.test(leadSeedSrc));
+assert('lead-admin-seed flags is_new based on baseline membership',
+  /TEAM_MEMBERS/.test(leadSeedSrc) && /isInBaseline/.test(leadSeedSrc));
+
+const postRouteSrcPhase10b = read('app/api/v1/org/nodes/route.js');
+assert('POST /org/nodes imports ensureLeadIsDeptAdmin',
+  /import \{ ensureLeadIsDeptAdmin \}/.test(postRouteSrcPhase10b));
+assert('POST /org/nodes invokes auto-seed for kind=department + leadEmail',
+  /if \(kind === 'department' && leadEmail\)/.test(postRouteSrcPhase10b)
+  && /ensureLeadIsDeptAdmin\(\{/.test(postRouteSrcPhase10b));
+assert('POST /org/nodes never auto-seeds for teams',
+  !/if \(kind === 'team' && leadEmail\)/.test(postRouteSrcPhase10b));
+assert('POST /org/nodes returns leadSeed payload',
+  /leadSeed,/.test(postRouteSrcPhase10b));
+
+const defaultSeedSrcPhase10b = read('src/lib/org-default-seed.js');
+assert('org-default-seed bumps SEED_VERSION to 2',
+  /const SEED_VERSION = 2/.test(defaultSeedSrcPhase10b));
+assert('org-default-seed imports ensureLeadIsDeptAdmin',
+  /import \{ ensureLeadIsDeptAdmin \} from '\.\/org-lead-admin-seed'/.test(defaultSeedSrcPhase10b));
+assert('org-default-seed v2 backfills every dept with lead_email',
+  /if \(currentVersion < 2\)/.test(defaultSeedSrcPhase10b)
+  && /kind = 'department'[\s\S]+lead_email IS NOT NULL/.test(defaultSeedSrcPhase10b));
+assert('org-default-seed v2 reports lead_admins_seeded',
+  /lead_admins_seeded/.test(defaultSeedSrcPhase10b));
+
+const formDrawerSrcPhase10b = read('src/components/org/OrgNodeFormDrawer.jsx');
+assert('OrgNodeFormDrawer accepts getCurrentDeptForEmail prop',
+  /getCurrentDeptForEmail/.test(formDrawerSrcPhase10b));
+assert('OrgNodeFormDrawer renders LeadMoveWarning',
+  /function LeadMoveWarning/.test(formDrawerSrcPhase10b)
+  && /<LeadMoveWarning/.test(formDrawerSrcPhase10b));
+assert('OrgNodeFormDrawer hint mentions auto-seed of Admin',
+  /auto-seeded as this department's Admin/.test(formDrawerSrcPhase10b));
+
+const orgViewSrcPhase10b = read('src/components/views/OrgView.jsx');
+assert('OrgView defines getCurrentDeptForEmail and walks to top-level',
+  /const getCurrentDeptForEmail = useCallback/.test(orgViewSrcPhase10b)
+  && /while \(topLevel\.parentId/.test(orgViewSrcPhase10b));
+assert('OrgView passes getCurrentDeptForEmail into OrgNodeFormDrawer',
+  /getCurrentDeptForEmail=\{getCurrentDeptForEmail\}/.test(orgViewSrcPhase10b));
+
+// ── Section 17: Phase 10a — Login-as-dept-admin button ───────────────────
+console.log('\n── Phase 10a: Login-as-dept-admin button ──');
+const appSrcPhase10a = read('src/App.jsx');
+assert('App.jsx passes realUser + onImpersonate to OrgView',
+  /<OrgView user=\{effectiveUser\} realUser=\{user\} onImpersonate=\{handleImpersonate\}/.test(appSrcPhase10a));
+
+const orgViewSrcPhase10a = read('src/components/views/OrgView.jsx');
+assert('OrgView defines GLOBAL_SUPER_ADMIN_EMAIL constant',
+  /const GLOBAL_SUPER_ADMIN_EMAIL = 'mohamed\.tantawy@deel\.com'/.test(orgViewSrcPhase10a));
+assert('OrgView derives isGlobalSuperAdmin from realUser first',
+  /realUser\?\.email \|\| user\?\.email/.test(orgViewSrcPhase10a));
+assert('OrgView exports handleLoginAsDeptAdmin via callback',
+  /const handleLoginAsDeptAdmin = useCallback/.test(orgViewSrcPhase10a));
+assert('OrgView passes isGlobalSuperAdmin + onLoginAsDeptAdmin to OrgChartCanvas',
+  /isGlobalSuperAdmin=\{isGlobalSuperAdmin\}[\s\S]*onLoginAsDeptAdmin=\{handleLoginAsDeptAdmin\}/.test(orgViewSrcPhase10a));
+assert('OrgView passes isGlobalSuperAdmin + onLoginAsDeptAdmin to OrgTreeView',
+  (orgViewSrcPhase10a.match(/isGlobalSuperAdmin=\{isGlobalSuperAdmin\}/g) || []).length >= 2);
+
+const treeSrcPhase10a = read('src/components/org/OrgTreeView.jsx');
+assert('OrgTreeView renders Login-as-admin button under correct guards',
+  /isGlobalSuperAdmin[\s\S]+node\.kind === 'department'[\s\S]+!node\.parentId[\s\S]+node\.leadEmail/.test(treeSrcPhase10a));
+assert('OrgTreeView Login button invokes onLoginAsDeptAdmin with leadEmail',
+  /onLoginAsDeptAdmin\?\.\(node\.leadEmail\)/.test(treeSrcPhase10a));
+
+const chartSrcPhase10a = read('src/components/org/OrgChartCanvas.jsx');
+assert('OrgChartCanvas threads isGlobalSuperAdmin into NodeCard',
+  /isGlobalSuperAdmin=\{isGlobalSuperAdmin\}/.test(chartSrcPhase10a));
+assert('OrgChartCanvas NodeCard guards Login button on root-dept + leadEmail',
+  /isGlobalSuperAdmin[\s\S]+node\.kind === 'department'[\s\S]+!node\.parentId[\s\S]+node\.leadEmail/.test(chartSrcPhase10a));
+assert('OrgChartCanvas Login button invokes onLoginAsDeptAdmin',
+  /onLoginAsDeptAdmin\?\.\(node\.leadEmail\)/.test(chartSrcPhase10a));
+
+// ── Section 18: Phase 11a — Multi-tenant foundation ──────────────────────
+console.log('\n── Phase 11a: multi-tenant foundation ──');
+const migrateSrcPhase11a = read('src/lib/migrate.js');
+
+// Schema ALTERs for every surface table
+for (const tbl of [
+  'announcements', 'hr_hub_request', 'leader_alert',
+  'urgent_assist_request', 'urgent_assist_schedule',
+  'time_off_events', 'handovers', 'tasks', 'workspace_members',
+]) {
+  assert(`migrate.js adds org_node_id to ${tbl}`,
+    new RegExp(`ALTER TABLE ${tbl}\\s+ADD COLUMN IF NOT EXISTS org_node_id UUID REFERENCES org_nodes\\(id\\) ON DELETE SET NULL`).test(migrateSrcPhase11a));
+  assert(`migrate.js indexes ${tbl}.org_node_id`,
+    new RegExp(`CREATE INDEX IF NOT EXISTS idx_${tbl}_org_node`).test(migrateSrcPhase11a));
+}
+assert('migrate.js imports backfillHrExperienceTenancyIfNeeded',
+  /import \{ backfillHrExperienceTenancyIfNeeded \} from '\.\/dept-backfill'/.test(migrateSrcPhase11a));
+assert('migrate.js calls backfillHrExperienceTenancyIfNeeded after seedOrgDefaultIfNeeded',
+  /seedOrgDefaultIfNeeded\(\);[\s\S]*?backfillHrExperienceTenancyIfNeeded\(\)/.test(migrateSrcPhase11a));
+
+const deptScopeSrc = read('src/lib/dept-scope.js');
+assert('dept-scope exports GLOBAL_SUPER_ADMIN_EMAIL = mohamed.tantawy@deel.com',
+  /export const GLOBAL_SUPER_ADMIN_EMAIL = 'mohamed\.tantawy@deel\.com'/.test(deptScopeSrc));
+assert('dept-scope exports SUPER_ADMIN_DEPT_COOKIE',
+  /export const SUPER_ADMIN_DEPT_COOKIE = 'ops_hub_super_admin_dept'/.test(deptScopeSrc));
+assert('dept-scope getCurrentDeptId honors super-admin cookie',
+  /isGlobalSuperAdmin\(user\)[\s\S]*?readSuperAdminCookie/.test(deptScopeSrc));
+assert('dept-scope getCurrentDeptId validates cookie against active dept',
+  /parent_id IS NULL AND is_archived = false/.test(deptScopeSrc));
+assert('dept-scope walks parent_id chain to top-level dept',
+  /WITH RECURSIVE chain AS[\s\S]+parent_id IS NULL/.test(deptScopeSrc));
+assert('dept-scope caches resolution with TTL',
+  /TTL_MS = 30_000/.test(deptScopeSrc));
+assert('dept-scope exposes clearDeptScopeCache for invalidation',
+  /export function clearDeptScopeCache/.test(deptScopeSrc));
+
+const backfillSrc = read('src/lib/dept-backfill.js');
+assert('dept-backfill exports backfillHrExperienceTenancyIfNeeded',
+  /export async function backfillHrExperienceTenancyIfNeeded/.test(backfillSrc));
+assert('dept-backfill targets exactly the 9 isolated surfaces',
+  /'announcements'[\s\S]+'hr_hub_request'[\s\S]+'leader_alert'[\s\S]+'urgent_assist_request'[\s\S]+'urgent_assist_schedule'[\s\S]+'time_off_events'[\s\S]+'handovers'[\s\S]+'tasks'[\s\S]+'workspace_members'/.test(backfillSrc));
+assert('dept-backfill resolves HRX UUID via slug (not name)',
+  /HR_EXPERIENCE_SLUG = 'hr-experience'/.test(backfillSrc)
+  && /WHERE slug = \$1/.test(backfillSrc));
+assert('dept-backfill UPDATE only targets NULL org_node_id (idempotent)',
+  /SET org_node_id = \$1 WHERE org_node_id IS NULL/.test(backfillSrc));
+assert('dept-backfill version-marked in app_settings',
+  /BACKFILL_KEY = 'dept_backfill_version'/.test(backfillSrc)
+  && /app_settings/.test(backfillSrc));
+assert('dept-backfill writes dept.backfill_hrx audit row',
+  /'dept\.backfill_hrx'/.test(backfillSrc));
+
+const scopeRouteSrc = read('app/api/v1/dept-scope/current/route.js');
+assert('dept-scope GET endpoint returns deptId + isGlobalSuperAdmin',
+  /isGlobalSuperAdmin: superAdmin/.test(scopeRouteSrc));
+assert('dept-scope POST endpoint is super-admin-only (Forbidden otherwise)',
+  /if \(!isGlobalSuperAdmin\(user\)\)[\s\S]*Forbidden/.test(scopeRouteSrc));
+assert('dept-scope POST validates dept is top-level + active',
+  /parent_id IS NULL AND is_archived = false/.test(scopeRouteSrc));
+assert('dept-scope POST sets sameSite=lax + 30-day cookie',
+  /sameSite: 'lax'/.test(scopeRouteSrc)
+  && /maxAge: 60 \* 60 \* 24 \* 30/.test(scopeRouteSrc));
+
+const hookSrc = read('src/hooks/useCurrentDept.js');
+assert('useCurrentDept exposes setDept that reloads on success',
+  /export function useCurrentDept/.test(hookSrc)
+  && /window\.location\.reload/.test(hookSrc));
+assert('useCurrentDept tolerates 401 silently during initial paint',
+  /res\.status === 401/.test(hookSrc));
+
+const topNavSrc = read('src/components/nav/DeelTopNav.jsx');
+assert('DeelTopNav imports useCurrentDept',
+  /import \{ useCurrentDept \} from '\.\.\/\.\.\/hooks\/useCurrentDept'/.test(topNavSrc));
+assert('DeelTopNav gates dept picker on isGlobalSuperAdmin',
+  /deptState\.isGlobalSuperAdmin/.test(topNavSrc));
+assert('DeelTopNav dept picker offers Reset to home',
+  /Reset to home dept/.test(topNavSrc));
+assert('DeelTopNav dept picker click invokes setDept',
+  /deptState\.setDept\(d\.id\)/.test(topNavSrc)
+  && /deptState\.setDept\(null\)/.test(topNavSrc));
+
+// ── Section 19: Phase 11b — Announcements isolation ──────────────────────
+console.log('\n── Phase 11b: announcements isolation ──');
+const annFlowSrc = read('src/lib/announcementFlow.js');
+assert('announcementFlow accepts options.orgNodeId',
+  /const orgNodeId = options\.orgNodeId \|\| null/.test(annFlowSrc));
+assert('announcementFlow INSERT includes org_node_id column',
+  /INSERT INTO announcements[\s\S]+org_node_id\)/.test(annFlowSrc));
+
+const annListRouteSrc = read('app/api/v1/announcements/route.js');
+assert('announcements GET imports getCurrentDeptId',
+  /import \{ getCurrentDeptId \}/.test(annListRouteSrc));
+assert('announcements GET filters by currentDeptId',
+  /currentDeptId[\s\S]+AND org_node_id = \$/.test(annListRouteSrc));
+assert('announcements GET fails closed when no dept (1=0 deny)',
+  /AND 1=0/.test(annListRouteSrc));
+assert('announcements POST stamps orgNodeId from actor currentDeptId',
+  /const orgNodeId = await getCurrentDeptId\(user, req\)[\s\S]+orgNodeId,/.test(annListRouteSrc));
+
+const annIdRouteSrc = read('app/api/v1/announcements/[id]/route.js');
+assert('announcements/id GET filters by currentDeptId',
+  /WHERE id = \$1 AND org_node_id = \$2/.test(annIdRouteSrc));
+assert('announcements/id PATCH refuses cross-dept edits',
+  /AND org_node_id = \$\$\{idx \+ 1\}/.test(annIdRouteSrc));
+assert('announcements/id DELETE refuses cross-dept deletes',
+  /DELETE FROM announcements WHERE id = \$1 AND org_node_id = \$2/.test(annIdRouteSrc));
+
+const approveSrc = read('app/api/v1/announcement-requests/[id]/approve/route.js');
+assert('announcement-requests approve resolves requester dept',
+  /getTopLevelDeptForMember\(r\.requested_by_email\)/.test(approveSrc));
+assert('announcement-requests approve passes orgNodeId to publishFromRequest',
+  /publishFromRequest\([\s\S]+orgNodeId: requesterDept\?\.deptId/.test(approveSrc));
+
+const publishSrc = read('app/api/v1/announcement-requests/[id]/publish/route.js');
+assert('announcement-requests publish resolves requester dept',
+  /getTopLevelDeptForMember\(r\.requested_by_email\)/.test(publishSrc));
+assert('announcement-requests publish passes orgNodeId to publishFromRequest',
+  /publishFromRequest\([\s\S]+orgNodeId: requesterDept\?\.deptId/.test(publishSrc));
+
+// ── Section 20: Phase 11c — HR Hub isolation ─────────────────────────────
+console.log('\n── Phase 11c: HR Hub isolation ──');
+const hrHubListSrc = read('app/api/v1/hr-hub/requests/route.js');
+assert('hr-hub/requests imports getCurrentDeptId',
+  /import \{ getCurrentDeptId \}/.test(hrHubListSrc));
+assert('hr-hub/requests GET filters by currentDeptId (org_node_id) first',
+  /currentDeptId[\s\S]+where\.push\(`org_node_id = \$/.test(hrHubListSrc));
+assert('hr-hub/requests GET fails closed when no dept',
+  /where\.push\(`FALSE`\)/.test(hrHubListSrc));
+assert('hr-hub/requests POST stamps submitterDeptId on INSERT',
+  /submitterDeptId = await getCurrentDeptId\(user, req\)/.test(hrHubListSrc)
+  && /org_node_id\)/.test(hrHubListSrc)
+  && /submitterDeptId,/.test(hrHubListSrc));
+
+const hrHubIdSrc = read('app/api/v1/hr-hub/requests/[id]/route.js');
+assert('hr-hub/requests/[id] imports getCurrentDeptId',
+  /import \{ getCurrentDeptId \}/.test(hrHubIdSrc));
+assert('hr-hub/requests/[id] GET filters by currentDeptId',
+  /WHERE id = \$1 AND org_node_id = \$2/.test(hrHubIdSrc));
+assert('hr-hub/requests/[id] PATCH refuses cross-dept SELECT + UPDATE',
+  /SELECT \* FROM hr_hub_request WHERE id = \$1 AND org_node_id = \$2/.test(hrHubIdSrc)
+  && /AND org_node_id = \$\$\{p \+ 1\}/.test(hrHubIdSrc));
+
+// ── Section 21: Phase 11d — Leaders Hub isolation ────────────────────────
+console.log('\n── Phase 11d: Leaders Hub isolation ──');
+const leaderListSrc = read('app/api/v1/leader-alerts/alerts/route.js');
+assert('leader-alerts list imports getCurrentDeptId',
+  /import \{ getCurrentDeptId \}/.test(leaderListSrc));
+assert('leader-alerts list filters by currentDeptId / FALSE fail-closed',
+  /where\.push\(`org_node_id = \$/.test(leaderListSrc)
+  && /where\.push\(`FALSE`\)/.test(leaderListSrc));
+assert('leader-alerts list stamps creatorDeptId on INSERT',
+  /creatorDeptId,/.test(leaderListSrc)
+  && /org_node_id\)\s*VALUES \('new'/.test(leaderListSrc));
+
+const leaderIdSrc = read('app/api/v1/leader-alerts/alerts/[id]/route.js');
+assert('leader-alerts/[id] imports getCurrentDeptId',
+  /import \{ getCurrentDeptId \}/.test(leaderIdSrc));
+assert('leader-alerts/[id] GET filters by org_node_id',
+  /WHERE a\.id = \$1 AND a\.org_node_id = \$3/.test(leaderIdSrc));
+assert('leader-alerts/[id] PATCH refuses cross-dept',
+  /SELECT \* FROM leader_alert WHERE id = \$1 AND org_node_id = \$2/.test(leaderIdSrc));
+assert('leader-alerts/[id] DELETE refuses cross-dept',
+  /DELETE FROM leader_alert WHERE id = \$1 AND org_node_id = \$2/.test(leaderIdSrc));
+
+const unackedSrc = read('app/api/v1/leader-alerts/unacked-count/route.js');
+assert('leader-alerts unacked-count is dept-scoped',
+  /a\.org_node_id = \$3/.test(unackedSrc));
+
+// ── Section 22: Phase 11e — OOO + Handovers isolation ────────────────────
+console.log('\n── Phase 11e: OOO + Handovers isolation ──');
+const tofListSrc = read('app/api/v1/time-off-events/route.js');
+assert('time-off-events list filters by currentDeptId',
+  /e\.org_node_id = \$/.test(tofListSrc));
+assert('time-off-events POST stamps subject (work_email) dept',
+  /getTopLevelDeptForMember\(workEmail\)/.test(tofListSrc)
+  && /subjectDeptId/.test(tofListSrc)
+  && /org_node_id\)/.test(tofListSrc));
+
+const tofIdSrc = read('app/api/v1/time-off-events/[id]/route.js');
+assert('time-off-events/[id] DELETE refuses cross-dept',
+  /SELECT work_email FROM time_off_events WHERE id = \$1 AND org_node_id = \$2/.test(tofIdSrc)
+  && /DELETE FROM time_off_events WHERE id = \$1 AND org_node_id = \$2/.test(tofIdSrc));
+
+const hoListSrc = read('app/api/v1/handovers/route.js');
+assert('handovers POST stamps requester dept on INSERT',
+  /requesterDeptId/.test(hoListSrc)
+  && /org_node_id\)/.test(hoListSrc));
+assert('handovers GET filters by currentDeptId / FALSE',
+  /h\.org_node_id = \$/.test(hoListSrc)
+  && /where\.push\(`FALSE`\)/.test(hoListSrc));
+
+const hoIdSrc = read('app/api/v1/handovers/[id]/route.js');
+assert('handovers/[id] GET 404s cross-dept',
+  /handover\.org_node_id && handover\.org_node_id !== currentDeptId/.test(hoIdSrc));
+assert('handovers/[id] PATCH 404s cross-dept',
+  /handover\.org_node_id && handover\.org_node_id !== currentDeptId[\s\S]+?Not found/.test(hoIdSrc));
+assert('handovers/[id] DELETE 404s cross-dept',
+  (hoIdSrc.match(/handover\.org_node_id && handover\.org_node_id !== currentDeptId/g) || []).length >= 3);
+
+// ── Section 23: Phase 11f — Urgent Assist isolation ──────────────────────
+console.log('\n── Phase 11f: Urgent Assist isolation ──');
+const uaListSrc = read('app/api/v1/urgent-assist/route.js');
+assert('urgent-assist GET filters by currentDeptId / FALSE',
+  /where\.push\(`org_node_id = \$/.test(uaListSrc)
+  && /where\.push\(`FALSE`\)/.test(uaListSrc));
+assert('urgent-assist POST stamps submitterDeptId',
+  /submitterDeptId/.test(uaListSrc));
+
+const uaIdSrc = read('app/api/v1/urgent-assist/[id]/route.js');
+assert('urgent-assist/[id] loadRow gates by org_node_id',
+  /WHERE id = \$1 AND org_node_id = \$2/.test(uaIdSrc));
+assert('urgent-assist/[id] PATCH dept-scoped UPDATE',
+  /UPDATE urgent_assist_request SET[\s\S]+AND org_node_id = \$\$\{p \+ 1\}/.test(uaIdSrc));
+assert('urgent-assist/[id] DELETE dept-scoped',
+  /DELETE FROM urgent_assist_request WHERE id = \$1 AND org_node_id = \$2/.test(uaIdSrc));
+
+const uaSchedListSrc = read('app/api/v1/urgent-assist-schedule/route.js');
+assert('urgent-assist-schedule GET dept-isolated',
+  /where\.push\(`org_node_id = \$/.test(uaSchedListSrc));
+assert('urgent-assist-schedule POST stamps actor dept',
+  /currentDeptId,?\s*\]/.test(uaSchedListSrc)
+  && /org_node_id\)/.test(uaSchedListSrc));
+
+const uaSchedIdSrc = read('app/api/v1/urgent-assist-schedule/[id]/route.js');
+assert('urgent-assist-schedule/[id] DELETE dept-scoped',
+  /DELETE FROM urgent_assist_schedule WHERE id = \$1 AND org_node_id = \$2/.test(uaSchedIdSrc));
+
+// ── Section 24: Phase 11g — Workspaces / My Queue isolation ──────────────
+console.log('\n── Phase 11g: Workspaces / My Queue isolation ──');
+const wsMembersSrc = read('src/lib/workspace-members.js');
+assert('workspace-members addMember resolves subject dept via dept-scope',
+  /getTopLevelDeptForMember\(e\)/.test(wsMembersSrc));
+assert('workspace-members addMember stamps org_node_id on INSERT',
+  /INSERT INTO workspace_members \(workspace_id, email, role, added_by, org_node_id\)/.test(wsMembersSrc));
+// Note: /api/v1/queue + /api/v1/workspaces/[workspaceId]/queue are Zendesk-
+// sourced, so dept-isolation flows through Phase 11h tasks isolation +
+// workspace_members.org_node_id (this PR). No DB-level queue filter to
+// audit here.
+
+// ── Section 25: Phase 11h — Tasks isolation ──────────────────────────────
+console.log('\n── Phase 11h: Tasks isolation ──');
+const tasksListSrc = read('app/api/v1/tasks/route.js');
+assert('tasks list imports getCurrentDeptId',
+  /import \{ getCurrentDeptId \}/.test(tasksListSrc));
+assert('tasks list filters by t.org_node_id with fail-closed',
+  /t\.org_node_id = \$/.test(tasksListSrc)
+  && /whereSql \+= ` AND 1=0`/.test(tasksListSrc));
+assert('tasks POST stamps orgNodeId on INSERT',
+  /INSERT INTO tasks[\s\S]+org_node_id\)/.test(tasksListSrc)
+  && /const orgNodeId = await getCurrentDeptId\(postUser, req\)/.test(tasksListSrc));
+
+const tasksIdSrc = read('app/api/v1/tasks/[id]/route.js');
+assert('tasks/[id] GET filters by t.org_node_id',
+  /WHERE t\.id = \$1 AND t\.org_node_id = \$2/.test(tasksIdSrc));
+assert('tasks/[id] DELETE filters by org_node_id',
+  /WHERE id = \$1 AND org_node_id = \$2/.test(tasksIdSrc));
+
+const tasksSnoozeSrc = read('app/api/v1/tasks/[id]/snooze/route.js');
+assert('tasks/[id]/snooze stamps shadow row dept on INSERT',
+  /INSERT INTO tasks[\s\S]+org_node_id\)/.test(tasksSnoozeSrc));
+
+const reassignSrc = read('app/api/v1/queue/reassign/route.js');
+assert('queue/reassign shadow upsert stamps org_node_id',
+  /INSERT INTO tasks[\s\S]+org_node_id\)/.test(reassignSrc));
+assert('queue/reassign ON CONFLICT does NOT touch org_node_id (immutable)',
+  !/ON CONFLICT[\s\S]+org_node_id = EXCLUDED\.org_node_id/.test(reassignSrc));
+
+const actionsSrc = read('app/api/v1/queue/[ticketId]/actions/route.js');
+assert('queue/actions shadow upsert stamps org_node_id',
+  /'org_node_id'/.test(actionsSrc)
+  && /orgNodeId/.test(actionsSrc));
+assert('queue/actions resolves orgNodeId once per POST',
+  /const orgNodeId = await getCurrentDeptId\(user, req\)/.test(actionsSrc));
+
+// ── Section 26: Phase 11i — Integration sweep + HRX-no-impact contract ───
+console.log('\n── Phase 11i: integration sweep + HRX-no-impact contract ──');
+
+// Spot-checked gaps fixed in this PR:
+const readSrc = read('app/api/v1/announcements/[id]/read/route.js');
+assert('announcements/[id]/read dept-scopes existence check (no cross-dept ack)',
+  /AND org_node_id = \$2/.test(readSrc)
+  && /getCurrentDeptId/.test(readSrc));
+
+const importSrc = read('app/api/v1/time-off-events/import/route.js');
+assert('time-off-events/import stamps subject dept per row',
+  /getTopLevelDeptForMember/.test(importSrc)
+  && /org_node_id\)/.test(importSrc));
+
+// HRX-no-impact contract: every isolated surface read filters by org_node_id.
+// Spot-check that the canonical pattern (WHERE ... org_node_id = $deptId)
+// appears in each surface's primary route.
+const HRX_NO_IMPACT_ROUTES = [
+  ['app/api/v1/announcements/route.js',                'AND org_node_id = \\$'],
+  ['app/api/v1/hr-hub/requests/route.js',              '`org_node_id = \\$'],
+  ['app/api/v1/leader-alerts/alerts/route.js',         '`org_node_id = \\$'],
+  ['app/api/v1/urgent-assist/route.js',                '`org_node_id = \\$'],
+  ['app/api/v1/time-off-events/route.js',              'e\\.org_node_id = \\$'],
+  ['app/api/v1/handovers/route.js',                    'h\\.org_node_id = \\$'],
+  ['app/api/v1/tasks/route.js',                        't\\.org_node_id = \\$'],
+];
+for (const [path, pattern] of HRX_NO_IMPACT_ROUTES) {
+  const src = read(path);
+  assert(`HRX-no-impact: ${path} reads filter by org_node_id`,
+    new RegExp(pattern).test(src));
+}
+
+// And that the legacy `team` column is NEVER written from the new lead-seed
+// helper — the queue-scoping boundary for ~84 HRX agents must stay untouched.
+const leadSeedFinalSrc = read('src/lib/org-lead-admin-seed.js');
+assert('HRX-no-impact: org-lead-admin-seed never writes legacy team column',
+  !/UPDATE team_member_overrides[\s\S]+\bteam\s*=/.test(leadSeedFinalSrc));
+
+// dept-backfill targets every surface — single sweep guarantees HRX
+// stamping across the whole product on first prod boot after this deploys.
+const backfillFinalSrc = read('src/lib/dept-backfill.js');
+const REQUIRED_SURFACES = [
+  'announcements', 'hr_hub_request', 'leader_alert',
+  'urgent_assist_request', 'urgent_assist_schedule',
+  'time_off_events', 'handovers', 'tasks', 'workspace_members',
+];
+for (const tbl of REQUIRED_SURFACES) {
+  assert(`HRX-no-impact: backfill stamps ${tbl}`,
+    new RegExp(`'${tbl}'`).test(backfillFinalSrc));
+}
+
+// ── Section 27: Phase 11j — urgent_assist_schedule composite unique fix ──
+console.log('\n── Phase 11j: urgent_assist_schedule unique-constraint fix ──');
+const migrateSrcPhase11j = read('src/lib/migrate.js');
+assert('migrate.js drops the legacy single-column UNIQUE on schedule_date',
+  /DROP CONSTRAINT IF EXISTS urgent_assist_schedule_schedule_date_key/.test(migrateSrcPhase11j));
+assert('migrate.js adds composite UNIQUE (schedule_date, org_node_id) partial index',
+  /uniq_urgent_assist_schedule_date_dept[\s\S]+ON urgent_assist_schedule\(schedule_date, org_node_id\)[\s\S]+WHERE org_node_id IS NOT NULL/.test(migrateSrcPhase11j));
+
+const schedRouteSrcPhase11j = read('app/api/v1/urgent-assist-schedule/route.js');
+assert('urgent-assist-schedule POST fails closed without dept context',
+  /Cannot save schedule without a department context/.test(schedRouteSrcPhase11j));
+assert('urgent-assist-schedule POST uses composite ON CONFLICT with partial predicate',
+  /ON CONFLICT \(schedule_date, org_node_id\) WHERE org_node_id IS NOT NULL DO UPDATE/.test(schedRouteSrcPhase11j));
+assert('urgent-assist-schedule POST no longer references the legacy single-column ON CONFLICT',
+  !/ON CONFLICT \(schedule_date\) DO UPDATE/.test(schedRouteSrcPhase11j));
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

@@ -5,6 +5,7 @@ import { isApprover } from '../../../../src/data/approvers';
 import { isAnnouncementsAdmin, canManageAnnouncements } from '../../../../src/lib/announcements-admin';
 import { MEMBERS_BY_EMAIL } from '../../../../src/data/members';
 import { ensureRosterHydrated } from '../../../../src/lib/roster-server';
+import { getCurrentDeptId } from '../../../../src/lib/dept-scope';
 import {
   VALID_TARGETS,
   publishFromRequest,
@@ -95,6 +96,22 @@ export async function GET(req) {
     let whereSql = ' WHERE 1=1';
     const params = [];
     let idx = 1;
+
+    // Phase 11b (2026-05-20): hard dept isolation. Every read scopes to the
+    // caller's currentDeptId (super-admin's cookie wins if set; everyone
+    // else resolves to their own top-level dept). HRX-no-impact: after the
+    // Phase 11a backfill every existing announcement has org_node_id = HRX,
+    // so HRX agents resolve to HRX and see exactly today's feed. New depts
+    // start empty.
+    const currentDeptId = await getCurrentDeptId(user, req);
+    if (currentDeptId) {
+      whereSql += ` AND org_node_id = $${idx++}`;
+      params.push(currentDeptId);
+    } else {
+      // No dept resolvable → user has no top-level org placement → see nothing.
+      // This is the safe failure mode (deny rather than leak).
+      whereSql += ` AND 1=0`;
+    }
 
     if (status) {
       const statuses = status.split(',');
@@ -290,6 +307,11 @@ export async function POST(req) {
       return NextResponse.json({ error: 'Invalid scheduledFor' }, { status: 400 });
     }
 
+    // Phase 11b: every direct publish stamps the actor's currentDeptId so
+    // the new announcement is born tenanted. Super-admin's picker decides
+    // the destination dept; everyone else writes to their own home dept.
+    const orgNodeId = await getCurrentDeptId(user, req);
+
     const published = await publishFromRequest(
       {
         type: payload.type,
@@ -307,6 +329,7 @@ export async function POST(req) {
       {
         sendAt: scheduledFor,
         actor: user,
+        orgNodeId,
       }
     );
 

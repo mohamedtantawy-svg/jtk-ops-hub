@@ -11,6 +11,7 @@ import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { query, withTransaction } from '../../../../../../src/lib/db';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
+import { getCurrentDeptId } from '../../../../../../src/lib/dept-scope';
 import {
   ALLOWED_STATUSES,
   ALLOWED_SEVERITIES,
@@ -32,14 +33,18 @@ export async function GET(_req, { params }) {
   await ensureRosterHydrated();
   const { id } = await params;
 
+  // Phase 11d (2026-05-20): 404 cross-dept reads.
+  const currentDeptId = await getCurrentDeptId(user, _req);
+  if (!currentDeptId) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
   try {
     const { rows: alertRows } = await query(
       `SELECT a.*,
         (SELECT COUNT(*)::int FROM leader_alert_ack ack WHERE ack.alert_id = a.id) AS ack_count,
         EXISTS(SELECT 1 FROM leader_alert_ack ack WHERE ack.alert_id = a.id AND LOWER(ack.email) = $2) AS i_acked
       FROM leader_alert a
-      WHERE a.id = $1`,
-      [id, user.email.toLowerCase()],
+      WHERE a.id = $1 AND a.org_node_id = $3`,
+      [id, user.email.toLowerCase(), currentDeptId],
     );
     if (alertRows.length === 0) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -107,8 +112,15 @@ export async function PATCH(req, { params }) {
   try { payload = await req.json(); }
   catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }); }
 
+  // Phase 11d: refuse cross-dept edits.
+  const currentDeptId = await getCurrentDeptId(user, req);
+  if (!currentDeptId) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
   try {
-    const { rows: existingRows } = await query(`SELECT * FROM leader_alert WHERE id = $1`, [id]);
+    const { rows: existingRows } = await query(
+      `SELECT * FROM leader_alert WHERE id = $1 AND org_node_id = $2`,
+      [id, currentDeptId],
+    );
     if (existingRows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     const existing = existingRows[0];
 
@@ -256,8 +268,14 @@ export async function DELETE(_req, { params }) {
   }
 
   const { id } = await params;
+  // Phase 11d: refuse cross-dept deletes.
+  const currentDeptId = await getCurrentDeptId(user, _req);
+  if (!currentDeptId) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   try {
-    const { rowCount } = await query(`DELETE FROM leader_alert WHERE id = $1`, [id]);
+    const { rowCount } = await query(
+      `DELETE FROM leader_alert WHERE id = $1 AND org_node_id = $2`,
+      [id, currentDeptId],
+    );
     if (rowCount === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     return NextResponse.json({ ok: true });
   } catch (err) {

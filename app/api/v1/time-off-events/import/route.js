@@ -13,6 +13,7 @@ import { withTransaction } from '../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { canManageHandoverSettings } from '../../../../../src/lib/handover-admin';
 import { invalidateAndReloadHandoverScopeCache } from '../../../../../src/lib/handover-scope-cache-loader';
+import { getTopLevelDeptForMember } from '../../../../../src/lib/dept-scope';
 
 const MAX_BYTES = 5 * 1024 * 1024;   // 5 MB ceiling per HANDOVERS_PLAN.md §19 security row
 const MONTHS = {
@@ -125,17 +126,35 @@ export async function POST(req) {
 
       let inserted = 0;
       let skipped = 0;
+      // Phase 11i (2026-05-20): resolve each subject's home dept once per
+      // chunk and stamp on the bulk INSERT. Falls back to null when a
+      // subject has no org placement yet — the next dept-backfill boot
+      // stamps those to HRX. Cache the lookup per-email within this batch
+      // so a re-import of 1000 rows for the same 50 people only does 50
+      // dept lookups.
+      const deptCache = new Map();
+      const resolveDept = async (email) => {
+        const lc = String(email || '').toLowerCase();
+        if (deptCache.has(lc)) return deptCache.get(lc);
+        const top = await getTopLevelDeptForMember(lc);
+        const id = top?.deptId || null;
+        deptCache.set(lc, id);
+        return id;
+      };
       // Chunk the bulk insert at 500 rows per query to keep parameter
       // count comfortably below Postgres' 65k limit even for very large
       // pastes.
       for (let i = 0; i < rows.length; i += 500) {
         const chunk = rows.slice(i, i + 500);
-        const valuesSql = chunk
-          .map((_, j) => `($${j * 4 + 1}, $${j * 4 + 2}, $${j * 4 + 3}, $${j * 4 + 4})`)
+        const chunkWithDept = await Promise.all(
+          chunk.map(async r => ({ ...r, dept: await resolveDept(r.email) })),
+        );
+        const valuesSql = chunkWithDept
+          .map((_, j) => `($${j * 5 + 1}, $${j * 5 + 2}, $${j * 5 + 3}, $${j * 5 + 4}, $${j * 5 + 5})`)
           .join(', ');
-        const params = chunk.flatMap(r => [r.email, r.start, r.end, batchId]);
+        const params = chunkWithDept.flatMap(r => [r.email, r.start, r.end, batchId, r.dept]);
         const ins = await client.query(
-          `INSERT INTO time_off_events (work_email, start_date, end_date, imported_batch)
+          `INSERT INTO time_off_events (work_email, start_date, end_date, imported_batch, org_node_id)
            VALUES ${valuesSql}
            ON CONFLICT (work_email, start_date, end_date, source) DO NOTHING
            RETURNING id`,

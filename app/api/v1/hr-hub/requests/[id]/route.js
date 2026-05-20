@@ -14,6 +14,7 @@ import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { query, withTransaction } from '../../../../../../src/lib/db';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
+import { getCurrentDeptId } from '../../../../../../src/lib/dept-scope';
 import {
   memberByEmail,
   isHrHubAdmin,
@@ -46,6 +47,10 @@ export async function GET(req, { params }) {
 
   await ensureRosterHydrated();
 
+  // Phase 11c (2026-05-20): refuse cross-dept reads. 404 instead of leaking.
+  const currentDeptId = await getCurrentDeptId(user, req);
+  if (!currentDeptId) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
   const [reqRes, commentsRes, followersRes, logRes] = await Promise.all([
     query(
       `SELECT id, flow, status, priority, function_area, request_type, report_type,
@@ -56,8 +61,8 @@ export async function GET(req, { params }) {
               task_source, task_id, task_url, task_subject,
               sla_ext_requested_days, sla_ext_reason_code, sla_ext_acknowledged,
               sla_ext_approved_days
-         FROM hr_hub_request WHERE id = $1`,
-      [id],
+         FROM hr_hub_request WHERE id = $1 AND org_node_id = $2`,
+      [id, currentDeptId],
     ),
     query(
       `SELECT id, request_id, parent_comment_id, author_email, author_name,
@@ -168,9 +173,13 @@ export async function PATCH(req, { params }) {
   try { patch = await req.json(); }
   catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }); }
 
+  // Phase 11c (2026-05-20): refuse cross-dept edits. SELECT scoped to dept
+  // so a request in another tenant looks the same as a non-existent one.
+  const currentDeptId = await getCurrentDeptId(user, req);
+  if (!currentDeptId) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   const { rows: existingRows } = await query(
-    `SELECT * FROM hr_hub_request WHERE id = $1`,
-    [id],
+    `SELECT * FROM hr_hub_request WHERE id = $1 AND org_node_id = $2`,
+    [id, currentDeptId],
   );
   if (existingRows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   const existing = existingRows[0];
@@ -292,8 +301,10 @@ export async function PATCH(req, { params }) {
   }
 
   updates.push(`updated_at = NOW()`);
-  const sql = `UPDATE hr_hub_request SET ${updates.join(', ')} WHERE id = $${p} RETURNING *`;
-  values.push(id);
+  // Phase 11c: UPDATE also dept-scoped so a concurrent dept-move between
+  // the SELECT above and the UPDATE here can't widen the blast radius.
+  const sql = `UPDATE hr_hub_request SET ${updates.join(', ')} WHERE id = $${p} AND org_node_id = $${p + 1} RETURNING *`;
+  values.push(id, currentDeptId);
   const { rows } = await query(sql, values);
   const updated = rows[0];
 

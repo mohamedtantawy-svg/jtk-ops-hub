@@ -68,6 +68,10 @@ export default function OrgNodeFormDrawer({
   defaultKind,     // for 'create': 'department' | 'team'
   node,            // for 'edit': the node being edited
   onSave,          // async (payload) => savedNode
+  // Phase 10b (2026-05-20): resolves an email to its current top-level
+  // department so we can warn before moving a member across dept boundaries.
+  // (email) => { node, topLevel, memberName } | null
+  getCurrentDeptForEmail,
 }) {
   const initial = useMemo(() => {
     if (mode === 'edit' && node) {
@@ -302,7 +306,7 @@ export default function OrgNodeFormDrawer({
             />
           </Field>
 
-          <Field label="Lead email" hint="The person who runs this group. Auto-fills manager suggestions in Phase 3.">
+          <Field label="Lead email" hint="The person who runs this group. On create, they're auto-seeded as this department's Admin.">
             <input
               type="email"
               value={form.leadEmail}
@@ -311,6 +315,12 @@ export default function OrgNodeFormDrawer({
               style={inputStyle}
               onFocus={e => e.currentTarget.style.borderColor = 'var(--purple)'}
               onBlur={e => e.currentTarget.style.borderColor = 'var(--border)'}
+            />
+            <LeadMoveWarning
+              email={form.leadEmail}
+              kind={form.kind}
+              currentNodeId={node?.id || null}
+              getCurrentDeptForEmail={getCurrentDeptForEmail}
             />
           </Field>
 
@@ -540,6 +550,43 @@ export default function OrgNodeFormDrawer({
             {saving ? 'Saving…' : (isEdit ? 'Save changes' : `Create ${form.kind}`)}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Lead-move warning ───────────────────────────────────────────────────
+// Phase 10b (2026-05-20): when the typed lead email already belongs to
+// another active department, surface a confirm banner BEFORE the admin
+// hits Save — the locked one-node-per-member rule means submitting will
+// move the lead out of their current dept entirely.
+function LeadMoveWarning({ email, kind, currentNodeId, getCurrentDeptForEmail }) {
+  if (!getCurrentDeptForEmail) return null;
+  const trimmed = (email || '').trim().toLowerCase();
+  if (!trimmed || !trimmed.includes('@')) return null;
+  const current = getCurrentDeptForEmail(trimmed);
+  if (!current) return null;
+  // Suppress when the lead is already in this exact node (edit flow with no
+  // change) — re-saving an unchanged dept shouldn't show a scary banner.
+  if (currentNodeId && current.node?.id === currentNodeId) return null;
+  const fromDept = current.topLevel?.name || current.node?.name || 'their current group';
+  return (
+    <div role="alert" style={{
+      marginTop: 8,
+      padding: '10px 12px',
+      borderRadius: 8,
+      background: 'var(--orange-light, #fff7ed)',
+      border: '1px solid var(--orange, #ea580c)',
+      color: 'var(--orange, #c2410c)',
+      fontSize: 'var(--font-sm)',
+      lineHeight: 1.4,
+      display: 'flex', gap: 8, alignItems: 'flex-start',
+    }}>
+      <i className="bi bi-exclamation-triangle-fill" style={{ fontSize: 13, marginTop: 2, flexShrink: 0 }} />
+      <div>
+        <strong>{current.memberName}</strong> is currently in <strong>{fromDept}</strong>.
+        Saving this {kind} will move them out of {fromDept}
+        {kind === 'department' ? ' and seat them here as Admin.' : '.'}
       </div>
     </div>
   );

@@ -25,6 +25,7 @@ import { query } from '../../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { canApproveAnnouncementRequests } from '../../../../../../src/lib/announcements-admin';
 import { publishFromRequest, recordAudit } from '../../../../../../src/lib/announcementFlow';
+import { getTopLevelDeptForMember } from '../../../../../../src/lib/dept-scope';
 
 export async function POST(req, { params }) {
   try {
@@ -98,6 +99,11 @@ export async function POST(req, { params }) {
       }
     }
 
+    // Phase 11b (2026-05-20): published announcement lands in the
+    // REQUESTER's dept (isolation follows the submitter). Approver's
+    // currentDeptId is irrelevant for the destination.
+    const requesterDept = await getTopLevelDeptForMember(r.requested_by_email);
+
     let published;
     try {
       published = await publishFromRequest(merged, {
@@ -105,6 +111,7 @@ export async function POST(req, { params }) {
         urgentOverride,
         urgentOverrideReason,
         actor: user,
+        orgNodeId: requesterDept?.deptId || null,
       });
     } catch (e) {
       if (e.code === 'RATE_LIMIT') {
