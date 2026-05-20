@@ -890,6 +890,218 @@ assert('urgent-assist-schedule POST uses composite ON CONFLICT with partial pred
 assert('urgent-assist-schedule POST no longer references the legacy single-column ON CONFLICT',
   !/ON CONFLICT \(schedule_date\) DO UPDATE/.test(schedRouteSrcPhase11j));
 
+// ── Section 28: Phase 12a — Smart chart redesign ─────────────────────────
+console.log('\n── Phase 12a: smart chart redesign ──');
+
+const layoutSrcPhase12a = read('src/utils/orgChartLayout.js');
+assert('orgChartLayout exports new card dimensions (CARD_W >= 240)',
+  /export const CARD_W = (2[4-9]\d|[3-9]\d\d)/.test(layoutSrcPhase12a));
+assert('orgChartLayout accepts expansion in args',
+  /layoutOrgChart\(\{[\s\S]*expansion[\s\S]*\}\)/.test(layoutSrcPhase12a));
+assert('orgChartLayout gates sub-tree descent on expansion.expandedTeamId',
+  /expansion\.expandedTeamId === node\.id/.test(layoutSrcPhase12a));
+assert('orgChartLayout gates members on expansion.showMembers',
+  /expansion\.showMembers\.has\(node\.id\)/.test(layoutSrcPhase12a));
+assert('orgChartLayout always descends from department to teams',
+  /if \(node\.kind === 'department'\)[\s\S]+?descend = true/.test(layoutSrcPhase12a));
+
+const canvasSrcPhase12a = read('src/components/org/OrgChartCanvas.jsx');
+assert('OrgChartCanvas threads expansion to layoutOrgChart',
+  /layoutOrgChart\(\{ tree, rootNodes, members, expansion \}\)/.test(canvasSrcPhase12a));
+assert('OrgChartCanvas builds membersByEmail for lead lookup',
+  /const membersByEmail = useMemo/.test(canvasSrcPhase12a));
+assert('OrgChartCanvas builds per-node subtreeStats helper',
+  /const subtreeStats = useMemo/.test(canvasSrcPhase12a)
+  && /descendantMembers/.test(canvasSrcPhase12a)
+  && /directTeams/.test(canvasSrcPhase12a));
+assert('OrgChartCanvas accepts expansion + callbacks props',
+  /onToggleTeamExpansion/.test(canvasSrcPhase12a)
+  && /onToggleShowMembers/.test(canvasSrcPhase12a));
+assert('NodeCard accepts lead + stats + toggle props',
+  /function NodeCard\([\s\S]+?lead,[\s\S]+?stats,[\s\S]+?canToggleExpand,[\s\S]+?isExpanded,[\s\S]+?isShowingMembers,/.test(canvasSrcPhase12a));
+assert('NodeCard renders an embedded lead row with Avatar',
+  /Avatar size=\{22\} name=\{lead\.name\}/.test(canvasSrcPhase12a));
+assert('NodeCard exposes the Expand button (gated on canToggleExpand)',
+  /canToggleExpand && \(/.test(canvasSrcPhase12a)
+  && /onClick=\{onToggleExpand\}/.test(canvasSrcPhase12a));
+assert('NodeCard exposes the Show members button (gated on memberCount > 0)',
+  /memberCount > 0 && \(/.test(canvasSrcPhase12a)
+  && /onClick=\{onToggleShowMembers\}/.test(canvasSrcPhase12a));
+assert('NodeCard preserves Phase 10a Login-as-dept-admin pill',
+  /onLoginAsDeptAdmin\?\.\(node\.leadEmail\)/.test(canvasSrcPhase12a));
+
+const viewSrcPhase12a = read('src/components/views/OrgView.jsx');
+assert('OrgView holds chartExpansion state with the three slots',
+  /const \[chartExpansion, setChartExpansion\] = useState/.test(viewSrcPhase12a)
+  && /expandedTeamId: null/.test(viewSrcPhase12a)
+  && /expandedSubTeamId: null/.test(viewSrcPhase12a)
+  && /showMembers: new Set\(\)/.test(viewSrcPhase12a));
+assert('OrgView toggleTeamExpansion auto-collapses prior sub-team on team change',
+  /expandedSubTeamId: null/.test(viewSrcPhase12a)
+  && /expandedTeamId === nodeId \? null : nodeId/.test(viewSrcPhase12a));
+assert('OrgView wires expansion + callbacks into OrgChartCanvas',
+  /expansion=\{chartExpansion\}[\s\S]+?onToggleTeamExpansion=\{toggleTeamExpansion\}[\s\S]+?onToggleShowMembers=\{toggleShowMembers\}/.test(viewSrcPhase12a));
+
+// ── Section 29: Phase 13a — Per-department integration config ────────────
+console.log('\n── Phase 13a: per-department integration config ──');
+
+const deptIntegrationsSrc = read('src/lib/dept-integrations.js');
+assert('dept-integrations exports DEPT_INTEGRATIONS map',
+  /export const DEPT_INTEGRATIONS/.test(deptIntegrationsSrc));
+assert('dept-integrations has HR Experience entry with HRX env vars (no change)',
+  /'hr-experience'[\s\S]+ZENDESK_API_TOKEN[\s\S]+JIRA_API_TOKEN[\s\S]+DEEL_ADMIN_TOKEN/.test(deptIntegrationsSrc));
+assert('dept-integrations has Global Immigration entry with GIX env vars',
+  /'global-immigration'[\s\S]+Zendesk_API_Payroll_GIX[\s\S]+JIRA_GIX[\s\S]+DEEL_ADMIN_GIX/.test(deptIntegrationsSrc));
+assert('Global Immigration hides 5 Deel sources (onboarding/offboarding/amendments/redlines/incentivePlans)',
+  /'global-immigration'[\s\S]+onboarding: false,[\s\S]+offboarding: false,[\s\S]+amendments: false,[\s\S]+redlines: false,[\s\S]+incentivePlans: false/.test(deptIntegrationsSrc));
+assert('Global Immigration Zendesk group = Immigration Experience',
+  /'global-immigration'[\s\S]+'Immigration Experience'/.test(deptIntegrationsSrc));
+assert('Global Immigration Jira filter includes Global Mobility',
+  /'global-immigration'[\s\S]+ownerFieldValues:[\s\S]+'Global Mobility'/.test(deptIntegrationsSrc));
+assert('Global Immigration Workbench team filter = Mobility Operations + GSC - Mobility',
+  /'global-immigration'[\s\S]+teamFilter:[\s\S]+'Mobility Operations'[\s\S]+'GSC - Mobility'/.test(deptIntegrationsSrc));
+assert('dept-integrations exports the per-source helper isDeelSourceVisible',
+  /export function isDeelSourceVisible/.test(deptIntegrationsSrc));
+assert('dept-integrations exports visibleDeelSourcesFor (used by dept-scope/current)',
+  /export function visibleDeelSourcesFor/.test(deptIntegrationsSrc));
+assert('dept-integrations exposes resolveWorkbenchConfig / resolveJiraConfig / resolveZendeskConfig',
+  /export function resolveWorkbenchConfig/.test(deptIntegrationsSrc)
+  && /export function resolveJiraConfig/.test(deptIntegrationsSrc)
+  && /export function resolveZendeskConfig/.test(deptIntegrationsSrc));
+
+const deptScopeSrcPhase13a = read('src/lib/dept-scope.js');
+assert('dept-scope exposes getCurrentDeptSlugAndId',
+  /export async function getCurrentDeptSlugAndId/.test(deptScopeSrcPhase13a));
+assert('dept-scope recursive CTE selects slug column for top-level resolve',
+  /SELECT id, name, slug FROM chain WHERE parent_id IS NULL/.test(deptScopeSrcPhase13a));
+
+const scopeCurrentSrcPhase13a = read('app/api/v1/dept-scope/current/route.js');
+assert('/api/v1/dept-scope/current returns visibleSources',
+  /visibleSources,/.test(scopeCurrentSrcPhase13a)
+  && /visibleDeelSourcesFor\(dept\?\.slug \|\| null\)/.test(scopeCurrentSrcPhase13a));
+
+const hookSrcPhase13a = read('src/hooks/useCurrentDept.js');
+assert('useCurrentDept exposes visibleSources with fail-closed defaults',
+  /visibleSources: EMPTY_VISIBLE_SOURCES/.test(hookSrcPhase13a)
+  && /visibleSources: \(data\.visibleSources/.test(hookSrcPhase13a));
+
+// All 7 Deel-source routes early-exit when disabled.
+const DEEL_ROUTES = [
+  ['app/api/v1/integrations/deel/onboarding/route.js',       "'onboarding'"],
+  ['app/api/v1/integrations/deel/onboarding-paused/route.js', "'onboarding'"],
+  ['app/api/v1/integrations/deel/offboarding/route.js',      "'offboarding'"],
+  ['app/api/v1/integrations/deel/amendments/route.js',       "'amendments'"],
+  ['app/api/v1/integrations/deel/redlines/route.js',         "'redlines'"],
+  ['app/api/v1/integrations/deel/incentive-plans/route.js',  "'incentivePlans'"],
+  ['app/api/v1/integrations/deel/workbench/route.js',        "'workbench'"],
+];
+for (const [path, sourceKey] of DEEL_ROUTES) {
+  const src = read(path);
+  assert(`${path.split('/').slice(-2, -1)[0]} route gates by isDeelSourceVisible(${sourceKey})`,
+    src.includes('isDeelSourceVisible')
+    && src.includes(sourceKey)
+    && /disabled: true, reason: 'source-disabled-for-dept'/.test(src));
+}
+
+// HRX-no-impact: every HRX-side env var in the integration profile must
+// match the ORIGINAL values the pre-Phase-13a routes read. Regression
+// guard so a future tweak doesn't accidentally retarget HRX.
+assert('HRX-no-impact: HRX zendesk token env unchanged',
+  /'hr-experience'[\s\S]+tokenEnvVar: 'ZENDESK_API_TOKEN'/.test(deptIntegrationsSrc));
+assert('HRX-no-impact: HRX zendesk group env unchanged',
+  /'hr-experience'[\s\S]+groupEnvVar: 'ZENDESK_HR_GROUP'/.test(deptIntegrationsSrc));
+assert('HRX-no-impact: HRX jira project keys unchanged (COHD, OSHD)',
+  /'hr-experience'[\s\S]+projectKeys: \['COHD', 'OSHD'\]/.test(deptIntegrationsSrc));
+assert('HRX-no-impact: HRX all 6 Deel sources enabled',
+  /'hr-experience'[\s\S]+onboarding: true,[\s\S]+offboarding: true,[\s\S]+amendments: true,[\s\S]+redlines: true,[\s\S]+incentivePlans: true,[\s\S]+workbench: true/.test(deptIntegrationsSrc));
+
+// ── Section 30: Phase 13b — per-dept dispatch (Workbench + ZD + Jira) ────
+console.log('\n── Phase 13b: per-dept dispatch for Workbench + Zendesk + Jira ──');
+
+const deelApiSrcPhase13b = read('src/lib/deel-api.js');
+assert('deel-api _deelFetch honors options.adminTokenOverride',
+  /const adminToken = options\.adminTokenOverride \|\| DEEL_ADMIN_TOKEN/.test(deelApiSrcPhase13b));
+assert('deel-api listWorkbenchTasks accepts adminTokenOverride + teamNameFilter',
+  /params\.adminTokenOverride/.test(deelApiSrcPhase13b)
+  && /params\.teamNameFilter/.test(deelApiSrcPhase13b));
+assert('deel-api listWorkbenchTasks skips reconcile for non-HRX (teamNameFilter set)',
+  /teamNameFilter\s*\?\s*false\s*:\s*\(params\.includeCompleted/.test(deelApiSrcPhase13b));
+assert('deel-api listWorkbenchTasks filters pre-projection by team name',
+  /sourceItems = teamNameFilter[\s\S]+t\.teamName[\s\S]+t\.team\?\.name/.test(deelApiSrcPhase13b));
+
+const zdApiSrcPhase13b = read('src/lib/zendesk-api.js');
+assert('zendesk-api _zendeskFetch honors token/subdomain/email overrides',
+  /tokenOverride\s*=\s*options\.tokenOverride/.test(zdApiSrcPhase13b)
+  && /subdomainOverride\s*=\s*options\.subdomainOverride/.test(zdApiSrcPhase13b)
+  && /emailOverride\s*=\s*options\.emailOverride/.test(zdApiSrcPhase13b));
+assert('zendesk-api searchTickets passes opts through',
+  /searchTickets\(query, params = \{\}, opts = \{\}\)/.test(zdApiSrcPhase13b)
+  && /return zendeskFetch\(`\/search\.json\?\$\{qs\.toString\(\)\}`, opts\)/.test(zdApiSrcPhase13b));
+assert('zendesk-api updateTicket / reassignTicket / showManyUsers accept overrides',
+  /updateTicket\(ticketId, data, opts = \{\}\)/.test(zdApiSrcPhase13b)
+  && /reassignTicket\(ticketId, assigneeEmail, opts = \{\}\)/.test(zdApiSrcPhase13b)
+  && /showManyUsers\(ids, opts = \{\}\)/.test(zdApiSrcPhase13b));
+
+const jiraApiSrcPhase13b = read('src/lib/jira-api.js');
+assert('jira-api _jiraFetch honors token/baseUrl/email overrides',
+  /tokenOverride\s*=\s*options\.tokenOverride/.test(jiraApiSrcPhase13b)
+  && /baseUrlOverride\s*=\s*options\.baseUrlOverride/.test(jiraApiSrcPhase13b)
+  && /emailOverride\s*=\s*options\.emailOverride/.test(jiraApiSrcPhase13b));
+assert('jira-api searchIssues passes opts through',
+  /searchIssues\(jql, params = \{\}, opts = \{\}\)/.test(jiraApiSrcPhase13b));
+assert('jira-api reassignIssue / addComment / transitionIssue accept overrides',
+  /reassignIssue\(issueKey, assigneeEmail, opts = \{\}\)/.test(jiraApiSrcPhase13b)
+  && /addComment\(issueKey, commentText, opts = \{\}\)/.test(jiraApiSrcPhase13b)
+  && /transitionIssue\(issueKey, transitionId, opts = \{\}\)/.test(jiraApiSrcPhase13b));
+
+const wbRouteSrcPhase13b = read('app/api/v1/integrations/deel/workbench/route.js');
+assert('workbench route dispatches HRX vs per-dept on slug',
+  /const isHrx = !deptInfo \|\| deptInfo\.deptSlug === SLUGS\.HR_EXPERIENCE/.test(wbRouteSrcPhase13b));
+assert('workbench route passes adminTokenOverride + teamNameFilter for non-HRX',
+  /adminTokenOverride: workbenchCfg\.token[\s\S]+teamNameFilter: workbenchCfg\.teamFilter/.test(wbRouteSrcPhase13b));
+assert('workbench route fails closed when dept token not in Nexus yet',
+  /dept-workbench-token-not-configured/.test(wbRouteSrcPhase13b));
+assert('workbench cache key is dept-namespaced for non-HRX',
+  /isHrx \? CACHE_KEY : `\$\{CACHE_KEY\}_\$\{deptInfo\.deptSlug\}`/.test(wbRouteSrcPhase13b));
+
+const queueRouteSrcPhase13b = read('app/api/v1/queue/route.js');
+assert('queue route GET short-circuits for non-HRX (returns empty)',
+  /_deptDispatchStub: true/.test(queueRouteSrcPhase13b));
+assert('queue route HRX path is preserved (slug check first)',
+  /const isHrx = !deptInfo \|\| deptInfo\.deptSlug === SLUGS\.HR_EXPERIENCE/.test(queueRouteSrcPhase13b));
+
+const actionsSrcPhase13b = read('app/api/v1/queue/[ticketId]/actions/route.js');
+assert('actions route resolves dept opts + threads Zendesk overrides',
+  /const zdAuthOpts = zdCfg \?/.test(actionsSrcPhase13b)
+  && /\.\.\.zdAuthOpts/.test(actionsSrcPhase13b));
+assert('actions route threads Jira overrides to Jira helpers',
+  /addJiraComment\(ticketId, body\.message, jiraAuthOverride\)/.test(actionsSrcPhase13b)
+  && /transitionJiraIssue\(ticketId, body\.status, jiraAuthOverride\)/.test(actionsSrcPhase13b)
+  && /assignJiraIssue\(ticketId, body\.assigneeEmail, jiraAuthOverride\)/.test(actionsSrcPhase13b));
+
+const reassignSrcPhase13b = read('app/api/v1/queue/reassign/route.js');
+assert('reassign route resolves dept opts',
+  /const isHrx = !deptInfo \|\| deptInfo\.deptSlug === SLUGS\.HR_EXPERIENCE/.test(reassignSrcPhase13b));
+assert('reassign route passes Zendesk + Jira overrides through to lib helpers',
+  /reassignTicket\(numericId, assigneeEmail, \{ actAsEmail: user\.email, \.\.\.zdOpts \}\)/.test(reassignSrcPhase13b)
+  && /reassignIssue\(ticketId, assigneeEmail, jiraOpts\)/.test(reassignSrcPhase13b));
+
+const deptIntegrationsSrcPhase13b = read('src/lib/dept-integrations.js');
+assert('Global Immigration workbench is now enabled (was false in 13a)',
+  /'global-immigration'[\s\S]+workbench: true,/.test(deptIntegrationsSrcPhase13b));
+
+// HRX-no-impact regression assertions for Phase 13b.
+assert('HRX-no-impact: deelFetch default path uses DEEL_ADMIN_TOKEN',
+  /const adminToken = options\.adminTokenOverride \|\| DEEL_ADMIN_TOKEN/.test(deelApiSrcPhase13b));
+assert('HRX-no-impact: zendeskFetch default subdomain/email/token reads ZENDESK_* env',
+  /effSubdomain = subdomainOverride \|\| ZENDESK_SUBDOMAIN/.test(zdApiSrcPhase13b)
+  && /effEmail = emailOverride \|\| ZENDESK_EMAIL/.test(zdApiSrcPhase13b)
+  && /effToken = tokenOverride \|\| ZENDESK_API_TOKEN/.test(zdApiSrcPhase13b));
+assert('HRX-no-impact: jiraFetch default base/email/token reads JIRA_* env',
+  /effBase = baseUrlOverride \|\| JIRA_BASE_URL/.test(jiraApiSrcPhase13b)
+  && /effEmail = emailOverride \|\| JIRA_USER_EMAIL/.test(jiraApiSrcPhase13b)
+  && /effToken = tokenOverride \|\| JIRA_API_TOKEN/.test(jiraApiSrcPhase13b));
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

@@ -62,6 +62,39 @@ export default function OrgView({ user, realUser, onImpersonate }) {
   // ── Phase 4: multi-select + drag-to-move ────────────────────────────────
   const [selectedEmails, setSelectedEmails] = useState(() => new Set());
   const [movePayload, setMovePayload] = useState(null);
+
+  // ── Phase 12a (2026-05-20): chart expansion state. Default = depts +
+  // teams only. expandedTeamId controls which single team's sub-teams are
+  // visible (auto-collapses siblings so the chart stays fit-to-screen at
+  // 50+ teams). showMembers is the per-node toggle for member chips —
+  // members never render until a card's "Show members" button is clicked.
+  const [chartExpansion, setChartExpansion] = useState({
+    expandedTeamId: null,
+    expandedSubTeamId: null,
+    showMembers: new Set(),
+  });
+  const toggleTeamExpansion = useCallback((nodeId, kind) => {
+    setChartExpansion(prev => {
+      if (kind === 'team') {
+        // Toggling the same team collapses it; toggling a different one
+        // auto-collapses any prior sibling AND any nested sub-team.
+        const next = prev.expandedTeamId === nodeId ? null : nodeId;
+        return { ...prev, expandedTeamId: next, expandedSubTeamId: null };
+      }
+      // 'subTeam' — toggles within the currently-expanded team. Auto-
+      // collapses prior sub-team selection so only one sub-team's children
+      // are visible at a time.
+      const next = prev.expandedSubTeamId === nodeId ? null : nodeId;
+      return { ...prev, expandedSubTeamId: next };
+    });
+  }, []);
+  const toggleShowMembers = useCallback((nodeId) => {
+    setChartExpansion(prev => {
+      const next = new Set(prev.showMembers);
+      if (next.has(nodeId)) next.delete(nodeId); else next.add(nodeId);
+      return { ...prev, showMembers: next };
+    });
+  }, []);
   // ── Phase 7: audit drawer + CSV export menu ─────────────────────────────
   const [auditOpen, setAuditOpen] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
@@ -448,6 +481,9 @@ export default function OrgView({ user, realUser, onImpersonate }) {
             onDropMembers={openMovePreview}
             isGlobalSuperAdmin={isGlobalSuperAdmin}
             onLoginAsDeptAdmin={handleLoginAsDeptAdmin}
+            expansion={chartExpansion}
+            onToggleTeamExpansion={toggleTeamExpansion}
+            onToggleShowMembers={toggleShowMembers}
           />
         ) : viewMode === 'list' ? (
           <OrgTreeView

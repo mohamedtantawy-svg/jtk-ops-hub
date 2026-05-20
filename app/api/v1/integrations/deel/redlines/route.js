@@ -8,6 +8,8 @@
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { listRedlineRequests, isDeelConfigured } from '../../../../../../src/lib/deel-api';
+import { getCurrentDeptSlugAndId } from '../../../../../../src/lib/dept-scope';
+import { isDeelSourceVisible } from '../../../../../../src/lib/dept-integrations';
 import { cacheGet, cacheSet } from '../../../../../../src/lib/server-cache';
 import { scopeRedlineRequests } from '../../../../../../src/lib/queue-scoping';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
@@ -37,6 +39,13 @@ export async function GET(req) {
   const user = getAuthUser(req);
   if (!user.email) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  // Phase 13a: dept-isolated visibility gate.
+  {
+    const deptInfo = await getCurrentDeptSlugAndId(user, req);
+    if (!isDeelSourceVisible(deptInfo?.deptSlug, 'redlines')) {
+      return NextResponse.json({ items: [], total: 0, disabled: true, reason: 'source-disabled-for-dept' });
+    }
   }
   if (!isDeelConfigured()) {
     return NextResponse.json({ error: 'Deel API not configured' }, { status: 503 });
