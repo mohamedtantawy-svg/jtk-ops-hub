@@ -14,6 +14,7 @@ import { NextResponse } from 'next/server';
 import { query } from '../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { canManageOrgGlobal, canManageOrgNode, hasAnyOrgEditPower } from '../../../../../src/lib/org-admin';
+import { ensureLeadIsDeptAdmin } from '../../../../../src/lib/org-lead-admin-seed';
 
 const VALID_KINDS = new Set(['department', 'team']);
 const NAME_MAX = 120;
@@ -300,6 +301,25 @@ export async function POST(req) {
       ],
     );
 
+    // Phase 10b (2026-05-20): auto-seed the lead as the dept's Admin so a
+    // freshly-created department always has at least one member. Scope:
+    // kind==='department' only — teams have leads but they're labels, not
+    // admin roles. Failure is non-fatal: dept creation succeeds and the
+    // admin can re-trigger by saving the dept again.
+    let leadSeed = null;
+    if (kind === 'department' && leadEmail) {
+      try {
+        leadSeed = await ensureLeadIsDeptAdmin({
+          nodeId: row.id,
+          leadEmail,
+          actorEmail: user.email,
+        });
+      } catch (seedErr) {
+        console.warn('[org/nodes POST] lead auto-seed failed:', seedErr.message);
+        leadSeed = { error: seedErr.message };
+      }
+    }
+
     return NextResponse.json({
       node: {
         id: row.id,
@@ -319,9 +339,10 @@ export async function POST(req) {
         createdAt: row.created_at,
         createdBy: row.created_by,
         updatedAt: row.updated_at,
-        memberCount: 0,
+        memberCount: leadSeed && !leadSeed.error && !leadSeed.skipped ? 1 : 0,
         vacantCount: 0,
       },
+      leadSeed,
     }, { status: 201 });
   } catch (err) {
     if (err.code === '23505') {
