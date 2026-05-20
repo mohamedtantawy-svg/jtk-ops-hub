@@ -27,12 +27,22 @@ const FIT_PADDING = 32;
 export default function OrgChartCanvas({
   tree, rootNodes, members, search, canEdit,
   onSelectNode, onEdit, onAddChild, onArchive, onAddMember, onSelectMember,
+  // Phase 4 — member move + multi-select
+  selectedEmails = new Set(),
+  onToggleSelect,
+  onDropMembers,        // (memberEmails: string[], targetNode) => void
 }) {
   const wrapRef = useRef(null);
   const stageRef = useRef(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const dragging = useRef(null);
+  // Phase 4 — drag-and-drop state. `dragSourceEmails` carries either the
+  // single dragged member's email or the full selected set when starting
+  // a drag from a selected card. `dragTargetId` highlights the hovered
+  // drop zone.
+  const [dragSourceEmails, setDragSourceEmails] = useState(null);
+  const [dragTargetId, setDragTargetId] = useState(null);
 
   const layout = useMemo(
     () => layoutOrgChart({ tree, rootNodes, members }),
@@ -215,16 +225,46 @@ export default function OrgChartCanvas({
                 onAddChild={onAddChild}
                 onAddMember={onAddMember}
                 onArchive={onArchive}
+                isDropTarget={dragTargetId === it.id}
+                onDragOver={(e) => {
+                  if (!dragSourceEmails || !canEdit) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                  if (dragTargetId !== it.id) setDragTargetId(it.id);
+                }}
+                onDragLeave={() => { if (dragTargetId === it.id) setDragTargetId(null); }}
+                onDrop={(e) => {
+                  if (!dragSourceEmails || !canEdit) return;
+                  e.preventDefault();
+                  setDragTargetId(null);
+                  onDropMembers?.(dragSourceEmails, it.data);
+                  setDragSourceEmails(null);
+                }}
               />
             );
           }
           if (it.kind === 'member') {
+            const isSelected = selectedEmails.has(it.data.email);
             return (
               <MemberCard
                 key={it.id}
                 item={it}
                 highlight={highlight}
+                isSelected={isSelected}
+                canEdit={canEdit}
                 onSelect={onSelectMember}
+                onToggleSelect={onToggleSelect}
+                onDragStart={(e) => {
+                  if (!canEdit) return;
+                  // If the dragged card is part of the selection, drag the
+                  // entire selection. Otherwise drag just this email.
+                  const payload = isSelected && selectedEmails.size > 1
+                    ? Array.from(selectedEmails)
+                    : [it.data.email];
+                  setDragSourceEmails(payload);
+                  try { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', payload.join(',')); } catch {}
+                }}
+                onDragEnd={() => { setDragSourceEmails(null); setDragTargetId(null); }}
               />
             );
           }
@@ -266,7 +306,8 @@ export default function OrgChartCanvas({
   );
 }
 
-function NodeCard({ item, highlight, canEdit, onSelect, onEdit, onAddChild, onAddMember, onArchive }) {
+function NodeCard({ item, highlight, canEdit, onSelect, onEdit, onAddChild, onAddMember, onArchive,
+  isDropTarget, onDragOver, onDragLeave, onDrop }) {
   const node = item.data;
   const accent = node.color || (node.kind === 'department' ? '#7c3aed' : '#1f74b3');
   const icon = node.icon || (node.kind === 'department' ? 'bi-building' : 'bi-people');
@@ -280,6 +321,12 @@ function NodeCard({ item, highlight, canEdit, onSelect, onEdit, onAddChild, onAd
     return () => document.removeEventListener('mousedown', h);
   }, [menuOpen]);
 
+  // Visual: a drop target gets a thick accent ring + a subtle highlight so
+  // admins can see exactly where the drop will land before releasing.
+  const borderColor = isDropTarget ? accent : (highlight ? accent : 'var(--border)');
+  const shadow = isDropTarget
+    ? `0 0 0 4px ${accent}55, 0 4px 12px ${accent}33`
+    : (highlight ? `0 0 0 3px ${accent}33` : '0 1px 3px rgba(0,0,0,0.05)');
   return (
     <div
       data-org-card
@@ -287,21 +334,22 @@ function NodeCard({ item, highlight, canEdit, onSelect, onEdit, onAddChild, onAd
         position: 'absolute',
         left: item.x, top: item.y,
         width: CARD_W, height: CARD_H,
-        background: 'var(--surface)',
-        border: `1px solid ${highlight ? accent : 'var(--border)'}`,
+        background: isDropTarget ? `${accent}11` : 'var(--surface)',
+        border: `1px solid ${borderColor}`,
         borderTop: `3px solid ${accent}`,
         borderRadius: 12,
-        boxShadow: highlight
-          ? `0 0 0 3px ${accent}33`
-          : '0 1px 3px rgba(0,0,0,0.05)',
+        boxShadow: shadow,
         padding: '10px 12px',
         display: 'flex', flexDirection: 'column',
         cursor: 'pointer',
-        transition: 'border-color .12s, box-shadow .12s, transform .12s',
+        transition: 'border-color .12s, box-shadow .12s, transform .12s, background .12s',
       }}
       onClick={() => onSelect?.(node)}
       onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; }}
       onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; }}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
         <div style={{
@@ -406,25 +454,44 @@ function NodeCard({ item, highlight, canEdit, onSelect, onEdit, onAddChild, onAd
   );
 }
 
-function MemberCard({ item, highlight, onSelect }) {
+function MemberCard({ item, highlight, isSelected, canEdit,
+  onSelect, onToggleSelect, onDragStart, onDragEnd }) {
   const m = item.data;
+  // Selection takes precedence over search-highlight visually because a
+  // user actively picking members wants a stronger affordance.
+  const ring = isSelected
+    ? '0 0 0 3px var(--purple)'
+    : (highlight ? '0 0 0 3px var(--purple-light)' : '0 1px 3px rgba(0,0,0,0.04)');
   return (
     <div
       data-org-card
+      draggable={!!canEdit}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       style={{
         position: 'absolute',
         left: item.x, top: item.y,
         width: MEMBER_W, height: MEMBER_H,
-        background: 'var(--surface)',
-        border: `1px solid ${highlight ? 'var(--purple)' : 'var(--border)'}`,
+        background: isSelected ? 'var(--purple-light)' : 'var(--surface)',
+        border: `1px solid ${isSelected || highlight ? 'var(--purple)' : 'var(--border)'}`,
         borderRadius: 12,
-        boxShadow: highlight ? '0 0 0 3px var(--purple-light)' : '0 1px 3px rgba(0,0,0,0.04)',
+        boxShadow: ring,
         padding: '10px 12px',
         display: 'flex', alignItems: 'center', gap: 10,
-        cursor: 'pointer',
-        transition: 'border-color .12s, box-shadow .12s, transform .12s',
+        cursor: canEdit ? 'grab' : 'pointer',
+        transition: 'border-color .12s, box-shadow .12s, transform .12s, background .12s',
       }}
-      onClick={() => onSelect?.(m)}
+      onClick={(e) => {
+        // Cmd/ctrl/shift-click toggles selection without opening the
+        // detail drawer; plain click opens the drawer for inspection /
+        // edit.
+        if ((e.metaKey || e.ctrlKey || e.shiftKey) && canEdit) {
+          e.stopPropagation();
+          onToggleSelect?.(m.email);
+          return;
+        }
+        onSelect?.(m);
+      }}
       onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; }}
       onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; }}
     >
@@ -440,6 +507,9 @@ function MemberCard({ item, highlight, onSelect }) {
           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
         }}>{m.title || '—'}</div>
       </div>
+      {isSelected && (
+        <i className="bi bi-check-circle-fill" style={{ fontSize: 14, color: 'var(--purple)' }} />
+      )}
     </div>
   );
 }

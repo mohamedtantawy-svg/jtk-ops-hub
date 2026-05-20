@@ -22,6 +22,8 @@ import OrgNodeFormDrawer from '../org/OrgNodeFormDrawer';
 import OrgArchiveConfirm from '../org/OrgArchiveConfirm';
 import MemberDetailDrawer from '../org/MemberDetailDrawer';
 import AddMemberModal from '../org/AddMemberModal';
+import OrgMovePreviewModal from '../org/OrgMovePreviewModal';
+import BulkMoveBar from '../org/BulkMoveBar';
 
 const VIEW_MODES = [
   { id: 'chart', label: 'Chart', icon: 'bi-diagram-3-fill' },
@@ -40,6 +42,41 @@ export default function OrgView({ user }) {
   // ── Member-side modals (Phase 3) ────────────────────────────────────────
   const [selectedMember, setSelectedMember] = useState(null);
   const [addMemberTo, setAddMemberTo] = useState(null);
+
+  // ── Phase 4: multi-select + drag-to-move ────────────────────────────────
+  const [selectedEmails, setSelectedEmails] = useState(() => new Set());
+  const [movePayload, setMovePayload] = useState(null);
+  const toggleSelected = (email) => {
+    setSelectedEmails(prev => {
+      const next = new Set(prev);
+      if (next.has(email)) next.delete(email); else next.add(email);
+      return next;
+    });
+  };
+  const clearSelection = () => setSelectedEmails(new Set());
+  const emailsToMembers = (emails) => {
+    const lookup = new Map((members || []).map(m => [m.email, m]));
+    return emails.map(e => lookup.get(e)).filter(Boolean);
+  };
+  const openMovePreview = (emails, targetNode) => {
+    const resolved = emailsToMembers(emails);
+    if (resolved.length === 0 || !targetNode) return;
+    setMovePayload({ members: resolved, target: targetNode });
+  };
+  const applyMove = async ({ members: ms, target }) => {
+    // Sequentially patch each member — keeps the API single-row contract
+    // intact. With 100+ members per bulk move this is still fast enough
+    // (DB round-trips are sub-100ms each); Phase 7 swaps in a bulk
+    // endpoint if needed.
+    for (const m of ms) {
+      const res = await tm.updateMember(m.email, { orgNodeId: target.id });
+      if (res && res.ok === false) {
+        throw new Error(res.error || `Failed to move ${m.name}`);
+      }
+    }
+    clearSelection();
+    org.reload();
+  };
 
   // Permission to edit comes from the API response (server-side
   // authoritative) but we fall back to the local perms snapshot so the
@@ -261,6 +298,9 @@ export default function OrgView({ user }) {
             onArchive={(node) => setArchiveTarget(node)}
             onAddMember={(node) => setAddMemberTo(node)}
             onSelectMember={(m) => setSelectedMember(m)}
+            selectedEmails={selectedEmails}
+            onToggleSelect={toggleSelected}
+            onDropMembers={openMovePreview}
           />
         ) : viewMode === 'list' ? (
           <OrgTreeView
@@ -321,6 +361,21 @@ export default function OrgView({ user }) {
           return res;
         }}
       />
+      <OrgMovePreviewModal
+        open={!!movePayload}
+        payload={movePayload}
+        onClose={() => setMovePayload(null)}
+        onConfirm={applyMove}
+      />
+      {canEdit && (
+        <BulkMoveBar
+          selectedCount={selectedEmails.size}
+          rootNodes={org.rootNodes}
+          tree={org.tree}
+          onCancel={clearSelection}
+          onChooseTarget={(node) => openMovePreview(Array.from(selectedEmails), node)}
+        />
+      )}
     </div>
   );
 }
