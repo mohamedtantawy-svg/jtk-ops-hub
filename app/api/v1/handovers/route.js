@@ -24,6 +24,7 @@ import {
 } from '../../../../src/lib/handover-server';
 import { HANDOVER_EVENT_TYPES } from '../../../../src/lib/handover-helpers';
 import { MEMBERS_BY_EMAIL } from '../../../../src/data/members';
+import { getCurrentDeptId, getTopLevelDeptForMember } from '../../../../src/lib/dept-scope';
 
 const lc = (v) => (v || '').toLowerCase().trim();
 
@@ -135,18 +136,25 @@ export async function POST(req) {
       }, client);
       const managerApprovalRequired = settings?.manager_approval_required !== false;
 
+      // Phase 11e (2026-05-20): a handover belongs to the REQUESTER's
+      // dept (not the actor's — an RM creating a handover on behalf of
+      // a report writes the row into the report's dept).
+      const requesterDept = await getTopLevelDeptForMember(lc(event.work_email));
+      const requesterDeptId = requesterDept?.deptId || null;
+
       // Insert handover.
       const ins = await client.query(
         `INSERT INTO handovers
            (requester_email, start_date, end_date, time_off_event_id, reason,
             status, manager_email, manager_approval_required,
-            checklist_template_id, settings_id)
-         VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9)
+            checklist_template_id, settings_id, org_node_id)
+         VALUES ($1, $2, $3, $4, $5, 'draft', $6, $7, $8, $9, $10)
          RETURNING id`,
         [
           lc(event.work_email), event.start_date, event.end_date, event.id, reason,
           managerEmail, managerApprovalRequired,
           settings?.default_template_id || null, settings?.id || null,
+          requesterDeptId,
         ],
       );
       const handoverId = ins.rows[0].id;
@@ -232,6 +240,15 @@ export async function GET(req) {
   const where = [];
   const params = [];
   let p = 1;
+
+  // Phase 11e: dept-isolate handover reads.
+  const currentDeptId = await getCurrentDeptId(user, req);
+  if (currentDeptId) {
+    where.push(`h.org_node_id = $${p++}`);
+    params.push(currentDeptId);
+  } else {
+    where.push(`FALSE`);
+  }
 
   if (status) { where.push(`h.status = $${p++}`); params.push(status); }
   if (requester) { where.push(`LOWER(h.requester_email) = $${p++}`); params.push(lc(requester)); }

@@ -717,6 +717,37 @@ const unackedSrc = read('app/api/v1/leader-alerts/unacked-count/route.js');
 assert('leader-alerts unacked-count is dept-scoped',
   /a\.org_node_id = \$3/.test(unackedSrc));
 
+// ── Section 22: Phase 11e — OOO + Handovers isolation ────────────────────
+console.log('\n── Phase 11e: OOO + Handovers isolation ──');
+const tofListSrc = read('app/api/v1/time-off-events/route.js');
+assert('time-off-events list filters by currentDeptId',
+  /e\.org_node_id = \$/.test(tofListSrc));
+assert('time-off-events POST stamps subject (work_email) dept',
+  /getTopLevelDeptForMember\(workEmail\)/.test(tofListSrc)
+  && /subjectDeptId/.test(tofListSrc)
+  && /org_node_id\)/.test(tofListSrc));
+
+const tofIdSrc = read('app/api/v1/time-off-events/[id]/route.js');
+assert('time-off-events/[id] DELETE refuses cross-dept',
+  /SELECT work_email FROM time_off_events WHERE id = \$1 AND org_node_id = \$2/.test(tofIdSrc)
+  && /DELETE FROM time_off_events WHERE id = \$1 AND org_node_id = \$2/.test(tofIdSrc));
+
+const hoListSrc = read('app/api/v1/handovers/route.js');
+assert('handovers POST stamps requester dept on INSERT',
+  /requesterDeptId/.test(hoListSrc)
+  && /org_node_id\)/.test(hoListSrc));
+assert('handovers GET filters by currentDeptId / FALSE',
+  /h\.org_node_id = \$/.test(hoListSrc)
+  && /where\.push\(`FALSE`\)/.test(hoListSrc));
+
+const hoIdSrc = read('app/api/v1/handovers/[id]/route.js');
+assert('handovers/[id] GET 404s cross-dept',
+  /handover\.org_node_id && handover\.org_node_id !== currentDeptId/.test(hoIdSrc));
+assert('handovers/[id] PATCH 404s cross-dept',
+  /handover\.org_node_id && handover\.org_node_id !== currentDeptId[\s\S]+?Not found/.test(hoIdSrc));
+assert('handovers/[id] DELETE 404s cross-dept',
+  (hoIdSrc.match(/handover\.org_node_id && handover\.org_node_id !== currentDeptId/g) || []).length >= 3);
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
