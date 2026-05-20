@@ -33,11 +33,25 @@ const VIEW_MODES = [
   { id: 'table', label: 'Table', icon: 'bi-table' },
 ];
 
-export default function OrgView({ user }) {
+// Phase 10a (2026-05-20): the only "global super-admin" allowed to use the
+// per-row "Login as dept admin" affordance. Every other access=admin user is
+// expected to live inside one department's tenancy. Phase 11 swaps this for
+// a real `is_global_super_admin` flag — the constant lives in one place so
+// the migration is a single grep.
+const GLOBAL_SUPER_ADMIN_EMAIL = 'mohamed.tantawy@deel.com';
+
+export default function OrgView({ user, realUser, onImpersonate }) {
   const perms = useContext(PermissionsContext);
   const tm = useTeamMembers();
   const { members } = tm;
   const org = useOrgNodes();
+  // Resolved on the REAL user — impersonation doesn't grant the button.
+  const isGlobalSuperAdmin =
+    (realUser?.email || user?.email || '').toLowerCase() === GLOBAL_SUPER_ADMIN_EMAIL;
+  const handleLoginAsDeptAdmin = useCallback((leadEmail) => {
+    if (!isGlobalSuperAdmin || !leadEmail || !onImpersonate) return;
+    onImpersonate(String(leadEmail).toLowerCase());
+  }, [isGlobalSuperAdmin, onImpersonate]);
   const [viewMode, setViewMode] = useState('chart');
   const [search, setSearch] = useState('');
 
@@ -432,6 +446,8 @@ export default function OrgView({ user }) {
             selectedEmails={selectedEmails}
             onToggleSelect={toggleSelected}
             onDropMembers={openMovePreview}
+            isGlobalSuperAdmin={isGlobalSuperAdmin}
+            onLoginAsDeptAdmin={handleLoginAsDeptAdmin}
           />
         ) : viewMode === 'list' ? (
           <OrgTreeView
@@ -445,6 +461,8 @@ export default function OrgView({ user }) {
             onArchive={handleArchiveOrRestore}
             onAddMember={(node) => setAddMemberTo(node)}
             onSelect={openEdit}
+            isGlobalSuperAdmin={isGlobalSuperAdmin}
+            onLoginAsDeptAdmin={handleLoginAsDeptAdmin}
           />
         ) : (
           <TablePreview nodes={org.nodes} members={members} tree={org.tree} search={search} onSelectMember={(m) => setSelectedMember(m)} />

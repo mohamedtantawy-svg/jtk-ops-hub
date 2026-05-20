@@ -32,6 +32,11 @@ export default function OrgChartCanvas({
   selectedEmails = new Set(),
   onToggleSelect,
   onDropMembers,        // (memberEmails: string[], targetNode) => void
+  // Phase 10a — per-root-dept "Login as dept admin" affordance, gated on
+  // isGlobalSuperAdmin (currently mohamed only) + node.kind==='department'
+  // + !node.parentId + node.leadEmail.
+  isGlobalSuperAdmin,
+  onLoginAsDeptAdmin,
 }) {
   const wrapRef = useRef(null);
   const stageRef = useRef(null);
@@ -227,6 +232,8 @@ export default function OrgChartCanvas({
                 onAddMember={onAddMember}
                 onArchive={onArchive}
                 sumDescendants={sumDescendants}
+                isGlobalSuperAdmin={isGlobalSuperAdmin}
+                onLoginAsDeptAdmin={onLoginAsDeptAdmin}
                 isDropTarget={dragTargetId === it.id}
                 onDragOver={(e) => {
                   if (!dragSourceEmails || !canEdit) return;
@@ -309,7 +316,8 @@ export default function OrgChartCanvas({
 }
 
 function NodeCard({ item, highlight, canEdit, onSelect, onEdit, onAddChild, onAddMember, onArchive,
-  sumDescendants, isDropTarget, onDragOver, onDragLeave, onDrop }) {
+  sumDescendants, isGlobalSuperAdmin, onLoginAsDeptAdmin,
+  isDropTarget, onDragOver, onDragLeave, onDrop }) {
   const node = item.data;
   const accent = node.color || (node.kind === 'department' ? '#7c3aed' : '#1f74b3');
   const icon = node.icon || (node.kind === 'department' ? 'bi-building' : 'bi-people');
@@ -408,6 +416,41 @@ function NodeCard({ item, highlight, canEdit, onSelect, onEdit, onAddChild, onAd
         ))}
         {(node.countryCodes || []).length > 4 && (
           <span style={{ fontWeight: 600 }}>+{node.countryCodes.length - 4}</span>
+        )}
+        {/* Phase 10a: Login-as-dept-admin — top-level departments only.
+            Sits before the action menu so a quick click switches the global
+            super-admin into that dept's lead account. */}
+        {isGlobalSuperAdmin
+          && node.kind === 'department'
+          && !node.parentId
+          && node.leadEmail && (
+          <button
+            type="button"
+            data-org-control
+            onClick={e => { e.stopPropagation(); onLoginAsDeptAdmin?.(node.leadEmail); }}
+            aria-label={`Login as ${node.leadEmail}`}
+            title={`Login as ${node.leadEmail.split('@')[0]} (${node.name} admin)`}
+            style={{
+              marginLeft: 'auto',
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: '2px 7px', height: 20,
+              background: 'var(--purple-light)',
+              color: 'var(--purple)',
+              border: '1px solid var(--purple)',
+              borderRadius: 'var(--radius-pill)',
+              fontSize: 10, fontWeight: 700,
+              fontFamily: 'inherit',
+              cursor: 'pointer',
+              transition: 'background .12s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--purple)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'var(--purple-light)'}
+            onMouseDown={e => e.currentTarget.style.color = 'white'}
+            onMouseUp={e => e.currentTarget.style.color = 'var(--purple)'}
+          >
+            <i className="bi bi-box-arrow-in-right" style={{ fontSize: 9 }} />
+            Login
+          </button>
         )}
         {canEdit && (
           <div ref={menuRef} style={{ marginLeft: 'auto', position: 'relative' }} onClick={e => e.stopPropagation()}>
