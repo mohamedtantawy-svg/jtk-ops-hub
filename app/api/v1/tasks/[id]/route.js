@@ -3,6 +3,7 @@ import { query } from '../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { getVisibleMemberEmails, isAdmin } from '../../../../../src/lib/scope-helpers';
 import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
+import { getCurrentDeptId } from '../../../../../src/lib/dept-scope';
 
 export async function GET(req, { params }) {
   const user = getAuthUser(req);
@@ -12,14 +13,18 @@ export async function GET(req, { params }) {
     const { id } = await params;
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 
+    // Phase 11h (2026-05-20): refuse cross-dept reads. 404 instead of leaking.
+    const currentDeptId = await getCurrentDeptId(user, req);
+    if (!currentDeptId) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
     // Role-based scoping — same hierarchy as /tasks GET: admin/RM see all;
     // team_lead sees self + direct reports + unassigned; agent sees self only.
-    let whereClause = isUUID ? 'WHERE t.id = $1' : 'WHERE t.external_id = $1';
-    const params_arr = [id];
+    let whereClause = isUUID ? 'WHERE t.id = $1 AND t.org_node_id = $2' : 'WHERE t.external_id = $1 AND t.org_node_id = $2';
+    const params_arr = [id, currentDeptId];
     if (!isAdmin(user) && user.role !== 'regional_manager') {
       const visible = [...getVisibleMemberEmails(user)];
       const allowUnassigned = user.role === 'team_lead';
-      let ph = 2;
+      let ph = 3;
       if (visible.length === 0) {
         whereClause += ` AND t.assignee_id IN (SELECT id FROM members WHERE LOWER(email) = LOWER($${ph}))`;
         params_arr.push(user.email);
@@ -59,8 +64,13 @@ export async function DELETE(req, { params }) {
   try {
     const { id } = await params;
     const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-    const whereClause = isUUID ? 'WHERE id = $1' : 'WHERE external_id = $1';
-    await query(`DELETE FROM tasks ${whereClause}`, [id]);
+    // Phase 11h: refuse cross-dept deletes.
+    const currentDeptId = await getCurrentDeptId(delUser, req);
+    if (!currentDeptId) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    const whereClause = isUUID
+      ? 'WHERE id = $1 AND org_node_id = $2'
+      : 'WHERE external_id = $1 AND org_node_id = $2';
+    await query(`DELETE FROM tasks ${whereClause}`, [id, currentDeptId]);
     return new NextResponse(null, { status: 204 });
   } catch (err) {
     console.error('[tasks/id DELETE]', err.message);

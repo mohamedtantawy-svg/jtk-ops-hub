@@ -18,6 +18,7 @@ import { getVisibleCountries } from '../../../../../../src/lib/queue-scoping';
 import { canAssignTo } from '../../../../../../src/lib/task-scope-guard';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
 import { resolveZendeskUserIdByEmail, updateTicket as updateZdTicket, reassignTicket as reassignZdTicket } from '../../../../../../src/lib/zendesk-api';
+import { getCurrentDeptId } from '../../../../../../src/lib/dept-scope';
 
 const STALE_TTL_MS = 30 * 60_000;
 
@@ -185,11 +186,14 @@ async function assignJiraIssue(issueKey, email) {
 // ── Shadow task upsert + activity log ────────────────────────────────────────
 // Keeps a persistent row keyed by the external id so we can record history for
 // tickets that otherwise live only in Zendesk/Jira.
-async function upsertShadowAndLog({ ticketId, source, eventType, eventText, actorName, patch = {} }) {
+async function upsertShadowAndLog({ ticketId, source, eventType, eventText, actorName, patch = {}, orgNodeId = null }) {
   try {
-    const cols = ['external_id', 'source', 'subject'];
-    const vals = [ticketId, source, ticketId];
-    let ph = 3;
+    // Phase 11h (2026-05-20): the shadow row is born tenanted in the
+    // actor's dept. ON CONFLICT does NOT update org_node_id — the row's
+    // original dept owns it forever, even across cross-dept touches.
+    const cols = ['external_id', 'source', 'subject', 'org_node_id'];
+    const vals = [ticketId, source, ticketId, orgNodeId];
+    let ph = 4;
     const updates = ['updated_at = NOW()'];
 
     // Optional columns we may patch (status, snoozed_until, assignee_id)
@@ -233,6 +237,10 @@ export async function POST(req, { params }) {
   // Hydrate before any scope / canAssignTo check so a just-added TL can
   // reassign to a just-onboarded agent without a server restart.
   await ensureRosterHydrated();
+
+  // Phase 11h: resolve the actor's currentDeptId once and pass it to every
+  // shadow-row insert so the row is tenanted from creation.
+  const orgNodeId = await getCurrentDeptId(user, req);
 
   const { ticketId } = await params;
   const body = await req.json();
@@ -289,6 +297,7 @@ export async function POST(req, { params }) {
         ticketId, source, eventType: 'reply',
         eventText: `Replied (${body.public !== false ? 'public' : 'internal'})`,
         actorName: user.name,
+        orgNodeId,
       });
       cacheDelMany(['queue', `queue_${source}`]);
       return NextResponse.json({ ok: true, action: 'reply' });
@@ -313,6 +322,7 @@ export async function POST(req, { params }) {
         eventText: `Status changed to ${body.status}`,
         actorName: user.name,
         patch: { status: body.status },
+        orgNodeId,
       });
       cacheDelMany(['queue', `queue_${source}`]);
       return NextResponse.json({ ok: true, action: 'status', status: body.status });
@@ -343,6 +353,7 @@ export async function POST(req, { params }) {
         eventText: `Reassigned to ${body.assigneeEmail}`,
         actorName: user.name,
         patch: { assigneeId: asgn.rows[0]?.id || null },
+        orgNodeId,
       });
       cacheDelMany(['queue', `queue_${source}`]);
       return NextResponse.json({ ok: true, action: 'assignee' });

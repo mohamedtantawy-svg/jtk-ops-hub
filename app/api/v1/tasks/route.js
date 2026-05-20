@@ -3,6 +3,7 @@ import { query } from '../../../../src/lib/db';
 import { getAuthUser } from '../../../../src/lib/auth-helpers';
 import { getVisibleMemberEmails, isAdmin } from '../../../../src/lib/scope-helpers';
 import { ensureRosterHydrated } from '../../../../src/lib/roster-server';
+import { getCurrentDeptId } from '../../../../src/lib/dept-scope';
 
 export async function GET(req) {
   const user = getAuthUser(req);
@@ -21,6 +22,18 @@ export async function GET(req) {
     let whereSql = ' WHERE 1=1';
     const params = [];
     let idx = 1;
+
+    // Phase 11h (2026-05-20): dept-isolate every task read. Fails closed
+    // when no dept resolvable. HRX-no-impact via Phase 11a backfill —
+    // every existing task was stamped HR Experience, and HRX users
+    // resolve to HR Experience.
+    const currentDeptId = await getCurrentDeptId(user, req);
+    if (currentDeptId) {
+      whereSql += ` AND t.org_node_id = $${idx++}`;
+      params.push(currentDeptId);
+    } else {
+      whereSql += ` AND 1=0`;
+    }
 
     // Role-based scoping — mirrors src/utils/permissions.js#scopeTasks so the
     // FE and BE agree on what each role can see:
@@ -51,8 +64,8 @@ export async function GET(req) {
     if (country) { whereSql += ` AND country_code = $${idx++}`; params.push(country); }
     if (search) { whereSql += ` AND (subject ILIKE $${idx} OR description ILIKE $${idx})`; params.push(`%${search}%`); idx++; }
 
-    const countSql = 'SELECT COUNT(*) FROM tasks' + whereSql;
-    const dataSql = 'SELECT id, external_id, subject, status, priority, source, country_code, assignee_id, sla_mins, tags, snoozed_until, created_at, updated_at FROM tasks' + whereSql + ` ORDER BY created_at DESC LIMIT $${idx++} OFFSET $${idx++}`;
+    const countSql = 'SELECT COUNT(*) FROM tasks t' + whereSql;
+    const dataSql = 'SELECT t.id, t.external_id, t.subject, t.status, t.priority, t.source, t.country_code, t.assignee_id, t.sla_mins, t.tags, t.snoozed_until, t.created_at, t.updated_at FROM tasks t' + whereSql + ` ORDER BY t.created_at DESC LIMIT $${idx++} OFFSET $${idx++}`;
     params.push(limit, offset);
 
     const [{ rows }, countResult] = await Promise.all([
@@ -120,11 +133,14 @@ export async function POST(req) {
       return NextResponse.json({ error: 'Maximum 20 tags allowed' }, { status: 400 });
     }
 
+    // Phase 11h: stamp the actor's currentDeptId on the new task.
+    const orgNodeId = await getCurrentDeptId(postUser, req);
+
     const { rows } = await query(
-      `INSERT INTO tasks (external_id, source, subject, description, priority, assignee_id, country_code, tags, external_url, source_created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+      `INSERT INTO tasks (external_id, source, subject, description, priority, assignee_id, country_code, tags, external_url, source_created_at, org_node_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10)
        RETURNING *`,
-      [externalId || null, source || 'manual', subject, description || '', priority || 'medium', assigneeId || null, countryCode || null, tags || [], externalUrl || null]
+      [externalId || null, source || 'manual', subject, description || '', priority || 'medium', assigneeId || null, countryCode || null, tags || [], externalUrl || null, orgNodeId]
     );
 
     const r = rows[0];
