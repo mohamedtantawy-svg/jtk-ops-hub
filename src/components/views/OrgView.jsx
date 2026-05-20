@@ -397,6 +397,7 @@ export default function OrgView({ user }) {
             members={members}
             search={search}
             canEdit={canEdit}
+            sumDescendants={org.sumDescendants}
             onSelectNode={openEdit}
             onEdit={openEdit}
             onAddChild={openCreateChild}
@@ -421,7 +422,7 @@ export default function OrgView({ user }) {
             onSelect={openEdit}
           />
         ) : (
-          <TablePreview nodes={org.nodes} search={search} />
+          <TablePreview nodes={org.nodes} members={members} tree={org.tree} search={search} onSelectMember={(m) => setSelectedMember(m)} />
         )}
       </div>
 
@@ -591,15 +592,47 @@ function WelcomeScaffold({ canEdit, onCreate }) {
   );
 }
 
-// ── Table preview (Phase 2 ships a sortable, virtualised table) ───────────
-function TablePreview({ nodes, search }) {
+// ── Table view ────────────────────────────────────────────────────────────
+// Phase 9 (2026-05-20): table now interleaves members under each node so
+// admins can scan who's where without bouncing to the chart. Sort: kind
+// (Department first, then Team), then name. Members appear indented below
+// their parent node with their org-path resolved from the tree map.
+function TablePreview({ nodes, members = [], tree, search, onSelectMember }) {
   const lc = (search || '').toLowerCase().trim();
-  const filtered = nodes
+  const matchesNode = (n) => !lc || n.name.toLowerCase().includes(lc) || (n.leadEmail || '').toLowerCase().includes(lc);
+  const matchesMember = (m) => !lc
+    || (m.name || '').toLowerCase().includes(lc)
+    || (m.email || '').toLowerCase().includes(lc)
+    || (m.title || '').toLowerCase().includes(lc);
+  const visibleNodes = nodes
     .filter(n => !n.isArchived)
-    .filter(n => !lc || n.name.toLowerCase().includes(lc) || (n.leadEmail || '').toLowerCase().includes(lc))
     .sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
+  // Group members by node id for quick lookup.
+  const byNode = new Map();
+  for (const m of members) {
+    const key = m.orgNodeId || '__unassigned__';
+    if (!byNode.has(key)) byNode.set(key, []);
+    byNode.get(key).push(m);
+  }
+  for (const list of byNode.values()) list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
-  if (!filtered.length) {
+  // Build the flat row list: per-node rows + per-member rows directly under.
+  const rows = [];
+  for (const n of visibleNodes) {
+    const nodeMatches = matchesNode(n);
+    const nodeMembers = (byNode.get(n.id) || []).filter(matchesMember);
+    if (!nodeMatches && nodeMembers.length === 0) continue;
+    rows.push({ kind: 'node', node: n });
+    for (const m of nodeMembers) rows.push({ kind: 'member', node: n, member: m });
+  }
+  // Truly unassigned members appear in their own bucket.
+  const unassigned = (byNode.get('__unassigned__') || []).filter(matchesMember);
+  if (unassigned.length) {
+    rows.push({ kind: 'group-header', label: 'Unassigned' });
+    for (const m of unassigned) rows.push({ kind: 'member', node: null, member: m });
+  }
+
+  if (!rows.length) {
     return (
       <EmptyState
         icon="bi-table"
@@ -629,35 +662,102 @@ function TablePreview({ nodes, search }) {
       }}>
         <div>Kind</div>
         <div>Name</div>
-        <div>Lead</div>
-        <div style={{ textAlign: 'right' }}>Members</div>
+        <div>Lead / Role</div>
+        <div style={{ textAlign: 'right' }}>Direct</div>
         <div style={{ textAlign: 'right' }}>Vacant</div>
       </div>
-      {filtered.map((n, i) => (
-        <div key={n.id} style={{
-          display: 'grid',
-          gridTemplateColumns: '140px 1fr 1fr 100px 100px',
-          padding: '10px 16px',
-          borderBottom: i < filtered.length - 1 ? '1px solid var(--border-light)' : 'none',
-          alignItems: 'center',
-          fontSize: 'var(--font-md)', color: 'var(--text)',
-        }}>
-          <div>
-            <span style={{
-              padding: '2px 8px',
-              borderRadius: 'var(--radius-pill)',
-              background: n.kind === 'department' ? 'var(--purple-light)' : 'var(--surface-3)',
-              color: n.kind === 'department' ? 'var(--purple)' : 'var(--text-secondary)',
-              fontSize: 'var(--font-xs)', fontWeight: 600,
-              textTransform: 'capitalize',
-            }}>{n.kind}</span>
+      {rows.map((r, i) => {
+        const isLast = i === rows.length - 1;
+        if (r.kind === 'group-header') {
+          return (
+            <div key={`gh-${i}`} style={{
+              padding: '10px 16px',
+              background: 'var(--orange-light)',
+              color: 'var(--orange)',
+              fontSize: 'var(--font-xs)',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+              borderBottom: !isLast ? '1px solid var(--border-light)' : 'none',
+            }}>{r.label}</div>
+          );
+        }
+        if (r.kind === 'node') {
+          const n = r.node;
+          return (
+            <div key={n.id} style={{
+              display: 'grid',
+              gridTemplateColumns: '140px 1fr 1fr 100px 100px',
+              padding: '10px 16px',
+              borderBottom: !isLast ? '1px solid var(--border-light)' : 'none',
+              alignItems: 'center',
+              fontSize: 'var(--font-md)', color: 'var(--text)',
+              background: n.kind === 'department' ? 'var(--purple-light)' : 'var(--surface-2)',
+            }}>
+              <div>
+                <span style={{
+                  padding: '2px 8px',
+                  borderRadius: 'var(--radius-pill)',
+                  background: n.kind === 'department' ? 'var(--purple)' : 'var(--surface-3)',
+                  color: n.kind === 'department' ? 'white' : 'var(--text-secondary)',
+                  fontSize: 'var(--font-xs)', fontWeight: 600,
+                  textTransform: 'capitalize',
+                }}>{n.kind}</span>
+              </div>
+              <div style={{ fontWeight: 700 }}>{n.name}</div>
+              <div style={{ color: 'var(--text-secondary)' }}>{n.leadEmail || '—'}</div>
+              <div style={{ textAlign: 'right', fontWeight: 600 }}>{(byNode.get(n.id) || []).length}</div>
+              <div style={{ textAlign: 'right', color: n.vacantCount ? 'var(--orange)' : 'var(--text-muted)', fontWeight: n.vacantCount ? 700 : 500 }}>{n.vacantCount || 0}</div>
+            </div>
+          );
+        }
+        // member row
+        const m = r.member;
+        return (
+          <div
+            key={`mr-${m.email}`}
+            onClick={() => onSelectMember?.(m)}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '140px 1fr 1fr 100px 100px',
+              padding: '8px 16px 8px 32px',
+              borderBottom: !isLast ? '1px solid var(--border-light)' : 'none',
+              alignItems: 'center',
+              fontSize: 'var(--font-sm)', color: 'var(--text)',
+              cursor: onSelectMember ? 'pointer' : 'default',
+              transition: 'background .12s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            <div>
+              <span style={{
+                padding: '2px 8px',
+                borderRadius: 'var(--radius-pill)',
+                background: 'var(--surface-3)',
+                color: 'var(--text-muted)',
+                fontSize: 'var(--font-xs)', fontWeight: 600,
+              }}>member</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{
+                width: 24, height: 24, borderRadius: '50%',
+                background: 'var(--purple-light)', color: 'var(--purple)',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 10, fontWeight: 700, flexShrink: 0,
+                overflow: 'hidden',
+              }}>{m.initials || (m.name || m.email).slice(0, 2).toUpperCase()}</div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 500, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.name}</div>
+                <div style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{m.email}</div>
+              </div>
+            </div>
+            <div style={{ color: 'var(--text-secondary)' }}>{m.title || '—'}</div>
+            <div style={{ textAlign: 'right', fontSize: 'var(--font-xs)', color: 'var(--text-muted)' }}>{m.access || ''}</div>
+            <div style={{ textAlign: 'right', fontSize: 'var(--font-xs)', color: 'var(--text-muted)' }}>{m.country || ''}</div>
           </div>
-          <div style={{ fontWeight: 600 }}>{n.name}</div>
-          <div style={{ color: 'var(--text-secondary)' }}>{n.leadEmail || '—'}</div>
-          <div style={{ textAlign: 'right', fontWeight: 600 }}>{n.memberCount || 0}</div>
-          <div style={{ textAlign: 'right', color: n.vacantCount ? 'var(--orange)' : 'var(--text-muted)', fontWeight: n.vacantCount ? 700 : 500 }}>{n.vacantCount || 0}</div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
