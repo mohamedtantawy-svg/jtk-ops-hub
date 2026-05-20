@@ -5,6 +5,7 @@ import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { query } from '../../../../../src/lib/db';
 import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
 import { isManagerOrAdmin } from '../../../../../src/lib/hide-task-helpers';
+import { getCurrentDeptId } from '../../../../../src/lib/dept-scope';
 
 function isUuid(s) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s || ''));
@@ -22,7 +23,13 @@ export async function DELETE(req, { params }) {
     return NextResponse.json({ error: 'Forbidden — only managers (TL/RM/admin) can delete schedule rows' }, { status: 403 });
   }
 
-  const { rowCount } = await query(`DELETE FROM urgent_assist_schedule WHERE id = $1`, [id]);
+  // Phase 11f: refuse cross-dept deletes.
+  const currentDeptId = await getCurrentDeptId(user, req);
+  if (!currentDeptId) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  const { rowCount } = await query(
+    `DELETE FROM urgent_assist_schedule WHERE id = $1 AND org_node_id = $2`,
+    [id, currentDeptId],
+  );
   if (rowCount === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   return NextResponse.json({ ok: true });
 }

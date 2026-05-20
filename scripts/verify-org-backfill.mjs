@@ -748,6 +748,34 @@ assert('handovers/[id] PATCH 404s cross-dept',
 assert('handovers/[id] DELETE 404s cross-dept',
   (hoIdSrc.match(/handover\.org_node_id && handover\.org_node_id !== currentDeptId/g) || []).length >= 3);
 
+// ── Section 23: Phase 11f — Urgent Assist isolation ──────────────────────
+console.log('\n── Phase 11f: Urgent Assist isolation ──');
+const uaListSrc = read('app/api/v1/urgent-assist/route.js');
+assert('urgent-assist GET filters by currentDeptId / FALSE',
+  /where\.push\(`org_node_id = \$/.test(uaListSrc)
+  && /where\.push\(`FALSE`\)/.test(uaListSrc));
+assert('urgent-assist POST stamps submitterDeptId',
+  /submitterDeptId/.test(uaListSrc));
+
+const uaIdSrc = read('app/api/v1/urgent-assist/[id]/route.js');
+assert('urgent-assist/[id] loadRow gates by org_node_id',
+  /WHERE id = \$1 AND org_node_id = \$2/.test(uaIdSrc));
+assert('urgent-assist/[id] PATCH dept-scoped UPDATE',
+  /UPDATE urgent_assist_request SET[\s\S]+AND org_node_id = \$\$\{p \+ 1\}/.test(uaIdSrc));
+assert('urgent-assist/[id] DELETE dept-scoped',
+  /DELETE FROM urgent_assist_request WHERE id = \$1 AND org_node_id = \$2/.test(uaIdSrc));
+
+const uaSchedListSrc = read('app/api/v1/urgent-assist-schedule/route.js');
+assert('urgent-assist-schedule GET dept-isolated',
+  /where\.push\(`org_node_id = \$/.test(uaSchedListSrc));
+assert('urgent-assist-schedule POST stamps actor dept',
+  /currentDeptId,?\s*\]/.test(uaSchedListSrc)
+  && /org_node_id\)/.test(uaSchedListSrc));
+
+const uaSchedIdSrc = read('app/api/v1/urgent-assist-schedule/[id]/route.js');
+assert('urgent-assist-schedule/[id] DELETE dept-scoped',
+  /DELETE FROM urgent_assist_schedule WHERE id = \$1 AND org_node_id = \$2/.test(uaSchedIdSrc));
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
