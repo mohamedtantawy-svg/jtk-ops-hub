@@ -24,6 +24,7 @@ import { query } from '../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { canManageTimeOffFor } from '../../../../../src/lib/queue-scoping';
 import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
+import { getCurrentDeptId } from '../../../../../src/lib/dept-scope';
 
 function isUuid(s) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s || ''));
@@ -134,10 +135,14 @@ export async function DELETE(req, { params }) {
 
   await ensureRosterHydrated();
 
+  // Phase 11e: refuse cross-dept deletes.
+  const currentDeptId = await getCurrentDeptId(user, req);
+  if (!currentDeptId) return NextResponse.json({ error: 'Time-off entry not found' }, { status: 404 });
+
   try {
     const { rows } = await query(
-      `SELECT work_email FROM time_off_events WHERE id = $1`,
-      [id],
+      `SELECT work_email FROM time_off_events WHERE id = $1 AND org_node_id = $2`,
+      [id, currentDeptId],
     );
     if (rows.length === 0) {
       return NextResponse.json({ error: 'Time-off entry not found' }, { status: 404 });
@@ -165,7 +170,10 @@ export async function DELETE(req, { params }) {
       );
     }
 
-    await query(`DELETE FROM time_off_events WHERE id = $1`, [id]);
+    await query(
+      `DELETE FROM time_off_events WHERE id = $1 AND org_node_id = $2`,
+      [id, currentDeptId],
+    );
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error('[time-off-events DELETE]', err.message);

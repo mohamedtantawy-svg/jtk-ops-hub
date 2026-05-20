@@ -19,6 +19,7 @@ import {
   HANDOVER_STATUSES,
   HANDOVER_EVENT_TYPES,
 } from '../../../../../src/lib/handover-helpers';
+import { getCurrentDeptId } from '../../../../../src/lib/dept-scope';
 
 const lc = (v) => (v || '').toLowerCase().trim();
 
@@ -32,8 +33,15 @@ export async function GET(req, ctx) {
   const user = getAuthUser(req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { id } = await ctx.params;
+  // Phase 11e (2026-05-20): refuse cross-dept reads. 404 instead of 403 so
+  // the existence of a handover in another tenant doesn't leak.
+  const currentDeptId = await getCurrentDeptId(user, req);
+  if (!currentDeptId) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   try {
     const handover = await loadHandoverWithDetails(id);
+    if (handover.org_node_id && handover.org_node_id !== currentDeptId) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
     // Visibility — caller must be requester OR coverer OR manager OR admin/RM.
     const callerEmail = lc(user.email);
     if (!isAdminUser(user)
@@ -59,9 +67,16 @@ export async function PATCH(req, ctx) {
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 }); }
 
+  // Phase 11e: refuse cross-dept edits.
+  const currentDeptId = await getCurrentDeptId(user, req);
+  if (!currentDeptId) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+
   try {
     const updated = await withTransaction(async (client) => {
       const handover = await loadHandoverWithDetails(id, { client });
+      if (handover.org_node_id && handover.org_node_id !== currentDeptId) {
+        throw Object.assign(new Error('Not found'), { status: 404 });
+      }
       if (!canModifyHandover(user, handover)) {
         throw Object.assign(new Error('You cannot edit this handover'), { status: 403 });
       }
@@ -180,9 +195,15 @@ export async function DELETE(req, ctx) {
   const user = getAuthUser(req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { id } = await ctx.params;
+  // Phase 11e: refuse cross-dept deletes.
+  const currentDeptId = await getCurrentDeptId(user, req);
+  if (!currentDeptId) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   try {
     await withTransaction(async (client) => {
       const handover = await loadHandoverWithDetails(id, { client });
+      if (handover.org_node_id && handover.org_node_id !== currentDeptId) {
+        throw Object.assign(new Error('Not found'), { status: 404 });
+      }
       if (!canModifyHandover(user, handover)) {
         throw Object.assign(new Error('You cannot delete this handover'), { status: 403 });
       }

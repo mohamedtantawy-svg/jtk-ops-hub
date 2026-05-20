@@ -24,6 +24,7 @@ import { getAuthUser } from '../../../../src/lib/auth-helpers';
 import { getVisibleOOOEmails, isAdminUser, canManageTimeOffFor } from '../../../../src/lib/queue-scoping';
 import { ensureRosterHydrated } from '../../../../src/lib/roster-server';
 import { LENS_IDS } from '../../../../src/lib/handover-helpers';
+import { getCurrentDeptId, getTopLevelDeptForMember } from '../../../../src/lib/dept-scope';
 
 const VALID_LENSES = new Set(Object.values(LENS_IDS));
 
@@ -58,7 +59,17 @@ export async function GET(req) {
   const params = [];
   let p = 1;
 
+  // Phase 11e (2026-05-20): dept-isolate time-off reads. Every row belongs
+  // to the dept of its work_email — we filter by org_node_id of the event
+  // itself (stamped at write time + by Phase 11a backfill).
+  const currentDeptId = await getCurrentDeptId(user, req);
   const where = [`e.status = 'approved'`];
+  if (currentDeptId) {
+    where.push(`e.org_node_id = $${p++}`);
+    params.push(currentDeptId);
+  } else {
+    where.push(`FALSE`);
+  }
 
   if (from) { where.push(`e.end_date >= $${p++}`); params.push(from); }
   if (to)   { where.push(`e.start_date <= $${p++}`); params.push(to); }
@@ -251,13 +262,20 @@ export async function POST(req) {
   }
 
   try {
+    // Phase 11e: stamp the work_email's home dept (not the actor's) — a
+    // manager submitting OOO for a report writes the row into the
+    // report's dept, not the manager's. Falls back to null if dept can't
+    // be resolved; the backfill picks those up on next boot.
+    const subjectDept = await getTopLevelDeptForMember(workEmail);
+    const subjectDeptId = subjectDept?.deptId || null;
+
     const insert = await query(
-      `INSERT INTO time_off_events (work_email, start_date, end_date, source, status, reason)
-       VALUES ($1, $2, $3, 'manual', 'approved', $4)
+      `INSERT INTO time_off_events (work_email, start_date, end_date, source, status, reason, org_node_id)
+       VALUES ($1, $2, $3, 'manual', 'approved', $4, $5)
        ON CONFLICT (work_email, start_date, end_date, source) DO UPDATE
          SET reason = EXCLUDED.reason, updated_at = NOW()
        RETURNING id, work_email, start_date, end_date, source, status, reason`,
-      [workEmail, startDate, endDate, reason],
+      [workEmail, startDate, endDate, reason, subjectDeptId],
     );
     const row = insert.rows[0];
     return NextResponse.json({
