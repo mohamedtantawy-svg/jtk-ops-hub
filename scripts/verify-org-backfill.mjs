@@ -210,6 +210,42 @@ assert('OrgView mounts the archive confirm',
 assert('OrgView renders the tree view when nodes exist',
   /<OrgTreeView/.test(orgViewSrcPhase1));
 
+// ── Section 9: Phase 2 visual chart ─────────────────────────────────────
+console.log('\n── Phase 2: visual chart ──');
+const layoutSrc = read('src/utils/orgChartLayout.js');
+assert('layout exports layoutOrgChart',
+  /export function layoutOrgChart/.test(layoutSrc));
+assert('layout produces positioned items with parent + member kinds',
+  /kind:\s*'node'/.test(layoutSrc) && /kind:\s*'member'/.test(layoutSrc));
+assert('layout caps inline members per node (MAX_INLINE_MEMBERS)',
+  /MAX_INLINE_MEMBERS\s*=\s*\d+/.test(layoutSrc));
+assert('layout sorts members alphabetically before placement',
+  /localeCompare/.test(layoutSrc));
+
+const canvasSrc = read('src/components/org/OrgChartCanvas.jsx');
+assert('canvas applies pan via pointer events',
+  /onPointerDown[\s\S]+startPan/.test(canvasSrc));
+assert('canvas supports cmd/ctrl + wheel zoom',
+  /metaKey \|\| e\.ctrlKey/.test(canvasSrc));
+assert('canvas exposes fit-to-screen',
+  /Fit-to-screen/.test(canvasSrc) || /'Fit'/.test(canvasSrc));
+assert('canvas renders SVG connectors between parent and child cards',
+  /<svg[\s\S]+connectors\.map/.test(canvasSrc));
+assert('NodeCard renders headcount badge',
+  /node\.memberCount/.test(canvasSrc));
+assert('NodeCard offers Edit / Add team / Archive when canEdit',
+  /Edit[\s\S]+Add team[\s\S]+Archive/.test(canvasSrc));
+assert('MemberCard imports Avatar',
+  /import Avatar from/.test(canvasSrc));
+
+const orgViewSrcPhase2 = read('src/components/views/OrgView.jsx');
+assert('OrgView mounts OrgChartCanvas in chart mode',
+  /viewMode === 'chart'[\s\S]+<OrgChartCanvas/.test(orgViewSrcPhase2));
+assert('OrgView keeps the indented list mode',
+  /viewMode === 'list'[\s\S]+<OrgTreeView/.test(orgViewSrcPhase2));
+assert('OrgView VIEW_MODES has 3 entries',
+  (orgViewSrcPhase2.match(/\{\s*id:\s*'(chart|list|table)'/g) || []).length === 3);
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
