@@ -35,6 +35,12 @@ jobs:
           role-to-assume: "arn:aws:iam::211125331032:role/github-actions-common"
           aws-region: eu-west-1
 
+      - name: Get Secrets
+        uses: aws-actions/aws-secretsmanager-get-secrets@2cb1a461cbd4865ac4299648312e4704c646cd53 # v3
+        with:
+          secret-ids: arn:aws:secretsmanager:eu-west-1:211125331032:secret:github-actions-playgrounds-PrScUZ
+          parse-json-secrets: true
+
       - name: Login to AWS ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
@@ -60,6 +66,8 @@ jobs:
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
           cache-from: type=registry,ref=${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
           cache-to: type=inline
+          build-args: |
+            CODEARTIFACT_AUTH_TOKEN=${{ env.GITHUB_ACTIONS_PLAYGROUNDS_CODEARTIFACT_AUTH_TOKEN }}
 
   deploy:
     name: Update Helm image tag
