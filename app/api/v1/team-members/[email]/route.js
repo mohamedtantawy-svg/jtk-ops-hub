@@ -57,6 +57,10 @@ export async function PATCH(req, { params }) {
       // Per-user permission grants (Director-managed). Booleans, no enum.
       isAnnouncementsAdmin: 'is_announcements_admin',
       isAccessAdmin: 'is_access_admin',
+      // Phase 3 (Org Tab): allocation now flows through org_node_id. Legacy
+      // `team` stays in the map for backwards-compat through Phase 5; Phase
+      // 6 drops it once every consumer reads from the new structure.
+      orgNodeId: 'org_node_id',
     };
 
     // Enum guards
@@ -107,6 +111,7 @@ export async function PATCH(req, { params }) {
                 service, country, avatar_url, start_date, is_new, is_deleted,
                 on_leave, is_announcements_admin,
                 is_access_admin,
+                org_node_id,
                 created_at, updated_at
     `;
 
@@ -205,6 +210,9 @@ export async function PATCH(req, { params }) {
       loginCount: loginRow?.login_count || 0,
       isAnnouncementsAdmin: row.is_announcements_admin === true,
       isAccessAdmin: row.is_access_admin === true,
+      // Phase 3 (Org Tab): expose the org node id so the FE applies the
+      // updated allocation without re-fetching the full roster.
+      orgNodeId: row.org_node_id || null,
     });
   } catch (err) {
     console.error('[team-members PATCH]', err.message);

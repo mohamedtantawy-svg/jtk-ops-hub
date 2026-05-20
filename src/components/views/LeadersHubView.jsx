@@ -1,94 +1,33 @@
 // ── LeadersHubView ────────────────────────────────────────────────────────
-// 2026-05-03 rebrand wrapper: combines the old Leaders Alerts surface and
-// the Team admin surface into a single Leaders Hub tab. Managers land on
-// Alerts by default (the spec); a small toggle in the header swaps to the
-// Team view. The two underlying components stay untouched — we just decide
-// which one to render based on a local sub-tab state.
+// Originally a sub-tab wrapper combining Leaders Alerts + the Team admin
+// surface. Phase 3 of the Org-tab build (2026-05-20) relocates People
+// management to the dedicated `org` view, so the Team sub-tab is gone and
+// LeadersHub becomes a thin pass-through to LeaderAlertsView. The
+// underlying Team.jsx component remains in the codebase for the Home
+// page team table + queue scoping until Phase 6 deletes it; we just no
+// longer expose it here.
 //
-// Future sub-tabs ("Reports", "Team OKRs", etc.) drop in by extending the
-// SUBTABS array; the toggle UI scales without further refactor.
-
-import { useState } from 'react';
+// Routes that previously deep-linked into Leaders Hub → Team now resolve
+// directly to the alerts surface — and managers reach the team admin via
+// the Org tab. The setView/realUser/onImpersonate/impersonating props are
+// left in the signature so callers (App.jsx) don't need to be updated in
+// the same PR, but they're now unused.
+//
+// eslint-disable-next-line no-unused-vars
 import LeaderAlertsView from './LeaderAlertsView';
-import Team from './Team';
-
-const SUBTABS = [
-  { id: 'alerts', label: 'Alerts', icon: 'bi-broadcast' },
-  { id: 'team',   label: 'Team',   icon: 'bi-people'    },
-];
 
 export default function LeadersHubView({
   user, perms,
-  // Alerts sub-view props.
   refreshNonce,
-  // Team sub-view props.
-  tasks,
-  setView,
-  realUser,
-  onImpersonate,
-  impersonating,
+  // Phase 3 (2026-05-20) — kept for backwards compatibility with the
+  // App.jsx call site. These were previously threaded into the Team
+  // sub-view; with that sub-tab removed they're no longer read.
+  // eslint-disable-next-line no-unused-vars
+  tasks, setView, realUser, onImpersonate, impersonating,
 }) {
-  const [tab, setTab] = useState('alerts');
-
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {/* Slim sub-tab strip — sits above the embedded view's own header.
-          Matches the rest of the top-nav font sizes/colours so the
-          transition between primary nav and sub-nav reads as a single
-          surface. */}
-      <div
-        role="tablist"
-        aria-label="Leaders Hub sub-views"
-        style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          padding: '8px 24px',
-          background: 'var(--surface)',
-          borderBottom: '1px solid var(--border-light)',
-          flexShrink: 0,
-        }}
-      >
-        {SUBTABS.map(t => {
-          const active = tab === t.id;
-          return (
-            <button
-              key={t.id}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => setTab(t.id)}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                height: 30, padding: '0 12px', borderRadius: 8,
-                border: active ? '1px solid var(--purple)' : '1px solid var(--border)',
-                background: active ? 'rgba(124, 58, 237, 0.1)' : 'var(--surface)',
-                color: active ? 'var(--purple)' : 'var(--text-secondary)',
-                fontSize: 12, fontWeight: active ? 700 : 500,
-                cursor: 'pointer', fontFamily: 'inherit',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              <i className={`bi ${t.icon}`} style={{ fontSize: 12 }} />
-              {t.label}
-            </button>
-          );
-        })}
-      </div>
-
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {tab === 'alerts' ? (
-          <LeaderAlertsView user={user} perms={perms} refreshNonce={refreshNonce} />
-        ) : (
-          <Team
-            user={user}
-            tasks={tasks}
-            setTask={() => {}}
-            setView={setView}
-            realUser={realUser}
-            onImpersonate={onImpersonate}
-            impersonating={impersonating}
-          />
-        )}
-      </div>
+      <LeaderAlertsView user={user} perms={perms} refreshNonce={refreshNonce} />
     </div>
   );
 }

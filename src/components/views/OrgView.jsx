@@ -20,6 +20,8 @@ import OrgTreeView from '../org/OrgTreeView';
 import OrgChartCanvas from '../org/OrgChartCanvas';
 import OrgNodeFormDrawer from '../org/OrgNodeFormDrawer';
 import OrgArchiveConfirm from '../org/OrgArchiveConfirm';
+import MemberDetailDrawer from '../org/MemberDetailDrawer';
+import AddMemberModal from '../org/AddMemberModal';
 
 const VIEW_MODES = [
   { id: 'chart', label: 'Chart', icon: 'bi-diagram-3-fill' },
@@ -29,10 +31,15 @@ const VIEW_MODES = [
 
 export default function OrgView({ user }) {
   const perms = useContext(PermissionsContext);
-  const { members } = useTeamMembers();
+  const tm = useTeamMembers();
+  const { members } = tm;
   const org = useOrgNodes();
   const [viewMode, setViewMode] = useState('chart');
   const [search, setSearch] = useState('');
+
+  // ── Member-side modals (Phase 3) ────────────────────────────────────────
+  const [selectedMember, setSelectedMember] = useState(null);
+  const [addMemberTo, setAddMemberTo] = useState(null);
 
   // Permission to edit comes from the API response (server-side
   // authoritative) but we fall back to the local perms snapshot so the
@@ -252,7 +259,8 @@ export default function OrgView({ user }) {
             onEdit={openEdit}
             onAddChild={openCreateChild}
             onArchive={(node) => setArchiveTarget(node)}
-            onSelectMember={() => { /* Phase 3 opens the member detail drawer */ }}
+            onAddMember={(node) => setAddMemberTo(node)}
+            onSelectMember={(m) => setSelectedMember(m)}
           />
         ) : viewMode === 'list' ? (
           <OrgTreeView
@@ -264,6 +272,7 @@ export default function OrgView({ user }) {
             onEdit={openEdit}
             onAddChild={openCreateChild}
             onArchive={(node) => setArchiveTarget(node)}
+            onAddMember={(node) => setAddMemberTo(node)}
             onSelect={openEdit}
           />
         ) : (
@@ -288,6 +297,29 @@ export default function OrgView({ user }) {
         node={archiveTarget}
         onClose={() => setArchiveTarget(null)}
         onConfirm={onArchiveConfirm}
+      />
+      <MemberDetailDrawer
+        open={!!selectedMember}
+        member={selectedMember}
+        tree={org.tree}
+        rootNodes={org.rootNodes}
+        canEdit={canEdit}
+        onClose={() => setSelectedMember(null)}
+        onUpdate={tm.updateMember}
+        onRemove={tm.removeMember}
+        onToggleLeave={tm.toggleOnLeave}
+        onSetCountries={tm.setCountries}
+      />
+      <AddMemberModal
+        open={!!addMemberTo}
+        node={addMemberTo}
+        leadEmail={addMemberTo?.leadEmail || null}
+        onClose={() => setAddMemberTo(null)}
+        onSubmit={async (payload) => {
+          const res = await tm.addMember(payload);
+          if (res?.ok !== false) org.reload();
+          return res;
+        }}
       />
     </div>
   );

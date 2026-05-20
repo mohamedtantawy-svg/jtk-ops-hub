@@ -246,6 +246,56 @@ assert('OrgView keeps the indented list mode',
 assert('OrgView VIEW_MODES has 3 entries',
   (orgViewSrcPhase2.match(/\{\s*id:\s*'(chart|list|table)'/g) || []).length === 3);
 
+// ── Section 10: Phase 3 people management ────────────────────────────────
+console.log('\n── Phase 3: people management migration ──');
+const memberDrawerSrc = read('src/components/org/MemberDetailDrawer.jsx');
+assert('MemberDetailDrawer exports default',
+  /export default function MemberDetailDrawer/.test(memberDrawerSrc));
+assert('drawer integrates with useTeamMembers update/remove/toggleLeave/setCountries',
+  /onUpdate[\s\S]+onRemove[\s\S]+onToggleLeave[\s\S]+onSetCountries/.test(memberDrawerSrc));
+assert('drawer ships a cascading NodePicker for allocation',
+  /function NodePicker/.test(memberDrawerSrc));
+
+const addMemberSrc = read('src/components/org/AddMemberModal.jsx');
+assert('AddMemberModal posts orgNodeId in the payload',
+  /orgNodeId:\s*node\.id/.test(addMemberSrc));
+assert('AddMemberModal validates @deel.com domain',
+  /endsWith\('@deel\.com'\)/.test(addMemberSrc));
+
+const teamMembersByIdSrc = read('app/api/v1/team-members/[email]/route.js');
+assert('PATCH whitelists orgNodeId → org_node_id',
+  /orgNodeId:\s*'org_node_id'/.test(teamMembersByIdSrc));
+assert('PATCH RETURNING includes org_node_id',
+  /RETURNING[\s\S]+org_node_id/.test(teamMembersByIdSrc));
+assert('PATCH response carries orgNodeId',
+  /orgNodeId:\s*row\.org_node_id/.test(teamMembersByIdSrc));
+
+const teamMembersPostSrc = read('app/api/v1/team-members/route.js');
+assert('POST validates orgNodeId UUID and inserts it',
+  /\/\^\[0-9a-fA-F-\]\{36\}\$\//.test(teamMembersPostSrc));
+assert('POST INSERT statement carries org_node_id',
+  /org_node_id\b[\s\S]+VALUES[\s\S]+\$13/.test(teamMembersPostSrc));
+
+const orgViewSrcPhase3 = read('src/components/views/OrgView.jsx');
+assert('OrgView mounts MemberDetailDrawer',
+  /<MemberDetailDrawer/.test(orgViewSrcPhase3));
+assert('OrgView mounts AddMemberModal',
+  /<AddMemberModal/.test(orgViewSrcPhase3));
+assert('OrgView wires onSelectMember to setSelectedMember',
+  /onSelectMember=\{[^}]*setSelectedMember/.test(orgViewSrcPhase3));
+assert('OrgView wires onAddMember to setAddMemberTo on both chart and list',
+  (orgViewSrcPhase3.match(/onAddMember=\{[^}]*setAddMemberTo/g) || []).length >= 2);
+
+const leadersHubSrc = read('src/components/views/LeadersHubView.jsx');
+assert('Leaders Hub no longer imports Team',
+  !/^import Team from/m.test(leadersHubSrc));
+assert('Leaders Hub no longer declares a SUBTABS array',
+  !/^const SUBTABS\s*=/m.test(leadersHubSrc));
+
+const appSrc2 = read('src/App.jsx');
+assert("App.jsx aliases legacy 'team' deep-link to 'org'",
+  /'team':\s*'org'/.test(appSrc2));
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

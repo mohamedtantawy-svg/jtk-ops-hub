@@ -78,6 +78,10 @@ const _VIEW_ALIASES = {
   'workspace': 'my-queue',
   'queue': 'my-queue',
   'home': 'briefing',
+  // Phase 3 (2026-05-20) — the Team sub-tab inside Leaders Hub moved to
+  // the dedicated Org tab. Any saved deep-link `?view=team` resolves to
+  // `?view=org` so admins don't bounce to briefing.
+  'team': 'org',
 };
 function _resolveViewAlias(v) {
   if (!v) return v;
