@@ -617,7 +617,7 @@ assert('useCurrentDept exposes setDept that reloads on success',
   /export function useCurrentDept/.test(hookSrc)
   && /window\.location\.reload/.test(hookSrc));
 assert('useCurrentDept tolerates 401 silently during initial paint',
-  /res\.status === 401/.test(hookSrc));
+  /err\?\.status === 401/.test(hookSrc));
 
 const topNavSrc = read('src/components/nav/DeelTopNav.jsx');
 assert('DeelTopNav imports useCurrentDept',
@@ -951,15 +951,15 @@ assert('dept-integrations exports DEPT_INTEGRATIONS map',
 assert('dept-integrations has HR Experience entry with HRX env vars (no change)',
   /'hr-experience'[\s\S]+ZENDESK_API_TOKEN[\s\S]+JIRA_API_TOKEN[\s\S]+DEEL_ADMIN_TOKEN/.test(deptIntegrationsSrc));
 assert('dept-integrations has Global Immigration entry with GIX env vars',
-  /'global-immigration'[\s\S]+Zendesk_API_Payroll_GIX[\s\S]+JIRA_GIX[\s\S]+DEEL_ADMIN_GIX/.test(deptIntegrationsSrc));
+  /'gix'[\s\S]+Zendesk_API_Payroll_GIX[\s\S]+JIRA_GIX[\s\S]+DEEL_ADMIN_GIX/.test(deptIntegrationsSrc));
 assert('Global Immigration hides 5 Deel sources (onboarding/offboarding/amendments/redlines/incentivePlans)',
-  /'global-immigration'[\s\S]+onboarding: false,[\s\S]+offboarding: false,[\s\S]+amendments: false,[\s\S]+redlines: false,[\s\S]+incentivePlans: false/.test(deptIntegrationsSrc));
+  /'gix'[\s\S]+onboarding: false,[\s\S]+offboarding: false,[\s\S]+amendments: false,[\s\S]+redlines: false,[\s\S]+incentivePlans: false/.test(deptIntegrationsSrc));
 assert('Global Immigration Zendesk group = Immigration Experience',
-  /'global-immigration'[\s\S]+'Immigration Experience'/.test(deptIntegrationsSrc));
+  /'gix'[\s\S]+'Immigration Experience'/.test(deptIntegrationsSrc));
 assert('Global Immigration Jira filter includes Global Mobility',
-  /'global-immigration'[\s\S]+ownerFieldValues:[\s\S]+'Global Mobility'/.test(deptIntegrationsSrc));
+  /'gix'[\s\S]+ownerFieldValues:[\s\S]+'Global Mobility'/.test(deptIntegrationsSrc));
 assert('Global Immigration Workbench team filter = Mobility Operations + GSC - Mobility',
-  /'global-immigration'[\s\S]+teamFilter:[\s\S]+'Mobility Operations'[\s\S]+'GSC - Mobility'/.test(deptIntegrationsSrc));
+  /'gix'[\s\S]+teamFilter:[\s\S]+'Mobility Operations'[\s\S]+'GSC - Mobility'/.test(deptIntegrationsSrc));
 assert('dept-integrations exports the per-source helper isDeelSourceVisible',
   /export function isDeelSourceVisible/.test(deptIntegrationsSrc));
 assert('dept-integrations exports visibleDeelSourcesFor (used by dept-scope/current)',
@@ -983,7 +983,7 @@ assert('/api/v1/dept-scope/current returns visibleSources',
 const hookSrcPhase13a = read('src/hooks/useCurrentDept.js');
 assert('useCurrentDept exposes visibleSources with fail-closed defaults',
   /visibleSources: EMPTY_VISIBLE_SOURCES/.test(hookSrcPhase13a)
-  && /visibleSources: \(data\.visibleSources/.test(hookSrcPhase13a));
+  && /visibleSources: \(data\?\.visibleSources/.test(hookSrcPhase13a));
 
 // All 7 Deel-source routes early-exit when disabled.
 const DEEL_ROUTES = [
@@ -1088,7 +1088,7 @@ assert('reassign route passes Zendesk + Jira overrides through to lib helpers',
 
 const deptIntegrationsSrcPhase13b = read('src/lib/dept-integrations.js');
 assert('Global Immigration workbench is now enabled (was false in 13a)',
-  /'global-immigration'[\s\S]+workbench: true,/.test(deptIntegrationsSrcPhase13b));
+  /'gix'[\s\S]+workbench: true,/.test(deptIntegrationsSrcPhase13b));
 
 // HRX-no-impact regression assertions for Phase 13b.
 assert('HRX-no-impact: deelFetch default path uses DEEL_ADMIN_TOKEN',
@@ -1108,8 +1108,10 @@ console.log('\n── Phase 14: Global Immigration roster seed ──');
 const gixRosterSrc = read('src/lib/global-immigration-roster-seed.js');
 assert('global-immigration-roster-seed exports the idempotent function',
   /export async function seedGlobalImmigrationRosterIfNeeded/.test(gixRosterSrc));
-assert('roster keyed off global-immigration slug',
-  /GLOBAL_IMMIGRATION_SLUG = 'global-immigration'/.test(gixRosterSrc));
+assert('roster keyed off gix slug (matches live org_nodes.slug, 14.1 fix)',
+  /GLOBAL_IMMIGRATION_SLUG = 'gix'/.test(gixRosterSrc));
+assert('SEED_VERSION bumped to v2 to override the no-gix-dept sentinel (14.1)',
+  /const SEED_VERSION = 2/.test(gixRosterSrc));
 assert('roster sentinel key is global_immigration_roster_seed_version',
   /SEED_KEY = 'global_immigration_roster_seed_version'/.test(gixRosterSrc));
 assert('roster has 67 entries (matching the CSV)',
@@ -1152,6 +1154,39 @@ assert('HRX-no-impact: roster never touches the legacy team column',
 assert('HRX-no-impact: roster only writes rows with org_node_id = Global Immigration UUID',
   /org_node_id,[\s\S]*?\$8/.test(gixRosterSrc)
   && /deptId/.test(gixRosterSrc));
+
+// ── Section 32: Phase 14.1 — prod-bug fixes (slugs + hook contract + tabs) ─
+console.log('\n── Phase 14.1: prod-bug fixes ──');
+const deptIntegrations14_1 = read('src/lib/dept-integrations.js');
+assert('dept-integrations: GLOBAL_IMMIGRATION_SLUG = \'gix\' (matches DB)',
+  /GLOBAL_IMMIGRATION_SLUG = 'gix'/.test(deptIntegrations14_1));
+assert('dept-integrations: BENEFITS_OPERATIONS_SLUG = \'benefits\' (matches DB)',
+  /BENEFITS_OPERATIONS_SLUG = 'benefits'/.test(deptIntegrations14_1));
+assert('dept-integrations: HR_EXPERIENCE_SLUG unchanged at hr-experience',
+  /HR_EXPERIENCE_SLUG = 'hr-experience'/.test(deptIntegrations14_1));
+assert('dept-integrations: PAYROLL_OPERATIONS_SLUG unchanged at payroll-operations',
+  /PAYROLL_OPERATIONS_SLUG = 'payroll-operations'/.test(deptIntegrations14_1));
+
+const useCurrentDeptSrc14_1 = read('src/hooks/useCurrentDept.js');
+assert('useCurrentDept: treats apiFetch return as parsed body (not Response)',
+  !/await\s+apiFetch\([^)]+\);\s*if\s*\(!\s*res\.ok/.test(useCurrentDeptSrc14_1)
+  && !/await\s+res\.json\(\)/.test(useCurrentDeptSrc14_1));
+assert('useCurrentDept: still reads isGlobalSuperAdmin from body',
+  /isGlobalSuperAdmin: data\?\.isGlobalSuperAdmin === true/.test(useCurrentDeptSrc14_1));
+assert('useCurrentDept: handles 401 via err.status (not res.status)',
+  /err\?\.status === 401/.test(useCurrentDeptSrc14_1));
+
+const queueSrc14_1 = read('src/components/queue/Queue.jsx');
+assert('Queue.jsx: imports useCurrentDept hook',
+  /from '\.\.\/\.\.\/hooks\/useCurrentDept'/.test(queueSrc14_1));
+assert('Queue.jsx: declares SOURCE_TAB_TO_VISIBILITY_KEY map',
+  /SOURCE_TAB_TO_VISIBILITY_KEY/.test(queueSrc14_1));
+assert('Queue.jsx: WORK_SOURCES tab list filtered by deptState.visibleSources',
+  /WORK_SOURCES, HIDDEN_TAB\]\.filter\(ws => \{[\s\S]*?visibleSources\?\.\[key\] === true/.test(queueSrc14_1));
+assert('Queue.jsx: incentive_plans → incentivePlans visibility key (camelCase mismatch)',
+  /incentive_plans: 'incentivePlans'/.test(queueSrc14_1));
+assert('Queue.jsx: HRX-no-impact — loading state returns true so all tabs render',
+  /deptState\?\.loading\) return true/.test(queueSrc14_1));
 
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
