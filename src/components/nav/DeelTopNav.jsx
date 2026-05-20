@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useContext } from 'react';
 import { PermissionsContext } from '../../App';
 import { isApprover } from '../../data/approvers';
+import { useCurrentDept } from '../../hooks/useCurrentDept';
 import Avatar from '../ui/Avatar';
 import NotificationPanel from './NotificationPanel';
 
@@ -106,14 +107,22 @@ const DeelTopNav = ({
   const [showCreate,  setShowCreate]  = useState(false);
   const [showNotifs,  setShowNotifs]  = useState(false);
   const [showUser,    setShowUser]    = useState(false);
+  const [showDeptPicker, setShowDeptPicker] = useState(false);
   const [darkMode,    setDarkMode]    = useState(() => {
     try { return localStorage.getItem('ops_hub_theme') === 'dark'; } catch(e) { return false; }
   });
 
-  const moreRef   = useRef(null);
-  const createRef = useRef(null);
-  const notifRef  = useRef(null);
-  const userRef   = useRef(null);
+  // Phase 11a (2026-05-20): super-admin dept picker. The hook auto-fetches
+  // /api/v1/dept-scope/current and returns isGlobalSuperAdmin so the chip
+  // only renders for mohamed.tantawy@deel.com. Click setDept(id) → POST →
+  // page reload so every scoped query refetches against the new boundary.
+  const deptState = useCurrentDept();
+
+  const moreRef     = useRef(null);
+  const createRef   = useRef(null);
+  const notifRef    = useRef(null);
+  const userRef     = useRef(null);
+  const deptPickerRef = useRef(null);
 
   // Unified outside-click handler for all dropdowns (fixes QA #149)
   useEffect(() => {
@@ -122,6 +131,7 @@ const DeelTopNav = ({
       if (moreRef.current && !moreRef.current.contains(e.target)) setShowMore(false);
       if (notifRef.current && !notifRef.current.contains(e.target)) setShowNotifs(false);
       if (userRef.current && !userRef.current.contains(e.target)) setShowUser(false);
+      if (deptPickerRef.current && !deptPickerRef.current.contains(e.target)) setShowDeptPicker(false);
     };
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
@@ -357,6 +367,96 @@ const DeelTopNav = ({
 
         {/* Divider */}
         <div style={{ width: 1, height: 28, background: 'rgba(0,0,0,0.08)', margin: '0 4px' }}></div>
+
+        {/* Phase 11a: Super-admin dept picker. Renders only for the single
+            global super-admin. Click the chip → dropdown of all active
+            top-level depts → POST sets the cookie → page reload scopes
+            every read to the new dept. "Reset to home" clears the cookie
+            and falls back to the super-admin's own resolved dept. */}
+        {deptState.isGlobalSuperAdmin && (
+          <div ref={deptPickerRef} style={{ position: 'relative' }}>
+            <button
+              type="button"
+              onClick={() => setShowDeptPicker(p => !p)}
+              aria-label="Switch viewing department"
+              title={`Viewing: ${deptState.dept?.name || '—'}`}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '6px 10px', height: 32,
+                background: 'var(--purple-light)',
+                color: 'var(--purple)',
+                border: '1px solid var(--purple)',
+                borderRadius: 'var(--radius-pill)',
+                fontSize: 12, fontWeight: 700,
+                fontFamily: 'inherit',
+                cursor: 'pointer',
+                maxWidth: 220, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}
+            >
+              <i className="bi bi-diagram-3-fill" style={{ fontSize: 11 }} />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                Viewing: {deptState.dept?.name || (deptState.loading ? '…' : 'All')}
+              </span>
+              <i className="bi bi-chevron-down" style={{ fontSize: 9 }} />
+            </button>
+            {showDeptPicker && (
+              <div style={{
+                ...dropdown, right: 0, borderRadius: 12,
+                padding: '6px 0', minWidth: 240, overflow: 'hidden',
+              }}>
+                <div style={{
+                  padding: '6px 14px 8px',
+                  fontSize: 10, fontWeight: 700,
+                  color: 'var(--text-disabled)',
+                  letterSpacing: 'var(--ls-caps)',
+                  textTransform: 'uppercase',
+                }}>Switch department</div>
+                {(deptState.depts || []).map(d => {
+                  const active = deptState.dept?.id === d.id;
+                  return (
+                    <div
+                      key={d.id} role="button" tabIndex={0}
+                      onClick={() => { setShowDeptPicker(false); deptState.setDept(d.id); }}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowDeptPicker(false); deptState.setDept(d.id); } }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                      onMouseLeave={e => e.currentTarget.style.background = active ? 'var(--purple-light)' : 'transparent'}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '9px 14px', cursor: 'pointer',
+                        background: active ? 'var(--purple-light)' : 'transparent',
+                        transition: 'background .12s',
+                      }}
+                    >
+                      <i className="bi bi-building" style={{ fontSize: 13, color: active ? 'var(--purple)' : 'var(--text-secondary)' }} />
+                      <span style={{
+                        flex: 1, fontSize: 13, fontWeight: active ? 700 : 500,
+                        color: active ? 'var(--purple)' : 'var(--text)',
+                      }}>{d.name}</span>
+                      {active && <i className="bi bi-check2" style={{ fontSize: 13, color: 'var(--purple)' }} />}
+                    </div>
+                  );
+                })}
+                <div style={{ height: 1, background: 'var(--border-light)', margin: '4px 0' }} />
+                <div
+                  role="button" tabIndex={0}
+                  onClick={() => { setShowDeptPicker(false); deptState.setDept(null); }}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setShowDeptPicker(false); deptState.setDept(null); } }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '9px 14px', cursor: 'pointer',
+                    fontSize: 12, color: 'var(--text-secondary)',
+                    transition: 'background .12s',
+                  }}
+                >
+                  <i className="bi bi-arrow-counterclockwise" style={{ fontSize: 12 }} />
+                  Reset to home dept
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* User avatar + name + org (Figma style) */}
         <div ref={userRef} style={{ position: 'relative' }}>
