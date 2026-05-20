@@ -1,21 +1,24 @@
-// ── OrgView (Phase 0, 2026-05-20) ───────────────────────────────────────────
+// ── OrgView (Phase 1, 2026-05-20) ───────────────────────────────────────────
 // Central command for the HR org structure: Department → Team → Sub-team →
-// Member hierarchy with org-chart + table views. Phase 0 ships the shell —
-// nav placement, view routing, permission wiring, and the loading scaffold.
-// Subsequent phases bolt on CRUD (Phase 1), the visual chart (Phase 2),
-// people-management modals lifted from Team.jsx (Phase 3), drag-and-drop
-// (Phase 4), per-team config (Phase 5), downstream wiring (Phase 6), and
-// bulk import/export + polish (Phase 7).
+// Member hierarchy with org-chart + table views. Phase 0 wired schema,
+// permissions, and the navigation slot; Phase 1 ships the live tree with
+// admin CRUD (create, rename, archive, move, reorder, color/icon/lead/
+// countries/slack). Phase 2 wraps a Slack-style visual chart around the
+// same data; Phase 3 lifts member management out of Team.jsx.
 //
-// All chrome (hero, toolbar, skeleton, empty state) is built against the
-// design tokens in src/index.css so light/dark/responsive parity is free.
-// No hardcoded hex outside the per-node accent slot.
+// All chrome is built against the design tokens in src/index.css so
+// light/dark/responsive parity is automatic. No hardcoded hex outside the
+// per-node accent slot.
 
 import { useContext, useMemo, useState } from 'react';
 import { PermissionsContext } from '../../App';
 import { useTeamMembers } from '../../hooks/useTeamMembers';
+import { useOrgNodes } from '../../hooks/useOrgNodes';
 import Skeleton from '../ui/Skeleton';
 import EmptyState from '../ui/EmptyState';
+import OrgTreeView from '../org/OrgTreeView';
+import OrgNodeFormDrawer from '../org/OrgNodeFormDrawer';
+import OrgArchiveConfirm from '../org/OrgArchiveConfirm';
 
 const VIEW_MODES = [
   { id: 'chart', label: 'Org chart', icon: 'bi-diagram-3' },
@@ -24,15 +27,41 @@ const VIEW_MODES = [
 
 export default function OrgView({ user }) {
   const perms = useContext(PermissionsContext);
-  const { members, loading } = useTeamMembers();
+  const { members } = useTeamMembers();
+  const org = useOrgNodes();
   const [viewMode, setViewMode] = useState('chart');
   const [search, setSearch] = useState('');
 
-  const canEdit = perms?.canDo?.('can_manage_org') === true;
+  // Permission to edit comes from the API response (server-side
+  // authoritative) but we fall back to the local perms snapshot so the
+  // edit affordances render immediately while the first fetch is in
+  // flight or while the API is unreachable (degraded mode). The
+  // canonical property name is `canManageOrg` — `canDo()` only covers
+  // ALL_ACTIONS, not ALL_ADMIN_POWERS.
+  const canEdit = org.canEdit || perms?.canManageOrg === true;
 
-  // ── Phase 0 placeholder summary — counts read from the existing member
-  // hook so the empty-shell still surfaces real data for the user. Phase 1
-  // replaces this with the live org_nodes tree.
+  // ── Modals ─────────────────────────────────────────────────────────────
+  const [formState, setFormState] = useState(null); // { mode, parent?, defaultKind?, node? }
+  const [archiveTarget, setArchiveTarget] = useState(null);
+
+  const openCreateRoot = () => setFormState({ mode: 'create', defaultKind: 'department', parent: null });
+  const openCreateChild = (parent, kind) => setFormState({ mode: 'create', parent, defaultKind: kind });
+  const openEdit = (node) => setFormState({ mode: 'edit', node, parent: node.parentId ? org.tree.byId.get(node.parentId) : null });
+  const closeForm = () => setFormState(null);
+
+  const onSaveForm = async (payload) => {
+    if (formState.mode === 'create') {
+      await org.createNode(payload);
+    } else {
+      await org.updateNode(formState.node.id, payload);
+    }
+  };
+
+  const onArchiveConfirm = async (node) => {
+    await org.archiveNode(node.id);
+  };
+
+  // ── Summary chips read live node counts so the hero stays in sync ──────
   const summary = useMemo(() => {
     const total = members?.length || 0;
     const withNode = members?.filter(m => m.orgNodeId).length || 0;
@@ -40,8 +69,12 @@ export default function OrgView({ user }) {
       total,
       assigned: withNode,
       unassigned: total - withNode,
+      departments: org.nodes.filter(n => n.kind === 'department' && !n.isArchived).length,
+      teams: org.nodes.filter(n => n.kind === 'team' && !n.isArchived).length,
     };
-  }, [members]);
+  }, [members, org.nodes]);
+
+  const showWelcome = !org.loading && org.rootNodes.length === 0 && !search;
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -52,9 +85,6 @@ export default function OrgView({ user }) {
         borderBottom: '1px solid var(--border-light)',
         flexShrink: 0,
       }}>
-        {/* Custom hero — uses --text + --text-secondary tokens so dark mode
-            stays legible. Doesn't reach for PageHeader because that component
-            hardcodes a near-black title colour (pre-existing bug elsewhere). */}
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
           <div style={{
             width: 40, height: 40, borderRadius: 12,
@@ -79,8 +109,7 @@ export default function OrgView({ user }) {
           {canEdit && (
             <button
               type="button"
-              disabled
-              title="Edit mode lands in Phase 1"
+              onClick={openCreateRoot}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 6,
                 height: 36, padding: '0 14px',
@@ -88,9 +117,11 @@ export default function OrgView({ user }) {
                 border: 'none', borderRadius: 'var(--radius-lg)',
                 fontSize: 13, fontWeight: 600,
                 fontFamily: 'inherit',
-                cursor: 'not-allowed', opacity: 0.55,
-                flexShrink: 0,
+                cursor: 'pointer', flexShrink: 0,
+                transition: 'background .12s',
               }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--purple-hover, #6d28d9)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'var(--purple)'}
             >
               <i className="bi bi-plus-lg" />
               New department
@@ -98,10 +129,10 @@ export default function OrgView({ user }) {
           )}
         </div>
 
-        {/* ── Toolbar: view-mode pills + search ──────────────────────────── */}
+        {/* ── Toolbar ─────────────────────────────────────────────────────── */}
         <div style={{
           display: 'flex', alignItems: 'center', gap: 12,
-          marginTop: 18,
+          marginTop: 18, flexWrap: 'wrap',
         }}>
           <div role="tablist" aria-label="Org view mode" style={{
             display: 'inline-flex',
@@ -125,7 +156,7 @@ export default function OrgView({ user }) {
                     borderRadius: 'var(--radius-md)',
                     background: active ? 'var(--surface)' : 'transparent',
                     color: active ? 'var(--text)' : 'var(--text-secondary)',
-                    boxShadow: active ? 'var(--shadow-xs, 0 1px 2px rgba(0,0,0,.06))' : 'none',
+                    boxShadow: active ? '0 1px 2px rgba(0,0,0,.06)' : 'none',
                     fontSize: 12,
                     fontWeight: active ? 600 : 500,
                     fontFamily: 'inherit',
@@ -140,10 +171,7 @@ export default function OrgView({ user }) {
             })}
           </div>
 
-          <div style={{
-            position: 'relative',
-            flex: 1, maxWidth: 320,
-          }}>
+          <div style={{ position: 'relative', flex: 1, maxWidth: 360, minWidth: 200 }}>
             <i className="bi bi-search" style={{
               position: 'absolute', left: 12, top: '50%',
               transform: 'translateY(-50%)',
@@ -166,20 +194,23 @@ export default function OrgView({ user }) {
                 fontFamily: 'inherit',
                 outline: 'none',
                 transition: 'border-color .12s',
+                boxSizing: 'border-box',
               }}
               onFocus={e => e.currentTarget.style.borderColor = 'var(--purple)'}
               onBlur={e => e.currentTarget.style.borderColor = 'var(--border)'}
             />
           </div>
 
-          {/* Headcount summary */}
           <div style={{
             marginLeft: 'auto',
-            display: 'flex', alignItems: 'center', gap: 16,
+            display: 'flex', alignItems: 'center', gap: 12,
             fontSize: 12, color: 'var(--text-secondary)',
+            flexWrap: 'wrap',
           }}>
-            <SummaryPill icon="bi-people" label="Total" value={summary.total} />
-            <SummaryPill icon="bi-check-circle" label="Assigned" value={summary.assigned} tone="success" />
+            <SummaryPill icon="bi-building"        label="Depts"      value={summary.departments} />
+            <SummaryPill icon="bi-people"          label="Teams"      value={summary.teams} />
+            <SummaryPill icon="bi-person-fill"     label="Total"      value={summary.total} />
+            <SummaryPill icon="bi-check-circle"    label="Assigned"   value={summary.assigned} tone="success" />
             {summary.unassigned > 0 && (
               <SummaryPill icon="bi-question-circle" label="Unassigned" value={summary.unassigned} tone="warn" />
             )}
@@ -189,12 +220,60 @@ export default function OrgView({ user }) {
 
       {/* ── Body ─────────────────────────────────────────────────────────── */}
       <div style={{ flex: 1, overflow: 'auto', padding: '24px 32px 48px' }}>
-        {loading ? (
-          <ChartSkeleton />
+        {org.loading ? (
+          <TreeSkeleton />
+        ) : org.error && org.rootNodes.length === 0 ? (
+          <EmptyState
+            icon="bi-exclamation-triangle"
+            title="Couldn't load the org tree"
+            subtitle="The org API didn't respond. Reload to try again — your structure is safe."
+            action={
+              <button
+                type="button"
+                onClick={() => org.reload()}
+                style={primaryBtn()}
+              >
+                <i className="bi bi-arrow-clockwise" /> Reload
+              </button>
+            }
+          />
+        ) : showWelcome ? (
+          <WelcomeScaffold canEdit={canEdit} onCreate={openCreateRoot} />
+        ) : viewMode === 'chart' ? (
+          <OrgTreeView
+            tree={org.tree}
+            rootNodes={org.rootNodes}
+            search={search}
+            canEdit={canEdit}
+            sumDescendants={org.sumDescendants}
+            onEdit={openEdit}
+            onAddChild={openCreateChild}
+            onArchive={(node) => setArchiveTarget(node)}
+            onSelect={openEdit}
+          />
         ) : (
-          <ComingSoonScaffold viewMode={viewMode} canEdit={canEdit} />
+          <TablePreview nodes={org.nodes} search={search} />
         )}
       </div>
+
+      {/* ── Drawers / modals ──────────────────────────────────────────────── */}
+      {formState && (
+        <OrgNodeFormDrawer
+          open
+          mode={formState.mode}
+          parentNode={formState.parent}
+          defaultKind={formState.defaultKind}
+          node={formState.node}
+          onClose={closeForm}
+          onSave={onSaveForm}
+        />
+      )}
+      <OrgArchiveConfirm
+        open={!!archiveTarget}
+        node={archiveTarget}
+        onClose={() => setArchiveTarget(null)}
+        onConfirm={onArchiveConfirm}
+      />
     </div>
   );
 }
@@ -202,9 +281,9 @@ export default function OrgView({ user }) {
 // ── Small inline pill used in the toolbar summary ─────────────────────────
 function SummaryPill({ icon, label, value, tone = 'default' }) {
   const palette = {
-    default: { bg: 'transparent',         color: 'var(--text-secondary)' },
-    success: { bg: 'var(--surface-2)',    color: 'var(--text-secondary)' },
-    warn:    { bg: 'var(--orange-light)', color: 'var(--orange)' },
+    default: { bg: 'transparent',         color: 'var(--text-secondary)', strong: 'var(--text)' },
+    success: { bg: 'var(--surface-2)',    color: 'var(--text-secondary)', strong: 'var(--text)' },
+    warn:    { bg: 'var(--orange-light)', color: 'var(--orange)',         strong: 'var(--orange)' },
   }[tone];
   return (
     <span style={{
@@ -215,112 +294,155 @@ function SummaryPill({ icon, label, value, tone = 'default' }) {
     }}>
       <i className={`bi ${icon}`} style={{ fontSize: 12 }} />
       <span style={{ color: 'var(--text-muted)' }}>{label}</span>
-      <strong style={{ fontWeight: 700, color: tone === 'warn' ? 'var(--orange)' : 'var(--text)' }}>{value}</strong>
+      <strong style={{ fontWeight: 700, color: palette.strong }}>{value}</strong>
     </span>
   );
 }
 
-// ── Skeleton tree placeholder ─────────────────────────────────────────────
-function ChartSkeleton() {
-  const card = { borderRadius: 12 };
+// ── Tree skeleton placeholder ─────────────────────────────────────────────
+function TreeSkeleton() {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24 }}>
-      <Skeleton width={220} height={48} style={card} />
-      <div style={{ display: 'flex', gap: 16 }}>
-        <Skeleton width={180} height={40} style={{ borderRadius: 10 }} />
-        <Skeleton width={180} height={40} style={{ borderRadius: 10 }} />
-      </div>
-      <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
-        {Array.from({ length: 6 }).map((_, i) => (
-          <Skeleton key={i} width={120} height={64} style={card} />
-        ))}
-      </div>
+    <div style={{
+      background: 'var(--surface)',
+      border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-lg)',
+      overflow: 'hidden',
+    }}>
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div key={i} style={{
+          padding: '12px 16px',
+          paddingLeft: 16 + (i % 3) * 24,
+          borderBottom: i < 5 ? '1px solid var(--border-light)' : 'none',
+          display: 'flex', alignItems: 'center', gap: 10,
+        }}>
+          <Skeleton width={22} height={22} style={{ borderRadius: 6 }} />
+          <Skeleton width={28} height={28} style={{ borderRadius: 8 }} />
+          <Skeleton width={Math.round(180 - i * 12)} height={14} />
+          <Skeleton width={64} height={20} style={{ borderRadius: 20, marginLeft: 'auto' }} />
+          <Skeleton width={42} height={20} style={{ borderRadius: 20 }} />
+        </div>
+      ))}
     </div>
   );
 }
 
-// ── Phase 0 scaffold: explains what's coming, shows the seeded structure
-// will be live in Phase 1, and offers a clear empty state until the chart
-// renderer is wired in Phase 2.
-function ComingSoonScaffold({ viewMode, canEdit }) {
-  const isChart = viewMode === 'chart';
+// ── First-run welcome scaffold (no nodes yet) ─────────────────────────────
+function WelcomeScaffold({ canEdit, onCreate }) {
   return (
     <div style={{
-      maxWidth: 720, margin: '8vh auto 0',
+      maxWidth: 720, margin: '6vh auto 0',
       display: 'flex', flexDirection: 'column', alignItems: 'center',
       textAlign: 'center', gap: 'var(--space-4)',
     }}>
       <div style={{
-        width: 64, height: 64,
-        borderRadius: 16,
+        width: 64, height: 64, borderRadius: 16,
         background: 'var(--purple-light)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>
-        <i className={`bi ${isChart ? 'bi-diagram-3-fill' : 'bi-table'}`}
-          style={{ fontSize: 28, color: 'var(--purple)' }} />
+        <i className="bi bi-diagram-3-fill" style={{ fontSize: 28, color: 'var(--purple)' }} />
       </div>
       <h3 style={{ fontSize: 'var(--font-xl)', fontWeight: 700, color: 'var(--text)', margin: 0 }}>
-        The Org tab is being assembled
+        Build your org from scratch
       </h3>
       <p style={{
         fontSize: 'var(--font-md)', color: 'var(--text-secondary)',
         maxWidth: 480, margin: 0, lineHeight: 1.5,
       }}>
-        Phase 0 wires the foundation — schema, permissions, and this navigation
-        slot. The interactive {isChart ? 'org chart' : 'table view'}, drag-to-move
-        people, per-team configuration, and bulk operations land in the next
-        phases.
+        Start with a department, then nest teams (and sub-teams) under it.
+        Assign leads, countries, and Slack channels as you go. Members get
+        moved in once the structure is in place.
       </p>
-      <div style={{
-        marginTop: 'var(--space-4)',
-        display: 'grid', gridTemplateColumns: 'repeat(2, minmax(240px, 1fr))',
-        gap: 'var(--space-3)', textAlign: 'left',
-        width: '100%',
-      }}>
-        <RoadmapCard phase="Phase 1" title="Departments & teams" body="Create, rename, move, and archive nodes." status="next" />
-        <RoadmapCard phase="Phase 2" title="Visual org chart" body="Tree with collapsible groups + table toggle." />
-        <RoadmapCard phase="Phase 3" title="People management" body="Add, edit, allocate — lifted from Leaders Hub." />
-        <RoadmapCard phase="Phase 4" title="Drag-and-drop moves" body="Reassign people and restructure with impact preview." />
-        <RoadmapCard phase="Phase 5" title="Per-team config" body="SLA cascade, MOC rotation, delegated admins." />
-        <RoadmapCard phase="Phase 6" title="Downstream wiring" body="Briefing, Queue, HR Hub all read the new structure." />
-      </div>
-      {!canEdit && (
-        <EmptyState
-          icon="bi-shield-check"
-          title="Read-only access"
-          subtitle="You can browse the org chart in every phase. Edit actions are gated behind admin or regional-manager permissions."
-        />
+      {canEdit && (
+        <button type="button" onClick={onCreate} style={primaryBtn({ height: 40, padding: '0 18px' })}>
+          <i className="bi bi-plus-lg" />
+          Create your first department
+        </button>
       )}
     </div>
   );
 }
 
-function RoadmapCard({ phase, title, body, status }) {
-  const isNext = status === 'next';
+// ── Table preview (Phase 2 ships a sortable, virtualised table) ───────────
+function TablePreview({ nodes, search }) {
+  const lc = (search || '').toLowerCase().trim();
+  const filtered = nodes
+    .filter(n => !n.isArchived)
+    .filter(n => !lc || n.name.toLowerCase().includes(lc) || (n.leadEmail || '').toLowerCase().includes(lc))
+    .sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
+
+  if (!filtered.length) {
+    return (
+      <EmptyState
+        icon="bi-table"
+        title="Nothing to show"
+        subtitle="Try a different search, or switch back to the chart view."
+      />
+    );
+  }
   return (
     <div style={{
-      padding: 'var(--space-4)',
       background: 'var(--surface)',
-      border: `1px solid ${isNext ? 'var(--purple)' : 'var(--border)'}`,
+      border: '1px solid var(--border)',
       borderRadius: 'var(--radius-lg)',
-      boxShadow: isNext ? '0 0 0 3px var(--purple-light)' : 'none',
-      transition: 'box-shadow .15s, border-color .15s',
+      overflow: 'hidden',
     }}>
       <div style={{
-        fontSize: 'var(--font-xs)', fontWeight: 700,
-        color: isNext ? 'var(--purple)' : 'var(--text-muted)',
-        letterSpacing: 'var(--ls-caps, 0.06em)',
+        display: 'grid',
+        gridTemplateColumns: '140px 1fr 1fr 100px 100px',
+        padding: '10px 16px',
+        background: 'var(--surface-2)',
+        borderBottom: '1px solid var(--border-light)',
+        fontSize: 'var(--font-xs)',
+        fontWeight: 700,
+        letterSpacing: '0.05em',
         textTransform: 'uppercase',
-        marginBottom: 6,
-      }}>{phase}{isNext ? ' · up next' : ''}</div>
-      <div style={{
-        fontSize: 'var(--font-md)', fontWeight: 600,
-        color: 'var(--text)', marginBottom: 4,
-      }}>{title}</div>
-      <div style={{
-        fontSize: 'var(--font-sm)', color: 'var(--text-secondary)',
-        lineHeight: 1.4,
-      }}>{body}</div>
+        color: 'var(--text-muted)',
+      }}>
+        <div>Kind</div>
+        <div>Name</div>
+        <div>Lead</div>
+        <div style={{ textAlign: 'right' }}>Members</div>
+        <div style={{ textAlign: 'right' }}>Vacant</div>
+      </div>
+      {filtered.map((n, i) => (
+        <div key={n.id} style={{
+          display: 'grid',
+          gridTemplateColumns: '140px 1fr 1fr 100px 100px',
+          padding: '10px 16px',
+          borderBottom: i < filtered.length - 1 ? '1px solid var(--border-light)' : 'none',
+          alignItems: 'center',
+          fontSize: 'var(--font-md)', color: 'var(--text)',
+        }}>
+          <div>
+            <span style={{
+              padding: '2px 8px',
+              borderRadius: 'var(--radius-pill)',
+              background: n.kind === 'department' ? 'var(--purple-light)' : 'var(--surface-3)',
+              color: n.kind === 'department' ? 'var(--purple)' : 'var(--text-secondary)',
+              fontSize: 'var(--font-xs)', fontWeight: 600,
+              textTransform: 'capitalize',
+            }}>{n.kind}</span>
+          </div>
+          <div style={{ fontWeight: 600 }}>{n.name}</div>
+          <div style={{ color: 'var(--text-secondary)' }}>{n.leadEmail || '—'}</div>
+          <div style={{ textAlign: 'right', fontWeight: 600 }}>{n.memberCount || 0}</div>
+          <div style={{ textAlign: 'right', color: n.vacantCount ? 'var(--orange)' : 'var(--text-muted)', fontWeight: n.vacantCount ? 700 : 500 }}>{n.vacantCount || 0}</div>
+        </div>
+      ))}
     </div>
   );
+}
+
+function primaryBtn(extra = {}) {
+  return {
+    display: 'inline-flex', alignItems: 'center', gap: 6,
+    height: 36, padding: '0 14px',
+    background: 'var(--purple)', color: 'white',
+    border: 'none', borderRadius: 'var(--radius-lg)',
+    fontSize: 13, fontWeight: 600,
+    fontFamily: 'inherit',
+    cursor: 'pointer',
+    transition: 'background .12s',
+    ...extra,
+  };
 }
