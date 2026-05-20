@@ -29,12 +29,25 @@ export function isZendeskConfigured() {
  * user. Reads (GET) don't need impersonation; pass it only on mutations.
  */
 async function _zendeskFetch(endpoint, options = {}) {
-  if (!isZendeskConfigured()) {
+  // Phase 13b (2026-05-20): callers can override the auth tuple via
+  // options.tokenOverride / .subdomainOverride / .emailOverride to point
+  // at a per-dept Zendesk instance (e.g. Global Immigration's
+  // Zendesk_API_Payroll_GIX). When all three are unset, the module-level
+  // ZENDESK_* env vars are used — HRX behavior is byte-identical.
+  const tokenOverride = options.tokenOverride || null;
+  const subdomainOverride = options.subdomainOverride || null;
+  const emailOverride = options.emailOverride || null;
+  const effSubdomain = subdomainOverride || ZENDESK_SUBDOMAIN;
+  const effEmail = emailOverride || ZENDESK_EMAIL;
+  const effToken = tokenOverride || ZENDESK_API_TOKEN;
+
+  if (!effSubdomain || !effEmail || !effToken) {
     throw new Error('Zendesk API is not configured (ZENDESK_SUBDOMAIN, ZENDESK_EMAIL, ZENDESK_API_TOKEN)');
   }
 
-  const auth = Buffer.from(`${ZENDESK_EMAIL}/token:${ZENDESK_API_TOKEN}`).toString('base64');
-  const url = `${ZENDESK_BASE}${endpoint}`;
+  const auth = Buffer.from(`${effEmail}/token:${effToken}`).toString('base64');
+  const base = `https://${effSubdomain}.zendesk.com/api/v2`;
+  const url = `${base}${endpoint}`;
 
   const headers = {
     Authorization: `Basic ${auth}`,
@@ -139,7 +152,7 @@ export async function getTicketComments(ticketId, params = {}) {
 
 // ── Search ──────────────────────────────────────────────────────────────────
 
-export async function searchTickets(query, params = {}) {
+export async function searchTickets(query, params = {}, opts = {}) {
   const qs = new URLSearchParams();
   qs.set('query', `type:ticket ${query}`);
   if (params.sort_by) qs.set('sort_by', params.sort_by);
@@ -150,7 +163,9 @@ export async function searchTickets(query, params = {}) {
   // Zendesk returns each requested type as a top-level array on the response;
   // callers join by ticket_id.
   if (params.include) qs.set('include', params.include);
-  return zendeskFetch(`/search.json?${qs.toString()}`);
+  // Phase 13b: pass per-dept auth overrides through to zendeskFetch when
+  // provided. HRX path (opts = {}) is byte-identical to pre-Phase-13b.
+  return zendeskFetch(`/search.json?${qs.toString()}`, opts);
 }
 
 // ── Users ───────────────────────────────────────────────────────────────────
@@ -195,11 +210,16 @@ export async function listGroups() {
 // ── Ticket Update ───────────────────────────────────────────────────────────
 
 // `opts.actAsEmail` impersonates that user via X-On-Behalf-Of (see _zendeskFetch).
+// Phase 13b: `opts.tokenOverride` / `opts.subdomainOverride` / `opts.emailOverride`
+// route the write to a per-dept Zendesk (e.g. Global Immigration).
 export async function updateTicket(ticketId, data, opts = {}) {
   return zendeskFetch(`/tickets/${ticketId}.json`, {
     method: 'PUT',
     body: JSON.stringify({ ticket: data }),
     actAsEmail: opts.actAsEmail,
+    tokenOverride: opts.tokenOverride,
+    subdomainOverride: opts.subdomainOverride,
+    emailOverride: opts.emailOverride,
   });
 }
 
@@ -217,7 +237,18 @@ export async function createTicket(data, opts = {}) {
 
 export async function reassignTicket(ticketId, assigneeEmail, opts = {}) {
   // The user lookup is a read — leave it under the API token's identity.
-  const searchRes = await zendeskFetch(`/users/search.json?query=email:${encodeURIComponent(assigneeEmail)}`);
+  // Phase 13b: the lookup must hit the SAME Zendesk instance as the write
+  // (Global Immigration's users live in their own Zendesk), so the auth
+  // overrides flow through here too.
+  const authOpts = {
+    tokenOverride: opts.tokenOverride,
+    subdomainOverride: opts.subdomainOverride,
+    emailOverride: opts.emailOverride,
+  };
+  const searchRes = await zendeskFetch(
+    `/users/search.json?query=email:${encodeURIComponent(assigneeEmail)}`,
+    authOpts,
+  );
   const user = searchRes?.users?.[0];
   if (!user) throw new Error(`Zendesk user not found for email: ${assigneeEmail}`);
 
@@ -227,16 +258,20 @@ export async function reassignTicket(ticketId, assigneeEmail, opts = {}) {
     method: 'PUT',
     body: JSON.stringify({ ticket: { assignee_id: user.id } }),
     actAsEmail: opts.actAsEmail,
+    ...authOpts,
   });
 }
 
 // ── Batch Users (resolve IDs → emails/names) ───────────────────────────
 
-export async function showManyUsers(ids) {
+export async function showManyUsers(ids, opts = {}) {
   if (!ids || ids.length === 0) return { users: [] };
   // Zendesk allows up to 100 IDs per call
   const batch = ids.slice(0, 100);
-  return zendeskFetch(`/users/show_many.json?ids=${batch.join(',')}`);
+  // Phase 13b: pass per-dept auth overrides through so a non-HRX dept's
+  // user lookup hits THAT dept's Zendesk instance (users IDs are
+  // per-instance — cross-instance lookup would silently mis-resolve).
+  return zendeskFetch(`/users/show_many.json?ids=${batch.join(',')}`, opts);
 }
 
 // ── Per-ticket SLA policy_metrics fetch (background SLA sync) ─────────

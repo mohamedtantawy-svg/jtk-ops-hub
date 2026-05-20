@@ -11,6 +11,8 @@ import { getAuthUser } from '../../../../src/lib/auth-helpers';
 import { searchTickets, showManyUsers, isZendeskConfigured } from '../../../../src/lib/zendesk-api';
 import { loadSlaRowsForTicketIds, warmSlaCacheForTicketIds } from '../../../../src/lib/zendesk-sla-sync';
 import { searchIssues, isJiraConfigured, resolveHrxOwnerFields, emailsFromJiraFieldValue } from '../../../../src/lib/jira-api';
+import { getCurrentDeptSlugAndId } from '../../../../src/lib/dept-scope';
+import { SLUGS } from '../../../../src/lib/dept-integrations';
 
 // Jira custom fields (by display-name substring) that, together with the
 // built-in `assignee` and `reporter`, govern whether a ticket belongs to our
@@ -1191,6 +1193,38 @@ export async function GET(req) {
   // Hydrate server roster from team_member_overrides so scopeQueueItems sees
   // the latest roster (TTL-gated; collapses concurrent calls into one query).
   await ensureRosterHydrated();
+
+  // Phase 13b (2026-05-20): dispatch by current dept.
+  //   • HRX: byte-identical to pre-Phase-13b. The entire 1300-line GET
+  //     handler below runs unchanged.
+  //   • Non-HRX dept: the /api/v1/queue route returns an empty payload
+  //     for now. Per-dept Zendesk + Jira write actions DO route through
+  //     the dept's tokens (see queue/[ticketId]/actions + queue/reassign).
+  //     The full non-HRX READ fetch (Zendesk by group + Jira by ownerField
+  //     value) lands in Phase 13c — designed to be smaller than the HRX
+  //     path (no SLA enrichment / no historical bucket splitting) so it
+  //     can be iterated on with real prod data without risking HRX.
+  //
+  // Why empty rather than partial: HRX's queue logic carries a lot of
+  // assumptions (HRX_OWNER_FIELD_NAMES, ADMIN_EMAILS_LIST, country tag
+  // detection, SLA Promised cache). Reusing those in a non-HRX context
+  // could silently surface HRX-flavored data to the wrong tenant. Empty
+  // is the safe default; mohamed accesses Global Immigration's queue
+  // today via /api/v1/workspaces/gix/queue (Zendesk, already wired).
+  {
+    const deptInfo = await getCurrentDeptSlugAndId(user, req);
+    const isHrx = !deptInfo || deptInfo.deptSlug === SLUGS.HR_EXPERIENCE;
+    if (!isHrx) {
+      return NextResponse.json({
+        items: [],
+        total: 0,
+        truncated: false,
+        _deptDispatchStub: true,
+        _deptSlug: deptInfo.deptSlug,
+        _note: 'Non-HRX queue read lands in Phase 13c. Use /api/v1/workspaces/gix/queue for Zendesk today.',
+      });
+    }
+  }
 
   const url = new URL(req.url);
   const bustCache = url.searchParams.has('_t');

@@ -21,7 +21,8 @@ import { query } from '../../../../../src/lib/db';
 import { cacheDelMany } from '../../../../../src/lib/server-cache';
 import { MEMBERS_BY_EMAIL } from '../../../../../src/data/members';
 import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
-import { getCurrentDeptId } from '../../../../../src/lib/dept-scope';
+import { getCurrentDeptId, getCurrentDeptSlugAndId } from '../../../../../src/lib/dept-scope';
+import { resolveZendeskConfig, resolveJiraConfig, SLUGS } from '../../../../../src/lib/dept-integrations';
 
 async function upsertShadowAndLog({ ticketId, source, assigneeEmail, actorName, orgNodeId }) {
   try {
@@ -113,20 +114,38 @@ export async function POST(req) {
     const isZendesk = ticketId.startsWith('ZD-');
     const source = isZendesk ? 'zendesk' : 'jira';
 
+    // Phase 13b: resolve the actor's dept once + route the reassign write
+    // to the matching Zendesk / Jira instance. HRX (no overrides) is
+    // byte-identical to pre-Phase-13b; non-HRX uses the per-dept tokens.
+    const deptInfo = await getCurrentDeptSlugAndId(user, req);
+    const isHrx = !deptInfo || deptInfo.deptSlug === SLUGS.HR_EXPERIENCE;
+    const zdCfg = isHrx ? null : resolveZendeskConfig(deptInfo.deptSlug);
+    const jiraCfg = isHrx ? null : resolveJiraConfig(deptInfo.deptSlug);
+    const zdOpts = zdCfg ? {
+      tokenOverride: zdCfg.token,
+      subdomainOverride: zdCfg.subdomain,
+      emailOverride: zdCfg.email,
+    } : {};
+    const jiraOpts = jiraCfg ? {
+      tokenOverride: jiraCfg.token,
+      baseUrlOverride: jiraCfg.baseUrl || undefined,
+      emailOverride: jiraCfg.email || undefined,
+    } : {};
+
     if (isZendesk) {
       // Strip the "ZD-" prefix to get the numeric Zendesk ticket ID
       const numericId = ticketId.replace('ZD-', '');
       // actAsEmail impersonates the team member so the ticket's audit
       // log records them as the updater instead of the API token owner.
-      await reassignTicket(numericId, assigneeEmail, { actAsEmail: user.email });
+      await reassignTicket(numericId, assigneeEmail, { actAsEmail: user.email, ...zdOpts });
     } else {
       // Jira issue keys are used as-is (e.g. "PROJ-123")
-      await reassignIssue(ticketId, assigneeEmail);
+      await reassignIssue(ticketId, assigneeEmail, jiraOpts);
     }
 
     // Persist + log activity; bust the /queue caches so the next poll picks
     // up the fresh assignee from the source system instead of our stale copy.
-    const orgNodeId = await getCurrentDeptId(user, req);
+    const orgNodeId = deptInfo?.deptId || await getCurrentDeptId(user, req);
     await upsertShadowAndLog({ ticketId, source, assigneeEmail, actorName: user.name, orgNodeId });
     cacheDelMany(['queue', 'queue_zendesk', 'queue_jira']);
 

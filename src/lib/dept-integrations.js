@@ -93,15 +93,9 @@ export const DEPT_INTEGRATIONS = {
     workbench: {
       tokenEnvVar: 'DEEL_ADMIN_GIX',
       teamFilter: ['Mobility Operations', 'GSC - Mobility'],
-      // Phase 13b follow-up — wiring this requires:
-      //   (a) `deel-api.js#deelFetch` to accept a per-call token override
-      //       so listWorkbenchTasks can use DEEL_ADMIN_GIX instead of the
-      //       module-level DEEL_ADMIN_TOKEN.
-      //   (b) The Deel team UUIDs for "Mobility Operations" + "GSC -
-      //       Mobility" (the upstream API filters by teamId UUID, not
-      //       name). Until then, workbench stays disabled below so the
-      //       Global Immigration admin sees empty rather than leaking
-      //       HRX's workbench.
+      // Phase 13b (2026-05-20): wired via the per-call adminTokenOverride
+      // added to deel-api.js#deelFetch + the post-fetch teamNameFilter
+      // in listWorkbenchTasks. HRX is untouched (no overrides passed).
     },
     deelSources: {
       onboarding: false,
@@ -109,7 +103,7 @@ export const DEPT_INTEGRATIONS = {
       amendments: false,
       redlines: false,
       incentivePlans: false,
-      workbench: false, // ← Phase 13b enables this once deelFetch accepts a per-call token override.
+      workbench: true,
     },
   },
 

@@ -1015,6 +1015,93 @@ assert('HRX-no-impact: HRX jira project keys unchanged (COHD, OSHD)',
 assert('HRX-no-impact: HRX all 6 Deel sources enabled',
   /'hr-experience'[\s\S]+onboarding: true,[\s\S]+offboarding: true,[\s\S]+amendments: true,[\s\S]+redlines: true,[\s\S]+incentivePlans: true,[\s\S]+workbench: true/.test(deptIntegrationsSrc));
 
+// ── Section 30: Phase 13b — per-dept dispatch (Workbench + ZD + Jira) ────
+console.log('\n── Phase 13b: per-dept dispatch for Workbench + Zendesk + Jira ──');
+
+const deelApiSrcPhase13b = read('src/lib/deel-api.js');
+assert('deel-api _deelFetch honors options.adminTokenOverride',
+  /const adminToken = options\.adminTokenOverride \|\| DEEL_ADMIN_TOKEN/.test(deelApiSrcPhase13b));
+assert('deel-api listWorkbenchTasks accepts adminTokenOverride + teamNameFilter',
+  /params\.adminTokenOverride/.test(deelApiSrcPhase13b)
+  && /params\.teamNameFilter/.test(deelApiSrcPhase13b));
+assert('deel-api listWorkbenchTasks skips reconcile for non-HRX (teamNameFilter set)',
+  /teamNameFilter\s*\?\s*false\s*:\s*\(params\.includeCompleted/.test(deelApiSrcPhase13b));
+assert('deel-api listWorkbenchTasks filters pre-projection by team name',
+  /sourceItems = teamNameFilter[\s\S]+t\.teamName[\s\S]+t\.team\?\.name/.test(deelApiSrcPhase13b));
+
+const zdApiSrcPhase13b = read('src/lib/zendesk-api.js');
+assert('zendesk-api _zendeskFetch honors token/subdomain/email overrides',
+  /tokenOverride\s*=\s*options\.tokenOverride/.test(zdApiSrcPhase13b)
+  && /subdomainOverride\s*=\s*options\.subdomainOverride/.test(zdApiSrcPhase13b)
+  && /emailOverride\s*=\s*options\.emailOverride/.test(zdApiSrcPhase13b));
+assert('zendesk-api searchTickets passes opts through',
+  /searchTickets\(query, params = \{\}, opts = \{\}\)/.test(zdApiSrcPhase13b)
+  && /return zendeskFetch\(`\/search\.json\?\$\{qs\.toString\(\)\}`, opts\)/.test(zdApiSrcPhase13b));
+assert('zendesk-api updateTicket / reassignTicket / showManyUsers accept overrides',
+  /updateTicket\(ticketId, data, opts = \{\}\)/.test(zdApiSrcPhase13b)
+  && /reassignTicket\(ticketId, assigneeEmail, opts = \{\}\)/.test(zdApiSrcPhase13b)
+  && /showManyUsers\(ids, opts = \{\}\)/.test(zdApiSrcPhase13b));
+
+const jiraApiSrcPhase13b = read('src/lib/jira-api.js');
+assert('jira-api _jiraFetch honors token/baseUrl/email overrides',
+  /tokenOverride\s*=\s*options\.tokenOverride/.test(jiraApiSrcPhase13b)
+  && /baseUrlOverride\s*=\s*options\.baseUrlOverride/.test(jiraApiSrcPhase13b)
+  && /emailOverride\s*=\s*options\.emailOverride/.test(jiraApiSrcPhase13b));
+assert('jira-api searchIssues passes opts through',
+  /searchIssues\(jql, params = \{\}, opts = \{\}\)/.test(jiraApiSrcPhase13b));
+assert('jira-api reassignIssue / addComment / transitionIssue accept overrides',
+  /reassignIssue\(issueKey, assigneeEmail, opts = \{\}\)/.test(jiraApiSrcPhase13b)
+  && /addComment\(issueKey, commentText, opts = \{\}\)/.test(jiraApiSrcPhase13b)
+  && /transitionIssue\(issueKey, transitionId, opts = \{\}\)/.test(jiraApiSrcPhase13b));
+
+const wbRouteSrcPhase13b = read('app/api/v1/integrations/deel/workbench/route.js');
+assert('workbench route dispatches HRX vs per-dept on slug',
+  /const isHrx = !deptInfo \|\| deptInfo\.deptSlug === SLUGS\.HR_EXPERIENCE/.test(wbRouteSrcPhase13b));
+assert('workbench route passes adminTokenOverride + teamNameFilter for non-HRX',
+  /adminTokenOverride: workbenchCfg\.token[\s\S]+teamNameFilter: workbenchCfg\.teamFilter/.test(wbRouteSrcPhase13b));
+assert('workbench route fails closed when dept token not in Nexus yet',
+  /dept-workbench-token-not-configured/.test(wbRouteSrcPhase13b));
+assert('workbench cache key is dept-namespaced for non-HRX',
+  /isHrx \? CACHE_KEY : `\$\{CACHE_KEY\}_\$\{deptInfo\.deptSlug\}`/.test(wbRouteSrcPhase13b));
+
+const queueRouteSrcPhase13b = read('app/api/v1/queue/route.js');
+assert('queue route GET short-circuits for non-HRX (returns empty)',
+  /_deptDispatchStub: true/.test(queueRouteSrcPhase13b));
+assert('queue route HRX path is preserved (slug check first)',
+  /const isHrx = !deptInfo \|\| deptInfo\.deptSlug === SLUGS\.HR_EXPERIENCE/.test(queueRouteSrcPhase13b));
+
+const actionsSrcPhase13b = read('app/api/v1/queue/[ticketId]/actions/route.js');
+assert('actions route resolves dept opts + threads Zendesk overrides',
+  /const zdAuthOpts = zdCfg \?/.test(actionsSrcPhase13b)
+  && /\.\.\.zdAuthOpts/.test(actionsSrcPhase13b));
+assert('actions route threads Jira overrides to Jira helpers',
+  /addJiraComment\(ticketId, body\.message, jiraAuthOverride\)/.test(actionsSrcPhase13b)
+  && /transitionJiraIssue\(ticketId, body\.status, jiraAuthOverride\)/.test(actionsSrcPhase13b)
+  && /assignJiraIssue\(ticketId, body\.assigneeEmail, jiraAuthOverride\)/.test(actionsSrcPhase13b));
+
+const reassignSrcPhase13b = read('app/api/v1/queue/reassign/route.js');
+assert('reassign route resolves dept opts',
+  /const isHrx = !deptInfo \|\| deptInfo\.deptSlug === SLUGS\.HR_EXPERIENCE/.test(reassignSrcPhase13b));
+assert('reassign route passes Zendesk + Jira overrides through to lib helpers',
+  /reassignTicket\(numericId, assigneeEmail, \{ actAsEmail: user\.email, \.\.\.zdOpts \}\)/.test(reassignSrcPhase13b)
+  && /reassignIssue\(ticketId, assigneeEmail, jiraOpts\)/.test(reassignSrcPhase13b));
+
+const deptIntegrationsSrcPhase13b = read('src/lib/dept-integrations.js');
+assert('Global Immigration workbench is now enabled (was false in 13a)',
+  /'global-immigration'[\s\S]+workbench: true,/.test(deptIntegrationsSrcPhase13b));
+
+// HRX-no-impact regression assertions for Phase 13b.
+assert('HRX-no-impact: deelFetch default path uses DEEL_ADMIN_TOKEN',
+  /const adminToken = options\.adminTokenOverride \|\| DEEL_ADMIN_TOKEN/.test(deelApiSrcPhase13b));
+assert('HRX-no-impact: zendeskFetch default subdomain/email/token reads ZENDESK_* env',
+  /effSubdomain = subdomainOverride \|\| ZENDESK_SUBDOMAIN/.test(zdApiSrcPhase13b)
+  && /effEmail = emailOverride \|\| ZENDESK_EMAIL/.test(zdApiSrcPhase13b)
+  && /effToken = tokenOverride \|\| ZENDESK_API_TOKEN/.test(zdApiSrcPhase13b));
+assert('HRX-no-impact: jiraFetch default base/email/token reads JIRA_* env',
+  /effBase = baseUrlOverride \|\| JIRA_BASE_URL/.test(jiraApiSrcPhase13b)
+  && /effEmail = emailOverride \|\| JIRA_USER_EMAIL/.test(jiraApiSrcPhase13b)
+  && /effToken = tokenOverride \|\| JIRA_API_TOKEN/.test(jiraApiSrcPhase13b));
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

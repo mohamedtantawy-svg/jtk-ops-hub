@@ -57,8 +57,14 @@ async function _deelFetch(path, options = {}) {
 
   // For /admin/* paths, prefer DEEL_ADMIN_TOKEN (admin session JWT) if set —
   // /rest/v2/* endpoints keep using DEEL_API_KEY.
+  // Phase 13b (2026-05-20): callers can pass `options.adminTokenOverride`
+  // to swap the admin token at the call-site (e.g. Workbench for non-HRX
+  // depts uses DEEL_ADMIN_GIX instead of DEEL_ADMIN_TOKEN). When unset,
+  // the module-level DEEL_ADMIN_TOKEN is used exactly as before — HRX
+  // callers see byte-identical behavior.
   const isAdminPath = path.startsWith('/admin/');
-  const token = isAdminPath && DEEL_ADMIN_TOKEN ? DEEL_ADMIN_TOKEN : DEEL_API_KEY;
+  const adminToken = options.adminTokenOverride || DEEL_ADMIN_TOKEN;
+  const token = isAdminPath && adminToken ? adminToken : DEEL_API_KEY;
 
   const url = `${DEEL_BASE}${path}`;
 
@@ -1729,16 +1735,37 @@ function extractCountryFromCustomFields(customFields) {
  *   - teamIds: HRX Operations only
  *   - statuses: all four actionable buckets (TO_DO, IN_PROGRESS, ON_HOLD, ESCALATED)
  *   - follows `cursor` across pages up to 5000 items
+ *
+ * Phase 13b (2026-05-20): when `params.adminTokenOverride` is set the
+ * fetch uses that token instead of the module-level DEEL_ADMIN_TOKEN —
+ * for non-HRX depts (Global Immigration's DEEL_ADMIN_GIX, etc.).
+ * `params.teamNameFilter` lets callers post-filter on the upstream
+ * `team` field by name (string list, case-insensitive) — used when
+ * the dept's Workbench profile knows team names but not Deel team
+ * UUIDs (Phase 13b transition state).
  */
 export async function listWorkbenchTasks(params = {}) {
   const statuses = params.statuses || ['TO_DO', 'IN_PROGRESS', 'ON_HOLD', 'ESCALATED'];
   const teamIds = params.teamIds || [HRX_OPERATIONS_TEAM_ID];
+  const adminTokenOverride = params.adminTokenOverride || null;
+  const teamNameFilter = Array.isArray(params.teamNameFilter)
+    ? params.teamNameFilter.map(s => String(s).toLowerCase())
+    : null;
+  const fetchOpts = adminTokenOverride ? { adminTokenOverride } : {};
   // Whether to also pull recently-completed tasks. Default ON so the queue
   // and Briefing's "resolved today" count includes Workbench tasks closed
   // in the last 24h — matches the cross-queue spec ("always show resolved
   // items in the past 24h with no data loss across all Qs"). Caller can
   // disable for endpoints that only care about the active backlog.
-  const includeCompleted = params.includeCompleted !== false;
+  //
+  // Phase 13b: when teamNameFilter is set (non-HRX dept path), skip the
+  // includeCompleted branch entirely — that branch writes to the shared
+  // workbench_known_tasks DB snapshot, which is HRX-only today. A future
+  // PR can add per-dept snapshots; until then the non-HRX path returns
+  // only the active set (no 24h resolved tail).
+  const includeCompleted = teamNameFilter
+    ? false
+    : (params.includeCompleted !== false);
   const completedLookbackMs = (params.completedLookbackHours ?? 24) * 60 * 60 * 1000;
 
   const buildQs = (cursor, statusList) => {
@@ -1755,7 +1782,7 @@ export async function listWorkbenchTasks(params = {}) {
   let serverCount = 0;
   for (let page = 0; page < WORKBENCH_MAX_PAGES; page++) {
     const qs = buildQs(cursor, statuses);
-    const res = await deelFetch(`/admin/ops_workbench/tasks?${qs.toString()}`);
+    const res = await deelFetch(`/admin/ops_workbench/tasks?${qs.toString()}`, fetchOpts);
     const pageItems = res?.result || [];
     serverCount = res?.count || serverCount;
     if (pageItems.length === 0) break;
@@ -1800,7 +1827,7 @@ export async function listWorkbenchTasks(params = {}) {
         for (const id of teamIds) qs.append('teamIds[]', id);
         qs.set('limit', '100');
         if (cursor) qs.set('cursor', cursor);
-        const res = await deelFetch(`/admin/ops_workbench/tasks?${qs.toString()}`);
+        const res = await deelFetch(`/admin/ops_workbench/tasks?${qs.toString()}`, fetchOpts);
         const pageItems = res?.result || [];
         if (pageItems.length === 0) break;
         for (const t of pageItems) {
@@ -1860,6 +1887,27 @@ export async function listWorkbenchTasks(params = {}) {
     }
   }
 
+  // Phase 13b: pre-projection team filter for non-HRX depts. Runs on the
+  // raw upstream rows (which still carry `teamName` / `team.name`) — the
+  // projection below drops the team field per the 2026-05-12 memory
+  // audit, so post-projection filtering wouldn't work. HRX path
+  // (teamNameFilter === null) skips this and projects allItems unchanged.
+  const sourceItems = teamNameFilter
+    ? allItems.filter(t => {
+        const candidates = [
+          t.teamName,
+          t.team?.name,
+          t._teamName,
+        ];
+        for (const c of candidates) {
+          if (typeof c === 'string' && teamNameFilter.includes(c.toLowerCase())) {
+            return true;
+          }
+        }
+        return false;
+      })
+    : allItems;
+
   // Slim projection — only fields consumed downstream by the queue route,
   // normalizeWorkbench, and queue-scoping. Per the 2026-05-12 memory audit
   // (pod RSS spiked > 3 GiB triggering OOM kills), dropping unused fields
@@ -1869,7 +1917,7 @@ export async function listWorkbenchTasks(params = {}) {
   // per-row cache footprint by ~60-70%. With ~5000 active + 200 finished
   // rows in the workbench cache, that's tens of MiB freed per refresh
   // cycle — across every Deel cache the savings multiply.
-  const items = allItems.map(t => ({
+  const items = sourceItems.map(t => ({
     id:               t.id || '',
     name:             t.name || '',
     status:           t.status || '',                              // TO_DO, IN_PROGRESS, etc.

@@ -7,7 +7,7 @@ import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { listWorkbenchTasks, isDeelConfigured } from '../../../../../../src/lib/deel-api';
 import { getCurrentDeptSlugAndId } from '../../../../../../src/lib/dept-scope';
-import { isDeelSourceVisible } from '../../../../../../src/lib/dept-integrations';
+import { isDeelSourceVisible, resolveWorkbenchConfig, SLUGS } from '../../../../../../src/lib/dept-integrations';
 import { cacheGet, cacheSet } from '../../../../../../src/lib/server-cache';
 import { scopeWorkbenchTasks } from '../../../../../../src/lib/queue-scoping';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
@@ -42,16 +42,25 @@ export async function GET(req) {
   if (!user.email) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  // Phase 13a: dept-isolated visibility gate. Global Immigration's
-  // workbench wiring (DEEL_ADMIN_GIX + Mobility team filter) lands in
-  // Phase 13b once deel-api supports per-call token overrides + the
-  // upstream "Mobility Operations" / "GSC - Mobility" team UUIDs are
-  // known. Until then, every non-HRX dept gets empty here.
-  {
-    const deptInfo = await getCurrentDeptSlugAndId(user, req);
-    if (!isDeelSourceVisible(deptInfo?.deptSlug, 'workbench')) {
-      return NextResponse.json({ items: [], total: 0, disabled: true, reason: 'source-disabled-for-dept' });
-    }
+  // Phase 13a: dept-isolated visibility gate.
+  // Phase 13b: when source IS visible for a non-HRX dept (e.g. Global
+  // Immigration with workbench enabled), use the per-dept Deel admin
+  // token + team filter via params on listWorkbenchTasks. HRX path
+  // (no overrides) is byte-identical to pre-Phase-13b.
+  const deptInfo = await getCurrentDeptSlugAndId(user, req);
+  if (!isDeelSourceVisible(deptInfo?.deptSlug, 'workbench')) {
+    return NextResponse.json({ items: [], total: 0, disabled: true, reason: 'source-disabled-for-dept' });
+  }
+  const isHrx = !deptInfo || deptInfo.deptSlug === SLUGS.HR_EXPERIENCE;
+  const workbenchCfg = isHrx ? null : resolveWorkbenchConfig(deptInfo.deptSlug);
+  // Per-dept paths require both: the dept config AND a non-empty token.
+  // If a non-HRX dept's token isn't set in Nexus yet, fall back to empty
+  // (don't leak HRX's data).
+  if (!isHrx && !workbenchCfg) {
+    return NextResponse.json({
+      items: [], total: 0, disabled: true,
+      reason: 'dept-workbench-token-not-configured',
+    });
   }
   if (!isDeelConfigured()) {
     return NextResponse.json({ error: 'Deel API not configured' }, { status: 503 });
@@ -67,17 +76,31 @@ export async function GET(req) {
     const bustCache = searchParams.get('bust') === '1';
     const limit = searchParams.get('limit') || '50';
 
+    // Phase 13b: cache key is dept-namespaced so HRX's snapshot never
+    // leaks to a non-HRX caller. HRX's key matches the pre-Phase-13b
+    // value (CACHE_KEY) so the existing cache file format is reused.
+    const cacheKey = isHrx ? CACHE_KEY : `${CACHE_KEY}_${deptInfo.deptSlug}`;
+
     if (!bustCache) {
-      const fresh = cacheGet(CACHE_KEY, CACHE_TTL);
+      const fresh = cacheGet(cacheKey, CACHE_TTL);
       if (fresh) return NextResponse.json(scoped(fresh, user));
     }
 
     let responseData;
     try {
       const r = await buildWithTimeout(
-        CACHE_KEY,
+        cacheKey,
         async () => {
-          const result = await listWorkbenchTasks({ limit: parseInt(limit, 10) });
+          // Phase 13b: per-dept fetch params — HRX gets the unchanged
+          // signature; non-HRX adds adminTokenOverride + teamNameFilter.
+          const fetchParams = isHrx
+            ? { limit: parseInt(limit, 10) }
+            : {
+                limit: parseInt(limit, 10),
+                adminTokenOverride: workbenchCfg.token,
+                teamNameFilter: workbenchCfg.teamFilter || [],
+              };
+          const result = await listWorkbenchTasks(fetchParams);
           const items = result.items.map(t => ({
             ...t,
             displayStatus: deriveWorkbenchStatus(t),
@@ -102,7 +125,7 @@ export async function GET(req) {
       }
       responseData = r.result;
     } catch (fetchErr) {
-      const stale = cacheGet(CACHE_KEY, STALE_TTL);
+      const stale = cacheGet(cacheKey, STALE_TTL);
       if (stale) {
         console.warn('[workbench] Fetch failed, returning stale cache:', fetchErr.message);
         return NextResponse.json({ ...scoped(stale, user), _stale: true });
