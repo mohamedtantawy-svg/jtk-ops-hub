@@ -1,4 +1,5 @@
 FROM public.ecr.aws/docker/library/node:22-alpine AS builder
+ARG CODEARTIFACT_AUTH_TOKEN
 WORKDIR /app
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
