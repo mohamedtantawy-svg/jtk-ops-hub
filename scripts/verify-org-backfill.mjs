@@ -776,6 +776,18 @@ const uaSchedIdSrc = read('app/api/v1/urgent-assist-schedule/[id]/route.js');
 assert('urgent-assist-schedule/[id] DELETE dept-scoped',
   /DELETE FROM urgent_assist_schedule WHERE id = \$1 AND org_node_id = \$2/.test(uaSchedIdSrc));
 
+// ── Section 24: Phase 11g — Workspaces / My Queue isolation ──────────────
+console.log('\n── Phase 11g: Workspaces / My Queue isolation ──');
+const wsMembersSrc = read('src/lib/workspace-members.js');
+assert('workspace-members addMember resolves subject dept via dept-scope',
+  /getTopLevelDeptForMember\(e\)/.test(wsMembersSrc));
+assert('workspace-members addMember stamps org_node_id on INSERT',
+  /INSERT INTO workspace_members \(workspace_id, email, role, added_by, org_node_id\)/.test(wsMembersSrc));
+// Note: /api/v1/queue + /api/v1/workspaces/[workspaceId]/queue are Zendesk-
+// sourced, so dept-isolation flows through Phase 11h tasks isolation +
+// workspace_members.org_node_id (this PR). No DB-level queue filter to
+// audit here.
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
