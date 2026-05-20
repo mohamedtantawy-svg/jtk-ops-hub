@@ -35,6 +35,7 @@ export async function GET(req) {
                 service, country, avatar_url, start_date, is_new, is_deleted,
                 on_leave, is_announcements_admin,
                 is_access_admin,
+                org_node_id,
                 created_at, updated_at
            FROM team_member_overrides`,
       ),

@@ -59,6 +59,11 @@ export const ALL_VIEWS = [
   // click that calls setView('notifications')) back to 'briefing',
   // which is the regression caught in the 2026-05-05 live audit.
   'notifications',
+  // Org tab (Phase 0, 2026-05-20) — visible to everyone (read-only for
+  // non-managerial tiers), edit access gated by `can_manage_org` admin power
+  // and per-node delegation rows in `org_node_admins`. Not in
+  // MANAGERIAL_ONLY_VIEWS — agents see the chart but can't mutate it.
+  'org',
   'settings',
 ];
 
@@ -149,6 +154,7 @@ export const VIEW_LABELS = {
   'urgent-assist': 'Urgent Assist',
   'urgent-assist-schedule': 'Urgent Assist Schedule',
   'notifications': 'Notifications',
+  'org':           'Org',
   'settings':      'Settings',
 };
 
