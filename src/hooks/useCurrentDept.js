@@ -36,29 +36,31 @@ export function useCurrentDept() {
 
   const load = useCallback(async () => {
     try {
-      const res = await apiFetch('/dept-scope/current');
-      if (!res.ok) {
-        // 401 during initial paint is fine — just leave the hook in loading
-        // state until auth lands. Don't propagate as an error.
-        if (res.status === 401) {
-          setState(s => ({ ...s, loading: false }));
-          return;
-        }
-        throw new Error(`HTTP ${res.status}`);
-      }
-      const data = await res.json();
+      // apiFetch returns the PARSED body on success and throws an Error
+      // (with `.status`) on non-2xx. 2026-05-20 fix: the original code
+      // treated the return as a Response object (`.ok` / `.status` / `.json()`)
+      // which silently failed for every user — the hook ALWAYS landed in
+      // the catch branch, so the super-admin chip never rendered and
+      // visibleSources stayed at the empty default.
+      const data = await apiFetch('/dept-scope/current');
       setState({
-        deptId: data.deptId || null,
-        dept: data.dept || null,
-        isGlobalSuperAdmin: data.isGlobalSuperAdmin === true,
-        depts: Array.isArray(data.depts) ? data.depts : [],
-        visibleSources: (data.visibleSources && typeof data.visibleSources === 'object')
+        deptId: data?.deptId || null,
+        dept: data?.dept || null,
+        isGlobalSuperAdmin: data?.isGlobalSuperAdmin === true,
+        depts: Array.isArray(data?.depts) ? data.depts : [],
+        visibleSources: (data?.visibleSources && typeof data.visibleSources === 'object')
           ? { ...EMPTY_VISIBLE_SOURCES, ...data.visibleSources }
           : EMPTY_VISIBLE_SOURCES,
         loading: false,
         error: null,
       });
     } catch (err) {
+      // 401 during initial paint is fine — leave the hook in loading state
+      // until auth lands. Don't surface as an error.
+      if (err?.status === 401) {
+        setState(s => ({ ...s, loading: false }));
+        return;
+      }
       console.warn('[useCurrentDept] load failed:', err?.message);
       setState(s => ({ ...s, loading: false, error: err?.message || 'load failed' }));
     }
@@ -66,14 +68,12 @@ export function useCurrentDept() {
 
   const setDept = useCallback(async (deptId) => {
     try {
-      const res = await apiFetch('/dept-scope/current', {
+      // apiFetch throws on non-2xx, so a successful call means the cookie
+      // is set and we can reload immediately.
+      await apiFetch('/dept-scope/current', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ deptId: deptId || null }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      // Full reload — simpler + safer than invalidating every scoped hook
-      // by hand. The super-admin uses this maybe 1-2x per day.
       window.location.reload();
     } catch (err) {
       console.warn('[useCurrentDept] setDept failed:', err?.message);

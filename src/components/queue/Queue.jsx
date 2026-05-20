@@ -28,6 +28,7 @@ import Avatar from '../ui/Avatar';
 import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
 import { useTaskNotes } from '../../hooks/useTaskNotes';
 import { useTeamDataVersion } from '../../hooks/useTeamDataVersion';
+import { useCurrentDept } from '../../hooks/useCurrentDept';
 import UnifiedSyncButton from './UnifiedSyncButton';
 import SourceTable from './SourceTable';
 import ErrorBoundary from '../ui/ErrorBoundary';
@@ -126,7 +127,27 @@ const loadFilters = (email) => {
   }
 };
 
+// Map a WORK_SOURCES tab id → its `visibleSources` key on the dept-scope
+// payload. Jira + Zendesk are NOT in visibleSources (they're available
+// to every dept by default and dispatched per-dept by the route layer)
+// so they pass through unconditionally.
+const SOURCE_TAB_TO_VISIBILITY_KEY = {
+  onboarding: 'onboarding',
+  offboarding: 'offboarding',
+  amendments: 'amendments',
+  redlines: 'redlines',
+  incentive_plans: 'incentivePlans',
+  workbench: 'workbench',
+};
+
 const Queue = ({ user, tasks, subFilter }) => {
+  // Phase 14.1 (2026-05-20): per-dept Deel-source visibility. Tabs that
+  // belong to a source the current dept has explicitly hidden don't render
+  // at all (GIX hides 5; HRX keeps all 6). HRX preserves identical
+  // behavior because its visibleSources profile sets all 6 → true.
+  const deptState = useCurrentDept();
+  const visibleSources = deptState?.visibleSources;
+
   // Filters always start in their default state to keep SSR HTML identical
   // to the first client render. The `useEffect` below rehydrates from
   // localStorage after mount — prevents React #418 hydration mismatches
@@ -969,7 +990,18 @@ const Queue = ({ user, tasks, subFilter }) => {
             // wrap also gives narrow desktops / tablets a usable layout instead
             // of a horizontal-scroll filter row.
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', overflow: 'visible', paddingBottom: 2 }}>
-              {[...WORK_SOURCES, HIDDEN_TAB].map(ws => {
+              {[...WORK_SOURCES, HIDDEN_TAB].filter(ws => {
+                // Phase 14.1 visibility gate: if a Deel source is set to
+                // false in the current dept's profile, drop its tab from
+                // the row. The hook starts with EMPTY_VISIBLE_SOURCES
+                // (all false) and resolves to the real values once
+                // /dept-scope/current returns — during that brief window
+                // we let unknown ids through, then hide on next render.
+                if (deptState?.loading) return true;
+                const key = SOURCE_TAB_TO_VISIBILITY_KEY[ws.id];
+                if (!key) return true; // jira/zendesk/hidden — always show
+                return visibleSources?.[key] === true;
+              }).map(ws => {
                 const isQueueFilter = ws.id === 'zendesk' || ws.id === 'jira';
                 const isActive = isQueueFilter ? (fTool === ws.id && !workSource) : workSource === ws.id;
                 const count = ws.id === 'onboarding' ? visOnboardingRows.length

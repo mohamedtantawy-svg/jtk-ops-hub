@@ -17,10 +17,16 @@
 // themselves). Every read resolves `process.env[name]` at request time
 // so a rotation in Nexus doesn't require a process restart.
 
+// Canonical slugs MUST match what's actually persisted in `org_nodes.slug`
+// in prod — the 2026-05-20 deploy revealed that GIX was stored as 'gix'
+// (not 'global-immigration') and Benefits as 'benefits' (not
+// 'benefits-operations') because mohamed chose those slugs when creating
+// the depts via UI. Slugs are stable + this map is keyed by slug, so the
+// constants here must reflect the live values, not aspirational ones.
 const HR_EXPERIENCE_SLUG = 'hr-experience';
-const GLOBAL_IMMIGRATION_SLUG = 'global-immigration';
+const GLOBAL_IMMIGRATION_SLUG = 'gix';
 const PAYROLL_OPERATIONS_SLUG = 'payroll-operations';
-const BENEFITS_OPERATIONS_SLUG = 'benefits-operations';
+const BENEFITS_OPERATIONS_SLUG = 'benefits';
 
 // Default Deel-source flags for a brand-new department. All FALSE so a
 // freshly-stood-up dept doesn't accidentally render HRX-style sections
