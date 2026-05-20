@@ -124,14 +124,21 @@ export async function addMember(workspaceId, email, role, addedBy) {
   const r = VALID_ROLES.has(role) ? role : 'member';
   const by = normalizeEmail(addedBy) || null;
 
+  // Phase 11g (2026-05-20): stamp the NEW member's own dept (not the
+  // adder's). Resolves via the recursive CTE to their top-level dept.
+  // Null is permitted while the new member's org placement is being set up.
+  const { getTopLevelDeptForMember } = await import('./dept-scope');
+  const subjectDept = await getTopLevelDeptForMember(e);
+  const subjectDeptId = subjectDept?.deptId || null;
+
   const { rows } = await query(
-    `INSERT INTO workspace_members (workspace_id, email, role, added_by)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO workspace_members (workspace_id, email, role, added_by, org_node_id)
+     VALUES ($1, $2, $3, $4, $5)
      ON CONFLICT (workspace_id, LOWER(email))
        WHERE status = 'active'
        DO NOTHING
      RETURNING email, role, added_by, added_at`,
-    [workspaceId, e, r, by],
+    [workspaceId, e, r, by, subjectDeptId],
   );
   if (!rows.length) {
     // Either already a member, or had a 'removed' row blocking. Try reviving
