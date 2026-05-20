@@ -380,6 +380,30 @@ assert('drawer renders VacanciesSection',
 assert('save folds SLA + dashboards into config blob',
   /config:\s*cleanConfig/.test(drawerSrcPhase5));
 
+// ── Section 13: Phase 6 downstream wiring ────────────────────────────────
+console.log('\n── Phase 6: downstream wiring ──');
+const orgScopeSrc = read('src/lib/org-scope.js');
+assert('org-scope exports subtreeNodeIds + membersInSubtree + userOrgScope',
+  /export function subtreeNodeIds/.test(orgScopeSrc)
+  && /export function membersInSubtree/.test(orgScopeSrc)
+  && /export function userOrgScope/.test(orgScopeSrc));
+assert('subtreeNodeIds caps iterations to prevent infinite loops',
+  /safety < 5000/.test(orgScopeSrc));
+
+const tmRouteSrcPhase6 = read('app/api/v1/team-members/route.js');
+assert('POST team-members validates against dynamic team list',
+  /getValidTeamNames\(\)/.test(tmRouteSrcPhase6));
+assert('POST keeps legacy enum as fallback',
+  /LEGACY_VALID_TEAMS/.test(tmRouteSrcPhase6));
+
+const tmByIdSrcPhase6 = read('app/api/v1/team-members/[email]/route.js');
+assert('PATCH team-members validates against dynamic team list',
+  /getValidTeamNamesForPatch/.test(tmByIdSrcPhase6));
+
+const orgConfigSrc = read('src/data/orgConfig.js');
+assert('orgConfig.js marked @deprecated',
+  /@deprecated/.test(orgConfigSrc));
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

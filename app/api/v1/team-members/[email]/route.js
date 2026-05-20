@@ -14,7 +14,25 @@ import { canManageRoster, bustAccessAdminCache } from '../../../../../src/lib/ac
 
 const VALID_ACCESS = ['admin', 'regional_manager', 'team_lead', 'agent'];
 const VALID_SERVICES = ['EOR', 'LifeCycle', 'New Services', 'All'];
-const VALID_TEAMS = ['All', 'EMEA', 'APAC', 'LATAM', 'NAM', 'LATAM + NAM'];
+// Phase 6 (2026-05-20): legacy enum kept as a safety net; the live
+// allow-list now includes every active org_nodes.name so the Edit
+// Allocation drawer can write a new team name without a deploy.
+const LEGACY_VALID_TEAMS = ['All', 'EMEA', 'APAC', 'LATAM', 'NAM', 'LATAM + NAM'];
+let _patchTeamCache = { names: new Set(), ts: 0 };
+const PATCH_TEAM_TTL_MS = 60_000;
+async function getValidTeamNamesForPatch() {
+  const now = Date.now();
+  if (_patchTeamCache.ts && now - _patchTeamCache.ts < PATCH_TEAM_TTL_MS) {
+    return _patchTeamCache.names;
+  }
+  const set = new Set(LEGACY_VALID_TEAMS);
+  try {
+    const { rows } = await query(`SELECT name FROM org_nodes WHERE is_archived = false`);
+    for (const r of rows) if (r?.name) set.add(r.name);
+  } catch { /* fall back to legacy enum */ }
+  _patchTeamCache = { names: set, ts: now };
+  return set;
+}
 
 // Resolve a subject email from URL params. Next.js 16 makes params a promise.
 async function resolveEmail(params) {
@@ -70,8 +88,13 @@ export async function PATCH(req, { params }) {
     if (body.service !== undefined && body.service !== null && !VALID_SERVICES.includes(body.service)) {
       return NextResponse.json({ error: `Invalid service. Must be one of: ${VALID_SERVICES.join(', ')}` }, { status: 400 });
     }
-    if (body.team !== undefined && body.team !== null && !VALID_TEAMS.includes(body.team)) {
-      return NextResponse.json({ error: `Invalid team. Must be one of: ${VALID_TEAMS.join(', ')}` }, { status: 400 });
+    if (body.team !== undefined && body.team !== null) {
+      const valid = await getValidTeamNamesForPatch();
+      if (!valid.has(body.team)) {
+        return NextResponse.json({
+          error: `Invalid team "${body.team}". Must match a legacy region or an active org_nodes.name.`,
+        }, { status: 400 });
+      }
     }
 
     const updates = [];
