@@ -26,7 +26,7 @@ const FIT_PADDING = 32;
 
 export default function OrgChartCanvas({
   tree, rootNodes, members, search, canEdit,
-  onSelectNode, onEdit, onAddChild, onArchive, onSelectMember,
+  onSelectNode, onEdit, onAddChild, onArchive, onAddMember, onSelectMember,
 }) {
   const wrapRef = useRef(null);
   const stageRef = useRef(null);
@@ -213,6 +213,7 @@ export default function OrgChartCanvas({
                 onSelect={onSelectNode}
                 onEdit={onEdit}
                 onAddChild={onAddChild}
+                onAddMember={onAddMember}
                 onArchive={onArchive}
               />
             );
@@ -265,7 +266,7 @@ export default function OrgChartCanvas({
   );
 }
 
-function NodeCard({ item, highlight, canEdit, onSelect, onEdit, onAddChild, onArchive }) {
+function NodeCard({ item, highlight, canEdit, onSelect, onEdit, onAddChild, onAddMember, onArchive }) {
   const node = item.data;
   const accent = node.color || (node.kind === 'department' ? '#7c3aed' : '#1f74b3');
   const icon = node.icon || (node.kind === 'department' ? 'bi-building' : 'bi-people');
@@ -375,16 +376,22 @@ function NodeCard({ item, highlight, canEdit, onSelect, onEdit, onAddChild, onAr
               <i className="bi bi-three-dots" style={{ fontSize: 11 }} />
             </button>
             {menuOpen && (
+              // Menu opens downward (top: calc(100% + 4px)) so cards near the
+              // very top of the chart canvas don't clip the menu against the
+              // canvas's overflow:hidden boundary. The action button sits
+              // along the card's bottom edge so a downward menu still flows
+              // naturally.
               <div style={{
-                position: 'absolute', bottom: 'calc(100% + 4px)', right: 0,
+                position: 'absolute', top: 'calc(100% + 4px)', right: 0,
                 background: 'var(--surface)',
                 border: '1px solid var(--border)',
                 borderRadius: 'var(--radius-lg)',
                 boxShadow: '0 12px 30px rgba(0,0,0,0.14)',
                 minWidth: 180, overflow: 'hidden', zIndex: 5,
               }}>
-                <CardMenuItem icon="bi-pencil"  label="Edit"           onClick={() => { setMenuOpen(false); onEdit?.(node); }} />
-                <CardMenuItem icon="bi-plus-lg" label="Add team"       onClick={() => { setMenuOpen(false); onAddChild?.(node, 'team'); }} />
+                <CardMenuItem icon="bi-pencil"      label="Edit"               onClick={() => { setMenuOpen(false); onEdit?.(node); }} />
+                <CardMenuItem icon="bi-person-plus" label="Add member"         onClick={() => { setMenuOpen(false); onAddMember?.(node); }} />
+                <CardMenuItem icon="bi-plus-lg"     label="Add team"           onClick={() => { setMenuOpen(false); onAddChild?.(node, 'team'); }} />
                 {node.kind === 'department' && (
                   <CardMenuItem icon="bi-diagram-2" label="Add sub-department" onClick={() => { setMenuOpen(false); onAddChild?.(node, 'department'); }} />
                 )}

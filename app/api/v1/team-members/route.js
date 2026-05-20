@@ -120,6 +120,12 @@ export async function POST(req) {
     const managerEmail = body.managerEmail ? String(body.managerEmail).trim().toLowerCase() : null;
     const country = body.country ? String(body.country).trim() : null;
     const title = body.title || 'HR Experience Specialist';
+    // Phase 3 (Org Tab): new members can land directly on an org node so
+    // the Org-tab "Add member" flow doesn't require a second PATCH. UUID
+    // validation is loose — the FK will reject a non-existent node.
+    const orgNodeId = body.orgNodeId && /^[0-9a-fA-F-]{36}$/.test(String(body.orgNodeId))
+      ? String(body.orgNodeId)
+      : null;
 
     if (!VALID_ACCESS.includes(access)) {
       return NextResponse.json({ error: `Invalid access. Must be one of: ${VALID_ACCESS.join(', ')}` }, { status: 400 });
@@ -168,8 +174,9 @@ export async function POST(req) {
     await query(
       `INSERT INTO team_member_overrides
          (email, name, initials, title, access, manager_email, team, region,
-          service, country, avatar_url, start_date, is_new, is_deleted, on_leave)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true,false,false)
+          service, country, avatar_url, start_date, is_new, is_deleted, on_leave,
+          org_node_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true,false,false,$13)
        ON CONFLICT (email) DO UPDATE
        SET name          = EXCLUDED.name,
            initials      = EXCLUDED.initials,
@@ -185,8 +192,9 @@ export async function POST(req) {
            is_new        = true,
            is_deleted    = false,
            on_leave      = false,
+           org_node_id   = COALESCE(EXCLUDED.org_node_id, team_member_overrides.org_node_id),
            updated_at    = NOW()`,
-      [email, name, initials, title, access, managerEmail, team, region, service, country, avatarUrl, startDate]
+      [email, name, initials, title, access, managerEmail, team, region, service, country, avatarUrl, startDate, orgNodeId]
     );
 
     // Also seed a members row so auth (findMemberByEmail), /me, and permissions
@@ -226,6 +234,7 @@ export async function POST(req) {
       service, country, avatarUrl, startDate,
       isNew: true, isDeleted: false, onLeave: false,
       lastSeenAt: null, lastLoginAt: null, loginCount: 0,
+      orgNodeId,
     }, { status: 201 });
   } catch (err) {
     console.error('[team-members POST]', err.message);

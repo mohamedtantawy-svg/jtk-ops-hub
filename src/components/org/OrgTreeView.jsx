@@ -74,6 +74,7 @@ export default function OrgTreeView({
   sumDescendants,
   onEdit,
   onAddChild,
+  onAddMember,
   onArchive,
   onSelect,
 }) {
@@ -167,6 +168,7 @@ export default function OrgTreeView({
               sumDescendants={sumDescendants}
               onEdit={onEdit}
               onAddChild={onAddChild}
+              onAddMember={onAddMember}
               onArchive={onArchive}
               onSelect={onSelect}
             />
@@ -179,7 +181,7 @@ export default function OrgTreeView({
 
 function OrgNodeRow({
   node, depth, tree, collapsed, toggle, keepIds, canEdit,
-  sumDescendants, onEdit, onAddChild, onArchive, onSelect,
+  sumDescendants, onEdit, onAddChild, onAddMember, onArchive, onSelect,
 }) {
   const kids = tree.byParent.get(node.id) || [];
   const visibleKids = keepIds ? kids.filter(k => keepIds.has(k.id)) : kids;
@@ -332,6 +334,7 @@ function OrgNodeRow({
                 zIndex: 300, minWidth: 200, overflow: 'hidden',
               }}>
                 <MenuItem icon="bi-pencil"        label="Edit"           onClick={() => { setMenuOpen(false); onEdit?.(node); }} />
+                <MenuItem icon="bi-person-plus"   label="Add member"     onClick={() => { setMenuOpen(false); onAddMember?.(node); }} />
                 {/* Sub-team add: every department can host teams; every team can host sub-teams. Sub-department add is admin-only via the global "+ New department" entry. */}
                 <MenuItem icon="bi-plus-lg"       label="Add child team" onClick={() => { setMenuOpen(false); onAddChild?.(node, 'team'); }} />
                 {node.kind === 'department' && (
@@ -358,6 +361,7 @@ function OrgNodeRow({
           sumDescendants={sumDescendants}
           onEdit={onEdit}
           onAddChild={onAddChild}
+          onAddMember={onAddMember}
           onArchive={onArchive}
           onSelect={onSelect}
         />
