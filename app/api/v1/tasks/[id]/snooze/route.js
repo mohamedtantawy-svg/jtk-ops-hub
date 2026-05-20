@@ -3,6 +3,7 @@ import { query, withTransaction } from '../../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { canOperateOnTask, loadTaskForGuard, FORBIDDEN } from '../../../../../../src/lib/task-scope-guard';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
+import { getCurrentDeptId } from '../../../../../../src/lib/dept-scope';
 
 // PATCH /api/v1/tasks/[id]/snooze
 // `id` is either a UUID (internal tasks.id) or an external_id like "ZD-123".
@@ -54,17 +55,20 @@ export async function PATCH(req, { params }) {
       updatedRow = rows[0] || null;
       if (!updatedRow) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     } else {
-      // external_id path: upsert so live tickets get a persistent row
+      // external_id path: upsert so live tickets get a persistent row.
+      // Phase 11h: stamp the snoozer's currentDeptId so the shadow row is
+      // born tenanted in the actor's dept.
       const source = id.startsWith('ZD-') ? 'zendesk' : id.startsWith('PROJ-') || /^[A-Z]+-\d+$/.test(id) ? 'jira' : 'manual';
+      const orgNodeId = await getCurrentDeptId(user, req);
       const { rows } = await query(
-        `INSERT INTO tasks (external_id, source, subject, status, snoozed_until)
-         VALUES ($1, $2, $1, 'snoozed', $3)
+        `INSERT INTO tasks (external_id, source, subject, status, snoozed_until, org_node_id)
+         VALUES ($1, $2, $1, 'snoozed', $3, $4)
          ON CONFLICT (external_id) DO UPDATE
            SET snoozed_until = EXCLUDED.snoozed_until,
                status = 'snoozed',
                updated_at = NOW()
          RETURNING *`,
-        [id, source, until || null],
+        [id, source, until || null, orgNodeId],
       );
       updatedRow = rows[0] || null;
     }

@@ -788,6 +788,41 @@ assert('workspace-members addMember stamps org_node_id on INSERT',
 // workspace_members.org_node_id (this PR). No DB-level queue filter to
 // audit here.
 
+// ── Section 25: Phase 11h — Tasks isolation ──────────────────────────────
+console.log('\n── Phase 11h: Tasks isolation ──');
+const tasksListSrc = read('app/api/v1/tasks/route.js');
+assert('tasks list imports getCurrentDeptId',
+  /import \{ getCurrentDeptId \}/.test(tasksListSrc));
+assert('tasks list filters by t.org_node_id with fail-closed',
+  /t\.org_node_id = \$/.test(tasksListSrc)
+  && /whereSql \+= ` AND 1=0`/.test(tasksListSrc));
+assert('tasks POST stamps orgNodeId on INSERT',
+  /INSERT INTO tasks[\s\S]+org_node_id\)/.test(tasksListSrc)
+  && /const orgNodeId = await getCurrentDeptId\(postUser, req\)/.test(tasksListSrc));
+
+const tasksIdSrc = read('app/api/v1/tasks/[id]/route.js');
+assert('tasks/[id] GET filters by t.org_node_id',
+  /WHERE t\.id = \$1 AND t\.org_node_id = \$2/.test(tasksIdSrc));
+assert('tasks/[id] DELETE filters by org_node_id',
+  /WHERE id = \$1 AND org_node_id = \$2/.test(tasksIdSrc));
+
+const tasksSnoozeSrc = read('app/api/v1/tasks/[id]/snooze/route.js');
+assert('tasks/[id]/snooze stamps shadow row dept on INSERT',
+  /INSERT INTO tasks[\s\S]+org_node_id\)/.test(tasksSnoozeSrc));
+
+const reassignSrc = read('app/api/v1/queue/reassign/route.js');
+assert('queue/reassign shadow upsert stamps org_node_id',
+  /INSERT INTO tasks[\s\S]+org_node_id\)/.test(reassignSrc));
+assert('queue/reassign ON CONFLICT does NOT touch org_node_id (immutable)',
+  !/ON CONFLICT[\s\S]+org_node_id = EXCLUDED\.org_node_id/.test(reassignSrc));
+
+const actionsSrc = read('app/api/v1/queue/[ticketId]/actions/route.js');
+assert('queue/actions shadow upsert stamps org_node_id',
+  /'org_node_id'/.test(actionsSrc)
+  && /orgNodeId/.test(actionsSrc));
+assert('queue/actions resolves orgNodeId once per POST',
+  /const orgNodeId = await getCurrentDeptId\(user, req\)/.test(actionsSrc));
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

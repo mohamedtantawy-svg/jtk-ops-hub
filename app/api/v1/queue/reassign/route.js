@@ -21,8 +21,9 @@ import { query } from '../../../../../src/lib/db';
 import { cacheDelMany } from '../../../../../src/lib/server-cache';
 import { MEMBERS_BY_EMAIL } from '../../../../../src/data/members';
 import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
+import { getCurrentDeptId } from '../../../../../src/lib/dept-scope';
 
-async function upsertShadowAndLog({ ticketId, source, assigneeEmail, actorName }) {
+async function upsertShadowAndLog({ ticketId, source, assigneeEmail, actorName, orgNodeId }) {
   try {
     // Resolve assignee_id from email (NULL if not a known member)
     const assigneeLookup = await query(
@@ -31,15 +32,19 @@ async function upsertShadowAndLog({ ticketId, source, assigneeEmail, actorName }
     );
     const assigneeId = assigneeLookup.rows[0]?.id || null;
 
+    // Phase 11h: shadow rows are born tenanted in the actor's dept. The
+    // ON CONFLICT branch does NOT update org_node_id — the row's original
+    // dept owns it forever, even if a later actor from a different dept
+    // touches it (defends against cross-tenant rewrites).
     const upsert = await query(
-      `INSERT INTO tasks (external_id, source, subject, status, assignee_id)
-       VALUES ($1, $2, $3, 'in_progress', $4)
+      `INSERT INTO tasks (external_id, source, subject, status, assignee_id, org_node_id)
+       VALUES ($1, $2, $3, 'in_progress', $4, $5)
        ON CONFLICT (external_id) DO UPDATE
          SET assignee_id = EXCLUDED.assignee_id,
              status = CASE WHEN tasks.status = 'resolved' THEN tasks.status ELSE 'in_progress' END,
              updated_at = NOW()
        RETURNING id`,
-      [ticketId, source, ticketId, assigneeId],
+      [ticketId, source, ticketId, assigneeId, orgNodeId],
     );
     const taskUuid = upsert.rows[0]?.id;
     if (!taskUuid) return;
@@ -121,7 +126,8 @@ export async function POST(req) {
 
     // Persist + log activity; bust the /queue caches so the next poll picks
     // up the fresh assignee from the source system instead of our stale copy.
-    await upsertShadowAndLog({ ticketId, source, assigneeEmail, actorName: user.name });
+    const orgNodeId = await getCurrentDeptId(user, req);
+    await upsertShadowAndLog({ ticketId, source, assigneeEmail, actorName: user.name, orgNodeId });
     cacheDelMany(['queue', 'queue_zendesk', 'queue_jira']);
 
     return NextResponse.json({
