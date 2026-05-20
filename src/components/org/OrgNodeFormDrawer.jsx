@@ -6,6 +6,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { FLAGS, getCountryName } from '../../data/constants';
+import {
+  listNodeAdmins, grantNodeAdmin, revokeNodeAdmin,
+  listNodeVacancies, addNodeVacancy, removeNodeVacancy,
+} from '../../services/orgApi';
 
 const PRESET_COLORS = [
   { hex: '#7c3aed', name: 'Purple' },
@@ -49,6 +53,10 @@ function emptyForm(kind, parentNode) {
     // Sub-teams inherit parent's country list as a starting point. Admin
     // can edit before saving.
     countryCodes: Array.isArray(parentNode?.countryCodes) ? [...parentNode.countryCodes] : [],
+    // Phase 5: nested config slots — SLA cascade + dashboards stub.
+    slaTicketMins: '',
+    slaOnboardingMins: '',
+    dashboards: '',
   };
 }
 
@@ -63,6 +71,9 @@ export default function OrgNodeFormDrawer({
 }) {
   const initial = useMemo(() => {
     if (mode === 'edit' && node) {
+      const ticket = node.config?.sla?.thresholds?.ticket;
+      const onb = node.config?.sla?.thresholds?.onboarding;
+      const dashSlugs = Array.isArray(node.config?.dashboards) ? node.config.dashboards.join(', ') : '';
       return {
         kind: node.kind,
         name: node.name || '',
@@ -72,6 +83,9 @@ export default function OrgNodeFormDrawer({
         icon: node.icon || (node.kind === 'department' ? 'bi-building' : 'bi-people'),
         slackChannel: node.slackChannel || '',
         countryCodes: node.countryCodes || [],
+        slaTicketMins: ticket != null ? String(ticket) : '',
+        slaOnboardingMins: onb != null ? String(onb) : '',
+        dashboards: dashSlugs,
       };
     }
     return emptyForm(defaultKind || 'team', parentNode);
@@ -110,6 +124,29 @@ export default function OrgNodeFormDrawer({
     if (!name) { setError('Name is required.'); return; }
     setSaving(true);
     try {
+      // Phase 5: roll the SLA + dashboards inputs into the config blob.
+      // Preserve any keys the user hasn't surfaced yet (capacity, MOC, etc.)
+      const baseConfig = (mode === 'edit' && node?.config && typeof node.config === 'object') ? { ...node.config } : {};
+      const slaThresholds = {};
+      const ticketMins = Number(form.slaTicketMins);
+      const onbMins = Number(form.slaOnboardingMins);
+      if (Number.isFinite(ticketMins) && form.slaTicketMins !== '') slaThresholds.ticket = ticketMins;
+      if (Number.isFinite(onbMins) && form.slaOnboardingMins !== '') slaThresholds.onboarding = onbMins;
+      const slaPatch = Object.keys(slaThresholds).length
+        ? { ...(baseConfig.sla || {}), thresholds: slaThresholds }
+        : (baseConfig.sla && (delete baseConfig.sla.thresholds, baseConfig.sla));
+      const dashSlugs = String(form.dashboards || '')
+        .split(',').map(s => s.trim()).filter(Boolean);
+      const nextConfig = {
+        ...baseConfig,
+        ...(slaPatch ? { sla: slaPatch } : { sla: undefined }),
+        dashboards: dashSlugs,
+      };
+      // Drop undefined keys so JSONB stays clean.
+      const cleanConfig = Object.fromEntries(
+        Object.entries(nextConfig).filter(([, v]) => v !== undefined),
+      );
+
       const payload = {
         kind: form.kind,
         name,
@@ -119,6 +156,7 @@ export default function OrgNodeFormDrawer({
         icon: form.icon || null,
         slackChannel: form.slackChannel.trim() || null,
         countryCodes: form.countryCodes,
+        config: cleanConfig,
       };
       if (mode === 'create') {
         payload.parentId = parentNode?.id || null;
@@ -340,6 +378,50 @@ export default function OrgNodeFormDrawer({
             </div>
           </Field>
 
+          {/* Phase 5 — SLA cascade override */}
+          {isEdit && (
+            <Field label="SLA override (minutes)" hint="Leave blank to inherit from the parent node. Sub-teams inherit if you don't set their own value.">
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>Ticket</div>
+                  <input type="number" min={0} value={form.slaTicketMins}
+                    onChange={e => set('slaTicketMins', e.target.value)}
+                    placeholder="inherit"
+                    style={inputStyle}
+                  />
+                </div>
+                <div>
+                  <div style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)', marginBottom: 4 }}>Onboarding</div>
+                  <input type="number" min={0} value={form.slaOnboardingMins}
+                    onChange={e => set('slaOnboardingMins', e.target.value)}
+                    placeholder="inherit"
+                    style={inputStyle}
+                  />
+                </div>
+              </div>
+            </Field>
+          )}
+
+          {/* Phase 5 — Dashboards stub (Phase 8 editor lands behind FF) */}
+          {isEdit && (
+            <Field label="Dashboard slugs" hint="Comma-separated. These map to the per-team mini-workspace landing in a follow-up phase.">
+              <input value={form.dashboards} onChange={e => set('dashboards', e.target.value)}
+                placeholder="hrx-eor-overview, hrx-eor-sla"
+                style={inputStyle}
+              />
+            </Field>
+          )}
+
+          {/* Phase 5 — Delegated admins */}
+          {isEdit && node && (
+            <DelegatedAdminsSection nodeId={node.id} />
+          )}
+
+          {/* Phase 5 — Vacant role placeholders */}
+          {isEdit && node && (
+            <VacanciesSection nodeId={node.id} />
+          )}
+
           <Field label="Countries" hint="Multi-select. Sub-teams inherit from their parent unless overridden.">
             <div>
               <input
@@ -496,3 +578,220 @@ const inputStyle = {
   fontFamily: 'inherit',
   boxSizing: 'border-box',
 };
+
+// ── Delegated admins section ────────────────────────────────────────────
+function DelegatedAdminsSection({ nodeId }) {
+  const [admins, setAdmins] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [email, setEmail] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await listNodeAdmins(nodeId);
+      setAdmins(res?.admins || []);
+    } catch (e) { setErr(e?.message || 'Load failed'); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [nodeId]);
+
+  const grant = async () => {
+    const lc = email.trim().toLowerCase();
+    if (!lc) return;
+    setBusy(true); setErr(null);
+    try {
+      await grantNodeAdmin(nodeId, lc);
+      setEmail('');
+      await load();
+    } catch (e) { setErr(e?.message || 'Could not grant'); }
+    finally { setBusy(false); }
+  };
+  const revoke = async (target) => {
+    setBusy(true); setErr(null);
+    try {
+      await revokeNodeAdmin(nodeId, target);
+      await load();
+    } catch (e) { setErr(e?.message || 'Could not revoke'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div>
+      <label style={{
+        display: 'block',
+        fontSize: 'var(--font-sm)', fontWeight: 600,
+        color: 'var(--text)', marginBottom: 6,
+      }}>Delegated admins</label>
+      <div style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)', marginBottom: 8 }}>
+        These users can edit this node and every descendant — no global admin powers granted.
+      </div>
+      {err && (
+        <div role="alert" style={{
+          padding: '8px 12px', borderRadius: 8,
+          background: 'var(--red-light, #fef2f2)',
+          color: 'var(--red-solid, #b91c1c)',
+          fontSize: 'var(--font-sm)', marginBottom: 8,
+        }}>{err}</div>
+      )}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+        <input
+          type="email" value={email} onChange={e => setEmail(e.target.value)}
+          placeholder="admin@deel.com" style={{ ...inputStyle, flex: 1 }}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); grant(); } }}
+        />
+        <button type="button" onClick={grant} disabled={busy || !email.trim()}
+          style={{
+            padding: '8px 14px', height: 38,
+            background: 'var(--purple)', color: 'white',
+            border: 'none', borderRadius: 8,
+            fontSize: 'var(--font-sm)', fontWeight: 600,
+            fontFamily: 'inherit',
+            cursor: busy || !email.trim() ? 'not-allowed' : 'pointer',
+            opacity: busy || !email.trim() ? 0.55 : 1,
+          }}
+        >Grant</button>
+      </div>
+      <div style={{
+        border: '1px solid var(--border)', borderRadius: 8,
+        background: 'var(--surface-2)',
+        overflow: 'hidden',
+      }}>
+        {loading ? (
+          <div style={{ padding: 12, fontSize: 'var(--font-sm)', color: 'var(--text-muted)', textAlign: 'center' }}>Loading…</div>
+        ) : admins.length === 0 ? (
+          <div style={{ padding: 12, fontSize: 'var(--font-sm)', color: 'var(--text-muted)', textAlign: 'center' }}>
+            No delegated admins yet.
+          </div>
+        ) : admins.map(a => (
+          <div key={a.email} style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '8px 12px',
+            borderBottom: '1px solid var(--border-light)',
+          }}>
+            <i className="bi bi-shield-lock" style={{ fontSize: 12, color: 'var(--purple)' }} />
+            <span style={{ flex: 1, fontSize: 'var(--font-sm)', color: 'var(--text)' }}>{a.email}</span>
+            <button type="button" onClick={() => revoke(a.email)} disabled={busy}
+              style={{
+                background: 'transparent', border: 'none',
+                color: 'var(--text-muted)', cursor: 'pointer',
+                padding: 4, borderRadius: 4,
+                fontFamily: 'inherit',
+              }}
+              aria-label={`Revoke ${a.email}`}
+            ><i className="bi bi-x-circle" style={{ fontSize: 13 }} /></button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Vacancies section ───────────────────────────────────────────────────
+function VacanciesSection({ nodeId }) {
+  const [vacancies, setVacancies] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [title, setTitle] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const res = await listNodeVacancies(nodeId);
+      setVacancies(res?.vacancies || []);
+    } catch (e) { setErr(e?.message || 'Load failed'); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [nodeId]);
+
+  const add = async () => {
+    const t = title.trim();
+    if (!t) return;
+    setBusy(true); setErr(null);
+    try {
+      await addNodeVacancy(nodeId, { title: t });
+      setTitle('');
+      await load();
+    } catch (e) { setErr(e?.message || 'Could not add'); }
+    finally { setBusy(false); }
+  };
+  const remove = async (id) => {
+    setBusy(true); setErr(null);
+    try {
+      await removeNodeVacancy(nodeId, id);
+      await load();
+    } catch (e) { setErr(e?.message || 'Could not remove'); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div>
+      <label style={{
+        display: 'block',
+        fontSize: 'var(--font-sm)', fontWeight: 600,
+        color: 'var(--text)', marginBottom: 6,
+      }}>Open roles (vacancies)</label>
+      <div style={{ fontSize: 'var(--font-xs)', color: 'var(--text-muted)', marginBottom: 8 }}>
+        Ghost placeholders show on the chart under this node so hiring is visible at a glance.
+      </div>
+      {err && (
+        <div role="alert" style={{
+          padding: '8px 12px', borderRadius: 8,
+          background: 'var(--red-light, #fef2f2)',
+          color: 'var(--red-solid, #b91c1c)',
+          fontSize: 'var(--font-sm)', marginBottom: 8,
+        }}>{err}</div>
+      )}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+        <input
+          value={title} onChange={e => setTitle(e.target.value)}
+          placeholder="Senior HR Experience Manager"
+          style={{ ...inputStyle, flex: 1 }}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
+        />
+        <button type="button" onClick={add} disabled={busy || !title.trim()}
+          style={{
+            padding: '8px 14px', height: 38,
+            background: 'var(--purple)', color: 'white',
+            border: 'none', borderRadius: 8,
+            fontSize: 'var(--font-sm)', fontWeight: 600,
+            fontFamily: 'inherit',
+            cursor: busy || !title.trim() ? 'not-allowed' : 'pointer',
+            opacity: busy || !title.trim() ? 0.55 : 1,
+          }}
+        >Add</button>
+      </div>
+      <div style={{
+        border: '1px solid var(--border)', borderRadius: 8,
+        background: 'var(--surface-2)', overflow: 'hidden',
+      }}>
+        {loading ? (
+          <div style={{ padding: 12, fontSize: 'var(--font-sm)', color: 'var(--text-muted)', textAlign: 'center' }}>Loading…</div>
+        ) : vacancies.length === 0 ? (
+          <div style={{ padding: 12, fontSize: 'var(--font-sm)', color: 'var(--text-muted)', textAlign: 'center' }}>
+            No open roles yet.
+          </div>
+        ) : vacancies.map(v => (
+          <div key={v.id} style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '8px 12px',
+            borderBottom: '1px solid var(--border-light)',
+          }}>
+            <i className="bi bi-person-dash" style={{ fontSize: 12, color: 'var(--orange)' }} />
+            <span style={{ flex: 1, fontSize: 'var(--font-sm)', color: 'var(--text)' }}>{v.title}</span>
+            <button type="button" onClick={() => remove(v.id)} disabled={busy}
+              style={{
+                background: 'transparent', border: 'none',
+                color: 'var(--text-muted)', cursor: 'pointer',
+                padding: 4, borderRadius: 4, fontFamily: 'inherit',
+              }}
+              aria-label={`Remove ${v.title}`}
+            ><i className="bi bi-x-circle" style={{ fontSize: 13 }} /></button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}

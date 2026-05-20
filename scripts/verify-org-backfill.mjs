@@ -330,6 +330,56 @@ assert('OrgView mounts BulkMoveBar gated on canEdit',
 assert('OrgView applyMove iterates updateMember with orgNodeId',
   /tm\.updateMember\(m\.email,\s*\{\s*orgNodeId:\s*target\.id/.test(orgViewSrcPhase4));
 
+// ── Section 12: Phase 5 per-team configuration ───────────────────────────
+console.log('\n── Phase 5: per-team config ──');
+const adminsRouteSrc = read('app/api/v1/org/nodes/[id]/admins/route.js');
+assert('admins route exposes GET/POST/DELETE',
+  /export async function GET/.test(adminsRouteSrc)
+  && /export async function POST/.test(adminsRouteSrc)
+  && /export async function DELETE/.test(adminsRouteSrc));
+assert('admins grant writes org_audit',
+  /'node\.admin\.grant'/.test(adminsRouteSrc));
+assert('admins revoke writes org_audit',
+  /'node\.admin\.revoke'/.test(adminsRouteSrc));
+assert('admins grant busts the org-admin cache',
+  /bustOrgAdminCache/.test(adminsRouteSrc));
+
+const vacanciesRouteSrc = read('app/api/v1/org/nodes/[id]/vacancies/route.js');
+assert('vacancies route exposes GET/POST/DELETE',
+  /export async function GET/.test(vacanciesRouteSrc)
+  && /export async function POST/.test(vacanciesRouteSrc)
+  && /export async function DELETE/.test(vacanciesRouteSrc));
+assert('vacancies POST writes audit',
+  /'vacancy\.create'/.test(vacanciesRouteSrc));
+
+const slaResolverSrc = read('src/lib/sla-resolver.js');
+assert('SLA resolver walks ancestors with safety guard',
+  /while \(cur && safety < 32\)/.test(slaResolverSrc));
+assert('SLA resolver merges outermost → innermost',
+  /reverse\(\)/.test(slaResolverSrc));
+
+const orgApiSrcPhase5 = read('src/services/orgApi.js');
+assert('orgApi adds delegated-admin wrappers',
+  /listNodeAdmins/.test(orgApiSrcPhase5)
+  && /grantNodeAdmin/.test(orgApiSrcPhase5)
+  && /revokeNodeAdmin/.test(orgApiSrcPhase5));
+assert('orgApi adds vacancy wrappers',
+  /listNodeVacancies/.test(orgApiSrcPhase5)
+  && /addNodeVacancy/.test(orgApiSrcPhase5)
+  && /removeNodeVacancy/.test(orgApiSrcPhase5));
+
+const drawerSrcPhase5 = read('src/components/org/OrgNodeFormDrawer.jsx');
+assert('drawer surfaces SLA cascade inputs',
+  /SLA override \(minutes\)/.test(drawerSrcPhase5));
+assert('drawer surfaces dashboards stub',
+  /Dashboard slugs/.test(drawerSrcPhase5));
+assert('drawer renders DelegatedAdminsSection',
+  /<DelegatedAdminsSection/.test(drawerSrcPhase5));
+assert('drawer renders VacanciesSection',
+  /<VacanciesSection/.test(drawerSrcPhase5));
+assert('save folds SLA + dashboards into config blob',
+  /config:\s*cleanConfig/.test(drawerSrcPhase5));
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
