@@ -20,7 +20,34 @@ import { canManageRoster } from '../../../../src/lib/access-admin';
 
 const VALID_ACCESS = ['admin', 'regional_manager', 'team_lead', 'agent'];
 const VALID_SERVICES = ['EOR', 'LifeCycle', 'New Services', 'All'];
-const VALID_TEAMS = ['All', 'EMEA', 'APAC', 'LATAM', 'NAM', 'LATAM + NAM'];
+// Phase 6 (2026-05-20): the team allow-list is now layered. The hard-coded
+// list below stays as the legacy fallback (matches the regions used by
+// pre-Org-tab callers); on top of it we accept any active `org_nodes.name`
+// so the new Edit Allocation drawer's cascade picker can write a team
+// name that doesn't exist in the old enum without rejection. Validation
+// remains strict — strings outside the union still 400.
+const LEGACY_VALID_TEAMS = ['All', 'EMEA', 'APAC', 'LATAM', 'NAM', 'LATAM + NAM'];
+let _orgTeamNamesCache = { names: new Set(), ts: 0 };
+const ORG_TEAMS_TTL_MS = 60_000;
+async function getValidTeamNames() {
+  const now = Date.now();
+  if (_orgTeamNamesCache.ts && now - _orgTeamNamesCache.ts < ORG_TEAMS_TTL_MS) {
+    return _orgTeamNamesCache.names;
+  }
+  const set = new Set(LEGACY_VALID_TEAMS);
+  try {
+    const { rows } = await query(`SELECT name FROM org_nodes WHERE is_archived = false`);
+    for (const r of rows) if (r?.name) set.add(r.name);
+  } catch {
+    // DB unreachable — fall back to the legacy enum so writes don't fail
+    // closed during an outage.
+  }
+  _orgTeamNamesCache = { names: set, ts: now };
+  return set;
+}
+// Kept for compat with any external imports that still reference the
+// constant. New code should call getValidTeamNames().
+const VALID_TEAMS = LEGACY_VALID_TEAMS;
 
 export async function GET(req) {
   try {
@@ -133,8 +160,13 @@ export async function POST(req) {
     if (service && !VALID_SERVICES.includes(service)) {
       return NextResponse.json({ error: `Invalid service. Must be one of: ${VALID_SERVICES.join(', ')}` }, { status: 400 });
     }
-    if (team && !VALID_TEAMS.includes(team)) {
-      return NextResponse.json({ error: `Invalid team. Must be one of: ${VALID_TEAMS.join(', ')}` }, { status: 400 });
+    if (team) {
+      const validTeams = await getValidTeamNames();
+      if (!validTeams.has(team)) {
+        return NextResponse.json({
+          error: `Invalid team "${team}". Must match a legacy region (${LEGACY_VALID_TEAMS.join(', ')}) or an existing org_nodes.name.`,
+        }, { status: 400 });
+      }
     }
 
     // Reject duplicates: only fully-populated, active override rows are
