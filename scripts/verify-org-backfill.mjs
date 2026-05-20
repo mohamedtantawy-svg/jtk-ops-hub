@@ -129,6 +129,87 @@ assert("App.jsx imports OrgView",
 assert("App.jsx renders <OrgView> when view==='org'",
   /view==='org'[\s\S]{0,200}<OrgView/.test(appSrc));
 
+// ── Section 8: Phase 1 CRUD wiring ───────────────────────────────────────
+console.log('\n── Phase 1: CRUD wiring ──');
+const orgAdminSrc = read('src/lib/org-admin.js');
+assert('org-admin exports canManageOrgGlobal',
+  /export function canManageOrgGlobal/.test(orgAdminSrc));
+assert('org-admin exports canManageOrgNode',
+  /export async function canManageOrgNode/.test(orgAdminSrc));
+assert('canManageOrgGlobal grants admin + regional_manager',
+  /role === 'admin' \|\| user\.role === 'regional_manager'/.test(orgAdminSrc));
+assert('delegation walks ancestors via recursive CTE',
+  /WITH RECURSIVE chain[\s\S]+org_node_admins/.test(orgAdminSrc));
+
+const nodesRouteSrc = read('app/api/v1/org/nodes/route.js');
+assert('GET /org/nodes uses getAuthUser',
+  /export async function GET[\s\S]+getAuthUser/.test(nodesRouteSrc));
+assert('POST validates kind enum',
+  /VALID_KINDS\s*=\s*new\s+Set\(\[\s*'department',\s*'team'/.test(nodesRouteSrc));
+assert('POST enforces team-must-have-parent rule',
+  /A team must have a parent department/.test(nodesRouteSrc));
+assert('POST applies depth cap',
+  /MAX_DEPTH\s*=\s*6/.test(nodesRouteSrc) && /Hierarchy depth cap/.test(nodesRouteSrc));
+assert('POST writes org_audit',
+  /INSERT INTO org_audit[\s\S]+'node\.create'/.test(nodesRouteSrc));
+
+const nodeByIdSrc = read('app/api/v1/org/nodes/[id]/route.js');
+assert('PATCH refuses to mutate archived nodes',
+  /Restore the node before editing/.test(nodeByIdSrc));
+assert('DELETE refuses when node has children or members',
+  /Cannot archive a node with active children or members/.test(nodeByIdSrc));
+assert('DELETE is soft-delete (sets is_archived = true)',
+  /SET is_archived = true/.test(nodeByIdSrc));
+
+const moveSrc = read('app/api/v1/org/nodes/[id]/move/route.js');
+assert('move endpoint prevents cycles',
+  /Cannot move a node inside its own descendants \(cycle\)/.test(moveSrc));
+assert('move endpoint guards depth cap',
+  /Move would exceed hierarchy depth cap/.test(moveSrc));
+
+const orgApiSrc = read('src/services/orgApi.js');
+assert('orgApi exports the 6 CRUD wrappers',
+  /listOrgNodes/.test(orgApiSrc)
+    && /createOrgNode/.test(orgApiSrc)
+    && /patchOrgNode/.test(orgApiSrc)
+    && /archiveOrgNode/.test(orgApiSrc)
+    && /moveOrgNode/.test(orgApiSrc)
+    && /reorderOrgNode/.test(orgApiSrc));
+
+const useOrgNodesSrc = read('src/hooks/useOrgNodes.js');
+assert('useOrgNodes builds a parent → children tree',
+  /buildTree[\s\S]+byParent/.test(useOrgNodesSrc));
+assert('useOrgNodes exposes sumDescendants for recursive headcount',
+  /sumDescendants/.test(useOrgNodesSrc));
+
+const orgTreeSrc = read('src/components/org/OrgTreeView.jsx');
+assert('OrgTreeView persists collapse state to localStorage',
+  /ops_hub_org_collapsed/.test(orgTreeSrc));
+assert('OrgTreeView search auto-expands matching ancestors',
+  /keepIds/.test(orgTreeSrc));
+
+const drawerSrc = read('src/components/org/OrgNodeFormDrawer.jsx');
+assert('drawer handles create AND edit',
+  /mode === 'edit'/.test(drawerSrc) && /mode === 'create'/.test(drawerSrc));
+assert('drawer offers color presets',
+  /PRESET_COLORS/.test(drawerSrc));
+assert('drawer offers icon presets',
+  /PRESET_ICONS/.test(drawerSrc));
+
+const archiveSrc = read('src/components/org/OrgArchiveConfirm.jsx');
+assert('archive confirm reads err.body.impact',
+  /err\?\.body\?\.impact/.test(archiveSrc));
+
+const orgViewSrcPhase1 = read('src/components/views/OrgView.jsx');
+assert('OrgView mounts useOrgNodes',
+  /useOrgNodes\(\)/.test(orgViewSrcPhase1));
+assert('OrgView mounts the create/edit drawer',
+  /<OrgNodeFormDrawer/.test(orgViewSrcPhase1));
+assert('OrgView mounts the archive confirm',
+  /<OrgArchiveConfirm/.test(orgViewSrcPhase1));
+assert('OrgView renders the tree view when nodes exist',
+  /<OrgTreeView/.test(orgViewSrcPhase1));
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
