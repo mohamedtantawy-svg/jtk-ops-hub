@@ -296,6 +296,40 @@ const appSrc2 = read('src/App.jsx');
 assert("App.jsx aliases legacy 'team' deep-link to 'org'",
   /'team':\s*'org'/.test(appSrc2));
 
+// ── Section 11: Phase 4 drag-and-drop + bulk move ────────────────────────
+console.log('\n── Phase 4: DnD + bulk move ──');
+const movePreviewSrc = read('src/components/org/OrgMovePreviewModal.jsx');
+assert('move preview modal exists',
+  /export default function OrgMovePreviewModal/.test(movePreviewSrc));
+assert('move preview surfaces bulk vs single copy',
+  /isBulk/.test(movePreviewSrc));
+
+const bulkBarSrc = read('src/components/org/BulkMoveBar.jsx');
+assert('BulkMoveBar exports default',
+  /export default function BulkMoveBar/.test(bulkBarSrc));
+assert('BulkMoveBar renders target-tree picker',
+  /TargetTree/.test(bulkBarSrc));
+
+const canvasSrcPhase4 = read('src/components/org/OrgChartCanvas.jsx');
+assert('chart canvas tracks drag source + target',
+  /dragSourceEmails/.test(canvasSrcPhase4) && /dragTargetId/.test(canvasSrcPhase4));
+assert('NodeCard exposes drop handlers + drop-target visual',
+  /isDropTarget/.test(canvasSrcPhase4) && /onDrop=/.test(canvasSrcPhase4));
+assert('MemberCard is draggable when canEdit',
+  /draggable=\{!!canEdit\}/.test(canvasSrcPhase4));
+assert('MemberCard cmd/ctrl/shift-click toggles selection',
+  /metaKey \|\| e\.ctrlKey \|\| e\.shiftKey/.test(canvasSrcPhase4));
+
+const orgViewSrcPhase4 = read('src/components/views/OrgView.jsx');
+assert('OrgView holds selectedEmails state',
+  /selectedEmails,\s*setSelectedEmails/.test(orgViewSrcPhase4));
+assert('OrgView mounts OrgMovePreviewModal',
+  /<OrgMovePreviewModal/.test(orgViewSrcPhase4));
+assert('OrgView mounts BulkMoveBar gated on canEdit',
+  /canEdit && \([\s\S]+<BulkMoveBar/.test(orgViewSrcPhase4));
+assert('OrgView applyMove iterates updateMember with orgNodeId',
+  /tm\.updateMember\(m\.email,\s*\{\s*orgNodeId:\s*target\.id/.test(orgViewSrcPhase4));
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
