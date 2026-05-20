@@ -404,6 +404,36 @@ const orgConfigSrc = read('src/data/orgConfig.js');
 assert('orgConfig.js marked @deprecated',
   /@deprecated/.test(orgConfigSrc));
 
+// ── Section 14: Phase 7 audit + CSV export ───────────────────────────────
+console.log('\n── Phase 7: audit viewer + CSV export ──');
+const auditRouteSrc = read('app/api/v1/org/audit/route.js');
+assert('audit route admin-gated (canManageOrgGlobal)',
+  /canManageOrgGlobal\(user\)/.test(auditRouteSrc));
+assert('audit route supports limit + filters',
+  /MAX_LIMIT/.test(auditRouteSrc) && /action[\s\S]+actor[\s\S]+target/.test(auditRouteSrc));
+
+const auditDrawerSrc = read('src/components/org/OrgAuditDrawer.jsx');
+assert('audit drawer exports default',
+  /export default function OrgAuditDrawer/.test(auditDrawerSrc));
+assert('audit drawer labels common actions',
+  /node\.create[\s\S]+node\.update[\s\S]+node\.archive/.test(auditDrawerSrc));
+
+const csvSrc = read('src/utils/orgCsvExport.js');
+assert('csv exports buildStructureCsv',
+  /export function buildStructureCsv/.test(csvSrc));
+assert('csv exports buildMembersCsv',
+  /export function buildMembersCsv/.test(csvSrc));
+assert('csv exports downloadCsv (Blob + a.click)',
+  /URL\.createObjectURL/.test(csvSrc) && /a\.click\(\)/.test(csvSrc));
+
+const orgViewSrcPhase7 = read('src/components/views/OrgView.jsx');
+assert('OrgView mounts OrgAuditDrawer',
+  /<OrgAuditDrawer/.test(orgViewSrcPhase7));
+assert('OrgView wires audit button',
+  /onClick=\{\(\) => setAuditOpen\(true\)\}/.test(orgViewSrcPhase7));
+assert('OrgView exposes structure + members CSV exports',
+  /buildStructureCsv/.test(orgViewSrcPhase7) && /buildMembersCsv/.test(orgViewSrcPhase7));
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
