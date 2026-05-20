@@ -34,6 +34,11 @@ export async function archiveOrgNode(id) {
   return apiFetch(`/org/nodes/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
+// Phase 8 (2026-05-20): restore a previously-archived node.
+export async function restoreOrgNode(id) {
+  return apiFetch(`/org/nodes/${encodeURIComponent(id)}/restore`, { method: 'POST' });
+}
+
 export async function moveOrgNode(id, { parentId }) {
   return apiFetch(`/org/nodes/${encodeURIComponent(id)}/move`, {
     method: 'POST',

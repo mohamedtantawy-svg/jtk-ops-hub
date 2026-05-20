@@ -434,6 +434,34 @@ assert('OrgView wires audit button',
 assert('OrgView exposes structure + members CSV exports',
   /buildStructureCsv/.test(orgViewSrcPhase7) && /buildMembersCsv/.test(orgViewSrcPhase7));
 
+// ── Section 15: Phase 8 hardening + restore ──────────────────────────────
+console.log('\n── Phase 8: hardening ──');
+const restoreSrc = read('app/api/v1/org/nodes/[id]/restore/route.js');
+assert('restore endpoint flips is_archived = false',
+  /is_archived = false/.test(restoreSrc));
+assert('restore refuses when parent is archived',
+  /Parent node is archived/.test(restoreSrc));
+assert('restore guards against sibling-name collision',
+  /A sibling with the same name now exists/.test(restoreSrc));
+assert('restore writes node.restore audit',
+  /'node\.restore'/.test(restoreSrc));
+
+const orgApiSrcPhase8 = read('src/services/orgApi.js');
+assert('orgApi exports restoreOrgNode',
+  /export async function restoreOrgNode/.test(orgApiSrcPhase8));
+
+const hookSrcPhase8 = read('src/hooks/useOrgNodes.js');
+assert('useOrgNodes exposes restoreNode',
+  /restoreNode/.test(hookSrcPhase8));
+assert('useOrgNodes exposes includeArchived toggle',
+  /includeArchived,\s*setIncludeArchived/.test(hookSrcPhase8));
+
+const orgViewSrcPhase8 = read('src/components/views/OrgView.jsx');
+assert('OrgView toggles Show archived',
+  /Show archived/.test(orgViewSrcPhase8));
+assert('OrgView uses handleArchiveOrRestore so archived nodes are restorable',
+  /handleArchiveOrRestore/.test(orgViewSrcPhase8));
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
