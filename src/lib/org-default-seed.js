@@ -9,14 +9,24 @@
 // so day-one merges have everyone landing under the right node — admins then
 // move people around manually (Phase 4 ships drag-and-drop for this).
 //
+// Phase 10b (v2, 2026-05-20): on top of the v1 bootstrap, sweep every active
+// department with a `lead_email` and ensure that lead is seeded as the dept's
+// Admin (override row + org_node_admins). Catches up the three depts mohamed
+// stood up before auto-seed existed (Global Immigration, Payroll Operations,
+// Benefits Operations) and any future ones created before this code shipped.
+//
 // Idempotent via the `org_default_seed_version` sentinel in app_settings, in
 // line with the other *-seed.js modules. Manual edits to the seeded nodes
 // (rename, recolor, etc.) are preserved across deploys — the seed only
 // inserts a node if no node with the same slug exists.
 
 import { query } from './db';
+import { ensureLeadIsDeptAdmin } from './org-lead-admin-seed';
 
-const SEED_VERSION = 1;
+// v2 (2026-05-20, Phase 10b): bump triggers a one-shot backfill that seeds
+// every existing department's `lead_email` as that dept's Admin via
+// ensureLeadIsDeptAdmin. Idempotent; safe to re-run on a fully-seeded DB.
+const SEED_VERSION = 2;
 const SEED_KEY = 'org_default_seed_version';
 
 // Canonical slugs for the bootstrap nodes. Re-running the seed looks rows
@@ -122,6 +132,39 @@ export async function seedOrgDefaultIfNeeded() {
     backfilledOverrides = upd.rowCount || 0;
   }
 
+  // ── v2 (Phase 10b): seed lead-as-admin for every existing department ────
+  // Iterates every active department with a non-null lead_email and ensures
+  // (a) the lead has an override row pointing at the dept with access='admin',
+  // (b) the lead is in org_node_admins for that dept. Idempotent via the
+  // helper's UPSERT/ON CONFLICT semantics. Skipped when the sentinel is
+  // already at v2 (early-return at top of function).
+  let leadAdminsSeeded = 0;
+  if (currentVersion < 2) {
+    try {
+      const { rows: depts } = await query(
+        `SELECT id, lead_email FROM org_nodes
+           WHERE kind = 'department'
+             AND is_archived = false
+             AND lead_email IS NOT NULL
+             AND lead_email <> ''`,
+      );
+      for (const d of depts) {
+        try {
+          await ensureLeadIsDeptAdmin({
+            nodeId: d.id,
+            leadEmail: d.lead_email,
+            actorEmail: 'system-seed',
+          });
+          leadAdminsSeeded += 1;
+        } catch (err) {
+          console.warn(`[org seed v2] lead-as-admin backfill failed for ${d.id}/${d.lead_email}:`, err?.message);
+        }
+      }
+    } catch (err) {
+      console.warn('[org seed v2] backfill loop failed:', err?.message);
+    }
+  }
+
   // ── Audit row for the bootstrap ─────────────────────────────────────────
   await query(
     `INSERT INTO org_audit (actor_email, action, target_kind, target_id, after_json, metadata)
@@ -134,6 +177,7 @@ export async function seedOrgDefaultIfNeeded() {
       JSON.stringify({
         version: SEED_VERSION,
         backfilled_overrides: backfilledOverrides,
+        lead_admins_seeded: leadAdminsSeeded,
       }),
     ],
   );
@@ -153,5 +197,6 @@ export async function seedOrgDefaultIfNeeded() {
     hr_experience_id: hrExperienceId,
     eor_operations_id: eorOpsId,
     backfilled_overrides: backfilledOverrides,
+    lead_admins_seeded: leadAdminsSeeded,
   };
 }

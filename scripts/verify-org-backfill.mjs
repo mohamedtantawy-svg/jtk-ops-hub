@@ -462,6 +462,61 @@ assert('OrgView toggles Show archived',
 assert('OrgView uses handleArchiveOrRestore so archived nodes are restorable',
   /handleArchiveOrRestore/.test(orgViewSrcPhase8));
 
+// ── Section 16: Phase 10b — auto-seed lead as dept admin ─────────────────
+console.log('\n── Phase 10b: lead-as-admin auto-seed ──');
+const leadSeedSrc = read('src/lib/org-lead-admin-seed.js');
+assert('lead-admin-seed exports ensureLeadIsDeptAdmin',
+  /export async function ensureLeadIsDeptAdmin/.test(leadSeedSrc));
+assert('lead-admin-seed UPSERTs team_member_overrides with access=admin',
+  /INSERT INTO team_member_overrides[\s\S]+ON CONFLICT \(email\) DO UPDATE/.test(leadSeedSrc)
+  && /access\s*=\s*'admin'/.test(leadSeedSrc));
+assert('lead-admin-seed never writes the legacy team column',
+  !/UPDATE team_member_overrides[\s\S]+\bteam\s*=/.test(leadSeedSrc));
+assert('lead-admin-seed grants delegated admin via org_node_admins',
+  /INSERT INTO org_node_admins[\s\S]+ON CONFLICT \(node_id, email\) DO NOTHING/.test(leadSeedSrc));
+assert('lead-admin-seed writes node.lead_seeded audit row',
+  /'node\.lead_seeded'/.test(leadSeedSrc));
+assert('lead-admin-seed flags is_new based on baseline membership',
+  /TEAM_MEMBERS/.test(leadSeedSrc) && /isInBaseline/.test(leadSeedSrc));
+
+const postRouteSrcPhase10b = read('app/api/v1/org/nodes/route.js');
+assert('POST /org/nodes imports ensureLeadIsDeptAdmin',
+  /import \{ ensureLeadIsDeptAdmin \}/.test(postRouteSrcPhase10b));
+assert('POST /org/nodes invokes auto-seed for kind=department + leadEmail',
+  /if \(kind === 'department' && leadEmail\)/.test(postRouteSrcPhase10b)
+  && /ensureLeadIsDeptAdmin\(\{/.test(postRouteSrcPhase10b));
+assert('POST /org/nodes never auto-seeds for teams',
+  !/if \(kind === 'team' && leadEmail\)/.test(postRouteSrcPhase10b));
+assert('POST /org/nodes returns leadSeed payload',
+  /leadSeed,/.test(postRouteSrcPhase10b));
+
+const defaultSeedSrcPhase10b = read('src/lib/org-default-seed.js');
+assert('org-default-seed bumps SEED_VERSION to 2',
+  /const SEED_VERSION = 2/.test(defaultSeedSrcPhase10b));
+assert('org-default-seed imports ensureLeadIsDeptAdmin',
+  /import \{ ensureLeadIsDeptAdmin \} from '\.\/org-lead-admin-seed'/.test(defaultSeedSrcPhase10b));
+assert('org-default-seed v2 backfills every dept with lead_email',
+  /if \(currentVersion < 2\)/.test(defaultSeedSrcPhase10b)
+  && /kind = 'department'[\s\S]+lead_email IS NOT NULL/.test(defaultSeedSrcPhase10b));
+assert('org-default-seed v2 reports lead_admins_seeded',
+  /lead_admins_seeded/.test(defaultSeedSrcPhase10b));
+
+const formDrawerSrcPhase10b = read('src/components/org/OrgNodeFormDrawer.jsx');
+assert('OrgNodeFormDrawer accepts getCurrentDeptForEmail prop',
+  /getCurrentDeptForEmail/.test(formDrawerSrcPhase10b));
+assert('OrgNodeFormDrawer renders LeadMoveWarning',
+  /function LeadMoveWarning/.test(formDrawerSrcPhase10b)
+  && /<LeadMoveWarning/.test(formDrawerSrcPhase10b));
+assert('OrgNodeFormDrawer hint mentions auto-seed of Admin',
+  /auto-seeded as this department's Admin/.test(formDrawerSrcPhase10b));
+
+const orgViewSrcPhase10b = read('src/components/views/OrgView.jsx');
+assert('OrgView defines getCurrentDeptForEmail and walks to top-level',
+  /const getCurrentDeptForEmail = useCallback/.test(orgViewSrcPhase10b)
+  && /while \(topLevel\.parentId/.test(orgViewSrcPhase10b));
+assert('OrgView passes getCurrentDeptForEmail into OrgNodeFormDrawer',
+  /getCurrentDeptForEmail=\{getCurrentDeptForEmail\}/.test(orgViewSrcPhase10b));
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
