@@ -2037,6 +2037,28 @@ CREATE INDEX IF NOT EXISTS idx_tasks_org_node                   ON tasks(org_nod
 
 ALTER TABLE workspace_members      ADD COLUMN IF NOT EXISTS org_node_id UUID REFERENCES org_nodes(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_workspace_members_org_node       ON workspace_members(org_node_id);
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Phase 11j (2026-05-20) — fix urgent_assist_schedule unique constraint
+--
+-- The original CREATE TABLE declares schedule_date UNIQUE at column level,
+-- generating constraint urgent_assist_schedule_schedule_date_key. With
+-- Phase 11f isolation, two depts MUST be able to own their own (date, dept)
+-- row independently — the column-level UNIQUE blocks that, causing the ON
+-- CONFLICT in /urgent-assist-schedule POST to silently overwrite dept A's
+-- slots with dept B's writes on a same-date INSERT collision.
+--
+-- Fix: drop the legacy single-column UNIQUE; add a composite UNIQUE on
+-- (schedule_date, org_node_id) so each dept has its own per-date row.
+-- Partial WHERE org_node_id IS NOT NULL because the brief boot-time
+-- window between this schema landing and the dept-backfill running has
+-- NULL rows; the backfill stamps them within the same runMigrations call.
+-- ────────────────────────────────────────────────────────────────────────────
+ALTER TABLE urgent_assist_schedule
+  DROP CONSTRAINT IF EXISTS urgent_assist_schedule_schedule_date_key;
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_urgent_assist_schedule_date_dept
+  ON urgent_assist_schedule(schedule_date, org_node_id)
+  WHERE org_node_id IS NOT NULL;
 `;
 
 export async function runMigrations() {

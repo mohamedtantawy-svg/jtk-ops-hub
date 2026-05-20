@@ -874,6 +874,22 @@ for (const tbl of REQUIRED_SURFACES) {
     new RegExp(`'${tbl}'`).test(backfillFinalSrc));
 }
 
+// ── Section 27: Phase 11j — urgent_assist_schedule composite unique fix ──
+console.log('\n── Phase 11j: urgent_assist_schedule unique-constraint fix ──');
+const migrateSrcPhase11j = read('src/lib/migrate.js');
+assert('migrate.js drops the legacy single-column UNIQUE on schedule_date',
+  /DROP CONSTRAINT IF EXISTS urgent_assist_schedule_schedule_date_key/.test(migrateSrcPhase11j));
+assert('migrate.js adds composite UNIQUE (schedule_date, org_node_id) partial index',
+  /uniq_urgent_assist_schedule_date_dept[\s\S]+ON urgent_assist_schedule\(schedule_date, org_node_id\)[\s\S]+WHERE org_node_id IS NOT NULL/.test(migrateSrcPhase11j));
+
+const schedRouteSrcPhase11j = read('app/api/v1/urgent-assist-schedule/route.js');
+assert('urgent-assist-schedule POST fails closed without dept context',
+  /Cannot save schedule without a department context/.test(schedRouteSrcPhase11j));
+assert('urgent-assist-schedule POST uses composite ON CONFLICT with partial predicate',
+  /ON CONFLICT \(schedule_date, org_node_id\) WHERE org_node_id IS NOT NULL DO UPDATE/.test(schedRouteSrcPhase11j));
+assert('urgent-assist-schedule POST no longer references the legacy single-column ON CONFLICT',
+  !/ON CONFLICT \(schedule_date\) DO UPDATE/.test(schedRouteSrcPhase11j));
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

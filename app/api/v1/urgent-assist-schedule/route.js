@@ -147,10 +147,18 @@ export async function POST(req) {
   }
 
   const notes = cleanStr(body.notes, 2000);
-  // Phase 11f: stamp the actor's currentDeptId so each dept's schedule is
-  // independent. The (schedule_date, org_node_id) pair is what should be
-  // unique going forward (schema-level constraint update is a follow-up).
+  // Phase 11f + 11j (2026-05-20): stamp the actor's currentDeptId so each
+  // dept owns its own (date, dept) row. ON CONFLICT now keys on the
+  // composite (schedule_date, org_node_id) — matching the unique index
+  // landed by the Phase 11j schema migration. Fail-closed when there's
+  // no resolvable dept so a stray null can't create an orphan row.
   const currentDeptId = await getCurrentDeptId(user, req);
+  if (!currentDeptId) {
+    return NextResponse.json(
+      { error: 'Cannot save schedule without a department context' },
+      { status: 400 },
+    );
+  }
 
   const { rows } = await query(
     `INSERT INTO urgent_assist_schedule
@@ -172,7 +180,7 @@ export async function POST(req) {
              $12, $13,
              $14,
              $15, $16, NOW(), $17)
-     ON CONFLICT (schedule_date) DO UPDATE SET
+     ON CONFLICT (schedule_date, org_node_id) WHERE org_node_id IS NOT NULL DO UPDATE SET
        emea_main_email   = EXCLUDED.emea_main_email,
        emea_main_name    = EXCLUDED.emea_main_name,
        emea_backup_email = EXCLUDED.emea_backup_email,
