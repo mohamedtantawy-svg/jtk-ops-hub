@@ -19,6 +19,7 @@ import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { query } from '../../../../../src/lib/db';
 import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
 import { getVisibleEmailsForAccess } from '../../../../../src/data/members';
+import { getCurrentDeptId } from '../../../../../src/lib/dept-scope';
 import {
   memberByEmail,
   managerEmailFor,
@@ -153,9 +154,25 @@ export async function GET(req) {
   // assigned to them and needs to see their queue.
   const effectiveScope = (scope === 'team' && !isManager) ? 'mine' : scope;
 
+  // Phase 11c (2026-05-20): hard dept isolation. Every read filters by the
+  // caller's currentDeptId. HRX users resolve to HR Experience UUID via
+  // dept-scope's recursive CTE; Phase 11a backfill stamped every existing
+  // hr_hub_request with HR Experience, so HRX agents see identical data
+  // to today. Fail-closed when no dept is resolvable (deny rather than leak).
+  const currentDeptId = await getCurrentDeptId(user, req);
+
   const where = [];
   const params = [];
   let p = 1;
+
+  // Phase 11c: dept-isolation gate — must be the first clause so a missing
+  // dept (caller has no org placement) fails closed to zero rows.
+  if (currentDeptId) {
+    where.push(`org_node_id = $${p++}`);
+    params.push(currentDeptId);
+  } else {
+    where.push(`FALSE`);
+  }
 
   if (flow) { where.push(`flow = $${p++}`); params.push(flow); }
   if (status) { where.push(`status = $${p++}`); params.push(status); }
@@ -491,6 +508,14 @@ export async function POST(req) {
     }
   }
 
+  // Phase 11c (2026-05-20): stamp the submitter's currentDeptId on every
+  // new request. Isolation follows the submitter — a Payroll user's
+  // request lands in Payroll's HR Hub regardless of where the assignee
+  // sits. If dept resolution fails we still create the row (null) so a
+  // user without org placement can submit; the v1 dept-backfill picks it
+  // up on next boot.
+  const submitterDeptId = await getCurrentDeptId(user, req);
+
   const insert = await query(
     `INSERT INTO hr_hub_request
        (flow, priority,
@@ -502,7 +527,8 @@ export async function POST(req) {
         team_lead_email, cc_email,
         task_source, task_id, task_url, task_subject,
         sla_ext_requested_days, sla_ext_reason_code, sla_ext_acknowledged,
-        assignee_manually_set)
+        assignee_manually_set,
+        org_node_id)
      VALUES ($1, $2,
              $3, $4, $5,
              $6, $7, $8,
@@ -512,7 +538,8 @@ export async function POST(req) {
              $15, $16,
              $17, $18, $19, $20,
              $21, $22, $23,
-             $24)
+             $24,
+             $25)
      RETURNING id, status, created_at`,
     [
       flow, priority,
@@ -525,6 +552,7 @@ export async function POST(req) {
       taskSource, taskId, taskUrl, taskSubject,
       slaExtRequestedDays, slaExtReasonCode, slaExtAcknowledged,
       assigneeManuallySet,
+      submitterDeptId,
     ],
   );
 

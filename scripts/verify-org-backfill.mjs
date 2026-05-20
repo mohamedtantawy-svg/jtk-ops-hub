@@ -668,6 +668,29 @@ assert('announcement-requests publish resolves requester dept',
 assert('announcement-requests publish passes orgNodeId to publishFromRequest',
   /publishFromRequest\([\s\S]+orgNodeId: requesterDept\?\.deptId/.test(publishSrc));
 
+// ── Section 20: Phase 11c — HR Hub isolation ─────────────────────────────
+console.log('\n── Phase 11c: HR Hub isolation ──');
+const hrHubListSrc = read('app/api/v1/hr-hub/requests/route.js');
+assert('hr-hub/requests imports getCurrentDeptId',
+  /import \{ getCurrentDeptId \}/.test(hrHubListSrc));
+assert('hr-hub/requests GET filters by currentDeptId (org_node_id) first',
+  /currentDeptId[\s\S]+where\.push\(`org_node_id = \$/.test(hrHubListSrc));
+assert('hr-hub/requests GET fails closed when no dept',
+  /where\.push\(`FALSE`\)/.test(hrHubListSrc));
+assert('hr-hub/requests POST stamps submitterDeptId on INSERT',
+  /submitterDeptId = await getCurrentDeptId\(user, req\)/.test(hrHubListSrc)
+  && /org_node_id\)/.test(hrHubListSrc)
+  && /submitterDeptId,/.test(hrHubListSrc));
+
+const hrHubIdSrc = read('app/api/v1/hr-hub/requests/[id]/route.js');
+assert('hr-hub/requests/[id] imports getCurrentDeptId',
+  /import \{ getCurrentDeptId \}/.test(hrHubIdSrc));
+assert('hr-hub/requests/[id] GET filters by currentDeptId',
+  /WHERE id = \$1 AND org_node_id = \$2/.test(hrHubIdSrc));
+assert('hr-hub/requests/[id] PATCH refuses cross-dept SELECT + UPDATE',
+  /SELECT \* FROM hr_hub_request WHERE id = \$1 AND org_node_id = \$2/.test(hrHubIdSrc)
+  && /AND org_node_id = \$\$\{p \+ 1\}/.test(hrHubIdSrc));
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
