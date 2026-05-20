@@ -17,12 +17,14 @@ import { useOrgNodes } from '../../hooks/useOrgNodes';
 import Skeleton from '../ui/Skeleton';
 import EmptyState from '../ui/EmptyState';
 import OrgTreeView from '../org/OrgTreeView';
+import OrgChartCanvas from '../org/OrgChartCanvas';
 import OrgNodeFormDrawer from '../org/OrgNodeFormDrawer';
 import OrgArchiveConfirm from '../org/OrgArchiveConfirm';
 
 const VIEW_MODES = [
-  { id: 'chart', label: 'Org chart', icon: 'bi-diagram-3' },
-  { id: 'table', label: 'Table',     icon: 'bi-table' },
+  { id: 'chart', label: 'Chart', icon: 'bi-diagram-3-fill' },
+  { id: 'list',  label: 'List',  icon: 'bi-list-ul' },
+  { id: 'table', label: 'Table', icon: 'bi-table' },
 ];
 
 export default function OrgView({ user }) {
@@ -240,6 +242,19 @@ export default function OrgView({ user }) {
         ) : showWelcome ? (
           <WelcomeScaffold canEdit={canEdit} onCreate={openCreateRoot} />
         ) : viewMode === 'chart' ? (
+          <OrgChartCanvas
+            tree={org.tree}
+            rootNodes={org.rootNodes}
+            members={members}
+            search={search}
+            canEdit={canEdit}
+            onSelectNode={openEdit}
+            onEdit={openEdit}
+            onAddChild={openCreateChild}
+            onArchive={(node) => setArchiveTarget(node)}
+            onSelectMember={() => { /* Phase 3 opens the member detail drawer */ }}
+          />
+        ) : viewMode === 'list' ? (
           <OrgTreeView
             tree={org.tree}
             rootNodes={org.rootNodes}
