@@ -942,6 +942,79 @@ assert('OrgView toggleTeamExpansion auto-collapses prior sub-team on team change
 assert('OrgView wires expansion + callbacks into OrgChartCanvas',
   /expansion=\{chartExpansion\}[\s\S]+?onToggleTeamExpansion=\{toggleTeamExpansion\}[\s\S]+?onToggleShowMembers=\{toggleShowMembers\}/.test(viewSrcPhase12a));
 
+// ── Section 29: Phase 13a — Per-department integration config ────────────
+console.log('\n── Phase 13a: per-department integration config ──');
+
+const deptIntegrationsSrc = read('src/lib/dept-integrations.js');
+assert('dept-integrations exports DEPT_INTEGRATIONS map',
+  /export const DEPT_INTEGRATIONS/.test(deptIntegrationsSrc));
+assert('dept-integrations has HR Experience entry with HRX env vars (no change)',
+  /'hr-experience'[\s\S]+ZENDESK_API_TOKEN[\s\S]+JIRA_API_TOKEN[\s\S]+DEEL_ADMIN_TOKEN/.test(deptIntegrationsSrc));
+assert('dept-integrations has Global Immigration entry with GIX env vars',
+  /'global-immigration'[\s\S]+Zendesk_API_Payroll_GIX[\s\S]+JIRA_GIX[\s\S]+DEEL_ADMIN_GIX/.test(deptIntegrationsSrc));
+assert('Global Immigration hides 5 Deel sources (onboarding/offboarding/amendments/redlines/incentivePlans)',
+  /'global-immigration'[\s\S]+onboarding: false,[\s\S]+offboarding: false,[\s\S]+amendments: false,[\s\S]+redlines: false,[\s\S]+incentivePlans: false/.test(deptIntegrationsSrc));
+assert('Global Immigration Zendesk group = Immigration Experience',
+  /'global-immigration'[\s\S]+'Immigration Experience'/.test(deptIntegrationsSrc));
+assert('Global Immigration Jira filter includes Global Mobility',
+  /'global-immigration'[\s\S]+ownerFieldValues:[\s\S]+'Global Mobility'/.test(deptIntegrationsSrc));
+assert('Global Immigration Workbench team filter = Mobility Operations + GSC - Mobility',
+  /'global-immigration'[\s\S]+teamFilter:[\s\S]+'Mobility Operations'[\s\S]+'GSC - Mobility'/.test(deptIntegrationsSrc));
+assert('dept-integrations exports the per-source helper isDeelSourceVisible',
+  /export function isDeelSourceVisible/.test(deptIntegrationsSrc));
+assert('dept-integrations exports visibleDeelSourcesFor (used by dept-scope/current)',
+  /export function visibleDeelSourcesFor/.test(deptIntegrationsSrc));
+assert('dept-integrations exposes resolveWorkbenchConfig / resolveJiraConfig / resolveZendeskConfig',
+  /export function resolveWorkbenchConfig/.test(deptIntegrationsSrc)
+  && /export function resolveJiraConfig/.test(deptIntegrationsSrc)
+  && /export function resolveZendeskConfig/.test(deptIntegrationsSrc));
+
+const deptScopeSrcPhase13a = read('src/lib/dept-scope.js');
+assert('dept-scope exposes getCurrentDeptSlugAndId',
+  /export async function getCurrentDeptSlugAndId/.test(deptScopeSrcPhase13a));
+assert('dept-scope recursive CTE selects slug column for top-level resolve',
+  /SELECT id, name, slug FROM chain WHERE parent_id IS NULL/.test(deptScopeSrcPhase13a));
+
+const scopeCurrentSrcPhase13a = read('app/api/v1/dept-scope/current/route.js');
+assert('/api/v1/dept-scope/current returns visibleSources',
+  /visibleSources,/.test(scopeCurrentSrcPhase13a)
+  && /visibleDeelSourcesFor\(dept\?\.slug \|\| null\)/.test(scopeCurrentSrcPhase13a));
+
+const hookSrcPhase13a = read('src/hooks/useCurrentDept.js');
+assert('useCurrentDept exposes visibleSources with fail-closed defaults',
+  /visibleSources: EMPTY_VISIBLE_SOURCES/.test(hookSrcPhase13a)
+  && /visibleSources: \(data\.visibleSources/.test(hookSrcPhase13a));
+
+// All 7 Deel-source routes early-exit when disabled.
+const DEEL_ROUTES = [
+  ['app/api/v1/integrations/deel/onboarding/route.js',       "'onboarding'"],
+  ['app/api/v1/integrations/deel/onboarding-paused/route.js', "'onboarding'"],
+  ['app/api/v1/integrations/deel/offboarding/route.js',      "'offboarding'"],
+  ['app/api/v1/integrations/deel/amendments/route.js',       "'amendments'"],
+  ['app/api/v1/integrations/deel/redlines/route.js',         "'redlines'"],
+  ['app/api/v1/integrations/deel/incentive-plans/route.js',  "'incentivePlans'"],
+  ['app/api/v1/integrations/deel/workbench/route.js',        "'workbench'"],
+];
+for (const [path, sourceKey] of DEEL_ROUTES) {
+  const src = read(path);
+  assert(`${path.split('/').slice(-2, -1)[0]} route gates by isDeelSourceVisible(${sourceKey})`,
+    src.includes('isDeelSourceVisible')
+    && src.includes(sourceKey)
+    && /disabled: true, reason: 'source-disabled-for-dept'/.test(src));
+}
+
+// HRX-no-impact: every HRX-side env var in the integration profile must
+// match the ORIGINAL values the pre-Phase-13a routes read. Regression
+// guard so a future tweak doesn't accidentally retarget HRX.
+assert('HRX-no-impact: HRX zendesk token env unchanged',
+  /'hr-experience'[\s\S]+tokenEnvVar: 'ZENDESK_API_TOKEN'/.test(deptIntegrationsSrc));
+assert('HRX-no-impact: HRX zendesk group env unchanged',
+  /'hr-experience'[\s\S]+groupEnvVar: 'ZENDESK_HR_GROUP'/.test(deptIntegrationsSrc));
+assert('HRX-no-impact: HRX jira project keys unchanged (COHD, OSHD)',
+  /'hr-experience'[\s\S]+projectKeys: \['COHD', 'OSHD'\]/.test(deptIntegrationsSrc));
+assert('HRX-no-impact: HRX all 6 Deel sources enabled',
+  /'hr-experience'[\s\S]+onboarding: true,[\s\S]+offboarding: true,[\s\S]+amendments: true,[\s\S]+redlines: true,[\s\S]+incentivePlans: true,[\s\S]+workbench: true/.test(deptIntegrationsSrc));
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
