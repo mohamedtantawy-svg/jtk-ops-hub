@@ -77,6 +77,11 @@ export default function OrgTreeView({
   onAddMember,
   onArchive,
   onSelect,
+  // Phase 10a (2026-05-20): per-row "Login as dept admin" button. Gated on
+  // isGlobalSuperAdmin so only the single owner sees the affordance — keeps
+  // cross-tenant impersonation a singleton power until Phase 11.
+  isGlobalSuperAdmin,
+  onLoginAsDeptAdmin,
 }) {
   const [collapsed, setCollapsed] = useState(() => readCollapsed());
   const keepIds = useMemo(() => filterIds(tree, search), [tree, search]);
@@ -171,6 +176,8 @@ export default function OrgTreeView({
               onAddMember={onAddMember}
               onArchive={onArchive}
               onSelect={onSelect}
+              isGlobalSuperAdmin={isGlobalSuperAdmin}
+              onLoginAsDeptAdmin={onLoginAsDeptAdmin}
             />
           ))
         )}
@@ -182,6 +189,7 @@ export default function OrgTreeView({
 function OrgNodeRow({
   node, depth, tree, collapsed, toggle, keepIds, canEdit,
   sumDescendants, onEdit, onAddChild, onAddMember, onArchive, onSelect,
+  isGlobalSuperAdmin, onLoginAsDeptAdmin,
 }) {
   const kids = tree.byParent.get(node.id) || [];
   const visibleKids = keepIds ? kids.filter(k => keepIds.has(k.id)) : kids;
@@ -301,6 +309,42 @@ function OrgNodeRow({
             <i className="bi bi-person-circle" style={{ fontSize: 12 }} />
             {node.leadEmail.split('@')[0]}
           </span>
+        )}
+
+        {/* Phase 10a: Login-as-dept-admin button — top-level departments only,
+            single global super-admin only, lead email required. Sub-teams
+            and sub-departments don't carry their own tenancy so the button
+            is intentionally hidden for them. */}
+        {isGlobalSuperAdmin
+          && node.kind === 'department'
+          && !node.parentId
+          && node.leadEmail && (
+          <button
+            type="button"
+            onClick={e => { e.stopPropagation(); onLoginAsDeptAdmin?.(node.leadEmail); }}
+            aria-label={`Login as ${node.leadEmail}`}
+            title={`Login as ${node.leadEmail.split('@')[0]} (${node.name} admin)`}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              padding: '4px 10px', height: 26,
+              background: 'var(--purple-light)',
+              color: 'var(--purple)',
+              border: '1px solid var(--purple)',
+              borderRadius: 'var(--radius-pill)',
+              fontSize: 'var(--font-xs)', fontWeight: 600,
+              fontFamily: 'inherit',
+              cursor: 'pointer',
+              flexShrink: 0,
+              transition: 'background .12s',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--purple)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'var(--purple-light)'}
+            onFocus={e => e.currentTarget.style.background = 'var(--purple)'}
+            onBlur={e => e.currentTarget.style.background = 'var(--purple-light)'}
+          >
+            <i className="bi bi-box-arrow-in-right" style={{ fontSize: 11 }} />
+            <span style={{ whiteSpace: 'nowrap' }}>Login as admin</span>
+          </button>
         )}
 
         {/* Action menu */}

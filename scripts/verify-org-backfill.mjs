@@ -517,6 +517,38 @@ assert('OrgView defines getCurrentDeptForEmail and walks to top-level',
 assert('OrgView passes getCurrentDeptForEmail into OrgNodeFormDrawer',
   /getCurrentDeptForEmail=\{getCurrentDeptForEmail\}/.test(orgViewSrcPhase10b));
 
+// ── Section 17: Phase 10a — Login-as-dept-admin button ───────────────────
+console.log('\n── Phase 10a: Login-as-dept-admin button ──');
+const appSrcPhase10a = read('src/App.jsx');
+assert('App.jsx passes realUser + onImpersonate to OrgView',
+  /<OrgView user=\{effectiveUser\} realUser=\{user\} onImpersonate=\{handleImpersonate\}/.test(appSrcPhase10a));
+
+const orgViewSrcPhase10a = read('src/components/views/OrgView.jsx');
+assert('OrgView defines GLOBAL_SUPER_ADMIN_EMAIL constant',
+  /const GLOBAL_SUPER_ADMIN_EMAIL = 'mohamed\.tantawy@deel\.com'/.test(orgViewSrcPhase10a));
+assert('OrgView derives isGlobalSuperAdmin from realUser first',
+  /realUser\?\.email \|\| user\?\.email/.test(orgViewSrcPhase10a));
+assert('OrgView exports handleLoginAsDeptAdmin via callback',
+  /const handleLoginAsDeptAdmin = useCallback/.test(orgViewSrcPhase10a));
+assert('OrgView passes isGlobalSuperAdmin + onLoginAsDeptAdmin to OrgChartCanvas',
+  /isGlobalSuperAdmin=\{isGlobalSuperAdmin\}[\s\S]*onLoginAsDeptAdmin=\{handleLoginAsDeptAdmin\}/.test(orgViewSrcPhase10a));
+assert('OrgView passes isGlobalSuperAdmin + onLoginAsDeptAdmin to OrgTreeView',
+  (orgViewSrcPhase10a.match(/isGlobalSuperAdmin=\{isGlobalSuperAdmin\}/g) || []).length >= 2);
+
+const treeSrcPhase10a = read('src/components/org/OrgTreeView.jsx');
+assert('OrgTreeView renders Login-as-admin button under correct guards',
+  /isGlobalSuperAdmin[\s\S]+node\.kind === 'department'[\s\S]+!node\.parentId[\s\S]+node\.leadEmail/.test(treeSrcPhase10a));
+assert('OrgTreeView Login button invokes onLoginAsDeptAdmin with leadEmail',
+  /onLoginAsDeptAdmin\?\.\(node\.leadEmail\)/.test(treeSrcPhase10a));
+
+const chartSrcPhase10a = read('src/components/org/OrgChartCanvas.jsx');
+assert('OrgChartCanvas threads isGlobalSuperAdmin into NodeCard',
+  /isGlobalSuperAdmin=\{isGlobalSuperAdmin\}/.test(chartSrcPhase10a));
+assert('OrgChartCanvas NodeCard guards Login button on root-dept + leadEmail',
+  /isGlobalSuperAdmin[\s\S]+node\.kind === 'department'[\s\S]+!node\.parentId[\s\S]+node\.leadEmail/.test(chartSrcPhase10a));
+assert('OrgChartCanvas Login button invokes onLoginAsDeptAdmin',
+  /onLoginAsDeptAdmin\?\.\(node\.leadEmail\)/.test(chartSrcPhase10a));
+
 // ── Summary ─────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
