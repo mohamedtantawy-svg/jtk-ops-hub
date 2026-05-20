@@ -1142,6 +1142,33 @@ Compile report
 
 48. **Dev-preview verification = compile check ONLY, not E2E.** The Ops Hub dev preview runs unauthenticated; every authed API call returns 401 before reaching the handler. That means a compile-clean PR can still ship broken: hook order bugs (mistake #43), payload-shape bugs (response not what FE expects), permission bugs (server gate too narrow), can-but-shouldn't bugs (button enabled when it ought not be). **Rule for any PR that touches a stateful component OR an auth-required route**: explicitly state in the PR description what was verified vs deferred. Don't conflate "DOM renders + chunk has my symbols" with "feature works." When the user reports a runtime bug post-merge, recognise that the dev preview gave a false-green — don't argue with the bug report, look at the live failure shape. See PR #596 retro.
 
+49. **`apiFetch` returns the parsed body, NOT a Response object.** `src/services/api.js`#apiFetch resolves to the JSON body on 2xx and THROWS on non-2xx (with `err.status` carrying the HTTP code). Treating the return like a Response (`res.ok`, `res.status`, `res.json()`) means the call ALWAYS lands in the catch branch — the hook silently fails, downstream UI never lights up. Phase 11a's `useCurrentDept` shipped with this bug on 2026-05-20 → `isGlobalSuperAdmin` stayed at `false` for every user, the super-admin chip never rendered in TopNav, AND `visibleSources` stayed at the empty fail-closed default (cascading into mistake #52). One bug, 2 visible symptoms. **Rule**: when writing a new hook against `apiFetch`, treat the return as a body and the throw as the error path. Quick check before commit: `grep -nE 'apiFetch\([^)]+\).*\.(ok|status|json\()' src/hooks/ src/components/` should return nothing. See PR #734.
+
+50. **Slug constants MUST match the actual `org_nodes.slug` row — not the aspirational kebab-case of the dept name.** mohamed picked `'gix'` (not `'global-immigration'`) and `'benefits'` (not `'benefits-operations'`) when creating those departments via the UI. Phase 13a's `DEPT_INTEGRATIONS` map AND Phase 14's roster seed were keyed by the wrong slugs → every per-dept integration lookup silently fell through to undefined, the seed wrote a poison sentinel (see #51), and three prod symptoms cascaded (hidden source-tab gate broke, Zendesk/Jira/Workbench dispatch fell back to no-op, roster never populated). **Rule**: before introducing a slug constant, confirm it against the live `org_nodes.slug` value — `curl /api/v1/dept-scope/current` with the user's bearer token returns every dept's actual slug. Slugs are stable but they're USER-picked — they are NOT derivable from the dept name. See PR #734.
+
+51. **A boot-time seed that writes a "skipped" sentinel on lookup-failure blocks every subsequent run — bump the version, don't just fix the lookup.** Phase 14's roster seed couldn't find `slug='global-immigration'` (see #50), so it correctly wrote `{ version: 1, skipped: 'no-gix-dept' }` to `app_settings` so it wouldn't retry forever. But once the slug bug is fixed, the version guard (`currentVersion >= SEED_VERSION`) still skips because the sentinel says v1 is "done." **Rule**: any time a sentinel is set with a `skipped:` reason (env-missing, lookup-failed, FK-missing, etc), the recovery fix MUST also bump `SEED_VERSION` so the guard runs the seed body again — fixing only the underlying cause leaves the seed permanently dormant. Same pattern applies to any one-shot migration that records its own completion. See PR #734 (`SEED_VERSION 1 → 2`).
+
+52. **Server-side gating of a Deel source doesn't hide the FE tab — gate the tab list client-side too.** Phase 13a's `isDeelSourceVisible(deptSlug, sourceKey)` correctly returned `false` for GIX's 5 hidden sources, so the API routes early-exited and returned empty rows — but the `WORK_SOURCES` tab row in `Queue.jsx` rendered every tab regardless of the dept profile, so derek saw all 5 hidden tabs (empty + clickable). **Rule**: per-dept visibility needs THREE layers — (a) server route early-exit (Phase 13a did this), (b) FE consumer reads `visibleSources` from `useCurrentDept` and filters the tab/chip list (Phase 14.1 added this), (c) navigation guards if direct URL deep-links could land on a hidden source. Don't conflate "data is empty" with "tab is hidden." Also: watch for camelCase vs snake_case key mismatches between the tab id (`'incentive_plans'`) and the visibility key (`'incentivePlans'`). See PR #734.
+
+53. **After a multi-phase deploy, run the 4-symptom Chrome diagnostic IIFE before declaring it shipped.** The 2026-05-20 deploy went green, every commit was on `main`, the dev preview compiled clean — and four user-visible bugs landed simultaneously (chip missing, GIX 2/68 members, hidden tabs visible, integrations not dispatching). The fastest signal is a Chrome DevTools async IIFE — NOT top-level await (fails with "await is only valid in async functions"):
+
+    ```js
+    (async () => {
+      const token = localStorage.getItem('ops_hub_token');
+      const h = { Authorization: `Bearer ${token}` };
+      const out = {};
+      out.deptScope = await (await fetch('/api/v1/dept-scope/current', { headers: h })).json();
+      const tm = await (await fetch('/api/v1/team-members?limit=500', { headers: h })).json();
+      const items = tm.items ?? tm;
+      const byOrg = {};
+      items.forEach(m => { const k = m.org_node_id || 'NULL'; byOrg[k] = (byOrg[k]||0)+1; });
+      out.teamMembers = { total: items.length, byOrgId: byOrg };
+      return JSON.stringify(out, null, 2);
+    })()
+    ```
+
+    Run via `mcp__Claude_in_Chrome__javascript_tool` after navigating to `https://jtk.dp.com`. The dept-scope payload reveals slugs, `isGlobalSuperAdmin`, `visibleSources`, dept list — catching slug-mismatch (#50), hook-contract-fail (#49), and seed-skip (#51) in one call. The team-members breakdown by `org_node_id` immediately flags an unrun seed (expected count vs actual per dept UUID). **Rule**: post-deploy for any tenancy or integration-config change, run this IIFE before reporting "shipped." Two minutes of diagnostic beats a round of "i deployed but…" messages. See PR #734.
+
 ---
 
 ## Quick command reference
