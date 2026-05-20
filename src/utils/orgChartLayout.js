@@ -46,38 +46,39 @@ function buildSubtree(nodeId, ctx, depth) {
     .map(k => buildSubtree(k.id, ctx, depth + 1))
     .filter(Boolean);
 
-  // Leaf nodes attach their direct members (and any descendants' members
-  // when the node has no child nodes — bubbling up the member list keeps
-  // the chart from feeling empty when a team has no sub-teams).
-  if (items.length === 0) {
-    const members = ctx.membersByNode.get(nodeId) || [];
-    if (members.length > 0) {
-      const visible = members.slice(0, MAX_INLINE_MEMBERS);
-      const extra = members.length - visible.length;
-      for (let i = 0; i < visible.length; i += 1) {
-        items.push({
-          id: `m:${visible[i].email}`,
-          kind: 'member',
-          width: MEMBER_W,
-          height: MEMBER_H,
-          depth: depth + 1,
-          parentId: nodeId,
-          children: [],
-          data: visible[i],
-        });
-      }
-      if (extra > 0) {
-        items.push({
-          id: `m-more:${nodeId}`,
-          kind: 'member-more',
-          width: MEMBER_W,
-          height: MEMBER_H,
-          depth: depth + 1,
-          parentId: nodeId,
-          children: [],
-          data: { count: extra, nodeId },
-        });
-      }
+  // Phase 9 (2026-05-20): attach direct members at EVERY node, not just
+  // leaves. Before this fix, EMEA / APAC / AMERICAS showed 0 chips even
+  // though the regional managers were direct members of those nodes —
+  // because non-leaf nodes (those with child sub-teams) skipped the member
+  // attachment entirely. Now members appear as sibling chips alongside
+  // any child sub-team cards.
+  const members = ctx.membersByNode.get(nodeId) || [];
+  if (members.length > 0) {
+    const visible = members.slice(0, MAX_INLINE_MEMBERS);
+    const extra = members.length - visible.length;
+    for (let i = 0; i < visible.length; i += 1) {
+      items.push({
+        id: `m:${visible[i].email}`,
+        kind: 'member',
+        width: MEMBER_W,
+        height: MEMBER_H,
+        depth: depth + 1,
+        parentId: nodeId,
+        children: [],
+        data: visible[i],
+      });
+    }
+    if (extra > 0) {
+      items.push({
+        id: `m-more:${nodeId}`,
+        kind: 'member-more',
+        width: MEMBER_W,
+        height: MEMBER_H,
+        depth: depth + 1,
+        parentId: nodeId,
+        children: [],
+        data: { count: extra, nodeId },
+      });
     }
   }
 

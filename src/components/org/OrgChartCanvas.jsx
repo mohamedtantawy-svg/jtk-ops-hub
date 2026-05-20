@@ -27,6 +27,7 @@ const FIT_PADDING = 32;
 export default function OrgChartCanvas({
   tree, rootNodes, members, search, canEdit,
   onSelectNode, onEdit, onAddChild, onArchive, onAddMember, onSelectMember,
+  sumDescendants,
   // Phase 4 — member move + multi-select
   selectedEmails = new Set(),
   onToggleSelect,
@@ -225,6 +226,7 @@ export default function OrgChartCanvas({
                 onAddChild={onAddChild}
                 onAddMember={onAddMember}
                 onArchive={onArchive}
+                sumDescendants={sumDescendants}
                 isDropTarget={dragTargetId === it.id}
                 onDragOver={(e) => {
                   if (!dragSourceEmails || !canEdit) return;
@@ -307,7 +309,7 @@ export default function OrgChartCanvas({
 }
 
 function NodeCard({ item, highlight, canEdit, onSelect, onEdit, onAddChild, onAddMember, onArchive,
-  isDropTarget, onDragOver, onDragLeave, onDrop }) {
+  sumDescendants, isDropTarget, onDragOver, onDragLeave, onDrop }) {
   const node = item.data;
   const accent = node.color || (node.kind === 'department' ? '#7c3aed' : '#1f74b3');
   const icon = node.icon || (node.kind === 'department' ? 'bi-building' : 'bi-people');
@@ -378,17 +380,21 @@ function NodeCard({ item, highlight, canEdit, onSelect, onEdit, onAddChild, onAd
             marginTop: 2,
           }}>{node.kind}{node.leadEmail ? ` · ${node.leadEmail.split('@')[0]}` : ''}</div>
         </div>
-        <span style={{
-          display: 'inline-flex', alignItems: 'center', gap: 3,
-          padding: '2px 7px',
-          borderRadius: 'var(--radius-pill)',
-          background: 'var(--surface-3)',
-          color: 'var(--text-secondary)',
-          fontSize: 10, fontWeight: 700,
-          flexShrink: 0,
-        }}>
+        {/* Phase 9 (2026-05-20): show recursive headcount so EMEA's badge
+            reflects every person in its subtree, not just direct attaches.
+            Falls back to direct count if the helper isn't supplied. */}
+        <span title={`${(sumDescendants ? sumDescendants(node.id).members : (node.memberCount || 0))} members in subtree`}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 3,
+            padding: '2px 7px',
+            borderRadius: 'var(--radius-pill)',
+            background: 'var(--surface-3)',
+            color: 'var(--text-secondary)',
+            fontSize: 10, fontWeight: 700,
+            flexShrink: 0,
+          }}>
           <i className="bi bi-person-fill" style={{ fontSize: 9 }} />
-          {node.memberCount || 0}
+          {sumDescendants ? sumDescendants(node.id).members : (node.memberCount || 0)}
         </span>
       </div>
       <div style={{
