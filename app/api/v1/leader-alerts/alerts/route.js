@@ -15,6 +15,7 @@ import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { query, withTransaction } from '../../../../../src/lib/db';
 import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
+import { getCurrentDeptId } from '../../../../../src/lib/dept-scope';
 import {
   ALLOWED_STATUSES,
   ALLOWED_SEVERITIES,
@@ -56,6 +57,16 @@ export async function GET(req) {
   const where = [];
   const params = [];
   let p = 1;
+
+  // Phase 11d (2026-05-20): dept isolation. Every leader_alert read scopes
+  // to the caller's currentDeptId. Fails closed when no dept resolvable.
+  const currentDeptId = await getCurrentDeptId(user, req);
+  if (currentDeptId) {
+    where.push(`org_node_id = $${p++}`);
+    params.push(currentDeptId);
+  } else {
+    where.push(`FALSE`);
+  }
 
   if (scope === 'mine') {
     where.push(`LOWER(created_by_email) = $${p++}`);
@@ -190,11 +201,15 @@ export async function POST(req) {
 
   try {
     const created = await withTransaction(async (client) => {
+      // Phase 11d: stamp the creator's currentDeptId on the new alert so
+      // it's born tenanted. Isolation follows the person who raises it.
+      const creatorDeptId = await getCurrentDeptId(user, req);
+
       const insert = await client.query(
         `INSERT INTO leader_alert
            (status, severity, category, title, body, impact_tags, links, attachments,
-            created_by_email, created_by_name)
-         VALUES ('new', $1, $2, $3, $4, $5::text[], $6::jsonb, $7::jsonb, $8, $9)
+            created_by_email, created_by_name, org_node_id)
+         VALUES ('new', $1, $2, $3, $4, $5::text[], $6::jsonb, $7::jsonb, $8, $9, $10)
          RETURNING *`,
         [
           severity, category, title, body,
@@ -203,6 +218,7 @@ export async function POST(req) {
           JSON.stringify(attachments),
           user.email.toLowerCase(),
           createdByName,
+          creatorDeptId,
         ],
       );
       const row = insert.rows[0];
