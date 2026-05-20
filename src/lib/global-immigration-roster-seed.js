@@ -29,9 +29,15 @@
 
 import { query } from './db';
 
-const SEED_VERSION = 1;
+// Bumped to v2 (2026-05-20) because v1 wrote a "skipped: 'no-gix-dept'"
+// sentinel on the first prod boot — the lookup used slug
+// 'global-immigration' but the actual `org_nodes.slug` value mohamed
+// picked when creating the dept was 'gix'. Without bumping the version,
+// the sentinel guard would skip the seed forever even after the slug
+// constant is corrected.
+const SEED_VERSION = 2;
 const SEED_KEY = 'global_immigration_roster_seed_version';
-const GLOBAL_IMMIGRATION_SLUG = 'global-immigration';
+const GLOBAL_IMMIGRATION_SLUG = 'gix';
 const DEFAULT_TITLE = 'Immigration Experience Specialist';
 const DEFAULT_SERVICE = 'New Services';
 
