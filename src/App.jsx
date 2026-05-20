@@ -78,6 +78,10 @@ const _VIEW_ALIASES = {
   'workspace': 'my-queue',
   'queue': 'my-queue',
   'home': 'briefing',
+  // Phase 3 (2026-05-20) — the Team sub-tab inside Leaders Hub moved to
+  // the dedicated Org tab. Any saved deep-link `?view=team` resolves to
+  // `?view=org` so admins don't bounce to briefing.
+  'team': 'org',
 };
 function _resolveViewAlias(v) {
   if (!v) return v;
@@ -128,6 +132,7 @@ import Slack from './components/views/Slack';
 import Alerts from './components/views/Alerts';
 import FeedbackView from './components/views/FeedbackView';
 import HrHubView from './components/views/HrHubView';
+import OrgView from './components/views/OrgView';
 import NotificationsView from './components/views/NotificationsView';
 import LeaderAlertsView from './components/views/LeaderAlertsView';
 import LeadersHubView from './components/views/LeadersHubView';
@@ -2025,6 +2030,7 @@ const App=()=>{
           {view==='alerts'        &&perms?.canView('alerts')!==false       &&<div className="page-enter"><Alerts tasks={perms?.scopeTasks?.(tasksWithSlaExt,MEMBERS)||tasksWithSlaExt} setTasks={setTasks}/></div>}
           {view==='feedback'      &&perms?.canView('feedback')!==false     &&<div className="page-enter"><FeedbackView user={effectiveUser} addToast={addToast} openCompose={feedbackCompose} onComposeOpened={()=>setFeedbackCompose(false)}/></div>}
           {view==='hr-hub'        &&perms?.canView('hr-hub')!==false       &&<div className="page-enter"><HrHubView user={effectiveUser} onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}/></div>}
+          {view==='org'           &&perms?.canView('org')!==false          &&<div className="page-enter"><OrgView user={effectiveUser}/></div>}
           {view==='notifications' &&<div className="page-enter"><NotificationsView notifs={mergedNotifs} unreadCount={mergedNotifs.filter(n=>!n.read).length} markAllRead={markAllRead} markRead={(serverId)=>serverNotifs.markRead(serverId)} markUnread={(serverId)=>serverNotifs.markUnread(serverId)} onNotifClick={handleNotifClick}/></div>}
           {view==='urgent-assist' &&perms?.canView('urgent-assist')!==false&&<div className="page-enter" key={urgentAssistRefreshNonce}><UrgentAssistView user={effectiveUser} onCreate={()=>setUrgentAssistCreate(true)} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall} onOpenSchedule={() => setView('urgent-assist-schedule')}/></div>}
           {view==='urgent-assist-schedule' &&perms?.canView('urgent-assist-schedule')!==false&&<div className="page-enter"><UrgentAssistScheduleView/></div>}

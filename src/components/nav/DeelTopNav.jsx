@@ -37,6 +37,10 @@ const PRIMARY_TABS = [
   // agent (audit 2026-05-04 + spec hardening request).
   { id: 'leader-alerts', icon: 'bi-broadcast',            label: 'Leaders Hub', managerialOnly: true },
   { id: 'urgent-assist', icon: 'bi-exclamation-octagon',  label: 'Urgent Assist' },
+  // Org tab (Phase 0, 2026-05-20) — central command for departments / teams
+  // / sub-teams / people. Visible to everyone (read-only for agents); edit
+  // access gated by `can_manage_org` admin power inside the view itself.
+  { id: 'org',           icon: 'bi-diagram-3',            label: 'Org' },
   { id: 'feedback',      icon: 'bi-lightbulb',            label: 'Feedback' },
   { id: 'announcements', icon: 'bi-megaphone',            label: 'Announcements' },
 ];

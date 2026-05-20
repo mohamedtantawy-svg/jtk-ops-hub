@@ -20,7 +20,34 @@ import { canManageRoster } from '../../../../src/lib/access-admin';
 
 const VALID_ACCESS = ['admin', 'regional_manager', 'team_lead', 'agent'];
 const VALID_SERVICES = ['EOR', 'LifeCycle', 'New Services', 'All'];
-const VALID_TEAMS = ['All', 'EMEA', 'APAC', 'LATAM', 'NAM', 'LATAM + NAM'];
+// Phase 6 (2026-05-20): the team allow-list is now layered. The hard-coded
+// list below stays as the legacy fallback (matches the regions used by
+// pre-Org-tab callers); on top of it we accept any active `org_nodes.name`
+// so the new Edit Allocation drawer's cascade picker can write a team
+// name that doesn't exist in the old enum without rejection. Validation
+// remains strict — strings outside the union still 400.
+const LEGACY_VALID_TEAMS = ['All', 'EMEA', 'APAC', 'LATAM', 'NAM', 'LATAM + NAM'];
+let _orgTeamNamesCache = { names: new Set(), ts: 0 };
+const ORG_TEAMS_TTL_MS = 60_000;
+async function getValidTeamNames() {
+  const now = Date.now();
+  if (_orgTeamNamesCache.ts && now - _orgTeamNamesCache.ts < ORG_TEAMS_TTL_MS) {
+    return _orgTeamNamesCache.names;
+  }
+  const set = new Set(LEGACY_VALID_TEAMS);
+  try {
+    const { rows } = await query(`SELECT name FROM org_nodes WHERE is_archived = false`);
+    for (const r of rows) if (r?.name) set.add(r.name);
+  } catch {
+    // DB unreachable — fall back to the legacy enum so writes don't fail
+    // closed during an outage.
+  }
+  _orgTeamNamesCache = { names: set, ts: now };
+  return set;
+}
+// Kept for compat with any external imports that still reference the
+// constant. New code should call getValidTeamNames().
+const VALID_TEAMS = LEGACY_VALID_TEAMS;
 
 export async function GET(req) {
   try {
@@ -35,6 +62,7 @@ export async function GET(req) {
                 service, country, avatar_url, start_date, is_new, is_deleted,
                 on_leave, is_announcements_admin,
                 is_access_admin,
+                org_node_id,
                 created_at, updated_at
            FROM team_member_overrides`,
       ),
@@ -119,6 +147,12 @@ export async function POST(req) {
     const managerEmail = body.managerEmail ? String(body.managerEmail).trim().toLowerCase() : null;
     const country = body.country ? String(body.country).trim() : null;
     const title = body.title || 'HR Experience Specialist';
+    // Phase 3 (Org Tab): new members can land directly on an org node so
+    // the Org-tab "Add member" flow doesn't require a second PATCH. UUID
+    // validation is loose — the FK will reject a non-existent node.
+    const orgNodeId = body.orgNodeId && /^[0-9a-fA-F-]{36}$/.test(String(body.orgNodeId))
+      ? String(body.orgNodeId)
+      : null;
 
     if (!VALID_ACCESS.includes(access)) {
       return NextResponse.json({ error: `Invalid access. Must be one of: ${VALID_ACCESS.join(', ')}` }, { status: 400 });
@@ -126,8 +160,13 @@ export async function POST(req) {
     if (service && !VALID_SERVICES.includes(service)) {
       return NextResponse.json({ error: `Invalid service. Must be one of: ${VALID_SERVICES.join(', ')}` }, { status: 400 });
     }
-    if (team && !VALID_TEAMS.includes(team)) {
-      return NextResponse.json({ error: `Invalid team. Must be one of: ${VALID_TEAMS.join(', ')}` }, { status: 400 });
+    if (team) {
+      const validTeams = await getValidTeamNames();
+      if (!validTeams.has(team)) {
+        return NextResponse.json({
+          error: `Invalid team "${team}". Must match a legacy region (${LEGACY_VALID_TEAMS.join(', ')}) or an existing org_nodes.name.`,
+        }, { status: 400 });
+      }
     }
 
     // Reject duplicates: only fully-populated, active override rows are
@@ -167,8 +206,9 @@ export async function POST(req) {
     await query(
       `INSERT INTO team_member_overrides
          (email, name, initials, title, access, manager_email, team, region,
-          service, country, avatar_url, start_date, is_new, is_deleted, on_leave)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true,false,false)
+          service, country, avatar_url, start_date, is_new, is_deleted, on_leave,
+          org_node_id)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true,false,false,$13)
        ON CONFLICT (email) DO UPDATE
        SET name          = EXCLUDED.name,
            initials      = EXCLUDED.initials,
@@ -184,8 +224,9 @@ export async function POST(req) {
            is_new        = true,
            is_deleted    = false,
            on_leave      = false,
+           org_node_id   = COALESCE(EXCLUDED.org_node_id, team_member_overrides.org_node_id),
            updated_at    = NOW()`,
-      [email, name, initials, title, access, managerEmail, team, region, service, country, avatarUrl, startDate]
+      [email, name, initials, title, access, managerEmail, team, region, service, country, avatarUrl, startDate, orgNodeId]
     );
 
     // Also seed a members row so auth (findMemberByEmail), /me, and permissions
@@ -225,6 +266,7 @@ export async function POST(req) {
       service, country, avatarUrl, startDate,
       isNew: true, isDeleted: false, onLeave: false,
       lastSeenAt: null, lastLoginAt: null, loginCount: 0,
+      orgNodeId,
     }, { status: 201 });
   } catch (err) {
     console.error('[team-members POST]', err.message);
