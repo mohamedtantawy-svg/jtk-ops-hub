@@ -1,15 +1,21 @@
-// ── OrgChartCanvas (Phase 2, 2026-05-20) ───────────────────────────────────
-// Slack-style visual org chart. Cards for each department / team / sub-
-// team, with leaf teams hosting up to MAX_INLINE_MEMBERS member chips —
-// overflow collapses into a "+N more" tile that opens the team's detail
-// drawer. Pan via click-and-drag, zoom via cmd/ctrl + scroll. The +/–
-// controls + a "fit" button live in a floating toolbar bottom-right.
+// ── OrgChartCanvas (Phase 12a redesign — 2026-05-20) ───────────────────────
+// Smart org chart. The original "render everything always" tree fell apart
+// at scale (10+ depts × 50+ teams × 2500+ members). This redesign:
 //
-// Connector lines are SVG paths drawn underneath the cards. Each parent →
-// child relationship draws a vertical stem from the parent's bottom, a
-// horizontal rail at the midpoint of ROW_GAP, and a vertical drop to each
-// child's top — a clean orthogonal layout that matches the reference
-// design.
+//   • Default view: every department + every team. Sub-teams + members
+//     HIDDEN until clicked.
+//   • Lead embedded in the card (avatar + name) instead of a separate
+//     chip. No bare ack-style "+8 more" by default — members only appear
+//     when an admin clicks "Show members" on a specific card.
+//   • One team's sub-teams open at a time. Click expand on team B and
+//     team A (if open) auto-collapses — keeps the chart fit-to-screen
+//     no matter how deep you drill.
+//   • Auto fit-to-screen on every expansion change so the chart stays
+//     compact regardless of which subtree is currently open.
+//
+// Card affordances (kept from prior phases): drop-target for member
+// drag-and-drop (Phase 4), Login-as-dept-admin button (Phase 10a),
+// per-card action menu (edit / add / archive).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Avatar from '../ui/Avatar';
@@ -37,6 +43,13 @@ export default function OrgChartCanvas({
   // + !node.parentId + node.leadEmail.
   isGlobalSuperAdmin,
   onLoginAsDeptAdmin,
+  // Phase 12a — expansion state. Controls which sub-trees + which member
+  // chips are rendered. Comes from OrgView so the state survives across
+  // mode switches (chart ↔ list ↔ table) and so the audit drawer / form
+  // drawer can drive expansion as well (future).
+  expansion,                  // { expandedTeamId, expandedSubTeamId, showMembers: Set<string> }
+  onToggleTeamExpansion,      // (nodeId, kind: 'team' | 'subTeam') => void
+  onToggleShowMembers,        // (nodeId) => void
 }) {
   const wrapRef = useRef(null);
   const stageRef = useRef(null);
@@ -50,9 +63,57 @@ export default function OrgChartCanvas({
   const [dragSourceEmails, setDragSourceEmails] = useState(null);
   const [dragTargetId, setDragTargetId] = useState(null);
 
+  // Phase 12a: lead lookup so each card can embed its lead's avatar + name
+  // inline instead of forcing the admin to expand the team to see who runs
+  // it. Cheap O(members) build, memoised; lookups are O(1).
+  const membersByEmail = useMemo(() => {
+    const map = new Map();
+    for (const m of members || []) {
+      if (m?.email) map.set(String(m.email).toLowerCase(), m);
+    }
+    return map;
+  }, [members]);
+
+  // Phase 12a: per-node subtree stats (direct + descendant teams,
+  // members, vacancies). Used by the card stats row. Recursive descent
+  // with a cache keyed by node id so a 50-team org doesn't re-walk the
+  // subtree on every render.
+  const subtreeStats = useMemo(() => {
+    const cache = new Map();
+    function walk(nodeId) {
+      if (cache.has(nodeId)) return cache.get(nodeId);
+      const node = tree.byId?.get(nodeId);
+      if (!node) {
+        const empty = { directTeams: 0, descendantTeams: 0, directMembers: 0, descendantMembers: 0, vacancies: 0 };
+        cache.set(nodeId, empty);
+        return empty;
+      }
+      let directTeams = 0;
+      let descendantTeams = 0;
+      let directMembers = node.memberCount || 0;
+      let descendantMembers = node.memberCount || 0;
+      let vacancies = node.vacantCount || 0;
+      const kids = (tree.byParent?.get(nodeId) || []).filter(k => !k.isArchived);
+      for (const kid of kids) {
+        if (kid.kind === 'team') {
+          directTeams += 1;
+          descendantTeams += 1;
+        }
+        const childStats = walk(kid.id);
+        descendantTeams += childStats.descendantTeams;
+        descendantMembers += childStats.descendantMembers;
+        vacancies += childStats.vacancies;
+      }
+      const out = { directTeams, descendantTeams, directMembers, descendantMembers, vacancies };
+      cache.set(nodeId, out);
+      return out;
+    }
+    return walk;
+  }, [tree]);
+
   const layout = useMemo(
-    () => layoutOrgChart({ tree, rootNodes, members }),
-    [tree, rootNodes, members],
+    () => layoutOrgChart({ tree, rootNodes, members, expansion }),
+    [tree, rootNodes, members, expansion],
   );
 
   // ── Pan handling ────────────────────────────────────────────────────────
@@ -220,6 +281,26 @@ export default function OrgChartCanvas({
         {layout.items.map(it => {
           const highlight = matchesSearch(it);
           if (it.kind === 'node') {
+            const node = it.data;
+            const lead = node.leadEmail
+              ? membersByEmail.get(String(node.leadEmail).toLowerCase()) || null
+              : null;
+            const stats = subtreeStats(node.id);
+            // A node "can expand" when it has at least one team child (sub-team).
+            // Departments and root-level teams without sub-teams render the
+            // expand button disabled / hidden.
+            const childKidsAreTeams = (tree.byParent?.get(node.id) || [])
+              .some(k => !k.isArchived && k.kind === 'team');
+            const isTeamUnderDept = node.kind === 'team'
+              && tree.byId?.get(node.parentId)?.kind === 'department';
+            const isSubTeam = node.kind === 'team' && !isTeamUnderDept;
+            const isExpanded = isTeamUnderDept
+              ? expansion?.expandedTeamId === node.id
+              : isSubTeam
+                ? expansion?.expandedSubTeamId === node.id
+                : false;
+            const canToggleExpand = childKidsAreTeams && (isTeamUnderDept || isSubTeam);
+            const isShowingMembers = expansion?.showMembers?.has(node.id) === true;
             return (
               <NodeCard
                 key={it.id}
@@ -231,7 +312,16 @@ export default function OrgChartCanvas({
                 onAddChild={onAddChild}
                 onAddMember={onAddMember}
                 onArchive={onArchive}
-                sumDescendants={sumDescendants}
+                lead={lead}
+                stats={stats}
+                canToggleExpand={canToggleExpand}
+                isExpanded={isExpanded}
+                isShowingMembers={isShowingMembers}
+                onToggleExpand={() => {
+                  if (!canToggleExpand) return;
+                  onToggleTeamExpansion?.(node.id, isTeamUnderDept ? 'team' : 'subTeam');
+                }}
+                onToggleShowMembers={() => onToggleShowMembers?.(node.id)}
                 isGlobalSuperAdmin={isGlobalSuperAdmin}
                 onLoginAsDeptAdmin={onLoginAsDeptAdmin}
                 isDropTarget={dragTargetId === it.id}
@@ -315,9 +405,29 @@ export default function OrgChartCanvas({
   );
 }
 
-function NodeCard({ item, highlight, canEdit, onSelect, onEdit, onAddChild, onAddMember, onArchive,
-  sumDescendants, isGlobalSuperAdmin, onLoginAsDeptAdmin,
-  isDropTarget, onDragOver, onDragLeave, onDrop }) {
+// ── NodeCard (Phase 12a redesign — 2026-05-20) ────────────────────────────
+// Department / team / sub-team card. Embeds the lead inline (avatar +
+// name) so the admin doesn't have to expand to see who runs the team.
+// Stats row shows direct teams + descendant members. Actions row has
+// per-card "Expand" + "Show members" toggles that drive the chart's
+// expansion state.
+function NodeCard({
+  item, highlight, canEdit,
+  onSelect, onEdit, onAddChild, onAddMember, onArchive,
+  // Phase 12a inputs
+  lead,                       // Member | null — looked up from membersByEmail
+  stats,                      // { directTeams, descendantMembers, vacancies, ... }
+  canToggleExpand,            // true iff this node has team-kind children
+  isExpanded,                 // true iff this node is currently expanded
+  isShowingMembers,           // true iff this card's members are rendered
+  onToggleExpand,
+  onToggleShowMembers,
+  // Phase 10a — preserved
+  isGlobalSuperAdmin,
+  onLoginAsDeptAdmin,
+  // Phase 4 — drop-target plumbing preserved
+  isDropTarget, onDragOver, onDragLeave, onDrop,
+}) {
   const node = item.data;
   const accent = node.color || (node.kind === 'department' ? '#7c3aed' : '#1f74b3');
   const icon = node.icon || (node.kind === 'department' ? 'bi-building' : 'bi-people');
@@ -331,12 +441,16 @@ function NodeCard({ item, highlight, canEdit, onSelect, onEdit, onAddChild, onAd
     return () => document.removeEventListener('mousedown', h);
   }, [menuOpen]);
 
-  // Visual: a drop target gets a thick accent ring + a subtle highlight so
-  // admins can see exactly where the drop will land before releasing.
   const borderColor = isDropTarget ? accent : (highlight ? accent : 'var(--border)');
   const shadow = isDropTarget
     ? `0 0 0 4px ${accent}55, 0 4px 12px ${accent}33`
     : (highlight ? `0 0 0 3px ${accent}33` : '0 1px 3px rgba(0,0,0,0.05)');
+  const kindLabel = node.kind === 'department' ? 'Dept' : 'Team';
+  const memberCount = stats?.descendantMembers ?? (node.memberCount || 0);
+  const directTeams = stats?.directTeams ?? 0;
+  const leadName = lead?.name || (node.leadEmail ? node.leadEmail.split('@')[0] : null);
+  const leadInitials = lead?.initials || (leadName ? leadName.slice(0, 2).toUpperCase() : '?');
+
   return (
     <div
       data-org-card
@@ -349,10 +463,11 @@ function NodeCard({ item, highlight, canEdit, onSelect, onEdit, onAddChild, onAd
         borderTop: `3px solid ${accent}`,
         borderRadius: 12,
         boxShadow: shadow,
-        padding: '10px 12px',
+        padding: '10px 14px 8px',
         display: 'flex', flexDirection: 'column',
         cursor: 'pointer',
         transition: 'border-color .12s, box-shadow .12s, transform .12s, background .12s',
+        overflow: 'hidden',
       }}
       onClick={() => onSelect?.(node)}
       onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; }}
@@ -361,7 +476,8 @@ function NodeCard({ item, highlight, canEdit, onSelect, onEdit, onAddChild, onAd
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+      {/* Header row: icon + name + kind chip */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 6 }}>
         <div style={{
           width: 30, height: 30, borderRadius: 8,
           background: `${accent}22`,
@@ -372,98 +488,142 @@ function NodeCard({ item, highlight, canEdit, onSelect, onEdit, onAddChild, onAd
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
-            fontSize: 'var(--font-sm)',
-            fontWeight: 700,
-            color: 'var(--text)',
-            lineHeight: 1.25,
+            fontSize: 'var(--font-md)', fontWeight: 700,
+            color: 'var(--text)', lineHeight: 1.2,
             overflow: 'hidden',
             display: '-webkit-box',
             WebkitLineClamp: 2,
             WebkitBoxOrient: 'vertical',
           }}>{node.name}</div>
-          <div style={{
-            fontSize: 'var(--font-xs)',
-            color: 'var(--text-muted)',
-            textTransform: 'capitalize',
-            marginTop: 2,
-          }}>{node.kind}{node.leadEmail ? ` · ${node.leadEmail.split('@')[0]}` : ''}</div>
         </div>
-        {/* Phase 9 (2026-05-20): show recursive headcount so EMEA's badge
-            reflects every person in its subtree, not just direct attaches.
-            Falls back to direct count if the helper isn't supplied. */}
-        <span title={`${(sumDescendants ? sumDescendants(node.id).members : (node.memberCount || 0))} members in subtree`}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 3,
-            padding: '2px 7px',
-            borderRadius: 'var(--radius-pill)',
-            background: 'var(--surface-3)',
-            color: 'var(--text-secondary)',
-            fontSize: 10, fontWeight: 700,
-            flexShrink: 0,
-          }}>
-          <i className="bi bi-person-fill" style={{ fontSize: 9 }} />
-          {sumDescendants ? sumDescendants(node.id).members : (node.memberCount || 0)}
-        </span>
+        <span style={{
+          padding: '2px 8px',
+          borderRadius: 'var(--radius-pill)',
+          background: node.kind === 'department' ? `${accent}22` : 'var(--surface-3)',
+          color: node.kind === 'department' ? accent : 'var(--text-secondary)',
+          fontSize: 10, fontWeight: 700,
+          letterSpacing: '0.04em',
+          textTransform: 'uppercase',
+          flexShrink: 0,
+        }}>{kindLabel}</span>
       </div>
+
+      {/* Lead row — embedded inline; the lead is the team's identity */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '6px 8px',
+        background: 'var(--surface-2)',
+        borderRadius: 8,
+        marginBottom: 6,
+        minHeight: 32,
+      }}>
+        {lead ? (
+          <Avatar size={22} name={lead.name} initials={leadInitials} src={lead.avatarUrl} />
+        ) : (
+          <div style={{
+            width: 22, height: 22, borderRadius: '50%',
+            background: 'var(--surface-3)',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 10, color: 'var(--text-muted)', flexShrink: 0,
+          }}>?</div>
+        )}
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{
+            fontSize: 'var(--font-xs)', color: 'var(--text-muted)',
+            lineHeight: 1, textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600,
+          }}>Lead</div>
+          <div style={{
+            fontSize: 'var(--font-sm)', fontWeight: 600, color: 'var(--text)',
+            lineHeight: 1.2, marginTop: 2,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>{leadName || 'Unassigned'}</div>
+        </div>
+      </div>
+
+      {/* Stats row — counts + country flags */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        fontSize: 'var(--font-xs)', color: 'var(--text-secondary)',
+        marginBottom: 6,
+      }}>
+        {directTeams > 0 && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontWeight: 600 }}>
+            <i className="bi bi-diagram-3" style={{ fontSize: 10 }} />
+            {directTeams} {directTeams === 1 ? 'team' : 'teams'}
+          </span>
+        )}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontWeight: 600 }}
+          title={`${memberCount} member${memberCount === 1 ? '' : 's'} in subtree`}>
+          <i className="bi bi-person-fill" style={{ fontSize: 10 }} />
+          {memberCount}
+        </span>
+        {(node.countryCodes || []).length > 0 && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, marginLeft: 'auto' }}>
+            {(node.countryCodes || []).slice(0, 3).map(c => (
+              <span key={c} style={{ fontSize: 11 }} title={c}>{flagFor(c)}</span>
+            ))}
+            {(node.countryCodes || []).length > 3 && (
+              <span style={{ fontWeight: 700, color: 'var(--text-muted)' }}>+{node.countryCodes.length - 3}</span>
+            )}
+          </span>
+        )}
+      </div>
+
+      {/* Actions row — expand / show-members / login / ... */}
       <div style={{
         marginTop: 'auto',
         display: 'flex', alignItems: 'center', gap: 6,
-        fontSize: 'var(--font-xs)',
-        color: 'var(--text-muted)',
-      }}>
-        {(node.countryCodes || []).slice(0, 4).map(c => (
-          <span key={c} style={{ fontSize: 13 }} title={c}>{flagFor(c)}</span>
-        ))}
-        {(node.countryCodes || []).length > 4 && (
-          <span style={{ fontWeight: 600 }}>+{node.countryCodes.length - 4}</span>
+      }} onClick={e => e.stopPropagation()}>
+        {canToggleExpand && (
+          <button
+            type="button" data-org-control
+            onClick={onToggleExpand}
+            aria-pressed={isExpanded}
+            aria-label={isExpanded ? 'Collapse sub-teams' : 'Expand sub-teams'}
+            style={pillBtnStyle(isExpanded ? accent : 'var(--text-secondary)', isExpanded ? `${accent}22` : 'var(--surface-2)', isExpanded ? accent : 'var(--border)')}
+          >
+            <i className={`bi ${isExpanded ? 'bi-chevron-up' : 'bi-chevron-down'}`} style={{ fontSize: 9 }} />
+            {isExpanded ? 'Hide' : 'Expand'}
+          </button>
         )}
-        {/* Phase 10a: Login-as-dept-admin — top-level departments only.
-            Sits before the action menu so a quick click switches the global
-            super-admin into that dept's lead account. */}
+        {memberCount > 0 && (
+          <button
+            type="button" data-org-control
+            onClick={onToggleShowMembers}
+            aria-pressed={isShowingMembers}
+            aria-label={isShowingMembers ? 'Hide team members' : 'Show team members'}
+            style={pillBtnStyle(isShowingMembers ? accent : 'var(--text-secondary)', isShowingMembers ? `${accent}22` : 'var(--surface-2)', isShowingMembers ? accent : 'var(--border)')}
+          >
+            <i className={`bi ${isShowingMembers ? 'bi-eye-slash' : 'bi-eye'}`} style={{ fontSize: 9 }} />
+            {isShowingMembers ? 'Hide members' : 'Show members'}
+          </button>
+        )}
+        {/* Phase 10a Login-as-admin — top-level departments only, super-admin only */}
         {isGlobalSuperAdmin
           && node.kind === 'department'
           && !node.parentId
           && node.leadEmail && (
           <button
-            type="button"
-            data-org-control
-            onClick={e => { e.stopPropagation(); onLoginAsDeptAdmin?.(node.leadEmail); }}
+            type="button" data-org-control
+            onClick={() => onLoginAsDeptAdmin?.(node.leadEmail)}
             aria-label={`Login as ${node.leadEmail}`}
             title={`Login as ${node.leadEmail.split('@')[0]} (${node.name} admin)`}
-            style={{
-              marginLeft: 'auto',
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-              padding: '2px 7px', height: 20,
-              background: 'var(--purple-light)',
-              color: 'var(--purple)',
-              border: '1px solid var(--purple)',
-              borderRadius: 'var(--radius-pill)',
-              fontSize: 10, fontWeight: 700,
-              fontFamily: 'inherit',
-              cursor: 'pointer',
-              transition: 'background .12s',
-            }}
-            onMouseEnter={e => e.currentTarget.style.background = 'var(--purple)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'var(--purple-light)'}
-            onMouseDown={e => e.currentTarget.style.color = 'white'}
-            onMouseUp={e => e.currentTarget.style.color = 'var(--purple)'}
+            style={pillBtnStyle('var(--purple)', 'var(--purple-light)', 'var(--purple)')}
           >
             <i className="bi bi-box-arrow-in-right" style={{ fontSize: 9 }} />
             Login
           </button>
         )}
         {canEdit && (
-          <div ref={menuRef} style={{ marginLeft: 'auto', position: 'relative' }} onClick={e => e.stopPropagation()}>
+          <div ref={menuRef} style={{ marginLeft: 'auto', position: 'relative' }}>
             <button
               type="button"
               aria-label="Actions"
               onClick={() => setMenuOpen(p => !p)}
               style={{
-                width: 22, height: 22,
+                width: 24, height: 24,
                 background: menuOpen ? 'var(--surface-3)' : 'transparent',
-                border: 'none',
-                borderRadius: 6,
-                cursor: 'pointer',
+                border: 'none', borderRadius: 6, cursor: 'pointer',
                 color: 'var(--text-secondary)',
                 display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
               }}
@@ -473,11 +633,6 @@ function NodeCard({ item, highlight, canEdit, onSelect, onEdit, onAddChild, onAd
               <i className="bi bi-three-dots" style={{ fontSize: 11 }} />
             </button>
             {menuOpen && (
-              // Menu opens downward (top: calc(100% + 4px)) so cards near the
-              // very top of the chart canvas don't clip the menu against the
-              // canvas's overflow:hidden boundary. The action button sits
-              // along the card's bottom edge so a downward menu still flows
-              // naturally.
               <div style={{
                 position: 'absolute', top: 'calc(100% + 4px)', right: 0,
                 background: 'var(--surface)',
@@ -501,6 +656,25 @@ function NodeCard({ item, highlight, canEdit, onSelect, onEdit, onAddChild, onAd
       </div>
     </div>
   );
+}
+
+// Reusable pill button style used by the per-card action buttons. The
+// `color` argument is the accent / text colour; `bg` + `border` adjust
+// independently so the active/inactive variants share one factory.
+function pillBtnStyle(color, bg, border) {
+  return {
+    display: 'inline-flex', alignItems: 'center', gap: 4,
+    padding: '3px 9px', height: 22,
+    background: bg,
+    color,
+    border: `1px solid ${border}`,
+    borderRadius: 'var(--radius-pill)',
+    fontSize: 10, fontWeight: 700,
+    fontFamily: 'inherit',
+    cursor: 'pointer',
+    transition: 'background .12s, color .12s, border-color .12s',
+    whiteSpace: 'nowrap',
+  };
 }
 
 function MemberCard({ item, highlight, isSelected, canEdit,
