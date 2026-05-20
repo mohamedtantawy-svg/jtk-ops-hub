@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { query } from '../../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
+import { getCurrentDeptId } from '../../../../../../src/lib/dept-scope';
 
 export async function POST(req, { params }) {
   try {
@@ -12,15 +13,19 @@ export async function POST(req, { params }) {
 
     const { id } = await params;
 
-    // Existence check up front. The INSERT below has a foreign key on
-    // announcement_id that fires a 23503 violation when the row is gone,
-    // which surfaces as a 500 in our logs even though the user-facing
-    // outcome is "this announcement no longer exists". Returning 410 lets
-    // the FE drop the popup from its dismissed-popups state and stop
-    // retrying.
+    // Phase 11i (2026-05-20): dept-scope the existence check so a user
+    // can't ack a cross-dept announcement by guessing its UUID. 410 keeps
+    // the FE behavior aligned with the original "announcement no longer
+    // exists" path (drop the popup, stop retrying) — from the caller's
+    // perspective, an announcement in another tenant is indistinguishable
+    // from one that's been deleted.
+    const currentDeptId = await getCurrentDeptId(user, req);
+    if (!currentDeptId) {
+      return NextResponse.json({ error: 'Announcement not found', code: 'gone' }, { status: 410 });
+    }
     const exists = await query(
-      'SELECT 1 FROM announcements WHERE id = $1 LIMIT 1',
-      [id]
+      'SELECT 1 FROM announcements WHERE id = $1 AND org_node_id = $2 LIMIT 1',
+      [id, currentDeptId]
     );
     if (exists.rowCount === 0) {
       return NextResponse.json(
