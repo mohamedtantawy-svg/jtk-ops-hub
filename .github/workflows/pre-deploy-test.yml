@@ -10,17 +10,35 @@ on:
 jobs:
   build:
     name: Build check
+    permissions:
+      id-token: write
+      contents: read
     runs-on:
       group: default
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@d979d5b3a71173a29b74b5b88418bfda9437d885 # v6
+        with:
+          role-to-assume: arn:aws:iam::211125331032:role/github-actions-common
+          aws-region: eu-west-1
+
+      - name: Get Secrets
+        uses: aws-actions/aws-secretsmanager-get-secrets@2cb1a461cbd4865ac4299648312e4704c646cd53 # v3
+        with:
+          secret-ids: arn:aws:secretsmanager:eu-west-1:211125331032:secret:github-actions-playgrounds-PrScUZ
+          parse-json-secrets: true
+
       - name: Install and build (Docker)
+        env:
+          CODEARTIFACT_AUTH_TOKEN: ${{ env.GITHUB_ACTIONS_PLAYGROUNDS_CODEARTIFACT_AUTH_TOKEN }}
         run: |
           docker run --rm \
             -v "$GITHUB_WORKSPACE:/app" \
             -w /app \
             -e NEXT_TELEMETRY_DISABLED=1 \
+            -e CODEARTIFACT_AUTH_TOKEN="$CODEARTIFACT_AUTH_TOKEN" \
             public.ecr.aws/docker/library/node:22-alpine \
             sh -c 'npm ci && npm run build'
