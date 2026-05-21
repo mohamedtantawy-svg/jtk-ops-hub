@@ -144,6 +144,16 @@ function _normaliseMember(m) {
 
 let _currentRoster = TEAM_MEMBERS.map(_normaliseMember);
 let _rosterVersion = 0;
+// Live-fetch landed signal — independent of `_rosterVersion`. Bumped to
+// true the first time `useTeamMembers` finishes a /team-members fetch
+// (success OR fail). Needed because `hydrateRoster` no-ops when the
+// incoming roster is structurally equal to `_currentRoster` (the static
+// baseline on mount), so `_rosterVersion` can stay at 0 forever for a
+// fresh agent whose live roster happens to match the seeded shape — in
+// which case App.jsx's `rosterVersion === 0` deferral (PR #754) would
+// otherwise leave the home-routing effect permanently paused and the
+// agent staring at a blank page.
+let _liveRosterFetched = false;
 const _subscribers = new Set();
 
 function _buildMembersByEmail(roster) {
@@ -274,6 +284,36 @@ export function hydrateRoster(nextMembers) {
 /** Current monotonically-increasing roster version (0 if untouched). */
 export function getRosterVersion() {
   return _rosterVersion;
+}
+
+/**
+ * Mark the live /team-members fetch as having landed at least once.
+ * Idempotent; fires the same subscribers as `hydrateRoster` so React
+ * consumers re-read both signals in their callback. Separate from
+ * `_rosterVersion` because the version counter only bumps when the
+ * incoming roster differs from `_currentRoster`, and on the very first
+ * mount the seeded baseline + the freshly-fetched roster can be
+ * structurally identical (e.g. a brand-new agent whose only row already
+ * matches the static seed). Without this signal, App.jsx's
+ * `rosterVersion === 0` gate could stay armed indefinitely.
+ */
+export function markLiveRosterFetched() {
+  if (_liveRosterFetched) return;
+  _liveRosterFetched = true;
+  for (const cb of _subscribers) {
+    try {
+      cb(_rosterVersion);
+    } catch (err) {
+      if (typeof console !== 'undefined' && console.warn) {
+        console.warn('[members subscribeRoster]', err?.message || err);
+      }
+    }
+  }
+}
+
+/** Has the live /team-members fetch landed at least once this session? */
+export function getLiveRosterFetched() {
+  return _liveRosterFetched;
 }
 
 /** Register a callback fired after each successful hydration. Returns an

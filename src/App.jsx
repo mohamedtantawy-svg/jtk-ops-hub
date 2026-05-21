@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef, useCallback, createContext } from '
 import { TOOLS, STATUSES, FUNCTIONS, FLAGS } from './data/constants';
 import { INITIAL_PROJECTS } from './data/projects';
 import { INITIAL_REQUESTS } from './data/requests';
-import { MEMBERS, MEMBERS_BY_EMAIL, DEFAULT_USER_ACCESS_MAP, TEAM_MEMBERS, getAllReports, subscribeRoster, getRosterVersion } from './data/members';
+import { MEMBERS, MEMBERS_BY_EMAIL, DEFAULT_USER_ACCESS_MAP, TEAM_MEMBERS, getAllReports, subscribeRoster, getRosterVersion, getLiveRosterFetched } from './data/members';
 import { useTeamMembers } from './hooks/useTeamMembers';
 import { INITIAL_ACTIVITY, INITIAL_NOTES } from './data/tasks';
 import { FEED_EVENTS } from './data/feed';
@@ -632,8 +632,18 @@ const App=()=>{
   // subscribe to hydrations and bump a counter that every dependent memo
   // (userAccessMap reconcile, PermissionsContext consumers) can key off of.
   const [rosterVersion,setRosterVersion]=useState(()=>getRosterVersion());
+  // Companion signal to rosterVersion — true once the live /team-members
+  // fetch has completed at least once (success or fail). Needed because
+  // hydrateRoster no-ops when the incoming data is structurally equal to
+  // the baseline, which can keep rosterVersion stuck at 0 for fresh
+  // agents whose live roster happens to match the seed shape. See the
+  // routing effect below for why both signals are checked.
+  const [rosterFetched,setRosterFetched]=useState(()=>getLiveRosterFetched());
   useEffect(() => {
-    const unsub = subscribeRoster((v) => setRosterVersion(v));
+    const unsub = subscribeRoster((v) => {
+      setRosterVersion(v);
+      setRosterFetched(getLiveRosterFetched());
+    });
     return unsub;
   }, []);
 
@@ -1344,12 +1354,22 @@ const App=()=>{
     // existed). Flipping to agent-home on that stale read and then
     // having to flip BACK to briefing once the real role arrives shows
     // the manager a brief AgentHome paint, which they correctly read as
-    // "the cards don't show any tasks". With rosterVersion=0 we defer
-    // the routing decision until the live roster has loaded at least
-    // once — for managers with a populated localStorage cache (legacy
-    // or per-dept) hydration is synchronous on the very first render,
-    // so the briefing view paints with no flicker.
-    if (rosterVersion === 0) return;
+    // "the cards don't show any tasks". For managers with a populated
+    // localStorage cache (legacy or per-dept) hydration is synchronous on
+    // the very first render, so the briefing view paints with no flicker.
+    //
+    // Two signals are checked because they aren't redundant:
+    //   • rosterVersion > 0 — the module-level roster differs from the
+    //     baseline (hydrateRoster fired with actual change).
+    //   • rosterFetched     — the live /team-members fetch returned, even
+    //     if its payload was structurally identical to the baseline (in
+    //     which case hydrateRoster no-ops and rosterVersion stays at 0).
+    // Without the second signal, agents whose live roster happens to
+    // match the static seed get stuck: rosterVersion === 0 forever,
+    // routing deferred forever, view stays at 'briefing' but the
+    // BriefingView render gate rejects them (dataScope is own_tasks_only)
+    // → blank page (Abe Elkholi, 2026-05-21).
+    if (!rosterFetched && rosterVersion === 0) return;
     const dataScope = perms?.raw?.dataScope;
     if (!dataScope) return; // wait for accessType to resolve
     const isManagerial = dataScope === 'all_tasks' || dataScope === 'regional_tasks' || dataScope === 'team_tasks';
@@ -1362,7 +1382,7 @@ const App=()=>{
     // this, the admin sees AgentHome rendered with their own data until
     // they manually click the Home tab.
     if (isManagerial && view === 'agent-home') setView('briefing');
-  }, [effectiveUser, perms?.raw?.dataScope, view, rosterVersion]);
+  }, [effectiveUser, perms?.raw?.dataScope, view, rosterVersion, rosterFetched]);
 
   // ── Live integrations (Jira, Slack) ───────────────────────────────────────
   // Deel REST-v2 wrapper (useDeelData) retired 2026-05-13 — endpoints had

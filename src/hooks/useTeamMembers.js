@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../services/api';
-import { TEAM_MEMBERS, hydrateRoster } from '../data/members';
+import { TEAM_MEMBERS, hydrateRoster, markLiveRosterFetched } from '../data/members';
 import { hydrateOwnerCountries } from '../data/countryOwners';
 import { useCurrentDeptId, getCurrentDeptIdSync } from '../lib/current-dept-storage';
 
@@ -135,7 +135,14 @@ export function useTeamMembers() {
       setError(err);
       console.warn('[useTeamMembers] fetch failed, using baseline:', err.message);
     } finally {
-      if (mountedRef.current) setLoading(false);
+      if (mountedRef.current) {
+        setLoading(false);
+        // Signal that the live fetch landed (success OR fail) so App.jsx's
+        // home-routing effect can stop deferring even when the response
+        // happens to be structurally identical to the static baseline
+        // (hydrateRoster no-ops in that case → rosterVersion stays at 0).
+        markLiveRosterFetched();
+      }
     }
   }, []);
 
