@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../services/api';
 import { TEAM_MEMBERS, hydrateRoster } from '../data/members';
 import { hydrateOwnerCountries } from '../data/countryOwners';
+import { useCurrentDeptId, getCurrentDeptIdSync } from '../lib/current-dept-storage';
 
 // Shape-compat fallback: baseline TEAM_MEMBERS with defaulted metadata fields
 // so consumers can read every property regardless of whether the API returned.
@@ -32,16 +33,26 @@ function baselineAsMerged() {
 const CACHE_KEY_BASE = 'ops_hub_team_members_cache';
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
-function cacheKey() {
-  if (typeof localStorage === 'undefined') return null;
-  try { return `${CACHE_KEY_BASE}:${(localStorage.getItem('ops_hub_logged_in_email') || '').toLowerCase()}`; }
-  catch { return CACHE_KEY_BASE; }
-}
-
-function readCache() {
+// Phase 11+ instant-switch (2026-05-21): cache is per user AND per dept so
+// the roster shown in HRX (84 HRX members) and GIX (67 GIX members) don't
+// stomp each other when mohamed switches the picker. Without this, the
+// last-fetched roster wins regardless of dept and the Team tab + Org
+// surfaces + Briefing Team Summary all flash the wrong people.
+function cacheKey(deptIdArg) {
   if (typeof localStorage === 'undefined') return null;
   try {
-    const raw = localStorage.getItem(cacheKey());
+    const email = (localStorage.getItem('ops_hub_logged_in_email') || '').toLowerCase();
+    const u = email ? `:${email}` : '';
+    const did = (deptIdArg !== undefined) ? deptIdArg : getCurrentDeptIdSync();
+    const d = did ? `:${did}` : ':no-dept';
+    return `${CACHE_KEY_BASE}${u}${d}`;
+  } catch { return CACHE_KEY_BASE; }
+}
+
+function readCache(deptIdArg) {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(cacheKey(deptIdArg));
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || !Array.isArray(parsed.items)) return null;
@@ -50,22 +61,29 @@ function readCache() {
   } catch { return null; }
 }
 
-function writeCache(items) {
+function writeCache(deptIdArg, items) {
   if (typeof localStorage === 'undefined') return;
-  try { localStorage.setItem(cacheKey(), JSON.stringify({ items, ts: Date.now() })); } catch {}
+  try { localStorage.setItem(cacheKey(deptIdArg), JSON.stringify({ items, ts: Date.now() })); } catch {}
 }
 
 export function useTeamMembers() {
   // Initial state: cached items if present (instant paint with real
   // lastSeenAt values), otherwise the static baseline. The fetch in the
   // mount effect below revalidates either way.
-  const [members, setMembers] = useState(() => readCache() || baselineAsMerged());
+  const initialDeptId = getCurrentDeptIdSync();
+  const [members, setMembers] = useState(() => readCache(initialDeptId) || baselineAsMerged());
   // `loading` is true only when we don't have cached data — the first paint
   // from cache is treated as "ready" so the Team view doesn't flash a
   // spinner over real data.
-  const [loading, setLoading] = useState(() => !readCache());
+  const [loading, setLoading] = useState(() => !readCache(initialDeptId));
   const [error, setError] = useState(null);
   const mountedRef = useRef(true);
+
+  // Phase 11+ instant-switch (2026-05-21): roster is per-dept. Switching
+  // dept must swap cache namespaces and refetch.
+  const currentDeptId = useCurrentDeptId();
+  const currentDeptIdRef = useRef(currentDeptId);
+  useEffect(() => { currentDeptIdRef.current = currentDeptId; }, [currentDeptId]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -78,7 +96,7 @@ export function useTeamMembers() {
       if (!mountedRef.current) return;
       if (Array.isArray(data?.items)) {
         setMembers(data.items);
-        writeCache(data.items);
+        writeCache(currentDeptIdRef.current, data.items);
         setError(null);
       }
     } catch (err) {
@@ -92,6 +110,22 @@ export function useTeamMembers() {
   }, []);
 
   useEffect(() => { fetchMembers(); }, [fetchMembers]);
+
+  // On dept change, swap to the target dept's cached roster (if any) and
+  // refetch. This is what makes the chip-switch land on the right people
+  // instantly when the user has visited the dept before.
+  useEffect(() => {
+    const cached = readCache(currentDeptId);
+    if (cached) {
+      setMembers(cached);
+      setLoading(false);
+    } else {
+      // No cache for this dept yet — show baseline while we fetch.
+      setMembers(baselineAsMerged());
+      setLoading(true);
+    }
+    fetchMembers();
+  }, [currentDeptId, fetchMembers]);
 
   // ── Cross-session refresh ─────────────────────────────────────────────
   // The hook used to fetch on mount only, so a country / manager edit made
@@ -214,7 +248,7 @@ export function useTeamMembers() {
     };
     setMembers(prev => {
       const next = [...prev, optimistic];
-      writeCache(next);
+      writeCache(currentDeptIdRef.current, next);
       return next;
     });
 
@@ -225,7 +259,7 @@ export function useTeamMembers() {
       });
       setMembers(prev => {
         const next = prev.map(m => m.email.toLowerCase() === email ? { ...optimistic, ...saved } : m);
-        writeCache(next);
+        writeCache(currentDeptIdRef.current, next);
         return next;
       });
       return { ok: true, member: saved };
@@ -233,7 +267,7 @@ export function useTeamMembers() {
       // Roll back the optimistic insert and refetch to resync.
       setMembers(prev => {
         const next = prev.filter(m => m.email.toLowerCase() !== email);
-        writeCache(next);
+        writeCache(currentDeptIdRef.current, next);
         return next;
       });
       fetchMembers();
@@ -249,7 +283,7 @@ export function useTeamMembers() {
     // Optimistic
     setMembers(prev => {
       const next = prev.map(m => m.email.toLowerCase() === lc ? { ...m, ...patch } : m);
-      writeCache(next);
+      writeCache(currentDeptIdRef.current, next);
       return next;
     });
 
@@ -260,7 +294,7 @@ export function useTeamMembers() {
       });
       setMembers(prev => {
         const next = prev.map(m => m.email.toLowerCase() === lc ? { ...m, ...saved } : m);
-        writeCache(next);
+        writeCache(currentDeptIdRef.current, next);
         return next;
       });
       return { ok: true, member: saved };
@@ -268,7 +302,7 @@ export function useTeamMembers() {
       // Roll back the optimistic patch
       setMembers(prev => {
         const next = prev.map(m => m.email.toLowerCase() === lc ? previous : m);
-        writeCache(next);
+        writeCache(currentDeptIdRef.current, next);
         return next;
       });
       return { ok: false, error: err.message || 'Failed to update member' };
@@ -290,7 +324,7 @@ export function useTeamMembers() {
       // Optimistic remove
       setMembers(prev => {
         const next = prev.filter(m => m.email.toLowerCase() !== lc);
-        writeCache(next);
+        writeCache(currentDeptIdRef.current, next);
         return next;
       });
     }
@@ -303,7 +337,7 @@ export function useTeamMembers() {
         // Roll back the optimistic remove
         setMembers(prev => {
           const next = [...prev, previous];
-          writeCache(next);
+          writeCache(currentDeptIdRef.current, next);
           return next;
         });
       }
@@ -334,7 +368,7 @@ export function useTeamMembers() {
 
     setMembers(prev => {
       const next = prev.map(m => m.email.toLowerCase() === lc ? { ...m, countries: cleaned } : m);
-      writeCache(next);
+      writeCache(currentDeptIdRef.current, next);
       return next;
     });
 
@@ -346,14 +380,14 @@ export function useTeamMembers() {
       const finalCountries = Array.isArray(saved?.countries) ? saved.countries : cleaned;
       setMembers(prev => {
         const next = prev.map(m => m.email.toLowerCase() === lc ? { ...m, countries: finalCountries } : m);
-        writeCache(next);
+        writeCache(currentDeptIdRef.current, next);
         return next;
       });
       return { ok: true, countries: finalCountries };
     } catch (err) {
       setMembers(prev => {
         const next = prev.map(m => m.email.toLowerCase() === lc ? previous : m);
-        writeCache(next);
+        writeCache(currentDeptIdRef.current, next);
         return next;
       });
       return { ok: false, error: err.message || 'Failed to save countries' };

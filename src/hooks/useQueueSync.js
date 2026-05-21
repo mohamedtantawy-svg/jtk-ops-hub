@@ -22,20 +22,25 @@ import { fetchQueueBySource } from '../services/integrationsApi';
 import { MEMBERS } from '../data/members';
 import { getQueueChannel, broadcastSync } from './queueSyncChannel';
 import { idbGet, idbSet } from '../lib/idb-cache';
+import { useCurrentDeptId } from '../lib/current-dept-storage';
 
 // ── Per-source sync config ──────────────────────────────────────────────────
-// Cache keys are user-scoped via cacheKeyFor() so two signed-in users on the
-// same browser never inherit each other's server-scoped payload.
+// Cache keys are user + dept scoped via cacheKeyFor() so two signed-in users
+// (or two dept-scopes for the same super-admin) on the same browser never
+// inherit each other's payload. Phase 11+ instant-switch (2026-05-21):
+// switching dept now swaps cache namespaces instead of wiping + reloading.
 const SOURCE_CONFIG = {
   zendesk: { interval: 2 * 60 * 1000, cacheKey: 'ops_hub_queue_zendesk', cacheTtl: 2 * 60 * 1000 },
   jira:    { interval: 3 * 60 * 1000, cacheKey: 'ops_hub_queue_jira',    cacheTtl: 3 * 60 * 1000 },
 };
 
-function cacheKeyFor(source, userEmail) {
+function cacheKeyFor(source, userEmail, deptId) {
   const cfg = SOURCE_CONFIG[source];
   if (!cfg) return null;
   const lc = (userEmail || '').toLowerCase();
-  return lc ? `${cfg.cacheKey}:${lc}` : cfg.cacheKey;
+  const u = lc ? `:${lc}` : '';
+  const d = deptId ? `:${deptId}` : ':no-dept';
+  return `${cfg.cacheKey}${u}${d}`;
 }
 
 // ── Normalize a queue item from the backend ─────────────────────────────────
@@ -126,10 +131,10 @@ function normalizeQueueItem(item) {
 // IDB (~50% of free disk space) instead of localStorage (5–10 MB cap that
 // used to overflow on heavy Jira queues). One-time migration from the LS
 // keys still happens on first read.
-async function readSourceCache(source, userEmail) {
+async function readSourceCache(source, userEmail, deptId) {
   const cfg = SOURCE_CONFIG[source];
   if (!cfg) return null;
-  const key = cacheKeyFor(source, userEmail);
+  const key = cacheKeyFor(source, userEmail, deptId);
   try {
     const idbHit = await idbGet(key);
     if (idbHit?.items) return idbHit;
@@ -160,10 +165,10 @@ function slimForCache(items) {
   });
 }
 
-async function writeSourceCache(source, items, meta, userEmail) {
+async function writeSourceCache(source, items, meta, userEmail, deptId) {
   const cfg = SOURCE_CONFIG[source];
   if (!cfg) return;
-  const key = cacheKeyFor(source, userEmail);
+  const key = cacheKeyFor(source, userEmail, deptId);
   const slim = slimForCache(items);
   await idbSet(key, { items: slim, meta, ts: Date.now() });
 }
@@ -204,12 +209,12 @@ function mergeSourceIntoTasks(currentTasks, syncedItems, source) {
 }
 
 // ── Async cache load — reads every source from IDB and assembles the list. ─
-async function loadCachedTasksAsync(userEmail) {
+async function loadCachedTasksAsync(userEmail, deptId) {
   const all = [];
   const seen = new Set();
   const meta = {};
   for (const source of Object.keys(SOURCE_CONFIG)) {
-    const cached = await readSourceCache(source, userEmail);
+    const cached = await readSourceCache(source, userEmail, deptId);
     if (cached?.items?.length) {
       for (const item of cached.items) {
         const normalized = normalizeQueueItem(item);
@@ -247,14 +252,31 @@ export function useQueueSync(arg = true) {
   const userEmailRef = useRef(userEmail);
   useEffect(() => { userEmailRef.current = userEmail; }, [userEmail]);
 
+  // Phase 11+ instant-switch (2026-05-21): current dept-id flows into the
+  // cache key + broadcast filter. Ref mirror keeps syncSource's callback
+  // identity stable across dept changes — the live ref is read inside the
+  // callback so the new dept's namespace gets written + broadcast.
+  const currentDeptId = useCurrentDeptId();
+  const currentDeptIdRef = useRef(currentDeptId);
+  useEffect(() => { currentDeptIdRef.current = currentDeptId; }, [currentDeptId]);
+
   // ── IDB cache hydration ────────────────────────────────────────────────
-  // Reads the per-source cache from IndexedDB on mount and merges it into
-  // state. Skipped per-source when a sync has already filled that source —
-  // never overwrite fresh server data with stale cache.
+  // Reads the per-source cache from IndexedDB on mount + on every dept
+  // change. Skipped per-source when a sync has already filled that source —
+  // never overwrite fresh server data with stale cache. On dept switch
+  // we reset firstSyncDoneRef so the new dept's cache hydrates rather
+  // than being treated as already-served by the previous dept's payload.
   useEffect(() => {
     let cancelled = false;
+    // Dept just switched: clear the per-source "already synced" flags and
+    // last-fetch timestamps so the new dept's cache + sync take effect.
+    firstSyncDoneRef.current = { zendesk: false, jira: false };
+    lastFetchTsRefs.current = { zendesk: 0, jira: 0 };
+    inFlightRefs.current = { zendesk: null, jira: null };
+    setTasks([]);
+    setSourceLoading({ zendesk: true, jira: true });
     (async () => {
-      const { tasks: cachedTasks, meta: cachedMeta } = await loadCachedTasksAsync(userEmail);
+      const { tasks: cachedTasks, meta: cachedMeta } = await loadCachedTasksAsync(userEmail, currentDeptId);
       if (cancelled || !mountedRef.current) return;
       if (cachedTasks.length === 0) return;
 
@@ -294,7 +316,7 @@ export function useQueueSync(arg = true) {
       }
     })();
     return () => { cancelled = true; };
-  }, [userEmail]);
+  }, [userEmail, currentDeptId]);
 
   // Per-source sync function (with in-flight dedup).
   const syncSource = useCallback(async (source, opts = {}) => {
@@ -346,10 +368,12 @@ export function useQueueSync(arg = true) {
         lastFetchTsRefs.current[source] = now;
         firstSyncDoneRef.current[source] = true;
 
-        // Persist + broadcast (fire-and-forget).
-        writeSourceCache(source, rawItems, meta, userEmailRef.current).catch(() => {});
+        // Persist + broadcast (fire-and-forget). Both keys (user + dept)
+        // are read from refs so a dept switch mid-sync writes to the new
+        // dept's namespace, not the stale closure.
+        writeSourceCache(source, rawItems, meta, userEmailRef.current, currentDeptIdRef.current).catch(() => {});
         if (rawItems.length > 0) {
-          broadcastSync(source, rawItems, meta, userEmailRef.current);
+          broadcastSync(source, rawItems, meta, userEmailRef.current, currentDeptIdRef.current);
         }
         return synced;
       } catch (err) {
@@ -443,8 +467,9 @@ export function useQueueSync(arg = true) {
     };
   }, [syncSource, enabled]);
 
-  // Cross-tab adoption — user-scoped so multiple users on one machine
-  // never cross-pollinate caches.
+  // Cross-tab adoption — user + dept scoped so multiple users (or
+  // multiple dept-scopes for the same super-admin) on one machine never
+  // cross-pollinate caches.
   useEffect(() => {
     const ch = getQueueChannel();
     if (!ch) return;
@@ -454,11 +479,10 @@ export function useQueueSync(arg = true) {
       if (msg.source !== 'zendesk' && msg.source !== 'jira') return;
       const myEmail = (userEmailRef.current || '').toLowerCase();
       const theirEmail = (msg.userKey || '').toLowerCase();
-      // Tighter than the previous `myEmail && theirEmail && ...` — that
-      // accepted a scoped message from another user when our own email
-      // hadn't loaded yet (logged-out tab, hydration race). Reject
-      // whenever EITHER side has a key that doesn't match the other.
       if ((myEmail || theirEmail) && myEmail !== theirEmail) return;
+      const myDept = currentDeptIdRef.current || '';
+      const theirDept = msg.deptKey || '';
+      if ((myDept || theirDept) && myDept !== theirDept) return;
       if (!msg.ts || msg.ts <= (lastFetchTsRefs.current[msg.source] || 0)) return;
 
       const items = msg.items || [];
@@ -479,7 +503,7 @@ export function useQueueSync(arg = true) {
       lastFetchTsRefs.current[msg.source] = msg.ts;
       syncCounts.current[msg.source] = (syncCounts.current[msg.source] || 0) + 1;
       firstSyncDoneRef.current[msg.source] = true;
-      writeSourceCache(msg.source, items, msg.meta || null, userEmailRef.current).catch(() => {});
+      writeSourceCache(msg.source, items, msg.meta || null, userEmailRef.current, currentDeptIdRef.current).catch(() => {});
     };
     ch.addEventListener('message', handler);
     return () => ch.removeEventListener('message', handler);

@@ -11,14 +11,24 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { fetchDeelOnboarding } from '../services/integrationsApi';
 import { getQueueChannel, broadcastSync } from './queueSyncChannel';
 import { idbGetWithMigration, idbSet } from '../lib/idb-cache';
+import { useCurrentDeptId } from '../lib/current-dept-storage';
 
 const SOURCE_ID = 'onboarding';
 const CACHE_TTL = 5 * 60 * 1000;
 const CACHE_KEY_BASE = 'ops_hub_onboarding_cache';
-const cacheKeyFor = (userEmail) =>
-  userEmail ? `${CACHE_KEY_BASE}:${String(userEmail).toLowerCase()}` : CACHE_KEY_BASE;
+// Phase 11+ instant-switch (2026-05-21): cache key is keyed by BOTH user
+// AND dept so switching depts via the TopNav chip swaps cache namespaces
+// without losing the previous dept's payload. Switching back paints from
+// the persisted slot — no spinner, no fetch wait. The 'no-dept' fallback
+// applies for users without a resolved dept (unassigned / pre-backfill).
+const cacheKeyFor = (userEmail, deptId) => {
+  const u = userEmail ? `:${String(userEmail).toLowerCase()}` : '';
+  const d = deptId ? `:${deptId}` : ':no-dept';
+  return `${CACHE_KEY_BASE}${u}${d}`;
+};
 
 export function useOnboardingData(enabled = true, userEmail = null) {
+  const currentDeptId = useCurrentDeptId();
   // IDB cache is async so initial state is empty; the hydration effect
   // below fills it ~10–50 ms after mount. Was localStorage (5–10 MB cap);
   // moved to IDB after the cap caused spurious "Offline cache is full"
@@ -72,8 +82,8 @@ export function useOnboardingData(enabled = true, userEmail = null) {
         if (force || fetched.length > 0 || itemsRef.current.length === 0) {
           setItems(fetched);
           // Fire-and-forget IDB write — doesn't block the data path.
-          idbSet(cacheKeyFor(userEmail), { items: fetched, ts: now }).catch(() => {});
-          broadcastSync(SOURCE_ID, fetched, null, userEmail);
+          idbSet(cacheKeyFor(userEmail, currentDeptId), { items: fetched, ts: now }).catch(() => {});
+          broadcastSync(SOURCE_ID, fetched, null, userEmail, currentDeptId);
         }
         lastFetchRef.current = now;
         liveReceivedRef.current = true;
@@ -91,27 +101,41 @@ export function useOnboardingData(enabled = true, userEmail = null) {
     })();
     inFlightRef.current = run;
     return run;
-  }, [enabled, userEmail]);
+  }, [enabled, userEmail, currentDeptId]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
   // ── IDB cache hydration ───────────────────────────────────────────────────
   // Async-loads the cached payload after mount and merges into state if the
   // live fetch hasn't arrived yet. Includes legacy-localStorage migration
-  // (one-shot copy from old key, then cleanup).
+  // (one-shot copy from old key, then cleanup). Re-runs when currentDeptId
+  // changes so a dept switch swaps to the target dept's persisted cache.
   useEffect(() => {
     let cancelled = false;
+    // Clear in-flight ref so the new dept's refresh isn't blocked by the
+    // old dept's pending fetch.
+    inFlightRef.current = null;
+    // Reset live-received guard so the new dept's cache hydrates even if
+    // the previous dept already received a live response.
+    liveReceivedRef.current = false;
     (async () => {
-      const cached = await idbGetWithMigration(cacheKeyFor(userEmail));
+      const cached = await idbGetWithMigration(cacheKeyFor(userEmail, currentDeptId));
       if (cancelled) return;
       if (liveReceivedRef.current) return;        // sync beat us — don't overwrite
-      if (!cached?.items?.length) return;
+      if (!cached?.items?.length) {
+        // No cache for this dept yet — clear stale items from the previous
+        // dept so we don't paint cross-dept data while the new fetch lands.
+        setItems([]);
+        setLastSyncAt(null);
+        lastFetchRef.current = 0;
+        return;
+      }
       setItems(cached.items);
       lastFetchRef.current = cached.ts || 0;
       setLastSyncAt(cached.ts || null);
     })();
     return () => { cancelled = true; };
-  }, [userEmail]);
+  }, [userEmail, currentDeptId]);
 
   // ── Auto-refresh while visible ─────────────────────────────────────────────
   // Previously the hook only fetched on mount, which meant a tab left open for
@@ -136,7 +160,8 @@ export function useOnboardingData(enabled = true, userEmail = null) {
   }, [enabled, refresh]);
 
   // Adopt cross-tab broadcasts for this source — reject broadcasts from a
-  // different signed-in user so we never pick up their scoped payload.
+  // different signed-in user OR a different dept so we never pick up
+  // someone else's scoped payload.
   useEffect(() => {
     const ch = getQueueChannel();
     if (!ch) return;
@@ -150,6 +175,12 @@ export function useOnboardingData(enabled = true, userEmail = null) {
       // hadn't loaded yet (logged-out tab, hydration race). Reject
       // whenever EITHER side has a key that doesn't match the other.
       if ((myKey || theirKey) && myKey !== theirKey) return;
+      // Phase 11+ dept gate: never adopt a sibling tab's payload when
+      // the dept doesn't match — otherwise an HRX tab would pick up a
+      // GIX-scoped payload from a sibling and paint the wrong data.
+      const myDept = currentDeptId || '';
+      const theirDept = msg.deptKey || '';
+      if ((myDept || theirDept) && myDept !== theirDept) return;
       if (msg.ts && msg.ts > lastFetchRef.current) {
         setItems(msg.items || []);
         lastFetchRef.current = msg.ts;
@@ -158,7 +189,7 @@ export function useOnboardingData(enabled = true, userEmail = null) {
     };
     ch.addEventListener('message', handler);
     return () => ch.removeEventListener('message', handler);
-  }, [userEmail]);
+  }, [userEmail, currentDeptId]);
 
   // Severity helper
   const getSeverity = (item) => item.action?.severity || 'active';

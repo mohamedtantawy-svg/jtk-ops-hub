@@ -3,10 +3,13 @@
 // offboarding, amendments, redlines, workbench) post on successful fetch so
 // sibling tabs can adopt the result without re-hitting the network.
 //
-// Message shape: { source, items, meta?, ts, userKey? }
+// Message shape: { source, items, meta?, ts, userKey?, deptKey? }
 // `userKey` is a lowercase email so receivers for a different signed-in user
 // on the same machine can ignore broadcasts that don't belong to them — the
 // server now scopes /queue per user, so payloads differ by role.
+// `deptKey` is the current dept-id (Phase 11+ multi-tenant) so a tab viewing
+// HRX never picks up a sibling tab's GIX-scoped payload. Both keys must
+// match before a listener adopts the broadcast.
 //
 // Gracefully degrades: if BroadcastChannel is unavailable (SSR, old browsers,
 // or a security context that blocks it), getQueueChannel returns null and
@@ -54,13 +57,15 @@ function resetChannel() {
  * @param {any[]} items — the raw items array from the sync response
  * @param {any} meta — optional meta object
  * @param {string|null} userEmail — current signed-in user's email (for scoping)
+ * @param {string|null} deptId — current dept-id (Phase 11+ multi-tenant scope)
  */
-export function broadcastSync(source, items, meta = null, userEmail = null) {
+export function broadcastSync(source, items, meta = null, userEmail = null, deptId = null) {
   const ch = getQueueChannel();
   if (!ch) return;
   const userKey = (userEmail || '').toLowerCase() || null;
+  const deptKey = (deptId && typeof deptId === 'string') ? deptId : null;
   try {
-    ch.postMessage({ source, items, meta, ts: Date.now(), userKey });
+    ch.postMessage({ source, items, meta, ts: Date.now(), userKey, deptKey });
   } catch {
     // Channel may have been closed by the browser (back-forward cache, memory
     // pressure). Reset so the next broadcast can re-init.
