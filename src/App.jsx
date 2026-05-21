@@ -5,6 +5,7 @@ import { INITIAL_PROJECTS } from './data/projects';
 import { INITIAL_REQUESTS } from './data/requests';
 import { MEMBERS, MEMBERS_BY_EMAIL, DEFAULT_USER_ACCESS_MAP, TEAM_MEMBERS, getAllReports, subscribeRoster, getRosterVersion, getLiveRosterFetched } from './data/members';
 import { useTeamMembers } from './hooks/useTeamMembers';
+import { useCurrentDeptId, getCurrentDeptIdSync } from './lib/current-dept-storage';
 import { INITIAL_ACTIVITY, INITIAL_NOTES } from './data/tasks';
 import { FEED_EVENTS } from './data/feed';
 import { ALL_AGENT_IDS, matchesAudience } from './data/comms';
@@ -985,15 +986,39 @@ const App=()=>{
   const [requestModal,setRequestModal]=useState(false);
   const [createEscalModal,setCreateEscalModal]=useState(false);
   const [backendOnline,setBackendOnline]=useState(false);
+  // MOC + TLOC are now per-dept (Phase 11f — `urgent_assist_schedule` per
+  // org_node_id). Storage keys carry the current dept suffix so super-admin
+  // dept switches don't bleed HRX's MOC into GIX's briefing pill. The 2026-05-21
+  // audit (F22) caught Beatriz Charry persisting as MOC across an HRX → GIX
+  // switch because the legacy key was a single global slot. Initial reads use
+  // `getCurrentDeptIdSync()` for instant paint; the dept-switch effect below
+  // re-hydrates on every dept change before the 15s poll catches up.
+  const mocCacheKey = useCallback((deptId) => `ops_hub_manager_on_call${deptId ? `:${deptId}` : ''}`, []);
+  const tlocCacheKey = useCallback((deptId) => `ops_hub_team_lead_on_call${deptId ? `:${deptId}` : ''}`, []);
+  const DEFAULT_MOC = { name: 'Omar Khalil', initials: 'OK', avatarUrl: 'https://api.dicebear.com/7.x/initials/svg?seed=Omar%20Khalil&backgroundColor=6b3fa0&textColor=ffffff&fontSize=40' };
   const [managerOnCall, setManagerOnCall] = useState(() => {
-    try { const m = localStorage.getItem('ops_hub_manager_on_call'); return m ? JSON.parse(m) : { name: 'Omar Khalil', initials: 'OK', avatarUrl: 'https://api.dicebear.com/7.x/initials/svg?seed=Omar%20Khalil&backgroundColor=6b3fa0&textColor=ffffff&fontSize=40' }; } catch(e) { return { name: 'Omar Khalil', initials: 'OK', avatarUrl: 'https://api.dicebear.com/7.x/initials/svg?seed=Omar%20Khalil&backgroundColor=6b3fa0&textColor=ffffff&fontSize=40' }; }
+    try {
+      const deptId = getCurrentDeptIdSync();
+      const m = localStorage.getItem(`ops_hub_manager_on_call${deptId ? `:${deptId}` : ''}`);
+      if (m) return JSON.parse(m);
+      // Fall back to the legacy unkeyed slot ONCE so existing users don't
+      // see a default-MOC flash on first load after this change ships.
+      const legacy = localStorage.getItem('ops_hub_manager_on_call');
+      return legacy ? JSON.parse(legacy) : DEFAULT_MOC;
+    } catch(e) { return DEFAULT_MOC; }
   });
   // Team Lead On Call — second rotating role (Mohamed 2026-05-14). No
   // baked-in default; the pill renders only when set. Hydrates from
   // localStorage for instant paint, then the 15s poll below confirms
   // against the server.
   const [teamLeadOnCall, setTeamLeadOnCall] = useState(() => {
-    try { const t = localStorage.getItem('ops_hub_team_lead_on_call'); return t ? JSON.parse(t) : null; } catch(e) { return null; }
+    try {
+      const deptId = getCurrentDeptIdSync();
+      const t = localStorage.getItem(`ops_hub_team_lead_on_call${deptId ? `:${deptId}` : ''}`);
+      if (t) return JSON.parse(t);
+      const legacy = localStorage.getItem('ops_hub_team_lead_on_call');
+      return legacy ? JSON.parse(legacy) : null;
+    } catch(e) { return null; }
   });
   // createReportModal removed 2026-05-02 with the GMReportingView retirement.
 
@@ -1619,10 +1644,39 @@ const App=()=>{
   useEffect(()=>{try{localStorage.setItem('ops_hub_access_types',JSON.stringify(accessTypes));}catch(e){}},[accessTypes]);
   useEffect(()=>{try{localStorage.setItem('ops_hub_user_access_map',JSON.stringify(userAccessMap));}catch(e){}},[userAccessMap]);
   useEffect(()=>{try{localStorage.setItem('ops_hub_dismissed_popups',JSON.stringify(dismissedPopups));}catch(e){}},[dismissedPopups]);
-  useEffect(() => { try { localStorage.setItem('ops_hub_manager_on_call', JSON.stringify(managerOnCall)); } catch(e) {} }, [managerOnCall]);
-  useEffect(() => { try { localStorage.setItem('ops_hub_team_lead_on_call', JSON.stringify(teamLeadOnCall)); } catch(e) {} }, [teamLeadOnCall]);
+  // Track current dept so MOC + TLOC re-hydrate on switch. 2026-05-21 audit F22.
+  const _currentDeptIdForMoc = useCurrentDeptId();
+  useEffect(() => { try { localStorage.setItem(mocCacheKey(_currentDeptIdForMoc), JSON.stringify(managerOnCall)); } catch(e) {} }, [managerOnCall, _currentDeptIdForMoc, mocCacheKey]);
+  useEffect(() => { try { localStorage.setItem(tlocCacheKey(_currentDeptIdForMoc), JSON.stringify(teamLeadOnCall)); } catch(e) {} }, [teamLeadOnCall, _currentDeptIdForMoc, tlocCacheKey]);
+
+  // On dept switch, immediately swap the displayed MOC + TLOC to the new dept's
+  // cached value (instant UX, no 15s lag). Tracks the previous dept so the
+  // initial null → real-dept resolution at mount doesn't fire a spurious reset.
+  const prevDeptIdForMocRef = useRef(_currentDeptIdForMoc);
+  useEffect(() => {
+    const prev = prevDeptIdForMocRef.current;
+    prevDeptIdForMocRef.current = _currentDeptIdForMoc;
+    // First effect or null → real-dept (initial resolve) — leave state as-is.
+    if (prev === _currentDeptIdForMoc) return;
+    if (!prev && _currentDeptIdForMoc) return;
+    // Real dept switch: pull the target dept's cached values; defaults if absent.
+    try {
+      const m = localStorage.getItem(mocCacheKey(_currentDeptIdForMoc));
+      setManagerOnCall(m ? JSON.parse(m) : DEFAULT_MOC);
+    } catch { setManagerOnCall(DEFAULT_MOC); }
+    try {
+      const t = localStorage.getItem(tlocCacheKey(_currentDeptIdForMoc));
+      setTeamLeadOnCall(t ? JSON.parse(t) : null);
+    } catch { setTeamLeadOnCall(null); }
+    // Server fetch below picks up the new dept via apiFetch's dept cookie /
+    // header on the next tick.
+  }, [_currentDeptIdForMoc, mocCacheKey, tlocCacheKey]);
 
   // ── Manager on Call: fetch from backend + poll every 15s for cross-user sync
+  // Re-fires immediately on dept switch (the dept cookie is part of apiFetch,
+  // so the server route returns the new dept's schedule). Without the
+  // currentDeptId dep, super-admin dept switches would keep showing the
+  // previous dept's MOC for up to 15 s.
   useEffect(() => {
     if (!user) return;
     let active = true;
@@ -1651,7 +1705,7 @@ const App=()=>{
     fetchMoc();
     const interval = setInterval(fetchMoc, 15000);
     return () => { active = false; clearInterval(interval); };
-  }, [user]);
+  }, [user, _currentDeptIdForMoc]);
 
   // ── Handler to change Manager on Call — saves to backend for cross-user sync
   const handleChangeManagerOnCall = useCallback((newMoc) => {
@@ -1663,6 +1717,7 @@ const App=()=>{
   }, []);
 
   // ── Team Lead On Call — fetch + 15s poll, identical cadence to MOC.
+  // Re-fires on dept switch (see MOC effect for rationale).
   useEffect(() => {
     if (!user) return;
     let active = true;
@@ -1689,7 +1744,7 @@ const App=()=>{
     fetchTloc();
     const interval = setInterval(fetchTloc, 15000);
     return () => { active = false; clearInterval(interval); };
-  }, [user]);
+  }, [user, _currentDeptIdForMoc]);
 
   // ── Handler to change Team Lead On Call — saves to backend; server
   // side bulk-reassigns auto-assigned HR-Hub rows from the previous TL
