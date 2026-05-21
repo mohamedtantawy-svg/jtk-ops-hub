@@ -127,6 +127,48 @@ const loadFilters = (email) => {
   }
 };
 
+// ── Subject column width (user-resizable) ───────────────────────────────────
+// Carolina Ferreira 2026-05-20 bug "Jira queue" / "Under the Jira queue we
+// cannot see the full ticket title, and therefore we don't know to which
+// employee it is referring to. Not seeing the employee's name makes us
+// having to open all tickets individually, to double check the status."
+// Proposed resolution: "Can we have the option to extend the column
+// manually?"
+//
+// Mechanic: the Subject column header renders a 6 px drag handle on its
+// right edge. Mousedown starts a drag that mutates the table's
+// `--queue-subject-width` CSS variable directly on the DOM (so virtualized
+// rows update without a React re-render storm); mouseup syncs React state
+// + persists to localStorage so the next mount keeps the user's chosen
+// width. Same email-scoped key pattern the rest of the Queue uses (skill
+// rule #5 — user-scoped cache). Default bumped from the previous effective
+// 320 px to 480 px so even users who never resize see ~50% more title.
+const SUBJECT_WIDTH_DEFAULT = 480;
+const SUBJECT_WIDTH_MIN = 240;
+const SUBJECT_WIDTH_MAX = 900;
+const SUBJECT_WIDTH_STORAGE_BASE = 'ops_hub_queue_subject_width';
+const subjectWidthKey = (email) => {
+  const lc = (email || '').toLowerCase();
+  return lc ? `${SUBJECT_WIDTH_STORAGE_BASE}:${lc}` : SUBJECT_WIDTH_STORAGE_BASE;
+};
+const clampSubjectWidth = (n) => {
+  if (!Number.isFinite(n)) return SUBJECT_WIDTH_DEFAULT;
+  return Math.min(SUBJECT_WIDTH_MAX, Math.max(SUBJECT_WIDTH_MIN, Math.round(n)));
+};
+const loadStoredSubjectWidth = (email) => {
+  if (typeof window === 'undefined') return SUBJECT_WIDTH_DEFAULT;
+  try {
+    const raw = localStorage.getItem(subjectWidthKey(email));
+    if (!raw) return SUBJECT_WIDTH_DEFAULT;
+    return clampSubjectWidth(parseInt(raw, 10));
+  } catch { return SUBJECT_WIDTH_DEFAULT; }
+};
+const saveStoredSubjectWidth = (email, w) => {
+  if (typeof window === 'undefined' || !email) return;
+  try { localStorage.setItem(subjectWidthKey(email), String(w)); }
+  catch { /* quota or private-mode — width still applies for this session */ }
+};
+
 // Map a WORK_SOURCES tab id → its `visibleSources` key on the dept-scope
 // payload. Jira + Zendesk are NOT in visibleSources (they're available
 // to every dept by default and dispatched per-dept by the route layer)
@@ -217,6 +259,53 @@ const Queue = ({ user, tasks, subFilter }) => {
   // Scroll container ref for the ZD/Jira table virtualizer (the Deel
   // panels each get their own scroller inside SourceTable).
   const ticketScrollerRef = useRef(null);
+
+  // ── User-resizable Subject column ────────────────────────────────────────
+  // See module-level block at top of file for the bug citation. State holds
+  // the React-visible width (drives the table's inline `--queue-subject-
+  // width` CSS variable on next render); `subjectWidthRef` carries the
+  // in-flight value during a drag so onmousemove can update the DOM
+  // directly without going through React. `tableElRef` lets the drag
+  // handler reach into the table to set the variable per frame.
+  const [subjectWidth, setSubjectWidth] = useState(() => loadStoredSubjectWidth(user?.email));
+  const subjectWidthRef = useRef(subjectWidth);
+  useEffect(() => { subjectWidthRef.current = subjectWidth; }, [subjectWidth]);
+  const tableElRef = useRef(null);
+  // Re-load if the signed-in email changes mid-session (impersonation +
+  // login-as-dept-admin flows swap `user` without a remount).
+  useEffect(() => {
+    const next = loadStoredSubjectWidth(user?.email);
+    setSubjectWidth(next);
+  }, [user?.email]);
+
+  const handleSubjectResizeStart = useCallback((e) => {
+    // Don't trigger the header's sort click; don't let the th's mousedown
+    // bubble up into the document-level outside-click handlers either.
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startWidth = subjectWidthRef.current;
+    const onMove = (mv) => {
+      const next = clampSubjectWidth(startWidth + (mv.clientX - startX));
+      subjectWidthRef.current = next;
+      if (tableElRef.current) {
+        tableElRef.current.style.setProperty('--queue-subject-width', `${next}px`);
+      }
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      const final = subjectWidthRef.current;
+      setSubjectWidth(final);
+      saveStoredSubjectWidth(user?.email, final);
+    };
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [user?.email]);
 
   const perms = useContext(PermissionsContext);
   const settings = useContext(SettingsContext);
@@ -1504,11 +1593,28 @@ const Queue = ({ user, tasks, subFilter }) => {
                   <div style={{ fontSize: 14, color: '#9e9e9e' }}>All caught up</div>
                 </div>
           ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }} role="grid" aria-label="Task queue">
+            <table
+              ref={tableElRef}
+              style={{
+                width: '100%', borderCollapse: 'collapse', fontSize: 13,
+                // Inline CSS variable consumed by the Subject th + the
+                // Subject td in QueueRow. Mutated directly via tableElRef
+                // during drag for instant resizing without re-rendering
+                // every virtualized row.
+                '--queue-subject-width': `${subjectWidth}px`,
+              }}
+              role="grid"
+              aria-label="Task queue"
+            >
               <thead>
                 <tr style={{ background: '#f5f4f2', position: 'sticky', top: 0, zIndex: 2 }}>
                   <SortableTh col="source"   label="Source"   width={80}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableTh col="subject"  label="Subject"  minWidth={200} align="left" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <ResizableSubjectTh
+                    sortCol={sortCol}
+                    sortDir={sortDir}
+                    onSort={toggleSort}
+                    onResizeStart={handleSubjectResizeStart}
+                  />
                   <SortableTh col="function" label="Function" width={90}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <SortableTh col="country"  label="Country"  width={50}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   {/* Requester — the employee/customer who raised the ticket.
@@ -1743,8 +1849,14 @@ const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onSlaExtension, on
       <td style={tdStyle}><ToolBadge source={task.source}/></td>
       {/* Subject — full text in title attr so truncated subjects (Zendesk
           long-form messages, employee long names) are reachable on hover.
-          Without this the user had to leave the app to read the full title. */}
-      <td title={task.subject || ''} style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: '#1b1b1b', maxWidth: 320 }}>
+          Without this the user had to leave the app to read the full title.
+          maxWidth reads the user-resizable `--queue-subject-width` CSS
+          variable set on the parent <table> (see ResizableSubjectTh below
+          + the drag handler in the Queue component). Fallback of 480px
+          covers the legacy/SSR path where the variable isn't yet defined
+          — also the new default per Carolina Ferreira's 2026-05-20 ask
+          (up from the previous fixed 320). */}
+      <td title={task.subject || ''} style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: '#1b1b1b', maxWidth: 'var(--queue-subject-width, 480px)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           {task.isAlert && <span className="pulse" style={{ width: 6, height: 6, borderRadius: '50%', background: '#ed8d00', flexShrink: 0 }}></span>}
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{task.subject}</span>
@@ -1950,6 +2062,72 @@ const SortableTh = memo(function SortableTh({ col, label, width, minWidth, align
           <i className="bi-caret-down-fill" style={{ color: active && sortDir === 'desc' ? '#1b1b1b' : '#ccc', marginTop: -3 }} />
         </span>
       </span>
+    </th>
+  );
+});
+
+// ── ResizableSubjectTh ────────────────────────────────────────────────────
+// Mirrors SortableTh's sort UI (click to toggle ▲/▼) but adds a 6 px
+// drag handle pinned to the right edge that lets the user widen / narrow
+// the Subject column. Reads its width from the table-level
+// `--queue-subject-width` CSS variable (driven by the Queue component's
+// state + drag handler) so the th + every QueueRow td stay in lockstep
+// without prop-drilling. Skill rule #5: storage is email-scoped (the
+// loader/saver live at module top).
+const ResizableSubjectTh = memo(function ResizableSubjectTh({ sortCol, sortDir, onSort, onResizeStart }) {
+  const active = sortCol === 'subject';
+  const sortState = active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
+  const [handleHov, setHandleHov] = useState(false);
+  const onKey = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSort('subject'); }
+  };
+  return (
+    <th
+      scope="col"
+      role="columnheader"
+      aria-sort={sortState}
+      onClick={() => onSort('subject')}
+      onKeyDown={onKey}
+      tabIndex={0}
+      style={{
+        ...thStyle,
+        width: 'var(--queue-subject-width, 480px)',
+        minWidth: SUBJECT_WIDTH_MIN,
+        textAlign: 'left',
+        cursor: 'pointer',
+        userSelect: 'none',
+        position: 'relative',
+      }}
+      aria-label={`Sort by Subject${active ? `, currently ${sortState}` : ''}. Drag the right edge to resize the column.`}
+    >
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        Subject
+        <span aria-hidden="true" style={{ display: 'inline-flex', flexDirection: 'column', lineHeight: 1, gap: 0, fontSize: 7, marginTop: -1 }}>
+          <i className="bi-caret-up-fill" style={{ color: active && sortDir === 'asc' ? '#1b1b1b' : '#ccc' }} />
+          <i className="bi-caret-down-fill" style={{ color: active && sortDir === 'desc' ? '#1b1b1b' : '#ccc', marginTop: -3 }} />
+        </span>
+      </span>
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize Subject column"
+        title="Drag to resize"
+        onMouseDown={onResizeStart}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+        onMouseEnter={() => setHandleHov(true)}
+        onMouseLeave={() => setHandleHov(false)}
+        style={{
+          position: 'absolute',
+          top: 0, right: 0, bottom: 0,
+          width: 6,
+          cursor: 'col-resize',
+          // Show a thin blue rail on hover so the affordance is
+          // discoverable without cluttering the header at rest.
+          background: handleHov ? '#1f74b3' : 'transparent',
+          transition: 'background .12s',
+        }}
+      />
     </th>
   );
 });
