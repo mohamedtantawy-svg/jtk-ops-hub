@@ -513,16 +513,26 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
   // audit: "the announcements looks like it goes to both". Server
   // already filters the announcement READ by org_node_id (Phase 11b),
   // so a viewer can only reach this tracker for announcements stamped
-  // with their current dept — filtering by `currentDeptId` is
+  // with their current dept — filtering by the dept sub-tree is
   // equivalent to filtering by `comm.orgNodeId` and avoids needing
   // the field to be on the FE payload.
-  const { deptId: currentDeptId } = useCurrentDept();
+  //
+  // 2026-05-21 fix: same bug as BriefingView's Team Summary — the
+  // original equality check `memberOrgNodeId === currentDeptId` failed
+  // because every HRX override row stamps the SUB-team UUID (EOR
+  // Operations) not the top-level HRX UUID. The ack tracker collapsed
+  // to zero rows for every announcement. Now we match against the
+  // full sub-tree of node-IDs returned by /dept-scope/current. Empty
+  // Set (cold paint) is treated as "include all" so first paint isn't
+  // empty while the request is in flight.
+  const { deptId: currentDeptId, currentDeptNodeIds } = useCurrentDept();
   const inCurrentDept = useCallback((m) => {
     if (!currentDeptId) return true;
+    if (!currentDeptNodeIds || currentDeptNodeIds.size === 0) return true;
     const memberOrgNodeId = MEMBERS_BY_EMAIL[(m.email || '').toLowerCase()]?.orgNodeId;
     if (!memberOrgNodeId) return true;
-    return memberOrgNodeId === currentDeptId;
-  }, [currentDeptId]);
+    return currentDeptNodeIds.has(memberOrgNodeId);
+  }, [currentDeptId, currentDeptNodeIds]);
   const getAckMembers=(comm)=>{
     let audienceMembers;
     if (Array.isArray(comm.target)) {

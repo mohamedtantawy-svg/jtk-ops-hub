@@ -10,6 +10,7 @@ import { query } from '../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import {
   getCurrentDeptId,
+  getDescendantNodeIds,
   isGlobalSuperAdmin,
   listTopLevelDepts,
   SUPER_ADMIN_DEPT_COOKIE,
@@ -43,12 +44,21 @@ export async function GET(req) {
   // Onboarding / Offboarding flows. Server-side routes also defense-in-
   // depth check the same flag.
   const visibleSources = visibleDeelSourcesFor(dept?.slug || null);
+  // 2026-05-21 — full sub-tree of node-IDs that roll up to the current
+  // dept. Phase 0 stamped every existing override row with EOR Operations
+  // (a TEAM under HR Experience), not HR Experience itself, so any FE
+  // filter that does `member.orgNodeId === currentDeptId` collapses to
+  // zero matches. Returning the sub-tree lets the FE do a Set membership
+  // check instead of equality. Empty array when deptId is null (e.g.
+  // unassigned user before backfill).
+  const currentDeptNodeIds = deptId ? await getDescendantNodeIds(deptId) : [];
   return NextResponse.json({
     deptId,
     dept,
     isGlobalSuperAdmin: superAdmin,
     depts,
     visibleSources,
+    currentDeptNodeIds,
   });
 }
 
