@@ -488,8 +488,16 @@ export default function HrHubView({ user, onCreateHrHub }) {
               submissions are the least-frequent triage target. Same order
               minus Team for non-managers. Default scope is computed at
               mount above (managers → 'all', agents → 'mine'). */}
+          {/* 2026-05-21 audit F16: hide "Team Requests" when dataScope is
+              `all_tasks` (RM / Director / Admin). For those roles the
+              user's "team" equals the dept, so All Requests + Team Requests
+              show identical counts and the second segment is dead weight.
+              TLs keep the segment because their team is a proper subset of
+              All. Agents never had it. */}
           {(isManager
-            ? [{ value: 'all', label: 'All Requests' }, { value: 'team', label: 'Team Requests' }, { value: 'assigned', label: 'Assigned to me' }, { value: 'mentioned', label: 'Mentioned', icon: 'bi-at' }, { value: 'mine', label: 'My Requests' }]
+            ? (perms?.dataScope === 'all_tasks'
+                ? [{ value: 'all', label: 'All Requests' }, { value: 'assigned', label: 'Assigned to me' }, { value: 'mentioned', label: 'Mentioned', icon: 'bi-at' }, { value: 'mine', label: 'My Requests' }]
+                : [{ value: 'all', label: 'All Requests' }, { value: 'team', label: 'Team Requests' }, { value: 'assigned', label: 'Assigned to me' }, { value: 'mentioned', label: 'Mentioned', icon: 'bi-at' }, { value: 'mine', label: 'My Requests' }])
             : [{ value: 'all', label: 'All Requests' }, { value: 'assigned', label: 'Assigned to me' }, { value: 'mentioned', label: 'Mentioned', icon: 'bi-at' }, { value: 'mine', label: 'My Requests' }]
           ).map(seg => {
             const active = scope === seg.value;
