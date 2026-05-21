@@ -724,8 +724,25 @@ const AlertRow = ({ alert, settings, isLast, currentEmail, onClick }) => {
         transition: 'background .1s',
       }}
     >
-      {/* Severity dot */}
-      <div title={sev.label} style={{ width: 8, height: 8, borderRadius: 4, background: sev.color, flexShrink: 0 }} />
+      {/* Severity chip — 2026-05-21 audit F44: the previous 8-px dot was
+          hard to scan amid the category chip, ack pill, and status pill on
+          the same row. A small labeled chip in the same shape as the
+          surrounding pills makes the severity readable at a glance while
+          keeping the row compact. */}
+      <div
+        title={`Severity: ${sev.label}`}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 4,
+          padding: '2px 7px', borderRadius: 128,
+          background: sev.bg, color: sev.color,
+          fontSize: 9, fontWeight: 700, whiteSpace: 'nowrap',
+          letterSpacing: '0.04em', textTransform: 'uppercase',
+          flexShrink: 0,
+        }}
+      >
+        <i className={sev.icon} style={{ fontSize: 9 }} />
+        {sev.label}
+      </div>
 
       {/* Category icon tile */}
       <div title={cat.label} style={{
