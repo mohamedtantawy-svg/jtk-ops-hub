@@ -71,6 +71,12 @@ const EMPTY_VISIBLE_SOURCES = Object.freeze({
   workbench: false,
 });
 
+// 2026-05-21 — initial Set is empty AND .size === 0 so consumers can
+// fall back to "include everything" while the first fetch is in flight,
+// matching the pre-PR #745 behavior on cold paint. Once the real list
+// arrives consumers switch to strict sub-tree membership.
+const EMPTY_NODE_IDS = Object.freeze(new Set());
+
 export function useCurrentDept() {
   const [state, setState] = useState({
     deptId: null,
@@ -78,6 +84,7 @@ export function useCurrentDept() {
     isGlobalSuperAdmin: false,
     depts: [],
     visibleSources: EMPTY_VISIBLE_SOURCES,
+    currentDeptNodeIds: EMPTY_NODE_IDS,
     loading: true,
     error: null,
   });
@@ -91,6 +98,9 @@ export function useCurrentDept() {
       // the catch branch, so the super-admin chip never rendered and
       // visibleSources stayed at the empty default.
       const data = await apiFetch('/dept-scope/current');
+      const nodeIds = Array.isArray(data?.currentDeptNodeIds)
+        ? new Set(data.currentDeptNodeIds)
+        : EMPTY_NODE_IDS;
       setState({
         deptId: data?.deptId || null,
         dept: data?.dept || null,
@@ -99,6 +109,7 @@ export function useCurrentDept() {
         visibleSources: (data?.visibleSources && typeof data.visibleSources === 'object')
           ? { ...EMPTY_VISIBLE_SOURCES, ...data.visibleSources }
           : EMPTY_VISIBLE_SOURCES,
+        currentDeptNodeIds: nodeIds,
         loading: false,
         error: null,
       });

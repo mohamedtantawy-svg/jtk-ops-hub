@@ -692,18 +692,26 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // were leaking through because `scopeIds` is assignee-scope, not
   // tenancy-scope).
   //
-  // `currentDeptId` comes from useCurrentDept (Phase 11a). For non-super-
-  // admins it's their own dept; for mohamed it's whatever the chip is set
-  // to. We treat a missing orgNodeId on a member as "include" so a member
-  // freshly added before the boot-time backfill ran isn't invisible —
-  // post-backfill every row has org_node_id and this branch is moot.
-  const { deptId: currentDeptId } = useCurrentDept();
+  // 2026-05-21 fix: the original equality check `memberOrgNodeId ===
+  // currentDeptId` was wrong. Phase 0 stamped every HRX override row
+  // with EOR Operations (a TEAM under HR Experience), so member rows
+  // hold the sub-team UUID — never the top-level HRX UUID returned by
+  // useCurrentDept().deptId. The comparison collapsed `allAgents` to 0
+  // and Team Summary / Overall Capacity went to zeros for every user.
+  // Now we compare against the full sub-tree of node-IDs that roll up
+  // to currentDeptId (server-computed via getDescendantNodeIds). A
+  // missing orgNodeId on a member is treated as "include" so a member
+  // freshly added before the boot-time backfill ran isn't invisible.
+  // Empty Set (cold paint, before /dept-scope/current resolves) also
+  // means "include" — equivalent to pre-PR #745 behaviour.
+  const { deptId: currentDeptId, currentDeptNodeIds } = useCurrentDept();
   const inCurrentDept = useCallback((m) => {
     if (!currentDeptId) return true;
+    if (!currentDeptNodeIds || currentDeptNodeIds.size === 0) return true;
     const memberOrgNodeId = MEMBERS_BY_EMAIL[(m.email || '').toLowerCase()]?.orgNodeId;
     if (!memberOrgNodeId) return true;
-    return memberOrgNodeId === currentDeptId;
-  }, [currentDeptId]);
+    return currentDeptNodeIds.has(memberOrgNodeId);
+  }, [currentDeptId, currentDeptNodeIds]);
 
   const allAgents = MEMBERS.filter(m => m.role === 'agent' && scopeIds.includes(m.id) && inCurrentDept(m)).map(m => {
     const memEmail = (m.email || '').toLowerCase();

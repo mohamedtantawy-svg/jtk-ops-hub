@@ -142,3 +142,41 @@ export async function listTopLevelDepts() {
     return [];
   }
 }
+
+// 2026-05-21 — fix for the Team Summary / ack-tracker dept-filter that
+// shipped in PR #745. The original FE filter compared
+// `member.orgNodeId === currentDeptId`, which always fails for HRX
+// because every existing override row points at a SUB-team UUID
+// (EOR Operations, EMEA 1, Next-Gen HR, etc.) — never the top-level
+// HR Experience UUID. `allAgents` collapsed to ~0–1 rows and Team
+// Summary / Overall Capacity went to zeros for every user. Fix:
+// return the dept's UUID + every descendant org_node.id so the FE can
+// do a Set membership check instead of equality.
+//
+// Walks the org_nodes tree once via recursive CTE; returns the FULL
+// sub-tree below (and including) the given dept. Archived nodes are
+// excluded so a deleted-then-restored team doesn't silently absorb
+// agents who used to belong to it.
+export async function getDescendantNodeIds(rootDeptId) {
+  if (!rootDeptId) return [];
+  try {
+    const { rows } = await query(
+      `WITH RECURSIVE subtree AS (
+         SELECT id, parent_id
+           FROM org_nodes
+          WHERE id = $1 AND is_archived = false
+         UNION ALL
+         SELECT n.id, n.parent_id
+           FROM org_nodes n
+           JOIN subtree s ON n.parent_id = s.id
+          WHERE n.is_archived = false
+       )
+       SELECT id FROM subtree`,
+      [rootDeptId],
+    );
+    return rows.map(r => r.id);
+  } catch (err) {
+    console.warn('[dept-scope] getDescendantNodeIds failed:', err.message);
+    return [];
+  }
+}
