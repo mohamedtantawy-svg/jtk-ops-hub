@@ -1,8 +1,9 @@
 import { useState, useContext, useMemo, useCallback, useEffect, useRef } from 'react';
 import { PermissionsContext, SettingsContext } from '../../App';
 import { COMMS_TYPES, matchesAudience } from '../../data/comms';
-import { MEMBERS } from '../../data/members';
+import { MEMBERS, MEMBERS_BY_EMAIL } from '../../data/members';
 import { scopeAckMembers } from '../../utils/permissions';
+import { useCurrentDept } from '../../hooks/useCurrentDept';
 import { renderRichText } from '../../utils/renderRichText';
 import Avatar from '../ui/Avatar';
 import AnnouncementMedia from '../ui/AnnouncementMedia';
@@ -504,13 +505,31 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
   //    Id-axis is only consulted as a last resort when the server payload
   //    has no `ackEmails` field at all (legacy / unreachable API).
   const accessType=perms?.raw;
+  // Phase 11+ dept isolation: narrow the ack-tracker audience to the
+  // current dept's members before the audience-rule + scopeAckMembers
+  // pipeline runs. Without this an HRX-stamped announcement showed a
+  // 171-row tracker (HRX + GIX agents leaking through) instead of the
+  // ~84 HRX members who actually need to ack — Mohamed 2026-05-21
+  // audit: "the announcements looks like it goes to both". Server
+  // already filters the announcement READ by org_node_id (Phase 11b),
+  // so a viewer can only reach this tracker for announcements stamped
+  // with their current dept — filtering by `currentDeptId` is
+  // equivalent to filtering by `comm.orgNodeId` and avoids needing
+  // the field to be on the FE payload.
+  const { deptId: currentDeptId } = useCurrentDept();
+  const inCurrentDept = useCallback((m) => {
+    if (!currentDeptId) return true;
+    const memberOrgNodeId = MEMBERS_BY_EMAIL[(m.email || '').toLowerCase()]?.orgNodeId;
+    if (!memberOrgNodeId) return true;
+    return memberOrgNodeId === currentDeptId;
+  }, [currentDeptId]);
   const getAckMembers=(comm)=>{
     let audienceMembers;
     if (Array.isArray(comm.target)) {
       const set=new Set(comm.target);
-      audienceMembers=MEMBERS.filter(m=>set.has(m.id));
+      audienceMembers=MEMBERS.filter(m=>set.has(m.id) && inCurrentDept(m));
     } else {
-      audienceMembers=MEMBERS.filter(m=>matchesAudience(comm.target, m));
+      audienceMembers=MEMBERS.filter(m=>matchesAudience(comm.target, m) && inCurrentDept(m));
     }
     const scoped=scopeAckMembers(audienceMembers, user, accessType, comm);
     const hasEmailAxis = Array.isArray(comm.ackEmails);

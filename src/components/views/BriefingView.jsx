@@ -3,6 +3,7 @@ import { TOOLS, STATUSES, FUNCTIONS, FLAGS } from '../../data/constants';
 import { MEMBERS, MEMBERS_BY_EMAIL, TEAM_MEMBERS, getDirectReports, getAllReports } from '../../data/members';
 import { useTeamMembers } from '../../hooks/useTeamMembers';
 import { useTeamDataVersion } from '../../hooks/useTeamDataVersion';
+import { useCurrentDept } from '../../hooks/useCurrentDept';
 import { matchesAudience } from '../../data/comms';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import { CALENDAR_EVENTS } from '../../data/calendar';
@@ -681,7 +682,30 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const capHighMin = Number.isFinite(capacitySettings?.highMin) ? capacitySettings.highMin : 100;
   const BASELINE_CAPACITY = capHighMin; // 100% on the workload bar = highMin (burnout)
 
-  const allAgents = MEMBERS.filter(m => m.role === 'agent' && scopeIds.includes(m.id)).map(m => {
+  // ── Phase 11+ dept isolation for the Team Summary ──────────────────────
+  // Without this filter the admin (or super-admin viewing HRX via the
+  // dept-picker chip) sees every dept's agents bundled into HRX's
+  // capacity / SLA buckets. Mohamed 2026-05-21 audit: "I see the
+  // Immigration headcount counted under HRX SLA & Capacity / their
+  // workload is also showing as part of the HRX dashboard" — 145 agents
+  // listed under HRX when HRX alone is ~84 (67 GIX members from Phase 14
+  // were leaking through because `scopeIds` is assignee-scope, not
+  // tenancy-scope).
+  //
+  // `currentDeptId` comes from useCurrentDept (Phase 11a). For non-super-
+  // admins it's their own dept; for mohamed it's whatever the chip is set
+  // to. We treat a missing orgNodeId on a member as "include" so a member
+  // freshly added before the boot-time backfill ran isn't invisible —
+  // post-backfill every row has org_node_id and this branch is moot.
+  const { deptId: currentDeptId } = useCurrentDept();
+  const inCurrentDept = useCallback((m) => {
+    if (!currentDeptId) return true;
+    const memberOrgNodeId = MEMBERS_BY_EMAIL[(m.email || '').toLowerCase()]?.orgNodeId;
+    if (!memberOrgNodeId) return true;
+    return memberOrgNodeId === currentDeptId;
+  }, [currentDeptId]);
+
+  const allAgents = MEMBERS.filter(m => m.role === 'agent' && scopeIds.includes(m.id) && inCurrentDept(m)).map(m => {
     const memEmail = (m.email || '').toLowerCase();
 
     // — Tickets (Zendesk + Jira merged in `tasks`) —
