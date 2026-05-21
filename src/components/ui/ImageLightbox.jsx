@@ -121,7 +121,7 @@ export default function ImageLightbox({ src, alt = '', name, kind = 'image', onC
 
 const toolbarBtn = {
   width: 36, height: 36, borderRadius: 999,
-  background: 'rgba(255,255,255,0.95)', color: '#1b1b1b',
+  background: 'rgba(255,255,255,0.95)', color: 'var(--text)',
   border: '1px solid rgba(255,255,255,0.4)',
   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
   textDecoration: 'none',

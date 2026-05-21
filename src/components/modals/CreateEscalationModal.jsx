@@ -10,12 +10,12 @@ const SLACK_CHANNELS = [
 ];
 
 const inputStyle = {
-  width:'100%', padding:'9px 12px', border:'1px solid #e8e8e8', borderRadius:12,
-  fontSize:14, color:'#1b1b1b', background:'var(--surface)', outline:'none',
+  width:'100%', padding:'9px 12px', border:'1px solid var(--border)', borderRadius:12,
+  fontSize:14, color:'var(--text)', background:'var(--surface)', outline:'none',
   fontFamily:'inherit', boxSizing:'border-box',
 };
 const labelStyle = {
-  fontSize:11, fontWeight:600, color:'#616161', textTransform:'uppercase',
+  fontSize:11, fontWeight:600, color:'var(--text-secondary)', textTransform:'uppercase',
   letterSpacing:'.05em', marginBottom:6, display:'block',
 };
 
@@ -84,11 +84,11 @@ export default function CreateEscalationModal({ onConfirm, onClose, currentUser,
               <i className="bi-arrow-up-circle-fill" style={{ color:'#d42d35', fontSize:17 }}/>
             </div>
             <div>
-              <div style={{ fontSize:18, fontWeight:700, color:'#1b1b1b' }}>Create Escalation</div>
-              <div style={{ fontSize:12, color:'#9e9e9e', marginTop:1 }}>Log a Slack or manual escalation</div>
+              <div style={{ fontSize:18, fontWeight:700, color:'var(--text)' }}>Create Escalation</div>
+              <div style={{ fontSize:12, color:'var(--text-muted)', marginTop:1 }}>Log a Slack or manual escalation</div>
             </div>
           </div>
-          <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', color:'#616161', fontSize:18, padding:4, lineHeight:1 }}>
+          <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text-secondary)', fontSize:18, padding:4, lineHeight:1 }}>
             <i className="bi-x-lg"/>
           </button>
         </div>
@@ -98,7 +98,7 @@ export default function CreateEscalationModal({ onConfirm, onClose, currentUser,
           {/* Source toggle */}
           <div style={{ marginBottom:20 }}>
             <label style={labelStyle}>Source</label>
-            <div style={{ display:'inline-flex', background:'#f7f5f2', borderRadius:128, padding:3, gap:2 }}>
+            <div style={{ display:'inline-flex', background:'var(--surface-3)', borderRadius:128, padding:3, gap:2 }}>
               {[
                 { id:'slack',  icon:'bi-slack',     label:'Slack Channel' },
                 { id:'manual', icon:'bi-person',     label:'Manual' },
@@ -121,8 +121,8 @@ export default function CreateEscalationModal({ onConfirm, onClose, currentUser,
 
           {/* Slack fields */}
           {source === 'slack' && (
-            <div style={{ background:'#f7f5f2', borderRadius:12, padding:'14px 16px', marginBottom:20, border:'1px solid #e8e8e8' }}>
-              <div style={{ fontSize:12, fontWeight:600, color:'#616161', marginBottom:12, display:'flex', alignItems:'center', gap:6 }}>
+            <div style={{ background:'var(--surface-3)', borderRadius:12, padding:'14px 16px', marginBottom:20, border:'1px solid var(--border)' }}>
+              <div style={{ fontSize:12, fontWeight:600, color:'var(--text-secondary)', marginBottom:12, display:'flex', alignItems:'center', gap:6 }}>
                 <i className="bi-slack" style={{ fontSize:13 }}/>Slack Details
               </div>
               <div style={{ marginBottom:12 }}>
@@ -200,7 +200,7 @@ export default function CreateEscalationModal({ onConfirm, onClose, currentUser,
           <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
             <button onClick={onClose} style={{
               padding:'9px 20px', borderRadius:128, fontSize:14, fontWeight:500,
-              border:'1px solid #e8e8e8', background:'var(--surface)', color:'#616161', cursor:'pointer',
+              border:'1px solid var(--border)', background:'var(--surface)', color:'var(--text-secondary)', cursor:'pointer',
             }}>Cancel</button>
             <button
               onClick={handleSubmit}

@@ -165,7 +165,7 @@ export default function PredictiveRisks({ tasks = [], members = [], escalations 
     <div
       style={{
         background: 'var(--surface)',
-        border: '1px solid #e8e8e8',
+        border: '1px solid var(--border)',
         borderRadius: 16,
         padding: 20,
       }}
@@ -173,7 +173,7 @@ export default function PredictiveRisks({ tasks = [], members = [], escalations 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
         <i className="bi-stars" style={{ fontSize: 16, color: '#7c3aed' }} />
-        <span style={{ fontSize: 15, fontWeight: 700, color: '#1b1b1b' }}>AI Risk Analysis</span>
+        <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>AI Risk Analysis</span>
         {risks.length > 0 && (
           <span
             style={{
@@ -189,7 +189,7 @@ export default function PredictiveRisks({ tasks = [], members = [], escalations 
             {risks.filter((r) => r.severity === 'critical').length} critical
           </span>
         )}
-        <span style={{ fontSize: 12, color: '#9e9e9e', marginLeft: 'auto' }}>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 'auto' }}>
           {risks.length} risk{risks.length !== 1 ? 's' : ''} detected
         </span>
       </div>
@@ -232,7 +232,7 @@ export default function PredictiveRisks({ tasks = [], members = [], escalations 
                 {/* Content */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: '#1b1b1b' }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
                       {risk.title}
                     </span>
                     <span
@@ -247,7 +247,7 @@ export default function PredictiveRisks({ tasks = [], members = [], escalations 
                       {cfg.label}
                     </span>
                   </div>
-                  <div style={{ fontSize: 12, color: '#616161', lineHeight: 1.4, marginBottom: 6 }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.4, marginBottom: 6 }}>
                     {risk.description}
                   </div>
                   <div

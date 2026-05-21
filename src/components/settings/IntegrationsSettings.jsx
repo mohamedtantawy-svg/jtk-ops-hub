@@ -114,8 +114,8 @@ export default function IntegrationsSettings({ addToast }) {
       {/* Header */}
       <div style={{ marginBottom: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-          <i className="bi-cloud-arrow-down-fill" style={{ fontSize: 18, color: '#1b1b1b' }} />
-          <span style={{ fontSize: 18, fontWeight: 700, color: '#1b1b1b' }}>Live Integrations</span>
+          <i className="bi-cloud-arrow-down-fill" style={{ fontSize: 18, color: 'var(--text)' }} />
+          <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>Live Integrations</span>
           <div style={{
             padding: '2px 10px', borderRadius: 99, fontSize: 11, fontWeight: 700,
             background: configuredCount === totalCount ? '#dcfce7' : '#fef3c7',
@@ -124,7 +124,7 @@ export default function IntegrationsSettings({ addToast }) {
             {configuredCount}/{totalCount} active
           </div>
         </div>
-        <div style={{ fontSize: 13, color: '#9e9e9e', marginLeft: 28 }}>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginLeft: 28 }}>
           Connect Ops Hub to external services for live data. API keys are configured as environment variables on Nexus.
         </div>
       </div>
@@ -155,10 +155,10 @@ export default function IntegrationsSettings({ addToast }) {
                 {/* Content */}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-                    <span style={{ fontSize: 15, fontWeight: 700, color: '#1b1b1b' }}>{integration.label}</span>
+                    <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{integration.label}</span>
                     <StatusDot status={currentStatus} />
                   </div>
-                  <div style={{ fontSize: 12.5, color: '#616161', marginBottom: 10 }}>
+                  <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 10 }}>
                     {integration.description}
                   </div>
 
@@ -194,8 +194,8 @@ export default function IntegrationsSettings({ addToast }) {
                       disabled={testing[integration.key]}
                       style={{
                         height: 32, padding: '0 14px', borderRadius: 128,
-                        border: '1px solid #e8e8e8', background: 'var(--surface)',
-                        color: '#1b1b1b', fontSize: 12, fontWeight: 600,
+                        border: '1px solid var(--border)', background: 'var(--surface)',
+                        color: 'var(--text)', fontSize: 12, fontWeight: 600,
                         cursor: testing[integration.key] ? 'wait' : 'pointer',
                         opacity: testing[integration.key] ? 0.6 : 1,
                         display: 'flex', alignItems: 'center', gap: 6,
@@ -214,14 +214,14 @@ export default function IntegrationsSettings({ addToast }) {
               {/* Endpoints */}
               {configured && status[integration.key]?.endpoints && (
                 <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid #e8e8e8' }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: '#9e9e9e', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                     Available Endpoints
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                     {status[integration.key].endpoints.map(ep => (
                       <code key={ep} style={{
                         fontSize: 10, padding: '2px 8px', borderRadius: 6,
-                        background: '#f5f5f5', color: '#616161',
+                        background: 'var(--surface-3)', color: 'var(--text-secondary)',
                         fontFamily: 'SF Mono, monospace',
                       }}>
                         {ep}
@@ -238,7 +238,7 @@ export default function IntegrationsSettings({ addToast }) {
       {/* Help text */}
       <div style={{
         marginTop: 20, padding: '14px 18px', borderRadius: 12,
-        background: '#f7f5f2', fontSize: 12, color: '#616161', lineHeight: 1.6,
+        background: 'var(--surface-3)', fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6,
       }}>
         <i className="bi-info-circle" style={{ marginRight: 6 }} />
         <strong>Setup:</strong> To configure integrations, add the required environment variables on Nexus
@@ -258,8 +258,8 @@ export default function IntegrationsSettings({ addToast }) {
           onClick={() => { refresh(); if (addToast) addToast('info', 'Refreshed', 'Integration status updated'); }}
           style={{
             height: 32, padding: '0 16px', borderRadius: 128,
-            border: '1px solid #e8e8e8', background: 'var(--surface)',
-            color: '#616161', fontSize: 12, fontWeight: 600,
+            border: '1px solid var(--border)', background: 'var(--surface)',
+            color: 'var(--text-secondary)', fontSize: 12, fontWeight: 600,
             cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
           }}
         >

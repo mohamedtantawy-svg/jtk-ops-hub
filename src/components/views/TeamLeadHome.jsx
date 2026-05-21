@@ -27,8 +27,8 @@ import { useCapacitySettings } from '../../hooks/useCapacitySettings';
 import { COUNTRY_OWNERS, OWNER_COUNTRIES } from '../../data/countryOwners';
 
 const CARD = {
-  background: 'white',
-  border: '1px solid #e8e8e8',
+  background: 'var(--surface)',
+  border: '1px solid var(--border)',
   borderRadius: 12,
   padding: 16,
 };
@@ -36,7 +36,7 @@ const CARD = {
 const SECTION_TITLE = {
   fontSize: 11, fontWeight: 700,
   textTransform: 'uppercase', letterSpacing: '0.06em',
-  color: '#9e9e9e', marginBottom: 10,
+  color: 'var(--text-muted)', marginBottom: 10,
 };
 
 function rowSlaSeverity(row) {
@@ -315,14 +315,14 @@ export default function TeamLeadHome({ user, tasks = [], setView, managerOnCall 
   }, []);
 
   return (
-    <div style={{ flex: 1, overflow: 'auto', background: '#fafaf9', padding: '20px 32px 80px' }}>
+    <div style={{ flex: 1, overflow: 'auto', background: 'var(--surface-2)', padding: '20px 32px 80px' }}>
       {/* ── Header ─────────────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: '#1b1b1b' }}>
+          <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)' }}>
             {greeting}, {(user?.name || '').split(' ')[0] || 'Team Lead'}
           </div>
-          <div style={{ fontSize: 13, color: '#616161', marginTop: 2 }}>
+          <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2 }}>
             {user?.team || ''} · {directReports.length} direct report{directReports.length === 1 ? '' : 's'}
             {perms?.dataScope === 'all_tasks' && <span style={{ marginLeft: 8, color: '#0e7490' }}>· admin preview (showing org)</span>}
           </div>
@@ -375,7 +375,7 @@ export default function TeamLeadHome({ user, tasks = [], setView, managerOnCall 
         <div style={CARD}>
           <div style={SECTION_TITLE}>My Team — Workload + Breaches</div>
           {perReportRows.length === 0 ? (
-            <div style={{ color: '#9e9e9e', fontSize: 13, padding: '32px 0', textAlign: 'center' }}>
+            <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: '32px 0', textAlign: 'center' }}>
               No direct reports on file. (TL view requires reports in `members.js`.)
             </div>
           ) : (
@@ -448,10 +448,10 @@ export default function TeamLeadHome({ user, tasks = [], setView, managerOnCall 
           <div style={SECTION_TITLE}>Manager on call</div>
           {managerOnCall?.email ? (
             <div>
-              <div style={{ fontSize: 14, fontWeight: 600, color: '#1b1b1b' }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>
                 {MEMBERS_BY_EMAIL[managerOnCall.email.toLowerCase()]?.name || managerOnCall.email}
               </div>
-              <div style={{ fontSize: 12, color: '#616161', marginTop: 4 }}>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
                 {managerOnCall.startTime || '09:00'} – {managerOnCall.endTime || '17:00'} {managerOnCall.timezone || 'UTC'}
               </div>
               {managerOnCall.email.toLowerCase() === user?.email?.toLowerCase() && (
@@ -465,7 +465,7 @@ export default function TeamLeadHome({ user, tasks = [], setView, managerOnCall 
               )}
             </div>
           ) : (
-            <div style={{ color: '#9e9e9e', fontSize: 13 }}>No one on call.</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No one on call.</div>
           )}
         </div>
       </div>
@@ -475,7 +475,7 @@ export default function TeamLeadHome({ user, tasks = [], setView, managerOnCall 
         <div style={CARD}>
           <div style={SECTION_TITLE}>By country (top 8)</div>
           {countryBreakdown.length === 0 ? (
-            <div style={{ color: '#9e9e9e', fontSize: 13 }}>No data yet.</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No data yet.</div>
           ) : (
             <BreakdownBars rows={countryBreakdown} color="#0e7490" />
           )}
@@ -483,7 +483,7 @@ export default function TeamLeadHome({ user, tasks = [], setView, managerOnCall 
         <div style={CARD}>
           <div style={SECTION_TITLE}>By source</div>
           {sourceBreakdown.length === 0 ? (
-            <div style={{ color: '#9e9e9e', fontSize: 13 }}>No data yet.</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>No data yet.</div>
           ) : (
             <BreakdownBars
               rows={sourceBreakdown.map(([k, v]) => [TOOLS[k]?.label || k, v])}
@@ -494,7 +494,7 @@ export default function TeamLeadHome({ user, tasks = [], setView, managerOnCall 
       </div>
 
       {/* ── Footer note ───────────────────────────────────────────── */}
-      <div style={{ marginTop: 24, fontSize: 11, color: '#9e9e9e', textAlign: 'center' }}>
+      <div style={{ marginTop: 24, fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
         TL Home preview · ?view=lead-home · data is live, layout is a draft
       </div>
     </div>
@@ -518,14 +518,14 @@ function TriageTile({ icon, label, count, color, bg, subText, breakdown, onClick
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
         <i className={icon} style={{ fontSize: 16, color }} />
-        <span style={{ fontSize: 11, fontWeight: 700, color: '#616161', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
           {label}
         </span>
       </div>
       <div style={{ fontSize: 32, fontWeight: 800, color: count > 0 ? color : '#9e9e9e', lineHeight: 1 }}>
         {count}
       </div>
-      {subText && <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 4 }}>{subText}</div>}
+      {subText && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{subText}</div>}
       {sortedBreakdown && sortedBreakdown.length > 0 && (
         <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
           {sortedBreakdown.map(([src, n]) => (
@@ -559,15 +559,15 @@ function ReportRow({ rep, capacity }) {
           <div style={{
             width: 22, height: 22, borderRadius: '50%', background: '#e8e8e8',
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 10, fontWeight: 700, color: '#616161',
+            fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)',
           }}>{(rep.name || '?').slice(0, 1)}</div>
         )}
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 600, color: '#1b1b1b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div style={{ fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {rep.name}
             {isHotspot && <span style={{ marginLeft: 6, color: '#d42d35' }} title="More than half of this person's queue is breached">🔥</span>}
           </div>
-          <div style={{ fontSize: 10, color: '#9e9e9e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {rep.title || rep.email}
           </div>
         </div>
@@ -576,19 +576,19 @@ function ReportRow({ rep, capacity }) {
         <div style={{ height: 6, background: '#f0efed', borderRadius: 128, overflow: 'hidden' }}>
           <div style={{ height: '100%', width: `${pct}%`, background: barColor, transition: 'width .2s' }} />
         </div>
-        <div style={{ fontSize: 10, color: '#9e9e9e', marginTop: 2 }}>
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
           {rep.active} / ~{capacity.highMin}
         </div>
       </div>
       <div style={{ textAlign: 'right' }}>
         <span style={{ fontWeight: 700, color: rep.breached > 0 ? '#d42d35' : '#9e9e9e' }}>{rep.breached}</span>
-        <div style={{ fontSize: 9, color: '#9e9e9e', textTransform: 'uppercase', letterSpacing: '0.04em' }}>brch</div>
+        <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>brch</div>
       </div>
       <div style={{ textAlign: 'right' }}>
         <span style={{ fontWeight: 700, color: rep.atRisk > 0 ? '#ed8d00' : '#9e9e9e' }}>{rep.atRisk}</span>
-        <div style={{ fontSize: 9, color: '#9e9e9e', textTransform: 'uppercase', letterSpacing: '0.04em' }}>risk</div>
+        <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>risk</div>
       </div>
-      <div style={{ textAlign: 'right', color: '#9e9e9e', fontSize: 11 }}>
+      <div style={{ textAlign: 'right', color: 'var(--text-muted)', fontSize: 11 }}>
         {rep.synthOwned > 0 && <span title="Rows assigned to them only via the synthetic country-owner round-robin">{rep.synthOwned} synth</span>}
       </div>
     </div>
@@ -596,7 +596,7 @@ function ReportRow({ rep, capacity }) {
 }
 
 function HotRow({ row }) {
-  const meta = TOOLS[row.source] || { label: row.source, color: '#616161', bg: '#f3f3f3', icon: 'bi-circle' };
+  const meta = TOOLS[row.source] || { label: row.source, color: 'var(--text-secondary)', bg: '#f3f3f3', icon: 'bi-circle' };
   const overdue = fmtDuration(row.overdueSecs);
   return (
     <div style={{
@@ -612,10 +612,10 @@ function HotRow({ row }) {
         {meta.label}
       </span>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontWeight: 600, color: '#1b1b1b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div style={{ fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {row.subject || row.id}
         </div>
-        <div style={{ fontSize: 10, color: '#9e9e9e' }}>
+        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
           {row.country ? `${getCountryName(row.country) || row.country} · ` : ''}{row.assignee || row.assigneeEmail || 'unassigned'}
         </div>
       </div>
@@ -624,8 +624,8 @@ function HotRow({ row }) {
       </div>
       {row.taskUrl ? (
         <a href={row.taskUrl} target="_blank" rel="noopener noreferrer" style={{
-          padding: '4px 8px', borderRadius: 6, border: '1px solid #e8e8e8',
-          fontSize: 10, fontWeight: 600, color: '#1b1b1b', background: 'white',
+          padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border)',
+          fontSize: 10, fontWeight: 600, color: 'var(--text)', background: 'var(--surface)',
           textDecoration: 'none',
         }}>Open</a>
       ) : <span />}
@@ -637,7 +637,7 @@ function DecisionTile({ icon, label, count, hint, onClick, color }) {
   const display = count == null ? '—' : count;
   return (
     <button onClick={onClick} style={{
-      padding: 12, borderRadius: 10, border: '1px solid #e8e8e8',
+      padding: 12, borderRadius: 10, border: '1px solid var(--border)',
       background: count > 0 ? '#fafaf9' : 'white', textAlign: 'left',
       cursor: 'pointer', transition: 'border-color .12s, background .12s',
       display: 'flex', alignItems: 'center', gap: 12,
@@ -647,10 +647,10 @@ function DecisionTile({ icon, label, count, hint, onClick, color }) {
     >
       <i className={icon} style={{ fontSize: 18, color }} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: '#1b1b1b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {label}
         </div>
-        {hint && <div style={{ fontSize: 10, color: '#9e9e9e' }}>{hint}</div>}
+        {hint && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{hint}</div>}
       </div>
       <div style={{ fontSize: 22, fontWeight: 800, color: count > 0 ? color : '#9e9e9e', lineHeight: 1, minWidth: 32, textAlign: 'right' }}>
         {display}
@@ -668,11 +668,11 @@ function BreakdownBars({ rows, color = '#0e7490', colors = null }) {
         const c = colors?.[i] || color;
         return (
           <div key={k} style={{ display: 'grid', gridTemplateColumns: '90px 1fr 32px', gap: 8, alignItems: 'center', fontSize: 12 }}>
-            <span style={{ fontWeight: 500, color: '#1b1b1b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{k}</span>
+            <span style={{ fontWeight: 500, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{k}</span>
             <div style={{ height: 8, background: '#f0efed', borderRadius: 128, overflow: 'hidden' }}>
               <div style={{ height: '100%', width: `${pct}%`, background: c }} />
             </div>
-            <span style={{ fontWeight: 600, color: '#616161', textAlign: 'right' }}>{v}</span>
+            <span style={{ fontWeight: 600, color: 'var(--text-secondary)', textAlign: 'right' }}>{v}</span>
           </div>
         );
       })}

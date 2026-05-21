@@ -3,7 +3,7 @@ import { PermissionsContext } from '../../App';
 import { MEMBERS } from '../../data/members';
 import { PROJECT_TYPES, PROJECT_STATUSES } from '../../data/projects';
 
-const labelStyle = { fontSize:11, fontWeight:600, color:'#9e9e9e', textTransform:'uppercase', letterSpacing:'.05em', marginBottom:6, display:'block' };
+const labelStyle = { fontSize:11, fontWeight:600, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'.05em', marginBottom:6, display:'block' };
 const priorityColors = { low:'#29811e', medium:'#1f74b3', high:'#ed5e2a', critical:'#d42d35' };
 const priorityBg    = { low:'#e6f4e5', medium:'#e8f0fe', high:'#fef3ee', critical:'#fce9ea' };
 
@@ -44,7 +44,7 @@ function AvatarStack({ ids, max = 5 }) {
       {rest > 0 && (
         <div style={{
           width:28, height:28, borderRadius:'50%', background:'#e8e8e8',
-          color:'#616161', fontSize:11, fontWeight:700, display:'flex',
+          color:'var(--text-secondary)', fontSize:11, fontWeight:700, display:'flex',
           alignItems:'center', justifyContent:'center', border:'2px solid white',
           marginLeft:-8,
         }}>+{rest}</div>
@@ -100,14 +100,14 @@ export default function ProjectDetail({ project, onClose, onEdit, onUpdateProgre
       <div style={{ padding:'20px 24px 16px', borderBottom:'1px solid #f2f2f2', flexShrink:0 }}>
         <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:12, marginBottom:12 }}>
           <div style={{ flex:1 }}>
-            <div style={{ fontSize:11, fontWeight:600, color:'#9e9e9e', textTransform:'uppercase', letterSpacing:'.05em', marginBottom:6 }}>
+            <div style={{ fontSize:11, fontWeight:600, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'.05em', marginBottom:6 }}>
               {project.id}
             </div>
-            <div style={{ fontSize:17, fontWeight:700, color:'#1b1b1b', lineHeight:1.3 }}>
+            <div style={{ fontSize:17, fontWeight:700, color:'var(--text)', lineHeight:1.3 }}>
               {project.name}
             </div>
           </div>
-          <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', color:'#9e9e9e', fontSize:18, padding:4, flexShrink:0, lineHeight:1 }}>
+          <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text-muted)', fontSize:18, padding:4, flexShrink:0, lineHeight:1 }}>
             <i className="bi-x-lg"/>
           </button>
         </div>
@@ -120,7 +120,7 @@ export default function ProjectDetail({ project, onClose, onEdit, onUpdateProgre
           }}>{statusInfo?.label}</span>
           <span style={{
             padding:'4px 10px', borderRadius:128, fontSize:12, fontWeight:500,
-            background:'#f7f5f2', color:'#616161',
+            background:'var(--surface-3)', color:'var(--text-secondary)',
           }}>
             <i className={`${typeInfo?.icon}`} style={{ marginRight:4, fontSize:11 }}/>
             {typeInfo?.label}
@@ -158,9 +158,9 @@ export default function ProjectDetail({ project, onClose, onEdit, onUpdateProgre
         )}
         {/* Linked tasks resolved note */}
         {totalLinked > 0 && (
-          <div style={{ marginTop:6, fontSize:11, color:'#616161', display:'flex', alignItems:'center', gap:4 }}>
-            <i className="bi-link-45deg" style={{ color:'#9e9e9e', fontSize:11 }}/>
-            <span><span style={{ fontWeight:700, color:'#1b1b1b' }}>{resolvedLinked}/{totalLinked}</span> linked tasks resolved</span>
+          <div style={{ marginTop:6, fontSize:11, color:'var(--text-secondary)', display:'flex', alignItems:'center', gap:4 }}>
+            <i className="bi-link-45deg" style={{ color:'var(--text-muted)', fontSize:11 }}/>
+            <span><span style={{ fontWeight:700, color:'var(--text)' }}>{resolvedLinked}/{totalLinked}</span> linked tasks resolved</span>
           </div>
         )}
       </div>
@@ -176,17 +176,17 @@ export default function ProjectDetail({ project, onClose, onEdit, onUpdateProgre
           )}
         </div>
         {totalLinked === 0 ? (
-          <div style={{ display:'flex', alignItems:'center', gap:8, color:'#9e9e9e', fontSize:12 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8, color:'var(--text-muted)', fontSize:12 }}>
             <i className="bi-link" style={{ fontSize:14 }}/>
             <span>Link tasks to track progress</span>
           </div>
         ) : (
           <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
             {linkedTasks.slice(0, 5).map(t => (
-              <div key={t.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 10px', background:'#fafaf9', borderRadius:10, border:'1px solid #f2f2f2' }}>
+              <div key={t.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'7px 10px', background:'var(--surface-2)', borderRadius:10, border:'1px solid #f2f2f2' }}>
                 <span style={{ width:7, height:7, borderRadius:'50%', background: t.status==='resolved'?'#29811e':'#ed8d00', flexShrink:0 }}/>
-                <span style={{ fontSize:12, color:'#1b1b1b', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{t.subject}</span>
-                <span style={{ fontSize:10, color:'#9e9e9e', fontFamily:'monospace', flexShrink:0 }}>{t.id}</span>
+                <span style={{ fontSize:12, color:'var(--text)', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{t.subject}</span>
+                <span style={{ fontSize:10, color:'var(--text-muted)', fontFamily:'monospace', flexShrink:0 }}>{t.id}</span>
               </div>
             ))}
           </div>
@@ -231,8 +231,8 @@ export default function ProjectDetail({ project, onClose, onEdit, onUpdateProgre
                 {lead.name.split(' ').map(w=>w[0]).join('').slice(0,2)}
               </div>
               <div>
-                <div style={{ fontSize:13, fontWeight:600, color:'#1b1b1b' }}>{lead.name}</div>
-                <div style={{ fontSize:11, color:'#9e9e9e' }}>{lead.role.replace('_',' ')}</div>
+                <div style={{ fontSize:13, fontWeight:600, color:'var(--text)' }}>{lead.name}</div>
+                <div style={{ fontSize:11, color:'var(--text-muted)' }}>{lead.role.replace('_',' ')}</div>
               </div>
             </div>
           )}
@@ -256,7 +256,7 @@ export default function ProjectDetail({ project, onClose, onEdit, onUpdateProgre
           {assigneeLabel ? (
             <div style={{ display:'flex', alignItems:'center', gap:6 }}>
               <i className={assigneeLabel === 'Everyone' ? 'bi-people-fill' : 'bi-people'} style={{ color:'#7c5cbf', fontSize:14 }}/>
-              <span style={{ fontSize:13, fontWeight:500, color:'#1b1b1b' }}>{assigneeLabel}</span>
+              <span style={{ fontSize:13, fontWeight:500, color:'var(--text)' }}>{assigneeLabel}</span>
             </div>
           ) : (
             <AvatarStack ids={project.assigneeIds} />
@@ -266,7 +266,7 @@ export default function ProjectDetail({ project, onClose, onEdit, onUpdateProgre
         {/* Created */}
         <div>
           <span style={labelStyle}>Created</span>
-          <div style={{ fontSize:13, color:'#616161' }}>
+          <div style={{ fontSize:13, color:'var(--text-secondary)' }}>
             {new Date(project.createdAt).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})}
           </div>
         </div>
@@ -276,7 +276,7 @@ export default function ProjectDetail({ project, onClose, onEdit, onUpdateProgre
       {project.description && (
         <div style={{ padding:'16px 24px', borderBottom:'1px solid #f2f2f2' }}>
           <span style={labelStyle}>Description</span>
-          <p style={{ fontSize:13, color:'#616161', lineHeight:1.6, margin:0 }}>{project.description}</p>
+          <p style={{ fontSize:13, color:'var(--text-secondary)', lineHeight:1.6, margin:0 }}>{project.description}</p>
         </div>
       )}
 
@@ -287,7 +287,7 @@ export default function ProjectDetail({ project, onClose, onEdit, onUpdateProgre
           <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
             <button onClick={() => onEdit(project)} style={{
               padding:'8px 16px', borderRadius:128, fontSize:13, fontWeight:500,
-              border:'1px solid #e8e8e8', background:'var(--surface)', color:'#1b1b1b', cursor:'pointer', display:'flex', alignItems:'center', gap:6,
+              border:'1px solid var(--border)', background:'var(--surface)', color:'var(--text)', cursor:'pointer', display:'flex', alignItems:'center', gap:6,
             }}>
               <i className="bi-pencil" style={{ fontSize:12 }}/> Edit
             </button>

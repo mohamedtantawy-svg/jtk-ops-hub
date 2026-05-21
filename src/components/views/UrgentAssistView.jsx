@@ -111,8 +111,8 @@ function StatusSelect({ value, onChange, disabled }) {
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
       style={{
-        padding: '3px 8px', borderRadius: 8, border: '1px solid #e8e8e8',
-        background: 'var(--surface)', fontSize: 11, color: '#1b1b1b',
+        padding: '3px 8px', borderRadius: 8, border: '1px solid var(--border)',
+        background: 'var(--surface)', fontSize: 11, color: 'var(--text)',
         cursor: disabled ? 'not-allowed' : 'pointer', outline: 'none',
       }}
     >
@@ -329,7 +329,7 @@ export default function UrgentAssistView({ user, onCreate, managerOnCall, onChan
   }, [onCreate]);
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#fafaf9' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--surface-2)' }}>
       {/* Hero */}
       <div style={{ padding: '20px 32px 12px', background: 'var(--surface)', borderBottom: '1px solid #e8e8e8' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
@@ -337,8 +337,8 @@ export default function UrgentAssistView({ user, onCreate, managerOnCall, onChan
             <i className="bi-exclamation-octagon-fill" style={{ fontSize: 22, color: '#d42d35' }} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 18, fontWeight: 700, color: '#1b1b1b' }}>Urgent Assist</div>
-            <div style={{ fontSize: 12, color: '#9e9e9e', marginTop: 2 }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>Urgent Assist</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
               HRX urgent-assist requests from Workbench &amp; manual entries · 6h SLA from creation
             </div>
           </div>
@@ -393,7 +393,7 @@ export default function UrgentAssistView({ user, onCreate, managerOnCall, onChan
             <ScopePill value="team" current={scope} onChange={setScope} label="Assigned to my team" count={scopeCounts.team ?? undefined} />
           )}
           <ScopePill value="all"  current={scope} onChange={setScope} label="All: Manager on Call View" count={scopeCounts.all ?? undefined} />
-          <span style={{ marginLeft: 'auto', fontSize: 12, color: '#9e9e9e' }}>
+          <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
             {/* 2026-05-21 audit F42: "Loading…" used to stick because the
                 shared workbenchData loading flag toggles on every
                 background refresh. Show the count once we have any
@@ -441,8 +441,8 @@ export default function UrgentAssistView({ user, onCreate, managerOnCall, onChan
                   <i className={s.icon} style={{ color: s.color, fontSize: 13 }} />
                 </span>
                 <span style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 11, color: '#9e9e9e', fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase' }}>{s.label}</div>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: '#1b1b1b', lineHeight: 1 }}>{count}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase' }}>{s.label}</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)', lineHeight: 1 }}>{count}</div>
                 </span>
               </button>
             );
@@ -453,13 +453,13 @@ export default function UrgentAssistView({ user, onCreate, managerOnCall, onChan
       {/* Filter bar */}
       <div style={{ padding: '10px 32px', background: 'var(--surface)', borderBottom: '1px solid #f0efed', display: 'flex', gap: 8, alignItems: 'center' }}>
         <div style={{ position: 'relative' }}>
-          <i className="bi-search" aria-hidden="true" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: '#9e9e9e' }} />
+          <i className="bi-search" aria-hidden="true" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: 'var(--text-muted)' }} />
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
             placeholder="Search subject, country, assignee…"
             aria-label="Search urgent assist requests"
-            style={{ width: 280, height: 32, paddingLeft: 30, paddingRight: 10, borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 12, outline: 'none' }}
+            style={{ width: 280, height: 32, paddingLeft: 30, paddingRight: 10, borderRadius: 8, border: '1px solid var(--border)', fontSize: 12, outline: 'none' }}
           />
         </div>
         <button
@@ -467,7 +467,7 @@ export default function UrgentAssistView({ user, onCreate, managerOnCall, onChan
           onClick={() => refresh()}
           aria-label="Refresh"
           title="Refresh"
-          style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #e8e8e8', background: 'var(--surface)', color: loading ? '#ed8d00' : '#9e9e9e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: loading ? '#ed8d00' : '#9e9e9e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         >
           <i className={loading ? 'bi-arrow-clockwise spin' : 'bi-arrow-clockwise'} style={{ fontSize: 12 }} />
         </button>
@@ -475,12 +475,12 @@ export default function UrgentAssistView({ user, onCreate, managerOnCall, onChan
           <button
             type="button"
             onClick={() => { setStatusFilter(null); setSearch(''); }}
-            style={{ height: 32, padding: '0 10px', borderRadius: 8, border: 'none', background: 'transparent', color: '#9e9e9e', fontSize: 11, cursor: 'pointer', textDecoration: 'underline', fontFamily: 'inherit' }}
+            style={{ height: 32, padding: '0 10px', borderRadius: 8, border: 'none', background: 'transparent', color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer', textDecoration: 'underline', fontFamily: 'inherit' }}
           >
             Clear filters
           </button>
         )}
-        <span style={{ marginLeft: 'auto', fontSize: 11, color: '#9e9e9e' }}>
+        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-muted)' }}>
           {filtered.length} shown
         </span>
       </div>
@@ -501,17 +501,17 @@ export default function UrgentAssistView({ user, onCreate, managerOnCall, onChan
         {filtered.length === 0 && !loading ? (
           <div style={{ textAlign: 'center', padding: 60 }}>
             <i className="bi-shield-check" style={{ fontSize: 40, color: '#c0c0c0', display: 'block', marginBottom: 12 }} />
-            <div style={{ fontSize: 15, fontWeight: 600, color: '#1b1b1b', marginBottom: 6 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>
               {statusFilter || search ? 'No matches' : 'All clear'}
             </div>
-            <div style={{ fontSize: 13, color: '#9e9e9e' }}>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
               {statusFilter || search ? 'Try adjusting the filters' : 'No urgent assist requests in this scope right now.'}
             </div>
           </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
-              <tr style={{ background: '#f5f4f2', position: 'sticky', top: 0, zIndex: 2 }}>
+              <tr style={{ background: 'var(--surface-2)', position: 'sticky', top: 0, zIndex: 2 }}>
                 <Th label="Subject"  align="left" minWidth={220} />
                 <Th label="Type"     width={170} />
                 <Th label="Country"  width={110} />
@@ -579,7 +579,7 @@ function UrgentRow({ row, managerOnCall, onStatusChange, onDelete }) {
         transition: 'background .1s',
       }}
     >
-      <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: '#1b1b1b', maxWidth: 320, paddingLeft: 24 }}>
+      <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: 'var(--text)', maxWidth: 320, paddingLeft: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <i
             className={row.isManual ? 'bi-pencil-square' : 'bi-grid-3x3-gap-fill'}
@@ -597,7 +597,7 @@ function UrgentRow({ row, managerOnCall, onStatusChange, onDelete }) {
           sub-type chip ("Manual" / "Workbench" / "Expedite") so origin is
           still visible without three different parent labels. Original
           string surfaced via `title=` so reporting + grep still work. */}
-      <td style={{ ...tdStyle, fontSize: 11, color: '#616161' }} title={row.requestType}>
+      <td style={{ ...tdStyle, fontSize: 11, color: 'var(--text-secondary)' }} title={row.requestType}>
         {(() => {
           const raw = String(row.requestType || '');
           const isExpedite = /expedite/i.test(raw);
@@ -619,17 +619,17 @@ function UrgentRow({ row, managerOnCall, onStatusChange, onDelete }) {
       </td>
       <td style={{ ...tdStyle, fontSize: 12, whiteSpace: 'nowrap' }} title={countryLabel}>
         {flag && <span style={{ marginRight: 3 }}>{flag}</span>}
-        <span style={{ color: '#616161', fontWeight: 500 }}>{countryLabel || '--'}</span>
+        <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>{countryLabel || '--'}</span>
       </td>
       <td style={tdStyle} title={row.assigneeName || 'Unassigned'}>
         {row.assigneeName ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
             <Avatar name={row.assigneeName} size="xs" />
-            <span style={{ fontSize: 11, color: '#1b1b1b', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 90 }}>
+            <span style={{ fontSize: 11, color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 90 }}>
               {row.assigneeName.split(' ')[0]}
             </span>
           </div>
-        ) : <span style={{ fontSize: 11, color: '#9e9e9e' }}>Unassigned</span>}
+        ) : <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Unassigned</span>}
       </td>
       {/* Urgent Assist Assignee — auto-tracks Manager on Call. */}
       <td
@@ -640,7 +640,7 @@ function UrgentRow({ row, managerOnCall, onStatusChange, onDelete }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
             <Avatar name={mocName} size="xs" />
             <span style={{
-              fontSize: 11, color: '#1b1b1b', fontWeight: 500,
+              fontSize: 11, color: 'var(--text)', fontWeight: 500,
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
               maxWidth: 110,
             }}>
@@ -661,7 +661,7 @@ function UrgentRow({ row, managerOnCall, onStatusChange, onDelete }) {
             </span>
           </div>
         ) : (
-          <span style={{ fontSize: 11, color: '#9e9e9e' }}>—</span>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>—</span>
         )}
       </td>
       {/* Added by — surfaces the row's creator so manual rows with the
@@ -678,12 +678,12 @@ function UrgentRow({ row, managerOnCall, onStatusChange, onDelete }) {
       >
         {(() => {
           const name = row.createdByName || (row.createdByEmail ? row.createdByEmail.split('@')[0] : '');
-          if (!name) return <span style={{ fontSize: 11, color: '#9e9e9e' }}>—</span>;
+          if (!name) return <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>—</span>;
           return (
             <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
               <Avatar name={name} size="xs" />
               <span style={{
-                fontSize: 11, color: '#1b1b1b', fontWeight: 500,
+                fontSize: 11, color: 'var(--text)', fontWeight: 500,
                 whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
                 maxWidth: 90,
               }}>
@@ -693,9 +693,9 @@ function UrgentRow({ row, managerOnCall, onStatusChange, onDelete }) {
           );
         })()}
       </td>
-      <td style={{ ...tdStyle, fontSize: 11, color: '#616161', whiteSpace: 'nowrap' }} title={row.createdAt ? new Date(row.createdAt).toLocaleString() : ''}>
+      <td style={{ ...tdStyle, fontSize: 11, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }} title={row.createdAt ? new Date(row.createdAt).toLocaleString() : ''}>
         <div>{fmtDate(row.createdAt)}</div>
-        <div style={{ fontSize: 10, color: '#9e9e9e' }}>{relTime(row.createdAt)}</div>
+        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{relTime(row.createdAt)}</div>
       </td>
       {/* 2026-05-21 audit F40: SLA column showed live "6d 1h over" for
           rows already in resolved / on_hold / rejected. The breach time
@@ -744,7 +744,7 @@ function UrgentRow({ row, managerOnCall, onStatusChange, onDelete }) {
             onClick={() => onDelete(row)}
             aria-label={`Delete "${row.subject}"`}
             title="Delete"
-            style={{ background: 'transparent', border: 'none', color: '#9e9e9e', cursor: 'pointer', padding: '4px 6px', borderRadius: 6 }}
+            style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px 6px', borderRadius: 6 }}
             onMouseEnter={e => { e.currentTarget.style.background = '#fef2f2'; e.currentTarget.style.color = '#d42d35'; }}
             onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#9e9e9e'; }}
           >
@@ -807,7 +807,7 @@ function Th({ label, width, minWidth, align }) {
   );
 }
 
-const thStyle = { padding: '10px 12px', fontSize: 10, fontWeight: 600, color: '#9e9e9e', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center', whiteSpace: 'nowrap', borderBottom: '1px solid #e8e8e8' };
+const thStyle = { padding: '10px 12px', fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center', whiteSpace: 'nowrap', borderBottom: '1px solid #e8e8e8' };
 const tdStyle = { padding: '10px 12px', textAlign: 'center', verticalAlign: 'middle' };
 
 // ── Manager on Call pill (mirrors BriefingView hero) ────────────────

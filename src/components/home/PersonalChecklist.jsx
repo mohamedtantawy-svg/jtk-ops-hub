@@ -51,7 +51,7 @@ const SCHEMA_VERSION = 2;
 const PRIORITY_META = {
   urgent: { label: 'Urgent', color: '#d42d35', bg: '#FEE2E2', rank: 0 },
   high:   { label: 'High',   color: '#ed8d00', bg: '#FEF3C7', rank: 1 },
-  normal: { label: 'Normal', color: '#9e9e9e', bg: '#f5f5f5', rank: 2 },
+  normal: { label: 'Normal', color: 'var(--text-muted)', bg: '#f5f5f5', rank: 2 },
   low:    { label: 'Low',    color: '#1f74b3', bg: '#DBEAFE', rank: 3 },
 };
 const PRIORITY_ORDER = ['urgent', 'high', 'normal', 'low'];
@@ -231,7 +231,7 @@ function formatDue(iso) {
   if (diff === 0) return { label: 'Today', color: '#ed8d00', bg: '#FEF3C7', icon: 'bi-calendar-event' };
   if (diff === 1) return { label: 'Tomorrow', color: '#ed8d00', bg: '#FEF3C7', icon: 'bi-calendar-event' };
   if (diff <= 7) return { label: `${diff}d`, color: '#1f74b3', bg: '#DBEAFE', icon: 'bi-calendar' };
-  return { label: d.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' }), color: '#616161', bg: '#f7f5f2', icon: 'bi-calendar' };
+  return { label: d.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' }), color: 'var(--text-secondary)', bg: '#f7f5f2', icon: 'bi-calendar' };
 }
 // Linkify free-text description content. Splits on http(s) URLs and returns
 // a mixed array of strings and <a> nodes. Trailing punctuation (.,;:!?)] etc.)
@@ -410,11 +410,11 @@ const DescriptionField = ({ value, onChange }) => {
           width: '100%',
           padding: '6px 10px',
           borderRadius: 8,
-          border: '1px solid #e8e8e8',
+          border: '1px solid var(--border)',
           fontSize: 12,
           outline: 'none',
           fontFamily: 'inherit',
-          color: '#1b1b1b',
+          color: 'var(--text)',
           // Cap textarea height so a long paste while editing also can't
           // expand the parent grid unbounded — user can still scroll inside.
           maxHeight: 320,
@@ -437,9 +437,9 @@ const DescriptionField = ({ value, onChange }) => {
           width: '100%',
           padding: '6px 10px',
           borderRadius: 8,
-          border: '1px solid #e8e8e8',
+          border: '1px solid var(--border)',
           fontSize: 12,
-          color: '#1b1b1b',
+          color: 'var(--text)',
           boxSizing: 'border-box',
           lineHeight: 1.4,
           whiteSpace: 'pre-wrap',
@@ -795,7 +795,7 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
                   </span>
                 )}
                 {item.description && (
-                  <span style={{ fontSize: 11, color: '#9e9e9e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180, display: 'inline-block' }} title={item.description}>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180, display: 'inline-block' }} title={item.description}>
                     {item.description}
                   </span>
                 )}
@@ -824,7 +824,7 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
               value={item.title}
               onChange={e => updateField(item.id, 'title', e.target.value)}
               placeholder="Title"
-              style={{ width: '100%', padding: '6px 10px', borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 12, fontFamily: 'inherit', outline: 'none', color: '#1b1b1b', boxSizing: 'border-box' }}
+              style={{ width: '100%', padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 12, fontFamily: 'inherit', outline: 'none', color: 'var(--text)', boxSizing: 'border-box' }}
               onFocus={e => e.target.style.borderColor = '#7c3aed'}
               onBlur={e => e.target.style.borderColor = '#e8e8e8'}
             />
@@ -833,19 +833,19 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
               onChange={(v) => updateField(item.id, 'description', v)}
             />
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <label style={{ fontSize: 11, color: '#9e9e9e', fontWeight: 600 }}>Due</label>
+              <label style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Due</label>
               <input
                 type="date"
                 value={item.dueDate || ''}
                 onChange={e => updateField(item.id, 'dueDate', e.target.value || null)}
-                style={{ padding: '4px 8px', borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 12, fontFamily: 'inherit', outline: 'none', color: '#1b1b1b' }}
+                style={{ padding: '4px 8px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 12, fontFamily: 'inherit', outline: 'none', color: 'var(--text)' }}
                 onFocus={e => e.target.style.borderColor = '#7c3aed'}
                 onBlur={e => e.target.style.borderColor = '#e8e8e8'}
               />
               {item.dueDate && (
                 <button
                   onClick={() => updateField(item.id, 'dueDate', null)}
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9e9e9e', fontSize: 11, padding: '2px 6px', borderRadius: 4 }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 11, padding: '2px 6px', borderRadius: 4 }}
                   onMouseEnter={e => e.currentTarget.style.color = '#d42d35'}
                   onMouseLeave={e => e.currentTarget.style.color = '#9e9e9e'}
                 >
@@ -854,14 +854,14 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
               )}
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <label style={{ fontSize: 11, color: '#9e9e9e', fontWeight: 600 }}>Priority</label>
+              <label style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Priority</label>
               <PriorityPicker value={item.priority || 'normal'} onChange={p => updateField(item.id, 'priority', p)} mode="full" />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <div style={{ flex: 1 }}></div>
               <button
                 onClick={() => setExpandedId(null)}
-                style={{ background: '#f7f5f2', border: 'none', cursor: 'pointer', color: '#616161', fontSize: 11, padding: '4px 10px', borderRadius: 6, fontWeight: 600 }}
+                style={{ background: 'var(--surface-3)', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', fontSize: 11, padding: '4px 10px', borderRadius: 6, fontWeight: 600 }}
               >
                 Done
               </button>
@@ -880,7 +880,7 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
   return (
     <div style={{
       background: 'var(--surface)',
-      border: '1px solid #e8e8e8',
+      border: '1px solid var(--border)',
       borderRadius: 16,
       overflow: 'hidden',
       display: 'flex',
@@ -913,12 +913,12 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ fontSize: primary ? 16 : 15, fontWeight: 700, color: '#1b1b1b' }}>My To-Do</div>
+            <div style={{ fontSize: primary ? 16 : 15, fontWeight: 700, color: 'var(--text)' }}>My To-Do</div>
             {primary && liveItems.length > 0 && (
               <span style={{ background: '#f3eff8', borderRadius: 128, padding: '3px 10px', fontSize: 11, fontWeight: 700, color: '#8b6dca' }}>{openCount} open</span>
             )}
           </div>
-          <div style={{ fontSize: primary ? 11 : 10, color: '#9e9e9e', marginTop: 1 }}>
+          <div style={{ fontSize: primary ? 11 : 10, color: 'var(--text-muted)', marginTop: 1 }}>
             {primary ? 'Your personal to-do list — saved on this device and synced across tabs' : 'Your personal to-do list — saved locally and across tabs'}
           </div>
         </div>
@@ -934,7 +934,7 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
                 <i className="bi-exclamation-circle-fill" style={{ fontSize: 9, marginRight: 3 }}></i>{overdueCount}
               </span>
             )}
-            <span style={{ fontSize: primary ? 12 : 11, color: '#9e9e9e', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{doneCount}/{liveItems.length}</span>
+            <span style={{ fontSize: primary ? 12 : 11, color: 'var(--text-muted)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{doneCount}/{liveItems.length}</span>
           </div>
         )}
       </div>
@@ -953,7 +953,7 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
               transition: 'width .3s ease',
             }}></div>
           </div>
-          <div style={{ fontSize: 10, color: '#9e9e9e', marginTop: 5, fontWeight: 600, letterSpacing: 0.3 }}>
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 5, fontWeight: 600, letterSpacing: 0.3 }}>
             {progressPct === 100
               ? 'All caught up — nice work!'
               : progressPct === 0
@@ -984,11 +984,11 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
                   height: primary ? 38 : 32,
                   padding: primary ? '0 14px' : '0 10px',
                   borderRadius: primary ? 10 : 8,
-                  border: '1px solid #e8e8e8',
+                  border: '1px solid var(--border)',
                   fontSize: primary ? 13 : 12,
                   outline: 'none',
                   fontFamily: 'inherit',
-                  color: '#1b1b1b',
+                  color: 'var(--text)',
                   background: 'var(--surface)',
                 }}
                 onFocus={e => e.target.style.borderColor = '#7c3aed'}
@@ -1001,9 +1001,9 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
                   height: primary ? 38 : 32,
                   padding: primary ? '0 12px' : '0 10px',
                   borderRadius: primary ? 10 : 8,
-                  border: '1px solid #e8e8e8',
+                  border: '1px solid var(--border)',
                   background: 'var(--surface)',
-                  color: '#616161',
+                  color: 'var(--text-secondary)',
                   fontSize: 11,
                   fontWeight: 600,
                   cursor: 'pointer',
@@ -1041,18 +1041,18 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
                 the full form, and the selected priority is carried into the
                 next task. Users can still override via the details form. */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: primary ? 8 : 6 }}>
-              <span style={{ fontSize: 10, fontWeight: 700, color: '#9e9e9e', letterSpacing: 0.4, textTransform: 'uppercase' }}>Priority</span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: 0.4, textTransform: 'uppercase' }}>Priority</span>
               <PriorityPicker value={draft.priority} onChange={p => setDraft(d => ({ ...d, priority: p }))} mode="compact" />
             </div>
           </>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: 'var(--surface)', padding: 10, borderRadius: 10, border: '1px solid #e8e8e8' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: 'var(--surface)', padding: 10, borderRadius: 10, border: '1px solid var(--border)' }}>
             <input
               autoFocus
               value={draft.title}
               onChange={e => setDraft(d => ({ ...d, title: e.target.value }))}
               placeholder="Title"
-              style={{ width: '100%', padding: '6px 10px', borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 12, outline: 'none', fontFamily: 'inherit', color: '#1b1b1b', boxSizing: 'border-box' }}
+              style={{ width: '100%', padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 12, outline: 'none', fontFamily: 'inherit', color: 'var(--text)', boxSizing: 'border-box' }}
               onFocus={e => e.target.style.borderColor = '#7c3aed'}
               onBlur={e => e.target.style.borderColor = '#e8e8e8'}
             />
@@ -1061,30 +1061,30 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
               onChange={e => setDraft(d => ({ ...d, description: e.target.value }))}
               placeholder="Description (optional)"
               rows={2}
-              style={{ width: '100%', padding: '6px 10px', borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 12, outline: 'none', fontFamily: 'inherit', color: '#1b1b1b', resize: 'vertical', boxSizing: 'border-box', lineHeight: 1.4 }}
+              style={{ width: '100%', padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 12, outline: 'none', fontFamily: 'inherit', color: 'var(--text)', resize: 'vertical', boxSizing: 'border-box', lineHeight: 1.4 }}
               onFocus={e => e.target.style.borderColor = '#7c3aed'}
               onBlur={e => e.target.style.borderColor = '#e8e8e8'}
             />
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <label style={{ fontSize: 11, color: '#9e9e9e', fontWeight: 600 }}>Due</label>
+              <label style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Due</label>
               <input
                 type="date"
                 value={draft.dueDate}
                 onChange={e => setDraft(d => ({ ...d, dueDate: e.target.value }))}
-                style={{ padding: '4px 8px', borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 12, outline: 'none', fontFamily: 'inherit', color: '#1b1b1b' }}
+                style={{ padding: '4px 8px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 12, outline: 'none', fontFamily: 'inherit', color: 'var(--text)' }}
                 onFocus={e => e.target.style.borderColor = '#7c3aed'}
                 onBlur={e => e.target.style.borderColor = '#e8e8e8'}
               />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <label style={{ fontSize: 11, color: '#9e9e9e', fontWeight: 600 }}>Priority</label>
+              <label style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600 }}>Priority</label>
               <PriorityPicker value={draft.priority} onChange={p => setDraft(d => ({ ...d, priority: p }))} mode="full" />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
               <div style={{ flex: 1 }}></div>
               <button
                 onClick={() => { setShowAddForm(false); setDraft({ title: '', description: '', dueDate: '', priority: 'normal' }); }}
-                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9e9e9e', fontSize: 11, padding: '4px 8px', borderRadius: 6, fontWeight: 600 }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 11, padding: '4px 8px', borderRadius: 6, fontWeight: 600 }}
               >
                 Cancel
               </button>
@@ -1113,7 +1113,7 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
             padding: primary ? '48px 24px 40px' : '20px 0',
             textAlign: 'center',
             fontSize: primary ? 13 : 12,
-            color: '#9e9e9e',
+            color: 'var(--text-muted)',
           }}>
             <i className="bi-list-check" style={{
               fontSize: primary ? 44 : 22,
@@ -1124,7 +1124,7 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
             }}></i>
             {primary ? (
               <>
-                <div style={{ fontWeight: 700, fontSize: 14, color: '#616161', marginBottom: 4 }}>Nothing on your plate yet</div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-secondary)', marginBottom: 4 }}>Nothing on your plate yet</div>
                 <div style={{ fontSize: 12 }}>Capture a task above — it stays with you across tabs and sessions.</div>
               </>
             ) : (
@@ -1139,7 +1139,7 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
             padding: primary ? '32px 24px 24px' : '18px 0',
             textAlign: 'center',
             fontSize: primary ? 13 : 12,
-            color: '#9e9e9e',
+            color: 'var(--text-muted)',
           }}>
             <i className="bi-check-circle" style={{
               fontSize: primary ? 32 : 20,
@@ -1147,7 +1147,7 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
               marginBottom: primary ? 8 : 4,
               color: '#15803d',
             }}></i>
-            <div style={{ fontWeight: 700, fontSize: primary ? 13 : 12, color: '#616161' }}>All caught up — nice work!</div>
+            <div style={{ fontWeight: 700, fontSize: primary ? 13 : 12, color: 'var(--text-secondary)' }}>All caught up — nice work!</div>
             <div style={{ fontSize: 11, marginTop: 2 }}>Completed tasks are tucked below.</div>
           </div>
         )}
@@ -1175,7 +1175,7 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
                 background: 'none',
                 border: 'none',
                 cursor: 'pointer',
-                color: '#616161',
+                color: 'var(--text-secondary)',
                 fontFamily: 'inherit',
                 transition: 'color .15s',
               }}
@@ -1188,8 +1188,8 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
               ></i>
               <span style={{ fontSize: primary ? 11 : 10, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase' }}>Completed</span>
               <span style={{
-                background: '#f5f5f5',
-                color: '#616161',
+                background: 'var(--surface-3)',
+                color: 'var(--text-secondary)',
                 fontSize: 10,
                 fontWeight: 700,
                 padding: '2px 8px',

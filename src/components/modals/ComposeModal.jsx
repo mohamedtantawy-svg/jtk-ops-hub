@@ -293,23 +293,23 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
             <i className="bi-pencil-square" style={{color:'#1565c0',fontSize:16}}></i>
           </div>
           <div style={{flex:1}}>
-            <div style={{fontSize:18,fontWeight:700,color:'#1b1b1b'}}>{draft?.id?'Edit Draft':'New Announcement'}</div>
-            <div style={{fontSize:12,color:'#9e9e9e'}}>
+            <div style={{fontSize:18,fontWeight:700,color:'var(--text)'}}>{draft?.id?'Edit Draft':'New Announcement'}</div>
+            <div style={{fontSize:12,color:'var(--text-muted)'}}>
               {canBypassQueue
                 ? 'You can send directly or submit for approval.'
                 : 'Your request will go to the approval queue.'}
             </div>
           </div>
-          <button aria-label="Close" onClick={onClose} style={{width:32,height:32,borderRadius:'50%',background:'#f2f2f2',border:'none',cursor:'pointer',color:'#616161',display:'flex',alignItems:'center',justifyContent:'center',fontSize:14}}><i className="bi-x-lg"></i></button>
+          <button aria-label="Close" onClick={onClose} style={{width:32,height:32,borderRadius:'50%',background:'#f2f2f2',border:'none',cursor:'pointer',color:'var(--text-secondary)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:14}}><i className="bi-x-lg"></i></button>
         </div>
 
         <div style={{flex:1,overflowY:'auto',padding:'16px 24px'}}>
           {/* Type */}
           <div style={{marginBottom:14}}>
-            <div style={{fontSize:11,fontWeight:700,color:'#616161',letterSpacing:'.05em',marginBottom:6}}>TYPE</div>
+            <div style={{fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'.05em',marginBottom:6}}>TYPE</div>
             <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
               {Object.entries(COMMS_TYPES).map(([k,v])=>(
-                <button key={k} onClick={()=>setType(k)} style={{display:'inline-flex',alignItems:'center',gap:5,height:30,padding:'0 12px',borderRadius:128,border:`1px solid ${type===k?v.color:v.border}`,background:type===k?v.bg:'white',color:type===k?v.color:'#616161',fontSize:12,cursor:'pointer',fontWeight:type===k?700:400,transition:'all .15s'}}>
+                <button key={k} onClick={()=>setType(k)} style={{display:'inline-flex',alignItems:'center',gap:5,height:30,padding:'0 12px',borderRadius:128,border:`1px solid ${type===k?v.color:v.border}`,background:type===k?v.bg:'white',color:type===k?v.color:'var(--text-secondary)',fontSize:12,cursor:'pointer',fontWeight:type===k?700:400,transition:'all .15s'}}>
                   <i className={v.icon} style={{fontSize:11}}></i>{v.label}
                 </button>
               ))}
@@ -318,26 +318,26 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
 
           {/* Title */}
           <div style={{marginBottom:12}}>
-            <div style={{fontSize:11,fontWeight:700,color:'#616161',letterSpacing:'.05em',marginBottom:5}}>TITLE</div>
-            <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g. Updated SOP: Termination Ownership Transfer" style={{width:'100%',border:'1px solid #e8e8e8',borderRadius:8,padding:'9px 12px',fontSize:13,outline:'none',boxSizing:'border-box',fontFamily:'inherit',color:'#1b1b1b'}} />
+            <div style={{fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'.05em',marginBottom:5}}>TITLE</div>
+            <input value={title} onChange={e=>setTitle(e.target.value)} placeholder="e.g. Updated SOP: Termination Ownership Transfer" style={{width:'100%',border:'1px solid var(--border)',borderRadius:8,padding:'9px 12px',fontSize:13,outline:'none',boxSizing:'border-box',fontFamily:'inherit',color:'var(--text)'}} />
           </div>
 
           {/* Body */}
           <div style={{marginBottom:12}}>
             <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:5}}>
-              <div style={{fontSize:11,fontWeight:700,color:'#616161',letterSpacing:'.05em'}}>MESSAGE {imageUrl&&<span style={{fontWeight:400,color:'#9e9e9e'}}>(optional if image attached)</span>}</div>
+              <div style={{fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'.05em'}}>MESSAGE {imageUrl&&<span style={{fontWeight:400,color:'var(--text-muted)'}}>(optional if image attached)</span>}</div>
               <span style={{flex:1}} />
               <button
                 type="button"
                 onClick={()=>setShowLinkInsert(v=>!v)}
                 title="Insert a link inside the message — recipients see the label as a clickable hyperlink"
-                style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 10px',borderRadius:128,border:'1px solid #e8e8e8',background:showLinkInsert?'#f3eff8':'white',color:showLinkInsert?'#6b3fa0':'#616161',fontSize:11,fontWeight:600,cursor:'pointer',transition:'all .12s'}}
+                style={{display:'inline-flex',alignItems:'center',gap:5,padding:'3px 10px',borderRadius:128,border:'1px solid var(--border)',background:showLinkInsert?'#f3eff8':'white',color:showLinkInsert?'#6b3fa0':'#616161',fontSize:11,fontWeight:600,cursor:'pointer',transition:'all .12s'}}
               >
                 <i className="bi-link-45deg" style={{fontSize:12}} />
                 Insert link
               </button>
             </div>
-            <textarea ref={bodyRef} value={body} onChange={e=>setBody(e.target.value)} rows={5} placeholder={imageUrl?"Add a caption or message (optional)...":"Write your announcement, update, or guidance here..."} style={{width:'100%',border:'1px solid #e8e8e8',borderRadius:8,padding:'9px 12px',fontSize:13,outline:'none',boxSizing:'border-box',resize:'vertical',fontFamily:'inherit',color:'#1b1b1b',lineHeight:1.6}}/>
+            <textarea ref={bodyRef} value={body} onChange={e=>setBody(e.target.value)} rows={5} placeholder={imageUrl?"Add a caption or message (optional)...":"Write your announcement, update, or guidance here..."} style={{width:'100%',border:'1px solid var(--border)',borderRadius:8,padding:'9px 12px',fontSize:13,outline:'none',boxSizing:'border-box',resize:'vertical',fontFamily:'inherit',color:'var(--text)',lineHeight:1.6}}/>
             {showLinkInsert && (
               <div style={{marginTop:8,padding:'10px 12px',background:'#fbfafc',border:'1px solid #ebe5f4',borderRadius:10}}>
                 <div style={{fontSize:11,fontWeight:700,color:'#6b3fa0',letterSpacing:'.05em',marginBottom:6,display:'flex',alignItems:'center',gap:6}}>
@@ -349,14 +349,14 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
                     value={linkInsertLabel}
                     onChange={e=>setLinkInsertLabel(e.target.value)}
                     placeholder="Visible text (e.g. Open SOP)"
-                    style={{border:'1px solid #e8e8e8',borderRadius:8,padding:'7px 10px',fontSize:12,outline:'none',boxSizing:'border-box',fontFamily:'inherit',color:'#1b1b1b'}}
+                    style={{border:'1px solid var(--border)',borderRadius:8,padding:'7px 10px',fontSize:12,outline:'none',boxSizing:'border-box',fontFamily:'inherit',color:'var(--text)'}}
                   />
                   <input
                     value={linkInsertUrl}
                     onChange={e=>setLinkInsertUrl(e.target.value)}
                     onKeyDown={e=>{ if(e.key==='Enter'){ e.preventDefault(); insertBodyLink(); } }}
                     placeholder="https://..."
-                    style={{border:'1px solid #e8e8e8',borderRadius:8,padding:'7px 10px',fontSize:12,outline:'none',boxSizing:'border-box',fontFamily:'inherit',color:'#1b1b1b'}}
+                    style={{border:'1px solid var(--border)',borderRadius:8,padding:'7px 10px',fontSize:12,outline:'none',boxSizing:'border-box',fontFamily:'inherit',color:'var(--text)'}}
                   />
                   <button
                     type="button"
@@ -367,7 +367,7 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
                     Insert
                   </button>
                 </div>
-                <div style={{fontSize:10,color:'#9e9e9e',marginTop:6,lineHeight:1.5}}>
+                <div style={{fontSize:10,color:'var(--text-muted)',marginTop:6,lineHeight:1.5}}>
                   Tip: select text first to turn it into a link, or paste a bare URL — recipients can click it directly. Use <code style={{background:'var(--surface)',padding:'1px 5px',borderRadius:4,border:'1px solid #ebe5f4',fontSize:10}}>[label](https://…)</code> syntax to type one inline.
                 </div>
               </div>
@@ -377,7 +377,7 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
           {/* Media (image or video — upload or URL) */}
           <div style={{marginBottom:12}}>
             <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:6}}>
-              <div style={{fontSize:11,fontWeight:700,color:'#616161',letterSpacing:'.05em'}}>MEDIA <span style={{fontWeight:400,color:'#9e9e9e'}}>(optional · image or video)</span></div>
+              <div style={{fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'.05em'}}>MEDIA <span style={{fontWeight:400,color:'var(--text-muted)'}}>(optional · image or video)</span></div>
               {imageUrl&&(
                 <button onClick={()=>{setImageUrl('');if(fileInputRef.current)fileInputRef.current.value='';}} style={{marginLeft:'auto',background:'none',border:'none',cursor:'pointer',color:'#d42d35',fontSize:10,fontWeight:600,display:'flex',alignItems:'center',gap:3,padding:0}}>
                   <i className="bi-trash" style={{fontSize:10}}></i>Remove
@@ -425,22 +425,22 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
                   }
                 }}/>
                 <i className="bi-cloud-arrow-up" style={{fontSize:24,color:dragActive?'#6b3fa0':'#b5b5b5',display:'block',marginBottom:6}}></i>
-                <div style={{fontSize:12,fontWeight:600,color:'#616161'}}>Click to upload or drag & drop</div>
-                <div style={{fontSize:11,color:'#9e9e9e',marginTop:3}}>PNG, JPG, GIF, WebP, MP4, WebM, MOV up to 10MB</div>
+                <div style={{fontSize:12,fontWeight:600,color:'var(--text-secondary)'}}>Click to upload or drag & drop</div>
+                <div style={{fontSize:11,color:'var(--text-muted)',marginTop:3}}>PNG, JPG, GIF, WebP, MP4, WebM, MOV up to 10MB</div>
                 <div style={{display:'flex',alignItems:'center',gap:8,justifyContent:'center',marginTop:10}}>
                   <div style={{height:1,flex:1,background:'#e8e8e8'}}></div>
-                  <span style={{fontSize:10,color:'#9e9e9e',fontWeight:600}}>OR</span>
+                  <span style={{fontSize:10,color:'var(--text-muted)',fontWeight:600}}>OR</span>
                   <div style={{height:1,flex:1,background:'#e8e8e8'}}></div>
                 </div>
                 <div style={{marginTop:8}} onClick={e=>e.stopPropagation()}>
                   <input placeholder="Paste image URL here..." onKeyDown={e=>{if(e.key==='Enter'){const safe=sanitizeImageUrl(e.target.value);if(safe)setImageUrl(safe);}}}
                     onBlur={e=>{const safe=sanitizeImageUrl(e.target.value);if(safe)setImageUrl(safe);}}
-                    style={{width:'100%',border:'1px solid #e8e8e8',borderRadius:8,padding:'7px 10px',fontSize:12,outline:'none',boxSizing:'border-box',fontFamily:'inherit',color:'#1b1b1b',textAlign:'center',maxWidth:320}}
+                    style={{width:'100%',border:'1px solid var(--border)',borderRadius:8,padding:'7px 10px',fontSize:12,outline:'none',boxSizing:'border-box',fontFamily:'inherit',color:'var(--text)',textAlign:'center',maxWidth:320}}
                   />
                 </div>
               </div>
             ):(
-              <div style={{position:'relative',borderRadius:12,overflow:'hidden',border:'1px solid #e8e8e8',background:'#fafaf9'}}>
+              <div style={{position:'relative',borderRadius:12,overflow:'hidden',border:'1px solid var(--border)',background:'var(--surface-2)'}}>
                 <AnnouncementMedia
                   src={sanitizeImageUrl(imageUrl)}
                   alt="Preview"
@@ -452,17 +452,17 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
 
           {/* Hyperlink */}
           <div style={{marginBottom:12}}>
-            <div style={{fontSize:11,fontWeight:700,color:'#616161',letterSpacing:'.05em',marginBottom:5}}>LINK <span style={{fontWeight:400,color:'#9e9e9e'}}>(optional)</span></div>
+            <div style={{fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'.05em',marginBottom:5}}>LINK <span style={{fontWeight:400,color:'var(--text-muted)'}}>(optional)</span></div>
             <div style={{display:'flex',alignItems:'center',gap:8}}>
-              <i className="bi-link-45deg" style={{color:'#9e9e9e',fontSize:16,flexShrink:0}}></i>
-              <input value={link} onChange={e=>setLink(e.target.value)} placeholder="https://slack.com/archives/..." style={{width:'100%',border:'1px solid #e8e8e8',borderRadius:8,padding:'9px 12px',fontSize:13,outline:'none',boxSizing:'border-box',fontFamily:'inherit',color:'#1b1b1b'}} />
+              <i className="bi-link-45deg" style={{color:'var(--text-muted)',fontSize:16,flexShrink:0}}></i>
+              <input value={link} onChange={e=>setLink(e.target.value)} placeholder="https://slack.com/archives/..." style={{width:'100%',border:'1px solid var(--border)',borderRadius:8,padding:'9px 12px',fontSize:13,outline:'none',boxSizing:'border-box',fontFamily:'inherit',color:'var(--text)'}} />
             </div>
           </div>
 
           {/* Target + Priority */}
           <div style={{display:'flex',gap:12,marginBottom:12}}>
             <div style={{flex:1}}>
-              <div style={{fontSize:11,fontWeight:700,color:'#616161',letterSpacing:'.05em',marginBottom:5}}>SEND TO</div>
+              <div style={{fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'.05em',marginBottom:5}}>SEND TO</div>
               <select
                 value={target === 'group' && targetGroupId ? `group:${targetGroupId}` : target}
                 onChange={e=>{
@@ -475,7 +475,7 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
                     setTargetGroupId(null);
                   }
                 }}
-                style={{width:'100%',border:'1px solid #e8e8e8',borderRadius:8,padding:'8px 10px',fontSize:13,outline:'none',fontFamily:'inherit',color:'#1b1b1b',cursor:'pointer'}}
+                style={{width:'100%',border:'1px solid var(--border)',borderRadius:8,padding:'8px 10px',fontSize:13,outline:'none',fontFamily:'inherit',color:'var(--text)',cursor:'pointer'}}
               >
                 <optgroup label="Audiences">
                   {AUDIENCES.map(k => (
@@ -494,8 +494,8 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
               </select>
             </div>
             <div style={{flex:1}}>
-              <div style={{fontSize:11,fontWeight:700,color:'#616161',letterSpacing:'.05em',marginBottom:5}}>PRIORITY</div>
-              <select value={priority} onChange={e=>setPriority(e.target.value)} style={{width:'100%',border:'1px solid #e8e8e8',borderRadius:8,padding:'8px 10px',fontSize:13,outline:'none',fontFamily:'inherit',color:'#1b1b1b',cursor:'pointer'}}>
+              <div style={{fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'.05em',marginBottom:5}}>PRIORITY</div>
+              <select value={priority} onChange={e=>setPriority(e.target.value)} style={{width:'100%',border:'1px solid var(--border)',borderRadius:8,padding:'8px 10px',fontSize:13,outline:'none',fontFamily:'inherit',color:'var(--text)',cursor:'pointer'}}>
                 <option value="high">High</option>
                 <option value="medium">Medium</option>
                 <option value="low">Low</option>
@@ -504,25 +504,25 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
           </div>
 
           {/* Popup toggle */}
-          <div style={{marginBottom:10,padding:'12px 14px',borderRadius:10,background:'#fafaf9',border:'1px solid #e8e8e8'}}>
+          <div style={{marginBottom:10,padding:'12px 14px',borderRadius:10,background:'var(--surface-2)',border:'1px solid var(--border)'}}>
             <div style={{display:'flex',alignItems:'center',gap:10}}>
               <div onClick={()=>setIsPopup(!isPopup)}
                 style={{width:40,height:22,borderRadius:12,background:isPopup?'#1b1b1b':'#d1d5db',position:'relative',cursor:'pointer',transition:'background .2s',flexShrink:0}}>
                 <div style={{width:18,height:18,borderRadius:'50%',background:'var(--surface)',position:'absolute',top:2,left:isPopup?20:2,transition:'left .2s',boxShadow:'0 1px 3px rgba(0,0,0,0.15)'}}/>
               </div>
               <div>
-                <div style={{fontSize:13,fontWeight:600,color:'#1b1b1b'}}>
+                <div style={{fontSize:13,fontWeight:600,color:'var(--text)'}}>
                   <i className="bi-window-stack" style={{fontSize:12,marginRight:6}}></i>
                   Send as Popup
                 </div>
-                <div style={{fontSize:11,color:'#9e9e9e',marginTop:2}}>Recipients must acknowledge before dismissing. Plays a notification sound.</div>
+                <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>Recipients must acknowledge before dismissing. Plays a notification sound.</div>
               </div>
             </div>
             {isPopup && (
               <div style={{marginTop:10,paddingTop:10,borderTop:'1px dashed #e0e0e0',display:'flex',alignItems:'center',gap:10}}>
-                <i className="bi-music-note-beamed" style={{fontSize:13,color:'#616161'}}></i>
-                <div style={{fontSize:12,fontWeight:600,color:'#616161',flexShrink:0}}>Notification Sound</div>
-                <select value={soundKey} onChange={e=>setSoundKey(e.target.value)} style={{flex:1,border:'1px solid #e8e8e8',borderRadius:6,padding:'5px 8px',fontSize:12,outline:'none',fontFamily:'inherit',color:'#1b1b1b',cursor:'pointer',background:'var(--surface)'}}>
+                <i className="bi-music-note-beamed" style={{fontSize:13,color:'var(--text-secondary)'}}></i>
+                <div style={{fontSize:12,fontWeight:600,color:'var(--text-secondary)',flexShrink:0}}>Notification Sound</div>
+                <select value={soundKey} onChange={e=>setSoundKey(e.target.value)} style={{flex:1,border:'1px solid var(--border)',borderRadius:6,padding:'5px 8px',fontSize:12,outline:'none',fontFamily:'inherit',color:'var(--text)',cursor:'pointer',background:'var(--surface)'}}>
                   {Object.entries(SOUND_PRESETS).map(([k,v]) => (
                     <option key={k} value={k}>{v.label}</option>
                   ))}
@@ -532,30 +532,30 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
           </div>
 
           {/* Schedule for later */}
-          <div style={{marginBottom:10,padding:'12px 14px',borderRadius:10,background:'#fafaf9',border:'1px solid #e8e8e8'}}>
+          <div style={{marginBottom:10,padding:'12px 14px',borderRadius:10,background:'var(--surface-2)',border:'1px solid var(--border)'}}>
             <div style={{display:'flex',alignItems:'center',gap:10}}>
               <div onClick={()=>setScheduleLater(!scheduleLater)}
                 style={{width:40,height:22,borderRadius:12,background:scheduleLater?'#1b1b1b':'#d1d5db',position:'relative',cursor:'pointer',transition:'background .2s',flexShrink:0}}>
                 <div style={{width:18,height:18,borderRadius:'50%',background:'var(--surface)',position:'absolute',top:2,left:scheduleLater?20:2,transition:'left .2s',boxShadow:'0 1px 3px rgba(0,0,0,0.15)'}}/>
               </div>
               <div style={{flex:1}}>
-                <div style={{fontSize:13,fontWeight:600,color:'#1b1b1b'}}>
+                <div style={{fontSize:13,fontWeight:600,color:'var(--text)'}}>
                   <i className="bi-clock" style={{fontSize:12,marginRight:6}}></i>
                   Schedule for later
                 </div>
-                <div style={{fontSize:11,color:'#9e9e9e',marginTop:2}}>
+                <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>
                   Pick a date & time. We'll publish automatically at that moment.
                 </div>
               </div>
             </div>
             {scheduleLater && (
               <div style={{marginTop:10,paddingTop:10,borderTop:'1px dashed #e0e0e0',display:'flex',alignItems:'center',gap:10}}>
-                <i className="bi-calendar-event" style={{fontSize:13,color:'#616161'}}></i>
+                <i className="bi-calendar-event" style={{fontSize:13,color:'var(--text-secondary)'}}></i>
                 <input
                   type="datetime-local"
                   value={scheduledFor}
                   onChange={e=>setScheduledFor(e.target.value)}
-                  style={{flex:1,border:'1px solid #e8e8e8',borderRadius:6,padding:'6px 10px',fontSize:13,outline:'none',fontFamily:'inherit',color:'#1b1b1b'}}
+                  style={{flex:1,border:'1px solid var(--border)',borderRadius:6,padding:'6px 10px',fontSize:13,outline:'none',fontFamily:'inherit',color:'var(--text)'}}
                 />
               </div>
             )}
@@ -574,7 +574,7 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
         </div>
 
         {/* Footer */}
-        <div style={{padding:'16px 24px 24px',display:'flex',gap:8,justifyContent:'flex-end',borderTop:'1px solid #f2f2f2',background:'#fafaf9'}}>
+        <div style={{padding:'16px 24px 24px',display:'flex',gap:8,justifyContent:'flex-end',borderTop:'1px solid #f2f2f2',background:'var(--surface-2)'}}>
           <button onClick={handleSaveDraft} disabled={!valid||submitting} style={{background:'var(--surface)',border:'1px solid #dedede',color:valid?'#1b1b1b':'#dedede',borderRadius:128,padding:'10px 20px',fontSize:13,cursor:valid?'pointer':'not-allowed',fontWeight:500}}>
             Save Draft
           </button>

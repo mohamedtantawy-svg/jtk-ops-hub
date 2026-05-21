@@ -167,12 +167,12 @@ export default function ReassignTaskModal({ task, tasks, onClose, onReassigned }
             <i className="bi-arrow-left-right" style={{ fontSize: 15, color: '#1d4ed8' }} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div id="reassign-title" style={{ fontSize: 15, fontWeight: 700, color: '#1b1b1b' }}>
+            <div id="reassign-title" style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>
               {isBulk ? `Reassign ${taskList.length} tasks` : 'Reassign task'}
             </div>
-            <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {sourceLabel}
-              {!isBulk && headTask?.subject ? <> · <strong style={{ color: '#616161' }}>{headTask.subject}</strong></> : null}
+              {!isBulk && headTask?.subject ? <> · <strong style={{ color: 'var(--text-secondary)' }}>{headTask.subject}</strong></> : null}
               {!isBulk && headTask?.country ? <> · {headTask.country}</> : null}
               {isBulk ? <> · One assignee will apply to all {taskList.length} tasks</> : null}
             </div>
@@ -181,7 +181,7 @@ export default function ReassignTaskModal({ task, tasks, onClose, onReassigned }
             type="button"
             onClick={() => { if (!submitting) onClose?.(); }}
             aria-label="Close"
-            style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid #e8e8e8', background: 'var(--surface, #fff)', color: '#9e9e9e', cursor: submitting ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface, #fff)', color: 'var(--text-muted)', cursor: submitting ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           >
             <i className="bi-x-lg" style={{ fontSize: 12 }} />
           </button>
@@ -190,7 +190,7 @@ export default function ReassignTaskModal({ task, tasks, onClose, onReassigned }
         {/* Search input */}
         <div style={{ padding: '12px 20px', borderBottom: '1px solid #f0efed' }}>
           <div style={{ position: 'relative' }}>
-            <i className="bi-search" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: '#9e9e9e' }} />
+            <i className="bi-search" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: 'var(--text-muted)' }} />
             <input
               ref={inputRef}
               type="text"
@@ -200,13 +200,13 @@ export default function ReassignTaskModal({ task, tasks, onClose, onReassigned }
               placeholder="Search by name or email…"
               disabled={submitting}
               style={{
-                width: '100%', padding: '9px 12px 9px 32px', border: '1px solid #e8e8e8',
-                borderRadius: 10, fontSize: 13, color: '#1b1b1b', background: 'var(--surface, #fff)',
+                width: '100%', padding: '9px 12px 9px 32px', border: '1px solid var(--border)',
+                borderRadius: 10, fontSize: 13, color: 'var(--text)', background: 'var(--surface, #fff)',
                 outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box',
               }}
             />
           </div>
-          <div style={{ marginTop: 8, fontSize: 11, color: '#9e9e9e' }}>
+          <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>
             <i className="bi-info-circle" style={{ marginRight: 4 }} />
             The new assignee — and their manager chain — will see this task in their Workspace immediately. Country owners keep visibility regardless.
           </div>
@@ -215,7 +215,7 @@ export default function ReassignTaskModal({ task, tasks, onClose, onReassigned }
         {/* Member list */}
         <div ref={listRef} role="listbox" style={{ flex: 1, overflowY: 'auto', minHeight: 200, maxHeight: 380 }}>
           {filtered.length === 0 ? (
-            <div style={{ padding: '32px 20px', textAlign: 'center', fontSize: 13, color: '#9e9e9e' }}>
+            <div style={{ padding: '32px 20px', textAlign: 'center', fontSize: 13, color: 'var(--text-muted)' }}>
               No matches
             </div>
           ) : filtered.map((m, idx) => {
@@ -244,10 +244,10 @@ export default function ReassignTaskModal({ task, tasks, onClose, onReassigned }
                   {(m.name || m.email || '?').split(' ').map(w => w[0]?.toUpperCase()).slice(0, 2).join('')}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {m.name || m.email}
                   </div>
-                  <div style={{ fontSize: 11, color: '#9e9e9e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {m.email}{m.team ? ` · ${m.team}` : ''}
                   </div>
                 </div>
@@ -269,7 +269,7 @@ export default function ReassignTaskModal({ task, tasks, onClose, onReassigned }
               {error}
             </span>
           ) : (
-            <span style={{ fontSize: 11, color: '#9e9e9e' }}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
               ↑↓ to navigate &middot; Enter to assign &middot; Esc to close
             </span>
           )}
@@ -279,8 +279,8 @@ export default function ReassignTaskModal({ task, tasks, onClose, onReassigned }
               onClick={clearOverride}
               disabled={submitting}
               style={{
-                padding: '7px 14px', borderRadius: 8, border: '1px solid #e8e8e8',
-                background: 'var(--surface, #fff)', color: '#616161',
+                padding: '7px 14px', borderRadius: 8, border: '1px solid var(--border)',
+                background: 'var(--surface, #fff)', color: 'var(--text-secondary)',
                 fontSize: 12, fontWeight: 600, cursor: submitting ? 'not-allowed' : 'pointer',
                 fontFamily: 'inherit',
               }}

@@ -30,7 +30,7 @@ const PreviewPopup = ({ draft, onClose, onConfirmSend }) => {
   const priorityColors = {
     high: { bg: '#ffe2de', color: '#d42d35' },
     medium: { bg: '#fff8e6', color: '#ed8d00' },
-    low: { bg: '#f0f0f0', color: '#616161' },
+    low: { bg: '#f0f0f0', color: 'var(--text-secondary)' },
   };
   const prio = priorityColors[draft.priority] || priorityColors.medium;
 
@@ -57,15 +57,15 @@ const PreviewPopup = ({ draft, onClose, onConfirmSend }) => {
           borderBottom: '1px solid #e8e8e8',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
-            <i className="bi-eye-fill" style={{ fontSize: 16, color: '#616161' }} />
-            <span style={{ fontSize: 16, fontWeight: 700, color: '#1b1b1b' }}>Preview</span>
+            <i className="bi-eye-fill" style={{ fontSize: 16, color: 'var(--text-secondary)' }} />
+            <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>Preview</span>
           </div>
           <button
             aria-label="Close"
             onClick={onClose}
             style={{
               width: 32, height: 32, borderRadius: '50%', background: '#f2f2f2',
-              border: 'none', cursor: 'pointer', color: '#616161',
+              border: 'none', cursor: 'pointer', color: 'var(--text-secondary)',
               display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14,
             }}
           >
@@ -100,14 +100,14 @@ const PreviewPopup = ({ draft, onClose, onConfirmSend }) => {
               </div>
 
               {/* Title */}
-              <div style={{ fontSize: 17, fontWeight: 700, color: '#1b1b1b', marginBottom: 12, lineHeight: 1.35 }}>
+              <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)', marginBottom: 12, lineHeight: 1.35 }}>
                 {draft.title || 'Untitled'}
               </div>
 
               {/* Meta row */}
               <div style={{
                 display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-                marginBottom: 16, fontSize: 12, color: '#9e9e9e',
+                marginBottom: 16, fontSize: 12, color: 'var(--text-muted)',
               }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   <i className="bi-person-fill" style={{ fontSize: 11 }} />
@@ -142,7 +142,7 @@ const PreviewPopup = ({ draft, onClose, onConfirmSend }) => {
                   <AnnouncementMedia
                     src={draft.imageUrl}
                     alt="Attachment"
-                    style={{ width: '100%', borderRadius: 8, border: '1px solid #e8e8e8', maxHeight: 240, objectFit: 'cover' }}
+                    style={{ width: '100%', borderRadius: 8, border: '1px solid var(--border)', maxHeight: 240, objectFit: 'cover' }}
                   />
                 </div>
               )}
@@ -181,7 +181,7 @@ const PreviewPopup = ({ draft, onClose, onConfirmSend }) => {
           {/* Note */}
           <div style={{
             marginTop: 16, padding: '12px 14px', borderRadius: 8,
-            background: '#f7f7f7', fontSize: 12, color: '#9e9e9e', lineHeight: 1.5,
+            background: '#f7f7f7', fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5,
             display: 'flex', gap: 8, alignItems: 'flex-start',
           }}>
             <i className="bi-info-circle" style={{ fontSize: 13, flexShrink: 0, marginTop: 1 }} />
@@ -199,7 +199,7 @@ const PreviewPopup = ({ draft, onClose, onConfirmSend }) => {
           <button
             onClick={onClose}
             style={{
-              background: 'var(--surface)', border: '1px solid #dedede', color: '#1b1b1b',
+              background: 'var(--surface)', border: '1px solid #dedede', color: 'var(--text)',
               borderRadius: 128, padding: '10px 24px', fontSize: 13,
               cursor: 'pointer', fontWeight: 500, transition: 'background .15s',
             }}

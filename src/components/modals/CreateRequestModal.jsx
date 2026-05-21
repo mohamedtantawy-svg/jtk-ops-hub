@@ -6,12 +6,12 @@ const PRIORITIES = ['low','medium','high','critical'];
 const priorityColors = { low:'#29811e', medium:'#1f74b3', high:'#ed5e2a', critical:'#d42d35' };
 
 const inputStyle = {
-  width:'100%', padding:'9px 12px', border:'1px solid #e8e8e8', borderRadius:12,
-  fontSize:14, color:'#1b1b1b', background:'var(--surface)', outline:'none',
+  width:'100%', padding:'9px 12px', border:'1px solid var(--border)', borderRadius:12,
+  fontSize:14, color:'var(--text)', background:'var(--surface)', outline:'none',
   fontFamily:'inherit', boxSizing:'border-box',
 };
 const labelStyle = {
-  fontSize:11, fontWeight:600, color:'#616161', textTransform:'uppercase',
+  fontSize:11, fontWeight:600, color:'var(--text-secondary)', textTransform:'uppercase',
   letterSpacing:'.05em', marginBottom:6, display:'block',
 };
 
@@ -71,10 +71,10 @@ export default function CreateRequestModal({ onConfirm, onClose, currentUser, ta
         {/* Header */}
         <div style={{ padding:'24px 28px 0', display:'flex', alignItems:'flex-start', justifyContent:'space-between' }}>
           <div>
-            <div style={{ fontSize:18, fontWeight:700, color:'#1b1b1b' }}>Raise a Request</div>
-            <div style={{ fontSize:13, color:'#9e9e9e', marginTop:2 }}>Send a request to another team for support or action</div>
+            <div style={{ fontSize:18, fontWeight:700, color:'var(--text)' }}>Raise a Request</div>
+            <div style={{ fontSize:13, color:'var(--text-muted)', marginTop:2 }}>Send a request to another team for support or action</div>
           </div>
-          <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', color:'#616161', fontSize:18, padding:4, lineHeight:1 }}>
+          <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--text-secondary)', fontSize:18, padding:4, lineHeight:1 }}>
             <i className="bi-x-lg"/>
           </button>
         </div>
@@ -178,7 +178,7 @@ export default function CreateRequestModal({ onConfirm, onClose, currentUser, ta
           <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
             <button onClick={onClose} style={{
               padding:'9px 20px', borderRadius:128, fontSize:14, fontWeight:500,
-              border:'1px solid #e8e8e8', background:'var(--surface)', color:'#616161', cursor:'pointer',
+              border:'1px solid var(--border)', background:'var(--surface)', color:'var(--text-secondary)', cursor:'pointer',
             }}>Cancel</button>
             <button
               onClick={handleSubmit}

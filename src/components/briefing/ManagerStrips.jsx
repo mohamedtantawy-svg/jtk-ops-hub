@@ -47,7 +47,7 @@ export function formatLastSeen(iso) {
 export const LAST_SEEN_TONE = {
   fresh:  { bg: '#e8f5e3', color: '#29811e' },
   recent: { bg: '#e8f0fe', color: '#1f74b3' },
-  stale:  { bg: '#f7f5f2', color: '#616161' },
+  stale:  { bg: '#f7f5f2', color: 'var(--text-secondary)' },
   never:  { bg: '#ffe2de', color: '#d42d35' },
 };
 
@@ -55,7 +55,7 @@ export const ACCESS_BADGE = {
   admin:            { label: 'Admin',        bg: '#ffe2de', color: '#d42d35' },
   regional_manager: { label: 'Regional Mgr', bg: '#e8f0fe', color: '#1f74b3' },
   team_lead:        { label: 'Team Lead',    bg: '#f3eff8', color: '#7c3aed' },
-  agent:            { label: 'Agent',        bg: '#f7f5f2', color: '#616161' },
+  agent:            { label: 'Agent',        bg: '#f7f5f2', color: 'var(--text-secondary)' },
 };
 
 // ── SLA classifiers (shared by Triage strip + per-row counters) ───────────
@@ -155,8 +155,8 @@ export function TriageStrip({ sourceRows = [], tickets = [], onNavigate }) {
       }}
       style={{
         flex: 1,
-        border: tally[props.k] > 0 ? `1.5px solid ${props.color}` : '1px solid #e8e8e8',
-        background: tally[props.k] > 0 ? props.bg : 'white',
+        border: tally[props.k] > 0 ? `1.5px solid ${props.color}` : '1px solid var(--border)',
+        background: tally[props.k] > 0 ? props.bg : 'var(--surface)',
         borderRadius: 14,
         padding: '14px 16px',
         cursor: 'pointer',
@@ -170,16 +170,16 @@ export function TriageStrip({ sourceRows = [], tickets = [], onNavigate }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
         <i className={props.icon} style={{ fontSize: 14, color: props.color }} />
         <span style={{
-          fontSize: 11, fontWeight: 700, color: '#616161',
+          fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)',
           textTransform: 'uppercase', letterSpacing: '0.06em',
         }}>{props.label}</span>
       </div>
       <div style={{
         fontSize: 30, fontWeight: 800, lineHeight: 1,
-        color: tally[props.k] > 0 ? props.color : '#9e9e9e',
+        color: tally[props.k] > 0 ? props.color : 'var(--text-muted)',
         fontVariantNumeric: 'tabular-nums',
       }}>{tally[props.k]}</div>
-      {props.sub && <div style={{ fontSize: 10, color: '#9e9e9e', marginTop: 5 }}>{props.sub}</div>}
+      {props.sub && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 5 }}>{props.sub}</div>}
       {props.breakdownKey && (
         <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 4, minHeight: 16 }}>
           {Object.entries(tally[props.breakdownKey] || {})
@@ -187,8 +187,8 @@ export function TriageStrip({ sourceRows = [], tickets = [], onNavigate }) {
             .map(([src, n]) => (
               <span key={src} style={{
                 fontSize: 10, fontWeight: 600,
-                color: TOOLS[src]?.color || '#616161',
-                background: TOOLS[src]?.bg || '#f3f3f3',
+                color: TOOLS[src]?.color || 'var(--text-secondary)',
+                background: TOOLS[src]?.bg || 'var(--surface-3)',
                 padding: '1px 7px', borderRadius: 128,
               }}>
                 {TOOLS[src]?.label || src} {n}
@@ -337,8 +337,8 @@ export function DecisionsStrip({ onNavigate }) {
           flex: 1,
           padding: '14px 16px',
           borderRadius: 14,
-          border: has ? `1.5px solid ${color}` : '1px solid #e8e8e8',
-          background: has ? `${color}0d` : 'white',
+          border: has ? `1.5px solid ${color}` : '1px solid var(--border)',
+          background: has ? `${color}0d` : 'var(--surface)',
           cursor: 'pointer',
           textAlign: 'left',
           display: 'flex', alignItems: 'center', gap: 12,
@@ -350,21 +350,21 @@ export function DecisionsStrip({ onNavigate }) {
       >
         <div style={{
           width: 38, height: 38, borderRadius: 10,
-          background: has ? `${color}1f` : '#f7f5f2',
+          background: has ? `${color}1f` : 'var(--surface-3)',
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
         }}>
           <i className={icon} style={{ fontSize: 16, color }} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
-            fontSize: 12, fontWeight: 600, color: '#1b1b1b',
+            fontSize: 12, fontWeight: 600, color: 'var(--text)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>{label}</div>
-          {hint && <div style={{ fontSize: 10, color: '#9e9e9e', marginTop: 2 }}>{hint}</div>}
+          {hint && <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{hint}</div>}
         </div>
         <div style={{
           fontSize: 26, fontWeight: 800, lineHeight: 1,
-          color: has ? color : '#9e9e9e',
+          color: has ? color : 'var(--text-muted)',
           minWidth: 32, textAlign: 'right',
           fontVariantNumeric: 'tabular-nums',
         }}>{n}</div>
@@ -430,7 +430,7 @@ export function LastSeenPill({ iso, loading = false }) {
   if (loading && !iso) {
     return (
       <span style={{
-        background: '#f5f4f2', color: '#9e9e9e',
+        background: 'var(--surface-2)', color: 'var(--text-muted)',
         fontSize: 10, fontWeight: 700,
         padding: '2px 8px', borderRadius: 128,
         display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap',

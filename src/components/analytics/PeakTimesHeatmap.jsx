@@ -65,7 +65,7 @@ export default function PeakTimesHeatmap({ tasks = [] }) {
     <div
       style={{
         background: 'var(--surface)',
-        border: '1px solid #e8e8e8',
+        border: '1px solid var(--border)',
         borderRadius: 16,
         padding: 20,
       }}
@@ -73,8 +73,8 @@ export default function PeakTimesHeatmap({ tasks = [] }) {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
         <i className="bi-clock-history" style={{ fontSize: 16, color: '#7c3aed' }} />
-        <span style={{ fontSize: 15, fontWeight: 700, color: '#1b1b1b' }}>Peak Hours Heatmap</span>
-        <span style={{ fontSize: 12, color: '#9e9e9e', marginLeft: 'auto' }}>Business hours, Mon-Fri</span>
+        <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>Peak Hours Heatmap</span>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 'auto' }}>Business hours, Mon-Fri</span>
       </div>
 
       {/* Grid */}
@@ -89,7 +89,7 @@ export default function PeakTimesHeatmap({ tasks = [] }) {
                   style={{
                     fontSize: 10,
                     fontWeight: 600,
-                    color: '#9e9e9e',
+                    color: 'var(--text-muted)',
                     textAlign: 'center',
                     padding: '0 2px 6px',
                   }}
@@ -106,7 +106,7 @@ export default function PeakTimesHeatmap({ tasks = [] }) {
                   style={{
                     fontSize: 11,
                     fontWeight: 600,
-                    color: '#616161',
+                    color: 'var(--text-secondary)',
                     paddingRight: 8,
                     textAlign: 'right',
                   }}
@@ -184,7 +184,7 @@ export default function PeakTimesHeatmap({ tasks = [] }) {
           justifyContent: 'flex-end',
         }}
       >
-        <span style={{ fontSize: 10, color: '#9e9e9e' }}>Low</span>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Low</span>
         {['#f9f5ff', '#ede9fe', '#a78bfa', '#7c3aed', '#d42d35'].map((c) => (
           <span
             key={c}
@@ -193,12 +193,12 @@ export default function PeakTimesHeatmap({ tasks = [] }) {
               height: 10,
               borderRadius: 3,
               background: c,
-              border: '1px solid #e8e8e8',
+              border: '1px solid var(--border)',
               display: 'inline-block',
             }}
           />
         ))}
-        <span style={{ fontSize: 10, color: '#9e9e9e' }}>Peak</span>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Peak</span>
       </div>
     </div>
   );

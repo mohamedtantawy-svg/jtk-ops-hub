@@ -301,7 +301,7 @@ const ZapierSettings = ({ addToast, tasks, setTasks }) => {
         <div style={{ padding: '16px 16px 12px', borderBottom: '1px solid #e8e8e8' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
             <i className="bi-lightning-charge-fill" style={{ fontSize: 18, color: '#ed8d00' }}></i>
-            <span style={{ fontSize: 16, fontWeight: 700, color: '#1b1b1b' }}>Zapier Integrations</span>
+            <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>Zapier Integrations</span>
           </div>
           <div style={{ position: 'relative' }}>
             <button onClick={() => setShowAddPicker(!showAddPicker)} style={{ width: '100%', height: 36, borderRadius: 10, border: '1px dashed #c4c4c4', background: 'var(--surface)', color: '#1f74b3', fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, transition: 'all .15s' }}
@@ -310,10 +310,10 @@ const ZapierSettings = ({ addToast, tasks, setTasks }) => {
               <i className="bi-plus-lg" style={{ fontSize: 12 }}></i> Add Integration
             </button>
             {showAddPicker && (
-              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4, background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 12, boxShadow: '0 8px 24px rgba(0,0,0,.12)', zIndex: 50, maxHeight: 320, overflowY: 'auto', padding: '6px 0' }}>
+              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: '0 8px 24px rgba(0,0,0,.12)', zIndex: 50, maxHeight: 320, overflowY: 'auto', padding: '6px 0' }}>
                 {Object.entries(ZAPIER_SOURCES).map(([key, src]) => (
                   <button key={key} onClick={() => { addIntegration(key); setShowAddPicker(false); }}
-                    style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '8px 14px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, color: '#1b1b1b', transition: 'background .1s' }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '8px 14px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13, color: 'var(--text)', transition: 'background .1s' }}
                     onMouseEnter={e => e.currentTarget.style.background = '#f7f5f2'}
                     onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                     <div style={{ width: 28, height: 28, borderRadius: 7, background: src.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -330,7 +330,7 @@ const ZapierSettings = ({ addToast, tasks, setTasks }) => {
         {/* Integration list */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '8px' }}>
           {integrations.length === 0 && (
-            <div style={{ textAlign: 'center', padding: '32px 16px', color: '#9e9e9e' }}>
+            <div style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--text-muted)' }}>
               <i className="bi-lightning-charge" style={{ fontSize: 28, display: 'block', marginBottom: 8 }}></i>
               <div style={{ fontSize: 13, fontWeight: 500 }}>No integrations yet</div>
               <div style={{ fontSize: 12, marginTop: 4 }}>Click "Add Integration" to connect a tool via Zapier</div>
@@ -348,8 +348,8 @@ const ZapierSettings = ({ addToast, tasks, setTasks }) => {
                   <i className={src.icon} style={{ color: src.color, fontSize: 13 }}></i>
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{int.name}</div>
-                  <div style={{ fontSize: 11, color: '#9e9e9e', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{int.name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span style={{ width: 6, height: 6, borderRadius: '50%', background: int.status === 'active' ? '#29811e' : int.status === 'error' ? '#d42d35' : '#ed8d00', flexShrink: 0 }}></span>
                     {int.status === 'active' ? 'Active' : int.status === 'error' ? 'Error' : 'Paused'}
                     {int.eventCount > 0 && <span style={{ color: '#c4c4c4' }}>|</span>}
@@ -365,7 +365,7 @@ const ZapierSettings = ({ addToast, tasks, setTasks }) => {
       {/* ── Right: Detail panel ─────────────────────────────────────── */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         {!selected ? (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9e9e9e' }}>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
             <div style={{ textAlign: 'center' }}>
               <i className="bi-arrow-left" style={{ fontSize: 24, display: 'block', marginBottom: 8 }}></i>
               <div style={{ fontSize: 14, fontWeight: 500 }}>Select an integration to configure</div>
@@ -389,13 +389,13 @@ const ZapierSettings = ({ addToast, tasks, setTasks }) => {
                   onMouseLeave={e => { if (activeTab !== tab.id) e.currentTarget.style.background = 'transparent'; }}>
                   <i className={tab.icon} style={{ fontSize: 11 }}></i>{tab.label}
                   {tab.id === 'activity' && selected.activityLog?.length > 0 && (
-                    <span style={{ background: '#e8e8e8', color: '#616161', fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 99 }}>{selected.activityLog.length}</span>
+                    <span style={{ background: '#e8e8e8', color: 'var(--text-secondary)', fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 99 }}>{selected.activityLog.length}</span>
                   )}
                 </button>
               ))}
               <div style={{ flex: 1 }}></div>
               <div style={{ display: 'flex', gap: 4, paddingBottom: 6 }}>
-                <button onClick={() => duplicateIntegration(selected)} title="Duplicate" style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #e8e8e8', background: 'var(--surface)', color: '#616161', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 }}><i className="bi-copy"></i></button>
+                <button onClick={() => duplicateIntegration(selected)} title="Duplicate" style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 }}><i className="bi-copy"></i></button>
                 <button onClick={() => { if (confirm('Delete this integration? This cannot be undone.')) deleteIntegration(selected.id); }} title="Delete" style={{ width: 28, height: 28, borderRadius: 6, border: '1px solid #FCA5A5', background: '#ffe2de', color: '#d42d35', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 }}><i className="bi-trash3"></i></button>
               </div>
             </div>
@@ -424,27 +424,27 @@ const GeneralTab = ({ int, update, webhookBaseUrl, copyText, copied, showSecret,
     <div>
       {/* Name */}
       <div style={{ marginBottom: 20 }}>
-        <label style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', display: 'block', marginBottom: 6 }}>Integration name</label>
+        <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 6 }}>Integration name</label>
         <input value={int.name} onChange={e => update({ name: e.target.value })}
-          style={{ width: '100%', height: 38, border: '1px solid #e8e8e8', borderRadius: 10, padding: '0 12px', fontSize: 14, outline: 'none', fontFamily: 'inherit', color: '#1b1b1b', boxSizing: 'border-box' }}
+          style={{ width: '100%', height: 38, border: '1px solid var(--border)', borderRadius: 10, padding: '0 12px', fontSize: 14, outline: 'none', fontFamily: 'inherit', color: 'var(--text)', boxSizing: 'border-box' }}
           placeholder="e.g. Zendesk Inbound Tickets" />
       </div>
 
       {/* Source type */}
       <div style={{ marginBottom: 20 }}>
-        <label style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', display: 'block', marginBottom: 6 }}>Source type</label>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', border: '1px solid #e8e8e8', borderRadius: 10, background: '#fafaf9' }}>
+        <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 6 }}>Source type</label>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', border: '1px solid var(--border)', borderRadius: 10, background: 'var(--surface-2)' }}>
           <div style={{ width: 30, height: 30, borderRadius: 7, background: src.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <i className={src.icon} style={{ color: src.color, fontSize: 13 }}></i>
           </div>
-          <span style={{ fontSize: 14, fontWeight: 500, color: '#1b1b1b' }}>{src.label}</span>
-          <span style={{ fontSize: 12, color: '#9e9e9e', marginLeft: 'auto' }}>Source cannot be changed after creation</span>
+          <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)' }}>{src.label}</span>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 'auto' }}>Source cannot be changed after creation</span>
         </div>
       </div>
 
       {/* Status toggle */}
       <div style={{ marginBottom: 20 }}>
-        <label style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', display: 'block', marginBottom: 6 }}>Status</label>
+        <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 6 }}>Status</label>
         <div style={{ display: 'flex', gap: 8 }}>
           {['active', 'paused'].map(st => (
             <button key={st} onClick={() => update({ status: st })}
@@ -464,14 +464,14 @@ const GeneralTab = ({ int, update, webhookBaseUrl, copyText, copied, showSecret,
 
       {/* Webhook URL */}
       <div style={{ marginBottom: 20 }}>
-        <label style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', display: 'block', marginBottom: 6 }}>Webhook URL</label>
-        <div style={{ fontSize: 12, color: '#9e9e9e', marginBottom: 6 }}>Use this URL in your Zapier webhook action (POST request)</div>
+        <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 6 }}>Webhook URL</label>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Use this URL in your Zapier webhook action (POST request)</div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <div style={{ flex: 1, padding: '9px 12px', border: '1px solid #e8e8e8', borderRadius: 10, background: '#fafaf9', fontSize: 12.5, fontFamily: 'SFMono-Regular, Menlo, monospace', color: '#1b1b1b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div style={{ flex: 1, padding: '9px 12px', border: '1px solid var(--border)', borderRadius: 10, background: 'var(--surface-2)', fontSize: 12.5, fontFamily: 'SFMono-Regular, Menlo, monospace', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {webhookBaseUrl}
           </div>
           <button onClick={() => copyText(webhookBaseUrl, 'url')}
-            style={{ height: 38, padding: '0 14px', borderRadius: 10, border: '1px solid #e8e8e8', background: copied === 'url' ? '#e8f5e9' : 'white', color: copied === 'url' ? '#29811e' : '#1f74b3', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap', transition: 'all .15s' }}>
+            style={{ height: 38, padding: '0 14px', borderRadius: 10, border: '1px solid var(--border)', background: copied === 'url' ? '#e8f5e9' : 'white', color: copied === 'url' ? '#29811e' : '#1f74b3', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap', transition: 'all .15s' }}>
             <i className={copied === 'url' ? 'bi-check-lg' : 'bi-clipboard'} style={{ fontSize: 12 }}></i>
             {copied === 'url' ? 'Copied' : 'Copy'}
           </button>
@@ -480,18 +480,18 @@ const GeneralTab = ({ int, update, webhookBaseUrl, copyText, copied, showSecret,
 
       {/* Webhook Secret */}
       <div style={{ marginBottom: 20 }}>
-        <label style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', display: 'block', marginBottom: 6 }}>Webhook secret</label>
-        <div style={{ fontSize: 12, color: '#9e9e9e', marginBottom: 6 }}>Add as <code style={{ background: '#f3f3f3', padding: '1px 5px', borderRadius: 4, fontSize: 11.5 }}>Authorization: Bearer &lt;secret&gt;</code> header in Zapier</div>
+        <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 6 }}>Webhook secret</label>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Add as <code style={{ background: '#f3f3f3', padding: '1px 5px', borderRadius: 4, fontSize: 11.5 }}>Authorization: Bearer &lt;secret&gt;</code> header in Zapier</div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <div style={{ flex: 1, padding: '9px 12px', border: '1px solid #e8e8e8', borderRadius: 10, background: '#fafaf9', fontSize: 12.5, fontFamily: 'SFMono-Regular, Menlo, monospace', color: '#1b1b1b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div style={{ flex: 1, padding: '9px 12px', border: '1px solid var(--border)', borderRadius: 10, background: 'var(--surface-2)', fontSize: 12.5, fontFamily: 'SFMono-Regular, Menlo, monospace', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {showSecret[int.id] ? int.webhookSecret : '••••••••••••••••••••••••'}
           </div>
           <button onClick={() => setShowSecret(prev => ({ ...prev, [int.id]: !prev[int.id] }))}
-            style={{ width: 38, height: 38, borderRadius: 10, border: '1px solid #e8e8e8', background: 'var(--surface)', color: '#616161', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>
+            style={{ width: 38, height: 38, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>
             <i className={showSecret[int.id] ? 'bi-eye-slash' : 'bi-eye'}></i>
           </button>
           <button onClick={() => copyText(int.webhookSecret, 'secret')}
-            style={{ width: 38, height: 38, borderRadius: 10, border: '1px solid #e8e8e8', background: copied === 'secret' ? '#e8f5e9' : 'white', color: copied === 'secret' ? '#29811e' : '#1f74b3', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>
+            style={{ width: 38, height: 38, borderRadius: 10, border: '1px solid var(--border)', background: copied === 'secret' ? '#e8f5e9' : 'white', color: copied === 'secret' ? '#29811e' : '#1f74b3', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13 }}>
             <i className={copied === 'secret' ? 'bi-check-lg' : 'bi-clipboard'}></i>
           </button>
           <button onClick={() => { if (confirm('Regenerate secret? Existing Zapier zaps using the old secret will stop working.')) update({ webhookSecret: genSecret() }); }}
@@ -503,26 +503,26 @@ const GeneralTab = ({ int, update, webhookBaseUrl, copyText, copied, showSecret,
 
       {/* External ID field */}
       <div style={{ marginBottom: 20 }}>
-        <label style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', display: 'block', marginBottom: 6 }}>External ID field</label>
-        <div style={{ fontSize: 12, color: '#9e9e9e', marginBottom: 6 }}>Which field in the incoming payload uniquely identifies each event (used for deduplication)</div>
+        <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 6 }}>External ID field</label>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Which field in the incoming payload uniquely identifies each event (used for deduplication)</div>
         <input value={int.externalIdField || ''} onChange={e => update({ externalIdField: e.target.value })}
           placeholder="e.g. id, key, ticket_id"
-          style={{ width: '100%', height: 38, border: '1px solid #e8e8e8', borderRadius: 10, padding: '0 12px', fontSize: 13, outline: 'none', fontFamily: 'SFMono-Regular, Menlo, monospace', color: '#1b1b1b', boxSizing: 'border-box' }} />
+          style={{ width: '100%', height: 38, border: '1px solid var(--border)', borderRadius: 10, padding: '0 12px', fontSize: 13, outline: 'none', fontFamily: 'SFMono-Regular, Menlo, monospace', color: 'var(--text)', boxSizing: 'border-box' }} />
       </div>
 
       {/* Stats */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
-        <div style={{ flex: 1, padding: '14px 16px', background: '#f7f5f2', borderRadius: 12 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#9e9e9e', marginBottom: 4 }}>Total events</div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: '#1b1b1b' }}>{int.eventCount || 0}</div>
+        <div style={{ flex: 1, padding: '14px 16px', background: 'var(--surface-3)', borderRadius: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>Total events</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)' }}>{int.eventCount || 0}</div>
         </div>
-        <div style={{ flex: 1, padding: '14px 16px', background: '#f7f5f2', borderRadius: 12 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#9e9e9e', marginBottom: 4 }}>Last event</div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: '#1b1b1b' }}>{relativeTime(int.lastEventAt)}</div>
+        <div style={{ flex: 1, padding: '14px 16px', background: 'var(--surface-3)', borderRadius: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>Last event</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{relativeTime(int.lastEventAt)}</div>
         </div>
-        <div style={{ flex: 1, padding: '14px 16px', background: '#f7f5f2', borderRadius: 12 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#9e9e9e', marginBottom: 4 }}>Created</div>
-          <div style={{ fontSize: 14, fontWeight: 600, color: '#1b1b1b' }}>{int.createdAt ? new Date(int.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}</div>
+        <div style={{ flex: 1, padding: '14px 16px', background: 'var(--surface-3)', borderRadius: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>Created</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{int.createdAt ? new Date(int.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}</div>
         </div>
       </div>
 
@@ -563,22 +563,22 @@ const SetupGuide = ({ int, webhookBaseUrl, copyText, copied }) => {
   }, null, 2);
 
   return (
-    <div style={{ border: '1px solid #e8e8e8', borderRadius: 12, overflow: 'hidden' }}>
+    <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
       <button onClick={() => setOpen(!open)}
-        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px', border: 'none', background: '#fafaf9', cursor: 'pointer', fontSize: 14, fontWeight: 600, color: '#1b1b1b', textAlign: 'left' }}>
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '14px 16px', border: 'none', background: 'var(--surface-2)', cursor: 'pointer', fontSize: 14, fontWeight: 600, color: 'var(--text)', textAlign: 'left' }}>
         <i className="bi-book" style={{ fontSize: 15, color: '#6b3fa0' }}></i>
         Zapier setup guide
-        <span style={{ fontSize: 12, fontWeight: 400, color: '#9e9e9e', flex: 1 }}>Step-by-step instructions</span>
-        <i className={open ? 'bi-chevron-up' : 'bi-chevron-down'} style={{ fontSize: 11, color: '#9e9e9e' }}></i>
+        <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-muted)', flex: 1 }}>Step-by-step instructions</span>
+        <i className={open ? 'bi-chevron-up' : 'bi-chevron-down'} style={{ fontSize: 11, color: 'var(--text-muted)' }}></i>
       </button>
       {open && (
-        <div style={{ padding: '16px 20px', borderTop: '1px solid #e8e8e8', fontSize: 13, color: '#1b1b1b', lineHeight: 1.7 }}>
+        <div style={{ padding: '16px 20px', borderTop: '1px solid #e8e8e8', fontSize: 13, color: 'var(--text)', lineHeight: 1.7 }}>
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontWeight: 700, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ width: 22, height: 22, borderRadius: '50%', background: '#6b3fa0', color: 'white', fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>1</span>
               Create a Zap in Zapier
             </div>
-            <div style={{ paddingLeft: 30, color: '#616161', fontSize: 12.5 }}>
+            <div style={{ paddingLeft: 30, color: 'var(--text-secondary)', fontSize: 12.5 }}>
               Set your trigger to <strong>{src.label}</strong> (e.g. "New Ticket" or "Updated Record"). Choose the event that should create a task in Ops Hub.
             </div>
           </div>
@@ -587,13 +587,13 @@ const SetupGuide = ({ int, webhookBaseUrl, copyText, copied }) => {
               <span style={{ width: 22, height: 22, borderRadius: '50%', background: '#6b3fa0', color: 'white', fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>2</span>
               Add a "Webhooks by Zapier" action
             </div>
-            <div style={{ paddingLeft: 30, color: '#616161', fontSize: 12.5 }}>
+            <div style={{ paddingLeft: 30, color: 'var(--text-secondary)', fontSize: 12.5 }}>
               Choose <strong>POST</strong> as the action event. Set the URL to your unique webhook endpoint:
             </div>
-            <div style={{ marginLeft: 30, marginTop: 6, padding: '8px 12px', background: '#f7f5f2', borderRadius: 8, fontFamily: 'SFMono-Regular, Menlo, monospace', fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ marginLeft: 30, marginTop: 6, padding: '8px 12px', background: 'var(--surface-3)', borderRadius: 8, fontFamily: 'SFMono-Regular, Menlo, monospace', fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{webhookBaseUrl}</span>
               <button onClick={() => copyText(webhookBaseUrl, 'guide-url')}
-                style={{ padding: '2px 8px', border: '1px solid #e8e8e8', borderRadius: 6, background: copied === 'guide-url' ? '#e8f5e9' : 'white', color: copied === 'guide-url' ? '#29811e' : '#1f74b3', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                style={{ padding: '2px 8px', border: '1px solid var(--border)', borderRadius: 6, background: copied === 'guide-url' ? '#e8f5e9' : 'white', color: copied === 'guide-url' ? '#29811e' : '#1f74b3', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap' }}>
                 {copied === 'guide-url' ? 'Copied' : 'Copy'}
               </button>
             </div>
@@ -603,10 +603,10 @@ const SetupGuide = ({ int, webhookBaseUrl, copyText, copied }) => {
               <span style={{ width: 22, height: 22, borderRadius: '50%', background: '#6b3fa0', color: 'white', fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>3</span>
               Set headers
             </div>
-            <div style={{ paddingLeft: 30, color: '#616161', fontSize: 12.5 }}>
+            <div style={{ paddingLeft: 30, color: 'var(--text-secondary)', fontSize: 12.5 }}>
               Add these headers in the Zapier webhook action:
             </div>
-            <div style={{ marginLeft: 30, marginTop: 6, padding: '8px 12px', background: '#f7f5f2', borderRadius: 8, fontFamily: 'SFMono-Regular, Menlo, monospace', fontSize: 11.5, lineHeight: 1.8 }}>
+            <div style={{ marginLeft: 30, marginTop: 6, padding: '8px 12px', background: 'var(--surface-3)', borderRadius: 8, fontFamily: 'SFMono-Regular, Menlo, monospace', fontSize: 11.5, lineHeight: 1.8 }}>
               <div>Content-Type: <span style={{ color: '#6b3fa0' }}>application/json</span></div>
               <div>Authorization: <span style={{ color: '#6b3fa0' }}>Bearer {'<your-webhook-secret>'}</span></div>
             </div>
@@ -616,7 +616,7 @@ const SetupGuide = ({ int, webhookBaseUrl, copyText, copied }) => {
               <span style={{ width: 22, height: 22, borderRadius: '50%', background: '#6b3fa0', color: 'white', fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>4</span>
               Configure the payload
             </div>
-            <div style={{ paddingLeft: 30, color: '#616161', fontSize: 12.5, marginBottom: 8 }}>
+            <div style={{ paddingLeft: 30, color: 'var(--text-secondary)', fontSize: 12.5, marginBottom: 8 }}>
               Set "Payload Type" to <strong>JSON</strong>. Map your {src.label} fields to the keys below. Only <code style={{ background: '#f3f3f3', padding: '1px 4px', borderRadius: 3, fontSize: 11 }}>source</code>, <code style={{ background: '#f3f3f3', padding: '1px 4px', borderRadius: 3, fontSize: 11 }}>externalId</code>, and <code style={{ background: '#f3f3f3', padding: '1px 4px', borderRadius: 3, fontSize: 11 }}>subject</code> are required.
             </div>
             <div style={{ marginLeft: 30, position: 'relative' }}>
@@ -632,7 +632,7 @@ const SetupGuide = ({ int, webhookBaseUrl, copyText, copied }) => {
               <span style={{ width: 22, height: 22, borderRadius: '50%', background: '#6b3fa0', color: 'white', fontSize: 11, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>5</span>
               Test and turn on
             </div>
-            <div style={{ paddingLeft: 30, color: '#616161', fontSize: 12.5 }}>
+            <div style={{ paddingLeft: 30, color: 'var(--text-secondary)', fontSize: 12.5 }}>
               Use the "Send Test Event" button above to verify your field mappings. Then publish your Zap in Zapier and you're done!
             </div>
           </div>
@@ -726,13 +726,13 @@ const MappingTab = ({ int, update }) => {
   return (
     <div>
       <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 16, fontWeight: 700, color: '#1b1b1b', marginBottom: 4 }}>Field mapping</div>
-        <div style={{ fontSize: 13, color: '#9e9e9e' }}>Map fields from the incoming Zapier payload to Ops Hub fields. Use dot notation for nested fields (e.g. <code style={{ background: '#f3f3f3', padding: '1px 5px', borderRadius: 4, fontSize: 12 }}>priority.name</code>). Select "Create custom field" to add your own.</div>
+        <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Field mapping</div>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Map fields from the incoming Zapier payload to Ops Hub fields. Use dot notation for nested fields (e.g. <code style={{ background: '#f3f3f3', padding: '1px 5px', borderRadius: 4, fontSize: 12 }}>priority.name</code>). Select "Create custom field" to add your own.</div>
       </div>
 
-      <div style={{ border: '1px solid #e8e8e8', borderRadius: 14, overflow: 'hidden', marginBottom: 16 }}>
+      <div style={{ border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden', marginBottom: 16 }}>
         {/* Header */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 32px 1fr 1fr 36px', gap: 8, padding: '10px 14px', background: '#fafaf9', borderBottom: '1px solid #e8e8e8', fontSize: 12, fontWeight: 600, color: '#9e9e9e' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 32px 1fr 1fr 36px', gap: 8, padding: '10px 14px', background: 'var(--surface-2)', borderBottom: '1px solid #e8e8e8', fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>
           <span>Source field</span>
           <span></span>
           <span>Ops Hub field</span>
@@ -749,13 +749,13 @@ const MappingTab = ({ int, update }) => {
             <div key={rowKey}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 32px 1fr 1fr 36px', gap: 8, padding: '8px 14px', borderBottom: showNewField === idx ? 'none' : '1px solid #f5f5f5', alignItems: 'center' }}>
                 <input value={m.sourceField} onChange={e => updateMapping(idx, 'sourceField', e.target.value)}
-                  placeholder="e.g. title" style={{ height: 34, border: '1px solid #e8e8e8', borderRadius: 8, padding: '0 10px', fontSize: 13, outline: 'none', fontFamily: 'SFMono-Regular, Menlo, monospace', color: '#1b1b1b', boxSizing: 'border-box' }} />
+                  placeholder="e.g. title" style={{ height: 34, border: '1px solid var(--border)', borderRadius: 8, padding: '0 10px', fontSize: 13, outline: 'none', fontFamily: 'SFMono-Regular, Menlo, monospace', color: 'var(--text)', boxSizing: 'border-box' }} />
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#c4c4c4' }}>
                   <i className="bi-arrow-right" style={{ fontSize: 14 }}></i>
                 </div>
                 <div style={{ position: 'relative' }}>
                   <select value={m.targetField} onChange={e => updateMapping(idx, 'targetField', e.target.value)}
-                    style={{ width: '100%', height: 34, border: `1px solid ${isCustom ? '#6b3fa0' : '#e8e8e8'}`, borderRadius: 8, padding: '0 8px', fontSize: 13, outline: 'none', fontFamily: 'inherit', color: '#1b1b1b', cursor: 'pointer', background: isCustom ? '#f9f5ff' : 'white' }}>
+                    style={{ width: '100%', height: 34, border: `1px solid ${isCustom ? '#6b3fa0' : '#e8e8e8'}`, borderRadius: 8, padding: '0 8px', fontSize: 13, outline: 'none', fontFamily: 'inherit', color: 'var(--text)', cursor: 'pointer', background: isCustom ? '#f9f5ff' : 'white' }}>
                     <option value="">-- Select field --</option>
                     {Object.entries(groupedFields).map(([group, fields]) => (
                       <optgroup key={group} label={fieldGroups[group] || group}>
@@ -771,13 +771,13 @@ const MappingTab = ({ int, update }) => {
                 </div>
                 {targetDef?.options ? (
                   <select value={m.defaultValue || ''} onChange={e => updateMapping(idx, 'defaultValue', e.target.value)}
-                    style={{ height: 34, border: '1px solid #e8e8e8', borderRadius: 8, padding: '0 8px', fontSize: 13, outline: 'none', fontFamily: 'inherit', color: m.defaultValue ? '#1b1b1b' : '#9e9e9e', cursor: 'pointer', background: 'var(--surface)' }}>
+                    style={{ height: 34, border: '1px solid var(--border)', borderRadius: 8, padding: '0 8px', fontSize: 13, outline: 'none', fontFamily: 'inherit', color: m.defaultValue ? '#1b1b1b' : '#9e9e9e', cursor: 'pointer', background: 'var(--surface)' }}>
                     <option value="">No default</option>
                     {targetDef.options.map(o => <option key={o} value={o}>{o}</option>)}
                   </select>
                 ) : (
                   <input value={m.defaultValue || ''} onChange={e => updateMapping(idx, 'defaultValue', e.target.value)}
-                    placeholder="Fallback value" style={{ height: 34, border: '1px solid #e8e8e8', borderRadius: 8, padding: '0 10px', fontSize: 13, outline: 'none', fontFamily: 'inherit', color: '#1b1b1b', boxSizing: 'border-box' }} />
+                    placeholder="Fallback value" style={{ height: 34, border: '1px solid var(--border)', borderRadius: 8, padding: '0 10px', fontSize: 13, outline: 'none', fontFamily: 'inherit', color: 'var(--text)', boxSizing: 'border-box' }} />
                 )}
                 <div style={{ display: 'flex', gap: 2 }}>
                   <button onClick={() => { setShowTransform(showTransform === idx ? null : idx); setNewMapFrom(''); setNewMapTo(''); }} title="Value transforms"
@@ -799,12 +799,12 @@ const MappingTab = ({ int, update }) => {
                 <div style={{ padding: '8px 14px 12px', borderBottom: '1px solid #f5f5f5', background: '#f0f7ff' }}>
                   <div style={{ fontSize: 11, fontWeight: 600, color: '#1f74b3', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 5 }}>
                     <i className="bi-arrow-repeat" style={{ fontSize: 10 }}></i>Value transforms for "{m.sourceField || m.targetField}"
-                    <span style={{ fontWeight: 400, color: '#9e9e9e', marginLeft: 4 }}>Map source values to Ops Hub values</span>
+                    <span style={{ fontWeight: 400, color: 'var(--text-muted)', marginLeft: 4 }}>Map source values to Ops Hub values</span>
                   </div>
                   {Object.entries(m.valueMap || {}).map(([from, to]) => (
                     <div key={from} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                      <code style={{ fontSize: 12, background: '#e8e8e8', padding: '2px 8px', borderRadius: 4, color: '#1b1b1b' }}>{from}</code>
-                      <i className="bi-arrow-right" style={{ fontSize: 10, color: '#9e9e9e' }}></i>
+                      <code style={{ fontSize: 12, background: '#e8e8e8', padding: '2px 8px', borderRadius: 4, color: 'var(--text)' }}>{from}</code>
+                      <i className="bi-arrow-right" style={{ fontSize: 10, color: 'var(--text-muted)' }}></i>
                       <code style={{ fontSize: 12, background: '#e8f0fe', padding: '2px 8px', borderRadius: 4, color: '#1f74b3' }}>{to}</code>
                       <button onClick={() => {
                         const newMap = { ...(m.valueMap || {}) };
@@ -821,7 +821,7 @@ const MappingTab = ({ int, update }) => {
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 }}>
                     <input value={newMapFrom} onChange={e => setNewMapFrom(e.target.value)} placeholder="Source value (e.g. Urgent)"
                       style={{ width: 140, height: 28, border: '1px solid #c7e2fe', borderRadius: 6, padding: '0 8px', fontSize: 12, outline: 'none', fontFamily: 'SFMono-Regular, Menlo, monospace' }} />
-                    <i className="bi-arrow-right" style={{ fontSize: 10, color: '#9e9e9e' }}></i>
+                    <i className="bi-arrow-right" style={{ fontSize: 10, color: 'var(--text-muted)' }}></i>
                     <input value={newMapTo} onChange={e => setNewMapTo(e.target.value)} placeholder="Ops Hub value (e.g. critical)"
                       style={{ width: 140, height: 28, border: '1px solid #c7e2fe', borderRadius: 6, padding: '0 8px', fontSize: 12, outline: 'none', fontFamily: 'SFMono-Regular, Menlo, monospace' }}
                       onKeyDown={e => {
@@ -851,19 +851,19 @@ const MappingTab = ({ int, update }) => {
                   <div style={{ flex: 1 }}>
                     <label style={{ fontSize: 11, fontWeight: 600, color: '#6b3fa0', display: 'block', marginBottom: 4 }}>Field label</label>
                     <input value={newFieldName} onChange={e => { setNewFieldName(e.target.value); setNewFieldKey(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')); }}
-                      placeholder="e.g. Employee ID" autoFocus style={{ width: '100%', height: 32, border: '1px solid #d4bfea', borderRadius: 8, padding: '0 10px', fontSize: 13, outline: 'none', fontFamily: 'inherit', color: '#1b1b1b', boxSizing: 'border-box', background: 'var(--surface)' }} />
+                      placeholder="e.g. Employee ID" autoFocus style={{ width: '100%', height: 32, border: '1px solid #d4bfea', borderRadius: 8, padding: '0 10px', fontSize: 13, outline: 'none', fontFamily: 'inherit', color: 'var(--text)', boxSizing: 'border-box', background: 'var(--surface)' }} />
                   </div>
                   <div style={{ flex: 1 }}>
-                    <label style={{ fontSize: 11, fontWeight: 600, color: '#6b3fa0', display: 'block', marginBottom: 4 }}>Field key <span style={{ fontWeight: 400, color: '#9e9e9e' }}>(auto-generated)</span></label>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: '#6b3fa0', display: 'block', marginBottom: 4 }}>Field key <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>(auto-generated)</span></label>
                     <input value={newFieldKey} onChange={e => setNewFieldKey(e.target.value.replace(/[^a-zA-Z0-9_]/g, ''))}
-                      placeholder="employee_id" style={{ width: '100%', height: 32, border: '1px solid #d4bfea', borderRadius: 8, padding: '0 10px', fontSize: 13, outline: 'none', fontFamily: 'SFMono-Regular, Menlo, monospace', color: '#1b1b1b', boxSizing: 'border-box', background: 'var(--surface)' }} />
+                      placeholder="employee_id" style={{ width: '100%', height: 32, border: '1px solid #d4bfea', borderRadius: 8, padding: '0 10px', fontSize: 13, outline: 'none', fontFamily: 'SFMono-Regular, Menlo, monospace', color: 'var(--text)', boxSizing: 'border-box', background: 'var(--surface)' }} />
                   </div>
                   <button onClick={() => createCustomField(idx)} disabled={!newFieldName.trim()}
                     style={{ height: 32, padding: '0 14px', borderRadius: 8, border: 'none', background: newFieldName.trim() ? '#6b3fa0' : '#d4bfea', color: 'white', fontSize: 12, fontWeight: 600, cursor: newFieldName.trim() ? 'pointer' : 'default', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}>
                     <i className="bi-plus-lg" style={{ fontSize: 10 }}></i>Create
                   </button>
                   <button onClick={() => setShowNewField(null)}
-                    style={{ height: 32, padding: '0 10px', borderRadius: 8, border: '1px solid #e8e8e8', background: 'var(--surface)', color: '#616161', fontSize: 12, cursor: 'pointer' }}>
+                    style={{ height: 32, padding: '0 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer' }}>
                     Cancel
                   </button>
                 </div>
@@ -888,11 +888,11 @@ const MappingTab = ({ int, update }) => {
           <div style={{ padding: '10px 14px', background: '#f9f5ff', borderBottom: '1px solid #d4bfea', display: 'flex', alignItems: 'center', gap: 6 }}>
             <i className="bi-puzzle" style={{ fontSize: 12, color: '#6b3fa0' }}></i>
             <span style={{ fontSize: 13, fontWeight: 600, color: '#6b3fa0' }}>Custom fields ({customFields.length})</span>
-            <span style={{ fontSize: 11, color: '#9e9e9e', marginLeft: 4 }}>Available across all integrations</span>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 4 }}>Available across all integrations</span>
           </div>
           {customFields.map(f => (
             <div key={f.key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', borderBottom: '1px solid #f3eff8', fontSize: 13 }}>
-              <span style={{ fontWeight: 500, color: '#1b1b1b', flex: 1 }}>{f.label}</span>
+              <span style={{ fontWeight: 500, color: 'var(--text)', flex: 1 }}>{f.label}</span>
               <code style={{ fontSize: 11, color: '#6b3fa0', background: '#f3eff8', padding: '2px 6px', borderRadius: 4 }}>{f.key}</code>
               <button onClick={() => deleteCustomField(f.key)} title="Delete custom field"
                 style={{ width: 24, height: 24, borderRadius: 6, border: 'none', background: 'transparent', color: '#c4c4c4', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11 }}
@@ -906,7 +906,7 @@ const MappingTab = ({ int, update }) => {
       )}
 
       {/* Info box */}
-      <div style={{ marginTop: 16, padding: '12px 14px', background: '#f7f5f2', borderRadius: 10, fontSize: 12, color: '#616161' }}>
+      <div style={{ marginTop: 16, padding: '12px 14px', background: 'var(--surface-3)', borderRadius: 10, fontSize: 12, color: 'var(--text-secondary)' }}>
         <i className="bi-info-circle" style={{ marginRight: 6 }}></i>
         <strong>Required:</strong> At least one mapping to <strong>Subject</strong> is needed. Leave source field empty and set a default value to use a static value. Custom fields are shared across all integrations and stored with each task.
       </div>
@@ -928,35 +928,35 @@ const RoutingTab = ({ int, update }) => {
   return (
     <div>
       <div style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 16, fontWeight: 700, color: '#1b1b1b', marginBottom: 4 }}>Destination & routing</div>
-        <div style={{ fontSize: 13, color: '#9e9e9e' }}>Choose where incoming events from this integration are routed to within Ops Hub.</div>
+        <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Destination & routing</div>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Choose where incoming events from this integration are routed to within Ops Hub.</div>
       </div>
 
       {/* Conditional filters */}
       <div style={{ marginBottom: 24 }}>
-        <label style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+        <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
           <i className="bi-funnel" style={{ fontSize: 12, color: '#6b3fa0' }}></i>
           Filters
-          {filters.length > 0 && <span style={{ fontSize: 11, fontWeight: 400, color: '#9e9e9e' }}>Only process events matching ALL conditions</span>}
+          {filters.length > 0 && <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-muted)' }}>Only process events matching ALL conditions</span>}
         </label>
         {filters.length === 0 ? (
-          <div style={{ padding: '12px 14px', background: '#fafaf9', borderRadius: 10, border: '1px dashed #e8e8e8', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 12.5, color: '#9e9e9e' }}><i className="bi-check-circle" style={{ marginRight: 6 }}></i>No filters — all incoming events are processed</span>
+          <div style={{ padding: '12px 14px', background: 'var(--surface-2)', borderRadius: 10, border: '1px dashed #e8e8e8', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}><i className="bi-check-circle" style={{ marginRight: 6 }}></i>No filters — all incoming events are processed</span>
             <button onClick={addFilter}
-              style={{ height: 28, padding: '0 12px', borderRadius: 7, border: '1px solid #e8e8e8', background: 'var(--surface)', color: '#6b3fa0', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+              style={{ height: 28, padding: '0 12px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: '#6b3fa0', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
               <i className="bi-plus-lg" style={{ fontSize: 10 }}></i>Add filter
             </button>
           </div>
         ) : (
-          <div style={{ border: '1px solid #e8e8e8', borderRadius: 12, overflow: 'hidden' }}>
+          <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
             {filters.map((f, idx) => (
               <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderBottom: idx < filters.length - 1 ? '1px solid #f5f5f5' : 'none', fontSize: 13 }}>
-                <span style={{ fontSize: 11, color: '#9e9e9e', width: 28, textAlign: 'center', flexShrink: 0 }}>{idx === 0 ? 'If' : 'AND'}</span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', width: 28, textAlign: 'center', flexShrink: 0 }}>{idx === 0 ? 'If' : 'AND'}</span>
                 <input value={f.field} onChange={e => updateFilter(idx, 'field', e.target.value)}
                   placeholder="payload field (e.g. priority)"
-                  style={{ flex: 1, height: 32, border: '1px solid #e8e8e8', borderRadius: 7, padding: '0 10px', fontSize: 12, outline: 'none', fontFamily: 'SFMono-Regular, Menlo, monospace' }} />
+                  style={{ flex: 1, height: 32, border: '1px solid var(--border)', borderRadius: 7, padding: '0 10px', fontSize: 12, outline: 'none', fontFamily: 'SFMono-Regular, Menlo, monospace' }} />
                 <select value={f.operator} onChange={e => updateFilter(idx, 'operator', e.target.value)}
-                  style={{ height: 32, border: '1px solid #e8e8e8', borderRadius: 7, padding: '0 6px', fontSize: 12, outline: 'none', cursor: 'pointer', color: '#6b3fa0', fontWeight: 500 }}>
+                  style={{ height: 32, border: '1px solid var(--border)', borderRadius: 7, padding: '0 6px', fontSize: 12, outline: 'none', cursor: 'pointer', color: '#6b3fa0', fontWeight: 500 }}>
                   <option value="equals">equals</option>
                   <option value="not_equals">not equals</option>
                   <option value="contains">contains</option>
@@ -967,7 +967,7 @@ const RoutingTab = ({ int, update }) => {
                 {!['exists', 'not_exists'].includes(f.operator) && (
                   <input value={f.value || ''} onChange={e => updateFilter(idx, 'value', e.target.value)}
                     placeholder="value"
-                    style={{ width: 120, height: 32, border: '1px solid #e8e8e8', borderRadius: 7, padding: '0 10px', fontSize: 12, outline: 'none', fontFamily: 'SFMono-Regular, Menlo, monospace' }} />
+                    style={{ width: 120, height: 32, border: '1px solid var(--border)', borderRadius: 7, padding: '0 10px', fontSize: 12, outline: 'none', fontFamily: 'SFMono-Regular, Menlo, monospace' }} />
                 )}
                 <button onClick={() => removeFilter(idx)}
                   style={{ width: 26, height: 26, borderRadius: 5, border: 'none', background: 'transparent', color: '#c4c4c4', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, flexShrink: 0 }}
@@ -991,7 +991,7 @@ const RoutingTab = ({ int, update }) => {
 
       {/* Destination picker */}
       <div style={{ marginBottom: 24 }}>
-        <label style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', display: 'block', marginBottom: 10 }}>Destination</label>
+        <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 10 }}>Destination</label>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
           {DESTINATIONS.map(d => (
             <button key={d.id} onClick={() => update({ destination: d.id })}
@@ -1006,7 +1006,7 @@ const RoutingTab = ({ int, update }) => {
                 </div>
                 <span style={{ fontSize: 14, fontWeight: 600, color: dest === d.id ? d.color : '#1b1b1b' }}>{d.label}</span>
               </div>
-              <div style={{ fontSize: 11.5, color: '#9e9e9e', lineHeight: 1.4 }}>{d.desc}</div>
+              <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.4 }}>{d.desc}</div>
             </button>
           ))}
         </div>
@@ -1019,7 +1019,7 @@ const RoutingTab = ({ int, update }) => {
       {dest === 'queue' && (<>
         {/* Inbound / Outbound */}
         <div style={{ marginBottom: 24 }}>
-          <label style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', display: 'block', marginBottom: 8 }}>Queue direction</label>
+          <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 8 }}>Queue direction</label>
           <div style={{ display: 'flex', gap: 10 }}>
             {[
               { val: 'inbound', label: 'Inbound', icon: 'bi-inbox', desc: 'Tasks received from external sources' },
@@ -1035,7 +1035,7 @@ const RoutingTab = ({ int, update }) => {
                   <i className={opt.icon} style={{ fontSize: 14, color: int.queueTab === opt.val ? '#1f74b3' : '#9e9e9e' }}></i>
                   <span style={{ fontSize: 13, fontWeight: 600, color: int.queueTab === opt.val ? '#1f74b3' : '#1b1b1b' }}>{opt.label}</span>
                 </div>
-                <div style={{ fontSize: 11.5, color: '#9e9e9e' }}>{opt.desc}</div>
+                <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{opt.desc}</div>
               </button>
             ))}
           </div>
@@ -1043,7 +1043,7 @@ const RoutingTab = ({ int, update }) => {
 
         {/* Default status on arrival */}
         <div style={{ marginBottom: 24 }}>
-          <label style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', display: 'block', marginBottom: 8 }}>Default status on arrival</label>
+          <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 8 }}>Default status on arrival</label>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {['new', 'in_progress'].map(st => (
               <button key={st} onClick={() => update({ subFilter: st === 'new' ? null : st })}
@@ -1061,7 +1061,7 @@ const RoutingTab = ({ int, update }) => {
 
         {/* Auto-assignment */}
         <div style={{ marginBottom: 24 }}>
-          <label style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', display: 'block', marginBottom: 8 }}>Auto-assignment</label>
+          <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 8 }}>Auto-assignment</label>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {[
               { val: 'none', label: 'Unassigned', desc: 'Goes to pool' },
@@ -1075,7 +1075,7 @@ const RoutingTab = ({ int, update }) => {
                   background: (int.autoAssign || 'none') === opt.val ? '#e8f0fe' : 'white',
                 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: (int.autoAssign || 'none') === opt.val ? '#1f74b3' : '#1b1b1b' }}>{opt.label}</div>
-                <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 2 }}>{opt.desc}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{opt.desc}</div>
               </button>
             ))}
           </div>
@@ -1083,7 +1083,7 @@ const RoutingTab = ({ int, update }) => {
 
         {/* Priority override */}
         <div>
-          <label style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', display: 'block', marginBottom: 8 }}>Default priority</label>
+          <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 8 }}>Default priority</label>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {['from_source', 'low', 'medium', 'high', 'critical'].map(p => {
               const colors = { from_source: '#616161', low: '#9e9e9e', medium: '#0369a1', high: '#d97706', critical: '#d42d35' };
@@ -1107,8 +1107,8 @@ const RoutingTab = ({ int, update }) => {
       {/* Escalation-specific options */}
       {dest === 'escalations' && (<>
         <div style={{ marginBottom: 24 }}>
-          <label style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', display: 'block', marginBottom: 8 }}>Escalation behavior</label>
-          <div style={{ fontSize: 12, color: '#9e9e9e', marginBottom: 10 }}>How should incoming events be handled as escalations?</div>
+          <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 8 }}>Escalation behavior</label>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>How should incoming events be handled as escalations?</div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {[
               { val: 'create', label: 'Create new escalation', desc: 'Each event creates a new escalation entry' },
@@ -1121,13 +1121,13 @@ const RoutingTab = ({ int, update }) => {
                   background: (int.escalationMode || 'create') === opt.val ? '#fff8e6' : 'white',
                 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: (int.escalationMode || 'create') === opt.val ? '#ed8d00' : '#1b1b1b' }}>{opt.label}</div>
-                <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 2 }}>{opt.desc}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{opt.desc}</div>
               </button>
             ))}
           </div>
         </div>
         <div style={{ marginBottom: 24 }}>
-          <label style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', display: 'block', marginBottom: 8 }}>Default escalation status</label>
+          <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 8 }}>Default escalation status</label>
           <div style={{ display: 'flex', gap: 8 }}>
             {['pending', 'in_review'].map(st => (
               <button key={st} onClick={() => update({ escalationStatus: st })}
@@ -1151,7 +1151,7 @@ const RoutingTab = ({ int, update }) => {
       {/* Comms-specific options */}
       {dest === 'comms' && (<>
         <div style={{ marginBottom: 24 }}>
-          <label style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', display: 'block', marginBottom: 8 }}>Communication type</label>
+          <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 8 }}>Communication type</label>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {['alert', 'announce', 'update', 'guidance', 'kudos'].map(t => {
               const labels = { alert: 'Alert', announce: 'Announcement', update: 'Update', guidance: 'Guidance', kudos: 'Kudos' };
@@ -1172,7 +1172,7 @@ const RoutingTab = ({ int, update }) => {
           </div>
         </div>
         <div style={{ marginBottom: 24 }}>
-          <label style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', display: 'block', marginBottom: 8 }}>Requires acknowledgement</label>
+          <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 8 }}>Requires acknowledgement</label>
           <div style={{ display: 'flex', gap: 8 }}>
             {[true, false].map(v => (
               <button key={String(v)} onClick={() => update({ commsRequireAck: v })}
@@ -1196,7 +1196,7 @@ const RoutingTab = ({ int, update }) => {
       {/* Projects-specific options */}
       {dest === 'projects' && (<>
         <div style={{ marginBottom: 24 }}>
-          <label style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', display: 'block', marginBottom: 8 }}>Project behavior</label>
+          <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 8 }}>Project behavior</label>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {[
               { val: 'create', label: 'Create new project', desc: 'Each event creates a new project entry' },
@@ -1210,7 +1210,7 @@ const RoutingTab = ({ int, update }) => {
                   background: (int.projectMode || 'create') === opt.val ? '#e8f5e9' : 'white',
                 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: (int.projectMode || 'create') === opt.val ? '#29811e' : '#1b1b1b' }}>{opt.label}</div>
-                <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 2 }}>{opt.desc}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{opt.desc}</div>
               </button>
             ))}
           </div>
@@ -1224,7 +1224,7 @@ const RoutingTab = ({ int, update }) => {
       {/* Reports-specific options */}
       {dest === 'reports' && (<>
         <div style={{ marginBottom: 24 }}>
-          <label style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', display: 'block', marginBottom: 8 }}>Report type</label>
+          <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 8 }}>Report type</label>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {['headcount', 'attrition', 'leave', 'payroll', 'compliance', 'custom'].map(t => (
               <button key={t} onClick={() => update({ reportCategory: t })}
@@ -1241,7 +1241,7 @@ const RoutingTab = ({ int, update }) => {
           </div>
         </div>
         <div style={{ marginBottom: 24 }}>
-          <label style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', display: 'block', marginBottom: 8 }}>Data handling</label>
+          <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 8 }}>Data handling</label>
           <div style={{ display: 'flex', gap: 8 }}>
             {[
               { val: 'append', label: 'Append data', desc: 'Add to existing report dataset' },
@@ -1254,7 +1254,7 @@ const RoutingTab = ({ int, update }) => {
                   background: (int.reportDataMode || 'append') === opt.val ? '#e3f2fd' : 'white',
                 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: (int.reportDataMode || 'append') === opt.val ? '#1565c0' : '#1b1b1b' }}>{opt.label}</div>
-                <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 2 }}>{opt.desc}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{opt.desc}</div>
               </button>
             ))}
           </div>
@@ -1300,15 +1300,15 @@ const ColumnsTab = ({ int, update }) => {
   return (
     <div>
       <div style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 16, fontWeight: 700, color: '#1b1b1b', marginBottom: 4 }}>Column visibility</div>
-        <div style={{ fontSize: 13, color: '#9e9e9e' }}>Choose which columns are visible for tasks from this integration.</div>
+        <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Column visibility</div>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Choose which columns are visible for tasks from this integration.</div>
       </div>
 
       {/* Global toggle */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 0', borderBottom: '1px solid #e8e8e8', marginBottom: 8 }}>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 500, color: '#1b1b1b' }}>Use global column defaults</div>
-          <div style={{ fontSize: 12, color: '#9e9e9e', marginTop: 2 }}>When enabled, this integration follows the global column settings from UI & Display</div>
+          <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)' }}>Use global column defaults</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>When enabled, this integration follows the global column settings from UI & Display</div>
         </div>
         <button onClick={toggleGlobal}
           style={{ width: 44, height: 24, borderRadius: 12, border: 'none', background: useGlobal ? '#29811e' : '#dedede', cursor: 'pointer', position: 'relative', transition: 'background .2s', flexShrink: 0 }}>
@@ -1321,8 +1321,8 @@ const ColumnsTab = ({ int, update }) => {
         {COLUMN_DEFS.map(col => (
           <div key={col.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 0', borderBottom: '1px solid #f5f5f5' }}>
             <div>
-              <div style={{ fontSize: 14, fontWeight: 500, color: '#1b1b1b' }}>{col.label}</div>
-              <div style={{ fontSize: 12, color: '#9e9e9e', marginTop: 1 }}>{col.desc}</div>
+              <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)' }}>{col.label}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 1 }}>{col.desc}</div>
             </div>
             <button onClick={() => toggleCol(col.key)}
               style={{ width: 44, height: 24, borderRadius: 12, border: 'none', background: cols[col.key] ? '#29811e' : '#dedede', cursor: 'pointer', position: 'relative', transition: 'background .2s', flexShrink: 0 }}>
@@ -1346,25 +1346,25 @@ const ActivityTab = ({ int, update }) => {
     <div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, color: '#1b1b1b' }}>Activity log</div>
-          <div style={{ fontSize: 13, color: '#9e9e9e' }}>Recent webhook events (last 50)</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>Activity log</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Recent webhook events (last 50)</div>
         </div>
         {logs.length > 0 && (
           <button onClick={() => update({ activityLog: [] })}
-            style={{ height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid #e8e8e8', background: 'var(--surface)', color: '#616161', fontSize: 12, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
+            style={{ height: 32, padding: '0 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)', fontSize: 12, fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
             <i className="bi-x-lg" style={{ fontSize: 10 }}></i>Clear log
           </button>
         )}
       </div>
 
       {logs.length === 0 ? (
-        <div style={{ textAlign: 'center', padding: '40px 20px', color: '#9e9e9e' }}>
+        <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
           <i className="bi-journal" style={{ fontSize: 28, display: 'block', marginBottom: 8 }}></i>
           <div style={{ fontSize: 13, fontWeight: 500 }}>No events yet</div>
           <div style={{ fontSize: 12, marginTop: 4 }}>Events will appear here when webhooks are received or tests are run</div>
         </div>
       ) : (
-        <div style={{ border: '1px solid #e8e8e8', borderRadius: 14, overflow: 'hidden' }}>
+        <div style={{ border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
           {logs.map((log, idx) => {
             const isExpanded = expandedId === log.id;
             const statusColors = {
@@ -1380,21 +1380,21 @@ const ActivityTab = ({ int, update }) => {
                   style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderBottom: idx < logs.length - 1 || isExpanded ? '1px solid #f5f5f5' : 'none', cursor: 'pointer', transition: 'background .1s' }}
                   onMouseEnter={e => e.currentTarget.style.background = '#fafaf9'}
                   onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                  <span style={{ fontSize: 12, color: '#9e9e9e', whiteSpace: 'nowrap', width: 70, flexShrink: 0 }}>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap', width: 70, flexShrink: 0 }}>
                     {log.timestamp ? new Date(log.timestamp).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--'}
                   </span>
                   <span style={{ display: 'inline-flex', padding: '2px 8px', borderRadius: 99, background: st.bg, color: st.color, fontSize: 11, fontWeight: 600, flexShrink: 0 }}>
                     {st.label}
                   </span>
-                  <span style={{ fontSize: 13, color: '#1b1b1b', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: 13, color: 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {log.summary}
                   </span>
-                  <i className={isExpanded ? 'bi-chevron-up' : 'bi-chevron-down'} style={{ fontSize: 10, color: '#9e9e9e', flexShrink: 0 }}></i>
+                  <i className={isExpanded ? 'bi-chevron-up' : 'bi-chevron-down'} style={{ fontSize: 10, color: 'var(--text-muted)', flexShrink: 0 }}></i>
                 </div>
                 {isExpanded && log.payload && (
-                  <div style={{ padding: '10px 14px', background: '#fafaf9', borderBottom: idx < logs.length - 1 ? '1px solid #f5f5f5' : 'none' }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: '#9e9e9e', marginBottom: 6 }}>RAW PAYLOAD</div>
-                    <pre style={{ fontSize: 11.5, fontFamily: 'SFMono-Regular, Menlo, monospace', color: '#616161', background: '#f0f0f0', padding: '10px 12px', borderRadius: 8, overflow: 'auto', maxHeight: 200, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                  <div style={{ padding: '10px 14px', background: 'var(--surface-2)', borderBottom: idx < logs.length - 1 ? '1px solid #f5f5f5' : 'none' }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6 }}>RAW PAYLOAD</div>
+                    <pre style={{ fontSize: 11.5, fontFamily: 'SFMono-Regular, Menlo, monospace', color: 'var(--text-secondary)', background: 'var(--surface-3)', padding: '10px 12px', borderRadius: 8, overflow: 'auto', maxHeight: 200, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
                       {JSON.stringify(log.payload, null, 2)}
                     </pre>
                   </div>

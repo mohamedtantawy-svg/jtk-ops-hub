@@ -500,7 +500,7 @@ export default function SourceTable({
     + (canBulk ? 1 : 0); // Selection checkbox column when any bulk handler is wired
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#fafaf9', overflow: 'hidden' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--surface-2)', overflow: 'hidden' }}>
       {/* ── Filter bar ── */}
       {!hideFilterBar && (
       <div style={{ padding: '10px 24px', background: 'var(--surface)', borderBottom: '1px solid #f0efed', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -516,12 +516,12 @@ export default function SourceTable({
 
         {searchable && (
           <div style={{ position: 'relative' }}>
-            <i className="bi-search" aria-hidden="true" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: '#9e9e9e' }} />
+            <i className="bi-search" aria-hidden="true" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: 'var(--text-muted)' }} />
             <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
               placeholder="Search..."
               role="searchbox"
               aria-label="Search tasks"
-              style={{ width: 200, height: 32, paddingLeft: 30, paddingRight: 10, borderRadius: 8, border: '1px solid #e8e8e8', fontSize: 12, outline: 'none' }} />
+              style={{ width: 200, height: 32, paddingLeft: 30, paddingRight: 10, borderRadius: 8, border: '1px solid var(--border)', fontSize: 12, outline: 'none' }} />
           </div>
         )}
 
@@ -532,7 +532,7 @@ export default function SourceTable({
           </button>
         )}
 
-        <span aria-live="polite" aria-atomic="true" style={{ fontSize: 11, color: '#9e9e9e' }}>
+        <span aria-live="polite" aria-atomic="true" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
           {(() => {
             const resolvedN = mineResolved.length + othersResolved.length;
             const activeN = sorted.length - resolvedN;
@@ -592,8 +592,8 @@ export default function SourceTable({
       {/* ── Loading ── */}
       {loading && rows.length === 0 && (
         <div style={{ textAlign: 'center', padding: 60 }}>
-          <i className="bi-arrow-clockwise spin" style={{ fontSize: 28, color: '#9e9e9e', display: 'block', marginBottom: 12 }} />
-          <div style={{ fontSize: 14, color: '#9e9e9e' }}>Loading tasks...</div>
+          <i className="bi-arrow-clockwise spin" style={{ fontSize: 28, color: 'var(--text-muted)', display: 'block', marginBottom: 12 }} />
+          <div style={{ fontSize: 14, color: 'var(--text-muted)' }}>Loading tasks...</div>
         </div>
       )}
 
@@ -601,10 +601,10 @@ export default function SourceTable({
       {error && rows.length === 0 && (
         <div style={{ textAlign: 'center', padding: 60 }}>
           <i className="bi-exclamation-triangle" style={{ fontSize: 40, color: '#ed8d00', display: 'block', marginBottom: 12 }} />
-          <div style={{ fontSize: 15, fontWeight: 600, color: '#1b1b1b', marginBottom: 6 }}>Failed to load</div>
-          <div style={{ fontSize: 13, color: '#9e9e9e', marginBottom: 16, maxWidth: 480 }}>{error}</div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>Failed to load</div>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16, maxWidth: 480 }}>{error}</div>
           {onRefresh && (
-            <button onClick={onRefresh} style={{ padding: '8px 20px', borderRadius: 128, border: '1px solid #e8e8e8', background: 'var(--surface)', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#1b1b1b' }}>
+            <button onClick={onRefresh} style={{ padding: '8px 20px', borderRadius: 128, border: '1px solid var(--border)', background: 'var(--surface)', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: 'var(--text)' }}>
               <i className="bi-arrow-clockwise" style={{ marginRight: 6 }} />Retry
             </button>
           )}
@@ -615,10 +615,10 @@ export default function SourceTable({
       {!loading && !error && sorted.length === 0 && (
         <div style={{ textAlign: 'center', padding: 60 }}>
           <i className={emptyIcon} style={{ fontSize: 40, color: '#c0c0c0', display: 'block', marginBottom: 12 }} />
-          <div style={{ fontSize: 15, fontWeight: 600, color: '#1b1b1b', marginBottom: 6 }}>
+          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>
             {searchTerm || statusFilter ? 'No matches' : emptyLabel}
           </div>
-          <div style={{ fontSize: 13, color: '#9e9e9e' }}>
+          <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
             {searchTerm || statusFilter ? 'Try adjusting the filters' : emptySubLabel}
           </div>
         </div>
@@ -629,7 +629,7 @@ export default function SourceTable({
         <div ref={scrollerRef} style={{ flex: 1, overflowY: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
-              <tr style={{ background: '#f5f4f2', position: 'sticky', top: 0, zIndex: 2 }}>
+              <tr style={{ background: 'var(--surface-2)', position: 'sticky', top: 0, zIndex: 2 }}>
                 {canBulk && (
                   <th style={{ ...thStyle, width: 36, padding: '8px 12px' }}>
                     <input
@@ -688,7 +688,7 @@ export default function SourceTable({
                       ? { color: '#6b6560', background: '#faf9f7', icon: 'bi-pause-circle-fill' }
                       : isMineHeader
                         ? { color: '#1d4ed8', background: '#eff6ff', icon: 'bi-person-check-fill' }
-                        : { color: '#6b6560', background: '#f5f4f2', icon: 'bi-people' };
+                        : { color: '#6b6560', background: 'var(--surface-2)', icon: 'bi-people' };
                   return (
                     <tr key={`section-band-${startIdx + i}`} style={{ height: ROW_HEIGHT }}>
                       <td colSpan={sectionColSpan} style={{ padding: '12px 16px', fontSize: 11, fontWeight: 700, color: headerStyle.color, letterSpacing: '.04em', background: headerStyle.background, borderTop: '1px solid #e8e8e8', borderBottom: '1px solid #e8e8e8' }}>
@@ -907,7 +907,7 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
     critical: { bg: '#fef2f2', color: '#d42d35', border: '#fca5a5', icon: 'bi-exclamation-triangle-fill' },
     warning:  { bg: '#fef3c7', color: '#92400e', border: '#ffe27c', icon: 'bi-exclamation-circle-fill' },
     active:   { bg: '#eff6ff', color: '#1d4ed8', border: '#bddcf0', icon: 'bi-arrow-repeat' },
-    info:     { bg: '#f7f5f2', color: '#616161', border: '#e8e8e8', icon: 'bi-clock' },
+    info:     { bg: '#f7f5f2', color: 'var(--text-secondary)', border: '#e8e8e8', icon: 'bi-clock' },
   };
   const baseCfg = sevConfig[sev] || sevConfig.info;
   // If the status has its own color, derive bg/border from it
@@ -953,7 +953,7 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
               <i className={tool.icon} style={{ fontSize: 9 }} />{tool.label}
             </span>
           ) : (
-            <span style={{ fontSize: 11, color: '#9e9e9e' }}>{row.source}</span>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{row.source}</span>
           )}
         </td>
       )}
@@ -961,7 +961,7 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
       {/* Subject — 2026-05-21 audit F29: full subject surfaced via
           `title=` so a hovered truncated row shows the complete name
           without forcing the user to expand the column. */}
-      <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: '#1b1b1b', maxWidth: 180 }}
+      <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: 'var(--text)', maxWidth: 180 }}
         title={row.subject || ''}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <div style={{
@@ -980,7 +980,7 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
 
       {/* Client Name */}
       {showClient && (
-        <td style={{ ...tdStyle, textAlign: 'left', fontSize: 12, color: '#1b1b1b', fontWeight: 500, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+        <td style={{ ...tdStyle, textAlign: 'left', fontSize: 12, color: 'var(--text)', fontWeight: 500, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
           title={row.clientName || ''}>
           {row.clientName || '--'}
         </td>
@@ -1008,7 +1008,7 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
       {/* Country */}
       <td style={{ ...tdStyle, fontSize: 12, whiteSpace: 'nowrap' }}>
         {flag && <span style={{ marginRight: 3 }}>{flag}</span>}
-        <span style={{ color: '#616161', fontWeight: 500 }}>{countryDisplay || '--'}</span>
+        <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>{countryDisplay || '--'}</span>
       </td>
 
       {/* Assignee — read-only mirror of the Deel-side HRX. The previous
@@ -1025,21 +1025,21 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
         {row.assignee ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
             <Avatar name={row.assignee} size="xs" />
-            <span style={{ fontSize: 11, color: '#1b1b1b', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 80, borderBottom: row.assigneeIsSynthetic ? '1px dashed #9e9e9e' : 'none', paddingBottom: row.assigneeIsSynthetic ? 1 : 0 }}>
+            <span style={{ fontSize: 11, color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 80, borderBottom: row.assigneeIsSynthetic ? '1px dashed var(--text-muted)' : 'none', paddingBottom: row.assigneeIsSynthetic ? 1 : 0 }}>
               {row.assignee.split(' ')[0]}
             </span>
           </div>
-        ) : <span style={{ fontSize: 11, color: '#9e9e9e', fontWeight: 500 }}>Unassigned</span>}
+        ) : <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>Unassigned</span>}
       </td>
 
       {/* Date column (Start Date for onboarding, End Date for offboarding, etc.) */}
-      <td style={{ ...tdStyle, fontSize: 11, color: '#616161', whiteSpace: 'nowrap' }}>
+      <td style={{ ...tdStyle, fontSize: 11, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
         {(() => {
           const val = row[dateField];
           // Offboarding: when end date is not yet confirmed, mirror admin UI's "ASAP" label.
           if (dateField === 'endDate' && !row.endDateIsConfirmed) {
-            if (val) return <span title={`Desired: ${fmtDate(val)}`} style={{ color: '#9e9e9e' }}>{fmtDate(val)}<span style={{ fontSize: 9, marginLeft: 4, color: '#b0b0b0' }}>(desired)</span></span>;
-            return <span style={{ color: '#9e9e9e', fontStyle: 'italic' }}>ASAP</span>;
+            if (val) return <span title={`Desired: ${fmtDate(val)}`} style={{ color: 'var(--text-muted)' }}>{fmtDate(val)}<span style={{ fontSize: 9, marginLeft: 4, color: '#b0b0b0' }}>(desired)</span></span>;
+            return <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>ASAP</span>;
           }
           return val ? fmtDate(val) : '--';
         })()}
@@ -1063,7 +1063,7 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
 
       {/* Updated */}
       {!hideUpdated && (
-        <td style={{ ...tdStyle, fontSize: 11, color: '#9e9e9e', whiteSpace: 'nowrap' }}>
+        <td style={{ ...tdStyle, fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
           {row.updatedAt ? timeAgo(row.updatedAt) : '--'}
         </td>
       )}
@@ -1276,8 +1276,8 @@ function WorkbenchSlaBadge({ slaRemaining, slaBreachStatus }) {
   const SLA_MAP = {
     SLA_BREACHED:     { label: 'Breached', color: '#d42d35', bg: '#fef2f2' },
     SLA_NOT_BREACHED: { label: 'On Track', color: '#29811e', bg: '#e8f5e9' },
-    SLA_PAUSED:       { label: 'Paused',   color: '#616161', bg: '#f3f3f3' },
-    SLA_NOT_STARTED:  { label: 'Not Set',  color: '#9e9e9e', bg: '#f7f5f2' },
+    SLA_PAUSED:       { label: 'Paused',   color: 'var(--text-secondary)', bg: '#f3f3f3' },
+    SLA_NOT_STARTED:  { label: 'Not Set',  color: 'var(--text-muted)', bg: '#f7f5f2' },
   };
   const sla = SLA_MAP[slaBreachStatus] || null;
   if (!sla) return <span style={{ color: '#d5d5d5', fontSize: 11 }}>--</span>;
@@ -1400,7 +1400,7 @@ function SortTh({ col, label, sortCol, sortDir, onSort, style }) {
 }
 
 // ── Styles ──
-const iconBtnStyle = { width: 32, height: 32, borderRadius: 8, border: '1px solid #e8e8e8', background: 'var(--surface)', color: '#9e9e9e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+const iconBtnStyle = { width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
 // Bulk-bar action button — solid colour fill on the dark bar so the action
 // stands out against the "12 tasks selected" label. Color is the action's
 // brand hue (purple = escalate, blue = reassign, red = hide).
@@ -1410,5 +1410,5 @@ const bulkBtnStyle = (color) => ({
   borderRadius: 8, padding: '6px 12px',
   fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
 });
-const thStyle = { padding: '10px 12px', fontSize: 10, fontWeight: 600, color: '#9e9e9e', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center', whiteSpace: 'nowrap', borderBottom: '1px solid #e8e8e8' };
+const thStyle = { padding: '10px 12px', fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center', whiteSpace: 'nowrap', borderBottom: '1px solid #e8e8e8' };
 const tdStyle = { padding: '8px 12px', textAlign: 'center', verticalAlign: 'middle' };

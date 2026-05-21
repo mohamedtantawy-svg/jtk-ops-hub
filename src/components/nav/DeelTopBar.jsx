@@ -29,7 +29,7 @@ const DeelTopBar = ({ view, onSearch, notifs, markAllRead, onCreateTask }) => {
 
   const dropdownBase = {
     position: 'absolute', top: 'calc(100% + 8px)', background: 'var(--surface)',
-    border: '1px solid #e8e8e8', boxShadow: '0 4px 20px rgba(0,0,0,0.10)', zIndex: 200,
+    border: '1px solid var(--border)', boxShadow: '0 4px 20px rgba(0,0,0,0.10)', zIndex: 200,
   };
 
   return (
@@ -40,7 +40,7 @@ const DeelTopBar = ({ view, onSearch, notifs, markAllRead, onCreateTask }) => {
     }}>
       {/* Page title */}
       <div style={{ flex: 1 }}>
-        <span style={{ fontSize: 15, fontWeight: 600, color: '#1b1b1b' }}>
+        <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>
           {VIEW_TITLES[view] || 'Ops Hub'}
         </span>
       </div>
@@ -49,16 +49,16 @@ const DeelTopBar = ({ view, onSearch, notifs, markAllRead, onCreateTask }) => {
       <button onClick={onSearch}
         style={{
           display: 'flex', alignItems: 'center', gap: 8, padding: '7px 14px',
-          borderRadius: 128, background: '#f4f4f4', border: '1px solid #e8e8e8',
-          cursor: 'pointer', fontSize: 13, color: '#9e9e9e', transition: 'background .15s',
+          borderRadius: 128, background: '#f4f4f4', border: '1px solid var(--border)',
+          cursor: 'pointer', fontSize: 13, color: 'var(--text-muted)', transition: 'background .15s',
         }}
         onMouseEnter={e => e.currentTarget.style.background = '#ececec'}
         onMouseLeave={e => e.currentTarget.style.background = '#f4f4f4'}>
-        <i className="bi bi-search" style={{ fontSize: 13, color: '#9e9e9e' }}></i>
+        <i className="bi bi-search" style={{ fontSize: 13, color: 'var(--text-muted)' }}></i>
         <span>Search</span>
         <span style={{
           background: '#e4e4e4', borderRadius: 5, padding: '2px 7px',
-          fontSize: 11, color: '#9e9e9e', fontWeight: 500, letterSpacing: '.02em',
+          fontSize: 11, color: 'var(--text-muted)', fontWeight: 500, letterSpacing: '.02em',
         }}>⌘K</span>
       </button>
 
@@ -91,7 +91,7 @@ const DeelTopBar = ({ view, onSearch, notifs, markAllRead, onCreateTask }) => {
               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
               padding: '16px 20px 14px', borderBottom: '1px solid #e8e8e8',
             }}>
-              <span style={{ fontSize: 16, fontWeight: 700, color: '#1b1b1b' }}>Notifications</span>
+              <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>Notifications</span>
               {unreadCount > 0 && (
                 <button onClick={markAllRead} style={{
                   background: 'none', border: 'none', color: '#1f74b3',
@@ -116,14 +116,14 @@ const DeelTopBar = ({ view, onSearch, notifs, markAllRead, onCreateTask }) => {
                     : n.type === 'success' ? '#29811e' : '#1f74b3',
                 }}></div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: n.read ? 400 : 600, color: '#1b1b1b', lineHeight: '18px' }}>{n.title}</div>
-                  <div style={{ fontSize: 12, color: '#616161', marginTop: 2, lineHeight: '16px' }}>{n.body}</div>
-                  <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 4 }}>{n.time}</div>
+                  <div style={{ fontSize: 13, fontWeight: n.read ? 400 : 600, color: 'var(--text)', lineHeight: '18px' }}>{n.title}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2, lineHeight: '16px' }}>{n.body}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{n.time}</div>
                 </div>
                 <i className="bi bi-chevron-right" style={{ fontSize: 12, color: '#c0c0c0', marginTop: 4, flexShrink: 0 }}></i>
               </div>
             )) : (
-              <div style={{ padding: 40, textAlign: 'center', color: '#9e9e9e', fontSize: 14 }}>
+              <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
                 <i className="bi bi-bell-slash" style={{ fontSize: 28, display: 'block', marginBottom: 8, color: '#d0d0d0' }}></i>
                 No notifications yet
               </div>

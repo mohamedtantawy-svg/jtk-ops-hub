@@ -760,7 +760,18 @@ export default function CountryHandoverDocView({ user }) {
           <div style={{ flex: 1, padding: 32, color: '#B91C1C', fontSize: 13 }}>
             {error}
           </div>
-        ) : !doc ? null : (
+        ) : !doc ? (
+          /* 2026-05-21 audit U108: right pane previously rendered nothing
+              when no country was selected. Show a friendly empty-state so
+              the surface doesn't look broken on first open. */
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, padding: 32, color: 'var(--text-muted)' }}>
+            <i className="bi-globe2" style={{ fontSize: 36, opacity: 0.5 }} />
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>Select a country to view its handover doc</div>
+            <div style={{ fontSize: 12, maxWidth: 360, textAlign: 'center' }}>
+              Each row in the left rail opens its long-lived per-country handover doc — fill it once, every OOO reuses it.
+            </div>
+          </div>
+        ) : (
           <>
             <header style={{
               padding: '14px 24px',

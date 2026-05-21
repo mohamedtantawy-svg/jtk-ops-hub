@@ -64,12 +64,12 @@ const OOOAlert = ({ tasks = [], onLeaveEmails = new Set(), members = [], onReass
             >
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div
-                  style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', cursor: onViewTask ? 'pointer' : 'default', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                  style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', cursor: onViewTask ? 'pointer' : 'default', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
                   onClick={() => onViewTask && onViewTask(task)}
                 >
                   {task.subject || task.title || 'Untitled'}
                 </div>
-                <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 2, display: 'flex', gap: 8 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, display: 'flex', gap: 8 }}>
                   <span>
                     <i className="bi-person" style={{ marginRight: 3 }}></i>
                     {getMemberName(task.assigneeEmail)}

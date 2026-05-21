@@ -14,8 +14,8 @@ const CreateTaskModal=({onConfirm,onClose,currentUser})=>{
   const countries=Object.keys(FLAGS);
   const sources=Object.entries(TOOLS).filter(([k])=>k!=='slack');
   const valid=form.subject.trim().length>3 && !!form.assigneeId;
-  const sel={width:'100%',padding:'8px 12px',border:'1px solid #e8e8e8',borderRadius:8,fontSize:13,color:'#1b1b1b',background:'var(--surface)',cursor:'pointer'};
-  const labelStyle={fontSize:12,fontWeight:600,color:'#616161',letterSpacing:'0.05em',display:'block',marginBottom:4};
+  const sel={width:'100%',padding:'8px 12px',border:'1px solid var(--border)',borderRadius:8,fontSize:13,color:'var(--text)',background:'var(--surface)',cursor:'pointer'};
+  const labelStyle={fontSize:12,fontWeight:600,color:'var(--text-secondary)',letterSpacing:'0.05em',display:'block',marginBottom:4};
 
   const handleSubmit=()=>{
     if(!valid){
@@ -34,9 +34,9 @@ const CreateTaskModal=({onConfirm,onClose,currentUser})=>{
         <div style={{padding:'24px 24px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0,borderBottom:'1px solid var(--border)',paddingBottom:'var(--space-4)',marginBottom:'var(--space-4)'}}>
           <div style={{display:'flex',alignItems:'center',gap:10}}>
             <div style={{width:36,height:36,background:'#e3f2fd',borderRadius:9,display:'flex',alignItems:'center',justifyContent:'center'}}><i className="bi-plus-circle-fill" style={{color:'#1565c0',fontSize:16}}></i></div>
-            <div><div style={{fontSize:18,fontWeight:700,color:'#1b1b1b'}}>Create Task</div><div style={{fontSize:12,color:'#9e9e9e',marginTop:1}}>Manually add a task to the queue</div></div>
+            <div><div style={{fontSize:18,fontWeight:700,color:'var(--text)'}}>Create Task</div><div style={{fontSize:12,color:'var(--text-muted)',marginTop:1}}>Manually add a task to the queue</div></div>
           </div>
-          <button aria-label="Close" onClick={onClose} style={{width:32,height:32,borderRadius:'50%',background:'#f2f2f2',border:'none',cursor:'pointer',color:'#616161',display:'flex',alignItems:'center',justifyContent:'center',fontSize:14}}><i className="bi-x-lg"></i></button>
+          <button aria-label="Close" onClick={onClose} style={{width:32,height:32,borderRadius:'50%',background:'#f2f2f2',border:'none',cursor:'pointer',color:'var(--text-secondary)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:14}}><i className="bi-x-lg"></i></button>
         </div>
         <div style={{padding:'0 24px 16px 24px',overflowY:'auto',flex:1}}>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10}}>
@@ -56,7 +56,7 @@ const CreateTaskModal=({onConfirm,onClose,currentUser})=>{
               placeholder="Brief description of the task…"
               aria-invalid={submitted && !valid}
               className={submitted && !form.subject.trim() ? 'input-error' : ''}
-              style={{width:'100%',padding:'8px 12px',border:`1px solid ${valid?'#1b1b1b':form.subject.length>0?'#d42d35':'#e8e8e8'}`,borderRadius:8,fontSize:13,color:'#1b1b1b',outline:'none',boxSizing:'border-box'}}
+              style={{width:'100%',padding:'8px 12px',border:`1px solid ${valid?'#1b1b1b':form.subject.length>0?'#d42d35':'#e8e8e8'}`,borderRadius:8,fontSize:13,color:'var(--text)',outline:'none',boxSizing:'border-box'}}
             />
             {submitted && !form.subject.trim() && (
               <div className="error-msg"><i className="bi bi-exclamation-circle"/><span>This field is required</span></div>
@@ -66,13 +66,13 @@ const CreateTaskModal=({onConfirm,onClose,currentUser})=>{
             <div className="error-msg" style={{marginTop:-6,marginBottom:8}}><i className="bi bi-exclamation-circle"/><span>Please select an assignee</span></div>
           )}
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10}}>
-            <div><label style={labelStyle}>LINK (OPTIONAL)</label><input type="url" value={form.link} onChange={e=>upd('link',e.target.value)} placeholder="https://..." style={{width:'100%',padding:'8px 12px',border:'1px solid #e8e8e8',borderRadius:8,fontSize:13,color:'#1b1b1b',outline:'none',boxSizing:'border-box'}}/></div>
-            <div><label style={labelStyle}>DEADLINE (OPTIONAL)</label><input type="date" value={form.deadline} onChange={e=>upd('deadline',e.target.value)} style={{width:'100%',padding:'8px 12px',border:'1px solid #e8e8e8',borderRadius:8,fontSize:13,color:'#1b1b1b',outline:'none',boxSizing:'border-box'}}/></div>
+            <div><label style={labelStyle}>LINK (OPTIONAL)</label><input type="url" value={form.link} onChange={e=>upd('link',e.target.value)} placeholder="https://..." style={{width:'100%',padding:'8px 12px',border:'1px solid var(--border)',borderRadius:8,fontSize:13,color:'var(--text)',outline:'none',boxSizing:'border-box'}}/></div>
+            <div><label style={labelStyle}>DEADLINE (OPTIONAL)</label><input type="date" value={form.deadline} onChange={e=>upd('deadline',e.target.value)} style={{width:'100%',padding:'8px 12px',border:'1px solid var(--border)',borderRadius:8,fontSize:13,color:'var(--text)',outline:'none',boxSizing:'border-box'}}/></div>
           </div>
           <div><label style={labelStyle}>DETAILS (OPTIONAL)</label><textarea className="note-input" value={form.body} onChange={e=>upd('body',e.target.value)} rows={3} placeholder="Employee name, ticket reference, additional context…"/></div>
         </div>
         <div style={{padding:'0 24px 24px 24px',display:'flex',gap:8,justifyContent:'flex-end',flexShrink:0,borderTop:'1px solid var(--border)',paddingTop:'var(--space-4)',marginTop:'var(--space-4)'}}>
-          <button onClick={onClose} style={{background:'var(--surface)',border:'1px solid #dedede',color:'#1b1b1b',borderRadius:128,padding:'10px 24px',fontSize:13,fontWeight:500,cursor:'pointer'}}>Cancel</button>
+          <button onClick={onClose} style={{background:'var(--surface)',border:'1px solid #dedede',color:'var(--text)',borderRadius:128,padding:'10px 24px',fontSize:13,fontWeight:500,cursor:'pointer'}}>Cancel</button>
           <button disabled={submitting} onClick={handleSubmit} style={{background:valid&&!submitting?'#1b1b1b':'#dedede',color:'white',border:'none',borderRadius:128,padding:'10px 24px',fontSize:13,fontWeight:500,cursor:submitting?'not-allowed':'pointer',display:'flex',alignItems:'center',gap:5,opacity:submitting?.6:1}}><i className="bi-plus-circle-fill" style={{fontSize:13}}></i>{submitting?'Creating…':'Create Task'}</button>
         </div>
       </div>

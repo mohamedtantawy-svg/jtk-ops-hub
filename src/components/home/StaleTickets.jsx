@@ -42,20 +42,20 @@ const StaleTickets = ({ tasks = [], defaultDays = 3 }) => {
   };
 
   return (
-    <div style={{ background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 16, overflow: 'hidden' }}>
+    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden' }}>
       {/* Header */}
       <div style={{ padding: '14px 20px 10px', borderBottom: '1px solid #e8e8e8', display: 'flex', alignItems: 'center', gap: 10 }}>
         <div style={{ width: 30, height: 30, borderRadius: 9, background: 'linear-gradient(135deg, #FEF3C7, #FDE68A)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <i className="bi-hourglass-split" style={{ fontSize: 13, color: '#D97706' }}></i>
         </div>
-        <span style={{ fontSize: 15, fontWeight: 700, color: '#1b1b1b', flex: 1 }}>Stale Tickets</span>
+        <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', flex: 1 }}>Stale Tickets</span>
 
         {/* Days dropdown */}
         <select
           value={days}
           onChange={e => setDays(Number(e.target.value))}
           style={{
-            height: 28, padding: '0 8px', borderRadius: 8, border: '1px solid #e8e8e8',
+            height: 28, padding: '0 8px', borderRadius: 8, border: '1px solid var(--border)',
             fontSize: 11, fontWeight: 600, color: '#666', background: '#fafafa',
             cursor: 'pointer', outline: 'none', fontFamily: 'inherit'
           }}
@@ -78,7 +78,7 @@ const StaleTickets = ({ tasks = [], defaultDays = 3 }) => {
           <div style={{ padding: '24px 20px', textAlign: 'center' }}>
             <i className="bi-check-circle-fill" style={{ fontSize: 24, color: '#16A34A', display: 'block', marginBottom: 8 }}></i>
             <div style={{ fontSize: 13, fontWeight: 600, color: '#16A34A' }}>All tickets active</div>
-            <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 4 }}>No tickets stale for {days}+ day{days !== 1 ? 's' : ''}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>No tickets stale for {days}+ day{days !== 1 ? 's' : ''}</div>
           </div>
         ) : (
           staleByType.map(([type, items]) => (
@@ -92,8 +92,8 @@ const StaleTickets = ({ tasks = [], defaultDays = 3 }) => {
                   alignItems: 'center', gap: 8, textAlign: 'left'
                 }}
               >
-                <i className={expandedGroups[type] ? 'bi-chevron-down' : 'bi-chevron-right'} style={{ fontSize: 10, color: '#9e9e9e' }}></i>
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', flex: 1 }}>{type}</span>
+                <i className={expandedGroups[type] ? 'bi-chevron-down' : 'bi-chevron-right'} style={{ fontSize: 10, color: 'var(--text-muted)' }}></i>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', flex: 1 }}>{type}</span>
                 <span style={{
                   fontSize: 11, fontWeight: 700, color: '#D97706', background: '#FEF3C7',
                   borderRadius: 10, padding: '1px 7px'
@@ -112,11 +112,11 @@ const StaleTickets = ({ tasks = [], defaultDays = 3 }) => {
                   }}
                 >
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 500, color: '#1b1b1b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {task.subject || task.title || 'Untitled'}
                     </div>
                     {task.assigneeEmail && (
-                      <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 1 }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
                         {task.assigneeName || task.assigneeEmail}
                       </div>
                     )}

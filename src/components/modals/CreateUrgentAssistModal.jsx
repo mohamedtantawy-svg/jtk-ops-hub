@@ -49,12 +49,12 @@ const PRIORITIES = [
 ];
 
 const inputStyle = {
-  width: '100%', padding: '9px 12px', border: '1px solid #e8e8e8', borderRadius: 10,
-  fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', outline: 'none',
+  width: '100%', padding: '9px 12px', border: '1px solid var(--border)', borderRadius: 10,
+  fontSize: 13, color: 'var(--text)', background: 'var(--surface)', outline: 'none',
   fontFamily: 'inherit', boxSizing: 'border-box',
 };
 const labelStyle = {
-  fontSize: 11, fontWeight: 600, color: '#616161', textTransform: 'uppercase',
+  fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase',
   letterSpacing: '.05em', marginBottom: 6, display: 'block',
 };
 
@@ -160,14 +160,14 @@ export default function CreateUrgentAssistModal({ onClose, onCreated, currentUse
             <i className="bi-exclamation-octagon-fill" style={{ fontSize: 18, color: '#d42d35' }} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div id="urgent-assist-title" style={{ fontSize: 16, fontWeight: 700, color: '#1b1b1b' }}>New Urgent Assist</div>
-            <div style={{ fontSize: 12, color: '#9e9e9e', marginTop: 2 }}>Logs a manual urgent-assist request — 6h SLA from now.</div>
+            <div id="urgent-assist-title" style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>New Urgent Assist</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Logs a manual urgent-assist request — 6h SLA from now.</div>
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close dialog"
-            style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #e8e8e8', background: 'var(--surface)', color: '#9e9e9e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           >
             <i className="bi-x-lg" style={{ fontSize: 12 }} />
           </button>
@@ -269,7 +269,7 @@ export default function CreateUrgentAssistModal({ onClose, onCreated, currentUse
             <button
               type="button"
               onClick={onClose}
-              style={{ padding: '9px 16px', borderRadius: 10, border: '1px solid #e8e8e8', background: 'var(--surface)', fontSize: 13, fontWeight: 500, color: '#616161', cursor: 'pointer', fontFamily: 'inherit' }}
+              style={{ padding: '9px 16px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface)', fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'inherit' }}
             >
               Cancel
             </button>

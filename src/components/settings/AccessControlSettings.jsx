@@ -20,24 +20,24 @@ const deriveBaseRole = (accessTypeId) => ACCESS_TYPE_TO_ROLE[accessTypeId] || 'a
 const TABS=['Access Types','Access Type Editor','People Directory'];
 
 // ── Styles ───────────────────────────────────────────────────────────────────
-const card={background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16,padding:24,marginBottom:16};
+const card={background:'var(--surface)',border:'1px solid var(--border)',borderRadius:16,padding:24,marginBottom:16};
 const btnPrimary={background:'#1b1b1b',color:'#fff',border:'none',borderRadius:12,padding:'8px 18px',fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'inherit'};
-const btnSecondary={background:'var(--surface)',color:'#1b1b1b',border:'1px solid #e8e8e8',borderRadius:12,padding:'8px 18px',fontSize:13,fontWeight:500,cursor:'pointer',fontFamily:'inherit'};
+const btnSecondary={background:'var(--surface)',color:'var(--text)',border:'1px solid var(--border)',borderRadius:12,padding:'8px 18px',fontSize:13,fontWeight:500,cursor:'pointer',fontFamily:'inherit'};
 const btnDanger={...btnSecondary,color:'#d32f2f',borderColor:'#f5c6c6'};
 const btnSmall={...btnSecondary,padding:'5px 12px',fontSize:12};
 const badge=(bg,color)=>({display:'inline-block',fontSize:11,fontWeight:600,padding:'2px 8px',borderRadius:8,background:bg,color,marginLeft:8});
-const inputStyle={width:'100%',border:'1px solid #e8e8e8',borderRadius:12,padding:'8px 12px',fontSize:13,outline:'none',fontFamily:'inherit',color:'#1b1b1b',boxSizing:'border-box'};
+const inputStyle={width:'100%',border:'1px solid var(--border)',borderRadius:12,padding:'8px 12px',fontSize:13,outline:'none',fontFamily:'inherit',color:'var(--text)',boxSizing:'border-box'};
 const selectStyle={...inputStyle,cursor:'pointer',appearance:'auto'};
-const sectionTitle={fontSize:14,fontWeight:600,color:'#1b1b1b',marginBottom:10,marginTop:20};
+const sectionTitle={fontSize:14,fontWeight:600,color:'var(--text)',marginBottom:10,marginTop:20};
 const checkboxGrid=(cols)=>({display:'grid',gridTemplateColumns:`repeat(${cols}, 1fr)`,gap:'8px 16px'});
 const thStyle={textAlign:'left',padding:'10px 14px',fontSize:12,fontWeight:600,color:'#7a7059',borderBottom:'1px solid #e8e8e8'};
 const tdStyle={padding:'10px 14px',verticalAlign:'middle'};
-const labelStyle={fontSize:12,fontWeight:600,color:'#1b1b1b',display:'block',marginBottom:4};
+const labelStyle={fontSize:12,fontWeight:600,color:'var(--text)',display:'block',marginBottom:4};
 const fieldRow={display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12};
 
 const STATUS_COLORS={
   active:{bg:'#e8f5e3',color:'#29811e'},
-  inactive:{bg:'#f5f5f5',color:'#9e9e9e'},
+  inactive:{bg:'#f5f5f5',color:'var(--text-muted)'},
   offboarding:{bg:'#fff3e0',color:'#ed8d00'},
 };
 
@@ -227,7 +227,7 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
   const AccessTypesList=()=>(
     <div>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
-        <div style={{fontSize:13,color:'#9e9e9e'}}>{accessTypes.length} access type{accessTypes.length!==1?'s':''}</div>
+        <div style={{fontSize:13,color:'var(--text-muted)'}}>{accessTypes.length} access type{accessTypes.length!==1?'s':''}</div>
         <button style={btnPrimary} onClick={startCreate}><i className="bi-plus" style={{marginRight:4}}/>Create Access Type</button>
       </div>
       {accessTypes.map(t=>{
@@ -236,11 +236,11 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
           <div key={t.id} style={{...card,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
             <div style={{flex:1}}>
               <div style={{display:'flex',alignItems:'center',gap:6}}>
-                <span style={{fontSize:15,fontWeight:600,color:'#1b1b1b'}}>{t.name}</span>
+                <span style={{fontSize:15,fontWeight:600,color:'var(--text)'}}>{t.name}</span>
                 {t.isDefault&&<span style={badge('#f0ede8','#7a7059')}>Built-in</span>}
               </div>
-              {t.description&&<div style={{fontSize:12,color:'#9e9e9e',marginTop:3}}>{t.description}</div>}
-              <div style={{fontSize:12,color:'#9e9e9e',marginTop:4}}>{count} user{count!==1?'s':''} assigned &middot; {t.views.length} views &middot; {t.actions.length} actions &middot; {DATA_SCOPE_LABELS[t.dataScope]}</div>
+              {t.description&&<div style={{fontSize:12,color:'var(--text-muted)',marginTop:3}}>{t.description}</div>}
+              <div style={{fontSize:12,color:'var(--text-muted)',marginTop:4}}>{count} user{count!==1?'s':''} assigned &middot; {t.views.length} views &middot; {t.actions.length} actions &middot; {DATA_SCOPE_LABELS[t.dataScope]}</div>
             </div>
             <div style={{display:'flex',gap:8,flexShrink:0}}>
               <button style={btnSecondary} onClick={()=>startEdit(t)}>Edit</button>
@@ -256,11 +256,11 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
 
   // ===================== TAB 1: EDITOR =====================
   const AccessTypeEditor=()=>{
-    if(!editingType) return <div style={{...card,textAlign:'center',color:'#9e9e9e',fontSize:13,padding:40}}>Select an access type to edit, or create a new one.</div>;
+    if(!editingType) return <div style={{...card,textAlign:'center',color:'var(--text-muted)',fontSize:13,padding:40}}>Select an access type to edit, or create a new one.</div>;
     const isCreate=!editingType.id;
     return(
       <div style={card}>
-        <div style={{fontSize:16,fontWeight:700,color:'#1b1b1b',marginBottom:16}}>{isCreate?'Create Access Type':'Edit Access Type'}</div>
+        <div style={{fontSize:16,fontWeight:700,color:'var(--text)',marginBottom:16}}>{isCreate?'Create Access Type':'Edit Access Type'}</div>
         <div style={fieldRow}>
           <div>
             <label style={labelStyle}>Name</label>
@@ -275,7 +275,7 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
         <div style={sectionTitle}>Views ({editingType.views.length}/{ALL_VIEWS.length})</div>
         <div style={checkboxGrid(4)}>
           {ALL_VIEWS.map(v=>(
-            <label key={v} style={{display:'flex',alignItems:'center',gap:6,fontSize:13,color:'#1b1b1b',cursor:'pointer'}}>
+            <label key={v} style={{display:'flex',alignItems:'center',gap:6,fontSize:13,color:'var(--text)',cursor:'pointer'}}>
               <input type="checkbox" checked={editingType.views.includes(v)} onChange={()=>edSet('views',toggleList(editingType.views,v))}/>
               {VIEW_LABELS[v]}
             </label>
@@ -289,7 +289,7 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
         <div style={sectionTitle}>Actions ({editingType.actions.length}/{ALL_ACTIONS.length})</div>
         <div style={checkboxGrid(3)}>
           {ALL_ACTIONS.map(a=>(
-            <label key={a} style={{display:'flex',alignItems:'center',gap:6,fontSize:13,color:'#1b1b1b',cursor:'pointer'}}>
+            <label key={a} style={{display:'flex',alignItems:'center',gap:6,fontSize:13,color:'var(--text)',cursor:'pointer'}}>
               <input type="checkbox" checked={editingType.actions.includes(a)} onChange={()=>edSet('actions',toggleList(editingType.actions,a))}/>
               {ACTION_LABELS[a]}
             </label>
@@ -303,7 +303,7 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
         <div style={sectionTitle}>Data Scope</div>
         <div style={{display:'flex',gap:20}}>
           {DATA_SCOPES.map(ds=>(
-            <label key={ds} style={{display:'flex',alignItems:'center',gap:6,fontSize:13,color:'#1b1b1b',cursor:'pointer'}}>
+            <label key={ds} style={{display:'flex',alignItems:'center',gap:6,fontSize:13,color:'var(--text)',cursor:'pointer'}}>
               <input type="radio" name="dataScope" checked={editingType.dataScope===ds} onChange={()=>edSet('dataScope',ds)}/>
               {DATA_SCOPE_LABELS[ds]}
             </label>
@@ -346,17 +346,17 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
         {/* Summary stats */}
         <div style={{display:'flex',gap:16,marginBottom:16,flexWrap:'wrap'}}>
           <div style={{...card,padding:'14px 20px',marginBottom:0,flex:'1 1 120px',minWidth:120,textAlign:'center'}}>
-            <div style={{fontSize:24,fontWeight:700,color:'#1b1b1b'}}>{totalPeople}</div>
-            <div style={{fontSize:11,color:'#9e9e9e',fontWeight:500}}>Total People</div>
+            <div style={{fontSize:24,fontWeight:700,color:'var(--text)'}}>{totalPeople}</div>
+            <div style={{fontSize:11,color:'var(--text-muted)',fontWeight:500}}>Total People</div>
           </div>
           <div style={{...card,padding:'14px 20px',marginBottom:0,flex:'1 1 120px',minWidth:120,textAlign:'center'}}>
             <div style={{fontSize:24,fontWeight:700,color:'#29811e'}}>{activeCount}</div>
-            <div style={{fontSize:11,color:'#9e9e9e',fontWeight:500}}>Active</div>
+            <div style={{fontSize:11,color:'var(--text-muted)',fontWeight:500}}>Active</div>
           </div>
           {summary.map(s=>(
             <div key={s.name} style={{...card,padding:'14px 20px',marginBottom:0,flex:'1 1 120px',minWidth:120,textAlign:'center'}}>
-              <div style={{fontSize:24,fontWeight:700,color:'#1b1b1b'}}>{s.count}</div>
-              <div style={{fontSize:11,color:'#9e9e9e',fontWeight:500}}>{s.name}{s.count!==1?'s':''}</div>
+              <div style={{fontSize:24,fontWeight:700,color:'var(--text)'}}>{s.count}</div>
+              <div style={{fontSize:11,color:'var(--text-muted)',fontWeight:500}}>{s.name}{s.count!==1?'s':''}</div>
             </div>
           ))}
         </div>
@@ -364,7 +364,7 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
         {/* Filters + Search + Add */}
         <div style={{display:'flex',gap:10,marginBottom:14,flexWrap:'wrap',alignItems:'center'}}>
           <div style={{position:'relative',flex:'1 1 200px'}}>
-            <i className="bi-search" style={{position:'absolute',left:12,top:10,fontSize:13,color:'#9e9e9e'}}/>
+            <i className="bi-search" style={{position:'absolute',left:12,top:10,fontSize:13,color:'var(--text-muted)'}}/>
             <input style={{...inputStyle,paddingLeft:34}} placeholder="Search by name, email, or title..." value={searchTerm} onChange={e=>setSearchTerm(e.target.value)}/>
           </div>
           <select style={{...selectStyle,width:130}} value={dirFilter.region} onChange={e=>setDirFilter(p=>({...p,region:e.target.value}))}>
@@ -392,7 +392,7 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
         {addingUser&&(
           <div style={{...card,border:'2px solid #c4b1f9',padding:20}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:14}}>
-              <div style={{fontSize:15,fontWeight:700,color:'#1b1b1b'}}>Add New Person</div>
+              <div style={{fontSize:15,fontWeight:700,color:'var(--text)'}}>Add New Person</div>
               <button style={{...btnSmall,padding:'4px 10px'}} onClick={()=>setAddingUser(false)}><i className="bi-x-lg"/></button>
             </div>
             <div style={fieldRow}>
@@ -452,9 +452,9 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
 
         {/* Sort */}
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
-          <div style={{fontSize:12,color:'#9e9e9e'}}>{peopleList.length} of {totalPeople} people</div>
+          <div style={{fontSize:12,color:'var(--text-muted)'}}>{peopleList.length} of {totalPeople} people</div>
           <div style={{display:'flex',alignItems:'center',gap:6}}>
-            <span style={{fontSize:12,color:'#9e9e9e'}}>Sort by</span>
+            <span style={{fontSize:12,color:'var(--text-muted)'}}>Sort by</span>
             <select style={{...selectStyle,width:110,padding:'4px 8px',fontSize:12}} value={dirSort} onChange={e=>setDirSort(e.target.value)}>
               <option value="name">Name</option>
               <option value="title">Title</option>
@@ -469,7 +469,7 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
         <div style={{...card,padding:0,overflow:'hidden'}}>
           <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
             <thead>
-              <tr style={{background:'#f7f5f2'}}>
+              <tr style={{background:'var(--surface-3)'}}>
                 <th style={thStyle}>Person</th>
                 <th style={thStyle}>Title</th>
                 <th style={thStyle}>Manager</th>
@@ -494,7 +494,7 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
                   <tr key={u.email} style={{borderBottom:'1px solid #f0ede8',background:'#faf8f5'}}>
                     <td style={tdStyle} colSpan={9}>
                       <div style={{padding:8}}>
-                        <div style={{fontSize:14,fontWeight:600,color:'#1b1b1b',marginBottom:12}}>Editing: {u.name||u.email}</div>
+                        <div style={{fontSize:14,fontWeight:600,color:'var(--text)',marginBottom:12}}>Editing: {u.name||u.email}</div>
                         <div style={fieldRow}>
                           <div><label style={labelStyle}>Name</label><input style={inputStyle} value={u.name||''} onChange={e=>updateUserField(u.email,'name',e.target.value)}/></div>
                           <div><label style={labelStyle}>Email</label><input style={inputStyle} value={u.email} disabled/></div>
@@ -569,16 +569,16 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
                       <div style={{display:'flex',alignItems:'center',gap:10}}>
                         <div style={{width:32,height:32,borderRadius:'50%',background:'#f0ede8',display:'flex',alignItems:'center',justifyContent:'center',fontSize:11,fontWeight:700,color:'#7a7059',flexShrink:0}}>{initials}</div>
                         <div>
-                          <div style={{fontWeight:600,color:'#1b1b1b',fontSize:13}}>{flag} {u.name||u.email}</div>
-                          <div style={{fontSize:11,color:'#9e9e9e'}}>{u.email}</div>
+                          <div style={{fontWeight:600,color:'var(--text)',fontSize:13}}>{flag} {u.name||u.email}</div>
+                          <div style={{fontSize:11,color:'var(--text-muted)'}}>{u.email}</div>
                         </div>
                       </div>
                     </td>
-                    <td style={{...tdStyle,fontSize:12,color:'#616161'}}>{u.title||'—'}</td>
-                    <td style={{...tdStyle,fontSize:12,color:'#616161'}}>{mgrName}</td>
-                    <td style={{...tdStyle,fontSize:12,color:'#616161'}}>{u.region||'—'}</td>
-                    <td style={{...tdStyle,fontSize:12,color:'#616161'}}>{u.team||'—'}</td>
-                    <td style={{...tdStyle,fontSize:12,color:'#616161'}}>{u.startDate||'—'}</td>
+                    <td style={{...tdStyle,fontSize:12,color:'var(--text-secondary)'}}>{u.title||'—'}</td>
+                    <td style={{...tdStyle,fontSize:12,color:'var(--text-secondary)'}}>{mgrName}</td>
+                    <td style={{...tdStyle,fontSize:12,color:'var(--text-secondary)'}}>{u.region||'—'}</td>
+                    <td style={{...tdStyle,fontSize:12,color:'var(--text-secondary)'}}>{u.team||'—'}</td>
+                    <td style={{...tdStyle,fontSize:12,color:'var(--text-secondary)'}}>{u.startDate||'—'}</td>
                     <td style={tdStyle}>
                       <span style={{fontSize:11,fontWeight:600,padding:'2px 8px',borderRadius:8,background:'#f0ede8',color:'#7a7059'}}>
                         {accessTypes.find(t=>t.id===atId)?.name||'Agent'}
@@ -598,7 +598,7 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
                 );
               })}
               {peopleList.length===0&&(
-                <tr><td colSpan={9} style={{...tdStyle,textAlign:'center',color:'#9e9e9e',padding:40}}>No people found matching your filters</td></tr>
+                <tr><td colSpan={9} style={{...tdStyle,textAlign:'center',color:'var(--text-muted)',padding:40}}>No people found matching your filters</td></tr>
               )}
             </tbody>
           </table>

@@ -419,7 +419,7 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
 
   return (
     <div style={{
-      flex: 1, overflow: 'auto', background: '#fafaf9',
+      flex: 1, overflow: 'auto', background: 'var(--surface-2)',
       padding: '24px 32px 80px',
     }}>
       {/* Inline responsive grid rules — Workspace uses the same pattern.
@@ -682,10 +682,10 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
               }}>
                 <i className="bi-check-circle-fill" />
               </div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: '#1b1b1b', marginBottom: 4 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>
                 You're caught up
               </div>
-              <div style={{ fontSize: 12, color: '#9e9e9e' }}>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                 Nothing breached or at risk. Help a teammate or pick the next item.
               </div>
             </div>
@@ -703,7 +703,7 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
             chip={null}
           />
           {sourcePills.length === 0 ? (
-            <div style={{ padding: '24px 0', textAlign: 'center', color: '#9e9e9e', fontSize: 12 }}>
+            <div style={{ padding: '24px 0', textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
               No active items in any source.
             </div>
           ) : (
@@ -715,8 +715,8 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
                   style={{
                     display: 'flex', alignItems: 'center', gap: 10,
                     padding: '10px 12px', borderRadius: 10,
-                    border: '1px solid #f0efed', background: 'white',
-                    cursor: 'pointer', fontSize: 13, color: '#1b1b1b',
+                    border: '1px solid var(--border-light)', background: 'var(--surface)',
+                    cursor: 'pointer', fontSize: 13, color: 'var(--text)',
                     textAlign: 'left', fontFamily: 'inherit',
                     transition: 'transform .12s, border-color .15s',
                   }}
@@ -739,7 +739,7 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
                         title="Per spec: Jira breaches are excluded from the SLA tiles above. Click to open your Jira queue."
                         style={{
                           fontSize: 9, fontWeight: 700,
-                          color: '#9e9e9e', background: '#f7f5f2',
+                          color: 'var(--text-muted)', background: 'var(--surface-3)',
                           padding: '1px 6px', borderRadius: 128,
                           letterSpacing: '0.04em', textTransform: 'uppercase',
                         }}
@@ -752,7 +752,7 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
                     fontSize: 14, fontWeight: 800, color: meta?.color || '#1b1b1b',
                     fontVariantNumeric: 'tabular-nums', minWidth: 24, textAlign: 'right',
                   }}>{count}</span>
-                  <i className="bi-arrow-right" style={{ fontSize: 11, color: '#9e9e9e' }} />
+                  <i className="bi-arrow-right" style={{ fontSize: 11, color: 'var(--text-muted)' }} />
                 </button>
               ))}
             </div>
@@ -768,15 +768,15 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
       {/* ── Footer hint ─────────────────────────────────────────────── */}
       <div style={{
         marginTop: 24, padding: '12px 16px', borderRadius: 12,
-        background: 'white', border: '1px solid #e8e8e8',
+        background: 'var(--surface)', border: '1px solid var(--border)',
         display: 'flex', alignItems: 'center', gap: 10,
-        fontSize: 12, color: '#616161',
+        fontSize: 12, color: 'var(--text-secondary)',
       }}>
         <i className="bi-info-circle-fill" style={{ fontSize: 13, color: '#0e7490' }} />
         <span>Click any card to jump straight in. All numbers are live and scoped to your assignments only.</span>
         <span style={{ flex: 1 }} />
         {user?.email && (
-          <span style={{ color: '#9e9e9e' }}>Signed in as <strong style={{ color: '#1b1b1b' }}>{user.name || user.email}</strong></span>
+          <span style={{ color: 'var(--text-muted)' }}>Signed in as <strong style={{ color: 'var(--text)' }}>{user.name || user.email}</strong></span>
         )}
       </div>
       {resolvedListOpen && (
@@ -787,8 +787,8 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
 }
 
 const CARD = {
-  background: 'white',
-  border: '1px solid #e8e8e8',
+  background: 'var(--surface)',
+  border: '1px solid var(--border)',
   borderRadius: 18,
   padding: 18,
   boxShadow: '0 1px 2px rgba(0,0,0,0.02)',
@@ -801,19 +801,19 @@ function SectionTitle({ title, hint, rightPill }) {
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 12, padding: '0 4px' }}>
       <h2 style={{
-        fontSize: 18, fontWeight: 800, color: '#1b1b1b',
+        fontSize: 18, fontWeight: 800, color: 'var(--text)',
         letterSpacing: '-0.01em', margin: 0,
       }}>{title}</h2>
       {hint && (
-        <span style={{ fontSize: 12, color: '#9e9e9e', fontWeight: 500 }}>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500 }}>
           {hint}
         </span>
       )}
       <span style={{ flex: 1 }} />
       {rightPill && (
         <span style={{
-          fontSize: 11, fontWeight: 700, color: '#616161',
-          background: 'white', border: '1px solid #e8e8e8',
+          fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)',
+          background: 'var(--surface)', border: '1px solid var(--border)',
           padding: '4px 10px', borderRadius: 128,
           fontVariantNumeric: 'tabular-nums',
         }}>{rightPill}</span>
@@ -829,8 +829,8 @@ function CardHeader({ title, subtitle, chip, chipColor }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 14, fontWeight: 800, color: '#1b1b1b', letterSpacing: '-0.01em' }}>{title}</div>
-        {subtitle && <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 2 }}>{subtitle}</div>}
+        <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.01em' }}>{title}</div>
+        {subtitle && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{subtitle}</div>}
       </div>
       {chip && (
         <span style={{
@@ -856,8 +856,8 @@ function SlaTile({ label, eyebrow, color, accent, bgLight, icon, count, subText,
       style={{
         position: 'relative',
         textAlign: 'left',
-        background: 'white',
-        border: '1px solid #e8e8e8',
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
         borderRadius: 18,
         padding: '20px 18px 16px',
         cursor: isAllClear ? 'default' : 'pointer',
@@ -899,8 +899,8 @@ function SlaTile({ label, eyebrow, color, accent, bgLight, icon, count, subText,
           <i className={icon} style={{ fontSize: 14 }} />
         </div>
       </div>
-      <div style={{ fontSize: 18, fontWeight: 800, color: '#1b1b1b', letterSpacing: '-0.01em', marginBottom: 4, lineHeight: 1.2 }}>{label}</div>
-      <div style={{ fontSize: 12, color: '#616161', lineHeight: 1.45, marginBottom: 12, minHeight: 32 }}>{subText}</div>
+      <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.01em', marginBottom: 4, lineHeight: 1.2 }}>{label}</div>
+      <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45, marginBottom: 12, minHeight: 32 }}>{subText}</div>
       <div style={{ flex: 1 }} />
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 6 }}>
         <span style={{
@@ -934,7 +934,7 @@ function SlaTile({ label, eyebrow, color, accent, bgLight, icon, count, subText,
 }
 
 function FocusRow({ row }) {
-  const meta = TOOLS[row.source] || { label: row.source, color: '#616161', bg: '#f3f3f3', icon: 'bi-circle' };
+  const meta = TOOLS[row.source] || { label: row.source, color: 'var(--text-secondary)', bg: '#f3f3f3', icon: 'bi-circle' };
   return (
     <div style={{
       display: 'grid', gridTemplateColumns: '90px 1fr auto auto',
@@ -951,10 +951,10 @@ function FocusRow({ row }) {
         {meta.label}
       </span>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontWeight: 600, color: '#1b1b1b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div style={{ fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {row.subject}
         </div>
-        <div style={{ fontSize: 10, color: '#9e9e9e', marginTop: 2 }}>
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
           {row.country ? `${getCountryName(row.country) || row.country} · ` : ''}{row.clientName || row.id}
         </div>
       </div>
@@ -980,8 +980,8 @@ function FocusRow({ row }) {
           target="_blank" rel="noopener noreferrer"
           style={{
             padding: '4px 10px', borderRadius: 8,
-            border: '1px solid #e8e8e8', background: 'white',
-            color: '#1b1b1b', fontSize: 11, fontWeight: 700,
+            border: '1px solid var(--border)', background: 'var(--surface)',
+            color: 'var(--text)', fontSize: 11, fontWeight: 700,
             textDecoration: 'none',
             display: 'inline-flex', alignItems: 'center', gap: 4,
           }}
@@ -1179,8 +1179,8 @@ function InboxTile({ icon, color, accent, bgLight, label, hint, count, ctaLabel,
         textAlign: 'left',
         padding: '20px 18px 16px',
         borderRadius: 18,
-        border: '1px solid #e8e8e8',
-        background: 'white',
+        border: '1px solid var(--border)',
+        background: 'var(--surface)',
         cursor: 'pointer',
         display: 'flex', flexDirection: 'column',
         overflow: 'hidden',
@@ -1215,8 +1215,8 @@ function InboxTile({ icon, color, accent, bgLight, label, hint, count, ctaLabel,
           <i className={icon} style={{ fontSize: 14 }} />
         </div>
       </div>
-      <div style={{ fontSize: 18, fontWeight: 800, color: '#1b1b1b', letterSpacing: '-0.01em', marginBottom: 4, lineHeight: 1.2 }}>{label}</div>
-      {hint && <div style={{ fontSize: 12, color: '#616161', lineHeight: 1.45, marginBottom: 12, minHeight: 32 }}>{hint}</div>}
+      <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.01em', marginBottom: 4, lineHeight: 1.2 }}>{label}</div>
+      {hint && <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45, marginBottom: 12, minHeight: 32 }}>{hint}</div>}
       <div style={{ flex: 1 }} />
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 6 }}>
         <span style={{

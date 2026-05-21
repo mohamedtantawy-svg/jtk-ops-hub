@@ -24,7 +24,7 @@ const NotifBell=({notifs,onMarkAll,collapsed,setView,setSelTask,tasks=[]})=>{
         <div className="fade-in" role="dialog" aria-label="Notifications" ref={panelRef} style={{position:'fixed',bottom:pos.bottom,left:pos.left,background:'var(--surface)',borderRadius:16,boxShadow:'0 4px 16px rgba(0,0,0,.12)',width:330,zIndex:1100,border:'1px solid #dedede',overflow:'hidden',maxHeight:'min(400px, calc(100vh - 80px))'}}>
           <div style={{padding:'12px 15px 10px',borderBottom:'1px solid #f7f5f2',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
             <div style={{display:'flex',alignItems:'center',gap:8}}>
-              <span style={{fontSize:13.5,fontWeight:700,color:'#1b1b1b'}}>Notifications</span>
+              <span style={{fontSize:13.5,fontWeight:700,color:'var(--text)'}}>Notifications</span>
               {unread>0&&<span style={{background:'#d42d35',color:'white',borderRadius:16,padding:'1px 7px',fontSize:10,fontWeight:700}}>{unread} new</span>}
             </div>
             {unread>0&&<button onClick={()=>{onMarkAll();}} style={{fontSize:11.5,color:'var(--g)',background:'none',border:'none',cursor:'pointer',fontWeight:600,display:'flex',alignItems:'center',gap:3}}><i className="bi-check2-all"></i>All read</button>}
@@ -49,13 +49,13 @@ const NotifBell=({notifs,onMarkAll,collapsed,setView,setSelTask,tasks=[]})=>{
               };
               return(
                 <div key={n.id}>
-                  {idx===0&&<div style={{padding:'5px 14px 3px',fontSize:10,fontWeight:700,color:'#bebebe',letterSpacing:'.06em',background:'#f7f5f2'}}>TODAY</div>}
+                  {idx===0&&<div style={{padding:'5px 14px 3px',fontSize:10,fontWeight:700,color:'#bebebe',letterSpacing:'.06em',background:'var(--surface-3)'}}>TODAY</div>}
                   <div onClick={handleClick} style={{padding:'9px 14px',borderBottom:'1px solid #f7f5f2',display:'flex',gap:10,alignItems:'flex-start',background:n.read?'white':'rgba(0,200,150,.03)',transition:'background .1s',cursor:'pointer'}}
                     onMouseEnter={e=>e.currentTarget.style.background='var(--bg,#f7f5f2)'} onMouseLeave={e=>e.currentTarget.style.background=n.read?'white':'rgba(0,200,150,.03)'}>
                     <div style={{width:30,height:30,borderRadius:9,background:`${c.color}18`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginTop:1}}><i className={c.icon} style={{color:c.color,fontSize:13}}></i></div>
                     <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:12.5,fontWeight:n.read?500:600,color:'#1b1b1b',lineHeight:1.4}}>{n.title}</div>
-                      {n.body&&<div title={n.body} style={{fontSize:11.5,color:'#616161',marginTop:1,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{n.body}</div>}
+                      <div style={{fontSize:12.5,fontWeight:n.read?500:600,color:'var(--text)',lineHeight:1.4}}>{n.title}</div>
+                      {n.body&&<div title={n.body} style={{fontSize:11.5,color:'var(--text-secondary)',marginTop:1,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{n.body}</div>}
                       <div style={{fontSize:10.5,color:'#bebebe',marginTop:2}}>{n.time}</div>
                     </div>
                     {!n.read&&<div style={{width:7,height:7,borderRadius:'50%',background:'var(--g)',flexShrink:0,marginTop:8}}></div>}
@@ -63,7 +63,7 @@ const NotifBell=({notifs,onMarkAll,collapsed,setView,setSelTask,tasks=[]})=>{
                 </div>
               );})}
           </div>
-          {notifs.length>5&&<div style={{padding:'8px 14px',borderTop:'1px solid #f7f5f2',textAlign:'center',fontSize:11.5,color:'#616161'}}>{notifs.length} notifications today</div>}
+          {notifs.length>5&&<div style={{padding:'8px 14px',borderTop:'1px solid #f7f5f2',textAlign:'center',fontSize:11.5,color:'var(--text-secondary)'}}>{notifs.length} notifications today</div>}
         </div>,
         document.body
       )}

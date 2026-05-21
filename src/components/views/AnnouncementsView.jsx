@@ -631,7 +631,7 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
 
   if (settings.announcements_enabled===false) {
     return (
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: '#9e9e9e' }}>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', color: 'var(--text-muted)' }}>
         <i className="bi-megaphone" style={{ fontSize: 40, marginBottom: 12, opacity: 0.4 }}></i>
         <div style={{ fontSize: 15, fontWeight: 600 }}>Announcements are disabled</div>
         <div style={{ fontSize: 13, marginTop: 4 }}>This feature has been turned off by an administrator.</div>
@@ -656,9 +656,9 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <i className="bi-megaphone-fill" style={{ fontSize: 18, color: '#6b3fa0' }}></i>
-            <span style={{ fontSize: 18, fontWeight: 700, color: '#1b1b1b' }}>Announcements</span>
+            <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>Announcements</span>
           </div>
-          <span style={{ fontSize: 12, color: '#9e9e9e', display: 'flex', alignItems: 'center', gap: 5 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5 }}>
             <i className="bi-people" style={{ fontSize: 11 }}></i>
             {comms.filter(c=>c.status==='sent').length} sent
           </span>
@@ -675,7 +675,7 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
                 pill next to it. Magnifying-glass icon left, clear-x icon
                 right when something is typed (one-click reset). */}
             <div style={{ position: 'relative', width: 220 }}>
-              <i className="bi-search" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: '#9e9e9e' }} />
+              <i className="bi-search" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: 'var(--text-muted)' }} />
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
@@ -684,8 +684,8 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
                 style={{
                   width: '100%', height: 32,
                   paddingLeft: 28, paddingRight: search ? 26 : 10,
-                  borderRadius: 8, border: '1px solid #e8e8e8',
-                  fontSize: 12, background: 'white', color: '#1b1b1b', outline: 'none',
+                  borderRadius: 8, border: '1px solid var(--border)',
+                  fontSize: 12, background: 'var(--surface)', color: 'var(--text)', outline: 'none',
                 }}
               />
               {search && (
@@ -697,7 +697,7 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
                     position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
                     width: 18, height: 18, borderRadius: 999, padding: 0,
                     border: 'none', background: 'transparent', cursor: 'pointer',
-                    color: '#9e9e9e', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                   }}
                 >
                   <i className="bi-x-circle-fill" style={{ fontSize: 12 }} />
@@ -779,7 +779,7 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
       </div>
 
       {/* ── Table ── */}
-      <div style={{ flex: 1, overflowY: 'auto', background: '#fafaf9' }}>
+      <div style={{ flex: 1, overflowY: 'auto', background: 'var(--surface-2)' }}>
         {filter === 'pending-approval' ? (
           <ApprovalQueueView user={user} addToast={addToast} embedded />
         ) : visible.length === 0 ? (
@@ -793,7 +793,7 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
-              <tr style={{ background: '#f5f4f2', position: 'sticky', top: 0, zIndex: 2 }}>
+              <tr style={{ background: 'var(--surface-2)', position: 'sticky', top: 0, zIndex: 2 }}>
                 <th style={thStyle}>Type</th>
                 <th style={{ ...thStyle, textAlign: 'left', minWidth: 200 }}>Title</th>
                 <th style={thStyle}>Priority</th>
@@ -836,13 +836,13 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
                       </span>
                     </td>
                     {/* Title */}
-                    <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: '#1b1b1b', maxWidth: 320 }}>
+                    <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: 'var(--text)', maxWidth: 320 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{comm.title}</span>
                         {comm.isPopup && comm.status === 'sent' && <span style={{ background: '#f3eff8', color: '#6b3fa0', borderRadius: 128, padding: '1px 6px', fontSize: 9, fontWeight: 700, flexShrink: 0 }}>POPUP</span>}
                         {comm.isPinned && <i className="bi-pin-fill" style={{ color: '#ed8d00', fontSize: 9, flexShrink: 0 }}></i>}
-                        {comm.status === 'draft' && <span style={{ background: '#f7f5f2', color: '#616161', borderRadius: 128, padding: '1px 6px', fontSize: 9, fontWeight: 700, flexShrink: 0 }}>DRAFT</span>}
-                        {(comm.comments||[]).length > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, color: '#9e9e9e', fontSize: 10, flexShrink: 0 }}><i className="bi-chat-dots" style={{ fontSize: 9 }}></i>{comm.comments.length}</span>}
+                        {comm.status === 'draft' && <span style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', borderRadius: 128, padding: '1px 6px', fontSize: 9, fontWeight: 700, flexShrink: 0 }}>DRAFT</span>}
+                        {(comm.comments||[]).length > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, color: 'var(--text-muted)', fontSize: 10, flexShrink: 0 }}><i className="bi-chat-dots" style={{ fontSize: 9 }}></i>{comm.comments.length}</span>}
                         {(comm.linkedIds||[]).length > 0 && <i className="bi-link-45deg" style={{ color: '#6b3fa0', fontSize: 11, flexShrink: 0 }} title={`${comm.linkedIds.length} linked`}></i>}
                       </div>
                     </td>
@@ -850,23 +850,23 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
                     <td style={tdStyle}>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                         <span style={{ width: 7, height: 7, borderRadius: '50%', background: PRIO_COLORS[comm.priority] || '#ed8d00', flexShrink: 0 }}></span>
-                        <span style={{ fontSize: 11, color: '#616161', textTransform: 'capitalize' }}>{comm.priority}</span>
+                        <span style={{ fontSize: 11, color: 'var(--text-secondary)', textTransform: 'capitalize' }}>{comm.priority}</span>
                       </span>
                     </td>
                     {/* Author */}
-                    <td style={{ ...tdStyle, color: '#616161' }}>{comm.author?.name || '—'}</td>
+                    <td style={{ ...tdStyle, color: 'var(--text-secondary)' }}>{comm.author?.name || '—'}</td>
                     {/* Date */}
-                    <td style={{ ...tdStyle, color: '#9e9e9e', fontSize: 12 }}>{formatFriendlyDate(comm.sentAt) || '—'}</td>
+                    <td style={{ ...tdStyle, color: 'var(--text-muted)', fontSize: 12 }}>{formatFriendlyDate(comm.sentAt) || '—'}</td>
                     {/* Target */}
                     <td style={tdStyle}>
-                      <span style={{ fontSize: 11, color: '#616161' }}>{comm.target === 'all' ? 'All' : comm.target}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{comm.target === 'all' ? 'All' : comm.target}</span>
                     </td>
                     {/* Ack status */}
                     <td style={tdStyle}>
                       {comm.status === 'draft' ? (
-                        <span style={{ color: '#9e9e9e', fontSize: 11 }}>Draft</span>
+                        <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>Draft</span>
                       ) : comm.status === 'archived' ? (
-                        <span style={{ color: '#9e9e9e', fontSize: 11 }}>Archived</span>
+                        <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>Archived</span>
                       ) : comm.status === 'scheduled' ? (
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#0a66c2', fontWeight: 600 }}>
                           <i className="bi-clock-history" style={{ fontSize: 10 }}></i>
@@ -879,7 +879,7 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
                             ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, color: '#d42d35', fontWeight: 600 }}><i className="bi-clock-fill" style={{ fontSize: 10 }}></i>Overdue</span>
                             : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, color: '#ed8d00', fontWeight: 600 }}><i className="bi-clock" style={{ fontSize: 10 }}></i>Pending</span>
                       ) : (
-                        <span style={{ fontSize: 11, color: '#616161', fontWeight: 600 }}>Sent</span>
+                        <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontWeight: 600 }}>Sent</span>
                       )}
                     </td>
                     {/* Ack rate (managers + approvers + admins). For TLs and
@@ -893,7 +893,7 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
                             <div style={{ width: 48, background: '#e8e8e8', borderRadius: 128, height: 4, overflow: 'hidden' }}>
                               <div style={{ height: '100%', borderRadius: 128, background: ackPct === 100 ? '#29811e' : '#6b3fa0', width: ackPct + '%', transition: 'width .3s' }}></div>
                             </div>
-                            <span style={{ fontSize: 11, color: '#616161', fontVariantNumeric: 'tabular-nums' }}>{ackPct}%</span>
+                            <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>{ackPct}%</span>
                           </div>
                         ) : <span style={{ color: '#d5d5d5' }}>—</span>}
                       </td>
@@ -1029,8 +1029,8 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
                     <tr key={comm.id + '-ack'}>
                       <td colSpan={canViewAckTracker ? 10 : 9} style={{ padding: '0 16px 16px', background: '#f9f8f6', borderBottom: '1px solid #e8e8e8' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, paddingTop: 8 }}>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: '#1b1b1b' }}>Acknowledgement Tracker</span>
-                          <span style={{ fontSize: 11, color: '#616161', fontVariantNumeric: 'tabular-nums' }}>{ackedCount}/{ackMembers.length}</span>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>Acknowledgement Tracker</span>
+                          <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>{ackedCount}/{ackMembers.length}</span>
                           {settings.comms_show_ack_progress !== false && (
                             <div style={{ width: 100, background: '#e8e8e8', borderRadius: 128, height: 5, overflow: 'hidden' }}>
                               <div style={{ height: '100%', borderRadius: 128, background: ackPct === 100 ? '#29811e' : '#6b3fa0', width: ackPct + '%', transition: 'width .4s ease' }}></div>
@@ -1051,7 +1051,7 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
                               <div key={member.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 10, background: rowBg, border: `1px solid ${rowBorder}`, minWidth: 180 }}>
                                 <Avatar name={member.name} size={24} />
                                 <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontSize: 12, fontWeight: 600, color: '#1b1b1b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{member.name}</div>
+                                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{member.name}</div>
                                   <div style={{ fontSize: 10, color: memberOverdue ? '#b02020' : '#9e9e9e' }}>
                                     {memberOverdue ? `Overdue · ${member.team}` : member.team}
                                   </div>
@@ -1143,7 +1143,7 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
 };
 
 // ── Styles ──
-const thStyle = { padding: '10px 12px', fontSize: 11, fontWeight: 600, color: '#9e9e9e', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center', whiteSpace: 'nowrap', borderBottom: '1px solid #e8e8e8' };
+const thStyle = { padding: '10px 12px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center', whiteSpace: 'nowrap', borderBottom: '1px solid #e8e8e8' };
 const tdStyle = { padding: '12px 12px', textAlign: 'center', verticalAlign: 'middle' };
 const actionBtnStyle = (bg, color) => ({ width: 28, height: 28, borderRadius: '50%', border: 'none', background: bg, color, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, flexShrink: 0, transition: 'opacity .15s' });
 
@@ -1246,27 +1246,27 @@ function WalkthroughOverlay({ comm, remaining, onAcknowledge, onSkip, onExit, on
         {/* Main popup card */}
         <div style={{ backgroundColor: 'var(--surface)', borderRadius: 16, width: '100%', maxHeight: '75vh', display: 'flex', flexDirection: 'column', boxShadow: '0 24px 48px rgba(0,0,0,0.18)', overflow: 'hidden', animation: 'popupFadeIn 0.2s ease-out', position: 'relative', zIndex: 100001 }}>
           {/* Top bar */}
-          <div style={{ padding: '12px 20px', borderBottom: '1px solid #f2f2f2', display: 'flex', alignItems: 'center', gap: 10, background: '#fafaf9' }}>
+          <div style={{ padding: '12px 20px', borderBottom: '1px solid #f2f2f2', display: 'flex', alignItems: 'center', gap: 10, background: 'var(--surface-2)' }}>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: t.bg, color: t.color, border: `1px solid ${t.border}`, borderRadius: 128, padding: '3px 12px', fontSize: 11, fontWeight: 600 }}>
               <i className={t.icon} style={{ fontSize: 11 }}></i>{t.label}
             </span>
-            <span style={{ fontSize: 12, color: '#9e9e9e', marginLeft: 'auto' }}>{remaining} remaining</span>
-            <button onClick={onExit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9e9e9e', fontSize: 16, padding: 4, display: 'flex' }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 'auto' }}>{remaining} remaining</span>
+            <button onClick={onExit} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 16, padding: 4, display: 'flex' }}>
               <i className="bi-x-lg"></i>
             </button>
           </div>
 
           {/* Content */}
           <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px' }}>
-            <h2 style={{ margin: '0 0 12px', fontSize: 20, fontWeight: 700, color: '#1b1b1b', lineHeight: 1.3 }}>{comm.title}</h2>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: '#9e9e9e', marginBottom: 20 }}>
+            <h2 style={{ margin: '0 0 12px', fontSize: 20, fontWeight: 700, color: 'var(--text)', lineHeight: 1.3 }}>{comm.title}</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: 'var(--text-muted)', marginBottom: 20 }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><i className="bi-person-circle" style={{ fontSize: 11 }}></i>{comm.author?.name}</span>
               {comm.sentAt && <><span>·</span><span>{comm.sentAt}</span></>}
               <span>·</span>
               <span>{comm.target === 'all' ? 'All Teams' : comm.target}</span>
             </div>
             {comm.imageUrl && (
-              <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid #e8e8e8', marginBottom: 16, background: '#fafaf9', textAlign: 'center' }}>
+              <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border)', marginBottom: 16, background: 'var(--surface-2)', textAlign: 'center' }}>
                 <AnnouncementMedia src={comm.imageUrl} style={{ maxWidth: '100%', maxHeight: 400, objectFit: 'contain', display: 'block', margin: '0 auto' }} />
               </div>
             )}
@@ -1291,7 +1291,7 @@ function WalkthroughOverlay({ comm, remaining, onAcknowledge, onSkip, onExit, on
           {/* Bottom actions */}
           <div style={{ padding: '14px 28px 20px', borderTop: '1px solid #f2f2f2', display: 'flex', gap: 10 }}>
             <button onClick={onSkip}
-              style={{ flex: 1, height: 44, borderRadius: 128, border: '1px solid #e8e8e8', background: 'var(--surface)', color: '#616161', fontSize: 14, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+              style={{ flex: 1, height: 44, borderRadius: 128, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)', fontSize: 14, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
               <i className="bi-arrow-right" style={{ fontSize: 14 }}></i>
               Skip
             </button>
@@ -1565,10 +1565,10 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: '#1b1b1b' }}>{cmt.authorName || 'User'}</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)' }}>{cmt.authorName || 'User'}</span>
               <span style={{ fontSize: 9, color: '#b5b5b5' }}>{timeAgo(cmt.createdAt)}</span>
               <span style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 'auto' }}>
-                <button onClick={() => { setReplyTo(replyTo === cmt.id ? null : cmt.id); setReplyText(''); setReplyMentions([]); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9e9e9e', fontSize: 9, padding: '0 3px' }} title="Reply">
+                <button onClick={() => { setReplyTo(replyTo === cmt.id ? null : cmt.id); setReplyText(''); setReplyMentions([]); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 9, padding: '0 3px' }} title="Reply">
                   <i className="bi-reply" style={{ fontSize: 10 }}></i>
                 </button>
                 {isOwn && (
@@ -1633,8 +1633,8 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
               {comm.isPopup && <span style={{ background: '#f3eff8', color: '#6b3fa0', borderRadius: 128, padding: '2px 7px', fontSize: 9, fontWeight: 700 }}>POPUP</span>}
               <span style={{ background: (PRIO_COLORS[comm.priority]||'#ed8d00')+'18', color: PRIO_COLORS[comm.priority]||'#ed8d00', borderRadius: 128, padding: '2px 9px', fontSize: 10, fontWeight: 700, textTransform: 'capitalize' }}>{comm.priority}</span>
             </div>
-            <div style={{ fontSize: 17, fontWeight: 700, color: '#1b1b1b', lineHeight: 1.3 }}>{comm.title}</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#9e9e9e', marginTop: 6 }}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)', lineHeight: 1.3 }}>{comm.title}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
               <span>{comm.author?.name}</span>
               {comm.sentAt && <><span>·</span><span>{comm.sentAt}</span></>}
               <span>·</span>
@@ -1646,7 +1646,7 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
               onClick={onCopyLink}
               title="Copy link"
               aria-label="Copy link to this announcement"
-              style={{ background: '#f2f2f2', border: 'none', cursor: 'pointer', color: '#9e9e9e', width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>
+              style={{ background: '#f2f2f2', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>
               <i className="bi-link-45deg"></i>
             </button>
           )}
@@ -1659,14 +1659,14 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
               <i className={isSaved ? 'bi-bookmark-fill' : 'bi-bookmark'}></i>
             </button>
           )}
-          <button onClick={onClose} style={{ background: '#f2f2f2', border: 'none', cursor: 'pointer', color: '#9e9e9e', width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>
+          <button onClick={onClose} style={{ background: '#f2f2f2', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', width: 30, height: 30, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>
             <i className="bi-x-lg"></i>
           </button>
         </div>
         {/* Body */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
           {comm.imageUrl && (
-            <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid #e8e8e8', marginBottom: 16, background: '#fafaf9', textAlign: 'center' }}>
+            <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid var(--border)', marginBottom: 16, background: 'var(--surface-2)', textAlign: 'center' }}>
               <AnnouncementMedia src={comm.imageUrl} style={{ maxWidth: '100%', maxHeight: 320, objectFit: 'contain', display: 'block', margin: '0 auto' }} />
             </div>
           )}
@@ -1691,8 +1691,8 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
           <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid #f2f2f2' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
               <i className="bi-link-45deg" style={{ fontSize: 13, color: '#6b3fa0' }}></i>
-              <span style={{ fontSize: 12, fontWeight: 700, color: '#1b1b1b' }}>Linked Announcements</span>
-              <span style={{ fontSize: 10, color: '#9e9e9e' }}>({linkedComms.length})</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>Linked Announcements</span>
+              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>({linkedComms.length})</span>
               {isLA && (
                 <button onClick={() => setShowLinkSearch(!showLinkSearch)} style={{ marginLeft: 'auto', background: '#f3eff8', border: 'none', cursor: 'pointer', color: '#6b3fa0', borderRadius: 128, padding: '3px 10px', fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
                   <i className="bi-plus" style={{ fontSize: 11 }}></i>Link
@@ -1702,17 +1702,17 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
             {showLinkSearch && isLA && (
               <div style={{ marginBottom: 10, position: 'relative' }}>
                 <input value={linkSearch} onChange={e => setLinkSearch(e.target.value)} placeholder="Search announcements to link..."
-                  style={{ width: '100%', height: 32, borderRadius: 8, border: '1px solid #e8e8e8', padding: '0 10px', fontSize: 12, outline: 'none', boxSizing: 'border-box' }}
+                  style={{ width: '100%', height: 32, borderRadius: 8, border: '1px solid var(--border)', padding: '0 10px', fontSize: 12, outline: 'none', boxSizing: 'border-box' }}
                 />
                 {linkableComms.length > 0 && (
-                  <div style={{ position: 'absolute', top: 36, left: 0, right: 0, background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 10, maxHeight: 160, overflowY: 'auto', zIndex: 10, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
+                  <div style={{ position: 'absolute', top: 36, left: 0, right: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10, maxHeight: 160, overflowY: 'auto', zIndex: 10, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
                     {linkableComms.slice(0, 6).map(lc => {
                       const lt = COMMS_TYPES[lc.type] || COMMS_TYPES.update;
                       return (
                         <div key={lc.id} onClick={() => handleLink(lc.id)} style={{ padding: '8px 12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, borderBottom: '1px solid #f9f9f9', fontSize: 12 }}
                           onMouseEnter={e => e.currentTarget.style.background = '#fafaf9'} onMouseLeave={e => e.currentTarget.style.background = 'white'}>
                           <span style={{ background: lt.bg, color: lt.color, borderRadius: 128, padding: '1px 6px', fontSize: 9, fontWeight: 700 }}>{lt.label}</span>
-                          <span style={{ color: '#1b1b1b', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lc.title}</span>
+                          <span style={{ color: 'var(--text)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lc.title}</span>
                         </div>
                       );
                     })}
@@ -1721,18 +1721,18 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
               </div>
             )}
             {linkedComms.length === 0 && !showLinkSearch && (
-              <div style={{ fontSize: 12, color: '#9e9e9e', padding: '4px 0' }}>No linked announcements</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '4px 0' }}>No linked announcements</div>
             )}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {linkedComms.map(lc => {
                 const lt = COMMS_TYPES[lc.type] || COMMS_TYPES.update;
                 return (
-                  <div key={lc.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#fafaf9', border: '1px solid #e8e8e8', borderRadius: 128, padding: '4px 10px 4px 8px', cursor: 'pointer' }}
+                  <div key={lc.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 128, padding: '4px 10px 4px 8px', cursor: 'pointer' }}
                     onClick={() => setDetailId(lc.id)}>
                     <span style={{ background: lt.bg, color: lt.color, borderRadius: 128, padding: '1px 6px', fontSize: 9, fontWeight: 700 }}>{lt.label}</span>
-                    <span style={{ fontSize: 11, fontWeight: 600, color: '#1b1b1b', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lc.title}</span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text)', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lc.title}</span>
                     {isLA && (
-                      <button onClick={(e) => { e.stopPropagation(); handleUnlink(lc.id); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9e9e9e', fontSize: 11, padding: 0, display: 'flex', lineHeight: 1 }} title="Unlink">
+                      <button onClick={(e) => { e.stopPropagation(); handleUnlink(lc.id); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 11, padding: 0, display: 'flex', lineHeight: 1 }} title="Unlink">
                         <i className="bi-x" style={{ fontSize: 13 }}></i>
                       </button>
                     )}
@@ -1746,8 +1746,8 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
           <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid #f2f2f2' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
               <i className="bi-chat-dots" style={{ fontSize: 11, color: '#6b3fa0' }}></i>
-              <span style={{ fontSize: 11, fontWeight: 700, color: '#1b1b1b' }}>Comments</span>
-              <span style={{ fontSize: 9, color: '#9e9e9e' }}>({localComments.length})</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>Comments</span>
+              <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>({localComments.length})</span>
             </div>
             {topLevelComments.length === 0 && (
               <div style={{ fontSize: 11, color: '#b5b5b5', padding: '2px 0 6px' }}>No comments yet. Be the first to comment.</div>

@@ -53,7 +53,7 @@ function formatLastSeen(iso) {
 const LAST_SEEN_TONE = {
   fresh:  { bg: '#e8f5e3', color: '#29811e' }, // green — active in the last day
   recent: { bg: '#e8f0fe', color: '#1f74b3' }, // blue — active this week
-  stale:  { bg: '#f7f5f2', color: '#616161' }, // grey — hasn't been here in a while
+  stale:  { bg: '#f7f5f2', color: 'var(--text-secondary)' }, // grey — hasn't been here in a while
   never:  { bg: '#ffe2de', color: '#d42d35' }, // red — never seen
 };
 
@@ -89,7 +89,7 @@ const ACCESS_BADGE = {
   admin:            { label:'Admin',        bg:'#ffe2de', color:'#d42d35' },
   regional_manager: { label:'Regional Mgr', bg:'#e8f0fe', color:'#1f74b3' },
   team_lead:        { label:'Team Lead',    bg:'#f3eff8', color:'#7c3aed' },
-  agent:            { label:'Agent',        bg:'#f7f5f2', color:'#616161' },
+  agent:            { label:'Agent',        bg:'#f7f5f2', color:'var(--text-secondary)' },
 };
 
 const TEAM_OPTIONS = ['All', 'EMEA', 'APAC', 'LATAM', 'NAM', 'LATAM + NAM'];
@@ -567,7 +567,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
             {depth > 0 && <div style={{ width: 1, height: 18, background: '#e8e8e8', marginRight: 7 }} />}
             <Avatar name={member.name} initials={member.initials} size={isManager ? 30 : 24} />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: isManager ? 700 : 500, color: '#1b1b1b', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <div style={{ fontSize: 13, fontWeight: isManager ? 700 : 500, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                 {member.name}
                 <span style={{ background: badge.bg, color: badge.color, fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 128 }}>{badge.label}</span>
                 {/* Last-seen pill. While the roster is still loading and we
@@ -578,8 +578,8 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                   <span
                     title="Loading last-seen…"
                     style={{
-                      background: '#f5f4f2',
-                      color: '#9e9e9e',
+                      background: 'var(--surface-2)',
+                      color: 'var(--text-muted)',
                       fontSize: 10,
                       fontWeight: 700,
                       padding: '2px 8px',
@@ -649,17 +649,17 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                 <OOOBadge events={oooEventsByEmail.get((email || '').toLowerCase())} />
 
                 {isManager && (
-                  <span style={{ fontSize: 10, color: '#9e9e9e', fontWeight: 500 }}>
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 500 }}>
                     {subReports.length} report{subReports.length !== 1 ? 's' : ''}
                   </span>
                 )}
               </div>
-              <div style={{ fontSize: 11, color: '#616161', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {member.title}
               </div>
             </div>
             {isManager && (
-              <i className={`bi-chevron-${isExpanded ? 'up' : 'down'}`} style={{ fontSize: 11, color: '#9e9e9e', marginLeft: 4, flexShrink: 0 }} />
+              <i className={`bi-chevron-${isExpanded ? 'up' : 'down'}`} style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 4, flexShrink: 0 }} />
             )}
             {showLoginAs && (
               <button
@@ -684,7 +684,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
             )}
           </div>
           {/* Team badge (click the three-dot menu → Edit Allocation to change) */}
-          <span style={{ textAlign: 'center', fontSize: 11, color: '#616161', background: '#f7f5f2', borderRadius: 128, padding: '2px 8px', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <span style={{ textAlign: 'center', fontSize: 11, color: 'var(--text-secondary)', background: 'var(--surface-3)', borderRadius: 128, padding: '2px 8px', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {member.team || '—'}
           </span>
           {/* Countries — multi-select picker. Saves immediately on Save
@@ -701,10 +701,10 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
               onSave={async (next) => setCountries(email, next)}
             />
           </div>
-          <span style={{ textAlign: 'center', fontSize: isManager ? 15 : 14, fontWeight: isManager ? 700 : 600, color: '#1b1b1b', fontVariantNumeric: 'tabular-nums' }}>{s.total}</span>
+          <span style={{ textAlign: 'center', fontSize: isManager ? 15 : 14, fontWeight: isManager ? 700 : 600, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{s.total}</span>
           <span style={{ textAlign: 'center', fontSize: isManager ? 14 : 13, fontWeight: isManager ? 600 : 500, color: '#1f74b3', fontVariantNumeric: 'tabular-nums' }}>{s.n}</span>
           <span style={{ textAlign: 'center', fontSize: isManager ? 14 : 13, fontWeight: isManager ? 600 : 500, color: '#ed8d00', fontVariantNumeric: 'tabular-nums' }}>{s.ip}</span>
-          <span style={{ textAlign: 'center', fontSize: isManager ? 14 : 13, fontWeight: isManager ? 600 : 500, color: '#9e9e9e', fontVariantNumeric: 'tabular-nums' }}>{s.w}</span>
+          <span style={{ textAlign: 'center', fontSize: isManager ? 14 : 13, fontWeight: isManager ? 600 : 500, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>{s.w}</span>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
             {slaDot(health)}
             <span style={{ fontSize: 10, color: health === 'red' ? '#d42d35' : health === 'yellow' ? '#ed8d00' : '#29811e', fontWeight: 600 }}>
@@ -737,7 +737,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                 width: 24, height: 24, borderRadius: 6, border: 'none',
                 background: isMenuOpen ? '#f3eff8' : (isHovered ? '#f7f5f2' : 'transparent'),
                 cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: '#616161', fontSize: 13, transition: 'background .1s',
+                color: 'var(--text-secondary)', fontSize: 13, transition: 'background .1s',
                 opacity: isHovered || isMenuOpen ? 1 : 0,
               }}
               title="Actions"
@@ -750,7 +750,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                 ref={actionMenuRef}
                 style={{
                   position: 'fixed', top: actionMenuPos.top, left: actionMenuPos.left, zIndex: 1100,
-                  background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 10,
+                  background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
                   boxShadow: '0 4px 16px rgba(0,0,0,0.10)', minWidth: 180,
                   padding: '4px 0', overflow: 'hidden',
                 }}
@@ -759,7 +759,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                   onClick={() => openEditAllocation(email)}
                   style={{
                     width: '100%', padding: '8px 14px', border: 'none', background: 'transparent',
-                    fontSize: 12, fontWeight: 500, color: '#1b1b1b', cursor: 'pointer',
+                    fontSize: 12, fontWeight: 500, color: 'var(--text)', cursor: 'pointer',
                     display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
                   }}
                   onMouseEnter={e => e.currentTarget.style.background = '#f9f8f6'}
@@ -772,7 +772,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                   onClick={() => handleToggleLeave(email)}
                   style={{
                     width: '100%', padding: '8px 14px', border: 'none', background: 'transparent',
-                    fontSize: 12, fontWeight: 500, color: '#1b1b1b', cursor: 'pointer',
+                    fontSize: 12, fontWeight: 500, color: 'var(--text)', cursor: 'pointer',
                     display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
                   }}
                   onMouseEnter={e => e.currentTarget.style.background = '#f9f8f6'}
@@ -789,7 +789,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                     onClick={() => openPermissionsModal(email)}
                     style={{
                       width: '100%', padding: '8px 14px', border: 'none', background: 'transparent',
-                      fontSize: 12, fontWeight: 500, color: '#1b1b1b', cursor: 'pointer',
+                      fontSize: 12, fontWeight: 500, color: 'var(--text)', cursor: 'pointer',
                       display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
                     }}
                     onMouseEnter={e => e.currentTarget.style.background = '#f9f8f6'}
@@ -825,19 +825,19 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
               <div
                 style={{
                   position: 'fixed', top: actionMenuPos.top, left: actionMenuPos.left, zIndex: 1110,
-                  background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 10,
+                  background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 10,
                   boxShadow: '0 4px 16px rgba(0,0,0,0.12)', minWidth: 220,
                   padding: '14px 16px',
                 }}
               >
-                <div style={{ fontSize: 12, fontWeight: 600, color: '#1b1b1b', marginBottom: 6 }}>Remove {member.name}?</div>
-                <div style={{ fontSize: 11, color: '#616161', marginBottom: 12 }}>This will remove them from the team list.</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>Remove {member.name}?</div>
+                <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 12 }}>This will remove them from the team list.</div>
                 <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                   <button
                     onClick={() => setConfirmRemove(null)}
                     style={{
-                      padding: '4px 12px', borderRadius: 128, border: '1px solid #e8e8e8',
-                      background: 'var(--surface)', fontSize: 11, fontWeight: 600, color: '#616161', cursor: 'pointer',
+                      padding: '4px 12px', borderRadius: 128, border: '1px solid var(--border)',
+                      background: 'var(--surface)', fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', cursor: 'pointer',
                     }}
                   >
                     Cancel
@@ -903,7 +903,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
         {/* Region filter + Add Member button */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
           {(isAdmin || (userMember && userMember.access === 'regional_manager')) && (
-            <div style={{ display: 'flex', background: '#f7f5f2', borderRadius: 128, padding: 3, gap: 2, width: 'fit-content', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', background: 'var(--surface-3)', borderRadius: 128, padding: 3, gap: 2, width: 'fit-content', flexWrap: 'wrap' }}>
               {REGIONS.map(r => {
                 const active = regionFilter === r.id;
                 return (
@@ -931,9 +931,9 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
               onClick={() => setShowAddModal(true)}
               style={{
                 padding: '5px 14px', borderRadius: 128,
-                border: '1px solid #e8e8e8',
+                border: '1px solid var(--border)',
                 background: 'var(--surface)',
-                color: '#1b1b1b',
+                color: 'var(--text)',
                 fontSize: 12, fontWeight: 600,
                 cursor: 'pointer',
                 display: 'flex', alignItems: 'center', gap: 5,
@@ -959,9 +959,9 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
             title="Download a CSV of every team member with the countries they own — useful for comparing against the Deel Countries by Person Role sheet."
             style={{
               padding: '5px 14px', borderRadius: 128,
-              border: '1px solid #e8e8e8',
+              border: '1px solid var(--border)',
               background: 'var(--surface)',
-              color: '#1b1b1b',
+              color: 'var(--text)',
               fontSize: 12, fontWeight: 600,
               cursor: 'pointer',
               display: 'inline-flex', alignItems: 'center', gap: 5,
@@ -1002,14 +1002,14 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                 <i className={s.icon} style={{ color: s.c, fontSize: 17 }} />
               </div>
               <div style={{ fontSize: 28, fontWeight: 800, color: s.c, fontVariantNumeric: 'tabular-nums' }}>{s.v}</div>
-              <div style={{ fontSize: 12, color: '#616161', marginTop: 2, fontWeight: 500 }}>{s.l}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2, fontWeight: 500 }}>{s.l}</div>
             </div>
           ))}
         </div>
 
         {/* Team table */}
-        <div style={{ background: 'var(--surface)', borderRadius: 16, border: '1px solid #e8e8e8', overflow: 'hidden', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
-          <div role="row" style={{ padding: '12px 16px', borderBottom: '1px solid #f2f2f2', display: 'grid', gridTemplateColumns: '1fr 56px 150px 64px 64px 64px 64px 80px 32px', gap: 8, background: '#fafaf9' }}>
+        <div style={{ background: 'var(--surface)', borderRadius: 16, border: '1px solid var(--border)', overflow: 'hidden', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+          <div role="row" style={{ padding: '12px 16px', borderBottom: '1px solid #f2f2f2', display: 'grid', gridTemplateColumns: '1fr 56px 150px 64px 64px 64px 64px 80px 32px', gap: 8, background: 'var(--surface-2)' }}>
             {['Manager / Agent', 'Team', 'Countries', 'Open', 'New', 'In prog', 'Pause', 'Health', ''].map((h, i) => (
               <span
                 key={h || `col-${i}`}
@@ -1021,7 +1021,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
             ))}
           </div>
           {visibleMembers.length === 0 && (
-            <div style={{ padding: '32px 16px', textAlign: 'center', color: '#9e9e9e' }}>
+            <div style={{ padding: '32px 16px', textAlign: 'center', color: 'var(--text-muted)' }}>
               <i className="bi-people" style={{ fontSize: 32, display: 'block', marginBottom: 12, opacity: 0.3 }} />
               <div style={{ fontSize: 14, fontWeight: 600 }}>No team members found</div>
               <div style={{ fontSize: 12, marginTop: 4 }}>Try adjusting the region filter above</div>
@@ -1046,7 +1046,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
             ? PARENTAL_LEAVE_DATA.filter(p => p.region === user.region)
             : PARENTAL_LEAVE_DATA;
           return (
-            <div style={{ marginTop: 20, background: 'var(--surface)', borderRadius: 16, border: '1px solid #e8e8e8', overflow: 'hidden', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+            <div style={{ marginTop: 20, background: 'var(--surface)', borderRadius: 16, border: '1px solid var(--border)', overflow: 'hidden', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
               <div
                 onClick={() => setShowParentalLeave(v => !v)}
                 style={{
@@ -1061,19 +1061,19 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                     <i className="bi-heart" style={{ color: '#e0457b', fontSize: 14 }} />
                   </div>
                   <div>
-                    <div style={{ fontSize: 'var(--font-base)', fontWeight: 600, color: '#1b1b1b', display: 'flex', alignItems: 'center', gap: 5 }}>Parental Leave Tracker</div>
-                    <div style={{ fontSize: 11, color: '#9e9e9e' }}>{plData.filter(p => p.status === 'Active' || p.status === 'Returning soon').length} currently on leave</div>
+                    <div style={{ fontSize: 'var(--font-base)', fontWeight: 600, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 5 }}>Parental Leave Tracker</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{plData.filter(p => p.status === 'Active' || p.status === 'Returning soon').length} currently on leave</div>
                   </div>
                 </div>
-                <i className={`bi-chevron-${showParentalLeave ? 'up' : 'down'}`} style={{ fontSize: 12, color: '#9e9e9e' }} />
+                <i className={`bi-chevron-${showParentalLeave ? 'up' : 'down'}`} style={{ fontSize: 12, color: 'var(--text-muted)' }} />
               </div>
               {showParentalLeave && (
                 <div style={{ borderTop: '1px solid #f2f2f2', overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                     <thead>
-                      <tr style={{ background: '#fafaf9' }}>
+                      <tr style={{ background: 'var(--surface-2)' }}>
                         {['Employee', 'Country', 'Type', 'Start date', 'End date', 'Status', 'Handover'].map(h => (
-                          <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 13, fontWeight: 500, color: '#9e9e9e', textTransform: 'none', letterSpacing: 'normal', borderBottom: '1px solid #f2f2f2', whiteSpace: 'nowrap' }}>{h}</th>
+                          <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 13, fontWeight: 500, color: 'var(--text-muted)', textTransform: 'none', letterSpacing: 'normal', borderBottom: '1px solid #f2f2f2', whiteSpace: 'nowrap' }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -1088,11 +1088,11 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                             onMouseEnter={e => e.currentTarget.style.background = '#fafaf9'}
                             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                           >
-                            <td style={{ padding: '11px 16px', fontWeight: 600, color: '#1b1b1b', whiteSpace: 'nowrap' }}>{p.name}</td>
-                            <td style={{ padding: '11px 16px', color: '#616161', whiteSpace: 'nowrap' }}>{getFlag(p.country) || '\u{1F310}'} {getCountryName(p.country) || p.country}</td>
-                            <td style={{ padding: '11px 16px', color: '#616161', whiteSpace: 'nowrap' }}>{p.type}</td>
-                            <td style={{ padding: '11px 16px', color: '#616161', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{p.startDate}</td>
-                            <td style={{ padding: '11px 16px', color: '#616161', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{p.endDate}</td>
+                            <td style={{ padding: '11px 16px', fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap' }}>{p.name}</td>
+                            <td style={{ padding: '11px 16px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{getFlag(p.country) || '\u{1F310}'} {getCountryName(p.country) || p.country}</td>
+                            <td style={{ padding: '11px 16px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{p.type}</td>
+                            <td style={{ padding: '11px 16px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{p.startDate}</td>
+                            <td style={{ padding: '11px 16px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{p.endDate}</td>
                             <td style={{ padding: '11px 16px', whiteSpace: 'nowrap' }}>
                               <span style={{ background: sc.bg, color: sc.color, padding: '3px 10px', borderRadius: 128, fontSize: 11, fontWeight: 700 }}>{p.status}</span>
                             </td>
@@ -1113,7 +1113,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
         })()}
 
         {/* End of Day Summary */}
-        <div style={{ marginTop: 20, background: 'var(--surface)', borderRadius: 16, border: '1px solid #e8e8e8', overflow: 'hidden', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
+        <div style={{ marginTop: 20, background: 'var(--surface)', borderRadius: 16, border: '1px solid var(--border)', overflow: 'hidden', boxShadow: '0 1px 2px rgba(0,0,0,0.04)' }}>
           <div
             onClick={() => setEodOpen(v => !v)}
             style={{
@@ -1128,11 +1128,11 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                 <i className="bi-moon-stars-fill" style={{ color: '#ed8d00', fontSize: 14 }} />
               </div>
               <div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#1b1b1b' }}>End of Day Summary</div>
-                <div style={{ fontSize: 11, color: '#9e9e9e' }}>{dateStr}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>End of Day Summary</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{dateStr}</div>
               </div>
             </div>
-            <i className={`bi-chevron-${eodOpen ? 'up' : 'down'}`} style={{ fontSize: 12, color: '#9e9e9e' }} />
+            <i className={`bi-chevron-${eodOpen ? 'up' : 'down'}`} style={{ fontSize: 12, color: 'var(--text-muted)' }} />
           </div>
           {eodOpen && (
             <div style={{ padding: '16px 20px', borderTop: '1px solid #f2f2f2' }}>
@@ -1148,7 +1148,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                     </div>
                     <div>
                       <div style={{ fontSize: 22, fontWeight: 800, color: s.c, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{s.v}</div>
-                      <div style={{ fontSize: 11, color: '#616161', marginTop: 2, fontWeight: 500 }}>{s.l}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2, fontWeight: 500 }}>{s.l}</div>
                     </div>
                   </div>
                 ))}
@@ -1157,7 +1157,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                 onClick={copySummary}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6, padding: '8px 18px', borderRadius: 128,
-                  border: '1px solid #e8e8e8',
+                  border: '1px solid var(--border)',
                   background: copyDone ? '#e8f5e3' : 'white',
                   color: copyDone ? '#29811e' : '#1b1b1b',
                   fontSize: 13, fontWeight: 600, cursor: 'pointer', transition: 'all .2s',
@@ -1190,10 +1190,10 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-              <div style={{ fontSize: 16, fontWeight: 700, color: '#1b1b1b' }}>Add Team Member</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>Add Team Member</div>
               <button
                 onClick={() => setShowAddModal(false)}
-                style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: '#f7f5f2', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#616161', fontSize: 14 }}
+                style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: 'var(--surface-3)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: 14 }}
               >
                 <i className="bi-x-lg" />
               </button>
@@ -1202,15 +1202,15 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14, maxHeight: 'calc(90vh - 200px)', overflowY: 'auto' }}>
               {/* Name */}
               <div>
-                <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Name <span style={{ color: '#d42d35' }}>*</span></label>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Name <span style={{ color: '#d42d35' }}>*</span></label>
                 <input
                   type="text"
                   value={addForm.name}
                   onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))}
                   placeholder="Full name"
                   style={{
-                    width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                    fontSize: 13, color: '#1b1b1b', outline: 'none', boxSizing: 'border-box',
+                    width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)',
+                    fontSize: 13, color: 'var(--text)', outline: 'none', boxSizing: 'border-box',
                   }}
                   onFocus={e => e.currentTarget.style.borderColor = '#7c3aed'}
                   onBlur={e => e.currentTarget.style.borderColor = '#e8e8e8'}
@@ -1219,15 +1219,15 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
 
               {/* Email */}
               <div>
-                <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Email <span style={{ color: '#d42d35' }}>*</span></label>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Email <span style={{ color: '#d42d35' }}>*</span></label>
                 <input
                   type="email"
                   value={addForm.email}
                   onChange={e => setAddForm(f => ({ ...f, email: e.target.value }))}
                   placeholder="name@deel.com"
                   style={{
-                    width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                    fontSize: 13, color: '#1b1b1b', outline: 'none', boxSizing: 'border-box',
+                    width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)',
+                    fontSize: 13, color: 'var(--text)', outline: 'none', boxSizing: 'border-box',
                   }}
                   onFocus={e => e.currentTarget.style.borderColor = '#7c3aed'}
                   onBlur={e => e.currentTarget.style.borderColor = '#e8e8e8'}
@@ -1236,15 +1236,15 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
 
               {/* Title */}
               <div>
-                <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Job title</label>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Job title</label>
                 <input
                   type="text"
                   value={addForm.title}
                   onChange={e => setAddForm(f => ({ ...f, title: e.target.value }))}
                   placeholder="e.g. HR Experience Specialist"
                   style={{
-                    width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                    fontSize: 13, color: '#1b1b1b', outline: 'none', boxSizing: 'border-box',
+                    width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)',
+                    fontSize: 13, color: 'var(--text)', outline: 'none', boxSizing: 'border-box',
                   }}
                   onFocus={e => e.currentTarget.style.borderColor = '#7c3aed'}
                   onBlur={e => e.currentTarget.style.borderColor = '#e8e8e8'}
@@ -1254,26 +1254,26 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
               {/* Team + Role row */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Team / section</label>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Team / section</label>
                   <select
                     value={addForm.team}
                     onChange={e => setAddForm(f => ({ ...f, team: e.target.value }))}
                     style={{
-                      width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                      fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', cursor: 'pointer',
+                      width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)',
+                      fontSize: 13, color: 'var(--text)', background: 'var(--surface)', cursor: 'pointer',
                     }}
                   >
                     {TEAM_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Role / access</label>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Role / access</label>
                   <select
                     value={addForm.role}
                     onChange={e => setAddForm(f => ({ ...f, role: e.target.value }))}
                     style={{
-                      width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                      fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', cursor: 'pointer',
+                      width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)',
+                      fontSize: 13, color: 'var(--text)', background: 'var(--surface)', cursor: 'pointer',
                     }}
                   >
                     {ROLE_OPTIONS.map(r => (
@@ -1286,13 +1286,13 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
               {/* Manager + Service row (NEW: fixes "cannot assign manager" gap) */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Manager</label>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Manager</label>
                   <select
                     value={addForm.managerEmail}
                     onChange={e => setAddForm(f => ({ ...f, managerEmail: e.target.value }))}
                     style={{
-                      width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                      fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', cursor: 'pointer',
+                      width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)',
+                      fontSize: 13, color: 'var(--text)', background: 'var(--surface)', cursor: 'pointer',
                     }}
                   >
                     <option value="">— Select a manager —</option>
@@ -1304,13 +1304,13 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                   </select>
                 </div>
                 <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Service line</label>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Service line</label>
                   <select
                     value={addForm.service}
                     onChange={e => setAddForm(f => ({ ...f, service: e.target.value }))}
                     style={{
-                      width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                      fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', cursor: 'pointer',
+                      width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)',
+                      fontSize: 13, color: 'var(--text)', background: 'var(--surface)', cursor: 'pointer',
                     }}
                   >
                     {SERVICE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
@@ -1321,28 +1321,28 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
               {/* Region + Country row */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Region</label>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Region</label>
                   <select
                     value={addForm.region}
                     onChange={e => setAddForm(f => ({ ...f, region: e.target.value }))}
                     style={{
-                      width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                      fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', cursor: 'pointer',
+                      width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)',
+                      fontSize: 13, color: 'var(--text)', background: 'var(--surface)', cursor: 'pointer',
                     }}
                   >
                     {REGION_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Countries</label>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Countries</label>
                   <input
                     type="text"
                     value={addForm.country}
                     onChange={e => setAddForm(f => ({ ...f, country: e.target.value }))}
                     placeholder="e.g. DE, US, SG"
                     style={{
-                      width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                      fontSize: 13, color: '#1b1b1b', outline: 'none', boxSizing: 'border-box',
+                      width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)',
+                      fontSize: 13, color: 'var(--text)', outline: 'none', boxSizing: 'border-box',
                     }}
                     onFocus={e => e.currentTarget.style.borderColor = '#7c3aed'}
                     onBlur={e => e.currentTarget.style.borderColor = '#e8e8e8'}
@@ -1364,8 +1364,8 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                 onClick={() => { setShowAddModal(false); setAddError(null); }}
                 disabled={addSaving}
                 style={{
-                  padding: '8px 18px', borderRadius: 128, border: '1px solid #e8e8e8',
-                  background: 'var(--surface)', fontSize: 13, fontWeight: 600, color: '#616161',
+                  padding: '8px 18px', borderRadius: 128, border: '1px solid var(--border)',
+                  background: 'var(--surface)', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)',
                   cursor: addSaving ? 'not-allowed' : 'pointer',
                   opacity: addSaving ? 0.6 : 1,
                 }}
@@ -1415,15 +1415,15 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
             >
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                 <div>
-                  <div style={{ fontSize: 16, fontWeight: 700, color: '#1b1b1b' }}>Edit Allocation</div>
-                  <div style={{ fontSize: 12, color: '#616161', marginTop: 2 }}>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>Edit Allocation</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
                     {target.name} · <span style={{ fontFamily: 'monospace' }}>{target.email}</span>
                   </div>
                 </div>
                 <button
                   onClick={() => { if (!allocSaving) { setEditAllocEmail(null); setAllocError(null); } }}
                   disabled={allocSaving}
-                  style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: '#f7f5f2', cursor: allocSaving ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#616161', fontSize: 14 }}
+                  style={{ width: 28, height: 28, borderRadius: 8, border: 'none', background: 'var(--surface-3)', cursor: allocSaving ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: 14 }}
                 >
                   <i className="bi-x-lg" />
                 </button>
@@ -1433,28 +1433,28 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                 {/* Name + Title */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div>
-                    <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Display name</label>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Display name</label>
                     <input
                       type="text"
                       value={allocForm.name}
                       onChange={e => setAllocForm(f => ({ ...f, name: e.target.value }))}
                       style={{
-                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                        fontSize: 13, color: '#1b1b1b', outline: 'none', boxSizing: 'border-box',
+                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)',
+                        fontSize: 13, color: 'var(--text)', outline: 'none', boxSizing: 'border-box',
                       }}
                       onFocus={e => e.currentTarget.style.borderColor = '#7c3aed'}
                       onBlur={e => e.currentTarget.style.borderColor = '#e8e8e8'}
                     />
                   </div>
                   <div>
-                    <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Job title</label>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Job title</label>
                     <input
                       type="text"
                       value={allocForm.title}
                       onChange={e => setAllocForm(f => ({ ...f, title: e.target.value }))}
                       style={{
-                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                        fontSize: 13, color: '#1b1b1b', outline: 'none', boxSizing: 'border-box',
+                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)',
+                        fontSize: 13, color: 'var(--text)', outline: 'none', boxSizing: 'border-box',
                       }}
                       onFocus={e => e.currentTarget.style.borderColor = '#7c3aed'}
                       onBlur={e => e.currentTarget.style.borderColor = '#e8e8e8'}
@@ -1465,13 +1465,13 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                 {/* Team + Role */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div>
-                    <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Team / section</label>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Team / section</label>
                     <select
                       value={allocForm.team}
                       onChange={e => setAllocForm(f => ({ ...f, team: e.target.value }))}
                       style={{
-                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                        fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', cursor: 'pointer',
+                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)',
+                        fontSize: 13, color: 'var(--text)', background: 'var(--surface)', cursor: 'pointer',
                       }}
                     >
                       <option value="">— Unassigned —</option>
@@ -1479,13 +1479,13 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                     </select>
                   </div>
                   <div>
-                    <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Role / access</label>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Role / access</label>
                     <select
                       value={allocForm.role}
                       onChange={e => setAllocForm(f => ({ ...f, role: e.target.value }))}
                       style={{
-                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                        fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', cursor: 'pointer',
+                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)',
+                        fontSize: 13, color: 'var(--text)', background: 'var(--surface)', cursor: 'pointer',
                       }}
                     >
                       {ROLE_OPTIONS.map(r => (
@@ -1498,13 +1498,13 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                 {/* Manager + Service */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div>
-                    <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Manager</label>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Manager</label>
                     <select
                       value={allocForm.managerEmail}
                       onChange={e => setAllocForm(f => ({ ...f, managerEmail: e.target.value }))}
                       style={{
-                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                        fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', cursor: 'pointer',
+                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)',
+                        fontSize: 13, color: 'var(--text)', background: 'var(--surface)', cursor: 'pointer',
                       }}
                     >
                       <option value="">— No manager —</option>
@@ -1518,13 +1518,13 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                     </select>
                   </div>
                   <div>
-                    <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Service line</label>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Service line</label>
                     <select
                       value={allocForm.service}
                       onChange={e => setAllocForm(f => ({ ...f, service: e.target.value }))}
                       style={{
-                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                        fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', cursor: 'pointer',
+                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)',
+                        fontSize: 13, color: 'var(--text)', background: 'var(--surface)', cursor: 'pointer',
                       }}
                     >
                       {SERVICE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
@@ -1535,13 +1535,13 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                 {/* Region + Country */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div>
-                    <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Region</label>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Region</label>
                     <select
                       value={allocForm.region}
                       onChange={e => setAllocForm(f => ({ ...f, region: e.target.value }))}
                       style={{
-                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                        fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', cursor: 'pointer',
+                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)',
+                        fontSize: 13, color: 'var(--text)', background: 'var(--surface)', cursor: 'pointer',
                       }}
                     >
                       <option value="">— No region —</option>
@@ -1549,15 +1549,15 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                     </select>
                   </div>
                   <div>
-                    <label style={{ fontSize: 11, fontWeight: 600, color: '#616161', display: 'block', marginBottom: 4 }}>Countries</label>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Countries</label>
                     <input
                       type="text"
                       value={allocForm.country}
                       onChange={e => setAllocForm(f => ({ ...f, country: e.target.value }))}
                       placeholder="e.g. DE, US, SG"
                       style={{
-                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #e8e8e8',
-                        fontSize: 13, color: '#1b1b1b', outline: 'none', boxSizing: 'border-box',
+                        width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)',
+                        fontSize: 13, color: 'var(--text)', outline: 'none', boxSizing: 'border-box',
                       }}
                       onFocus={e => e.currentTarget.style.borderColor = '#7c3aed'}
                       onBlur={e => e.currentTarget.style.borderColor = '#e8e8e8'}
@@ -1566,10 +1566,10 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                 </div>
 
                 {/* Last-seen read-only info — actual user activity, not idle tabs */}
-                <div style={{ padding: '10px 14px', background: '#f9f8f6', borderRadius: 10, fontSize: 11, color: '#616161', display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ padding: '10px 14px', background: '#f9f8f6', borderRadius: 10, fontSize: 11, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 10 }}>
                   <i className="bi-clock-history" style={{ fontSize: 14, color: '#7c3aed' }} />
                   <div>
-                    <div style={{ fontWeight: 600, color: '#1b1b1b', fontSize: 12 }}>
+                    <div style={{ fontWeight: 600, color: 'var(--text)', fontSize: 12 }}>
                       {target.lastSeenAt ? `Last seen: ${new Date(target.lastSeenAt).toLocaleString()}` : 'Has never been active in Ops Hub'}
                     </div>
                     {target.loginCount > 0 && (
@@ -1591,8 +1591,8 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                   onClick={() => { setEditAllocEmail(null); setAllocError(null); }}
                   disabled={allocSaving}
                   style={{
-                    padding: '8px 18px', borderRadius: 128, border: '1px solid #e8e8e8',
-                    background: 'var(--surface)', fontSize: 13, fontWeight: 600, color: '#616161',
+                    padding: '8px 18px', borderRadius: 128, border: '1px solid var(--border)',
+                    background: 'var(--surface)', fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)',
                     cursor: allocSaving ? 'not-allowed' : 'pointer',
                     opacity: allocSaving ? 0.6 : 1,
                   }}
@@ -1645,9 +1645,9 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                   <i className="bi-shield-lock" style={{ fontSize: 16, color: '#7c3aed' }} />
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: '#1b1b1b' }}>Manage permissions</div>
-                  <div style={{ fontSize: 12, color: '#9e9e9e', marginTop: 1 }}>
-                    Additive grants for <strong style={{ color: '#1b1b1b' }}>{targetName}</strong>. These apply on top of their normal access tier.
+                  <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>Manage permissions</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 1 }}>
+                    Additive grants for <strong style={{ color: 'var(--text)' }}>{targetName}</strong>. These apply on top of their normal access tier.
                   </div>
                 </div>
               </div>
@@ -1670,11 +1670,11 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                     style={{ marginTop: 2, accentColor: '#7c3aed' }}
                   />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: '#1b1b1b', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6 }}>
                       <i className="bi-megaphone-fill" style={{ fontSize: 12, color: '#7c3aed' }} />
                       Announcements Admin
                     </div>
-                    <div style={{ fontSize: 11, color: '#616161', marginTop: 4, lineHeight: 1.5 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4, lineHeight: 1.5 }}>
                       Full control over the announcement workflow — compose, approve / reject pending requests, archive &amp; unarchive, override draft fields before publishing, and send acknowledgement reminders. Treats this user as an admin for the announcements domain only; other permissions stay tied to their normal access tier.
                     </div>
                   </div>
@@ -1697,11 +1697,11 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                     style={{ marginTop: 2, accentColor: '#0369a1' }}
                   />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: '#1b1b1b', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 6 }}>
                       <i className="bi-shield-lock-fill" style={{ fontSize: 12, color: '#0369a1' }} />
                       Access Admin
                     </div>
-                    <div style={{ fontSize: 11, color: '#616161', marginTop: 4, lineHeight: 1.5 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4, lineHeight: 1.5 }}>
                       Manage the team roster — add / edit / remove members, edit allocations, set on-leave, and grant other per-user permissions. Use this to delegate roster maintenance without escalating someone's primary access tier to regional manager.
                     </div>
                   </div>
@@ -1713,8 +1713,8 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
                   onClick={closePermissionsModal}
                   disabled={permsSaving}
                   style={{
-                    padding: '8px 16px', borderRadius: 128, border: '1px solid #e8e8e8',
-                    background: 'var(--surface)', color: '#1b1b1b', fontSize: 13, fontWeight: 600,
+                    padding: '8px 16px', borderRadius: 128, border: '1px solid var(--border)',
+                    background: 'var(--surface)', color: 'var(--text)', fontSize: 13, fontWeight: 600,
                     cursor: permsSaving ? 'not-allowed' : 'pointer',
                   }}
                 >
@@ -1858,7 +1858,7 @@ const QueueSlaSettingsCard = () => {
 
   return (
     <div style={{
-      marginTop: 24, background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 16,
+      marginTop: 24, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16,
       overflow: 'hidden',
     }}>
       <div style={{ padding: '16px 22px 12px', borderBottom: '1px solid #f0eeec', display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1866,8 +1866,8 @@ const QueueSlaSettingsCard = () => {
           <i className="bi-shield-check" style={{ fontSize: 14, color: '#7c3aed' }} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: '#1b1b1b' }}>Queue SLA settings</div>
-          <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 1 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>Queue SLA settings</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
             {canEdit
               ? 'Set the SLA window for each queue. Saved values apply across the app immediately.'
               : 'Read-only — only Directors / Regional Managers / Team Leads can edit.'}
@@ -1882,10 +1882,10 @@ const QueueSlaSettingsCard = () => {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid #f0eeec' }}>
-              <th style={{ textAlign: 'left',  padding: '10px 8px', fontSize: 11, fontWeight: 700, color: '#9e9e9e', letterSpacing: '.04em', textTransform: 'uppercase' }}>Queue</th>
-              <th style={{ textAlign: 'left',  padding: '10px 8px', fontSize: 11, fontWeight: 700, color: '#9e9e9e', letterSpacing: '.04em', textTransform: 'uppercase' }}>Active SLA from</th>
-              <th style={{ textAlign: 'right', padding: '10px 8px', fontSize: 11, fontWeight: 700, color: '#9e9e9e', letterSpacing: '.04em', textTransform: 'uppercase' }}>Active window</th>
-              <th style={{ textAlign: 'right', padding: '10px 8px', fontSize: 11, fontWeight: 700, color: '#9e9e9e', letterSpacing: '.04em', textTransform: 'uppercase' }}>Paused window</th>
+              <th style={{ textAlign: 'left',  padding: '10px 8px', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.04em', textTransform: 'uppercase' }}>Queue</th>
+              <th style={{ textAlign: 'left',  padding: '10px 8px', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.04em', textTransform: 'uppercase' }}>Active SLA from</th>
+              <th style={{ textAlign: 'right', padding: '10px 8px', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.04em', textTransform: 'uppercase' }}>Active window</th>
+              <th style={{ textAlign: 'right', padding: '10px 8px', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.04em', textTransform: 'uppercase' }}>Paused window</th>
             </tr>
           </thead>
           <tbody>
@@ -1893,8 +1893,8 @@ const QueueSlaSettingsCard = () => {
               const cfg = draft?.[q.id] || {};
               return (
                 <tr key={q.id} style={{ borderBottom: '1px solid #f7f5f2' }}>
-                  <td style={{ padding: '10px 8px', fontWeight: 600, color: '#1b1b1b' }}>{q.label}</td>
-                  <td style={{ padding: '10px 8px', color: '#616161' }}>{q.anchor}</td>
+                  <td style={{ padding: '10px 8px', fontWeight: 600, color: 'var(--text)' }}>{q.label}</td>
+                  <td style={{ padding: '10px 8px', color: 'var(--text-secondary)' }}>{q.anchor}</td>
                   <td style={{ padding: '6px 8px', textAlign: 'right' }}>
                     <SlaInput
                       value={cfg.activeMins}
@@ -1909,11 +1909,11 @@ const QueueSlaSettingsCard = () => {
               );
             })}
             <tr style={{ background: '#fbfafc' }}>
-              <td colSpan={2} style={{ padding: '12px 8px', fontWeight: 700, color: '#1b1b1b' }}>
+              <td colSpan={2} style={{ padding: '12px 8px', fontWeight: 700, color: 'var(--text)' }}>
                 Universal paused window
-                <span style={{ marginLeft: 8, fontWeight: 500, fontSize: 11, color: '#9e9e9e' }}>(applies to every queue with a pause state)</span>
+                <span style={{ marginLeft: 8, fontWeight: 500, fontSize: 11, color: 'var(--text-muted)' }}>(applies to every queue with a pause state)</span>
               </td>
-              <td style={{ padding: '12px 8px', textAlign: 'right', color: '#9e9e9e', fontSize: 11 }}>—</td>
+              <td style={{ padding: '12px 8px', textAlign: 'right', color: 'var(--text-muted)', fontSize: 11 }}>—</td>
               <td style={{ padding: '6px 8px', textAlign: 'right' }}>
                 <SlaInput
                   value={pausedMins}
@@ -1949,10 +1949,10 @@ const QueueSlaSettingsCard = () => {
             </button>
           )}
         </div>
-        <div style={{ marginTop: 10, fontSize: 11, color: '#9e9e9e' }}>
+        <div style={{ marginTop: 10, fontSize: 11, color: 'var(--text-muted)' }}>
           All SLAs tick on the <strong>business-day clock</strong> — Saturday and Sunday do not elapse.
-          Enter values as hours (<code style={{ background: '#f5f5f5', padding: '1px 5px', borderRadius: 4 }}>48</code> = 48h),
-          or with an explicit unit (<code style={{ background: '#f5f5f5', padding: '1px 5px', borderRadius: 4 }}>5d</code>, <code style={{ background: '#f5f5f5', padding: '1px 5px', borderRadius: 4 }}>30m</code>).
+          Enter values as hours (<code style={{ background: 'var(--surface-3)', padding: '1px 5px', borderRadius: 4 }}>48</code> = 48h),
+          or with an explicit unit (<code style={{ background: 'var(--surface-3)', padding: '1px 5px', borderRadius: 4 }}>5d</code>, <code style={{ background: 'var(--surface-3)', padding: '1px 5px', borderRadius: 4 }}>30m</code>).
           Per-row SLA pills and the Briefing aggregate update on next sync.
         </div>
       </div>
@@ -2053,14 +2053,14 @@ const CapacitySettingsCard = () => {
   }
 
   return (
-    <div style={{ marginTop: 24, background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 16, overflow: 'hidden' }}>
+    <div style={{ marginTop: 24, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden' }}>
       <div style={{ padding: '16px 22px 12px', borderBottom: '1px solid #f0eeec', display: 'flex', alignItems: 'center', gap: 10 }}>
         <div style={{ width: 32, height: 32, borderRadius: 10, background: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <i className="bi-speedometer2" style={{ fontSize: 14, color: '#1f74b3' }} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: '#1b1b1b' }}>Workload capacity thresholds</div>
-          <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 1 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>Workload capacity thresholds</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
             {canEdit
               ? 'Set the workload bands used by Briefing health score and the Team workload pills.'
               : 'Read-only — only Directors / Regional Managers / Team Leads can edit.'}
@@ -2075,9 +2075,9 @@ const CapacitySettingsCard = () => {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid #f0eeec' }}>
-              <th style={{ textAlign: 'left',  padding: '10px 8px', fontSize: 11, fontWeight: 700, color: '#9e9e9e', letterSpacing: '.04em', textTransform: 'uppercase' }}>Band</th>
-              <th style={{ textAlign: 'left',  padding: '10px 8px', fontSize: 11, fontWeight: 700, color: '#9e9e9e', letterSpacing: '.04em', textTransform: 'uppercase' }}>Range (open + paused tasks)</th>
-              <th style={{ textAlign: 'right', padding: '10px 8px', fontSize: 11, fontWeight: 700, color: '#9e9e9e', letterSpacing: '.04em', textTransform: 'uppercase' }}>Threshold</th>
+              <th style={{ textAlign: 'left',  padding: '10px 8px', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.04em', textTransform: 'uppercase' }}>Band</th>
+              <th style={{ textAlign: 'left',  padding: '10px 8px', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.04em', textTransform: 'uppercase' }}>Range (open + paused tasks)</th>
+              <th style={{ textAlign: 'right', padding: '10px 8px', fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '.04em', textTransform: 'uppercase' }}>Threshold</th>
             </tr>
           </thead>
           <tbody>
@@ -2088,7 +2088,7 @@ const CapacitySettingsCard = () => {
                   Low (under-utilised)
                 </span>
               </td>
-              <td style={{ padding: '10px 8px', color: '#616161' }}>{`< ${lowMaxDraft}`}</td>
+              <td style={{ padding: '10px 8px', color: 'var(--text-secondary)' }}>{`< ${lowMaxDraft}`}</td>
               <td style={{ padding: '6px 8px', textAlign: 'right' }}>
                 <CapacityInput value={lowMaxDraft} disabled={!canEdit || saving || isLoading} onCommit={setLowMaxDraft} />
               </td>
@@ -2100,8 +2100,8 @@ const CapacitySettingsCard = () => {
                   Good (green near low → yellow near high)
                 </span>
               </td>
-              <td style={{ padding: '10px 8px', color: '#616161' }}>{`${lowMaxDraft} – ${highMinDraft}`}</td>
-              <td style={{ padding: '6px 8px', textAlign: 'right', color: '#9e9e9e', fontSize: 11 }}>—</td>
+              <td style={{ padding: '10px 8px', color: 'var(--text-secondary)' }}>{`${lowMaxDraft} – ${highMinDraft}`}</td>
+              <td style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--text-muted)', fontSize: 11 }}>—</td>
             </tr>
             <tr style={{ borderBottom: '1px solid #f7f5f2' }}>
               <td style={{ padding: '10px 8px', fontWeight: 600, color: '#d42d35' }}>
@@ -2110,7 +2110,7 @@ const CapacitySettingsCard = () => {
                   High (burnout risk)
                 </span>
               </td>
-              <td style={{ padding: '10px 8px', color: '#616161' }}>{`> ${highMinDraft}`}</td>
+              <td style={{ padding: '10px 8px', color: 'var(--text-secondary)' }}>{`> ${highMinDraft}`}</td>
               <td style={{ padding: '6px 8px', textAlign: 'right' }}>
                 <CapacityInput value={highMinDraft} disabled={!canEdit || saving || isLoading} onCommit={setHighMinDraft} />
               </td>
@@ -2142,7 +2142,7 @@ const CapacitySettingsCard = () => {
             </button>
           )}
         </div>
-        <div style={{ marginTop: 10, fontSize: 11, color: '#9e9e9e' }}>
+        <div style={{ marginTop: 10, fontSize: 11, color: 'var(--text-muted)' }}>
           Workload count = each agent's open + paused tasks across Zendesk, Jira, Workbench,
           Onboarding, Offboarding (Amendments / Redlines have no per-agent assignee, so they
           aren't counted here). The Briefing health score's Capacity factor (default 20%) reads

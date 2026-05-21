@@ -45,7 +45,7 @@ export default function TaskBreakdownChart({ tasks = [] }) {
 
     return Object.entries(groups)
       .map(([typ, count]) => {
-        const fn = FUNCTIONS[typ] || { label: typ, color: '#9e9e9e', bg: '#f7f5f2' };
+        const fn = FUNCTIONS[typ] || { label: typ, color: 'var(--text-muted)', bg: '#f7f5f2' };
         return {
           key: typ,
           label: fn.label,
@@ -65,7 +65,7 @@ export default function TaskBreakdownChart({ tasks = [] }) {
     <div
       style={{
         background: 'var(--surface)',
-        border: '1px solid #e8e8e8',
+        border: '1px solid var(--border)',
         borderRadius: 16,
         padding: 20,
       }}
@@ -83,14 +83,14 @@ export default function TaskBreakdownChart({ tasks = [] }) {
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <i className="bi-pie-chart" style={{ fontSize: 16, color: '#7c3aed' }} />
-          <span style={{ fontSize: 15, fontWeight: 700, color: '#1b1b1b' }}>
+          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>
             Task Breakdown
           </span>
           <span
             style={{
               fontSize: 11,
-              color: '#9e9e9e',
-              background: '#f7f5f2',
+              color: 'var(--text-muted)',
+              background: 'var(--surface-3)',
               padding: '2px 8px',
               borderRadius: 128,
               fontWeight: 600,
@@ -101,7 +101,7 @@ export default function TaskBreakdownChart({ tasks = [] }) {
         </div>
 
         {/* Period toggle pills */}
-        <div style={{ display: 'flex', background: '#f7f5f2', borderRadius: 128, padding: 3, gap: 2 }}>
+        <div style={{ display: 'flex', background: 'var(--surface-3)', borderRadius: 128, padding: 3, gap: 2 }}>
           {PERIODS.map((p) => {
             const active = period === p.id;
             return (
@@ -123,7 +123,7 @@ export default function TaskBreakdownChart({ tasks = [] }) {
 
       {/* List */}
       {data.length === 0 ? (
-        <div style={{ textAlign: 'center', color: '#9e9e9e', fontSize: 13, padding: 20 }}>
+        <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13, padding: 20 }}>
           No resolved tasks in this period
         </div>
       ) : (
@@ -147,7 +147,7 @@ export default function TaskBreakdownChart({ tasks = [] }) {
                     style={{
                       fontSize: 12,
                       fontWeight: 600,
-                      color: '#1b1b1b',
+                      color: 'var(--text)',
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
@@ -173,8 +173,8 @@ export default function TaskBreakdownChart({ tasks = [] }) {
 
                 {/* Count + pct */}
                 <div style={{ width: 70, textAlign: 'right', flexShrink: 0 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: '#1b1b1b' }}>{d.count}</span>
-                  <span style={{ fontSize: 10, color: '#9e9e9e', marginLeft: 4 }}>({d.pct}%)</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{d.count}</span>
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 4 }}>({d.pct}%)</span>
                 </div>
               </div>
             );

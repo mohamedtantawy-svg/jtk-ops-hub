@@ -128,7 +128,7 @@ const DailySummary = ({ tasks = [], escalations = [], scope = 'team' }) => {
         <div style={{ width: 30, height: 30, borderRadius: 9, background: '#DBEAFE', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <i className="bi-bar-chart-line" style={{ fontSize: 13, color: '#2563EB' }}></i>
         </div>
-        <span style={{ fontSize: 15, fontWeight: 700, color: '#1b1b1b' }}>Daily Summary</span>
+        <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>Daily Summary</span>
         <span style={{ fontSize: 11, color: '#6B7280', marginLeft: 'auto', fontWeight: 500 }} suppressHydrationWarning>
           {mountedAt ? mountedAt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : ''}
         </span>
@@ -161,7 +161,7 @@ const DailySummary = ({ tasks = [], escalations = [], scope = 'team' }) => {
               }}
             >
               <i className={item.icon} style={{ fontSize: 14, color: item.color, display: 'block', marginBottom: 4 }}></i>
-              <div style={{ fontSize: 18, fontWeight: 800, color: '#1b1b1b' }}>{item.value}</div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)' }}>{item.value}</div>
               <div style={{ fontSize: 10, color: '#6B7280', fontWeight: 600, marginTop: 2 }}>{item.label}</div>
             </div>
           );
@@ -175,7 +175,7 @@ const DailySummary = ({ tasks = [], escalations = [], scope = 'team' }) => {
           title="Share of today's work (incoming + carried over) that's been resolved today"
         >
           <i className="bi-speedometer2" style={{ fontSize: 14, color: stats.completion >= 70 ? '#16A34A' : stats.completion >= 40 ? '#D97706' : '#DC2626', display: 'block', marginBottom: 4 }}></i>
-          <div style={{ fontSize: 18, fontWeight: 800, color: '#1b1b1b' }}>{stats.completion}%</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)' }}>{stats.completion}%</div>
           <div style={{ fontSize: 10, color: '#6B7280', fontWeight: 600, marginTop: 2 }}>Completion</div>
         </div>
       </div>

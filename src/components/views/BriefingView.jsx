@@ -1146,7 +1146,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const Ring=({pct,color,size,stroke})=>{
     const r=(size-stroke)/2;const circ=2*Math.PI*r;const off=circ*(1-pct/100);
     return(<svg width={size} height={size} role="img" aria-label={`${pct}% progress`} style={{transform:'rotate(-90deg)'}}>
-      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#e8e8e8" strokeWidth={stroke}/>
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="var(--border)" strokeWidth={stroke}/>
       <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round"
         strokeDasharray={circ} strokeDashoffset={off} style={{'--circ':circ,'--off':off,animation:'ringDraw .9s cubic-bezier(.16,1,.3,1) forwards'}}/>
     </svg>);
@@ -1154,8 +1154,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
 
   // ── Mini ticket list for expandable panels ──────────────────────────
   const MiniTicketList=({items,emptyMsg})=>(
-    <div style={{background:'#fafaf9',border:'1px solid #e8e8e8',borderRadius:12,margin:'8px 0 4px',padding:'8px 12px',maxHeight:200,overflowY:'auto',animation:'fadeSlide .2s ease'}}>
-      {items.length===0?<div style={{fontSize:11,color:'#9e9e9e',padding:'12px 0',textAlign:'center'}}>
+    <div style={{background:'var(--surface-2)',border:'1px solid var(--border)',borderRadius:12,margin:'8px 0 4px',padding:'8px 12px',maxHeight:200,overflowY:'auto',animation:'fadeSlide .2s ease'}}>
+      {items.length===0?<div style={{fontSize:11,color:'var(--text-muted)',padding:'12px 0',textAlign:'center'}}>
         {emptyMsg||'No tasks'}
       </div>:
       items.map((t,i)=>{
@@ -1168,8 +1168,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               <i className={tool?.icon||'bi-circle'} style={{fontSize:9,color:tool?.color||'#bebebe'}}></i>
             </div>
             <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:11,fontWeight:600,color:'#1b1b1b',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{t.subject}</div>
-              <div style={{fontSize:9,color:'#9e9e9e',display:'flex',gap:6,marginTop:1}}>
+              <div style={{fontSize:11,fontWeight:600,color:'var(--text)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{t.subject}</div>
+              <div style={{fontSize:9,color:'var(--text-muted)',display:'flex',gap:6,marginTop:1}}>
                 <span>{STATUSES[t.status]?.label||t.status}</span>
                 <span>{rel(t.minutesAgo)} old</span>
               </div>
@@ -1198,7 +1198,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
 
   // ── Deel-style card wrapper ──────────────────────────────────────────
   const DeelCard=({children,style,...props})=>(
-    <div style={{background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16,padding:24,transition:'box-shadow .2s',...style}}
+    <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:16,padding:24,transition:'box-shadow .2s',...style}}
       onMouseEnter={e=>e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)'}
       onMouseLeave={e=>e.currentTarget.style.boxShadow='none'}
       {...props}>
@@ -1221,7 +1221,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
       onMouseLeave={e=>{e.currentTarget.style.boxShadow='none';e.currentTarget.style.transform='none';}}>
       {icon&&<i className={icon} style={{fontSize:10,color:color||'#9e9e9e',marginBottom:2,display:'block'}}></i>}
       <div style={{fontSize:24,fontWeight:700,color:color||'#1b1b1b',lineHeight:1,fontVariantNumeric:'tabular-nums'}}>{value}</div>
-      <div style={{fontSize:10,fontWeight:600,color:'#9e9e9e',marginTop:4}}>{label}</div>
+      <div style={{fontSize:10,fontWeight:600,color:'var(--text-muted)',marginTop:4}}>{label}</div>
     </div>
   );
 
@@ -1236,15 +1236,15 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             {/* Greeting + Role */}
             <div style={{flex:1,minWidth:0}}>
               <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
-                <h1 style={{fontSize:'var(--font-2xl, 20px)',lineHeight:'var(--lh-tight, 1.25)',fontWeight:700,color:'#1b1b1b',margin:0,letterSpacing:'-.01em'}}>{greeting}, {firstName}</h1>
+                <h1 style={{fontSize:'var(--font-2xl, 20px)',lineHeight:'var(--lh-tight, 1.25)',fontWeight:700,color:'var(--text)',margin:0,letterSpacing:'-.01em'}}>{greeting}, {firstName}</h1>
                 <span style={{background:'var(--purple-mid, #ede9fe)',color:'var(--purple, #7c3aed)',borderRadius:'var(--radius-pill)',padding:'2px 10px',fontSize:'var(--font-xs)',fontWeight:600}}>{roleLabel}</span>
               </div>
-              <div style={{fontSize:13,color:'#616161',marginTop:6,display:'flex',alignItems:'center',gap:8}}>
+              <div style={{fontSize:13,color:'var(--text-secondary)',marginTop:6,display:'flex',alignItems:'center',gap:8}}>
                 <span>{dateStr}</span>
                 <span style={{width:3,height:3,borderRadius:'50%',background:'#bebebe',display:'inline-block'}}></span>
                 <span>{timeStr}</span>
                 <span style={{width:3,height:3,borderRadius:'50%',background:'#bebebe',display:'inline-block'}}></span>
-                <span style={{color:'#9e9e9e'}}>{scopeLabel}</span>
+                <span style={{color:'var(--text-muted)'}}>{scopeLabel}</span>
               </div>
               {isAllScope&&(
                 <div style={{marginTop:5,fontSize:12,color:'#1f74b3',fontWeight:600,display:'flex',alignItems:'center',gap:5}}>
@@ -1267,8 +1267,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                       size={22}
                     />
                     <div style={{fontSize:12,lineHeight:'16px',whiteSpace:'nowrap'}}>
-                      <span style={{color:'#9e9e9e',fontWeight:500}}>Manager On Call:</span>{' '}
-                      <span style={{fontWeight:700,color:'#1b1b1b'}}>{managerOnCall.name}</span>
+                      <span style={{color:'var(--text-muted)',fontWeight:500}}>Manager On Call:</span>{' '}
+                      <span style={{fontWeight:700,color:'var(--text)'}}>{managerOnCall.name}</span>
                     </div>
                     {/* Edit pencil visible to every authenticated user as
                         of 2026-05-07 (Mohamed: "anyone can change [the
@@ -1289,7 +1289,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                         onMouseEnter={e=>e.currentTarget.style.background='#f0f0f0'}
                         onMouseLeave={e=>e.currentTarget.style.background='transparent'}
                       >
-                        <i className="bi bi-pencil" style={{fontSize:11,color:'#9e9e9e'}}></i>
+                        <i className="bi bi-pencil" style={{fontSize:11,color:'var(--text-muted)'}}></i>
                       </button>
                     )}
                   </div>
@@ -1357,8 +1357,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                         size={22}
                       />
                       <div style={{fontSize:12,lineHeight:'16px',whiteSpace:'nowrap'}}>
-                        <span style={{color:'#9e9e9e',fontWeight:500}}>Team Lead On Call:</span>{' '}
-                        <span style={{fontWeight:700,color:'#1b1b1b'}}>{teamLeadOnCall.name}</span>
+                        <span style={{color:'var(--text-muted)',fontWeight:500}}>Team Lead On Call:</span>{' '}
+                        <span style={{fontWeight:700,color:'var(--text)'}}>{teamLeadOnCall.name}</span>
                       </div>
                       <button
                         type="button"
@@ -1369,7 +1369,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                         onMouseEnter={e=>e.currentTarget.style.background='#f0f0f0'}
                         onMouseLeave={e=>e.currentTarget.style.background='transparent'}
                       >
-                        <i className="bi bi-pencil" style={{fontSize:11,color:'#9e9e9e'}}></i>
+                        <i className="bi bi-pencil" style={{fontSize:11,color:'var(--text-muted)'}}></i>
                       </button>
                     </div>
                     {showTlocPicker&&tlocPickerPos&&(
@@ -1486,18 +1486,18 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 onMouseEnter={e=>e.currentTarget.style.transform='scale(1.06)'} onMouseLeave={e=>e.currentTarget.style.transform='scale(1)'}>
                 <Ring pct={healthScore} color={hColor} size={64} stroke={5}/>
                 <div style={{position:'absolute',textAlign:'center'}}>
-                  <div className="health-label" style={{fontSize:18,fontWeight:700,color:'#1b1b1b',lineHeight:1,fontVariantNumeric:'tabular-nums'}}>{healthScore}</div>
-                  <div style={{fontSize:7,color:'#9e9e9e',fontWeight:600,letterSpacing:'.04em',marginTop:1}}>HEALTH</div>
+                  <div className="health-label" style={{fontSize:18,fontWeight:700,color:'var(--text)',lineHeight:1,fontVariantNumeric:'tabular-nums'}}>{healthScore}</div>
+                  <div style={{fontSize:7,color:'var(--text-muted)',fontWeight:600,letterSpacing:'.04em',marginTop:1}}>HEALTH</div>
                 </div>
               </div>
-              {showHealthBreakdown&&healthPopoverPos&&<div style={{position:'fixed',top:healthPopoverPos.top,right:healthPopoverPos.right,width:300,background:'var(--surface)',borderRadius:16,border:'1px solid #e8e8e8',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'18px 18px 14px',zIndex:9999,animation:'fadeSlide .2s ease'}}>
+              {showHealthBreakdown&&healthPopoverPos&&<div style={{position:'fixed',top:healthPopoverPos.top,right:healthPopoverPos.right,width:300,background:'var(--surface)',borderRadius:16,border:'1px solid var(--border)',boxShadow:'0 8px 24px rgba(0,0,0,.12)',padding:'18px 18px 14px',zIndex:9999,animation:'fadeSlide .2s ease'}}>
                 <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
                   <div style={{width:8,height:8,borderRadius:'50%',background:hColor}}></div>
-                  <span style={{fontSize:14,fontWeight:700,color:'#1b1b1b'}}>Health Breakdown</span>
+                  <span style={{fontSize:14,fontWeight:700,color:'var(--text)'}}>Health Breakdown</span>
                   <span style={{fontSize:11,fontWeight:700,color:hColor,marginLeft:'auto',padding:'2px 10px',borderRadius:128,background:hColor+'12'}}>{hLabel}</span>
-                  <button onClick={e=>{e.stopPropagation();setShowHealthBreakdown(false);}} style={{background:'none',border:'none',cursor:'pointer',padding:'2px 4px',fontSize:12,color:'#9e9e9e',lineHeight:1,marginLeft:4,borderRadius:4}} title="Close">✕</button>
+                  <button onClick={e=>{e.stopPropagation();setShowHealthBreakdown(false);}} style={{background:'none',border:'none',cursor:'pointer',padding:'2px 4px',fontSize:12,color:'var(--text-muted)',lineHeight:1,marginLeft:4,borderRadius:4}} title="Close">✕</button>
                 </div>
-                <div style={{fontSize:11,color:'#9e9e9e',marginBottom:10,lineHeight:1.4}}>
+                <div style={{fontSize:11,color:'var(--text-muted)',marginBottom:10,lineHeight:1.4}}>
                   How your {scopeLabel.toLowerCase()} is performing right now. Each factor is scored 0-100 and weighted below.
                 </div>
                 {[
@@ -1512,14 +1512,14 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                       <i className={row.icon} style={{fontSize:13,color:rc,width:18,textAlign:'center'}}></i>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{display:'flex',alignItems:'baseline',gap:6}}>
-                          <span style={{fontSize:12,color:'#1b1b1b',fontWeight:600}}>{row.label}</span>
-                          <span style={{fontSize:9,color:'#9e9e9e',fontWeight:600,background:'#f7f5f2',padding:'1px 6px',borderRadius:99}}>{row.weight}%</span>
+                          <span style={{fontSize:12,color:'var(--text)',fontWeight:600}}>{row.label}</span>
+                          <span style={{fontSize:9,color:'var(--text-muted)',fontWeight:600,background:'var(--surface-3)',padding:'1px 6px',borderRadius:99}}>{row.weight}%</span>
                         </div>
-                        <div style={{fontSize:10,color:'#9e9e9e',marginTop:1}}>{row.sub}</div>
+                        <div style={{fontSize:10,color:'var(--text-muted)',marginTop:1}}>{row.sub}</div>
                       </div>
                       <div style={{textAlign:'right'}}>
                         <div style={{fontSize:14,fontWeight:700,color:rc,fontVariantNumeric:'tabular-nums',lineHeight:1}}>{row.value}</div>
-                        <div style={{fontSize:9,color:'#9e9e9e',marginTop:2,fontVariantNumeric:'tabular-nums'}}>score {row.score}</div>
+                        <div style={{fontSize:9,color:'var(--text-muted)',marginTop:2,fontVariantNumeric:'tabular-nums'}}>score {row.score}</div>
                       </div>
                     </div>
                   );
@@ -1528,7 +1528,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   <div style={{fontSize:10,color:hColor,fontWeight:700,letterSpacing:'.02em'}}>
                     Score = (SLA×{wSLA} + Res×{wRes} + Resp×{wResp} + Cap×{wCap}) ÷ {wSum}
                   </div>
-                  <div style={{fontSize:9,color:'#9e9e9e',marginTop:3}}>
+                  <div style={{fontSize:9,color:'var(--text-muted)',marginTop:3}}>
                     Weights are configurable in Settings → Briefing
                   </div>
                 </div>
@@ -1538,7 +1538,11 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             {/* KPI Summary Cards */}
             {settings.briefing_show_kpi_cards!==false&&<div style={{display:'flex',alignItems:'center',gap:'var(--space-4, 16px)',flexShrink:0}}>
               <KpiCard label="Workload" value={wl} color={wc} icon="bi-speedometer2" clickable onClick={()=>setView('my-queue')}/>
-              <KpiCard label="SLA Comp %" value={`${slaCompRate}%`} color={slaCompRate>=80?'#29811e':slaCompRate>=60?'#ed8d00':'#d42d35'} icon="bi-shield-check" clickable onClick={()=>setView('analytics')}/>
+              {/* 2026-05-21 audit U03: bump green threshold to 90% so a
+                  visible KPI tile of "88%" doesn't read as Good. ≥90% green,
+                  ≥75% orange, <75% red. Matches the org-breach ring below
+                  which already used 90/70 cuts. */}
+              <KpiCard label="SLA Comp %" value={`${slaCompRate}%`} color={slaCompRate>=90?'#29811e':slaCompRate>=75?'#ed8d00':'#d42d35'} icon="bi-shield-check" clickable onClick={()=>setView('analytics')}/>
               {/* Header KPI: every resolved item currently in the viewer's
                   scope (own / team / region / org). Cross-source — counts
                   Zendesk + Jira tickets + Workbench COMPLETED + CLOSED.
@@ -1593,8 +1597,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
 
                 {/* Text content */}
                 <div style={{flex:1,minWidth:0,position:'relative',zIndex:1}}>
-                  <div style={{fontSize:17,fontWeight:700,color:'#1b1b1b',lineHeight:1.3,marginBottom:6}}>{comm.title}</div>
-                  <div style={{fontSize:13,color:'#4a4a4a',lineHeight:1.5,maxWidth:600,overflow:'hidden',textOverflow:'ellipsis',display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical'}}>{comm.body.slice(0,160)}{comm.body.length>160?'...':''}</div>
+                  <div style={{fontSize:17,fontWeight:700,color:'var(--text)',lineHeight:1.3,marginBottom:6}}>{comm.title}</div>
+                  <div style={{fontSize:13,color:'var(--text-secondary)',lineHeight:1.5,maxWidth:600,overflow:'hidden',textOverflow:'ellipsis',display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical'}}>{comm.body.slice(0,160)}{comm.body.length>160?'...':''}</div>
                   <button onClick={(e)=>{e.stopPropagation();setView('announcements');try{window.dispatchEvent(new CustomEvent('announcements:openDetail',{detail:{id:comm.id}}));}catch(_){}}} style={{
                     marginTop:12,display:'inline-flex',alignItems:'center',gap:6,
                     padding:'8px 20px',borderRadius:128,border:'none',
@@ -1621,11 +1625,18 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                     from the hero banner — does NOT record an ack server-side.
                     Users can still review + acknowledge from the Announcements
                     tab. Per-user, persisted in localStorage. */}
+                {/* 2026-05-21 audit U01: X was nearly invisible (gray glyph
+                    on light pastel bg). Stronger background tint + larger
+                    glyph + darker default color give it proper discoverability;
+                    hover state amps the bg further. */}
                 <button
+                  aria-label="Dismiss from hero (you can still acknowledge from the Announcements tab)"
                   title="Dismiss from hero (you can still acknowledge from the Announcements tab)"
                   onClick={(e)=>{e.stopPropagation();dismissAck(comm.id);if(total>1)goNext();}}
-                  style={{position:'absolute',top:10,right:12,width:24,height:24,borderRadius:'50%',background:'rgba(0,0,0,0.06)',border:'none',cursor:'pointer',color:'var(--text-muted)',fontSize:12,display:'flex',alignItems:'center',justifyContent:'center'}}>
-                  <i className="bi-x"></i>
+                  onMouseEnter={(e)=>{e.currentTarget.style.background='rgba(0,0,0,0.16)';}}
+                  onMouseLeave={(e)=>{e.currentTarget.style.background='rgba(0,0,0,0.10)';}}
+                  style={{position:'absolute',top:10,right:12,width:28,height:28,borderRadius:'50%',background:'rgba(0,0,0,0.10)',border:'none',cursor:'pointer',color:'var(--text)',fontSize:14,display:'flex',alignItems:'center',justifyContent:'center',transition:'background .15s'}}>
+                  <i className="bi-x-lg" style={{fontSize:12}}></i>
                 </button>
               </div>
 
@@ -1633,7 +1644,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               {total>1&&(
                 <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:10,padding:'10px 0 2px'}}>
                   {/* Left arrow */}
-                  <button onClick={goPrev} style={{width:30,height:30,borderRadius:'50%',border:'1px solid #e0e0e0',background:'var(--surface)',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',color:'#616161',fontSize:13,transition:'all .15s'}}
+                  <button onClick={goPrev} style={{width:30,height:30,borderRadius:'50%',border:'1px solid #e0e0e0',background:'var(--surface)',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',color:'var(--text-secondary)',fontSize:13,transition:'all .15s'}}
                     onMouseEnter={e=>{e.currentTarget.style.background='#f5f5f5';}} onMouseLeave={e=>{e.currentTarget.style.background='white';}}>
                     <i className="bi-chevron-left"></i>
                   </button>
@@ -1649,7 +1660,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   </div>
 
                   {/* Right arrow */}
-                  <button onClick={goNext} style={{width:30,height:30,borderRadius:'50%',border:'1px solid #e0e0e0',background:'var(--surface)',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',color:'#616161',fontSize:13,transition:'all .15s'}}
+                  <button onClick={goNext} style={{width:30,height:30,borderRadius:'50%',border:'1px solid #e0e0e0',background:'var(--surface)',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',color:'var(--text-secondary)',fontSize:13,transition:'all .15s'}}
                     onMouseEnter={e=>{e.currentTarget.style.background='#f5f5f5';}} onMouseLeave={e=>{e.currentTarget.style.background='white';}}>
                     <i className="bi-chevron-right"></i>
                   </button>
@@ -1827,11 +1838,11 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                     return(<div key={lv} style={{flex:1,textAlign:'center',padding:'8px 4px',borderRadius:10,background:clr+'08',border:`1px solid ${clr}15`}}>
                       <div style={{fontSize:24,fontWeight:700,color:clr,fontVariantNumeric:'tabular-nums'}}>{cnt}</div>
                       <div style={{fontSize:10,color:clr,fontWeight:600}}>{lv}</div>
-                      <div style={{fontSize:9,color:'#9e9e9e',marginTop:1}}>{desc}</div>
+                      <div style={{fontSize:9,color:'var(--text-muted)',marginTop:1}}>{desc}</div>
                     </div>);
                   })}
                 </div>
-                <div style={{fontSize:10,color:'#9e9e9e',marginTop:8,textAlign:'center'}}>Team avg: {teamAvg.toFixed(1)} tasks/agent &middot; {allAgents.length} agents</div>
+                <div style={{fontSize:10,color:'var(--text-muted)',marginTop:8,textAlign:'center'}}>Team avg: {teamAvg.toFixed(1)} tasks/agent &middot; {allAgents.length} agents</div>
               </div>
             </DeelCard>
           </div>
@@ -1878,19 +1889,19 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 {m.alert&&m.value>0&&<span className="pulse" style={{position:'absolute',top:10,right:12,width:7,height:7,borderRadius:'50%',background:'#d42d35'}}></span>}
                 <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}>
                   <i className={m.icon} style={{fontSize:12,color:m.color}}></i>
-                  <span style={{fontSize:13,fontWeight:600,color:'#9e9e9e',textTransform:'none',letterSpacing:'normal'}}>{m.label}</span>
+                  <span style={{fontSize:13,fontWeight:600,color:'var(--text-muted)',textTransform:'none',letterSpacing:'normal'}}>{m.label}</span>
                 </div>
                 <div style={{fontSize:24,fontWeight:700,color:(m.expandKey||m.nav)?'#1f74b3':m.color,lineHeight:1,fontVariantNumeric:'tabular-nums',cursor:(m.expandKey||m.nav)?'pointer':'default'}}>{m.value}</div>
                 <div style={{display:'flex',alignItems:'center',gap:4,marginTop:6}}>
-                  {m.sub&&<span style={{fontSize:10,color:'#9e9e9e'}}>{m.sub}</span>}
+                  {m.sub&&<span style={{fontSize:10,color:'var(--text-muted)'}}>{m.sub}</span>}
                   {m.tr&&m.tr.pct>0&&<span style={{fontSize:10,fontWeight:700,color:m.tr.c}}>{m.tr.dir}{m.tr.pct}%</span>}
                 </div>
               </DeelCard>
             ))}
           </div>
           {expandedSla==='active-breakdown'&&isOwnScope&&<div style={{marginTop:10}}>
-            <div style={{background:'#fafaf9',border:'1px solid #e8e8e8',borderRadius:12,padding:'12px 16px',animation:'fadeSlide .2s ease'}}>
-              {srcBreakdown.length===0?<div style={{fontSize:11,color:'#9e9e9e',padding:'12px 0',textAlign:'center'}}>No active tasks</div>:
+            <div style={{background:'var(--surface-2)',border:'1px solid var(--border)',borderRadius:12,padding:'12px 16px',animation:'fadeSlide .2s ease'}}>
+              {srcBreakdown.length===0?<div style={{fontSize:11,color:'var(--text-muted)',padding:'12px 0',textAlign:'center'}}>No active tasks</div>:
               srcBreakdown.map(([src,cnt])=>{
                 const tl=TOOLS[src];const color=SOURCE_COLOURS[src]||tl?.color||'#bebebe';
                 return(
@@ -1900,7 +1911,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                     <div style={{width:24,height:24,borderRadius:6,background:tl?.bg||'#f7f5f2',display:'flex',alignItems:'center',justifyContent:'center'}}>
                       <i className={tl?.icon||'bi-circle'} style={{fontSize:10,color}}></i>
                     </div>
-                    <span style={{fontSize:13,color:'#1b1b1b',flex:1,fontWeight:500}}>{tl?.label||src.charAt(0).toUpperCase()+src.slice(1)}</span>
+                    <span style={{fontSize:13,color:'var(--text)',flex:1,fontWeight:500}}>{tl?.label||src.charAt(0).toUpperCase()+src.slice(1)}</span>
                     <span style={{fontSize:16,fontWeight:700,color:'#1f74b3',fontVariantNumeric:'tabular-nums'}}>{cnt} {cnt===1?'task':'tasks'}</span>
                   </div>
                 );
@@ -1964,23 +1975,23 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               <div style={{width:36,height:36,borderRadius:12,background:'linear-gradient(135deg,#f3eff8,#EDE9FE)',display:'flex',alignItems:'center',justifyContent:'center'}}>
                 <i className="bi-people-fill" style={{fontSize:16,color:'#7c3aed'}}></i>
               </div>
-              <span style={{fontSize:18,fontWeight:700,color:'#1b1b1b'}}>Team Summary</span>
-              <span style={{fontSize:12,color:'#9e9e9e',marginLeft:'auto',background:'#fafaf9',padding:'3px 12px',borderRadius:128,fontWeight:600,border:'1px solid #e8e8e8'}}>{hmMembers.length} members</span>
+              <span style={{fontSize:18,fontWeight:700,color:'var(--text)'}}>Team Summary</span>
+              <span style={{fontSize:12,color:'var(--text-muted)',marginLeft:'auto',background:'var(--surface-2)',padding:'3px 12px',borderRadius:128,fontWeight:600,border:'1px solid var(--border)'}}>{hmMembers.length} members</span>
             </div>
             <div style={{overflowX:'auto'}}>
               <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
                 <thead>
-                  <tr style={{background:'#fafaf9',borderBottom:'1px solid #e8e8e8'}}>
-                    <th style={{padding:'12px 24px',textAlign:'left',fontWeight:600,color:'#9e9e9e',fontSize:12}}>Full Name</th>
-                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="Country ownership — controls who sees rows for this country in the country-OR-assignee queues. Click to edit.">Countries</th>
-                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="Total = Open + Paused across Zendesk, Jira, Workbench, Onboarding, Offboarding, Amendments, Redlines">Total</th>
-                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="Actionable rows across all 7 sources">Open</th>
-                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="Paused / waiting rows across all 7 sources">Paused</th>
-                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="Escalated tickets (subset of Open — informational)">Escalated</th>
-                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="SLA-breached rows across all 7 sources">Breaches</th>
-                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="Baseline 30 tasks = healthy workload. capacity% = total / 30.">Capacity %</th>
-                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'#9e9e9e',fontSize:12}} title="<20 Low · 20-50 Medium · >50 High">Workload</th>
-                    <th style={{padding:'12px 16px',textAlign:'right',fontWeight:600,color:'#9e9e9e',fontSize:12,whiteSpace:'nowrap'}}>Actions</th>
+                  <tr style={{background:'var(--surface-2)',borderBottom:'1px solid #e8e8e8'}}>
+                    <th style={{padding:'12px 24px',textAlign:'left',fontWeight:600,color:'var(--text-muted)',fontSize:12}}>Full Name</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'var(--text-muted)',fontSize:12}} title="Country ownership — controls who sees rows for this country in the country-OR-assignee queues. Click to edit.">Countries</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'var(--text-muted)',fontSize:12}} title="Total = Open + Paused across Zendesk, Jira, Workbench, Onboarding, Offboarding, Amendments, Redlines">Total</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'var(--text-muted)',fontSize:12}} title="Actionable rows across all 7 sources">Open</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'var(--text-muted)',fontSize:12}} title="Paused / waiting rows across all 7 sources">Paused</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'var(--text-muted)',fontSize:12}} title="Escalated tickets (subset of Open — informational)">Escalated</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'var(--text-muted)',fontSize:12}} title="SLA-breached rows across all 7 sources">Breaches</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'var(--text-muted)',fontSize:12}} title="Baseline 30 tasks = healthy workload. capacity% = total / 30.">Capacity %</th>
+                    <th style={{padding:'12px 16px',textAlign:'center',fontWeight:600,color:'var(--text-muted)',fontSize:12}} title="<20 Low · 20-50 Medium · >50 High">Workload</th>
+                    <th style={{padding:'12px 16px',textAlign:'right',fontWeight:600,color:'var(--text-muted)',fontSize:12,whiteSpace:'nowrap'}}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2039,10 +2050,10 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                         </td>
                         <td style={{padding:'14px 16px',textAlign:'center'}} title={m.capPct > 100 ? `${m.capPct}% — ${m.capPct - 100} percentage points over baseline (${BASELINE_CAPACITY} tasks). Capped to 100% in the bar; overflow shown with the "+X over" badge.` : `${m.capPct}% of baseline (${BASELINE_CAPACITY} tasks).`}>
                           <div style={{display:'flex',alignItems:'center',gap:6,justifyContent:'center'}}>
-                            <div style={{width:40,height:5,borderRadius:3,background:'#f0f0f0'}}>
+                            <div style={{width:40,height:5,borderRadius:3,background:'var(--surface-3)'}}>
                               <div style={{width:`${Math.min(m.capPct,100)}%`,height:5,borderRadius:3,background:m.wc}}></div>
                             </div>
-                            <span style={{fontSize:11,fontWeight:600,color:'#616161'}}>{Math.min(m.capPct, 100)}%</span>
+                            <span style={{fontSize:11,fontWeight:600,color:'var(--text-secondary)'}}>{Math.min(m.capPct, 100)}%</span>
                             {m.capPct > 100 && (
                               <span style={{fontSize:9,fontWeight:700,color:'#d42d35',background:'#fef2f2',padding:'1px 6px',borderRadius:128,letterSpacing:'0.02em'}}>
                                 +{m.capPct - 100} over
@@ -2098,9 +2109,9 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                                 aria-expanded={expanded}
                                 style={{
                                   width:22,height:22,borderRadius:6,
-                                  border:'1px solid #e8e8e8',background:'white',
+                                  border:'1px solid var(--border)',background:'var(--surface)',
                                   display:'inline-flex',alignItems:'center',justifyContent:'center',
-                                  cursor:'pointer',color:'#616161',flexShrink:0,
+                                  cursor:'pointer',color:'var(--text-secondary)',flexShrink:0,
                                   transition:'background .12s',
                                 }}
                                 onMouseEnter={(e) => { e.currentTarget.style.background = '#f7f5f2'; }}
@@ -2113,13 +2124,13 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                             )}
                             <Avatar name={g.manager.name} size={32}/>
                             <div style={{minWidth:0}}>
-                              <div style={{fontWeight:700,color:'#1b1b1b',display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                              <div style={{fontWeight:700,color:'var(--text)',display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
                                 {g.manager.name}
                                 <AccessBadge access={live?.access || g.manager.access} />
                                 <LastSeenPill iso={live?.lastSeenAt} loading={!!rosterLoading} />
                                 <OOOBadge events={oooEventsByEmail.get((g.manager.email || '').toLowerCase())} />
                               </div>
-                              <div style={{fontSize:11,color:'#9e9e9e'}}>
+                              <div style={{fontSize:11,color:'var(--text-muted)'}}>
                                 {g.manager.team} &middot; {g.headcount} {g.headcount === 1 ? 'agent' : 'agents'}
                                 {g.subGroups.length > 0 && (
                                   <> &middot; {g.subGroups.length} {g.subGroups.length === 1 ? 'team lead' : 'team leads'}</>
@@ -2135,7 +2146,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                             canEdit={canEditMemberCountries(g.manager.email)}
                           />
                         </td>
-                        <td style={{padding:'12px 16px',textAlign:'center',fontWeight:700,fontSize:16,color:'#1b1b1b'}}>{g.tc}</td>
+                        <td style={{padding:'12px 16px',textAlign:'center',fontWeight:700,fontSize:16,color:'var(--text)'}}>{g.tc}</td>
                         <td style={{padding:'12px 16px',textAlign:'center',fontWeight:700,color:'#1f74b3'}}>{g.open}</td>
                         <td style={{padding:'12px 16px',textAlign:'center',fontWeight:700,color:'#ed8d00'}}>{g.paused}</td>
                         <td style={{padding:'12px 16px',textAlign:'center',fontWeight:700,color:'#7c3aed'}}>{g.escalated}</td>
@@ -2149,7 +2160,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                             <div style={{width:40,height:5,borderRadius:3,background:'#e8e1f3'}}>
                               <div style={{width:`${Math.min(g.capPct,100)}%`,height:5,borderRadius:3,background:g.wc}}></div>
                             </div>
-                            <span style={{fontSize:11,fontWeight:700,color:'#616161'}}>{Math.min(g.capPct, 100)}%</span>
+                            <span style={{fontSize:11,fontWeight:700,color:'var(--text-secondary)'}}>{Math.min(g.capPct, 100)}%</span>
                             {g.capPct > 100 && (
                               <span style={{fontSize:9,fontWeight:700,color:'#d42d35',background:'#fef2f2',padding:'1px 6px',borderRadius:128,letterSpacing:'0.02em'}}>
                                 +{g.capPct - 100} over
@@ -2308,7 +2319,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   <div style={{width:32,height:32,borderRadius:10,background:'linear-gradient(135deg,#f3eff8,#EDE9FE)',display:'flex',alignItems:'center',justifyContent:'center'}}>
                     <i className="bi-people-fill" style={{fontSize:14,color:'#8b6dca'}}></i>
                   </div>
-                  <span style={{fontSize:16,fontWeight:700,color:'#1b1b1b'}}>Team Availability</span>
+                  <span style={{fontSize:16,fontWeight:700,color:'var(--text)'}}>Team Availability</span>
                 </div>
                 <div style={{padding:'12px 22px 18px'}}>
                   {wl==='High'&&manager&&(
@@ -2319,10 +2330,10 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   )}
                   {helpers.length>0?helpers.map(m=>(
                     <div key={m.id} style={{display:'flex',alignItems:'center',gap:10,padding:'9px 0',borderBottom:'1px solid #f5f5f5'}}>
-                      <Avatar name={m.name} size={30}/><div style={{flex:1}}><div style={{fontSize:13,fontWeight:600,color:'#1b1b1b'}}>{m.name}</div><div style={{fontSize:11,color:'#9e9e9e'}}>{FLAGS[m.country]} {m.team}</div></div>
+                      <Avatar name={m.name} size={30}/><div style={{flex:1}}><div style={{fontSize:13,fontWeight:600,color:'var(--text)'}}>{m.name}</div><div style={{fontSize:11,color:'var(--text-muted)'}}>{FLAGS[m.country]} {m.team}</div></div>
                       <span style={{fontSize:16,fontWeight:700,color:m.wc,fontVariantNumeric:'tabular-nums'}}>{m.tc}</span><span style={{fontSize:10,fontWeight:700,color:m.wc,padding:'2px 8px',borderRadius:128,background:m.wc+'10'}}>{m.wl}</span>
                     </div>
-                  )):<div style={{padding:'20px 0',textAlign:'center',fontSize:13,color:'#9e9e9e'}}>{total===0?'Queue clear — help a teammate!':'Team equally loaded'}</div>}
+                  )):<div style={{padding:'20px 0',textAlign:'center',fontSize:13,color:'var(--text-muted)'}}>{total===0?'Queue clear — help a teammate!':'Team equally loaded'}</div>}
                 </div>
               </DeelCard>}
 
@@ -2349,21 +2360,21 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                       <div style={{width:30,height:30,borderRadius:9,background:'linear-gradient(135deg,#e8f5e9,#f0f9ff)',display:'flex',alignItems:'center',justifyContent:'center'}}>
                         <i className="bi-calendar-event" style={{fontSize:13,color:'#29811e'}}></i>
                       </div>
-                      <span style={{fontSize:15,fontWeight:700,color:'#1b1b1b',flex:1}}>Start Dates</span>
-                      <span style={{fontSize:11,color:'#9e9e9e',background:'#f5f5f5',borderRadius:128,padding:'2px 8px',fontWeight:600}}>{upcomingStarts.length+overdueStarts.length}</span>
+                      <span style={{fontSize:15,fontWeight:700,color:'var(--text)',flex:1}}>Start Dates</span>
+                      <span style={{fontSize:11,color:'var(--text-muted)',background:'var(--surface-3)',borderRadius:128,padding:'2px 8px',fontWeight:600}}>{upcomingStarts.length+overdueStarts.length}</span>
                       <i className={startDatesExpanded?'bi-chevron-up':'bi-chevron-down'} style={{fontSize:11,color:'#bebebe'}}></i>
                     </div>
                     {startDatesExpanded&&(
                       <div style={{display:'flex',gap:0}}>
                         {/* LEFT: Upcoming */}
                         <div style={{flex:1,padding:'10px 14px',borderRight:'1px solid #f0f0f0'}}>
-                          <div style={{fontSize:13,fontWeight:600,color:'#9e9e9e',textTransform:'none',letterSpacing:'normal',marginBottom:8}}>Upcoming (14 days)</div>
+                          <div style={{fontSize:13,fontWeight:600,color:'var(--text-muted)',textTransform:'none',letterSpacing:'normal',marginBottom:8}}>Upcoming (14 days)</div>
                           {upcomingStarts.map((e,i)=>(
                             <div key={i} style={{display:'flex',alignItems:'center',gap:6,padding:'5px 0',borderBottom:i<upcomingStarts.length-1?'1px solid #fafafa':'none'}}>
                               <span style={{width:7,height:7,borderRadius:'50%',background:statusDot[e.status],flexShrink:0}}></span>
-                              <span style={{fontSize:11,color:'#616161',fontWeight:500,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{e.name}</span>
-                              <span style={{fontSize:10,color:'#9e9e9e'}}>{FLAGS[e.country]||''}</span>
-                              <span style={{fontSize:10,color:'#9e9e9e',whiteSpace:'nowrap'}}>{fmtDate(e.date)}</span>
+                              <span style={{fontSize:11,color:'var(--text-secondary)',fontWeight:500,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{e.name}</span>
+                              <span style={{fontSize:10,color:'var(--text-muted)'}}>{FLAGS[e.country]||''}</span>
+                              <span style={{fontSize:10,color:'var(--text-muted)',whiteSpace:'nowrap'}}>{fmtDate(e.date)}</span>
                             </div>
                           ))}
                         </div>
@@ -2373,8 +2384,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                           {overdueStarts.map((e,i)=>(
                             <div key={i} style={{display:'flex',alignItems:'center',gap:6,padding:'5px 0',borderBottom:i<overdueStarts.length-1?'1px solid #fafafa':'none'}}>
                               <span style={{width:7,height:7,borderRadius:'50%',background:statusDot[e.status],flexShrink:0}}></span>
-                              <span style={{fontSize:11,color:'#616161',fontWeight:500,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{e.name}</span>
-                              <span style={{fontSize:10,color:'#9e9e9e'}}>{FLAGS[e.country]||''}</span>
+                              <span style={{fontSize:11,color:'var(--text-secondary)',fontWeight:500,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{e.name}</span>
+                              <span style={{fontSize:10,color:'var(--text-muted)'}}>{FLAGS[e.country]||''}</span>
                               <span style={{fontSize:10,color:'#d42d35',whiteSpace:'nowrap'}}>{fmtDate(e.date)}</span>
                             </div>
                           ))}
@@ -2397,15 +2408,15 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   <div style={{width:32,height:32,borderRadius:10,background:'linear-gradient(135deg,#e8f0fe,#DBEAFE)',display:'flex',alignItems:'center',justifyContent:'center'}}>
                     <i className="bi-activity" style={{fontSize:13,color:'#1f74b3'}}></i>
                   </div>
-                  <span style={{fontSize:16,fontWeight:700,color:'#1b1b1b'}}>Recent Activity</span>
+                  <span style={{fontSize:16,fontWeight:700,color:'var(--text)'}}>Recent Activity</span>
                 </div>
                 <div style={{padding:'8px 22px 14px'}}>
                   {recentAct.map((a,i)=>(
                     <div key={a.id} style={{display:'flex',alignItems:'flex-start',gap:10,padding:'9px 0',borderBottom:i<recentAct.length-1?'1px solid #f5f5f5':'none'}}>
                       <i className={a.evIcon||'bi-circle'} style={{fontSize:13,color:a.evColor||a.color,marginTop:1,flexShrink:0}}></i>
                       <div style={{flex:1,minWidth:0}}>
-                        <div style={{fontSize:12,fontWeight:500,color:'#616161',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{a.subject}</div>
-                        <div style={{fontSize:11,color:'#9e9e9e',marginTop:2}}>{a.who} &middot; {a.ago} ago</div>
+                        <div style={{fontSize:12,fontWeight:500,color:'var(--text-secondary)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{a.subject}</div>
+                        <div style={{fontSize:11,color:'var(--text-muted)',marginTop:2}}>{a.who} &middot; {a.ago} ago</div>
                       </div>
                     </div>
                   ))}
@@ -2445,8 +2456,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 return (
                   <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(95px,1fr))',gap:10}}>
                     {links.map(a=>(
-                      <button key={a.v} onClick={()=>setView(a.v)} style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:6,padding:'14px 8px',cursor:'pointer',fontSize:12,fontWeight:600,color:'#1b1b1b',transition:'all .2s',
-                        background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16}}
+                      <button key={a.v} onClick={()=>setView(a.v)} style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:6,padding:'14px 8px',cursor:'pointer',fontSize:12,fontWeight:600,color:'var(--text)',transition:'all .2s',
+                        background:'var(--surface)',border:'1px solid var(--border)',borderRadius:16}}
                         onMouseEnter={e=>{e.currentTarget.style.borderColor=a.c;e.currentTarget.style.color=a.c;e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.boxShadow='0 2px 8px rgba(0,0,0,0.06)';}} onMouseLeave={e=>{e.currentTarget.style.borderColor='#e8e8e8';e.currentTarget.style.color='#1b1b1b';e.currentTarget.style.transform='none';e.currentTarget.style.boxShadow='none';}}>
                         <div style={{width:34,height:34,borderRadius:10,background:a.bg,display:'flex',alignItems:'center',justifyContent:'center'}}>
                           <i className={a.icon} style={{fontSize:15,color:a.c}}></i>
