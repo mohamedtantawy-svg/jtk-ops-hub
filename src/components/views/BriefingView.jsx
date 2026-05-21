@@ -171,6 +171,34 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const [expandedSource,setExpandedSource]=useState(null);
   const [expandedSla,setExpandedSla]=useState(null);
   const [ackBannerIdx,setAckBannerIdx]=useState(0);
+  // Per-user "dismissed from hero banner" announcement IDs. The X button on
+  // the pending-ack banner now actually dismisses the announcement from the
+  // hero (not just navigating the carousel), without recording an ack — the
+  // user can still find + ack it via the Announcements view. Keyed by lowercased
+  // email so a shared machine doesn't bleed one user's dismissals to the next.
+  // 2026-05-21 audit (F39): the X button was a misleading no-op when only one
+  // ack was pending — total>1 navigated to the next item but with total===1
+  // the click silently did nothing, leaving the banner sticky-pinned indefinitely
+  // (Compliance announcement 22% ack rate after 3h).
+  const ackDismissedKey = `ops_hub_ack_banner_dismissed:${(user?.email || '').toLowerCase()}`;
+  const [dismissedAckIds, setDismissedAckIds] = useState(() => {
+    try {
+      const raw = localStorage.getItem(ackDismissedKey);
+      return new Set(raw ? JSON.parse(raw) : []);
+    } catch { return new Set(); }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(ackDismissedKey, JSON.stringify([...dismissedAckIds])); } catch {}
+  }, [dismissedAckIds, ackDismissedKey]);
+  const dismissAck = useCallback((id) => {
+    if (!id) return;
+    setDismissedAckIds(prev => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  }, []);
   const [showHealthBreakdown,setShowHealthBreakdown]=useState(false);
   const [healthPopoverPos,setHealthPopoverPos]=useState(null);
   const [startDatesExpanded,setStartDatesExpanded]=useState(true);
@@ -1532,7 +1560,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             if(c.author&&c.author.id===user.id)return true;
             return matchesAudience(c.target, user.team);
           };
-          const pendingAcks=comms.filter(c=>c.status==='sent'&&targetMatch(c)&&!isAckedByMe(c)&&!(c.author&&c.author.id===user.id));
+          const pendingAcks=comms.filter(c=>c.status==='sent'&&targetMatch(c)&&!isAckedByMe(c)&&!(c.author&&c.author.id===user.id)&&!dismissedAckIds.has(c.id));
           if(pendingAcks.length===0)return null;
           const BANNER_THEMES={
             alert:    {bg:'#ffe2de',accent:'#d42d35',circle1:'rgba(212,45,53,0.08)',circle2:'rgba(212,45,53,0.05)',icon:'bi-exclamation-triangle-fill',iconBg:'#d42d35'},
@@ -1589,8 +1617,14 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   </div>
                 </div>
 
-                {/* X to dismiss from view (not ack) */}
-                <button onClick={(e)=>{e.stopPropagation();if(total>1)goNext();}} style={{position:'absolute',top:10,right:12,width:24,height:24,borderRadius:'50%',background:'rgba(0,0,0,0.06)',border:'none',cursor:'pointer',color:'#9e9e9e',fontSize:12,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                {/* X to dismiss from view (not ack). Hides this announcement
+                    from the hero banner — does NOT record an ack server-side.
+                    Users can still review + acknowledge from the Announcements
+                    tab. Per-user, persisted in localStorage. */}
+                <button
+                  title="Dismiss from hero (you can still acknowledge from the Announcements tab)"
+                  onClick={(e)=>{e.stopPropagation();dismissAck(comm.id);if(total>1)goNext();}}
+                  style={{position:'absolute',top:10,right:12,width:24,height:24,borderRadius:'50%',background:'rgba(0,0,0,0.06)',border:'none',cursor:'pointer',color:'var(--text-muted)',fontSize:12,display:'flex',alignItems:'center',justifyContent:'center'}}>
                   <i className="bi-x"></i>
                 </button>
               </div>
