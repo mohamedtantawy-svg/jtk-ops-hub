@@ -142,6 +142,14 @@ export function TriageStrip({ sourceRows = [], tickets = [], onNavigate }) {
           try { window.dispatchEvent(new CustomEvent('queue:setSlaFilter', { detail: { sla: 'breached' } })); } catch (_) {}
         } else if (props.k === 'atRisk') {
           try { window.dispatchEvent(new CustomEvent('queue:setSlaFilter', { detail: { sla: 'at_risk' } })); } catch (_) {}
+        } else if (props.k === 'paused') {
+          try { window.dispatchEvent(new CustomEvent('queue:setSlaFilter', { detail: { sla: 'paused' } })); } catch (_) {}
+        } else if (props.k === 'synth') {
+          // 2026-05-21 audit F08: NO REAL OWNER tile had no click-through.
+          // RM / Director need to triage the country-round-robin pool, so
+          // route them to Queue with an "unassigned" hand-off filter the
+          // Queue interprets as "rows without a real server-side assignee".
+          try { window.dispatchEvent(new CustomEvent('queue:setSlaFilter', { detail: { sla: 'no_real_owner' } })); } catch (_) {}
         }
         onNavigate?.('my-queue');
       }}
