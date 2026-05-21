@@ -782,8 +782,12 @@ const AlertRow = ({ alert, settings, isLast, currentEmail, onClick }) => {
         </div>
       </div>
 
-      {/* Ack count + state */}
-      <div style={{
+      {/* Ack count + state — independent axis from Status. An alert can
+          have many acks and still be "New" because Status tracks
+          resolution progress, not visibility. */}
+      <div
+        title={`${alert.ack_count || 0} leader${(alert.ack_count || 0) === 1 ? '' : 's'} have acknowledged this. Acks track who has SEEN the alert — separate from the Status pill which tracks resolution progress.`}
+        style={{
         display: 'flex', alignItems: 'center', gap: 5,
         padding: '4px 10px', borderRadius: 128,
         background: acked ? '#dcfce7' : 'var(--surface-2)',
@@ -795,8 +799,13 @@ const AlertRow = ({ alert, settings, isLast, currentEmail, onClick }) => {
         {alert.ack_count || 0}
       </div>
 
-      {/* Status pill */}
-      <div style={{
+      {/* Status pill — 2026-05-21 audit F43: "New" doesn't auto-advance
+          on first ack because Status tracks resolution progress
+          (Open → In Progress → On Hold → Resolved), not visibility.
+          Tooltip explains the axis split. */}
+      <div
+        title="Resolution status. Independent of ack count — an alert stays in this state until someone updates it via the detail panel."
+        style={{
         display: 'inline-flex', alignItems: 'center', gap: 5,
         padding: '4px 10px', borderRadius: 128,
         background: status.bg, color: status.color,

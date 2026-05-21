@@ -1689,19 +1689,25 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   // renamed to "Open Tasks" to disambiguate from HR Hub
                   // Requests; the underlying count is unchanged (sum of
                   // open items across every queue source).
-                  {icon:'bi-inbox-fill',label:'Open Tasks',value:activeRequestsCount,color:'var(--g)',sub:isOwnScope?'mine':isTeamScope?'team':'org-wide',nav:()=>setView('my-queue')},
+                  /* 2026-05-21 audit F07: three "tasks" totals on the
+                     Briefing didn't reconcile — Open Tasks (cross-source
+                     all-time open), Status Pipeline (open + new + pause +
+                     resolved within current scope), DES total ("today only").
+                     Inline tooltip clarifies each. */
+                  {icon:'bi-inbox-fill',label:'Open Tasks',value:activeRequestsCount,color:'var(--g)',sub:isOwnScope?'mine':isTeamScope?'team':'org-wide',nav:()=>setView('my-queue'),tooltip:'All open items across every queue source (Zendesk, Jira, Workbench, Onboarding, Offboarding, Amendments, Redlines, Incentive Plans), scoped to your current view. Distinct from Status Pipeline (which slices the same set into Open/New/In Progress/Pause/Resolved) and from the Department Executive Summary "today total" (created-today only).'},
                   {icon:'bi-megaphone-fill',label:'Announcements',value:execUnackedCount,color:execUnackedCount>0?'#ed8d00':'#616161',alert:execUnackedCount>0,nav:()=>{setView('announcements');try{window.dispatchEvent(new CustomEvent('announcements:setFilter',{detail:{filter:'needs-ack'}}));}catch(_){}}, accent:execUnackedCount>0?'#fff8e6':null,sub:'unacked'},
                 ].map(m=>(
                   <DeelCard key={m.label}
                     onClick={m.nav}
+                    title={m.tooltip}
                     style={{padding:'16px 18px',position:'relative',cursor:m.nav?'pointer':'default',background:m.accent||'white',border:m.accent?`1px solid ${m.color}22`:'1px solid #e8e8e8'}}>
                     {m.alert&&m.value>0&&<span className="pulse" style={{position:'absolute',top:10,right:12,width:7,height:7,borderRadius:'50%',background:'#d42d35'}}></span>}
                     <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}>
                       <i className={m.icon} style={{fontSize:12,color:m.color}}></i>
-                      <span style={{fontSize:13,fontWeight:600,color:'#9e9e9e',textTransform:'none',letterSpacing:'normal'}}>{m.label}</span>
+                      <span style={{fontSize:13,fontWeight:600,color:'var(--text-secondary)',textTransform:'none',letterSpacing:'normal'}}>{m.label}</span>
                     </div>
                     <div style={{fontSize:24,fontWeight:700,color:m.nav?'#1f74b3':m.color,lineHeight:1,fontVariantNumeric:'tabular-nums'}}>{m.value}</div>
-                    {m.sub&&<div style={{fontSize:10,color:'#9e9e9e',marginTop:6}}>{m.sub}</div>}
+                    {m.sub&&<div style={{fontSize:10,color:'var(--text-muted)',marginTop:6}}>{m.sub}</div>}
                   </DeelCard>
                 ))}
               </div>
@@ -1709,7 +1715,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
           })()}
           <div style={{marginBottom:16}}>
             <div style={{fontSize:'var(--font-md)',fontWeight:600,color:'var(--text)',letterSpacing:0}}>Department Executive Summary</div>
-            <div style={{fontSize:13,color:'#616161',marginTop:2}}>{orgOpen.length+orgResolved.length} total tasks today</div>
+            <div style={{fontSize:13,color:'var(--text-secondary)',marginTop:2}} title="Count of items created today (rolling 24h) across every queue source. Distinct from Open Tasks (all open items, not just today) and from Status Pipeline (slices the same created-today set by status).">{orgOpen.length+orgResolved.length} total tasks today</div>
           </div>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:16}}>
             {/* Col 1: Status Pipeline */}
