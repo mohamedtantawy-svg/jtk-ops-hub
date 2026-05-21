@@ -37,11 +37,25 @@ export function bustAnnouncementsAdminCache(email) {
 
 // Convenience for routes: returns true when the user can perform any
 // "manage announcements" action (compose, edit, archive, send-reminder,
-// approve). Combines the existing manager-tier list with the per-user
-// grant. Pass the user object from `getAuthUser`.
+// approve). Combines:
+//   • manager-tier roles (admin / RM / manager / TL),
+//   • approvers from the static roster in src/data/approvers.js — they
+//     already approve / reject / publish other people's announcement
+//     requests via /announcement-requests/[id]/{approve,reject,publish},
+//     so being able to fix a typo on a sent announcement is the same
+//     authority, just a smaller step. Without this, an approver who's
+//     an `agent` in the team roster (Laura Llopis 2026-05-20 bug "once
+//     posted, cannot be edited") saw the pencil button on the FE — it's
+//     gated on `isApprover || isAnnAdmin` in AnnouncementsView (`isLA`)
+//     — but the PATCH route 403'd because the role check below excluded
+//     her. FE/BE now agree.
+//   • per-user announcements admins via the Team-tab "Manage permissions"
+//     modal (is_announcements_admin column on team_member_overrides).
+// Pass the user object from `getAuthUser`.
 export async function canManageAnnouncements(user) {
   if (!user) return false;
   if (['admin', 'regional_manager', 'manager', 'team_lead'].includes(user.role)) return true;
+  if (isApprover(user.email)) return true;
   return await isAnnouncementsAdmin(user.email);
 }
 
