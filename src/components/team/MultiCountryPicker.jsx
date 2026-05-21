@@ -87,8 +87,29 @@ export default function MultiCountryPicker({
   const inputRef = useRef(null);
 
   // Keep the draft in sync if the parent re-pushes a new selection (e.g.
-  // after a successful save the optimistic update flows back through).
-  useEffect(() => { setDraft(normaliseList(selected)); }, [selected]);
+  // after a successful save the optimistic update flows back through, or
+  // another admin's edit lands via the cross-session refresh in
+  // useTeamMembers).
+  //
+  // IMPORTANT: only sync while the popover is CLOSED. Every parent
+  // re-render passes a fresh `member?.countries || []` array reference
+  // into <MultiCountryPicker selected={…}> — and Home/Briefing re-renders
+  // constantly (MOC + TLOC pollers every 15 s, notifications/feedback/
+  // SLA-extensions every 30 s, useQueueUnifiedSync 30 s nowTick, etc.).
+  // Before 2026-05-21 this effect re-ran on every parent render and
+  // wiped the user's in-progress draft mid-edit. Symptom Insiya
+  // reported 2026-05-19: open the picker for Francesca, tick Austria,
+  // 2-3 s later a poll fires → effect runs → draft resets to the saved
+  // list → `dirty` flips back to false; the next click on the (now
+  // labelled "No changes") Save button hits the `!dirty` early-return
+  // in handleSave and `setOpen(false)` fires — the popover "disappears"
+  // and the new country was never saved. Gating on `!open` keeps the
+  // draft stable for the duration of an edit session; we resync on
+  // close so the next open shows the latest saved value.
+  useEffect(() => {
+    if (open) return;
+    setDraft(normaliseList(selected));
+  }, [selected, open]);
 
   // Anchor the popover to the trigger via position:fixed AND render it
   // through a portal to document.body. The portal is the load-bearing
