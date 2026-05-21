@@ -591,6 +591,27 @@ const Queue = ({ user, tasks, subFilter }) => {
 
   const jiraRoleFilterActive = fJiraActionable !== true || fJiraRaised !== false;
   const hasActiveFilters = useMemo(() => !!(fTool || fStatus.length > 0 || fSla || fUnassigned || fCountry.length > 0 || search || jiraRoleFilterActive), [fTool, fStatus, fSla, fUnassigned, fCountry, search, jiraRoleFilterActive]);
+  // Same predicate minus `fSla`. Drives the SLA-pill count branch below so
+  // that clicking the On Track / At Risk / Breached pill doesn't itself
+  // switch the pill count from the cross-source aggregate (ZD + every Deel
+  // source) to the tickets-only count. Jose Ruales 2026-05-20 bug "UI
+  // Issue: Inconsistent Breach Count Across Views" — before this guard:
+  //   • Default Queue (no filter): pill said "Breached N" where N = ZD +
+  //     all-Deel breaches (the cross-source aggregate that also drives
+  //     the WorkspaceHome "Clear all breaches" card + the Home banner).
+  //   • Click the pill: `hasActiveFilters` flipped TRUE because fSla is
+  //     in that list → workspaceHomeSla branch was skipped → fell through
+  //     to the `slaBase = visPreSla` (tickets-only, ZD+Jira) branch → the
+  //     count collapsed to the ticket-only subset (e.g. 12 of 119), even
+  //     though the Deel breaches were still in the queue (now reachable
+  //     via the "breached items in other queues" hand-off panel rendered
+  //     below the ticket table).
+  // The pill's COUNT is a scope indicator ("how many breaches exist in my
+  // current view"); clicking it applies the filter but should not change
+  // the scope being counted. Other non-SLA filters legitimately narrow
+  // the scope (e.g. fTool='jira' narrows to Jira) — those still flip the
+  // count via `hasActiveFilters` below.
+  const hasNonSlaActiveFilters = useMemo(() => !!(fTool || fStatus.length > 0 || fUnassigned || fCountry.length > 0 || search || jiraRoleFilterActive), [fTool, fStatus, fUnassigned, fCountry, search, jiraRoleFilterActive]);
 
   // ── Source-panel filter (status severity + unassigned) ──
   // SLA filter is applied SEPARATELY (below) so the SLA pill counts stay
@@ -707,10 +728,14 @@ const Queue = ({ user, tasks, subFilter }) => {
   // Agents get a mine-only tally (see `mineOnlyForSla` above) so the pills
   // reflect THEIR queue, not the team's. Managers keep the team-wide count.
   const { atRiskCount, breachedCount, onTrackCount } = useMemo(() => {
-    // Workspace-home state (no source + no tool + no other filter) uses
+    // Workspace-home state (no source + no tool + no NON-SLA filter) uses
     // the aggregated count above so the pills and the "Clear all breaches"
-    // card on WorkspaceHome show the same number.
-    if (!workSource && !fTool && !hasActiveFilters) return workspaceHomeSla;
+    // card on WorkspaceHome show the same number. `hasNonSlaActiveFilters`
+    // (not `hasActiveFilters`) so that toggling the SLA pill itself doesn't
+    // collapse the count from cross-source (ZD + all Deel) to tickets-only
+    // — see the comment on `hasNonSlaActiveFilters` for Jose's 2026-05-20
+    // repro.
+    if (!workSource && !fTool && !hasNonSlaActiveFilters) return workspaceHomeSla;
     if (workSource === 'onboarding')      return tallyDeelSla(mineOnlyForSla(visOnboardingRows));
     if (workSource === 'offboarding')     return tallyDeelSla(mineOnlyForSla(visOffboardingRows));
     if (workSource === 'amendments')      return tallyDeelSla(mineOnlyForSla(visAmendmentRows));
@@ -734,7 +759,7 @@ const Queue = ({ user, tasks, subFilter }) => {
     const atRisk = slaBase.filter(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; }).length;
     const breached = slaBase.filter(t => { const s = slaInfo(t); return s && s.breach; }).length;
     return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: slaBase.length - atRisk - breached };
-  }, [workSource, fTool, hasActiveFilters, workspaceHomeSla, visPreSla, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows, visIncentivePlanRows, tallyDeelSla, mineOnlyForSla]);
+  }, [workSource, fTool, hasNonSlaActiveFilters, workspaceHomeSla, visPreSla, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows, visIncentivePlanRows, tallyDeelSla, mineOnlyForSla]);
 
   // ── View-aware header counts ──
   // For each Deel source we read the SLA-filtered row set so the "N open"
