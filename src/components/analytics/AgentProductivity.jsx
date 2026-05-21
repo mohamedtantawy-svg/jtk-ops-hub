@@ -42,7 +42,7 @@ const SORT_COLS = [
 const TH_STYLE = {
   fontSize: 11,
   fontWeight: 700,
-  color: '#9e9e9e',
+  color: 'var(--text-muted)',
   textTransform: 'uppercase',
   letterSpacing: 0.5,
   padding: '8px 10px',
@@ -57,7 +57,7 @@ const TD_STYLE = {
   fontSize: 12,
   padding: '8px 10px',
   borderBottom: '1px solid #f2f2f2',
-  color: '#1b1b1b',
+  color: 'var(--text)',
 };
 
 function CapacityBar({ pct }) {
@@ -198,7 +198,7 @@ export default function AgentProductivity({ tasks = [], members: membersProp, da
     <div
       style={{
         background: 'var(--surface)',
-        border: '1px solid #e8e8e8',
+        border: '1px solid var(--border)',
         borderRadius: 16,
         padding: 20,
       }}
@@ -206,8 +206,8 @@ export default function AgentProductivity({ tasks = [], members: membersProp, da
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
         <i className="bi-people" style={{ fontSize: 16, color: '#7c3aed' }} />
-        <span style={{ fontSize: 15, fontWeight: 700, color: '#1b1b1b' }}>Agent Productivity</span>
-        <span style={{ fontSize: 12, color: '#9e9e9e', marginLeft: 'auto' }}>
+        <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>Agent Productivity</span>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 'auto' }}>
           {agentMembers.length} agents
         </span>
       </div>
@@ -256,7 +256,7 @@ export default function AgentProductivity({ tasks = [], members: membersProp, da
                   />
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.2 }}>{row.name}</div>
-                    <div style={{ fontSize: 10, color: '#9e9e9e' }}>{row.team}</div>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{row.team}</div>
                   </div>
                 </td>
                 <td style={TD_STYLE}>{row.assigned}</td>
@@ -297,14 +297,14 @@ export default function AgentProductivity({ tasks = [], members: membersProp, da
           Task Weights:
         </span>
         {Object.entries(TASK_WEIGHTS).map(([type, w]) => (
-          <span key={type} style={{ fontSize: 11, color: '#616161' }}>
+          <span key={type} style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
             <span style={{ fontWeight: 600 }}>{type}</span> = {w}x
           </span>
         ))}
-        <span style={{ fontSize: 11, color: '#616161' }}>
+        <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
           <span style={{ fontWeight: 600 }}>Others</span> = {DEFAULT_WEIGHT}x
         </span>
-        <span style={{ fontSize: 10, color: '#9e9e9e', marginLeft: 'auto' }}>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 'auto' }}>
           Capacity % = weighted load / team avg
         </span>
       </div>

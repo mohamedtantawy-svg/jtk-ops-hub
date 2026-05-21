@@ -46,13 +46,13 @@ const ApproachingBreach = ({ tasks = [], slaInfo, onViewTask, limit = 5 }) => {
   };
 
   return (
-    <div style={{ background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 16, overflow: 'hidden' }}>
+    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden' }}>
       {/* Header */}
       <div style={{ padding: '14px 20px 10px', borderBottom: '1px solid #e8e8e8', display: 'flex', alignItems: 'center', gap: 10 }}>
         <div style={{ width: 30, height: 30, borderRadius: 9, background: 'linear-gradient(135deg, #FEF3C7, #FDE68A)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <i className="bi-alarm" style={{ fontSize: 13, color: '#D97706' }}></i>
         </div>
-        <span style={{ fontSize: 15, fontWeight: 700, color: '#1b1b1b', flex: 1 }}>Approaching Breach</span>
+        <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', flex: 1 }}>Approaching Breach</span>
         {approachingTasks.length > 0 && (
           <span style={{ fontSize: 11, fontWeight: 700, color: 'white', background: '#D97706', borderRadius: 10, padding: '2px 8px' }}>
             {approachingTasks.length}
@@ -66,7 +66,7 @@ const ApproachingBreach = ({ tasks = [], slaInfo, onViewTask, limit = 5 }) => {
           <div style={{ padding: '24px 20px', textAlign: 'center' }}>
             <i className="bi-shield-check" style={{ fontSize: 24, color: '#16A34A', display: 'block', marginBottom: 8 }}></i>
             <div style={{ fontSize: 13, fontWeight: 600, color: '#16A34A' }}>No tickets approaching breach</div>
-            <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 4 }}>All SLAs looking healthy</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>All SLAs looking healthy</div>
           </div>
         ) : (
           approachingTasks.map((task, idx) => {
@@ -84,16 +84,16 @@ const ApproachingBreach = ({ tasks = [], slaInfo, onViewTask, limit = 5 }) => {
                 onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
               >
                 {/* Source icon */}
-                <div style={{ width: 24, height: 24, borderRadius: 6, background: '#f5f5f5', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <div style={{ width: 24, height: 24, borderRadius: 6, background: 'var(--surface-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                   <i className={getSourceIcon(task.source)} style={{ fontSize: 11, color: '#666' }}></i>
                 </div>
 
                 {/* Ticket info */}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {task.subject || task.title || 'Untitled'}
                   </div>
-                  <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 2 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
                     {task.assigneeName || task.assigneeEmail || 'Unassigned'}
                     {task._sla.slaName && <span> &middot; {task._sla.slaName}</span>}
                   </div>

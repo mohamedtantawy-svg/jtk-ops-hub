@@ -12,7 +12,7 @@ const PILL_BASE = {
   fontSize: 12,
   fontWeight: 600,
   cursor: 'pointer',
-  border: '1px solid #e8e8e8',
+  border: '1px solid var(--border)',
   transition: 'all 0.15s',
   whiteSpace: 'nowrap',
   display: 'inline-flex',
@@ -30,7 +30,7 @@ const PILL_ACTIVE = {
 const PILL_INACTIVE = {
   ...PILL_BASE,
   background: 'var(--surface)',
-  color: '#616161',
+  color: 'var(--text-secondary)',
   borderColor: '#e8e8e8',
 };
 
@@ -40,7 +40,7 @@ const DROPDOWN_STYLE = {
   left: 0,
   marginTop: 4,
   background: 'var(--surface)',
-  border: '1px solid #e8e8e8',
+  border: '1px solid var(--border)',
   borderRadius: 12,
   boxShadow: '0 8px 24px rgba(0,0,0,.10)',
   maxHeight: 200,
@@ -57,7 +57,7 @@ const CHECK_ROW = {
   padding: '5px 14px',
   fontSize: 12,
   cursor: 'pointer',
-  color: '#1b1b1b',
+  color: 'var(--text)',
   transition: 'background 0.1s',
 };
 
@@ -321,24 +321,24 @@ export default function MultiFilter({
                 onChange={(e) => setCustomFrom(e.target.value)}
                 style={{
                   padding: '4px 8px',
-                  border: '1px solid #e8e8e8',
+                  border: '1px solid var(--border)',
                   borderRadius: 8,
                   fontSize: 12,
-                  color: '#1b1b1b',
+                  color: 'var(--text)',
                   outline: 'none',
                 }}
               />
-              <span style={{ fontSize: 12, color: '#9e9e9e' }}>to</span>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>to</span>
               <input
                 type="date"
                 value={customTo}
                 onChange={(e) => setCustomTo(e.target.value)}
                 style={{
                   padding: '4px 8px',
-                  border: '1px solid #e8e8e8',
+                  border: '1px solid var(--border)',
                   borderRadius: 8,
                   fontSize: 12,
-                  color: '#1b1b1b',
+                  color: 'var(--text)',
                   outline: 'none',
                 }}
               />

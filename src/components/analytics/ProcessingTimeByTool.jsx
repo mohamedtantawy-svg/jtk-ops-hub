@@ -52,11 +52,11 @@ export default function ProcessingTimeByTool({ tasks = [] }) {
       <div
         style={{
           background: 'var(--surface)',
-          border: '1px solid #e8e8e8',
+          border: '1px solid var(--border)',
           borderRadius: 16,
           padding: 20,
           textAlign: 'center',
-          color: '#9e9e9e',
+          color: 'var(--text-muted)',
           fontSize: 13,
         }}
       >
@@ -69,7 +69,7 @@ export default function ProcessingTimeByTool({ tasks = [] }) {
     <div
       style={{
         background: 'var(--surface)',
-        border: '1px solid #e8e8e8',
+        border: '1px solid var(--border)',
         borderRadius: 16,
         padding: 20,
       }}
@@ -77,10 +77,10 @@ export default function ProcessingTimeByTool({ tasks = [] }) {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 18 }}>
         <i className="bi-stopwatch" style={{ fontSize: 16, color: '#7c3aed' }} />
-        <span style={{ fontSize: 15, fontWeight: 700, color: '#1b1b1b' }}>
+        <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>
           Avg Processing Time by Source
         </span>
-        <span style={{ fontSize: 12, color: '#9e9e9e', marginLeft: 'auto' }}>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 'auto' }}>
           {tasks.filter((t) => t.status === 'resolved').length} resolved tasks
         </span>
       </div>
@@ -115,7 +115,7 @@ export default function ProcessingTimeByTool({ tasks = [] }) {
                 >
                   <i className={d.icon} style={{ fontSize: 13, color: d.color }} />
                 </span>
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#1b1b1b' }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
                   {d.label}
                 </span>
               </div>
@@ -143,10 +143,10 @@ export default function ProcessingTimeByTool({ tasks = [] }) {
 
               {/* Value */}
               <div style={{ width: 70, textAlign: 'right', flexShrink: 0 }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: '#1b1b1b' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
                   {fmtHours(d.avgMins)}
                 </span>
-                <span style={{ fontSize: 10, color: '#9e9e9e', marginLeft: 4 }}>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 4 }}>
                   ({d.count})
                 </span>
               </div>

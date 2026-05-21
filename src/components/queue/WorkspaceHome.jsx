@@ -145,7 +145,7 @@ export default function WorkspaceHome({
 
   return (
     <div style={{
-      flex: 1, overflow: 'auto', background: '#fafaf9',
+      flex: 1, overflow: 'auto', background: 'var(--surface-2)',
       padding: '24px 32px 80px',
     }}>
       {/* ── Hero — Priority of the Day ─────────────────────────────── */}
@@ -323,17 +323,17 @@ export default function WorkspaceHome({
       {/* ── Section title ───────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 14, padding: '0 4px' }}>
         <h2 style={{
-          fontSize: 18, fontWeight: 800, color: '#1b1b1b', letterSpacing: '-0.01em', margin: 0,
+          fontSize: 18, fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.01em', margin: 0,
         }}>
           How to work your queues today
         </h2>
-        <span style={{ fontSize: 12, color: '#9e9e9e', fontWeight: 500 }}>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500 }}>
           Top to bottom — no skipping. Breaches always come first.
         </span>
         <span style={{ flex: 1 }} />
         <span style={{
-          fontSize: 11, fontWeight: 700, color: '#616161',
-          background: 'white', border: '1px solid #e8e8e8',
+          fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)',
+          background: 'var(--surface)', border: '1px solid var(--border)',
           padding: '4px 10px', borderRadius: 128,
           fontVariantNumeric: 'tabular-nums',
         }}>
@@ -417,20 +417,20 @@ export default function WorkspaceHome({
       {/* ── Footer hint ─────────────────────────────────────────── */}
       <div style={{
         marginTop: 24, padding: '12px 16px', borderRadius: 12,
-        background: 'white', border: '1px solid #e8e8e8',
+        background: 'var(--surface)', border: '1px solid var(--border)',
         display: 'flex', alignItems: 'center', gap: 10,
-        fontSize: 12, color: '#616161',
+        fontSize: 12, color: 'var(--text-secondary)',
       }}>
         <i className="bi-info-circle-fill" style={{ fontSize: 13, color: '#0e7490' }} />
         <span>
           Click any card to jump straight in. Want to leave this view? Pick a tab above
-          (<strong style={{ color: '#1b1b1b' }}>Onboarding</strong> /
-          {' '}<strong style={{ color: '#1b1b1b' }}>Zendesk</strong> /
-          {' '}<strong style={{ color: '#1b1b1b' }}>Jira</strong> …).
+          (<strong style={{ color: 'var(--text)' }}>Onboarding</strong> /
+          {' '}<strong style={{ color: 'var(--text)' }}>Zendesk</strong> /
+          {' '}<strong style={{ color: 'var(--text)' }}>Jira</strong> …).
         </span>
         <span style={{ flex: 1 }} />
         {user?.email && (
-          <span style={{ color: '#9e9e9e' }}>Signed in as <strong style={{ color: '#1b1b1b' }}>{user.name || user.email}</strong></span>
+          <span style={{ color: 'var(--text-muted)' }}>Signed in as <strong style={{ color: 'var(--text)' }}>{user.name || user.email}</strong></span>
         )}
       </div>
     </div>
@@ -455,8 +455,8 @@ function StepCard({
       style={{
         position: 'relative',
         textAlign: 'left',
-        background: 'white',
-        border: '1px solid #e8e8e8',
+        background: 'var(--surface)',
+        border: '1px solid var(--border)',
         borderRadius: 18,
         padding: '20px 18px 18px',
         cursor: disabled ? 'default' : 'pointer',
@@ -511,12 +511,12 @@ function StepCard({
 
       {/* Title */}
       <div style={{
-        fontSize: 18, fontWeight: 800, color: '#1b1b1b',
+        fontSize: 18, fontWeight: 800, color: 'var(--text)',
         letterSpacing: '-0.01em', marginBottom: 6, lineHeight: 1.2,
       }}>{title}</div>
 
       {/* Subtitle */}
-      <div style={{ fontSize: 12, color: '#616161', lineHeight: 1.45, marginBottom: 12 }}>
+      <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45, marginBottom: 12 }}>
         {subtitle}
       </div>
 
@@ -532,7 +532,7 @@ function StepCard({
         }}>
           {showEmpty ? '✓' : count.toLocaleString()}
         </span>
-        <span style={{ fontSize: 12, color: '#9e9e9e', fontWeight: 500 }}>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500 }}>
           {showEmpty ? '' : countLabel}
         </span>
       </div>

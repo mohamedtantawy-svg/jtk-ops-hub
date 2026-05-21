@@ -291,7 +291,7 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
   };
 
   const SortIcon = ({ col }) => sortCol === col
-    ? <i className={`bi-caret-${sortDir === 'asc' ? 'up' : 'down'}-fill`} style={{ fontSize: 9, marginLeft: 3, color: '#1b1b1b' }} aria-label={sortDir === 'asc' ? 'sorted ascending' : 'sorted descending'}></i>
+    ? <i className={`bi-caret-${sortDir === 'asc' ? 'up' : 'down'}-fill`} style={{ fontSize: 9, marginLeft: 3, color: 'var(--text)' }} aria-label={sortDir === 'asc' ? 'sorted ascending' : 'sorted descending'}></i>
     : <i className="bi-chevron-expand" style={{ fontSize: 9, marginLeft: 3, color: '#dedede' }} aria-label="sortable"></i>;
 
   const maxSrc = Math.max(...bySrc.map(x => x.count), 1) || 1;
@@ -338,7 +338,7 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
       label: isOwnScope ? 'My Tasks' : `${kpiPrefix} Tasks`,
       value: all.length,
       sub: `${open.length} still open`,
-      color: '#1b1b1b',
+      color: 'var(--text)',
       icon: 'bi-inbox',
       iconBg: '#f7f5f2',
     },
@@ -372,7 +372,7 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
   if (tasks.length === 0) {
     return (
       <div style={{ flex: 1, overflowY: 'auto', padding: '0' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 300, color: '#9e9e9e' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 300, color: 'var(--text-muted)' }}>
           <i className="bi-bar-chart" style={{ fontSize: 40, marginBottom: 12, opacity: .4 }}></i>
           <div style={{ fontSize: 15, fontWeight: 600 }}>No data available for the selected period</div>
           <div style={{ fontSize: 13, marginTop: 4 }}>Try adjusting your filters or check back later</div>
@@ -386,13 +386,13 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
 
       {/* ── Subtitle + Filters ──────────────────────────────────────────── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 24px 0', flexWrap: 'wrap', gap: 10 }}>
-        <p style={{ fontSize: 13, color: '#9e9e9e', margin: 0 }}>{subtitleText}</p>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>{subtitleText}</p>
 
         {/* Simple pill filters for agents (non-managers) */}
         {!isManager && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
             {settings.analytics_show_region_filter !== false && (
-              <div style={{ display: 'flex', background: '#f7f5f2', borderRadius: 128, padding: 3, gap: 2 }}>
+              <div style={{ display: 'flex', background: 'var(--surface-3)', borderRadius: 128, padding: 3, gap: 2 }}>
                 {REGIONS.map(r => {
                   const active = regionFilter === r.id;
                   return (
@@ -403,7 +403,7 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
                 })}
               </div>
             )}
-            <div style={{ display: 'flex', background: '#f7f5f2', borderRadius: 128, padding: 3, gap: 2 }}>
+            <div style={{ display: 'flex', background: 'var(--surface-3)', borderRadius: 128, padding: 3, gap: 2 }}>
               {DATE_RANGES.map(r => {
                 const active = dateRange === r.id;
                 return (
@@ -436,14 +436,14 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
           <>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 24 }}>
               {kpiCards.map(s => (
-                <div key={s.label} style={{ background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 16, padding: '14px 16px', boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s' }}
+                <div key={s.label} style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: '14px 16px', boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s' }}
                   onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.06)'} onMouseLeave={e => e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)'}>
                   <div style={{ width: 36, height: 36, background: s.iconBg, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 10 }}>
                     <i className={s.icon} style={{ color: s.color, fontSize: 16 }}></i>
                   </div>
                   <div style={{ fontSize: 28, fontWeight: 700, color: s.color, lineHeight: 1, letterSpacing: '-0.5px', fontVariantNumeric: 'tabular-nums' }}>{s.value}</div>
-                  <div style={{ fontSize: 13, color: '#1b1b1b', fontWeight: 700, marginTop: 6 }}>{s.label}</div>
-                  <div style={{ fontSize: 12, color: '#616161', marginTop: 2 }}>{s.sub}</div>
+                  <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 700, marginTop: 6 }}>{s.label}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>{s.sub}</div>
                 </div>
               ))}
             </div>
@@ -451,7 +451,7 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
             {/* Escalation Rate card (managers / admin only) */}
             {isManager && (
               <div style={{ marginBottom: 24 }}>
-                <div style={{ background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 16, padding: '20px 20px', boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s', display: 'flex', alignItems: 'center', gap: 20 }}
+                <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: '20px 20px', boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s', display: 'flex', alignItems: 'center', gap: 20 }}
                   onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.06)'} onMouseLeave={e => e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)'}>
                   <div style={{ width: 40, height: 40, background: '#fef3ee', borderRadius: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <i className="bi-arrow-up-circle-fill" style={{ color: '#ed5e2a', fontSize: 17 }}></i>
@@ -460,8 +460,8 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
                     <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                       <div style={{ fontSize: 32, fontWeight: 800, color: '#ed5e2a', lineHeight: 1, letterSpacing: '-1px', fontVariantNumeric: 'tabular-nums' }}>{escalRate}%</div>
                     </div>
-                    <div style={{ fontSize: 13, color: '#1b1b1b', fontWeight: 700, marginTop: 6 }}>Escalation Rate</div>
-                    <div style={{ fontSize: 12, color: '#616161', marginTop: 2 }}>{escalCount} escalation{escalCount !== 1 ? 's' : ''} from {all.length} total tasks</div>
+                    <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 700, marginTop: 6 }}>Escalation Rate</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>{escalCount} escalation{escalCount !== 1 ? 's' : ''} from {all.length} total tasks</div>
                   </div>
                 </div>
               </div>
@@ -472,26 +472,26 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
         {/* ── Tasks by Source + Tasks by Function (all roles) ─────────────── */}
         {(activeTab === 'Overview' || activeTab === 'Sources') && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
-            <div style={{ background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 16, padding: 24, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s' }}
+            <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: 24, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s' }}
               onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.06)'} onMouseLeave={e => e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)'}>
-              <div style={{ fontWeight: 600, color: '#9e9e9e', fontSize: 13, marginBottom: 16 }}>Tasks by source</div>
+              <div style={{ fontWeight: 600, color: 'var(--text-muted)', fontSize: 13, marginBottom: 16 }}>Tasks by source</div>
               {bySrc.map(x => (
                 <div key={x.key} style={{ marginBottom: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                    <span style={{ fontSize: 13, color: '#616161', fontWeight: 500 }}>{x.label}</span>
+                    <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 500 }}>{x.label}</span>
                     <span style={{ fontSize: 13, fontWeight: 700, color: x.color, fontVariantNumeric: 'tabular-nums' }}>{x.count}</span>
                   </div>
                   <Bar pct={(x.count / maxSrc) * 100} color={x.color} value={x.count} />
                 </div>
               ))}
             </div>
-            <div style={{ background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 16, padding: 24, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s' }}
+            <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: 24, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s' }}
               onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.06)'} onMouseLeave={e => e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)'}>
-              <div style={{ fontWeight: 600, color: '#9e9e9e', fontSize: 13, marginBottom: 16 }}>Tasks by function</div>
+              <div style={{ fontWeight: 600, color: 'var(--text-muted)', fontSize: 13, marginBottom: 16 }}>Tasks by function</div>
               {byFn.map(x => (
                 <div key={x.key} style={{ marginBottom: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-                    <span style={{ fontSize: 13, color: '#616161', fontWeight: 500 }}>{x.label}</span>
+                    <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 500 }}>{x.label}</span>
                     <span style={{ fontSize: 13, fontWeight: 700, color: x.color, fontVariantNumeric: 'tabular-nums' }}>{x.count}</span>
                   </div>
                   <Bar pct={(x.count / maxFn) * 100} color={x.color} value={x.count} />
@@ -505,9 +505,9 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
         {(activeTab === 'Overview' || activeTab === 'SLA') && isManager && (
           <div style={{ display: 'grid', gridTemplateColumns: isAllScope ? '1fr 1fr' : '1fr', gap: 14, marginBottom: 14 }}>
             {/* Hourly Volume */}
-            <div style={{ background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 16, padding: 24, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s' }}
+            <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: 24, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s' }}
               onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.06)'} onMouseLeave={e => e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)'}>
-              <div style={{ fontWeight: 600, color: '#9e9e9e', fontSize: 13, marginBottom: 16 }}>Hourly volume</div>
+              <div style={{ fontWeight: 600, color: 'var(--text-muted)', fontSize: 13, marginBottom: 16 }}>Hourly volume</div>
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: 5, height: 90, marginBottom: 4 }}>
                 {HOURLY_VOLUME.map(h => {
                   const isPeak = h.v === maxHV;
@@ -516,26 +516,26 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
                       <span style={{ fontSize: 9.5, color: isPeak ? '#29811e' : '#9e9e9e', fontWeight: isPeak ? 700 : 500, fontVariantNumeric: 'tabular-nums' }}>{h.v}</span>
                       <div title={`${h.h}:00 — ${h.v} tasks`} style={{ width: '100%', background: isPeak ? '#29811e' : '#1f74b3', borderRadius: '4px 4px 0 0', height: `${(h.v / maxHV) * 70}px`, transition: 'height .6s ease', minHeight: 3, opacity: isPeak ? 1 : .55, cursor: 'pointer' }}
                         onMouseEnter={e => e.currentTarget.style.opacity = '1'} onMouseLeave={e => e.currentTarget.style.opacity = isPeak ? '1' : '.55'}></div>
-                      <span style={{ fontSize: 9, color: '#9e9e9e', fontWeight: isPeak ? 600 : 400 }}>{h.h}</span>
+                      <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: isPeak ? 600 : 400 }}>{h.h}</span>
                     </div>
                   );
                 })}
               </div>
-              <div style={{ marginTop: 4, fontSize: 11, color: '#9e9e9e', textAlign: 'center' }}>
+              <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
                 Peak: <span style={{ color: '#29811e', fontWeight: 700 }}>11:00</span> — {maxHV} tasks
               </div>
             </div>
 
             {/* Tasks by Country (regional/admin scope) */}
             {isAllScope && (
-              <div style={{ background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 16, padding: 24, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s' }}
+              <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: 24, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', transition: 'box-shadow .15s' }}
                 onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.06)'} onMouseLeave={e => e.currentTarget.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)'}>
-                <div style={{ fontWeight: 600, color: '#9e9e9e', fontSize: 13, marginBottom: 16 }}>Tasks by country</div>
+                <div style={{ fontWeight: 600, color: 'var(--text-muted)', fontSize: 13, marginBottom: 16 }}>Tasks by country</div>
                 {byCtry.map(x => (
                   <div key={x.c} style={{ marginBottom: 10 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
-                      <span style={{ fontSize: 13, color: '#616161' }}>{getFlag(x.c)} {getCountryName(x.c) || x.c}</span>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: '#616161', fontVariantNumeric: 'tabular-nums' }}>{x.count}</span>
+                      <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{getFlag(x.c)} {getCountryName(x.c) || x.c}</span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>{x.count}</span>
                     </div>
                     <Bar pct={(x.count / maxCtry) * 100} color='#29811e' value={x.count} />
                   </div>
@@ -578,11 +578,11 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
 
         {/* ── Legacy agent performance table (kept for inline detail, agents don't see this) ── */}
         {isManager && (activeTab === 'Team Performance') && sortedAgents.length > 0 && (
-          <div style={{ background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', overflow: 'hidden', marginBottom: 14 }}>
+          <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', overflow: 'hidden', marginBottom: 14 }}>
             <div style={{ padding: '20px 24px 0' }}>
-              <div style={{ fontWeight: 700, color: '#1b1b1b', fontSize: 14, marginBottom: 16 }}>Agent Performance Detail</div>
+              <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: 14, marginBottom: 16 }}>Agent Performance Detail</div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 70px 70px 60px 80px 80px 90px 90px', gap: 6, padding: '12px 16px', background: '#fafaf9', borderBottom: '1px solid #f2f2f2' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 70px 70px 60px 80px 80px 90px 90px', gap: 6, padding: '12px 16px', background: 'var(--surface-2)', borderBottom: '1px solid #f2f2f2' }}>
               {[
                 { k: '', l: 'Agent' },
                 { k: 'assigned', l: 'Assigned' },
@@ -604,16 +604,16 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <Avatar name={a.name} size={28} />
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b' }}>{a.name}</div>
-                    <div style={{ fontSize: 11, color: '#616161' }}>{FLAGS[a.country]} {a.team}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{a.name}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{FLAGS[a.country]} {a.team}</div>
                   </div>
                 </div>
-                <span style={{ textAlign: 'center', fontSize: 14, fontWeight: 600, color: '#616161', fontVariantNumeric: 'tabular-nums' }}>{assigned}</span>
+                <span style={{ textAlign: 'center', fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>{assigned}</span>
                 <span style={{ textAlign: 'center', fontSize: 14, fontWeight: 700, color: '#29811e', fontVariantNumeric: 'tabular-nums' }}>{res}</span>
                 <span style={{ textAlign: 'center', fontSize: 14, fontWeight: 600, color: '#ed8d00', fontVariantNumeric: 'tabular-nums' }}>{op}</span>
-                <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 600, color: '#1b1b1b', fontVariantNumeric: 'tabular-nums' }}>{avgT}m</div>
+                <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 600, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{avgT}m</div>
                 <span style={{ textAlign: 'center', fontSize: 13, fontWeight: 600, color: er > 5 ? '#d42d35' : er > 3 ? '#ed8d00' : '#29811e', fontVariantNumeric: 'tabular-nums' }}>{er}%</span>
-                <span style={{ textAlign: 'center', fontSize: 12, color: '#616161', fontVariantNumeric: 'tabular-nums' }}>{avgFirstResp}</span>
+                <span style={{ textAlign: 'center', fontSize: 12, color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>{avgFirstResp}</span>
                 <div style={{ textAlign: 'center' }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: slaComp >= 95 ? '#29811e' : slaComp >= 90 ? '#1f74b3' : '#ed8d00', background: slaComp >= 95 ? '#e8f5e3' : slaComp >= 90 ? '#e8f0fe' : '#fff8e6', padding: '2px 8px', borderRadius: 128, fontVariantNumeric: 'tabular-nums' }}>{slaComp}%</span>
                 </div>

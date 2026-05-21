@@ -41,7 +41,7 @@ const googleBtnStyle = {
   width: '100%',
   height: 50,
   background: 'var(--surface)',
-  color: '#1b1b1b',
+  color: 'var(--text)',
   border: '1.5px solid #e0ddd8',
   borderRadius: 14,
   fontSize: 15,
@@ -79,8 +79,8 @@ const LoginScreen = ({ onLogin }) => {
     <div style={wrap}>
       {/* Top bar */}
       <div style={{ padding: '20px 32px', display: 'flex', alignItems: 'center' }}>
-        <span style={{ fontFamily: 'Georgia, serif', fontWeight: 700, fontSize: 28, color: '#1b1b1b' }}>d.</span>
-        <span style={{ fontSize: 14, fontWeight: 600, color: '#9e9e9e', marginLeft: 12 }}>Ops Hub</span>
+        <span style={{ fontFamily: 'Georgia, serif', fontWeight: 700, fontSize: 28, color: 'var(--text)' }}>d.</span>
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-muted)', marginLeft: 12 }}>Ops Hub</span>
       </div>
 
       <div style={main}>
@@ -97,10 +97,10 @@ const LoginScreen = ({ onLogin }) => {
             }}>
               <i className="bi-shield-lock-fill" style={{ color: '#fff', fontSize: 24 }} />
             </div>
-            <h1 style={{ fontSize: 22, fontWeight: 700, color: '#1b1b1b', margin: '0 0 4px' }}>
+            <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', margin: '0 0 4px' }}>
               Sign in to Ops Hub
             </h1>
-            <p style={{ fontSize: 13, color: '#9e9e9e', margin: 0 }}>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>
               HR Operations Command Center
             </p>
           </div>
@@ -149,13 +149,13 @@ const LoginScreen = ({ onLogin }) => {
               )}
             </button>
           ) : (
-            <div style={{ textAlign: 'center', padding: '12px 0', fontSize: 13, color: '#9e9e9e' }}>
+            <div style={{ textAlign: 'center', padding: '12px 0', fontSize: 13, color: 'var(--text-muted)' }}>
               Loading sign-in...
             </div>
           )}
 
           {/* Help text */}
-          <div style={{ textAlign: 'center', marginTop: 24, fontSize: 12, color: '#9e9e9e' }}>
+          <div style={{ textAlign: 'center', marginTop: 24, fontSize: 12, color: 'var(--text-muted)' }}>
             Use your @deel.com Google account to sign in.
           </div>
         </div>

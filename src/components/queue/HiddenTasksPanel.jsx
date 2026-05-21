@@ -100,16 +100,16 @@ export default function HiddenTasksPanel({ hiddenTasks }) {
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: '12px 32px 24px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
         <i className="bi-eye-slash-fill" style={{ fontSize: 16, color: '#d42d35' }} />
-        <span style={{ fontSize: 14, fontWeight: 700, color: '#1b1b1b' }}>Hidden tasks</span>
-        <span style={{ fontSize: 12, color: '#9e9e9e' }}>{totalCount} active hide{totalCount === 1 ? '' : 's'}</span>
+        <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>Hidden tasks</span>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{totalCount} active hide{totalCount === 1 ? '' : 's'}</span>
         <span style={{ flex: 1 }} />
         <button
           onClick={() => refresh?.()}
           title="Refresh hidden list"
           style={{
             height: 28, padding: '0 10px', borderRadius: 8,
-            border: '1px solid #e8e8e8', background: 'white',
-            color: '#616161', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+            border: '1px solid var(--border)', background: 'var(--surface)',
+            color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600, cursor: 'pointer',
             display: 'inline-flex', alignItems: 'center', gap: 5,
           }}
         >
@@ -126,15 +126,15 @@ export default function HiddenTasksPanel({ hiddenTasks }) {
               height: 28, padding: '0 10px', borderRadius: 8,
               border: filterSource === null ? '1.5px solid #1b1b1b' : '1px solid #e8e8e8',
               background: filterSource === null ? '#f7f5f2' : 'white',
-              color: '#1b1b1b', fontSize: 11, fontWeight: filterSource === null ? 700 : 500, cursor: 'pointer',
+              color: 'var(--text)', fontSize: 11, fontWeight: filterSource === null ? 700 : 500, cursor: 'pointer',
             }}
           >
-            All <span style={{ marginLeft: 4, color: '#9e9e9e', fontWeight: 600 }}>{totalCount}</span>
+            All <span style={{ marginLeft: 4, color: 'var(--text-muted)', fontWeight: 600 }}>{totalCount}</span>
           </button>
           {[...grouped.entries()]
             .sort((a, b) => b[1].length - a[1].length)
             .map(([src, arr]) => {
-              const meta = TOOLS[src] || { label: src, color: '#616161', bg: '#f3f3f3', icon: 'bi-circle' };
+              const meta = TOOLS[src] || { label: src, color: 'var(--text-secondary)', bg: '#f3f3f3', icon: 'bi-circle' };
               const active = filterSource === src;
               return (
                 <button
@@ -177,7 +177,7 @@ export default function HiddenTasksPanel({ hiddenTasks }) {
       {visibleSorted.length === 0 ? (
         <div style={{
           flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: '#9e9e9e', fontSize: 13, padding: 32,
+          color: 'var(--text-muted)', fontSize: 13, padding: 32,
         }}>
           {totalCount === 0
             ? 'No tasks are currently hidden.'
@@ -185,11 +185,11 @@ export default function HiddenTasksPanel({ hiddenTasks }) {
         </div>
       ) : (
         <div style={{
-          flex: 1, overflow: 'auto', border: '1px solid #e8e8e8', borderRadius: 10, background: 'white',
+          flex: 1, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 10, background: 'var(--surface)',
         }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead style={{ position: 'sticky', top: 0, background: '#faf9f7', zIndex: 1 }}>
-              <tr style={{ textAlign: 'left', color: '#616161', fontSize: 11 }}>
+              <tr style={{ textAlign: 'left', color: 'var(--text-secondary)', fontSize: 11 }}>
                 <th style={thStyle}>Source</th>
                 <th style={thStyle}>Subject</th>
                 <th style={thStyle}>Reason</th>
@@ -201,7 +201,7 @@ export default function HiddenTasksPanel({ hiddenTasks }) {
             </thead>
             <tbody>
               {visibleSorted.map(row => {
-                const meta = TOOLS[row.taskSource] || { label: row.taskSource, color: '#616161', bg: '#f3f3f3', icon: 'bi-circle' };
+                const meta = TOOLS[row.taskSource] || { label: row.taskSource, color: 'var(--text-secondary)', bg: '#f3f3f3', icon: 'bi-circle' };
                 const isPending = pendingId === row.id;
                 return (
                   <tr key={row.id} style={{ borderTop: '1px solid #f0efed' }}>
@@ -217,17 +217,17 @@ export default function HiddenTasksPanel({ hiddenTasks }) {
                       </span>
                     </td>
                     <td style={tdStyle}>
-                      <div style={{ fontWeight: 500, color: '#1b1b1b', maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      <div style={{ fontWeight: 500, color: 'var(--text)', maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                         title={row.taskSubject || row.taskId}>
                         {row.taskSubject || row.taskId || '(no subject)'}
                       </div>
-                      <div style={{ fontSize: 10, color: '#9e9e9e' }}>{row.taskId}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{row.taskId}</div>
                     </td>
                     <td style={tdStyle}>
-                      <div style={{ color: '#1b1b1b' }}>{REASON_LABELS[row.reasonCode] || row.reasonCode || '—'}</div>
+                      <div style={{ color: 'var(--text)' }}>{REASON_LABELS[row.reasonCode] || row.reasonCode || '—'}</div>
                       {row.reasonText && (
                         <div style={{
-                          fontSize: 10, color: '#616161',
+                          fontSize: 10, color: 'var(--text-secondary)',
                           maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                         }} title={row.reasonText}>
                           {row.reasonText}
@@ -237,16 +237,16 @@ export default function HiddenTasksPanel({ hiddenTasks }) {
                     <td style={tdStyle}>
                       <div>{row.hiddenByName || row.hiddenByEmail || '—'}</div>
                       {row.hiddenByName && row.hiddenByEmail && (
-                        <div style={{ fontSize: 10, color: '#9e9e9e' }}>{row.hiddenByEmail}</div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{row.hiddenByEmail}</div>
                       )}
                     </td>
                     <td style={tdStyle}>
                       <div>{row.approvedByName || row.approvedByEmail || '—'}</div>
                       {row.approvedByName && row.approvedByEmail && (
-                        <div style={{ fontSize: 10, color: '#9e9e9e' }}>{row.approvedByEmail}</div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{row.approvedByEmail}</div>
                       )}
                     </td>
-                    <td style={{ ...tdStyle, color: '#616161' }} title={row.hiddenAt || ''}>
+                    <td style={{ ...tdStyle, color: 'var(--text-secondary)' }} title={row.hiddenAt || ''}>
                       {formatTime(row.hiddenAt)}
                     </td>
                     <td style={{ ...tdStyle, textAlign: 'right' }}>
@@ -256,7 +256,7 @@ export default function HiddenTasksPanel({ hiddenTasks }) {
                           style={{
                             display: 'inline-flex', alignItems: 'center', gap: 4,
                             padding: '4px 8px', marginRight: 6, borderRadius: 6,
-                            border: '1px solid #e8e8e8', background: 'white', color: '#1b1b1b',
+                            border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)',
                             fontSize: 11, fontWeight: 600, textDecoration: 'none',
                           }}
                         >

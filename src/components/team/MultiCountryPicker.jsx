@@ -570,7 +570,7 @@ export default function MultiCountryPicker({
             ...(pos.right != null ? { right: pos.right } : { left: pos.left }),
             width: 320,
             background: 'var(--surface)',
-            border: '1px solid #e8e8e8',
+            border: '1px solid var(--border)',
             borderRadius: 12,
             boxShadow: '0 8px 24px rgba(0,0,0,0.14)',
             zIndex: 1400,
@@ -587,7 +587,7 @@ export default function MultiCountryPicker({
             padding: '8px 10px',
             borderBottom: '1px solid #f0efed',
           }}>
-            <i className="bi-search" style={{ fontSize: 11, color: '#9e9e9e' }} />
+            <i className="bi-search" style={{ fontSize: 11, color: 'var(--text-muted)' }} />
             <input
               ref={inputRef}
               type="text"
@@ -596,7 +596,7 @@ export default function MultiCountryPicker({
               placeholder={`Search ${COUNTRY_OPTIONS.length} countries…`}
               style={{
                 flex: 1, border: 'none', outline: 'none',
-                fontSize: 12, color: '#1b1b1b', background: 'transparent',
+                fontSize: 12, color: 'var(--text)', background: 'transparent',
               }}
               onKeyDown={e => {
                 if (e.key === 'Escape') { setQuery(''); handleCancel(); }
@@ -605,7 +605,7 @@ export default function MultiCountryPicker({
             {query && (
               <i className="bi-x-circle-fill"
                 onClick={() => setQuery('')}
-                style={{ fontSize: 12, color: '#9e9e9e', cursor: 'pointer' }}
+                style={{ fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer' }}
               />
             )}
           </div>
@@ -614,11 +614,11 @@ export default function MultiCountryPicker({
           <div style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             padding: '6px 12px',
-            background: '#fafaf9',
+            background: 'var(--surface-2)',
             borderBottom: '1px solid #f0efed',
             fontSize: 11,
           }}>
-            <span style={{ color: '#616161', fontWeight: 600 }}>
+            <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>
               {draft.length} selected
               {unknownCount > 0 && (
                 <span style={{ marginLeft: 6, color: '#b45309', fontWeight: 600 }}>
@@ -658,7 +658,7 @@ export default function MultiCountryPicker({
           {/* Options list */}
           <div style={{ overflowY: 'auto', flex: 1 }}>
             {orderedOptions.length === 0 && (
-              <div style={{ padding: '20px 14px', textAlign: 'center', fontSize: 12, color: '#9e9e9e' }}>
+              <div style={{ padding: '20px 14px', textAlign: 'center', fontSize: 12, color: 'var(--text-muted)' }}>
                 No countries match &ldquo;{query}&rdquo;
               </div>
             )}
@@ -742,9 +742,9 @@ export default function MultiCountryPicker({
               style={{
                 padding: '5px 12px',
                 borderRadius: 128,
-                border: '1px solid #e8e8e8',
+                border: '1px solid var(--border)',
                 background: 'var(--surface)',
-                fontSize: 11, fontWeight: 600, color: '#616161',
+                fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)',
                 cursor: 'pointer',
               }}
             >

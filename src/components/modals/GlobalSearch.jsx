@@ -65,7 +65,7 @@ const GlobalSearch=({tasks,setView,setSelTask,onClose})=>{
       <style>{`@keyframes modalIn { from { opacity:0; transform:scale(0.96) translateY(8px); } to { opacity:1; transform:scale(1) translateY(0); } }`}</style>
       <div style={{background:'var(--surface)',borderRadius:'var(--radius-2xl)',width:'100%',maxWidth:560,boxShadow:'0 4px 24px rgba(0,0,0,0.15)',overflow:'hidden',display:'flex',flexDirection:'column',maxHeight:'60vh',animation:'modalIn 0.2s cubic-bezier(0.16,1,0.3,1) both'}} onClick={e=>e.stopPropagation()}>
         <div style={{display:'flex',alignItems:'center',gap:10,padding:'16px 20px',borderBottom:'1px solid #e8e8e8',flexShrink:0}}>
-          <i className="bi-search" style={{color:'#9e9e9e',fontSize:16,flexShrink:0}}></i>
+          <i className="bi-search" style={{color:'var(--text-muted)',fontSize:16,flexShrink:0}}></i>
           <input
             ref={iRef}
             autoFocus
@@ -79,18 +79,18 @@ const GlobalSearch=({tasks,setView,setSelTask,onClose})=>{
             placeholder="Search tasks, Slack, knowledge hub…"
             style={{flex:1,border:'none',outline:'none',fontSize:'var(--font-lg, 16px)',color:'var(--text)',background:'transparent'}}
           />
-          {q&&<button aria-label="Clear search" onClick={()=>setQ('')} style={{background:'none',border:'none',color:'#616161',cursor:'pointer',fontSize:17,display:'flex'}}><i className="bi-x"></i></button>}
-          <span style={{background:'#f2f2f2',color:'#616161',borderRadius:5,padding:'2px 7px',fontSize:11,fontFamily:'monospace',flexShrink:0}}>ESC</span>
+          {q&&<button aria-label="Clear search" onClick={()=>setQ('')} style={{background:'none',border:'none',color:'var(--text-secondary)',cursor:'pointer',fontSize:17,display:'flex'}}><i className="bi-x"></i></button>}
+          <span style={{background:'#f2f2f2',color:'var(--text-secondary)',borderRadius:5,padding:'2px 7px',fontSize:11,fontFamily:'monospace',flexShrink:0}}>ESC</span>
         </div>
         <div style={{overflowY:'auto',flex:1}}>
-          {!q&&<div style={{padding:'32px 24px',textAlign:'center',color:'#9e9e9e'}}><i className="bi-search" style={{fontSize:32,display:'block',marginBottom:16,opacity:.35}}></i><div style={{fontSize:14}}>Search across tasks, Slack messages, and the knowledge hub</div></div>}
-          {show&&!hasRes&&<div style={{padding:'32px 24px',textAlign:'center',color:'#9e9e9e'}}><div style={{fontSize:14}}>No results for "<strong style={{color:'#1b1b1b'}}>{q}</strong>"</div></div>}
+          {!q&&<div style={{padding:'32px 24px',textAlign:'center',color:'var(--text-muted)'}}><i className="bi-search" style={{fontSize:32,display:'block',marginBottom:16,opacity:.35}}></i><div style={{fontSize:14}}>Search across tasks, Slack messages, and the knowledge hub</div></div>}
+          {show&&!hasRes&&<div style={{padding:'32px 24px',textAlign:'center',color:'var(--text-muted)'}}><div style={{fontSize:14}}>No results for "<strong style={{color:'var(--text)'}}>{q}</strong>"</div></div>}
           {qTasks.length>0&&<>
             <div style={sectionHeaderStyle}>QUEUE TASKS</div>
             {qTasks.map(t=>{globalIdx++;const gi=globalIdx;return(
               <Row key={t.id} isHighlighted={hlIdx===gi} onClick={()=>{setSelTask(t);setView('my-queue');onClose();}}>
                 <ToolBadge source={t.source}/>
-                <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:500,color:'#1b1b1b',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{t.subject}</div><div style={{fontSize:11,color:'#9e9e9e'}}>{t.id} · {getFlag(t.country)} {getCountryName(t.country) || t.country}</div></div>
+                <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:500,color:'var(--text)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{t.subject}</div><div style={{fontSize:11,color:'var(--text-muted)'}}>{t.id} · {getFlag(t.country)} {getCountryName(t.country) || t.country}</div></div>
                 <StatusBadge status={t.status}/>
               </Row>
             );})}
@@ -100,7 +100,7 @@ const GlobalSearch=({tasks,setView,setSelTask,onClose})=>{
             {qSlack.map(t=>{globalIdx++;const gi=globalIdx;return(
               <Row key={t.id} isHighlighted={hlIdx===gi} onClick={()=>{setSelTask(t);setView('my-queue');onClose();}}>
                 <div style={{width:28,height:28,background:'#f3eff8',borderRadius:7,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><i className="bi-slack" style={{color:'#c4b1f9',fontSize:13}}></i></div>
-                <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:500,color:'#1b1b1b',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{t.subject}</div><div style={{fontSize:11,color:'#9e9e9e'}}>{t.sender} · {t.channel}</div></div>
+                <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:500,color:'var(--text)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{t.subject}</div><div style={{fontSize:11,color:'var(--text-muted)'}}>{t.sender} · {t.channel}</div></div>
               </Row>
             );})}
           </>}
@@ -109,14 +109,14 @@ const GlobalSearch=({tasks,setView,setSelTask,onClose})=>{
             {qKB.map(k=>{globalIdx++;const gi=globalIdx;return(
               <Row key={k.name} isHighlighted={hlIdx===gi} onClick={()=>{setView('knowledge-hub');onClose();}}>
                 <div style={{width:28,height:28,background:'#f3eff8',borderRadius:7,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}><i className={k.type==='report'?'bi-graph-up':k.type==='policy'?'bi-shield-check':k.type==='channel'?'bi-hash':'bi-tools'} style={{color:'#1565c0',fontSize:12}}></i></div>
-                <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:500,color:'#1b1b1b'}}>{k.name}</div><div style={{fontSize:11,color:'#9e9e9e',textTransform:'capitalize'}}>{k.type} · Knowledge Hub</div></div>
+                <div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:500,color:'var(--text)'}}>{k.name}</div><div style={{fontSize:11,color:'var(--text-muted)',textTransform:'capitalize'}}>{k.type} · Knowledge Hub</div></div>
                 <i className="bi-arrow-right" style={{color:'#dedede',fontSize:11}}></i>
               </Row>
             );})}
           </>}
         </div>
         {hasRes&&<div style={{padding:'8px 20px',borderTop:'1px solid #e8e8e8',display:'flex',gap:12,flexShrink:0}}>
-          {[['↑↓','Navigate'],['↵','Open'],['ESC','Close']].map(([k,l])=><span key={k} style={{fontSize:11,color:'#9e9e9e',display:'flex',alignItems:'center',gap:4}}><span className="kbd">{k}</span>{l}</span>)}
+          {[['↑↓','Navigate'],['↵','Open'],['ESC','Close']].map(([k,l])=><span key={k} style={{fontSize:11,color:'var(--text-muted)',display:'flex',alignItems:'center',gap:4}}><span className="kbd">{k}</span>{l}</span>)}
         </div>}
       </div>
     </div>

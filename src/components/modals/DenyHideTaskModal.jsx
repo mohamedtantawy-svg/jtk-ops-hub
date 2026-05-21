@@ -7,12 +7,12 @@ import { useEffect, useRef, useState } from 'react';
 import { denyHideTask } from '../../services/hideTaskApi';
 
 const inputStyle = {
-  width: '100%', padding: '9px 12px', border: '1px solid #e8e8e8', borderRadius: 10,
-  fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', outline: 'none',
+  width: '100%', padding: '9px 12px', border: '1px solid var(--border)', borderRadius: 10,
+  fontSize: 13, color: 'var(--text)', background: 'var(--surface)', outline: 'none',
   fontFamily: 'inherit', boxSizing: 'border-box',
 };
 const labelStyle = {
-  fontSize: 11, fontWeight: 600, color: '#616161', textTransform: 'uppercase',
+  fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase',
   letterSpacing: '.05em', marginBottom: 6, display: 'block',
 };
 
@@ -67,16 +67,16 @@ export default function DenyHideTaskModal({ request, onClose, onDenied }) {
             <i className="bi-x-octagon-fill" style={{ fontSize: 15, color: '#d42d35' }} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div id="deny-hide-title" style={{ fontSize: 15, fontWeight: 700, color: '#1b1b1b' }}>Deny hide request</div>
-            <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 2 }}>
-              {request?.taskSubject ? <span><strong style={{ color: '#1b1b1b' }}>{request.taskSubject}</strong></span> : 'Provide a reason — the requester will be notified.'}
+            <div id="deny-hide-title" style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>Deny hide request</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+              {request?.taskSubject ? <span><strong style={{ color: 'var(--text)' }}>{request.taskSubject}</strong></span> : 'Provide a reason — the requester will be notified.'}
             </div>
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            style={{ width: 28, height: 28, borderRadius: 7, border: '1px solid #e8e8e8', background: 'var(--surface)', color: '#9e9e9e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            style={{ width: 28, height: 28, borderRadius: 7, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           >
             <i className="bi-x-lg" style={{ fontSize: 11 }} />
           </button>
@@ -107,7 +107,7 @@ export default function DenyHideTaskModal({ request, onClose, onDenied }) {
             <button
               type="button"
               onClick={onClose}
-              style={{ padding: '8px 14px', borderRadius: 9, border: '1px solid #e8e8e8', background: 'var(--surface)', fontSize: 12, fontWeight: 500, color: '#616161', cursor: 'pointer', fontFamily: 'inherit' }}
+              style={{ padding: '8px 14px', borderRadius: 9, border: '1px solid var(--border)', background: 'var(--surface)', fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'inherit' }}
             >
               Cancel
             </button>

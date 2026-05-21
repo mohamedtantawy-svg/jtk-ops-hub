@@ -100,8 +100,8 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
     return(
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:12,padding:'14px 0',borderBottom:'1px solid #e8e8e8'}}>
         <div style={{flex:1}}>
-          <label htmlFor={uid} style={{fontSize:14,fontWeight:500,color:'#1b1b1b',cursor:'pointer',display:'block'}}>{label}</label>
-          {desc&&<div style={{fontSize:12,color:'#9e9e9e',marginTop:2}}>{desc}</div>}
+          <label htmlFor={uid} style={{fontSize:14,fontWeight:500,color:'var(--text)',cursor:'pointer',display:'block'}}>{label}</label>
+          {desc&&<div style={{fontSize:12,color:'var(--text-muted)',marginTop:2}}>{desc}</div>}
         </div>
         <label className="deel-toggle" htmlFor={uid} style={{flexShrink:0}}>
           <input id={uid} type="checkbox" checked={!!value} onChange={()=>onChange(!value)}/>
@@ -114,10 +114,10 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
   const Select=({label,desc,value,onChange,options})=>(
     <div style={{display:'flex',alignItems:'center',gap:12,padding:'14px 0',borderBottom:'1px solid #e8e8e8'}}>
       <div style={{flex:1}}>
-        <div style={{fontSize:14,fontWeight:500,color:'#1b1b1b'}}>{label}</div>
-        {desc&&<div style={{fontSize:12,color:'#9e9e9e',marginTop:1}}>{desc}</div>}
+        <div style={{fontSize:14,fontWeight:500,color:'var(--text)'}}>{label}</div>
+        {desc&&<div style={{fontSize:12,color:'var(--text-muted)',marginTop:1}}>{desc}</div>}
       </div>
-      <select value={value} onChange={e=>onChange(e.target.value)} style={{border:'1px solid #e8e8e8',borderRadius:12,padding:'5px 10px',fontSize:12,outline:'none',fontFamily:'inherit',color:'#1b1b1b',cursor:'pointer',minWidth:130}}>
+      <select value={value} onChange={e=>onChange(e.target.value)} style={{border:'1px solid var(--border)',borderRadius:12,padding:'5px 10px',fontSize:12,outline:'none',fontFamily:'inherit',color:'var(--text)',cursor:'pointer',minWidth:130}}>
         {options.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
     </div>
@@ -126,39 +126,39 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
   const NumberInput=({label,desc,value,onChange,min,max,suffix})=>(
     <div style={{display:'flex',alignItems:'center',gap:12,padding:'14px 0',borderBottom:'1px solid #e8e8e8'}}>
       <div style={{flex:1}}>
-        <div style={{fontSize:14,fontWeight:500,color:'#1b1b1b'}}>{label}</div>
-        {desc&&<div style={{fontSize:12,color:'#9e9e9e',marginTop:1}}>{desc}</div>}
+        <div style={{fontSize:14,fontWeight:500,color:'var(--text)'}}>{label}</div>
+        {desc&&<div style={{fontSize:12,color:'var(--text-muted)',marginTop:1}}>{desc}</div>}
       </div>
       <div style={{display:'flex',alignItems:'center',gap:5}}>
-        <input type="number" value={value} onChange={e=>{const v=Number(e.target.value);onChange(Math.max(min||0,Math.min(max||9999,v)));}} min={min} max={max} style={{width:70,border:'1px solid #e8e8e8',borderRadius:12,padding:'5px 8px',fontSize:12,outline:'none',fontFamily:'inherit',color:'#1b1b1b',textAlign:'right'}}/>
-        {suffix&&<span style={{fontSize:12,color:'#9e9e9e'}}>{suffix}</span>}
+        <input type="number" value={value} onChange={e=>{const v=Number(e.target.value);onChange(Math.max(min||0,Math.min(max||9999,v)));}} min={min} max={max} style={{width:70,border:'1px solid var(--border)',borderRadius:12,padding:'5px 8px',fontSize:12,outline:'none',fontFamily:'inherit',color:'var(--text)',textAlign:'right'}}/>
+        {suffix&&<span style={{fontSize:12,color:'var(--text-muted)'}}>{suffix}</span>}
       </div>
     </div>
   );
 
   const TextInput=({label,desc,value,onChange,placeholder})=>(
     <div style={{padding:'14px 0',borderBottom:'1px solid #e8e8e8'}}>
-      <div style={{fontSize:14,fontWeight:500,color:'#1b1b1b'}}>{label}</div>
-      {desc&&<div style={{fontSize:12,color:'#9e9e9e',marginTop:1,marginBottom:5}}>{desc}</div>}
-      <input value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder||''} style={{width:'100%',border:'1px solid #e8e8e8',borderRadius:12,padding:'7px 10px',fontSize:12.5,outline:'none',fontFamily:'inherit',color:'#1b1b1b',boxSizing:'border-box',marginTop:4}}/>
+      <div style={{fontSize:14,fontWeight:500,color:'var(--text)'}}>{label}</div>
+      {desc&&<div style={{fontSize:12,color:'var(--text-muted)',marginTop:1,marginBottom:5}}>{desc}</div>}
+      <input value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder||''} style={{width:'100%',border:'1px solid var(--border)',borderRadius:12,padding:'7px 10px',fontSize:12.5,outline:'none',fontFamily:'inherit',color:'var(--text)',boxSizing:'border-box',marginTop:4}}/>
     </div>
   );
 
   const TextArea=({label,desc,value,onChange,rows})=>(
     <div style={{padding:'14px 0',borderBottom:'1px solid #e8e8e8'}}>
-      <div style={{fontSize:14,fontWeight:500,color:'#1b1b1b'}}>{label}</div>
-      {desc&&<div style={{fontSize:12,color:'#9e9e9e',marginTop:1,marginBottom:5}}>{desc}</div>}
-      <textarea value={value} onChange={e=>onChange(e.target.value)} rows={rows||3} style={{width:'100%',border:'1px solid #e8e8e8',borderRadius:12,padding:'7px 10px',fontSize:12.5,outline:'none',fontFamily:'inherit',color:'#1b1b1b',boxSizing:'border-box',resize:'vertical',marginTop:4,lineHeight:1.5}}/>
+      <div style={{fontSize:14,fontWeight:500,color:'var(--text)'}}>{label}</div>
+      {desc&&<div style={{fontSize:12,color:'var(--text-muted)',marginTop:1,marginBottom:5}}>{desc}</div>}
+      <textarea value={value} onChange={e=>onChange(e.target.value)} rows={rows||3} style={{width:'100%',border:'1px solid var(--border)',borderRadius:12,padding:'7px 10px',fontSize:12.5,outline:'none',fontFamily:'inherit',color:'var(--text)',boxSizing:'border-box',resize:'vertical',marginTop:4,lineHeight:1.5}}/>
     </div>
   );
 
   const SectionHeader=({icon,title,desc})=>(
     <div style={{marginBottom:20}}>
       <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:4}}>
-        <i className={icon} style={{fontSize:18,color:'#1b1b1b'}}></i>
-        <span style={{fontSize:18,fontWeight:700,color:'#1b1b1b'}}>{title}</span>
+        <i className={icon} style={{fontSize:18,color:'var(--text)'}}></i>
+        <span style={{fontSize:18,fontWeight:700,color:'var(--text)'}}>{title}</span>
       </div>
-      {desc&&<div style={{fontSize:13,color:'#9e9e9e',marginLeft:28}}>{desc}</div>}
+      {desc&&<div style={{fontSize:13,color:'var(--text-muted)',marginLeft:28}}>{desc}</div>}
     </div>
   );
 
@@ -167,19 +167,19 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
     const [draft,setDraft]=useState('');
     return(
       <div style={{padding:'14px 0',borderBottom:'1px solid #e8e8e8'}}>
-        <div style={{fontSize:14,fontWeight:500,color:'#1b1b1b'}}>{label}</div>
-        {desc&&<div style={{fontSize:12,color:'#9e9e9e',marginTop:1,marginBottom:6}}>{desc}</div>}
+        <div style={{fontSize:14,fontWeight:500,color:'var(--text)'}}>{label}</div>
+        {desc&&<div style={{fontSize:12,color:'var(--text-muted)',marginTop:1,marginBottom:6}}>{desc}</div>}
         <div style={{display:'flex',flexWrap:'wrap',gap:6,marginTop:6,marginBottom:8}}>
           {(items||[]).map((item,i)=>(
-            <span key={i} style={{display:'inline-flex',alignItems:'center',gap:4,background:'#f7f5f2',border:'1px solid #e8e8e8',borderRadius:20,padding:'4px 10px',fontSize:12,color:'#616161'}}>
+            <span key={i} style={{display:'inline-flex',alignItems:'center',gap:4,background:'var(--surface-3)',border:'1px solid var(--border)',borderRadius:20,padding:'4px 10px',fontSize:12,color:'var(--text-secondary)'}}>
               {item}
-              <button onClick={()=>{const next=[...items];next.splice(i,1);onChange(next);}} style={{background:'none',border:'none',cursor:'pointer',color:'#9e9e9e',fontSize:14,lineHeight:1,padding:0,marginLeft:2}}>&times;</button>
+              <button onClick={()=>{const next=[...items];next.splice(i,1);onChange(next);}} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',fontSize:14,lineHeight:1,padding:0,marginLeft:2}}>&times;</button>
             </span>
           ))}
         </div>
         <div style={{display:'flex',gap:6}}>
-          <input value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Add new item..." onKeyDown={e=>{if(e.key==='Enter'&&draft.trim()){onChange([...(items||[]),draft.trim()]);setDraft('');}}} style={{flex:1,border:'1px solid #e8e8e8',borderRadius:8,padding:'5px 10px',fontSize:12,outline:'none',fontFamily:'inherit',color:'#1b1b1b'}}/>
-          <button onClick={()=>{if(draft.trim()){onChange([...(items||[]),draft.trim()]);setDraft('');}}} style={{height:30,padding:'0 12px',borderRadius:8,border:'1px solid #e8e8e8',background:'var(--surface)',color:'#1b1b1b',fontSize:12,fontWeight:600,cursor:'pointer'}}>Add</button>
+          <input value={draft} onChange={e=>setDraft(e.target.value)} placeholder="Add new item..." onKeyDown={e=>{if(e.key==='Enter'&&draft.trim()){onChange([...(items||[]),draft.trim()]);setDraft('');}}} style={{flex:1,border:'1px solid var(--border)',borderRadius:8,padding:'5px 10px',fontSize:12,outline:'none',fontFamily:'inherit',color:'var(--text)'}}/>
+          <button onClick={()=>{if(draft.trim()){onChange([...(items||[]),draft.trim()]);setDraft('');}}} style={{height:30,padding:'0 12px',borderRadius:8,border:'1px solid var(--border)',background:'var(--surface)',color:'var(--text)',fontSize:12,fontWeight:600,cursor:'pointer'}}>Add</button>
         </div>
       </div>
     );
@@ -190,19 +190,19 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
     const [draft,setDraft]=useState('');
     return(
       <div style={{padding:'14px 0',borderBottom:'1px solid #e8e8e8'}}>
-        <div style={{fontSize:14,fontWeight:500,color:'#1b1b1b'}}>{label}</div>
-        {desc&&<div style={{fontSize:12,color:'#9e9e9e',marginTop:1,marginBottom:6}}>{desc}</div>}
+        <div style={{fontSize:14,fontWeight:500,color:'var(--text)'}}>{label}</div>
+        {desc&&<div style={{fontSize:12,color:'var(--text-muted)',marginTop:1,marginBottom:6}}>{desc}</div>}
         <div style={{display:'flex',flexDirection:'column',gap:4,marginTop:6,marginBottom:8}}>
           {(items||[]).map((item,i)=>(
-            <div key={i} style={{display:'flex',alignItems:'flex-start',gap:6,background:'#f7f5f2',border:'1px solid #e8e8e8',borderRadius:8,padding:'8px 10px',fontSize:12,color:'#616161'}}>
+            <div key={i} style={{display:'flex',alignItems:'flex-start',gap:6,background:'var(--surface-3)',border:'1px solid var(--border)',borderRadius:8,padding:'8px 10px',fontSize:12,color:'var(--text-secondary)'}}>
               <span style={{flex:1,lineHeight:1.4}}>{item}</span>
-              <button onClick={()=>{const next=[...items];next.splice(i,1);onChange(next);}} style={{background:'none',border:'none',cursor:'pointer',color:'#9e9e9e',fontSize:14,lineHeight:1,padding:0,flexShrink:0}}>&times;</button>
+              <button onClick={()=>{const next=[...items];next.splice(i,1);onChange(next);}} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',fontSize:14,lineHeight:1,padding:0,flexShrink:0}}>&times;</button>
             </div>
           ))}
         </div>
         <div style={{display:'flex',gap:6}}>
-          <input value={draft} onChange={e=>setDraft(e.target.value)} placeholder={placeholder||'Add new...'} onKeyDown={e=>{if(e.key==='Enter'&&draft.trim()){onChange([...(items||[]),draft.trim()]);setDraft('');}}} style={{flex:1,border:'1px solid #e8e8e8',borderRadius:8,padding:'5px 10px',fontSize:12,outline:'none',fontFamily:'inherit',color:'#1b1b1b'}}/>
-          <button onClick={()=>{if(draft.trim()){onChange([...(items||[]),draft.trim()]);setDraft('');}}} style={{height:30,padding:'0 12px',borderRadius:8,border:'1px solid #e8e8e8',background:'var(--surface)',color:'#1b1b1b',fontSize:12,fontWeight:600,cursor:'pointer'}}>Add</button>
+          <input value={draft} onChange={e=>setDraft(e.target.value)} placeholder={placeholder||'Add new...'} onKeyDown={e=>{if(e.key==='Enter'&&draft.trim()){onChange([...(items||[]),draft.trim()]);setDraft('');}}} style={{flex:1,border:'1px solid var(--border)',borderRadius:8,padding:'5px 10px',fontSize:12,outline:'none',fontFamily:'inherit',color:'var(--text)'}}/>
+          <button onClick={()=>{if(draft.trim()){onChange([...(items||[]),draft.trim()]);setDraft('');}}} style={{height:30,padding:'0 12px',borderRadius:8,border:'1px solid var(--border)',background:'var(--surface)',color:'var(--text)',fontSize:12,fontWeight:600,cursor:'pointer'}}>Add</button>
         </div>
       </div>
     );
@@ -211,8 +211,8 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
   // Toggle group for object settings like {key: true/false}
   const ToggleGroup=({label,desc,obj,settingsKey})=>(
     <div style={{padding:'14px 0',borderBottom:'1px solid #e8e8e8'}}>
-      <div style={{fontSize:14,fontWeight:500,color:'#1b1b1b'}}>{label}</div>
-      {desc&&<div style={{fontSize:12,color:'#9e9e9e',marginTop:1,marginBottom:6}}>{desc}</div>}
+      <div style={{fontSize:14,fontWeight:500,color:'var(--text)'}}>{label}</div>
+      {desc&&<div style={{fontSize:12,color:'var(--text-muted)',marginTop:1,marginBottom:6}}>{desc}</div>}
       {Object.entries(obj||{}).map(([k,v])=>(
         <Toggle key={k} label={k.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase())} value={v} onChange={val=>setNested(settingsKey,k,val)}/>
       ))}
@@ -225,30 +225,30 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
     const [draft,setDraft]=useState(()=>fields.reduce((a,f)=>({...a,[f.key]:''}),{}));
     return(
       <div style={{padding:'14px 0',borderBottom:'1px solid #e8e8e8'}}>
-        <div style={{fontSize:14,fontWeight:500,color:'#1b1b1b'}}>{label}</div>
-        {desc&&<div style={{fontSize:12,color:'#9e9e9e',marginTop:1,marginBottom:6}}>{desc}</div>}
-        <div style={{border:'1px solid #e8e8e8',borderRadius:12,overflow:'hidden',marginTop:6,marginBottom:8}}>
-          <div style={{display:'flex',padding:'8px 12px',background:'#fafaf9',borderBottom:'1px solid #e8e8e8',fontSize:12,fontWeight:600,color:'#9e9e9e'}}>
+        <div style={{fontSize:14,fontWeight:500,color:'var(--text)'}}>{label}</div>
+        {desc&&<div style={{fontSize:12,color:'var(--text-muted)',marginTop:1,marginBottom:6}}>{desc}</div>}
+        <div style={{border:'1px solid var(--border)',borderRadius:12,overflow:'hidden',marginTop:6,marginBottom:8}}>
+          <div style={{display:'flex',padding:'8px 12px',background:'var(--surface-2)',borderBottom:'1px solid #e8e8e8',fontSize:12,fontWeight:600,color:'var(--text-muted)'}}>
             {fields.map(f=><span key={f.key} style={{flex:f.flex||1}}>{f.label}</span>)}
             <span style={{width:30}}></span>
           </div>
           {(items||[]).map((item,i)=>(
-            <div key={i} style={{display:'flex',alignItems:'center',padding:'6px 12px',borderBottom:'1px solid #f7f5f2',fontSize:12,color:'#616161'}}>
+            <div key={i} style={{display:'flex',alignItems:'center',padding:'6px 12px',borderBottom:'1px solid #f7f5f2',fontSize:12,color:'var(--text-secondary)'}}>
               {fields.map(f=><span key={f.key} style={{flex:f.flex||1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',paddingRight:4}}>{item[f.key]||''}</span>)}
-              <button onClick={()=>{const next=[...items];next.splice(i,1);onChange(next);}} style={{width:30,background:'none',border:'none',cursor:'pointer',color:'#9e9e9e',fontSize:14}}>&times;</button>
+              <button onClick={()=>{const next=[...items];next.splice(i,1);onChange(next);}} style={{width:30,background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',fontSize:14}}>&times;</button>
             </div>
           ))}
         </div>
         {showAdd?(
           <div style={{display:'flex',gap:6,alignItems:'flex-end',flexWrap:'wrap'}}>
             {fields.map(f=>(
-              <input key={f.key} value={draft[f.key]} onChange={e=>setDraft(prev=>({...prev,[f.key]:e.target.value}))} placeholder={f.label} style={{flex:f.flex||1,minWidth:80,border:'1px solid #e8e8e8',borderRadius:8,padding:'5px 10px',fontSize:12,outline:'none',fontFamily:'inherit',color:'#1b1b1b'}}/>
+              <input key={f.key} value={draft[f.key]} onChange={e=>setDraft(prev=>({...prev,[f.key]:e.target.value}))} placeholder={f.label} style={{flex:f.flex||1,minWidth:80,border:'1px solid var(--border)',borderRadius:8,padding:'5px 10px',fontSize:12,outline:'none',fontFamily:'inherit',color:'var(--text)'}}/>
             ))}
-            <button onClick={()=>{if(fields.some(f=>draft[f.key]?.trim())){onChange([...(items||[]),{...draft}]);setDraft(fields.reduce((a,f)=>({...a,[f.key]:''}),{}));setShowAdd(false);}}} style={{height:30,padding:'0 12px',borderRadius:8,border:'1px solid #e8e8e8',background:'var(--surface)',color:'#1b1b1b',fontSize:12,fontWeight:600,cursor:'pointer'}}>Save</button>
-            <button onClick={()=>setShowAdd(false)} style={{height:30,padding:'0 10px',borderRadius:8,border:'none',background:'none',color:'#9e9e9e',fontSize:12,cursor:'pointer'}}>Cancel</button>
+            <button onClick={()=>{if(fields.some(f=>draft[f.key]?.trim())){onChange([...(items||[]),{...draft}]);setDraft(fields.reduce((a,f)=>({...a,[f.key]:''}),{}));setShowAdd(false);}}} style={{height:30,padding:'0 12px',borderRadius:8,border:'1px solid var(--border)',background:'var(--surface)',color:'var(--text)',fontSize:12,fontWeight:600,cursor:'pointer'}}>Save</button>
+            <button onClick={()=>setShowAdd(false)} style={{height:30,padding:'0 10px',borderRadius:8,border:'none',background:'none',color:'var(--text-muted)',fontSize:12,cursor:'pointer'}}>Cancel</button>
           </div>
         ):(
-          <button onClick={()=>setShowAdd(true)} style={{height:30,padding:'0 12px',borderRadius:8,border:'1px dashed #dedede',background:'var(--surface)',color:'#616161',fontSize:12,cursor:'pointer',display:'flex',alignItems:'center',gap:4}}><i className="bi-plus" style={{fontSize:14}}></i>Add item</button>
+          <button onClick={()=>setShowAdd(true)} style={{height:30,padding:'0 12px',borderRadius:8,border:'1px dashed #dedede',background:'var(--surface)',color:'var(--text-secondary)',fontSize:12,cursor:'pointer',display:'flex',alignItems:'center',gap:4}}><i className="bi-plus" style={{fontSize:14}}></i>Add item</button>
         )}
       </div>
     );
@@ -257,17 +257,17 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
   // SLA-style table for severity -> minutes mapping
   const SeveritySlaTable=({label,desc,obj,settingsKey})=>(
     <div style={{padding:'14px 0',borderBottom:'1px solid #e8e8e8'}}>
-      <div style={{fontSize:14,fontWeight:500,color:'#1b1b1b'}}>{label}</div>
-      {desc&&<div style={{fontSize:12,color:'#9e9e9e',marginTop:1,marginBottom:6}}>{desc}</div>}
-      <div style={{border:'1px solid #e8e8e8',borderRadius:12,overflow:'hidden',marginTop:6}}>
-        <div style={{display:'flex',padding:'8px 14px',background:'#fafaf9',borderBottom:'1px solid #e8e8e8',fontSize:12,fontWeight:600,color:'#9e9e9e'}}>
+      <div style={{fontSize:14,fontWeight:500,color:'var(--text)'}}>{label}</div>
+      {desc&&<div style={{fontSize:12,color:'var(--text-muted)',marginTop:1,marginBottom:6}}>{desc}</div>}
+      <div style={{border:'1px solid var(--border)',borderRadius:12,overflow:'hidden',marginTop:6}}>
+        <div style={{display:'flex',padding:'8px 14px',background:'var(--surface-2)',borderBottom:'1px solid #e8e8e8',fontSize:12,fontWeight:600,color:'var(--text-muted)'}}>
           <span style={{flex:1}}>Severity</span><span style={{width:90,textAlign:'right'}}>Target (min)</span><span style={{width:60,textAlign:'right'}}>Hours</span>
         </div>
         {Object.entries(obj||{}).map(([sev,mins])=>(
           <div key={sev} style={{display:'flex',alignItems:'center',padding:'7px 14px',borderBottom:'1px solid #f7f5f2',fontSize:12.5}}>
             <span style={{flex:1,fontWeight:600,color:sev==='critical'?'#d42d35':sev==='high'?'#ed8d00':sev==='medium'?'#1f74b3':'#616161',textTransform:'capitalize'}}>{sev}</span>
-            <input type="number" value={mins} onChange={e=>setNested(settingsKey,sev,Number(e.target.value))} min={5} style={{width:80,border:'1px solid #e8e8e8',borderRadius:6,padding:'3px 8px',fontSize:12,outline:'none',textAlign:'right',fontFamily:'inherit'}}/>
-            <span style={{width:60,textAlign:'right',color:'#9e9e9e',fontSize:11}}>{(mins/60).toFixed(1)}h</span>
+            <input type="number" value={mins} onChange={e=>setNested(settingsKey,sev,Number(e.target.value))} min={5} style={{width:80,border:'1px solid var(--border)',borderRadius:6,padding:'3px 8px',fontSize:12,outline:'none',textAlign:'right',fontFamily:'inherit'}}/>
+            <span style={{width:60,textAlign:'right',color:'var(--text-muted)',fontSize:11}}>{(mins/60).toFixed(1)}h</span>
           </div>
         ))}
       </div>
@@ -282,7 +282,7 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
         <Toggle label="Notify lead on SLA breach" desc="Automatically alert the team lead when a task breaches its SLA" value={s.sla_breach_notify_lead} onChange={v=>set('sla_breach_notify_lead',v)}/>
         <Toggle label="Notify admin on SLA breach" desc="Send a notification to the admin when any SLA is breached" value={s.sla_breach_notify_admin} onChange={v=>set('sla_breach_notify_admin',v)}/>
         <NumberInput label="SLA warning threshold" desc="Show warning when this % of SLA time has elapsed" value={s.sla_warning_pct} onChange={v=>set('sla_warning_pct',v)} min={50} max={95} suffix="%"/>
-        <div style={{marginTop:16,marginBottom:8,padding:'12px 14px',borderRadius:12,background:'#fbfafc',border:'1px solid #efeaf5',fontSize:12,color:'#616161',lineHeight:1.5}}>
+        <div style={{marginTop:16,marginBottom:8,padding:'12px 14px',borderRadius:12,background:'#fbfafc',border:'1px solid #efeaf5',fontSize:12,color:'var(--text-secondary)',lineHeight:1.5}}>
           <i className="bi-info-circle" style={{marginRight:6,color:'#7c3aed'}}/>
           Per-queue SLA windows are configured in <strong>Team → Queue SLA settings</strong> (business-day clock, Sat/Sun excluded). The legacy per-function table here was retired on 2026-05-01 — its values were never read at runtime.
         </div>
@@ -301,7 +301,7 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
         <Select label="Default task status" desc="Status assigned to newly created tasks" value={s.default_task_status} onChange={v=>set('default_task_status',v)} options={[{value:'new',label:'New'},{value:'open',label:'Open'},{value:'in_progress',label:'In Progress'}]}/>
         <Toggle label="Keyboard shortcuts" desc="Enable J/K navigation, R to reply, E to escalate, C to close" value={s.enable_keyboard_shortcuts} onChange={v=>set('enable_keyboard_shortcuts',v)}/>
 
-        <div style={{marginTop:16,marginBottom:8,fontSize:13,fontWeight:600,color:'#9e9e9e',letterSpacing:'normal'}}>QUEUE ADVANCED</div>
+        <div style={{marginTop:16,marginBottom:8,fontSize:13,fontWeight:600,color:'var(--text-muted)',letterSpacing:'normal'}}>QUEUE ADVANCED</div>
         <Toggle label="Show inbound/outbound toggle" desc="Display the inbound vs outbound filter toggle at the top of the queue" value={s.queue_show_inbound_outbound_toggle} onChange={v=>set('queue_show_inbound_outbound_toggle',v)}/>
         <Toggle label="Show AI summary" desc="Display an AI-generated summary on the task detail panel" value={s.queue_show_ai_summary} onChange={v=>set('queue_show_ai_summary',v)}/>
         <Toggle label="Show quick reply" desc="Show the quick-reply bar at the bottom of task detail" value={s.queue_show_quick_reply} onChange={v=>set('queue_show_quick_reply',v)}/>
@@ -323,15 +323,15 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
               <i className={tool.icon} style={{color:tool.color,fontSize:12}}></i>
             </div>
             <div style={{flex:1}}>
-              <div style={{fontSize:14,fontWeight:500,color:'#1b1b1b'}}>{tool.label}</div>
-              <input value={s.source_urls[key]||''} onChange={e=>{const v=e.target.value;if(v.trim().length>0&&/^(javascript|data|vbscript):/i.test(v.trim()))return;setNested('source_urls',key,v);}} style={{width:'100%',border:'1px solid #dedede',borderRadius:5,padding:'4px 8px',fontSize:11,color:'#616161',marginTop:3,boxSizing:'border-box',outline:'none'}} placeholder="Base URL"/>
+              <div style={{fontSize:14,fontWeight:500,color:'var(--text)'}}>{tool.label}</div>
+              <input value={s.source_urls[key]||''} onChange={e=>{const v=e.target.value;if(v.trim().length>0&&/^(javascript|data|vbscript):/i.test(v.trim()))return;setNested('source_urls',key,v);}} style={{width:'100%',border:'1px solid #dedede',borderRadius:5,padding:'4px 8px',fontSize:11,color:'var(--text-secondary)',marginTop:3,boxSizing:'border-box',outline:'none'}} placeholder="Base URL"/>
             </div>
             <button onClick={()=>setNested('sources_enabled',key,!s.sources_enabled[key])} style={{width:40,height:22,borderRadius:11,border:'none',background:s.sources_enabled[key]?'var(--g)':'#dedede',cursor:'pointer',position:'relative',transition:'background .2s',flexShrink:0}}>
               <div style={{width:16,height:16,borderRadius:'50%',background:'var(--surface)',position:'absolute',top:3,left:s.sources_enabled[key]?21:3,transition:'left .2s',boxShadow:'0 1px 3px rgba(0,0,0,.15)'}}></div>
             </button>
           </div>
         ))}
-        <div style={{marginTop:12,padding:'10px 14px',background:'#f7f5f2',borderRadius:8,fontSize:11.5,color:'#616161'}}>
+        <div style={{marginTop:12,padding:'10px 14px',background:'var(--surface-3)',borderRadius:8,fontSize:11.5,color:'var(--text-secondary)'}}>
           <i className="bi-info-circle" style={{marginRight:5}}></i>Disabling a source hides it from the queue. Existing tasks from that source remain but won't receive new tickets.
         </div>
       </div>);
@@ -358,7 +358,7 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
         <Toggle label="Require escalation note" desc="Agents must provide a reason when escalating a task" value={s.escal_require_note} onChange={v=>set('escal_require_note',v)}/>
         <Toggle label="Notify RM on critical" desc="Automatically notify the Regional Manager on critical escalations" value={s.escal_critical_notify_rm} onChange={v=>set('escal_critical_notify_rm',v)}/>
 
-        <div style={{marginTop:16,marginBottom:8,fontSize:13,fontWeight:600,color:'#9e9e9e',letterSpacing:'normal'}}>ESCALATION CHAIN & SEVERITY</div>
+        <div style={{marginTop:16,marginBottom:8,fontSize:13,fontWeight:600,color:'var(--text-muted)',letterSpacing:'normal'}}>ESCALATION CHAIN & SEVERITY</div>
         <StringListEditor label="Severity levels" desc="Ordered list of escalation severity levels (highest to lowest)" items={s.escal_severity_levels} onChange={v=>setArr('escal_severity_levels',v)}/>
         <StringListEditor label="Escalation chain" desc="Routing chain for escalations — each step is a role" items={s.escal_chain} onChange={v=>setArr('escal_chain',v)}/>
         <SeveritySlaTable label="Response SLA by severity" desc="Maximum response time per severity level" obj={s.escal_response_sla_by_severity} settingsKey="escal_response_sla_by_severity"/>
@@ -368,13 +368,13 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
         <SectionHeader icon="bi-bell-fill" title="Notifications" desc="Choose what triggers notifications and how they're delivered."/>
         <Toggle label="Sound notifications" desc="Play a sound when a new notification arrives" value={s.notif_sound} onChange={v=>set('notif_sound',v)}/>
         <Toggle label="Desktop push notifications" desc="Show browser push notifications for critical events" value={s.notif_desktop} onChange={v=>set('notif_desktop',v)}/>
-        <div style={{marginTop:10,marginBottom:6,fontSize:13,fontWeight:600,color:'#9e9e9e',letterSpacing:'normal'}}>TRIGGER EVENTS</div>
+        <div style={{marginTop:10,marginBottom:6,fontSize:13,fontWeight:600,color:'var(--text-muted)',letterSpacing:'normal'}}>TRIGGER EVENTS</div>
         <Toggle label="New ticket received" desc="Notify when a new task is assigned to the queue" value={s.notif_new_ticket} onChange={v=>set('notif_new_ticket',v)}/>
         <Toggle label="SLA warning" desc="Notify when a task approaches its SLA deadline" value={s.notif_sla_warning} onChange={v=>set('notif_sla_warning',v)}/>
         <Toggle label="SLA breach" desc="Notify immediately when an SLA is breached" value={s.notif_sla_breach} onChange={v=>set('notif_sla_breach',v)}/>
         <Toggle label="New escalation" desc="Notify when a task is escalated to you or your team" value={s.notif_escalation} onChange={v=>set('notif_escalation',v)}/>
                 <Select label="Email digest" desc="Summary email of all notifications" value={s.notif_digest} onChange={v=>set('notif_digest',v)} options={[{value:'off',label:'Off'},{value:'daily',label:'Daily digest'},{value:'weekly',label:'Weekly digest'}]}/>
-        <div style={{marginTop:10,marginBottom:6,fontSize:13,fontWeight:600,color:'#9e9e9e',letterSpacing:'normal'}}>NOTIFICATION SOURCES</div>
+        <div style={{marginTop:10,marginBottom:6,fontSize:13,fontWeight:600,color:'var(--text-muted)',letterSpacing:'normal'}}>NOTIFICATION SOURCES</div>
         <Toggle label="Show Zendesk notifications" desc="Receive notifications from Zendesk tickets" value={s.notificationSources?.zendesk!==false} onChange={v=>setNested('notificationSources','zendesk',v)}/>
         <Toggle label="Show Gmail notifications" desc="Receive notifications from Gmail (off by default to reduce noise)" value={s.notificationSources?.gmail===true} onChange={v=>setNested('notificationSources','gmail',v)}/>
         <Toggle label="Show Jira notifications" desc="Receive notifications from Jira tickets" value={s.notificationSources?.jira!==false} onChange={v=>setNested('notificationSources','jira',v)}/>
@@ -390,7 +390,7 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
         <Toggle label="Sidebar expanded by default" desc="Start with the sidebar open (vs collapsed icons)" value={s.sidebar_default_open} onChange={v=>set('sidebar_default_open',v)}/>
         <Toggle label="Show onboarding for new users" desc="Display the welcome wizard on first visit" value={s.show_onboarding_new_users} onChange={v=>set('show_onboarding_new_users',v)}/>
         <Toggle label="Compact row mode" desc="Reduce vertical padding in task rows for higher density" value={s.compact_rows} onChange={v=>set('compact_rows',v)}/>
-        <div style={{marginTop:10,marginBottom:6,fontSize:13,fontWeight:600,color:'#9e9e9e',letterSpacing:'normal'}}>VISIBLE QUEUE COLUMNS</div>
+        <div style={{marginTop:10,marginBottom:6,fontSize:13,fontWeight:600,color:'var(--text-muted)',letterSpacing:'normal'}}>VISIBLE QUEUE COLUMNS</div>
         {[['ticket','Ticket ID'],['source','Source'],['function','Function'],['assignee','Assignee'],['country','Country'],['time','Time'],['status','Status']].map(([key,label])=>(
           <Toggle key={key} label={label} desc={`Show the ${label} column in the task queue`} value={s.queue_columns[key]} onChange={v=>setNested('queue_columns',key,v)}/>
         ))}
@@ -408,24 +408,24 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
         <SectionHeader icon="bi-brush-fill" title="Branding" desc="Customize the app name and colors to match your org."/>
         <TextInput label="Application name" desc="Displayed in the header and browser tab" value={s.app_name} onChange={v=>set('app_name',v)} placeholder="HRX Ops Hub"/>
         <div style={{padding:'14px 0',borderBottom:'1px solid #e8e8e8'}}>
-          <div style={{fontSize:14,fontWeight:500,color:'#1b1b1b'}}>Primary color</div>
-          <div style={{fontSize:12,color:'#9e9e9e',marginTop:1,marginBottom:6}}>Main accent color used across the app</div>
+          <div style={{fontSize:14,fontWeight:500,color:'var(--text)'}}>Primary color</div>
+          <div style={{fontSize:12,color:'var(--text-muted)',marginTop:1,marginBottom:6}}>Main accent color used across the app</div>
           <div style={{display:'flex',alignItems:'center',gap:8}}>
             <input type="color" value={s.primary_color} onChange={e=>set('primary_color',e.target.value)} style={{width:36,height:28,border:'1px solid #dedede',borderRadius:6,cursor:'pointer',padding:0}}/>
-            <input value={s.primary_color} onChange={e=>set('primary_color',e.target.value)} style={{width:90,border:'1px solid #dedede',borderRadius:6,padding:'5px 8px',fontSize:12,fontFamily:'monospace',color:'#616161',outline:'none'}}/>
-            <button onClick={()=>{set('primary_color','#1f74b3');set('brand_dark','#0a5a99');}} style={{border:'1px solid #dedede',borderRadius:6,padding:'5px 10px',fontSize:11,color:'#616161',cursor:'pointer',background:'var(--surface)'}}>Reset to Deel</button>
+            <input value={s.primary_color} onChange={e=>set('primary_color',e.target.value)} style={{width:90,border:'1px solid #dedede',borderRadius:6,padding:'5px 8px',fontSize:12,fontFamily:'monospace',color:'var(--text-secondary)',outline:'none'}}/>
+            <button onClick={()=>{set('primary_color','#1f74b3');set('brand_dark','#0a5a99');}} style={{border:'1px solid #dedede',borderRadius:6,padding:'5px 10px',fontSize:11,color:'var(--text-secondary)',cursor:'pointer',background:'var(--surface)'}}>Reset to Deel</button>
           </div>
         </div>
         <div style={{padding:'14px 0',borderBottom:'1px solid #e8e8e8'}}>
-          <div style={{fontSize:14,fontWeight:500,color:'#1b1b1b'}}>Dark accent color</div>
-          <div style={{fontSize:12,color:'#9e9e9e',marginTop:1,marginBottom:6}}>Used for hover states and emphasis</div>
+          <div style={{fontSize:14,fontWeight:500,color:'var(--text)'}}>Dark accent color</div>
+          <div style={{fontSize:12,color:'var(--text-muted)',marginTop:1,marginBottom:6}}>Used for hover states and emphasis</div>
           <div style={{display:'flex',alignItems:'center',gap:8}}>
             <input type="color" value={s.brand_dark} onChange={e=>set('brand_dark',e.target.value)} style={{width:36,height:28,border:'1px solid #dedede',borderRadius:6,cursor:'pointer',padding:0}}/>
-            <input value={s.brand_dark} onChange={e=>set('brand_dark',e.target.value)} style={{width:90,border:'1px solid #dedede',borderRadius:6,padding:'5px 8px',fontSize:12,fontFamily:'monospace',color:'#616161',outline:'none'}}/>
+            <input value={s.brand_dark} onChange={e=>set('brand_dark',e.target.value)} style={{width:90,border:'1px solid #dedede',borderRadius:6,padding:'5px 8px',fontSize:12,fontFamily:'monospace',color:'var(--text-secondary)',outline:'none'}}/>
           </div>
         </div>
-        <div style={{marginTop:14,padding:'12px 14px',background:'#f7f5f2',borderRadius:8}}>
-          <div style={{fontSize:11.5,fontWeight:600,color:'#616161',marginBottom:8}}>PREVIEW</div>
+        <div style={{marginTop:14,padding:'12px 14px',background:'var(--surface-3)',borderRadius:8}}>
+          <div style={{fontSize:11.5,fontWeight:600,color:'var(--text-secondary)',marginBottom:8}}>PREVIEW</div>
           <div style={{display:'flex',gap:8}}>
             <div style={{height:32,padding:'0 16px',borderRadius:8,background:s.primary_color,color:'white',fontSize:12,fontWeight:700,display:'flex',alignItems:'center'}}>Primary Button</div>
             <div style={{height:32,padding:'0 16px',borderRadius:8,background:s.brand_dark,color:'white',fontSize:12,fontWeight:700,display:'flex',alignItems:'center'}}>Dark Accent</div>
@@ -442,18 +442,18 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
 
       case 'team': return(<div>
         <SectionHeader icon="bi-people-fill" title="Team Management" desc="Add, edit, or remove team members and manage role assignments."/>
-        <div style={{border:'1px solid #e8e8e8',borderRadius:16,overflow:'hidden',marginBottom:14}}>
-          <div style={{display:'flex',padding:'7px 12px',background:'#f7f5f2',borderBottom:'1px solid #e8e8e8',fontSize:13,fontWeight:500,color:'#9e9e9e'}}>
+        <div style={{border:'1px solid var(--border)',borderRadius:16,overflow:'hidden',marginBottom:14}}>
+          <div style={{display:'flex',padding:'7px 12px',background:'var(--surface-3)',borderBottom:'1px solid #e8e8e8',fontSize:13,fontWeight:500,color:'var(--text-muted)'}}>
             <span style={{flex:1}}>Name</span><span style={{width:70}}>Role</span><span style={{width:60}}>Team</span><span style={{width:40}}>Co.</span><span style={{width:60,textAlign:'right'}}>Status</span>
           </div>
           {MEMBERS.map(m=>(
             <div key={m.id} style={{display:'flex',alignItems:'center',padding:'8px 12px',borderBottom:'1px solid #f7f5f2',fontSize:12.5}}>
               <div style={{flex:1,display:'flex',alignItems:'center',gap:8}}>
                 <Avatar name={m.name} size={22}/>
-                <span style={{fontWeight:600,color:'#1b1b1b'}}>{m.name}</span>
+                <span style={{fontWeight:600,color:'var(--text)'}}>{m.name}</span>
               </div>
               <span style={{width:70,fontSize:11,fontWeight:600,color:m.role==='admin'?'#c4b1f9':m.role==='team_lead'?'#ed8d00':'#616161',textTransform:'capitalize'}}>{m.role}</span>
-              <span style={{width:60,fontSize:11,color:'#616161'}}>{m.team}</span>
+              <span style={{width:60,fontSize:11,color:'var(--text-secondary)'}}>{m.team}</span>
               <span style={{width:40,fontSize:14}}>{FLAGS[m.country]||''}</span>
               <span style={{width:60,textAlign:'right'}}>
                 <span style={{display:'inline-flex',alignItems:'center',gap:3,fontSize:10,fontWeight:600,color:'#29811e'}}><span style={{width:5,height:5,borderRadius:'50%',background:'#29811e'}}></span>Active</span>
@@ -466,7 +466,7 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
           <div style={{fontSize:11.5,color:'#29811e'}}>In the production version, add/remove/edit members will sync with your HRIS or Workday directory. For now, team membership is configured at deployment.</div>
         </div>
 
-        <div style={{marginTop:16,marginBottom:8,fontSize:13,fontWeight:600,color:'#9e9e9e',letterSpacing:'normal'}}>TEAM VIEW SETTINGS</div>
+        <div style={{marginTop:16,marginBottom:8,fontSize:13,fontWeight:600,color:'var(--text-muted)',letterSpacing:'normal'}}>TEAM VIEW SETTINGS</div>
         <Toggle label="Show KPI cards" desc="Display key performance indicator cards at the top of the team view" value={s.team_show_kpi_cards} onChange={v=>set('team_show_kpi_cards',v)}/>
         <StringListEditor label="KPI cards" desc="Which KPI cards to display on the team view" items={s.team_kpi_cards} onChange={v=>setArr('team_kpi_cards',v)}/>
         <Toggle label="Show region filter" desc="Display the region dropdown filter on the team view" value={s.team_show_region_filter} onChange={v=>set('team_show_region_filter',v)}/>
@@ -479,16 +479,16 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
       case 'kb': return(<div>
         <SectionHeader icon="bi-book-half" title="Knowledge Hub Configuration" desc="Manage what content appears in the Knowledge Hub tabs."/>
         <div style={{marginBottom:14}}>
-          <div style={{fontSize:13,fontWeight:600,color:'#9e9e9e',letterSpacing:'normal',marginBottom:8}}>CONFIGURED ENTRIES</div>
-          <div style={{border:'1px solid #e8e8e8',borderRadius:16,overflow:'hidden'}}>
-            <div style={{display:'flex',padding:'10px 16px',background:'#fafaf9',borderBottom:'1px solid #e8e8e8',fontSize:13,fontWeight:500,color:'#9e9e9e',letterSpacing:'normal'}}>
+          <div style={{fontSize:13,fontWeight:600,color:'var(--text-muted)',letterSpacing:'normal',marginBottom:8}}>CONFIGURED ENTRIES</div>
+          <div style={{border:'1px solid var(--border)',borderRadius:16,overflow:'hidden'}}>
+            <div style={{display:'flex',padding:'10px 16px',background:'var(--surface-2)',borderBottom:'1px solid #e8e8e8',fontSize:13,fontWeight:500,color:'var(--text-muted)',letterSpacing:'normal'}}>
               <span style={{width:70}}>Type</span><span style={{flex:1}}>Name</span><span style={{width:70}}>Tab</span>
             </div>
             {KB_SEARCH_INDEX.map((entry,i)=>(
               <div key={i} style={{display:'flex',alignItems:'center',padding:'6px 12px',borderBottom:'1px solid #f7f5f2',fontSize:12}}>
                 <span style={{width:70,fontSize:10.5,fontWeight:600,color:entry.type==='process'?'#29811e':entry.type==='report'?'#1f74b3':entry.type==='policy'?'#c4b1f9':entry.type==='sla'?'#ed8d00':'#616161',textTransform:'none'}}>{entry.type}</span>
-                <span style={{flex:1,color:'#616161'}}>{entry.name}</span>
-                <span style={{width:70,fontSize:11,color:'#9e9e9e'}}>{entry.tab}</span>
+                <span style={{flex:1,color:'var(--text-secondary)'}}>{entry.name}</span>
+                <span style={{width:70,fontSize:11,color:'var(--text-muted)'}}>{entry.tab}</span>
               </div>
             ))}
           </div>
@@ -498,7 +498,7 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
           <div style={{fontSize:11.5,color:'#1f74b3'}}>In production, this will integrate with Confluence/Notion. Add new processes, reports, policies, and channels here and they'll appear in the Knowledge Hub search.</div>
         </div>
 
-        <div style={{marginTop:16,marginBottom:8,fontSize:13,fontWeight:600,color:'#9e9e9e',letterSpacing:'normal'}}>KNOWLEDGE HUB ADVANCED</div>
+        <div style={{marginTop:16,marginBottom:8,fontSize:13,fontWeight:600,color:'var(--text-muted)',letterSpacing:'normal'}}>KNOWLEDGE HUB ADVANCED</div>
         <Toggle label="Show search tab" desc="Display the full-text search tab in the Knowledge Hub" value={s.kb_show_search_tab} onChange={v=>set('kb_show_search_tab',v)}/>
         <Toggle label="Show Ask Claude tab" desc="Display the AI-powered Ask Claude tab for natural language queries" value={s.kb_show_ask_claude_tab} onChange={v=>set('kb_show_ask_claude_tab',v)}/>
         <StringListEditor label="Claude categories" desc="Categories available in the Ask Claude query dropdown" items={s.kb_claude_categories} onChange={v=>setArr('kb_claude_categories',v)}/>
@@ -513,8 +513,8 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
         <Select label="Export format" desc="File format for exports" value={s.export_format} onChange={v=>set('export_format',v)} options={[{value:'csv',label:'CSV'},{value:'xlsx',label:'Excel (.xlsx)'}]}/>
         <NumberInput label="Data retention" desc="Days to keep resolved task data before archiving" value={s.data_retention_days} onChange={v=>set('data_retention_days',v)} min={30} max={365} suffix="days"/>
         <div style={{marginTop:14,display:'flex',gap:8}}>
-          <button onClick={()=>{const rows=(tasks||[]).filter(t=>t.source!=='slack');const hdr='id,source,subject,status,assignee,country,type,received\n';const body=rows.map(t=>[t.id,t.source,'"'+t.subject.replace(/"/g,'""').replace(/^[=+@-]/,'\' $&')+'"',t.status,MEMBERS.find(m=>m.id===t.assigneeId)?.name||'',t.country,t.type,t.receivedAt].join(',')).join('\n');const d=document.createElement('a');d.setAttribute('href','data:text/csv;charset=utf-8,'+encodeURIComponent(hdr+body));d.setAttribute('download','ops-hub-tasks-export.csv');d.click();if(addToast)addToast('success','Exported',rows.length+' tasks exported to CSV');flash();}} style={{height:34,padding:'0 16px',borderRadius:8,border:'1px solid #dedede',background:'var(--surface)',color:'#1b1b1b',fontSize:12,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:6}}><i className="bi-download" style={{fontSize:11}}></i>Export All Tasks (CSV)</button>
-          <button onClick={()=>{const all=(tasks||[]).filter(t=>t.source!=='slack');const res=all.filter(t=>t.status==='resolved');const opn=all.filter(t=>t.status!=='resolved');const body='metric,value\nTotal Tasks,'+all.length+'\nOpen,'+opn.length+'\nResolved,'+res.length+'\nIn Progress,'+all.filter(t=>t.status==='in_progress').length+'\nAlerts,'+all.filter(t=>t.isAlert&&t.status!=='resolved').length+'\n';const d=document.createElement('a');d.setAttribute('href','data:text/csv;charset=utf-8,'+encodeURIComponent(body));d.setAttribute('download','ops-hub-analytics-report.csv');d.click();if(addToast)addToast('success','Exported','Analytics report downloaded');flash();}} style={{height:34,padding:'0 16px',borderRadius:8,border:'1px solid #dedede',background:'var(--surface)',color:'#1b1b1b',fontSize:12,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:6}}><i className="bi-file-earmark-spreadsheet" style={{fontSize:11}}></i>Export Analytics Report</button>
+          <button onClick={()=>{const rows=(tasks||[]).filter(t=>t.source!=='slack');const hdr='id,source,subject,status,assignee,country,type,received\n';const body=rows.map(t=>[t.id,t.source,'"'+t.subject.replace(/"/g,'""').replace(/^[=+@-]/,'\' $&')+'"',t.status,MEMBERS.find(m=>m.id===t.assigneeId)?.name||'',t.country,t.type,t.receivedAt].join(',')).join('\n');const d=document.createElement('a');d.setAttribute('href','data:text/csv;charset=utf-8,'+encodeURIComponent(hdr+body));d.setAttribute('download','ops-hub-tasks-export.csv');d.click();if(addToast)addToast('success','Exported',rows.length+' tasks exported to CSV');flash();}} style={{height:34,padding:'0 16px',borderRadius:8,border:'1px solid #dedede',background:'var(--surface)',color:'var(--text)',fontSize:12,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:6}}><i className="bi-download" style={{fontSize:11}}></i>Export All Tasks (CSV)</button>
+          <button onClick={()=>{const all=(tasks||[]).filter(t=>t.source!=='slack');const res=all.filter(t=>t.status==='resolved');const opn=all.filter(t=>t.status!=='resolved');const body='metric,value\nTotal Tasks,'+all.length+'\nOpen,'+opn.length+'\nResolved,'+res.length+'\nIn Progress,'+all.filter(t=>t.status==='in_progress').length+'\nAlerts,'+all.filter(t=>t.isAlert&&t.status!=='resolved').length+'\n';const d=document.createElement('a');d.setAttribute('href','data:text/csv;charset=utf-8,'+encodeURIComponent(body));d.setAttribute('download','ops-hub-analytics-report.csv');d.click();if(addToast)addToast('success','Exported','Analytics report downloaded');flash();}} style={{height:34,padding:'0 16px',borderRadius:8,border:'1px solid #dedede',background:'var(--surface)',color:'var(--text)',fontSize:12,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:6}}><i className="bi-file-earmark-spreadsheet" style={{fontSize:11}}></i>Export Analytics Report</button>
         </div>
       </div>);
 
@@ -534,13 +534,13 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
         <Toggle label="Show digest banner" desc="Display the daily digest summary banner at the top" value={s.briefing_show_digest_banner} onChange={v=>set('briefing_show_digest_banner',v)}/>
         <Toggle label="Show health score" desc="Display the team health score widget" value={s.briefing_show_health_score} onChange={v=>set('briefing_show_health_score',v)}/>
 
-        <div style={{marginTop:12,marginBottom:8,fontSize:13,fontWeight:600,color:'#9e9e9e',letterSpacing:'normal'}}>HEALTH SCORE WEIGHTS</div>
+        <div style={{marginTop:12,marginBottom:8,fontSize:13,fontWeight:600,color:'var(--text-muted)',letterSpacing:'normal'}}>HEALTH SCORE WEIGHTS</div>
         <NumberInput label="SLA weight" desc="Weight of SLA compliance in health score calculation" value={s.briefing_health_sla_weight} onChange={v=>set('briefing_health_sla_weight',v)} min={0} max={100} suffix="%"/>
         <NumberInput label="Resolution weight" desc="Weight of resolution rate in health score" value={s.briefing_health_resolution_weight} onChange={v=>set('briefing_health_resolution_weight',v)} min={0} max={100} suffix="%"/>
         <NumberInput label="Response weight" desc="Weight of first response time in health score" value={s.briefing_health_response_weight} onChange={v=>set('briefing_health_response_weight',v)} min={0} max={100} suffix="%"/>
         <NumberInput label="Capacity weight" desc="Weight of team capacity utilization in health score" value={s.briefing_health_capacity_weight} onChange={v=>set('briefing_health_capacity_weight',v)} min={0} max={100} suffix="%"/>
 
-        <div style={{marginTop:12,marginBottom:8,fontSize:13,fontWeight:600,color:'#9e9e9e',letterSpacing:'normal'}}>WIDGETS</div>
+        <div style={{marginTop:12,marginBottom:8,fontSize:13,fontWeight:600,color:'var(--text-muted)',letterSpacing:'normal'}}>WIDGETS</div>
         <Toggle label="Show KPI cards" desc="Display the KPI summary cards row" value={s.briefing_show_kpi_cards} onChange={v=>set('briefing_show_kpi_cards',v)}/>
         <Toggle label="Show admin actions" desc="Display admin quick-action buttons" value={s.briefing_show_admin_actions} onChange={v=>set('briefing_show_admin_actions',v)}/>
         <Toggle label="Show executive grid" desc="Display the executive summary grid" value={s.briefing_show_executive_grid} onChange={v=>set('briefing_show_executive_grid',v)}/>
@@ -671,22 +671,22 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
           {/* Search bar */}
           <div style={{padding:'4px 4px 8px',position:'sticky',top:0,background:'var(--surface)',zIndex:1}}>
             <div style={{position:'relative'}}>
-              <i className="bi-search" style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)',fontSize:12,color:'#9e9e9e',pointerEvents:'none'}}></i>
+              <i className="bi-search" style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)',fontSize:12,color:'var(--text-muted)',pointerEvents:'none'}}></i>
               <input
                 value={searchTerm}
                 onChange={e=>setSearchTerm(e.target.value)}
                 placeholder="Search settings..."
-                style={{width:'100%',border:'1px solid #e8e8e8',borderRadius:8,padding:'7px 10px 7px 30px',fontSize:12,outline:'none',fontFamily:'inherit',color:'#1b1b1b',boxSizing:'border-box',background:'#fafaf9'}}
+                style={{width:'100%',border:'1px solid var(--border)',borderRadius:8,padding:'7px 10px 7px 30px',fontSize:12,outline:'none',fontFamily:'inherit',color:'var(--text)',boxSizing:'border-box',background:'var(--surface-2)'}}
               />
               {searchTerm&&(
-                <button onClick={()=>setSearchTerm('')} style={{position:'absolute',right:8,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',cursor:'pointer',color:'#9e9e9e',fontSize:14,padding:0,lineHeight:1}}>&times;</button>
+                <button onClick={()=>setSearchTerm('')} style={{position:'absolute',right:8,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',fontSize:14,padding:0,lineHeight:1}}>&times;</button>
               )}
             </div>
           </div>
           <div style={{flex:1,overflowY:'auto'}}>
             {filteredGroups.map(group=>(
               <div key={group.label}>
-                <div style={{color:'#9e9e9e',fontSize:13,letterSpacing:'normal',textTransform:'none',fontWeight:600,padding:'12px 12px 4px'}}>
+                <div style={{color:'var(--text-muted)',fontSize:13,letterSpacing:'normal',textTransform:'none',fontWeight:600,padding:'12px 12px 4px'}}>
                   {group.label}
                 </div>
                 {group.items.map(c=>(
@@ -697,7 +697,7 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
               </div>
             ))}
             {filteredGroups.length===0&&(
-              <div style={{padding:'20px 12px',textAlign:'center',color:'#9e9e9e',fontSize:12}}>No settings match "{searchTerm}"</div>
+              <div style={{padding:'20px 12px',textAlign:'center',color:'var(--text-muted)',fontSize:12}}>No settings match "{searchTerm}"</div>
             )}
           </div>
         </div>

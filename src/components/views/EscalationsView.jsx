@@ -25,7 +25,7 @@ const SEVERITY_CONFIG = {
   critical: { label:'Critical', color:'#d42d35', bg:'#ffe2de' },
   high:     { label:'High',     color:'#ed5e2a', bg:'#fef3ee' },
   medium:   { label:'Medium',   color:'#1f74b3', bg:'#e8f0fe' },
-  low:      { label:'Low',      color:'#9e9e9e', bg:'#f7f5f2' },
+  low:      { label:'Low',      color:'var(--text-muted)', bg:'#f7f5f2' },
 };
 
 // Parse HH:MM string into minutes since midnight
@@ -244,7 +244,7 @@ const EscalationsView = ({ escalations, setEscalations, currentUser, onNewEscala
   const myPendingIds = new Set(myPending.map(e => e.id));
 
   const thStyle = {
-    padding:'10px 16px', fontSize:13, fontWeight:500, color:'#9e9e9e',
+    padding:'10px 16px', fontSize:13, fontWeight:500, color:'var(--text-muted)',
     textTransform:'none', letterSpacing:'normal', textAlign:'left',
     whiteSpace:'nowrap', userSelect:'none',
   };
@@ -293,11 +293,11 @@ const EscalationsView = ({ escalations, setEscalations, currentUser, onNewEscala
 
           {/* Subject */}
           <td style={{ padding:'12px 16px' }}>
-            <div style={{ fontWeight:600, fontSize:13, color:'#1b1b1b', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:280 }}>
+            <div style={{ fontWeight:600, fontSize:13, color:'var(--text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:280 }}>
               {esc.subject || esc.task?.subject || '(no subject)'}
             </div>
             {esc.reason && (
-              <div style={{ fontSize:11, color:'#9e9e9e', marginTop:2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:280 }}>
+              <div style={{ fontSize:11, color:'var(--text-muted)', marginTop:2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:280 }}>
                 {esc.reason}
               </div>
             )}
@@ -315,17 +315,17 @@ const EscalationsView = ({ escalations, setEscalations, currentUser, onNewEscala
 
           {/* From */}
           <td style={{ padding:'12px 16px' }}>
-            <span style={{ fontSize:12, color:'#616161', fontWeight:500 }}>{esc.escalatedBy}</span>
+            <span style={{ fontSize:12, color:'var(--text-secondary)', fontWeight:500 }}>{esc.escalatedBy}</span>
           </td>
 
           {/* Manager */}
           <td style={{ padding:'12px 16px' }}>
-            <span style={{ fontSize:12, color:'#1b1b1b', fontWeight:600 }}>{esc.managerName}</span>
+            <span style={{ fontSize:12, color:'var(--text)', fontWeight:600 }}>{esc.managerName}</span>
           </td>
 
           {/* Time */}
           <td style={{ padding:'12px 16px' }}>
-            <span style={{ fontSize:12, color:'#616161' }}>{formatEscalatedAt(esc.escalatedAt)}</span>
+            <span style={{ fontSize:12, color:'var(--text-secondary)' }}>{formatEscalatedAt(esc.escalatedAt)}</span>
           </td>
 
           {/* SLA */}
@@ -347,7 +347,7 @@ const EscalationsView = ({ escalations, setEscalations, currentUser, onNewEscala
             ) : isResolved && esc.resolvedBy ? (
               <span style={{ fontSize:11, color:'#29811e', fontWeight:600 }}>Resolved</span>
             ) : (
-              <span style={{ fontSize:11, color:'#9e9e9e' }}>--</span>
+              <span style={{ fontSize:11, color:'var(--text-muted)' }}>--</span>
             )}
           </td>
 
@@ -376,7 +376,7 @@ const EscalationsView = ({ escalations, setEscalations, currentUser, onNewEscala
               </div>
             )}
             {esc.status === 'resolved' && (
-              <span style={{ fontSize:11, color:'#9e9e9e' }}>
+              <span style={{ fontSize:11, color:'var(--text-muted)' }}>
                 {esc.resolvedBy && `by ${esc.resolvedBy}`}
               </span>
             )}
@@ -385,9 +385,9 @@ const EscalationsView = ({ escalations, setEscalations, currentUser, onNewEscala
 
         {/* Expandable reply row */}
         {isOpen && esc.status === 'pending' && (
-          <tr style={{ background:'#fafaf9', borderBottom:'1px solid #f2f2f2' }}>
+          <tr style={{ background:'var(--surface-2)', borderBottom:'1px solid #f2f2f2' }}>
             <td colSpan={9} style={{ padding:'12px 16px 16px 56px' }}>
-              <div style={{ fontSize:12, fontWeight:600, color:'#616161', marginBottom:6 }}>
+              <div style={{ fontSize:12, fontWeight:600, color:'var(--text-secondary)', marginBottom:6 }}>
                 Response to {esc.escalatedBy}:
               </div>
               <textarea
@@ -395,7 +395,7 @@ const EscalationsView = ({ escalations, setEscalations, currentUser, onNewEscala
                 value={replyText[esc.id] || ''}
                 onChange={e => setReplyText(p => ({ ...p, [esc.id]: e.target.value }))}
                 placeholder="Add a response note visible to the escalating agent..."
-                style={{ width:'100%', maxWidth:600, border:'1px solid #e8e8e8', borderRadius:12, padding:'10px 14px', fontSize:13, color:'#1b1b1b', outline:'none', fontFamily:'inherit', resize:'vertical', boxSizing:'border-box' }}
+                style={{ width:'100%', maxWidth:600, border:'1px solid var(--border)', borderRadius:12, padding:'10px 14px', fontSize:13, color:'var(--text)', outline:'none', fontFamily:'inherit', resize:'vertical', boxSizing:'border-box' }}
                 onFocus={e => { e.target.style.borderColor='#1f74b3'; e.target.style.boxShadow='0 0 0 3px rgba(31,116,179,0.1)'; }}
                 onBlur={e => { e.target.style.borderColor='#e8e8e8'; e.target.style.boxShadow='none'; }}
               />
@@ -406,7 +406,7 @@ const EscalationsView = ({ escalations, setEscalations, currentUser, onNewEscala
                   style={{ height:32, padding:'0 16px', borderRadius:128, border:'none', background:'#1b1b1b', color:'white', fontSize:12, fontWeight:700, cursor:replyText[esc.id]?.trim()?'pointer':'not-allowed', opacity:replyText[esc.id]?.trim()?1:0.45, display:'flex', alignItems:'center', gap:6 }}>
                   <i className="bi-send-fill" style={{ fontSize:10 }}/>Send Response
                 </button>
-                <button onClick={() => setReplyOpen(null)} style={{ height:32, padding:'0 12px', borderRadius:128, border:'1px solid #e8e8e8', background:'var(--surface)', color:'#616161', fontSize:12, cursor:'pointer' }}>
+                <button onClick={() => setReplyOpen(null)} style={{ height:32, padding:'0 12px', borderRadius:128, border:'1px solid var(--border)', background:'var(--surface)', color:'var(--text-secondary)', fontSize:12, cursor:'pointer' }}>
                   Cancel
                 </button>
               </div>
@@ -522,7 +522,7 @@ const EscalationsView = ({ escalations, setEscalations, currentUser, onNewEscala
               <col style={{ width:'14%' }}/>
             </colgroup>
             <thead>
-              <tr style={{ background:'#fafaf9', borderBottom:'1px solid #e8e8e8' }}>
+              <tr style={{ background:'var(--surface-2)', borderBottom:'1px solid #e8e8e8' }}>
                 <th style={thStyle}></th>
                 <th style={thStyle}>Subject</th>
                 <th style={thStyle}>Source</th>
@@ -543,7 +543,7 @@ const EscalationsView = ({ escalations, setEscalations, currentUser, onNewEscala
                     <td colSpan={9} style={{ padding:'12px 16px 6px', background:'#FFFBFB' }}>
                       <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                         <span style={{ width:8, height:8, borderRadius:'50%', background:'#d42d35', display:'inline-block' }}/>
-                        <span style={{ fontSize:13, fontWeight:600, color:'#9e9e9e' }}>
+                        <span style={{ fontSize:13, fontWeight:600, color:'var(--text-muted)' }}>
                           Needs your attention
                         </span>
                         <span style={{ background:'var(--red-light, #fce9ea)', color:'var(--red, #d42d35)', fontSize:11, fontWeight:700, padding:'2px 8px', borderRadius:128 }}>
@@ -564,7 +564,7 @@ const EscalationsView = ({ escalations, setEscalations, currentUser, onNewEscala
                   <tbody>
                     <tr>
                       <td colSpan={9} style={{ padding:'12px 16px 6px' }}>
-                        <span style={{ fontSize:13, fontWeight:600, color:'#9e9e9e' }}>
+                        <span style={{ fontSize:13, fontWeight:600, color:'var(--text-muted)' }}>
                           All escalations
                         </span>
                       </td>

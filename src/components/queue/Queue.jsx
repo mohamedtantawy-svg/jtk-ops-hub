@@ -1007,9 +1007,9 @@ const Queue = ({ user, tasks, subFilter }) => {
               title="Clear the SLA filter"
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 4,
-                background: 'transparent', border: '1px solid #e8e8e8',
+                background: 'transparent', border: '1px solid var(--border)',
                 borderRadius: 128, padding: '4px 10px', fontSize: 11,
-                color: '#616161', cursor: 'pointer', fontFamily: 'inherit',
+                color: 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'inherit',
                 whiteSpace: 'nowrap',
               }}
             >
@@ -1022,7 +1022,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             const sourceLabels = { onboarding: 'Onboarding', offboarding: 'Offboarding', amendments: 'Amendments', redlines: 'Redlines', workbench: 'Workbench', incentive_plans: 'Incentive Plans', hidden: 'Hidden' };
             const toolLabels = { zendesk: 'Zendesk', jira: 'Jira' };
             const viewLabel = sourceLabels[workSource] || toolLabels[fTool] || (isAdmin ? 'All Tasks' : user.team);
-            return <span style={{ fontSize: 13, fontWeight: 600, color: '#616161', marginLeft: 6 }}>{viewLabel}</span>;
+            return <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', marginLeft: 6 }}>{viewLabel}</span>;
           })()}
           {/* 2026-05-21 audit F25: "resolved" count on this header is a
               within-session accumulator from the FE merge — distinct from
@@ -1030,10 +1030,10 @@ const Queue = ({ user, tasks, subFilter }) => {
               persisted server-side 24h diff (PR #761). Surface the window
               inline so a user comparing the two pages doesn't try to
               reconcile mismatched scopes. */}
-          <span style={{ fontSize: 12, color: '#9e9e9e', display: 'flex', alignItems: 'center', gap: 5 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 5 }}>
             <i className="bi-layers" style={{ fontSize: 11 }}></i>
-            <span style={{ fontWeight: 600, color: '#1b1b1b' }}>{headerCounts.open}</span> open
-            {headerCounts.paused > 0 && <span title="Tasks paused / waiting on requester — excluded from the SLA tier pills."> &middot; <span style={{ fontWeight: 600, color: '#616161' }}>{headerCounts.paused}</span> paused</span>}
+            <span style={{ fontWeight: 600, color: 'var(--text)' }}>{headerCounts.open}</span> open
+            {headerCounts.paused > 0 && <span title="Tasks paused / waiting on requester — excluded from the SLA tier pills."> &middot; <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>{headerCounts.paused}</span> paused</span>}
             {headerCounts.resolved > 0 && <span title="Resolved within this session — Briefing's Resolved KPI also includes the persisted server-side 24h window."> &middot; <span style={{ fontWeight: 600, color: '#29811e' }}>{headerCounts.resolved}</span> resolved</span>}
           </span>
 
@@ -1242,7 +1242,7 @@ const Queue = ({ user, tasks, subFilter }) => {
               )}
 
               {hasActiveFilters && (
-                <button onClick={() => { setFTool(null); setFStatus([]); setFSla(null); setFUnassigned(false); setFCountry([]); setSearch(''); setFJiraActionable(true); setFJiraRaised(false); }} style={{ height: 32, display: 'inline-flex', alignItems: 'center', gap: 4, padding: '0 10px', borderRadius: 8, border: 'none', background: 'transparent', color: '#9e9e9e', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap', textDecoration: 'underline' }}>
+                <button onClick={() => { setFTool(null); setFStatus([]); setFSla(null); setFUnassigned(false); setFCountry([]); setSearch(''); setFJiraActionable(true); setFJiraRaised(false); }} style={{ height: 32, display: 'inline-flex', alignItems: 'center', gap: 4, padding: '0 10px', borderRadius: 8, border: 'none', background: 'transparent', color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap', textDecoration: 'underline' }}>
                   Clear all
                 </button>
               )}
@@ -1447,7 +1447,7 @@ const Queue = ({ user, tasks, subFilter }) => {
 
       {/* ── Main ZD/JR table (when no work source is active) ── */}
       {!workSource && (fTool || hasActiveFilters) && (
-        <div ref={ticketScrollerRef} style={{ flex: 1, overflowY: 'auto', background: '#fafaf9' }}>
+        <div ref={ticketScrollerRef} style={{ flex: 1, overflowY: 'auto', background: 'var(--surface-2)' }}>
 
           {/* Truncation hint — Sarah Suge 2026-05-11 feedback: when scrolling
               to the bottom the listing was cut off because Zendesk Search's
@@ -1515,10 +1515,10 @@ const Queue = ({ user, tasks, subFilter }) => {
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
                   <i className="bi-exclamation-octagon-fill" style={{ fontSize: 14, color: '#d42d35' }} />
-                  <span style={{ fontSize: 13, fontWeight: 700, color: '#1b1b1b' }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
                     {total} breached {total === 1 ? 'item' : 'items'} in other queues
                   </span>
-                  <span style={{ fontSize: 11, color: '#9e9e9e', fontWeight: 500 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>
                     — click a queue to drill in
                   </span>
                 </div>
@@ -1540,7 +1540,7 @@ const Queue = ({ user, tasks, subFilter }) => {
                       title={`Open ${s.label} filtered to breached items`}
                     >
                       <i className={s.icon} style={{ fontSize: 13, color: s.color }} />
-                      <span style={{ fontSize: 12, fontWeight: 600, color: '#1b1b1b' }}>{s.label}</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{s.label}</span>
                       <span style={{
                         padding: '1px 8px', borderRadius: 128, fontSize: 11, fontWeight: 700,
                         background: '#d42d35', color: '#fff', fontVariantNumeric: 'tabular-nums',
@@ -1568,17 +1568,17 @@ const Queue = ({ user, tasks, subFilter }) => {
                       <i className="bi bi-inbox" style={{ fontSize: 32, display: 'block', marginBottom: 12, opacity: 0.3 }}/>
                       {fSla === 'breached' && otherSourceBreaches > 0 ? (
                         <>
-                          <div style={{ fontSize: 15, fontWeight: 600, color: '#616161', marginBottom: 4 }}>No breached tickets</div>
-                          <div style={{ fontSize: 13, color: '#9e9e9e' }}>
+                          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>No breached tickets</div>
+                          <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
                             All ZD &amp; Jira tickets are within SLA. Check the queues above for the {otherSourceBreaches} {otherSourceBreaches === 1 ? 'breach' : 'breaches'} in other sources.
                           </div>
                         </>
                       ) : (
                         <>
-                          <div style={{ fontSize: 15, fontWeight: 600, color: '#616161', marginBottom: 4 }}>No tasks found</div>
+                          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 4 }}>No tasks found</div>
                           {hiddenByFilters > 0 ? (
                             <>
-                              <div style={{ fontSize: 13, color: '#9e9e9e', marginBottom: 16 }}>
+                              <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
                                 Your active filters are hiding {hiddenByFilters} {hiddenByFilters === 1 ? 'task' : 'tasks'} in your scope.
                               </div>
                               <button
@@ -1591,7 +1591,7 @@ const Queue = ({ user, tasks, subFilter }) => {
                               </button>
                             </>
                           ) : (
-                            <div style={{ fontSize: 13, color: '#9e9e9e' }}>Try adjusting your filters</div>
+                            <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Try adjusting your filters</div>
                           )}
                         </>
                       )}
@@ -1600,8 +1600,8 @@ const Queue = ({ user, tasks, subFilter }) => {
                 })()
               : <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, padding: 40, textAlign: 'center', minHeight: 300 }}>
                   <i className="bi-inbox" style={{ fontSize: 48, color: '#c0c0c0', display: 'block', marginBottom: 16 }}></i>
-                  <div style={{ fontSize: 17, fontWeight: 600, color: '#1b1b1b', marginBottom: 6 }}>Queue is clear</div>
-                  <div style={{ fontSize: 14, color: '#9e9e9e' }}>All caught up</div>
+                  <div style={{ fontSize: 17, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>Queue is clear</div>
+                  <div style={{ fontSize: 14, color: 'var(--text-muted)' }}>All caught up</div>
                 </div>
           ) : (
             <table
@@ -1618,7 +1618,7 @@ const Queue = ({ user, tasks, subFilter }) => {
               aria-label="Task queue"
             >
               <thead>
-                <tr style={{ background: '#f5f4f2', position: 'sticky', top: 0, zIndex: 2 }}>
+                <tr style={{ background: 'var(--surface-2)', position: 'sticky', top: 0, zIndex: 2 }}>
                   <SortableTh col="source"   label="Source"   width={80}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <ResizableSubjectTh
                     sortCol={sortCol}
@@ -1867,12 +1867,12 @@ const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onSlaExtension, on
           covers the legacy/SSR path where the variable isn't yet defined
           — also the new default per Carolina Ferreira's 2026-05-20 ask
           (up from the previous fixed 320). */}
-      <td title={task.subject || ''} style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: '#1b1b1b', maxWidth: 'var(--queue-subject-width, 480px)' }}>
+      <td title={task.subject || ''} style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: 'var(--text)', maxWidth: 'var(--queue-subject-width, 480px)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           {task.isAlert && <span className="pulse" style={{ width: 6, height: 6, borderRadius: '50%', background: '#ed8d00', flexShrink: 0 }}></span>}
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{task.subject}</span>
           {task.linkedTickets && task.linkedTickets.length > 0 && (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, padding: '1px 6px', borderRadius: 128, background: '#f2f2f2', fontSize: 10, color: '#616161', flexShrink: 0 }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, padding: '1px 6px', borderRadius: 128, background: '#f2f2f2', fontSize: 10, color: 'var(--text-secondary)', flexShrink: 0 }}>
               <i className="bi-link-45deg" style={{ fontSize: 9 }}></i>{task.linkedTickets.length}
             </span>
           )}
@@ -1885,7 +1885,7 @@ const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onSlaExtension, on
       {/* Country — flag + full name. Standard agreed 2026-05-19 (Mohamed):
           country NAME everywhere, not the ISO code. */}
       <td title={task.country ? getCountryName(task.country) : ''} style={{ ...tdStyle, fontSize: 12 }}>
-        {task.country && <span>{getFlag(task.country)} <span style={{ color: '#616161', fontWeight: 500 }}>{getCountryName(task.country) || task.country}</span></span>}
+        {task.country && <span>{getFlag(task.country)} <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>{getCountryName(task.country) || task.country}</span></span>}
       </td>
       {/* Requester — the employee/customer who raised the ticket. Hover
           tooltip carries the email so the user can spot multiple tickets
@@ -1894,7 +1894,7 @@ const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onSlaExtension, on
         title={task.requesterName
           ? `${task.requesterName}${task.requesterEmail ? ` <${task.requesterEmail}>` : ''}`
           : 'Requester unknown'}
-        style={{ ...tdStyle, textAlign: 'left', fontSize: 12, color: '#1b1b1b', maxWidth: 140 }}
+        style={{ ...tdStyle, textAlign: 'left', fontSize: 12, color: 'var(--text)', maxWidth: 140 }}
       >
         {task.requesterName
           ? (
@@ -1912,11 +1912,11 @@ const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onSlaExtension, on
       <td title={assignee.name || 'Unassigned'} style={tdStyle}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
           <Avatar name={assignee.name} size="xs"/>
-          <span style={{ fontSize: 12, color: '#1b1b1b', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{assignee.name?.split(' ')[0] || ''}</span>
+          <span style={{ fontSize: 12, color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{assignee.name?.split(' ')[0] || ''}</span>
         </div>
       </td>
       {/* Received */}
-      <td style={{ ...tdStyle, fontSize: 12, color: '#616161', whiteSpace: 'nowrap' }}>{relTime(task.minutesAgo)}</td>
+      <td style={{ ...tdStyle, fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{relTime(task.minutesAgo)}</td>
       {/* SLA */}
       {settings.sla_enabled !== false && <td style={tdStyle}><SlaBadge sla={sla} status={task.status}/></td>}
       {/* Status — Jira tickets surface the raw status name as a sub-label
@@ -2194,34 +2194,34 @@ const MultiFilterDropdown = memo(({ icon, label, selected = [], options, onChang
         <i className={open ? 'bi-chevron-up' : 'bi-chevron-down'} style={{ fontSize: 8, marginLeft: 2, opacity: 0.6 }}></i>
       </button>
       {open && (
-        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 12, boxShadow: '0 8px 24px rgba(0,0,0,.12)', zIndex: 200, minWidth: 260, maxHeight: 360, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: '0 8px 24px rgba(0,0,0,.12)', zIndex: 200, minWidth: 260, maxHeight: 360, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {showSearch && (
             <div style={{ padding: '8px 10px', borderBottom: '1px solid #f2f2f2', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <i className="bi-search" style={{ fontSize: 11, color: '#9e9e9e' }}></i>
+              <i className="bi-search" style={{ fontSize: 11, color: 'var(--text-muted)' }}></i>
               <input
                 ref={inputRef}
                 value={query}
                 onChange={e => setQuery(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Escape') { setQuery(''); setOpen(false); } }}
                 placeholder={`Search ${label.toLowerCase()}…`}
-                style={{ flex: 1, border: 'none', outline: 'none', fontSize: 12, color: '#1b1b1b', background: 'transparent' }}
+                style={{ flex: 1, border: 'none', outline: 'none', fontSize: 12, color: 'var(--text)', background: 'transparent' }}
               />
               {query && (
                 <i className="bi-x-circle-fill" onClick={() => setQuery('')}
-                  style={{ fontSize: 11, color: '#9e9e9e', cursor: 'pointer' }}></i>
+                  style={{ fontSize: 11, color: 'var(--text-muted)', cursor: 'pointer' }}></i>
               )}
             </div>
           )}
           <div style={{ flex: 1, overflowY: 'auto', padding: '6px 0' }}>
             {isActive && (
               <div onClick={() => { onChange([]); setOpen(false); setQuery(''); }}
-                style={{ padding: '8px 14px', fontSize: 12, color: '#9e9e9e', cursor: 'pointer', borderBottom: '1px solid #f2f2f2', display: 'flex', alignItems: 'center', gap: 6 }}
+                style={{ padding: '8px 14px', fontSize: 12, color: 'var(--text-muted)', cursor: 'pointer', borderBottom: '1px solid #f2f2f2', display: 'flex', alignItems: 'center', gap: 6 }}
                 onMouseEnter={e => e.currentTarget.style.background = '#f9f8f6'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
                 <i className="bi-x-circle" style={{ fontSize: 11 }}></i>Clear selection
               </div>
             )}
             {filtered.length === 0 && (
-              <div style={{ padding: '16px 14px', fontSize: 12, color: '#9e9e9e', textAlign: 'center' }}>
+              <div style={{ padding: '16px 14px', fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>
                 No matches for &ldquo;{query}&rdquo;
               </div>
             )}
@@ -2252,7 +2252,7 @@ const MultiFilterDropdown = memo(({ icon, label, selected = [], options, onChang
 MultiFilterDropdown.displayName = 'MultiFilterDropdown';
 
 // ── Styles ──
-const thStyle = { padding: '10px 12px', fontSize: 11, fontWeight: 600, color: '#9e9e9e', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center', whiteSpace: 'nowrap', borderBottom: '1px solid #e8e8e8' };
+const thStyle = { padding: '10px 12px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center', whiteSpace: 'nowrap', borderBottom: '1px solid #e8e8e8' };
 const tdStyle = { padding: '10px 12px', textAlign: 'center', verticalAlign: 'middle' };
 
 // ── Ticket note modal ─────────────────────────────────────────────────────

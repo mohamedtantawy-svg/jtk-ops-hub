@@ -37,7 +37,7 @@ const Alerts=({tasks,setTasks})=>{
           <div style={{fontSize:'var(--font-base)'}}>No active alerts right now</div>
         </div>
       ):(
-        <div style={{background:'var(--surface)',border:'1px solid #e8e8e8',borderRadius:16,overflow:'hidden',boxShadow:'0 1px 2px rgba(0,0,0,0.04)'}}>
+        <div style={{background:'var(--surface)',border:'1px solid var(--border)',borderRadius:16,overflow:'hidden',boxShadow:'0 1px 2px rgba(0,0,0,0.04)'}}>
         {alerts.map((a,idx)=>{
           const SEVERITY_STYLE={
             critical:{color:'var(--red, #d42d35)',icon:'bi-exclamation-octagon-fill'},
@@ -54,11 +54,11 @@ const Alerts=({tasks,setTasks})=>{
                 <i className={a.status==='resolved'?'bi-check-circle-fill':sev.icon} style={{color:a.status==='resolved'?'#29811e':sev.color,fontSize:18}}></i>
               </div>
               <div style={{flex:1}}>
-                <div style={{fontWeight:700,fontSize:14,color:'#1b1b1b',marginBottom:6}}>{a.subject}</div>
-                <div style={{fontSize:13,color:'#616161',lineHeight:1.6,wordBreak:'break-word'}}>{a.body.slice(0,180)}{a.body.length>180?'...':''}</div>
+                <div style={{fontWeight:700,fontSize:14,color:'var(--text)',marginBottom:6}}>{a.subject}</div>
+                <div style={{fontSize:13,color:'var(--text-secondary)',lineHeight:1.6,wordBreak:'break-word'}}>{a.body.slice(0,180)}{a.body.length>180?'...':''}</div>
                 <div style={{marginTop:10,display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
                   <ToolBadge source={a.source}/>
-                  <span style={{color:'#616161',fontSize:12}}>{getFlag(a.country)} {getCountryName(a.country) || a.country} · {a.receivedAt}</span>
+                  <span style={{color:'var(--text-secondary)',fontSize:12}}>{getFlag(a.country)} {getCountryName(a.country) || a.country} · {a.receivedAt}</span>
                   <a href={getUrl(a)} target="_blank" rel="noreferrer" style={{color:'#1f74b3',fontSize:12,textDecoration:'none',fontWeight:600,display:'flex',alignItems:'center',gap:4,background:'#e8f0fe',padding:'4px 12px',borderRadius:128}}>
                     <i className="bi-box-arrow-up-right" style={{fontSize:10}}></i>Open in {TOOLS[a.source]?.label}
                   </a>

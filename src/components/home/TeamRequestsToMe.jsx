@@ -46,13 +46,13 @@ const TeamRequestsToMe = ({ requests = [], currentUser = {}, members = [], onVie
   };
 
   return (
-    <div style={{ background: 'var(--surface)', border: '1px solid #e8e8e8', borderRadius: 16, overflow: 'hidden' }}>
+    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, overflow: 'hidden' }}>
       {/* Header */}
       <div style={{ padding: '14px 20px 10px', borderBottom: '1px solid #e8e8e8', display: 'flex', alignItems: 'center', gap: 10 }}>
         <div style={{ width: 30, height: 30, borderRadius: 9, background: 'linear-gradient(135deg, #f3eff8, #EDE9FE)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <i className="bi-people" style={{ fontSize: 13, color: '#7c3aed' }}></i>
         </div>
-        <span style={{ fontSize: 15, fontWeight: 700, color: '#1b1b1b', flex: 1 }}>Team Requests to Me</span>
+        <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', flex: 1 }}>Team Requests to Me</span>
         {teamRequests.length > 0 && (
           <span style={{ fontSize: 11, fontWeight: 700, color: 'white', background: '#7c3aed', borderRadius: 10, padding: '2px 8px' }}>
             {teamRequests.length}
@@ -63,7 +63,7 @@ const TeamRequestsToMe = ({ requests = [], currentUser = {}, members = [], onVie
       {/* Content */}
       <div style={{ maxHeight: 280, overflowY: 'auto' }}>
         {teamRequests.length === 0 ? (
-          <div style={{ padding: '24px 20px', textAlign: 'center', fontSize: 12, color: '#9e9e9e' }}>
+          <div style={{ padding: '24px 20px', textAlign: 'center', fontSize: 12, color: 'var(--text-muted)' }}>
             <i className="bi-check-circle" style={{ fontSize: 20, display: 'block', marginBottom: 6, opacity: 0.4 }}></i>
             No pending team requests
           </div>
@@ -82,10 +82,10 @@ const TeamRequestsToMe = ({ requests = [], currentUser = {}, members = [], onVie
             >
               {/* Subject & from */}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {req.subject || req.title || 'Untitled Request'}
                 </div>
-                <div style={{ fontSize: 11, color: '#9e9e9e', marginTop: 2 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
                   <i className="bi-person" style={{ marginRight: 3 }}></i>
                   {getMemberName(req.from_member_id)}
                 </div>
@@ -107,7 +107,7 @@ const TeamRequestsToMe = ({ requests = [], currentUser = {}, members = [], onVie
               {req.status && (
                 <span style={{
                   fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 10,
-                  background: '#f0f0f0', color: '#666', flexShrink: 0
+                  background: 'var(--surface-3)', color: '#666', flexShrink: 0
                 }}>
                   {req.status}
                 </span>

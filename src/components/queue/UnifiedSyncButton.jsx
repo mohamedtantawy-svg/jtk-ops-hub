@@ -354,7 +354,7 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
             top: 'calc(100% + 6px)', right: 0,
             width: 320,
             background: 'var(--surface)',
-            border: '1px solid #e8e8e8',
+            border: '1px solid var(--border)',
             borderRadius: 12,
             boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
             padding: 8, zIndex: 300,
@@ -362,7 +362,7 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
           <div style={{
             padding: '6px 10px 8px',
             fontSize: 11,
-            color: '#9e9e9e',
+            color: 'var(--text-muted)',
             borderBottom: '1px solid #f0efed',
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           }}>
@@ -406,8 +406,8 @@ export default function UnifiedSyncButton({ meta, sources, onRefresh, nowTick })
           {isOffline && (
             <div style={{
               marginTop: 6, padding: '6px 10px',
-              background: '#f7f5f2', borderRadius: 8,
-              fontSize: 11, color: '#616161',
+              background: 'var(--surface-3)', borderRadius: 8,
+              fontSize: 11, color: 'var(--text-secondary)',
               display: 'flex', alignItems: 'center', gap: 6,
             }}>
               <i className="bi-wifi-off" style={{ fontSize: 11 }} />
@@ -435,7 +435,7 @@ function SourceRow({ source, now }) {
     <div style={{
       padding: '6px 10px',
       display: 'flex', alignItems: 'center', gap: 8,
-      fontSize: 12, color: '#1b1b1b',
+      fontSize: 12, color: 'var(--text)',
       borderRadius: 6,
     }}>
       <span
@@ -451,7 +451,7 @@ function SourceRow({ source, now }) {
         title={error || ''}>
         {label}
       </span>
-      <span style={{ fontSize: 11, color: '#9e9e9e' }}>{count}</span>
+      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{count}</span>
       <span
         style={{ fontSize: 11, color: error ? '#d42d35' : '#616161', cursor: error ? 'help' : 'default' }}
         title={error ? `Failed — ${error}` : statusText}
@@ -464,8 +464,8 @@ function SourceRow({ source, now }) {
           disabled={isRefreshing}
           title={error ? `Retry — ${error}` : 'Refresh this source'}
           style={{
-            padding: '2px 6px', borderRadius: 6, border: '1px solid #e8e8e8',
-            background: 'var(--surface)', color: '#616161',
+            padding: '2px 6px', borderRadius: 6, border: '1px solid var(--border)',
+            background: 'var(--surface)', color: 'var(--text-secondary)',
             fontSize: 10, fontWeight: 600, cursor: isRefreshing ? 'wait' : 'pointer',
             display: 'inline-flex', alignItems: 'center',
           }}>

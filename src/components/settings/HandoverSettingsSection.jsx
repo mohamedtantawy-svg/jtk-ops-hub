@@ -23,14 +23,14 @@ function Card({ title, desc, children }) {
   return (
     <div style={{
       background: 'var(--surface, white)',
-      border: '1px solid #e8e8e8',
+      border: '1px solid var(--border)',
       borderRadius: 16,
       padding: 18,
       marginBottom: 16,
     }}>
       <div style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: '#1b1b1b' }}>{title}</div>
-        {desc && <div style={{ fontSize: 12, color: '#9e9e9e', marginTop: 2 }}>{desc}</div>}
+        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{title}</div>
+        {desc && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{desc}</div>}
       </div>
       {children}
     </div>
@@ -139,7 +139,7 @@ function ConfigurationsCard({ items, refresh, addToast }) {
     <Card title="Configurations" desc="Per-region / per-team setups. Resolution order: team → region → global. Exactly one global default at a time.">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {items.length === 0 && (
-          <div style={{ fontSize: 12, color: '#9e9e9e', padding: 12, textAlign: 'center' }}>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: 12, textAlign: 'center' }}>
             No configurations yet — defaults seed on first boot. Use “New configuration” to add scope-specific overrides.
           </div>
         )}
@@ -147,7 +147,7 @@ function ConfigurationsCard({ items, refresh, addToast }) {
           const editing = editingId === row.id && draft;
           return (
             <div key={row.id} style={{
-              border: '1px solid #e8e8e8',
+              border: '1px solid var(--border)',
               borderRadius: 12, padding: 12,
               background: editing ? 'rgba(124, 58, 237, 0.04)' : 'var(--surface, white)',
             }}>
@@ -158,13 +158,13 @@ function ConfigurationsCard({ items, refresh, addToast }) {
                       value={draft.name}
                       onChange={e => setDraft(d => ({ ...d, name: e.target.value.slice(0, 200) }))}
                       style={{
-                        width: '100%', border: '1px solid #e8e8e8', borderRadius: 8,
-                        padding: '5px 10px', fontSize: 13, fontWeight: 700, color: '#1b1b1b',
+                        width: '100%', border: '1px solid var(--border)', borderRadius: 8,
+                        padding: '5px 10px', fontSize: 13, fontWeight: 700, color: 'var(--text)',
                         fontFamily: 'inherit',
                       }}
                     />
                   ) : (
-                    <div style={{ fontSize: 13, fontWeight: 700, color: '#1b1b1b' }}>{row.name}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{row.name}</div>
                   )}
                   <div style={{ marginTop: 4, display: 'flex', gap: 6, alignItems: 'center' }}>
                     <Pill tone={row.is_default ? 'success' : 'neutral'}>
@@ -188,7 +188,7 @@ function ConfigurationsCard({ items, refresh, addToast }) {
               {editing && (
                 <div style={{
                   display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8,
-                  fontSize: 12, color: '#1b1b1b',
+                  fontSize: 12, color: 'var(--text)',
                 }}>
                   {[
                     ['manager_approval_required', 'Manager approval required'],
@@ -214,7 +214,7 @@ function ConfigurationsCard({ items, refresh, addToast }) {
                       type="number" min={0} max={30}
                       value={draft.min_days_to_trigger ?? 1}
                       onChange={e => setDraft(d => ({ ...d, min_days_to_trigger: Number(e.target.value) }))}
-                      style={{ width: 60, border: '1px solid #e8e8e8', borderRadius: 6, padding: '4px 6px', fontFamily: 'inherit' }}
+                      style={{ width: 60, border: '1px solid var(--border)', borderRadius: 6, padding: '4px 6px', fontFamily: 'inherit' }}
                     />
                   </label>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -222,7 +222,7 @@ function ConfigurationsCard({ items, refresh, addToast }) {
                     <select
                       value={draft.scope || 'global'}
                       onChange={e => setDraft(d => ({ ...d, scope: e.target.value }))}
-                      style={{ border: '1px solid #e8e8e8', borderRadius: 6, padding: '4px 8px', fontFamily: 'inherit' }}
+                      style={{ border: '1px solid var(--border)', borderRadius: 6, padding: '4px 8px', fontFamily: 'inherit' }}
                     >
                       <option value="global">global</option>
                       <option value="region">region</option>
@@ -233,7 +233,7 @@ function ConfigurationsCard({ items, refresh, addToast }) {
                         value={draft.scope_value || ''}
                         onChange={e => setDraft(d => ({ ...d, scope_value: e.target.value }))}
                         placeholder="region/team name"
-                        style={{ flex: 1, border: '1px solid #e8e8e8', borderRadius: 6, padding: '4px 6px', fontFamily: 'inherit' }}
+                        style={{ flex: 1, border: '1px solid var(--border)', borderRadius: 6, padding: '4px 6px', fontFamily: 'inherit' }}
                       />
                     )}
                   </label>
@@ -318,7 +318,7 @@ function TemplatesCard({ items, refresh, addToast }) {
     <Card title="Checklist templates" desc="The wizard pre-fills the default template's items. Mark items required to block submit until they're checked.">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         {items.length === 0 && (
-          <div style={{ fontSize: 12, color: '#9e9e9e', padding: 12, textAlign: 'center' }}>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: 12, textAlign: 'center' }}>
             No templates yet — defaults seed on first boot.
           </div>
         )}
@@ -326,7 +326,7 @@ function TemplatesCard({ items, refresh, addToast }) {
           const editing = editingId === row.id && draft;
           return (
             <div key={row.id} style={{
-              border: '1px solid #e8e8e8',
+              border: '1px solid var(--border)',
               borderRadius: 12, padding: 12,
               background: editing ? 'rgba(124, 58, 237, 0.04)' : 'var(--surface, white)',
             }}>
@@ -336,7 +336,7 @@ function TemplatesCard({ items, refresh, addToast }) {
                     <input
                       value={draft.name}
                       onChange={e => setDraft(d => ({ ...d, name: e.target.value.slice(0, 200) }))}
-                      style={{ width: '100%', border: '1px solid #e8e8e8', borderRadius: 8, padding: '5px 10px', fontSize: 13, fontWeight: 700, fontFamily: 'inherit' }}
+                      style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 8, padding: '5px 10px', fontSize: 13, fontWeight: 700, fontFamily: 'inherit' }}
                     />
                   ) : (
                     <div style={{ fontSize: 13, fontWeight: 700 }}>{row.name}</div>
@@ -344,7 +344,7 @@ function TemplatesCard({ items, refresh, addToast }) {
                   <div style={{ marginTop: 4, display: 'flex', gap: 6, alignItems: 'center' }}>
                     <Pill>{row.scope}{row.scope_value ? ` · ${row.scope_value}` : ''}</Pill>
                     {row.is_default && <Pill tone="success">Default</Pill>}
-                    <span style={{ fontSize: 11, color: '#9e9e9e' }}>{(row.items || []).length} items</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{(row.items || []).length} items</span>
                   </div>
                 </div>
                 {editing ? (
@@ -365,17 +365,17 @@ function TemplatesCard({ items, refresh, addToast }) {
                     {(draft.items || []).map((item, idx) => (
                       <div key={item.id || idx} style={{
                         display: 'flex', gap: 6, alignItems: 'center',
-                        padding: '6px 8px', border: '1px solid #e8e8e8', borderRadius: 8,
+                        padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 8,
                       }}>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                           <button type="button" onClick={() => moveItem(idx, -1)} aria-label="Move up"
                             disabled={idx === 0}
-                            style={{ background: 'transparent', border: 'none', cursor: idx === 0 ? 'not-allowed' : 'pointer', color: '#9e9e9e', padding: 0, lineHeight: 1, fontFamily: 'inherit' }}>
+                            style={{ background: 'transparent', border: 'none', cursor: idx === 0 ? 'not-allowed' : 'pointer', color: 'var(--text-muted)', padding: 0, lineHeight: 1, fontFamily: 'inherit' }}>
                             <i className="bi-caret-up-fill" style={{ fontSize: 10 }} />
                           </button>
                           <button type="button" onClick={() => moveItem(idx, +1)} aria-label="Move down"
                             disabled={idx === (draft.items.length - 1)}
-                            style={{ background: 'transparent', border: 'none', cursor: idx === draft.items.length - 1 ? 'not-allowed' : 'pointer', color: '#9e9e9e', padding: 0, lineHeight: 1, fontFamily: 'inherit' }}>
+                            style={{ background: 'transparent', border: 'none', cursor: idx === draft.items.length - 1 ? 'not-allowed' : 'pointer', color: 'var(--text-muted)', padding: 0, lineHeight: 1, fontFamily: 'inherit' }}>
                             <i className="bi-caret-down-fill" style={{ fontSize: 10 }} />
                           </button>
                         </div>
@@ -389,7 +389,7 @@ function TemplatesCard({ items, refresh, addToast }) {
                           placeholder="Item label"
                           style={{ flex: 1, border: 'none', background: 'transparent', fontFamily: 'inherit', fontSize: 12 }}
                         />
-                        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#616161' }}>
+                        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-secondary)' }}>
                           <input
                             type="checkbox"
                             checked={item.required !== false}
@@ -404,7 +404,7 @@ function TemplatesCard({ items, refresh, addToast }) {
                         <button type="button"
                           onClick={() => setDraft(d => ({ ...d, items: d.items.filter((_, i) => i !== idx) }))}
                           aria-label="Remove item"
-                          style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#9e9e9e', padding: 2, fontFamily: 'inherit' }}>
+                          style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 2, fontFamily: 'inherit' }}>
                           <i className="bi-x-lg" style={{ fontSize: 11 }} />
                         </button>
                       </div>
@@ -415,7 +415,7 @@ function TemplatesCard({ items, refresh, addToast }) {
                       ...d,
                       items: [...(d.items || []), { id: `item_${Date.now()}`, label: 'New item', required: true, hint: '' }],
                     }))}>+ Add item</SmallButton>
-                    <label style={{ fontSize: 11, color: '#616161', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <label style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                       <input
                         type="checkbox"
                         checked={!!draft.is_default}
@@ -498,30 +498,30 @@ function ImportAndAuditCard({ batches, refresh, addToast }) {
           <SmallButton variant="primary" onClick={() => fileInputRef.current?.click()} disabled={busy}>
             <i className="bi-upload" style={{ marginRight: 4 }} /> Upload CSV
           </SmallButton>
-          <span style={{ fontSize: 11, color: '#9e9e9e' }}>
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
             Expected columns: Start Date, End Date, Work Email
           </span>
         </div>
 
         {batches.length > 0 && (
           <div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#9e9e9e', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
               Recent imports
             </div>
-            <div style={{ border: '1px solid #e8e8e8', borderRadius: 8, overflow: 'hidden' }}>
+            <div style={{ border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
               {batches.map((b, i) => (
                 <div key={b.id} style={{
                   display: 'flex', alignItems: 'center', gap: 8,
                   padding: '8px 12px',
                   borderTop: i === 0 ? 'none' : '1px solid #e8e8e8',
-                  fontSize: 12, color: '#1b1b1b',
+                  fontSize: 12, color: 'var(--text)',
                 }}>
                   <span style={{ flex: 1, fontWeight: 600 }}>{b.filename || b.source}</span>
-                  <span style={{ color: '#9e9e9e', fontSize: 11 }}>{b.uploaded_by_email}</span>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{b.uploaded_by_email}</span>
                   <Pill tone="success">+{b.rows_inserted}</Pill>
                   <Pill>{b.rows_skipped} dup</Pill>
                   {b.rows_invalid > 0 && <Pill tone="danger">{b.rows_invalid} invalid</Pill>}
-                  <span style={{ color: '#9e9e9e', fontSize: 10, minWidth: 100, textAlign: 'right' }}>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 10, minWidth: 100, textAlign: 'right' }}>
                     {ymdShort(b.uploaded_at)}
                   </span>
                 </div>
@@ -531,19 +531,19 @@ function ImportAndAuditCard({ batches, refresh, addToast }) {
         )}
 
         <div style={{ borderTop: '1px solid #e8e8e8', paddingTop: 12 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#9e9e9e', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
             Audit export
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#9e9e9e' }}>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)' }}>
               From
               <input type="date" value={fromDate} onChange={e => setFromDate(e.target.value)}
-                style={{ border: '1px solid #e8e8e8', borderRadius: 6, padding: '4px 6px', fontSize: 12, fontFamily: 'inherit' }} />
+                style={{ border: '1px solid var(--border)', borderRadius: 6, padding: '4px 6px', fontSize: 12, fontFamily: 'inherit' }} />
             </label>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#9e9e9e' }}>
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--text-muted)' }}>
               To
               <input type="date" value={toDate} onChange={e => setToDate(e.target.value)}
-                style={{ border: '1px solid #e8e8e8', borderRadius: 6, padding: '4px 6px', fontSize: 12, fontFamily: 'inherit' }} />
+                style={{ border: '1px solid var(--border)', borderRadius: 6, padding: '4px 6px', fontSize: 12, fontFamily: 'inherit' }} />
             </label>
             <SmallButton variant="primary" onClick={downloadAudit} disabled={busy}>
               <i className="bi-download" style={{ marginRight: 4 }} /> Export CSV
@@ -595,16 +595,16 @@ function HandoverSettingsSection({ user, addToast }) {
     <div id="handovers" style={{ marginTop: 36 }}>
       <div style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-          <i className="bi-airplane" style={{ fontSize: 18, color: '#1b1b1b' }} />
-          <span style={{ fontSize: 18, fontWeight: 700, color: '#1b1b1b' }}>Handovers</span>
+          <i className="bi-airplane" style={{ fontSize: 18, color: 'var(--text)' }} />
+          <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>Handovers</span>
         </div>
-        <div style={{ fontSize: 13, color: '#9e9e9e', marginLeft: 28 }}>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginLeft: 28 }}>
           Configure how the OOO surface behaves: which presets apply, the default checklist items, and time-off import + audit.
         </div>
       </div>
 
       {loading ? (
-        <div style={{ fontSize: 12, color: '#9e9e9e', textAlign: 'center', padding: 24 }}>Loading…</div>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: 24 }}>Loading…</div>
       ) : (
         <>
           <ConfigurationsCard items={settings} refresh={refreshSettings} addToast={addToast} />

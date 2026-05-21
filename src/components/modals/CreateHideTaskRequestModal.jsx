@@ -39,12 +39,12 @@ const REASON_OPTIONS = [
 ];
 
 const inputStyle = {
-  width: '100%', padding: '9px 12px', border: '1px solid #e8e8e8', borderRadius: 10,
-  fontSize: 13, color: '#1b1b1b', background: 'var(--surface)', outline: 'none',
+  width: '100%', padding: '9px 12px', border: '1px solid var(--border)', borderRadius: 10,
+  fontSize: 13, color: 'var(--text)', background: 'var(--surface)', outline: 'none',
   fontFamily: 'inherit', boxSizing: 'border-box',
 };
 const labelStyle = {
-  fontSize: 11, fontWeight: 600, color: '#616161', textTransform: 'uppercase',
+  fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase',
   letterSpacing: '.05em', marginBottom: 6, display: 'block',
 };
 
@@ -155,16 +155,16 @@ export default function CreateHideTaskRequestModal({ task, tasks, onClose, onSub
             <i className="bi-eye-slash-fill" style={{ fontSize: 17, color: '#d42d35' }} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div id="hide-task-title" style={{ fontSize: 16, fontWeight: 700, color: '#1b1b1b' }}>
+            <div id="hide-task-title" style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>
               {submittedId
                 ? (isBulk ? `${submittedCount} hide requests submitted` : 'Hide request submitted')
                 : (isBulk ? `Hide ${taskList.length} tasks` : 'Hide this task')}
             </div>
-            <div style={{ fontSize: 12, color: '#9e9e9e', marginTop: 2 }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
               {isBulk
-                ? <span>One reason will apply to all <strong style={{ color: '#1b1b1b' }}>{taskList.length}</strong> selected tasks. Each lands as a separate approval for your manager.</span>
+                ? <span>One reason will apply to all <strong style={{ color: 'var(--text)' }}>{taskList.length}</strong> selected tasks. Each lands as a separate approval for your manager.</span>
                 : headTask?.subject
-                  ? <span><strong style={{ color: '#1b1b1b' }}>{headTask.subject}</strong>{headTask.country ? ` · ${headTask.country}` : ''}</span>
+                  ? <span><strong style={{ color: 'var(--text)' }}>{headTask.subject}</strong>{headTask.country ? ` · ${headTask.country}` : ''}</span>
                   : 'Why should this task be removed from the queue?'}
             </div>
           </div>
@@ -172,7 +172,7 @@ export default function CreateHideTaskRequestModal({ task, tasks, onClose, onSub
             type="button"
             onClick={onClose}
             aria-label="Close"
-            style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid #e8e8e8', background: 'var(--surface)', color: '#9e9e9e', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            style={{ width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           >
             <i className="bi-x-lg" style={{ fontSize: 12 }} />
           </button>
@@ -184,8 +184,8 @@ export default function CreateHideTaskRequestModal({ task, tasks, onClose, onSub
             <div style={{ width: 48, height: 48, borderRadius: 14, background: '#e8f5e9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <i className="bi-send-check-fill" style={{ fontSize: 22, color: '#15803d' }} />
             </div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: '#1b1b1b' }}>Sent to your manager for review</div>
-            <div style={{ fontSize: 13, color: '#616161', maxWidth: 420, lineHeight: 1.5 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>Sent to your manager for review</div>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', maxWidth: 420, lineHeight: 1.5 }}>
               Once approved, this task will disappear from your view and any future syncs.
               You can track the status under HR Hub → My Requests.
             </div>
@@ -224,8 +224,8 @@ export default function CreateHideTaskRequestModal({ task, tasks, onClose, onSub
                         <i className={opt.icon} style={{ color: opt.color, fontSize: 13 }} />
                       </span>
                       <span style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: '#1b1b1b' }}>{opt.label}</div>
-                        <div style={{ fontSize: 11, color: '#616161', marginTop: 2 }}>{opt.desc}</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{opt.label}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>{opt.desc}</div>
                       </span>
                       <span style={{ width: 16, height: 16, borderRadius: '50%', border: active ? `5px solid ${opt.color}` : '2px solid #d5d5d5', flexShrink: 0, marginTop: 4 }} />
                     </button>
@@ -260,7 +260,7 @@ export default function CreateHideTaskRequestModal({ task, tasks, onClose, onSub
               <button
                 type="button"
                 onClick={onClose}
-                style={{ padding: '9px 16px', borderRadius: 10, border: '1px solid #e8e8e8', background: 'var(--surface)', fontSize: 13, fontWeight: 500, color: '#616161', cursor: 'pointer', fontFamily: 'inherit' }}
+                style={{ padding: '9px 16px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface)', fontSize: 13, fontWeight: 500, color: 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'inherit' }}
               >
                 Cancel
               </button>

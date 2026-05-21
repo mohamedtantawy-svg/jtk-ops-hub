@@ -39,7 +39,7 @@ const STEPS = [
   },
   {
     icon: 'bi-eye-slash-fill',
-    color: '#616161',
+    color: 'var(--text-secondary)',
     title: 'Approve or deny hide-task requests',
     body: "When someone on your team requests to hide a task, the request lands in HR Hub as a 'hide_task_request' row with inline Approve / Deny. Approve and the task disappears from every queue; deny and the requester gets a notification.",
     tip: 'HR Hub · hide_task_request rows',
@@ -67,7 +67,7 @@ const STEPS = [
   },
   {
     icon: 'bi-plus-circle-fill',
-    color: '#1b1b1b',
+    color: 'var(--text)',
     title: 'Quick Create — your menu has more',
     body: 'The "+" button in the top-right shows you an extra option: "New Leaders Alert". Use it to broadcast a team-wide signal (incident, policy nudge, recognition) directly into the Leaders Hub without leaving wherever you are.',
     tip: 'Top nav · "+" button',
@@ -142,7 +142,7 @@ const ManagerTour = ({ onDismiss }) => {
               <i className={cur.icon} style={{color:cur.color,fontSize:20}}></i>
             </div>
             <div style={{flex:1,minWidth:0}}>
-              <div style={{color:'#9e9e9e',fontSize:11,fontWeight:600,letterSpacing:0.6,textTransform:'uppercase',marginBottom:3}}>
+              <div style={{color:'var(--text-muted)',fontSize:11,fontWeight:600,letterSpacing:0.6,textTransform:'uppercase',marginBottom:3}}>
                 Step {step + 1} of {total}
               </div>
               <h2 id="mgr-tour-title" style={{color:'white',fontWeight:700,fontSize:18,lineHeight:1.25,margin:0}}>
@@ -155,7 +155,7 @@ const ManagerTour = ({ onDismiss }) => {
           </p>
           {cur.tip && (
             <div style={{marginTop:14,display:'inline-flex',alignItems:'center',gap:6,background:'rgba(255,255,255,0.08)',border:'1px solid rgba(255,255,255,0.12)',borderRadius:128,padding:'5px 12px',color:'#cfcfcf',fontSize:12}}>
-              <i className="bi-geo-alt-fill" style={{fontSize:11,color:'#9e9e9e'}}></i>
+              <i className="bi-geo-alt-fill" style={{fontSize:11,color:'var(--text-muted)'}}></i>
               {cur.tip}
             </div>
           )}

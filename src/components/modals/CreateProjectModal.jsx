@@ -6,11 +6,11 @@ const PRIORITIES = ['low','medium','high','critical'];
 const TEAMS = ['EMEA','APAC','AMER'];
 
 const inputStyle = {
-  width:'100%', padding:'9px 12px', border:'1px solid #e8e8e8', borderRadius:12,
-  fontSize:14, color:'#1b1b1b', background:'var(--surface)', outline:'none',
+  width:'100%', padding:'9px 12px', border:'1px solid var(--border)', borderRadius:12,
+  fontSize:14, color:'var(--text)', background:'var(--surface)', outline:'none',
   fontFamily:'inherit', boxSizing:'border-box',
 };
-const labelStyle = { fontSize:11, fontWeight:600, color:'#616161', textTransform:'uppercase', letterSpacing:'.05em', marginBottom:6, display:'block' };
+const labelStyle = { fontSize:11, fontWeight:600, color:'var(--text-secondary)', textTransform:'uppercase', letterSpacing:'.05em', marginBottom:6, display:'block' };
 const sectionStyle = { marginBottom:20 };
 
 const priorityColors = { low:'#29811e', medium:'#1f74b3', high:'#ed5e2a', critical:'#d42d35' };
@@ -90,14 +90,14 @@ export default function CreateProjectModal({ onConfirm, onClose, project, curren
         {/* Header */}
         <div style={{ padding:'24px 28px', display:'flex', alignItems:'center', justifyContent:'space-between', flexShrink:0, borderBottom:'1px solid var(--border)', paddingBottom:'var(--space-4)', marginBottom:'var(--space-4)' }}>
           <div>
-            <div style={{ fontSize:18, fontWeight:700, color:'#1b1b1b' }}>
+            <div style={{ fontSize:18, fontWeight:700, color:'var(--text)' }}>
               {editing ? 'Edit Project' : 'New Project'}
             </div>
-            <div style={{ fontSize:13, color:'#9e9e9e', marginTop:2 }}>
+            <div style={{ fontSize:13, color:'var(--text-muted)', marginTop:2 }}>
               {editing ? 'Update project details' : 'Create a new project and assign it to your team'}
             </div>
           </div>
-          <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', padding:6, borderRadius:8, color:'#616161', fontSize:18, lineHeight:1 }}>
+          <button onClick={onClose} style={{ background:'none', border:'none', cursor:'pointer', padding:6, borderRadius:8, color:'var(--text-secondary)', fontSize:18, lineHeight:1 }}>
             <i className="bi-x-lg"/>
           </button>
         </div>
@@ -243,7 +243,7 @@ export default function CreateProjectModal({ onConfirm, onClose, project, curren
             )}
 
             {assignScope === 'everyone' && (
-              <div style={{ padding:'10px 14px', background:'#f7f5f2', borderRadius:10, fontSize:13, color:'#616161' }}>
+              <div style={{ padding:'10px 14px', background:'var(--surface-3)', borderRadius:10, fontSize:13, color:'var(--text-secondary)' }}>
                 <i className="bi-people-fill" style={{ marginRight:6 }}/>
                 This project will be visible to all team members
               </div>
@@ -265,7 +265,7 @@ export default function CreateProjectModal({ onConfirm, onClose, project, curren
           <div style={{ display:'flex', gap:10, justifyContent:'flex-end', borderTop:'1px solid var(--border)', paddingTop:'var(--space-4)', marginTop:'var(--space-4)' }}>
             <button onClick={onClose} style={{
               padding:'9px 20px', borderRadius:128, fontSize:14, fontWeight:500,
-              border:'1px solid #e8e8e8', background:'var(--surface)', color:'#616161', cursor:'pointer',
+              border:'1px solid var(--border)', background:'var(--surface)', color:'var(--text-secondary)', cursor:'pointer',
             }}>
               Cancel
             </button>

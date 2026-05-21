@@ -115,9 +115,9 @@ export default function PendingAcksBanner({
 
         {/* Text + CTA */}
         <div style={{ flex: 1, minWidth: 0, position:'relative', zIndex: 1 }}>
-          <div style={{ fontSize: 17, fontWeight: 700, color: '#1b1b1b', lineHeight: 1.3, marginBottom: 6 }}>{comm.title}</div>
+          <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--text)', lineHeight: 1.3, marginBottom: 6 }}>{comm.title}</div>
           <div style={{
-            fontSize: 13, color: '#4a4a4a', lineHeight: 1.5, maxWidth: 600,
+            fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, maxWidth: 600,
             overflow: 'hidden', textOverflow: 'ellipsis',
             display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
           }}>
@@ -160,7 +160,7 @@ export default function PendingAcksBanner({
             position: 'absolute', top: 10, right: 12,
             width: 24, height: 24, borderRadius: '50%',
             background: 'rgba(0,0,0,0.06)', border: 'none', cursor: 'pointer',
-            color: '#9e9e9e', fontSize: 12,
+            color: 'var(--text-muted)', fontSize: 12,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}
         >
@@ -171,7 +171,7 @@ export default function PendingAcksBanner({
       {total > 1 && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '10px 0 2px' }}>
           <button onClick={goPrev} aria-label="Previous"
-            style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid #e0e0e0', background: 'var(--surface)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#616161', fontSize: 13, transition: 'all .15s' }}
+            style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid #e0e0e0', background: 'var(--surface)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: 13, transition: 'all .15s' }}
             onMouseEnter={e => { e.currentTarget.style.background = '#f5f5f5'; }}
             onMouseLeave={e => { e.currentTarget.style.background = 'white'; }}>
             <i className="bi-chevron-left" />
@@ -189,7 +189,7 @@ export default function PendingAcksBanner({
             ))}
           </div>
           <button onClick={goNext} aria-label="Next"
-            style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid #e0e0e0', background: 'var(--surface)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#616161', fontSize: 13, transition: 'all .15s' }}
+            style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid #e0e0e0', background: 'var(--surface)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: 13, transition: 'all .15s' }}
             onMouseEnter={e => { e.currentTarget.style.background = '#f5f5f5'; }}
             onMouseLeave={e => { e.currentTarget.style.background = 'white'; }}>
             <i className="bi-chevron-right" />

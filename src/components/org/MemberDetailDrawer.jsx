@@ -587,7 +587,7 @@ function ToggleRow({ label, hint, icon, checked, onChange, disabled }) {
         <span style={{
           position: 'absolute', top: 2, left: checked ? 18 : 2,
           width: 16, height: 16, borderRadius: '50%',
-          background: 'white',
+          background: 'var(--surface)',
           transition: 'left .12s',
           boxShadow: '0 1px 2px rgba(0,0,0,0.2)',
         }} />

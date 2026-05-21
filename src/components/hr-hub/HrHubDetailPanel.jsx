@@ -625,7 +625,7 @@ function CopyLinkButton({ requestId }) {
     ? { bg: '#fef2f2', color: '#991b1b', border: '#fca5a5' }
     : (copied
         ? { bg: '#e8f5e9', color: '#166534', border: '#86efac' }
-        : { bg: 'white', color: '#1b1b1b', border: '#e8e8e8' });
+        : { bg: 'white', color: 'var(--text)', border: '#e8e8e8' });
   return (
     <button
       type="button"
