@@ -7,14 +7,20 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { fetchDeelIncentivePlans } from '../services/integrationsApi';
 import { getQueueChannel, broadcastSync } from './queueSyncChannel';
 import { idbGetWithMigration, idbSet } from '../lib/idb-cache';
+import { useCurrentDeptId } from '../lib/current-dept-storage';
 
 const SOURCE_ID = 'incentivePlans';
 const CACHE_TTL = 5 * 60 * 1000;
 const CACHE_KEY_BASE = 'ops_hub_incentive_plans_cache';
-const cacheKeyFor = (userEmail) =>
-  userEmail ? `${CACHE_KEY_BASE}:${String(userEmail).toLowerCase()}` : CACHE_KEY_BASE;
+// Phase 11+ instant-switch (2026-05-21): per-dept cache namespace.
+const cacheKeyFor = (userEmail, deptId) => {
+  const u = userEmail ? `:${String(userEmail).toLowerCase()}` : '';
+  const d = deptId ? `:${deptId}` : ':no-dept';
+  return `${CACHE_KEY_BASE}${u}${d}`;
+};
 
 export function useIncentivePlansData(enabled = true, userEmail = null) {
+  const currentDeptId = useCurrentDeptId();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -48,8 +54,8 @@ export function useIncentivePlansData(enabled = true, userEmail = null) {
         // drops out of the caller's scope (see useOnboardingData comment).
         if (force || fetched.length > 0 || itemsRef.current.length === 0) {
           setItems(fetched);
-          idbSet(cacheKeyFor(userEmail), { items: fetched, ts: now }).catch(() => {});
-          broadcastSync(SOURCE_ID, fetched, null, userEmail);
+          idbSet(cacheKeyFor(userEmail, currentDeptId), { items: fetched, ts: now }).catch(() => {});
+          broadcastSync(SOURCE_ID, fetched, null, userEmail, currentDeptId);
         }
         lastFetchRef.current = now;
         liveReceivedRef.current = true;
@@ -67,24 +73,32 @@ export function useIncentivePlansData(enabled = true, userEmail = null) {
     })();
     inFlightRef.current = run;
     return run;
-  }, [enabled, userEmail]);
+  }, [enabled, userEmail, currentDeptId]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
   // ── IDB cache hydration ─────────────────────────────────────────────────
+  // Re-runs on dept change to swap to the target dept's persisted cache.
   useEffect(() => {
     let cancelled = false;
+    inFlightRef.current = null;
+    liveReceivedRef.current = false;
     (async () => {
-      const cached = await idbGetWithMigration(cacheKeyFor(userEmail));
+      const cached = await idbGetWithMigration(cacheKeyFor(userEmail, currentDeptId));
       if (cancelled) return;
       if (liveReceivedRef.current) return;
-      if (!cached?.items?.length) return;
+      if (!cached?.items?.length) {
+        setItems([]);
+        setLastSyncAt(null);
+        lastFetchRef.current = 0;
+        return;
+      }
       setItems(cached.items);
       lastFetchRef.current = cached.ts || 0;
       setLastSyncAt(cached.ts || null);
     })();
     return () => { cancelled = true; };
-  }, [userEmail]);
+  }, [userEmail, currentDeptId]);
 
   // Auto-refresh while visible.
   useEffect(() => {
@@ -113,11 +127,10 @@ export function useIncentivePlansData(enabled = true, userEmail = null) {
       if (!msg || msg.source !== SOURCE_ID) return;
       const myKey = (userEmail || '').toLowerCase();
       const theirKey = (msg.userKey || '').toLowerCase();
-      // Tighter than the previous `myKey && theirKey && ...` — that
-      // accepted a scoped message from another user when our own email
-      // hadn't loaded yet (logged-out tab, hydration race). Reject
-      // whenever EITHER side has a key that doesn't match the other.
       if ((myKey || theirKey) && myKey !== theirKey) return;
+      const myDept = currentDeptId || '';
+      const theirDept = msg.deptKey || '';
+      if ((myDept || theirDept) && myDept !== theirDept) return;
       if (msg.ts && msg.ts > lastFetchRef.current) {
         setItems(msg.items || []);
         lastFetchRef.current = msg.ts;
@@ -126,7 +139,7 @@ export function useIncentivePlansData(enabled = true, userEmail = null) {
     };
     ch.addEventListener('message', handler);
     return () => ch.removeEventListener('message', handler);
-  }, [userEmail]);
+  }, [userEmail, currentDeptId]);
 
   return {
     items,

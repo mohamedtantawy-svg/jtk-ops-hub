@@ -11,16 +11,22 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { fetchDeelAmendments, fetchDeelRedlines } from '../services/integrationsApi';
 import { getQueueChannel, broadcastSync } from './queueSyncChannel';
 import { idbGetWithMigration, idbSet } from '../lib/idb-cache';
+import { useCurrentDeptId } from '../lib/current-dept-storage';
 
 const SOURCE_AMENDMENTS = 'amendments';
 const SOURCE_REDLINES = 'redlines';
 const CACHE_TTL = 5 * 60 * 1000;
 const CACHE_KEY_AMENDMENTS_BASE = 'ops_hub_amendments_cache';
 const CACHE_KEY_REDLINES_BASE = 'ops_hub_redlines_cache';
-const cacheKeyFor = (base, userEmail) =>
-  userEmail ? `${base}:${String(userEmail).toLowerCase()}` : base;
+// Phase 11+ instant-switch (2026-05-21): per-dept cache namespace.
+const cacheKeyFor = (base, userEmail, deptId) => {
+  const u = userEmail ? `:${String(userEmail).toLowerCase()}` : '';
+  const d = deptId ? `:${deptId}` : ':no-dept';
+  return `${base}${u}${d}`;
+};
 
 export function useChangeRequestData(enabled = true, userEmail = null) {
+  const currentDeptId = useCurrentDeptId();
   // IDB cache (was localStorage). Empty initial state; the hydration effect
   // below fills both legs ~10–50 ms after mount, gated per-leg so a late
   // amendments cache can't overwrite fresh redlines (or vice versa).
@@ -77,15 +83,15 @@ export function useChangeRequestData(enabled = true, userEmail = null) {
         // for the matching comment + the Reassign-not-working repro.
         if (amendResult.status === 'fulfilled' && (force || fetchedAmendments.length > 0 || amendmentsRef.current.length === 0)) {
           setAmendments(fetchedAmendments);
-          idbSet(cacheKeyFor(CACHE_KEY_AMENDMENTS_BASE, userEmail), { items: fetchedAmendments, ts: now }).catch(() => {});
-          broadcastSync(SOURCE_AMENDMENTS, fetchedAmendments, null, userEmail);
+          idbSet(cacheKeyFor(CACHE_KEY_AMENDMENTS_BASE, userEmail, currentDeptId), { items: fetchedAmendments, ts: now }).catch(() => {});
+          broadcastSync(SOURCE_AMENDMENTS, fetchedAmendments, null, userEmail, currentDeptId);
           lastFetchAmendmentsRef.current = now;
           liveAmendmentsRef.current = true;
         }
         if (redlineResult.status === 'fulfilled' && (force || fetchedRedlines.length > 0 || redlinesRef.current.length === 0)) {
           setRedlines(fetchedRedlines);
-          idbSet(cacheKeyFor(CACHE_KEY_REDLINES_BASE, userEmail), { items: fetchedRedlines, ts: now }).catch(() => {});
-          broadcastSync(SOURCE_REDLINES, fetchedRedlines, null, userEmail);
+          idbSet(cacheKeyFor(CACHE_KEY_REDLINES_BASE, userEmail, currentDeptId), { items: fetchedRedlines, ts: now }).catch(() => {});
+          broadcastSync(SOURCE_REDLINES, fetchedRedlines, null, userEmail, currentDeptId);
           lastFetchRedlinesRef.current = now;
           liveRedlinesRef.current = true;
         }
@@ -108,7 +114,7 @@ export function useChangeRequestData(enabled = true, userEmail = null) {
     })();
     inFlightRef.current = run;
     return run;
-  }, [enabled, userEmail]);
+  }, [enabled, userEmail, currentDeptId]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -116,28 +122,38 @@ export function useChangeRequestData(enabled = true, userEmail = null) {
   // Two parallel IDB reads (amendments + redlines), each gated independently
   // by liveAmendmentsRef / liveRedlinesRef so a late-arriving cache for one
   // leg can't overwrite fresh network data for the other. One-shot legacy
-  // localStorage migration is wrapped inside idbGetWithMigration.
+  // localStorage migration is wrapped inside idbGetWithMigration. Re-runs
+  // on dept change to swap to the target dept's persisted cache.
   useEffect(() => {
     let cancelled = false;
+    inFlightRef.current = null;
+    liveAmendmentsRef.current = false;
+    liveRedlinesRef.current = false;
     (async () => {
       const [cachedA, cachedR] = await Promise.all([
-        idbGetWithMigration(cacheKeyFor(CACHE_KEY_AMENDMENTS_BASE, userEmail)),
-        idbGetWithMigration(cacheKeyFor(CACHE_KEY_REDLINES_BASE, userEmail)),
+        idbGetWithMigration(cacheKeyFor(CACHE_KEY_AMENDMENTS_BASE, userEmail, currentDeptId)),
+        idbGetWithMigration(cacheKeyFor(CACHE_KEY_REDLINES_BASE, userEmail, currentDeptId)),
       ]);
       if (cancelled) return;
-      if (!liveAmendmentsRef.current && cachedA?.items?.length) {
+      if (cachedA?.items?.length) {
         setAmendments(cachedA.items);
         lastFetchAmendmentsRef.current = cachedA.ts || 0;
+      } else {
+        setAmendments([]);
+        lastFetchAmendmentsRef.current = 0;
       }
-      if (!liveRedlinesRef.current && cachedR?.items?.length) {
+      if (cachedR?.items?.length) {
         setRedlines(cachedR.items);
         lastFetchRedlinesRef.current = cachedR.ts || 0;
+      } else {
+        setRedlines([]);
+        lastFetchRedlinesRef.current = 0;
       }
       const newest = Math.max(lastFetchAmendmentsRef.current, lastFetchRedlinesRef.current);
-      if (newest > 0) setLastSyncAt(newest);
+      setLastSyncAt(newest > 0 ? newest : null);
     })();
     return () => { cancelled = true; };
-  }, [userEmail]);
+  }, [userEmail, currentDeptId]);
 
   // Auto-refresh while the tab is visible so the unified sync indicator
   // doesn't age into the "stale" state while the user is working.
@@ -169,11 +185,10 @@ export function useChangeRequestData(enabled = true, userEmail = null) {
       if (!msg) return;
       const myKey = (userEmail || '').toLowerCase();
       const theirKey = (msg.userKey || '').toLowerCase();
-      // Tighter than the previous `myKey && theirKey && ...` — that
-      // accepted a scoped message from another user when our own email
-      // hadn't loaded yet (logged-out tab, hydration race). Reject
-      // whenever EITHER side has a key that doesn't match the other.
       if ((myKey || theirKey) && myKey !== theirKey) return;
+      const myDept = currentDeptId || '';
+      const theirDept = msg.deptKey || '';
+      if ((myDept || theirDept) && myDept !== theirDept) return;
       if (msg.source === SOURCE_AMENDMENTS && msg.ts && msg.ts > lastFetchAmendmentsRef.current) {
         setAmendments(msg.items || []);
         lastFetchAmendmentsRef.current = msg.ts;
@@ -186,7 +201,7 @@ export function useChangeRequestData(enabled = true, userEmail = null) {
     };
     ch.addEventListener('message', handler);
     return () => ch.removeEventListener('message', handler);
-  }, [userEmail]);
+  }, [userEmail, currentDeptId]);
 
   // ── Amendments grouped by country ──
   const amendmentsByCountry = useMemo(() => {
