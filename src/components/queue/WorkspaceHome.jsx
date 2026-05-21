@@ -279,12 +279,24 @@ export default function WorkspaceHome({
               }}>
                 {priority?.headline || "Today's focus"}
               </h1>
-              <p style={{
-                fontSize: 17, lineHeight: 1.55, color: 'rgba(255,255,255,0.8)',
-                margin: '12px 0 0', maxWidth: 920,
-              }}>
-                {priority?.message || "Clear breaches first across every queue. Then tackle Zendesk, then Workbench, then everything else. Stay paired up — escalate fast."}
-              </p>
+              {/* 2026-05-21 audit F26: an admin who clears the body and
+                  saves leaves the field as ".." or empty whitespace, which
+                  rendered verbatim under a real headline ("Cut-Off
+                  Cleanup!!" / ".."). Treat strings ≤2 chars or
+                  whitespace-only as empty and hide the paragraph so the
+                  headline carries the message on its own. */}
+              {(() => {
+                const raw = (priority?.message || '').trim();
+                const stripped = raw.replace(/^[.\s·•\-]+$/g, '');
+                const text = stripped || (priority?.message ? '' : "Clear breaches first across every queue. Then tackle Zendesk, then Workbench, then everything else. Stay paired up — escalate fast.");
+                if (!text) return null;
+                return (
+                  <p style={{
+                    fontSize: 17, lineHeight: 1.55, color: 'rgba(255,255,255,0.8)',
+                    margin: '12px 0 0', maxWidth: 920,
+                  }}>{text}</p>
+                );
+              })()}
               <div style={{
                 marginTop: 18, display: 'flex', alignItems: 'center', gap: 10,
                 fontSize: 12, color: 'rgba(255,255,255,0.55)',

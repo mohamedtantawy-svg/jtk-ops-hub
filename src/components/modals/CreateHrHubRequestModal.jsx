@@ -173,6 +173,16 @@ function FieldInput({ field, settings, value, onChange, autofocus }) {
       options = Array.isArray(raw) ? raw : [];
     }
 
+    // 2026-05-21 audit F14: dependent dropdowns (Request Type depends on
+    // Related Function) used to render an empty "— Select —" option list
+    // until the parent was chosen, which looked broken to first-time
+    // openers. Now we disable + change the placeholder so the dependency
+    // is obvious without breaking the field for users who already have a
+    // parent selected.
+    const isDependentBlocked = field.kind === 'dropdown_dependent' && field.dependsOn && !(field._dependentParent || (value?.__parent ?? null));
+    const placeholder = isDependentBlocked
+      ? `— Choose ${field.dependsOnLabel || (field.dependsOn || '').replace(/_/g, ' ') || 'the previous field'} first —`
+      : '— Select —';
     return (
       <div style={{ marginBottom: 16 }}>
         {labelEl}
@@ -180,9 +190,11 @@ function FieldInput({ field, settings, value, onChange, autofocus }) {
           ref={ref}
           value={value || ''}
           onChange={e => onChange(e.target.value || null)}
-          style={{ ...inputStyle, cursor: 'pointer', appearance: 'auto' }}
+          disabled={isDependentBlocked}
+          title={isDependentBlocked ? placeholder : undefined}
+          style={{ ...inputStyle, cursor: isDependentBlocked ? 'not-allowed' : 'pointer', appearance: 'auto', opacity: isDependentBlocked ? 0.6 : 1 }}
         >
-          <option value="">— Select —</option>
+          <option value="">{placeholder}</option>
           {options.map(opt => (
             <option key={opt} value={opt}>{opt}</option>
           ))}
@@ -572,15 +584,12 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
     const raw = settings?.fields?.value || settings?.fields || [];
     const arr = Array.isArray(raw) ? raw : [];
     // Product rule: HR Request flow must always carry a Relevant Link.
-    // Workspace-triggered escalations prefill the originating task URL
-    // (Queue.jsx::escalatePrefill) so the existing array-length validator
-    // auto-satisfies the requirement; manual requests force the user to
-    // paste at least one URL before submit. Settings panel still shows
-    // the seed value (read-only today) — Stage 7 will surface this as a
-    // toggle.
-    if (flow === 'hr_request') {
-      return arr.map(f => f.id === 'links' ? { ...f, required: true } : f);
-    }
+    // 2026-05-21 audit F15: relevant-links field is no longer forced-
+    // required on hr_request. The previous override produced placeholder
+    // URLs (mailto:, n/a, the user's own email) on every request that
+    // genuinely didn't have a system link to attach. The flow's settings
+    // schema still surfaces the field; the requester decides whether to
+    // populate it.
     return arr;
   }, [settings, flow]);
 

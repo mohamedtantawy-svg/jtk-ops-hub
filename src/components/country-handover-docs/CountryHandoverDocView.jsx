@@ -16,6 +16,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTeamMembers } from '../../hooks/useTeamMembers';
+import { FLAGS, getCountryName } from '../../data/constants';
 import {
   listCountryHandoverDocs,
   getCountryHandoverDoc,
@@ -724,9 +725,18 @@ export default function CountryHandoverDocView({ user }) {
                   textAlign: 'left',
                 }}
               >
-                <span style={{ minWidth: 28, fontFamily: 'ui-monospace, SFMono-Regular, monospace', fontSize: 12 }}>{d.country_code}</span>
-                <span style={{ flex: 1, color: 'var(--text-secondary)', fontSize: 11, fontWeight: 500 }}>
-                  {d.status === 'published' ? `${d.counts?.sections_filled || 0}/10 filled` : 'Draft'}
+                {/* 2026-05-21 audit F33: render flag + name alongside
+                    the ISO2 code so users don't have to recall that AD =
+                    Andorra / AE = UAE / AL = Albania. Status pill moved to
+                    a smaller right-aligned chip so the country name has
+                    room to breathe. */}
+                <span style={{ fontSize: 14, lineHeight: 1, flexShrink: 0 }}>{FLAGS[d.country_code] || ''}</span>
+                <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, monospace', fontSize: 11, color: 'var(--text-muted)', flexShrink: 0 }}>{d.country_code}</span>
+                <span style={{ flex: 1, fontSize: 12, fontWeight: 500, color: active ? 'var(--purple)' : 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {getCountryName(d.country_code) || d.country_code}
+                </span>
+                <span style={{ color: 'var(--text-muted)', fontSize: 10, fontWeight: 500, flexShrink: 0 }}>
+                  {d.status === 'published' ? `${d.counts?.sections_filled || 0}/10` : 'Draft'}
                 </span>
                 {owned && <i className="bi bi-pencil-square" title="You own this country" style={{ fontSize: 11, color: 'var(--text-secondary)' }} />}
               </button>

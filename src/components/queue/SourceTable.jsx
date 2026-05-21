@@ -958,8 +958,11 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
         </td>
       )}
 
-      {/* Subject */}
-      <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: '#1b1b1b', maxWidth: 180 }}>
+      {/* Subject — 2026-05-21 audit F29: full subject surfaced via
+          `title=` so a hovered truncated row shows the complete name
+          without forcing the user to expand the column. */}
+      <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: '#1b1b1b', maxWidth: 180 }}
+        title={row.subject || ''}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <div style={{
             width: 26, height: 26, borderRadius: '50%',

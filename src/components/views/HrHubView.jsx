@@ -446,7 +446,22 @@ export default function HrHubView({ user, onCreateHrHub }) {
            collapse to 3-up, narrow to 2-up so each card stays readable. */
         .hrhub-status-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
         @media (max-width: 1200px) { .hrhub-status-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-        @media (max-width: 900px)  { .hrhub-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 900px)  {
+          .hrhub-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+          /* 2026-05-21 audit F11: at 2-column the 5th card (Rejected)
+             previously orphaned alone on row 3. Span it full-width so
+             the grid reads as 2+2+1-full instead of 2+2+1-half. */
+          .hrhub-status-grid > :nth-child(5):last-child { grid-column: span 2; }
+        }
+        /* 2026-05-21 audit F49: segments wrap mid-text at narrow viewports
+           because the container is inline-flex with no overflow rule.
+           Switch to horizontal scroll below 900 px so each segment stays
+           legible without forcing the whole rail to wrap. */
+        @media (max-width: 900px) {
+          .hrhub-scope-row { overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+          .hrhub-scope-row > [role="tablist"] { flex-wrap: nowrap; }
+          .hrhub-scope-row > [role="tablist"] > button { flex-shrink: 0; }
+        }
         .hrhub-row:hover { border-color: var(--border-light); background: var(--surface-2); }
       `}</style>
 
@@ -480,7 +495,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
           badges. "Mentioned" mirrors Slack's @mentions tab — surfaces every
           request where the viewer was tagged in a comment, regardless of who
           created it or whether it's on their team. Visible to all roles. */}
-      <div style={scopeRow}>
+      <div className="hrhub-scope-row" style={scopeRow}>
         <div role="tablist" aria-label="Request scope" style={segmentedControl}>
           {/* Segment order locked 2026-05-20 per Melissa's request: All
               first (manager triage default), then Team, Assigned,
@@ -488,8 +503,16 @@ export default function HrHubView({ user, onCreateHrHub }) {
               submissions are the least-frequent triage target. Same order
               minus Team for non-managers. Default scope is computed at
               mount above (managers → 'all', agents → 'mine'). */}
+          {/* 2026-05-21 audit F16: hide "Team Requests" when dataScope is
+              `all_tasks` (RM / Director / Admin). For those roles the
+              user's "team" equals the dept, so All Requests + Team Requests
+              show identical counts and the second segment is dead weight.
+              TLs keep the segment because their team is a proper subset of
+              All. Agents never had it. */}
           {(isManager
-            ? [{ value: 'all', label: 'All Requests' }, { value: 'team', label: 'Team Requests' }, { value: 'assigned', label: 'Assigned to me' }, { value: 'mentioned', label: 'Mentioned', icon: 'bi-at' }, { value: 'mine', label: 'My Requests' }]
+            ? (perms?.dataScope === 'all_tasks'
+                ? [{ value: 'all', label: 'All Requests' }, { value: 'assigned', label: 'Assigned to me' }, { value: 'mentioned', label: 'Mentioned', icon: 'bi-at' }, { value: 'mine', label: 'My Requests' }]
+                : [{ value: 'all', label: 'All Requests' }, { value: 'team', label: 'Team Requests' }, { value: 'assigned', label: 'Assigned to me' }, { value: 'mentioned', label: 'Mentioned', icon: 'bi-at' }, { value: 'mine', label: 'My Requests' }])
             : [{ value: 'all', label: 'All Requests' }, { value: 'assigned', label: 'Assigned to me' }, { value: 'mentioned', label: 'Mentioned', icon: 'bi-at' }, { value: 'mine', label: 'My Requests' }]
           ).map(seg => {
             const active = scope === seg.value;

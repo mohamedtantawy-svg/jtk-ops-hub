@@ -971,13 +971,18 @@ const Queue = ({ user, tasks, subFilter }) => {
               unmistakable. Inactive state stays the existing light
               pastel so the row still reads as three semantic statuses.
               Tooltips now explicitly explain what each filter does. */}
+          {/* 2026-05-21 audit F24: the three SLA tier counts don't sum to
+              the "Open" total because paused tasks are excluded from the
+              tier calculation. Surfaced as inline `(excludes paused)`
+              caption on the tier triplet so users don't try to reconcile
+              On Track + At Risk + Breached against Open + Paused. */}
           <SlaPill
             active={fSla === 'ok'}
             onClick={() => setFSla(fSla === 'ok' ? null : 'ok')}
             tone="ok"
             count={onTrackCount}
             label="On Track"
-            hint="Tasks well inside their SLA window — at least 25% of the time budget still remaining."
+            hint="Tasks well inside their SLA window — at least 25% of the time budget still remaining. (Paused tasks are excluded from the SLA tier counts.)"
           />
           <SlaPill
             active={fSla === 'at_risk'}
@@ -985,7 +990,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             tone="atRisk"
             count={atRiskCount}
             label="At Risk"
-            hint="Tasks inside SLA but with less than 25% of the time budget left — handle next to avoid a breach."
+            hint="Tasks inside SLA but with less than 25% of the time budget left — handle next to avoid a breach. (Paused tasks are excluded from the SLA tier counts.)"
           />
           <SlaPill
             active={fSla === 'breached'}
@@ -993,7 +998,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             tone="breached"
             count={breachedCount}
             label="Breached"
-            hint="Tasks past their SLA window — handle these first."
+            hint="Tasks past their SLA window — handle these first. (Paused tasks are excluded from the SLA tier counts.)"
           />
           {fSla && (
             <button
@@ -1019,11 +1024,17 @@ const Queue = ({ user, tasks, subFilter }) => {
             const viewLabel = sourceLabels[workSource] || toolLabels[fTool] || (isAdmin ? 'All Tasks' : user.team);
             return <span style={{ fontSize: 13, fontWeight: 600, color: '#616161', marginLeft: 6 }}>{viewLabel}</span>;
           })()}
+          {/* 2026-05-21 audit F25: "resolved" count on this header is a
+              within-session accumulator from the FE merge — distinct from
+              the Briefing's KPI tile which counts the FE state plus the
+              persisted server-side 24h diff (PR #761). Surface the window
+              inline so a user comparing the two pages doesn't try to
+              reconcile mismatched scopes. */}
           <span style={{ fontSize: 12, color: '#9e9e9e', display: 'flex', alignItems: 'center', gap: 5 }}>
             <i className="bi-layers" style={{ fontSize: 11 }}></i>
             <span style={{ fontWeight: 600, color: '#1b1b1b' }}>{headerCounts.open}</span> open
-            {headerCounts.paused > 0 && <span> &middot; <span style={{ fontWeight: 600, color: '#616161' }}>{headerCounts.paused}</span> paused</span>}
-            {headerCounts.resolved > 0 && <span> &middot; <span style={{ fontWeight: 600, color: '#29811e' }}>{headerCounts.resolved}</span> resolved</span>}
+            {headerCounts.paused > 0 && <span title="Tasks paused / waiting on requester — excluded from the SLA tier pills."> &middot; <span style={{ fontWeight: 600, color: '#616161' }}>{headerCounts.paused}</span> paused</span>}
+            {headerCounts.resolved > 0 && <span title="Resolved within this session — Briefing's Resolved KPI also includes the persisted server-side 24h window."> &middot; <span style={{ fontWeight: 600, color: '#29811e' }}>{headerCounts.resolved}</span> resolved</span>}
           </span>
 
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>

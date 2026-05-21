@@ -85,6 +85,29 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
   const [comments, setComments] = useState(initialComments);
   useEffect(() => { setComments(initialComments); }, [initialComments]);
 
+  // ── Close on ESC (a11y / power-user shortcut) ──────────────────────────
+  // Audit 2026-05-21 F13 — the drawer used to ignore Escape. Listener is
+  // attached only while the drawer is open (requestId truthy) and removed
+  // on close. Ignored when an inner editor (composer textarea, picker
+  // dropdown) has focus, because those typically use Escape for their own
+  // affordances (close picker, cancel inline edit).
+  useEffect(() => {
+    if (!requestId || typeof onClose !== 'function') return;
+    const handler = (e) => {
+      if (e.key !== 'Escape' && e.key !== 'Esc') return;
+      const ae = document.activeElement;
+      const tag = (ae?.tagName || '').toLowerCase();
+      const isEditable = tag === 'input' || tag === 'textarea' || tag === 'select' || ae?.isContentEditable;
+      // If an inner editor has focus, let it handle Escape first; this
+      // event listener picks up the fallthrough on the next press.
+      if (isEditable) return;
+      e.stopPropagation();
+      onClose();
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [requestId, onClose]);
+
   // Polling for new comments while the panel is open. The deps must NOT
   // include `comments` — that would tear down + rebuild the interval on
   // every poll, leaking timers. Use a ref to read the latest tail
@@ -240,18 +263,43 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
           fontSize: 14,
         }}
       >
-        {/* Header */}
+        {/* Header — sticky context strip.
+            2026-05-21 audit F12: the drawer auto-scrolls to the comment
+            thread on open (Slack-style, PR #741) which hides the
+            request subject above the fold. Showing flowLabel + truncated
+            subject + status pill in the sticky header gives a first-time
+            opener (e.g. notification deep-link) enough context to know
+            what they're looking at without scrolling up. */}
         <div style={{
-          padding: '14px 20px',
+          padding: '10px 20px 12px',
           borderBottom: '1px solid var(--border)',
-          display: 'flex', alignItems: 'center', gap: 12,
+          display: 'flex', flexDirection: 'column', gap: 6,
           flexShrink: 0,
         }}>
-          <div style={{
-            fontSize: 11, fontWeight: 700, letterSpacing: '0.04em',
-            textTransform: 'uppercase', color: 'var(--text-muted)',
-          }}>{flowLabel}</div>
-          <div style={{ flex: 1 }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{
+              fontSize: 11, fontWeight: 700, letterSpacing: '0.04em',
+              textTransform: 'uppercase', color: 'var(--text-muted)',
+            }}>{flowLabel}</div>
+            {request?.status && (
+              <span style={{
+                fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
+                textTransform: 'uppercase', padding: '2px 8px', borderRadius: 128,
+                background:
+                  request.status === 'resolved' ? '#e8f5e9' :
+                  request.status === 'rejected' ? '#fee2e2' :
+                  request.status === 'in_progress' ? '#fff8e6' :
+                  request.status === 'on_hold' ? '#f5f5f4' :
+                  '#e0f2fe',
+                color:
+                  request.status === 'resolved' ? '#15803d' :
+                  request.status === 'rejected' ? '#991b1b' :
+                  request.status === 'in_progress' ? '#d97706' :
+                  request.status === 'on_hold' ? '#737373' :
+                  '#0369a1',
+              }}>{(request.status || '').replace(/_/g, ' ')}</span>
+            )}
+            <div style={{ flex: 1 }} />
           {canDecide && (
             <>
               <button
@@ -303,8 +351,20 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
           <button
             onClick={onClose}
             aria-label="Close"
+            title="Close (Esc)"
             style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 4, color: 'var(--text-secondary)' }}
           ><i className="bi bi-x-lg" style={{ fontSize: 14 }} /></button>
+          </div>
+          {/* Sticky subject — single-line ellipsis so a long title doesn't
+              steal vertical space from the scrollable body. */}
+          {request && (
+            <div style={{
+              fontSize: 13, fontWeight: 600, color: 'var(--text)',
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }} title={request.title || request.summary || ''}>
+              {request.title || (request.summary || '').slice(0, 200) || '(untitled)'}
+            </div>
+          )}
         </div>
 
         {/* Body */}

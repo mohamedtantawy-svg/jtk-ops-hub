@@ -502,7 +502,13 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
       <style>{`
         .feedback-status-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
         @media (max-width: 1200px) { .feedback-status-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-        @media (max-width: 760px)  { .feedback-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 760px)  {
+          .feedback-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+          /* 2026-05-21 audit F45: pair with HR Hub's orphan fix — span
+             the 5th card full-width at 2-column so it reads as
+             2+2+1-full instead of 2+2+1-half. */
+          .feedback-status-grid > :nth-child(5):last-child { grid-column: span 2; }
+        }
         @media (max-width: 520px)  { .feedback-status-grid { grid-template-columns: 1fr; } }
       `}</style>
       {/* Header — title + subtitle adapt to the active kind so the user

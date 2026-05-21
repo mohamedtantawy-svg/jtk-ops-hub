@@ -177,6 +177,22 @@ async function writeSourceCache(source, items, meta, userEmail, deptId) {
 // Read-only model: take server values verbatim. Tasks that disappear from a
 // source are auto-resolved unless they're locally-created (manual top-nav
 // entries that the source doesn't know about).
+//
+// 2026-05-21 (audit F03): preserve already-resolved tasks that are absent
+// from a subsequent sync instead of silently dropping them. Previously the
+// function had three cases for "same source, not in sync map":
+//   • locally-created → keep
+//   • not yet resolved → flip to resolved
+//   • already resolved → ⚠️ FALL THROUGH → DROPPED
+// Any transient gap in the server's recently-solved set (network blip, pod
+// rotation between PR #761 hydration calls, cache invalidation race) would
+// erase a previously-stamped resolved task from FE state. Within minutes
+// the next sync would re-add it, so the Briefing "Resolved" KPI oscillated
+// every poll cycle (live: 755 → 734 → 763 → 728 → 732 in <5 min). Keeping
+// the resolved task closes the gap; the FE state still drains naturally on
+// page reload because the IDB cache is populated from server rawItems, not
+// merged state, so the server's 24h aging is still authoritative across
+// sessions.
 function mergeSourceIntoTasks(currentTasks, syncedItems, source) {
   const syncMap = new Map();
   for (const item of syncedItems) syncMap.set(item.id, item);
@@ -194,6 +210,11 @@ function mergeSourceIntoTasks(currentTasks, syncedItems, source) {
         result.push(task);
       } else if (task.status !== 'resolved') {
         result.push({ ...task, status: 'resolved' });
+      } else {
+        // Already-resolved task missing from this sync — keep it so the
+        // Resolved KPI doesn't oscillate on transient server-side gaps.
+        // See header comment.
+        result.push(task);
       }
       seen.add(task.id);
     } else {

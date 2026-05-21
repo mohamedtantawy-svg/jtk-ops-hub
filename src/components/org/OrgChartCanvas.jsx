@@ -448,8 +448,21 @@ function NodeCard({
   const kindLabel = node.kind === 'department' ? 'Dept' : 'Team';
   const memberCount = stats?.descendantMembers ?? (node.memberCount || 0);
   const directTeams = stats?.directTeams ?? 0;
-  const leadName = lead?.name || (node.leadEmail ? node.leadEmail.split('@')[0] : null);
-  const leadInitials = lead?.initials || (leadName ? leadName.slice(0, 2).toUpperCase() : '?');
+  // 2026-05-21 audit F19: derive a friendlier name from the leadEmail
+  // localpart when MEMBERS_BY_EMAIL has no row for it (e.g. brand-new
+  // dept lead whose roster row hasn't been seeded yet). "nick.thomson"
+  // -> "Nick Thomson", and the same string drives the initials so the
+  // Avatar shows "NT" instead of a generic "?".
+  const localpartToName = (email) => {
+    if (!email) return null;
+    const local = String(email).split('@')[0] || '';
+    return local.split(/[._-]/).filter(Boolean).map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ') || null;
+  };
+  const derivedLeadName = localpartToName(node.leadEmail);
+  const leadName = lead?.name || derivedLeadName;
+  const leadInitials = lead?.initials || (leadName
+    ? leadName.split(/\s+/).map(s => s.charAt(0).toUpperCase()).slice(0, 2).join('')
+    : '?');
 
   return (
     <div
@@ -519,6 +532,11 @@ function NodeCard({
       }}>
         {lead ? (
           <Avatar size={22} name={lead.name} initials={leadInitials} src={lead.avatarUrl} />
+        ) : leadName ? (
+          // Lead email is set but no roster row matches (typical for brand-new
+          // dept leads not yet seeded). Use the email-derived name + initials
+          // so the card looks complete instead of showing a generic "?".
+          <Avatar size={22} name={leadName} initials={leadInitials} />
         ) : (
           <div style={{
             width: 22, height: 22, borderRadius: '50%',

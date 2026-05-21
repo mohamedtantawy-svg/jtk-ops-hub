@@ -372,9 +372,29 @@ const PriorityPicker = ({ value, onChange, mode = 'compact' }) => {
 //
 // Empty descriptions start in edit mode so first-time entry is identical to
 // the previous textarea-only UX — no extra click required to type.
+// Read-only view is clamped to ~14 lines via max-height + overflow:auto so a
+// single multi-paragraph paste can't push the whole Briefing grid to 8,000 px
+// (the 2026-05-21 audit caught one item bloating PersonalChecklist to 6,026 px
+// inside `briefing-main-grid`, knocking ~4,500 px of blank scroll into the
+// page). The Show more / Show less toggle preserves access to long content
+// without forcing the layout to absorb it.
+const DESCRIPTION_CLAMP_PX = 220;
 const DescriptionField = ({ value, onChange }) => {
   const [editing, setEditing] = useState(!value);
+  const [expanded, setExpanded] = useState(false);
   const taRef = useRef(null);
+  const readRef = useRef(null);
+  const [needsClamp, setNeedsClamp] = useState(false);
+
+  // Detect whether the rendered text overflows the clamp so we only surface
+  // the toggle for items that actually need it. Re-measured whenever the
+  // value changes (typing in edit mode then blurring back to read).
+  useEffect(() => {
+    if (editing) return;
+    const el = readRef.current;
+    if (!el) return;
+    setNeedsClamp(el.scrollHeight > DESCRIPTION_CLAMP_PX + 1);
+  }, [value, editing]);
 
   if (editing) {
     return (
@@ -395,6 +415,9 @@ const DescriptionField = ({ value, onChange }) => {
           outline: 'none',
           fontFamily: 'inherit',
           color: '#1b1b1b',
+          // Cap textarea height so a long paste while editing also can't
+          // expand the parent grid unbounded — user can still scroll inside.
+          maxHeight: 320,
           resize: 'vertical',
           boxSizing: 'border-box',
           lineHeight: 1.4,
@@ -403,30 +426,56 @@ const DescriptionField = ({ value, onChange }) => {
       />
     );
   }
+  const clamped = needsClamp && !expanded;
   return (
-    <div
-      onClick={() => setEditing(true)}
-      title="Click to edit"
-      style={{
-        width: '100%',
-        padding: '6px 10px',
-        borderRadius: 8,
-        border: '1px solid #e8e8e8',
-        fontSize: 12,
-        color: '#1b1b1b',
-        boxSizing: 'border-box',
-        lineHeight: 1.4,
-        whiteSpace: 'pre-wrap',
-        wordBreak: 'break-word',
-        cursor: 'text',
-        minHeight: 32,
-        background: 'var(--surface)',
-        transition: 'border-color .15s',
-      }}
-      onMouseEnter={e => e.currentTarget.style.borderColor = '#7c3aed'}
-      onMouseLeave={e => e.currentTarget.style.borderColor = '#e8e8e8'}
-    >
-      {renderTextWithLinks(value)}
+    <div>
+      <div
+        ref={readRef}
+        onClick={() => setEditing(true)}
+        title="Click to edit"
+        style={{
+          width: '100%',
+          padding: '6px 10px',
+          borderRadius: 8,
+          border: '1px solid #e8e8e8',
+          fontSize: 12,
+          color: '#1b1b1b',
+          boxSizing: 'border-box',
+          lineHeight: 1.4,
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          cursor: 'text',
+          minHeight: 32,
+          maxHeight: clamped ? DESCRIPTION_CLAMP_PX : 480,
+          overflow: clamped ? 'hidden' : 'auto',
+          background: 'var(--surface)',
+          transition: 'border-color .15s',
+          position: 'relative',
+        }}
+        onMouseEnter={e => e.currentTarget.style.borderColor = '#7c3aed'}
+        onMouseLeave={e => e.currentTarget.style.borderColor = '#e8e8e8'}
+      >
+        {renderTextWithLinks(value)}
+      </div>
+      {needsClamp && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setExpanded(v => !v); }}
+          style={{
+            marginTop: 4,
+            background: 'none',
+            border: 'none',
+            padding: '2px 4px',
+            fontSize: 11,
+            fontWeight: 600,
+            color: '#7c3aed',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+          }}
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      )}
     </div>
   );
 };

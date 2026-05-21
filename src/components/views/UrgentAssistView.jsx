@@ -394,7 +394,13 @@ export default function UrgentAssistView({ user, onCreate, managerOnCall, onChan
           )}
           <ScopePill value="all"  current={scope} onChange={setScope} label="All: Manager on Call View" count={scopeCounts.all ?? undefined} />
           <span style={{ marginLeft: 'auto', fontSize: 12, color: '#9e9e9e' }}>
-            {loading ? 'Loading…' : `${statusCounts.total} ${statusCounts.total === 1 ? 'request' : 'requests'}`}
+            {/* 2026-05-21 audit F42: "Loading…" used to stick because the
+                shared workbenchData loading flag toggles on every
+                background refresh. Show the count once we have any
+                items — only fall back to "Loading…" on a true cold start. */}
+            {loading && statusCounts.total === 0
+              ? 'Loading…'
+              : `${statusCounts.total} ${statusCounts.total === 1 ? 'request' : 'requests'}`}
           </span>
         </div>
 
@@ -585,10 +591,31 @@ function UrgentRow({ row, managerOnCall, onStatusChange, onDelete }) {
           </span>
         </div>
       </td>
+      {/* 2026-05-21 audit F41: type taxonomy fragmented as
+          "Urgent Assist" / "HRX Urgent Assist" / "Expedite Request (HRX)".
+          Collapse the display: canonical chip says "Urgent Assist" with a
+          sub-type chip ("Manual" / "Workbench" / "Expedite") so origin is
+          still visible without three different parent labels. Original
+          string surfaced via `title=` so reporting + grep still work. */}
       <td style={{ ...tdStyle, fontSize: 11, color: '#616161' }} title={row.requestType}>
-        <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 128, background: '#fef2f2', color: '#d42d35', border: '1px solid #fca5a5', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' }}>
-          {row.requestType}
-        </span>
+        {(() => {
+          const raw = String(row.requestType || '');
+          const isExpedite = /expedite/i.test(raw);
+          const subType = isExpedite
+            ? 'Expedite'
+            : row.isManual ? 'Manual' : 'Workbench';
+          const subColor = isExpedite ? '#7c3aed' : (row.isManual ? '#1f74b3' : '#d97706');
+          return (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 128, background: '#fef2f2', color: '#d42d35', border: '1px solid #fca5a5', fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                Urgent Assist
+              </span>
+              <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: 128, fontSize: 9, fontWeight: 600, color: subColor, background: `${subColor}15`, whiteSpace: 'nowrap', letterSpacing: '0.02em' }}>
+                {subType}
+              </span>
+            </span>
+          );
+        })()}
       </td>
       <td style={{ ...tdStyle, fontSize: 12, whiteSpace: 'nowrap' }} title={countryLabel}>
         {flag && <span style={{ marginRight: 3 }}>{flag}</span>}
@@ -670,8 +697,21 @@ function UrgentRow({ row, managerOnCall, onStatusChange, onDelete }) {
         <div>{fmtDate(row.createdAt)}</div>
         <div style={{ fontSize: 10, color: '#9e9e9e' }}>{relTime(row.createdAt)}</div>
       </td>
+      {/* 2026-05-21 audit F40: SLA column showed live "6d 1h over" for
+          rows already in resolved / on_hold / rejected. The breach time
+          on a terminal row is misleading — the SLA clock stopped when
+          the row resolved. Render a muted "—" instead. Tooltip
+          surfaces the original breach delta for managers who want to
+          inspect historical breaches. */}
       <td style={tdStyle}>
-        <SlaBadge slaRemaining={row.slaRemaining} slaBreachStatus={row.slaBreachStatus} />
+        {row.status === 'resolved' || row.status === 'rejected' || row.status === 'on_hold' ? (
+          <span
+            style={{ color: 'var(--text-muted)', fontSize: 11 }}
+            title={row.slaRemaining != null ? `Final SLA at ${row.status}: ${Math.abs(Math.floor(row.slaRemaining / 3600))}h ${row.slaBreachStatus === 'SLA_BREACHED' ? 'over' : 'remaining'}` : undefined}
+          >—</span>
+        ) : (
+          <SlaBadge slaRemaining={row.slaRemaining} slaBreachStatus={row.slaBreachStatus} />
+        )}
       </td>
       <td style={tdStyle}>
         {row.isManual ? (

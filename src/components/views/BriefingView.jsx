@@ -171,6 +171,34 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const [expandedSource,setExpandedSource]=useState(null);
   const [expandedSla,setExpandedSla]=useState(null);
   const [ackBannerIdx,setAckBannerIdx]=useState(0);
+  // Per-user "dismissed from hero banner" announcement IDs. The X button on
+  // the pending-ack banner now actually dismisses the announcement from the
+  // hero (not just navigating the carousel), without recording an ack — the
+  // user can still find + ack it via the Announcements view. Keyed by lowercased
+  // email so a shared machine doesn't bleed one user's dismissals to the next.
+  // 2026-05-21 audit (F39): the X button was a misleading no-op when only one
+  // ack was pending — total>1 navigated to the next item but with total===1
+  // the click silently did nothing, leaving the banner sticky-pinned indefinitely
+  // (Compliance announcement 22% ack rate after 3h).
+  const ackDismissedKey = `ops_hub_ack_banner_dismissed:${(user?.email || '').toLowerCase()}`;
+  const [dismissedAckIds, setDismissedAckIds] = useState(() => {
+    try {
+      const raw = localStorage.getItem(ackDismissedKey);
+      return new Set(raw ? JSON.parse(raw) : []);
+    } catch { return new Set(); }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(ackDismissedKey, JSON.stringify([...dismissedAckIds])); } catch {}
+  }, [dismissedAckIds, ackDismissedKey]);
+  const dismissAck = useCallback((id) => {
+    if (!id) return;
+    setDismissedAckIds(prev => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  }, []);
   const [showHealthBreakdown,setShowHealthBreakdown]=useState(false);
   const [healthPopoverPos,setHealthPopoverPos]=useState(null);
   const [startDatesExpanded,setStartDatesExpanded]=useState(true);
@@ -1180,7 +1208,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
 
   // ── Card section title ──────────────────────────────────────────────
   const CardTitle=({children})=>(
-    <div style={{fontSize:13,fontWeight:600,color:'#9e9e9e',textTransform:'none',letterSpacing:'normal',marginBottom:14}}>{children}</div>
+    <div style={{fontSize:13,fontWeight:600,color:'var(--text-secondary)',textTransform:'none',letterSpacing:'normal',marginBottom:14}}>{children}</div>
   );
 
   // ── KPI mini card for hero ──────────────────────────────────────────
@@ -1532,7 +1560,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             if(c.author&&c.author.id===user.id)return true;
             return matchesAudience(c.target, user.team);
           };
-          const pendingAcks=comms.filter(c=>c.status==='sent'&&targetMatch(c)&&!isAckedByMe(c)&&!(c.author&&c.author.id===user.id));
+          const pendingAcks=comms.filter(c=>c.status==='sent'&&targetMatch(c)&&!isAckedByMe(c)&&!(c.author&&c.author.id===user.id)&&!dismissedAckIds.has(c.id));
           if(pendingAcks.length===0)return null;
           const BANNER_THEMES={
             alert:    {bg:'#ffe2de',accent:'#d42d35',circle1:'rgba(212,45,53,0.08)',circle2:'rgba(212,45,53,0.05)',icon:'bi-exclamation-triangle-fill',iconBg:'#d42d35'},
@@ -1589,8 +1617,14 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   </div>
                 </div>
 
-                {/* X to dismiss from view (not ack) */}
-                <button onClick={(e)=>{e.stopPropagation();if(total>1)goNext();}} style={{position:'absolute',top:10,right:12,width:24,height:24,borderRadius:'50%',background:'rgba(0,0,0,0.06)',border:'none',cursor:'pointer',color:'#9e9e9e',fontSize:12,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                {/* X to dismiss from view (not ack). Hides this announcement
+                    from the hero banner — does NOT record an ack server-side.
+                    Users can still review + acknowledge from the Announcements
+                    tab. Per-user, persisted in localStorage. */}
+                <button
+                  title="Dismiss from hero (you can still acknowledge from the Announcements tab)"
+                  onClick={(e)=>{e.stopPropagation();dismissAck(comm.id);if(total>1)goNext();}}
+                  style={{position:'absolute',top:10,right:12,width:24,height:24,borderRadius:'50%',background:'rgba(0,0,0,0.06)',border:'none',cursor:'pointer',color:'var(--text-muted)',fontSize:12,display:'flex',alignItems:'center',justifyContent:'center'}}>
                   <i className="bi-x"></i>
                 </button>
               </div>
@@ -1655,19 +1689,25 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   // renamed to "Open Tasks" to disambiguate from HR Hub
                   // Requests; the underlying count is unchanged (sum of
                   // open items across every queue source).
-                  {icon:'bi-inbox-fill',label:'Open Tasks',value:activeRequestsCount,color:'var(--g)',sub:isOwnScope?'mine':isTeamScope?'team':'org-wide',nav:()=>setView('my-queue')},
+                  /* 2026-05-21 audit F07: three "tasks" totals on the
+                     Briefing didn't reconcile — Open Tasks (cross-source
+                     all-time open), Status Pipeline (open + new + pause +
+                     resolved within current scope), DES total ("today only").
+                     Inline tooltip clarifies each. */
+                  {icon:'bi-inbox-fill',label:'Open Tasks',value:activeRequestsCount,color:'var(--g)',sub:isOwnScope?'mine':isTeamScope?'team':'org-wide',nav:()=>setView('my-queue'),tooltip:'All open items across every queue source (Zendesk, Jira, Workbench, Onboarding, Offboarding, Amendments, Redlines, Incentive Plans), scoped to your current view. Distinct from Status Pipeline (which slices the same set into Open/New/In Progress/Pause/Resolved) and from the Department Executive Summary "today total" (created-today only).'},
                   {icon:'bi-megaphone-fill',label:'Announcements',value:execUnackedCount,color:execUnackedCount>0?'#ed8d00':'#616161',alert:execUnackedCount>0,nav:()=>{setView('announcements');try{window.dispatchEvent(new CustomEvent('announcements:setFilter',{detail:{filter:'needs-ack'}}));}catch(_){}}, accent:execUnackedCount>0?'#fff8e6':null,sub:'unacked'},
                 ].map(m=>(
                   <DeelCard key={m.label}
                     onClick={m.nav}
+                    title={m.tooltip}
                     style={{padding:'16px 18px',position:'relative',cursor:m.nav?'pointer':'default',background:m.accent||'white',border:m.accent?`1px solid ${m.color}22`:'1px solid #e8e8e8'}}>
                     {m.alert&&m.value>0&&<span className="pulse" style={{position:'absolute',top:10,right:12,width:7,height:7,borderRadius:'50%',background:'#d42d35'}}></span>}
                     <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}>
                       <i className={m.icon} style={{fontSize:12,color:m.color}}></i>
-                      <span style={{fontSize:13,fontWeight:600,color:'#9e9e9e',textTransform:'none',letterSpacing:'normal'}}>{m.label}</span>
+                      <span style={{fontSize:13,fontWeight:600,color:'var(--text-secondary)',textTransform:'none',letterSpacing:'normal'}}>{m.label}</span>
                     </div>
                     <div style={{fontSize:24,fontWeight:700,color:m.nav?'#1f74b3':m.color,lineHeight:1,fontVariantNumeric:'tabular-nums'}}>{m.value}</div>
-                    {m.sub&&<div style={{fontSize:10,color:'#9e9e9e',marginTop:6}}>{m.sub}</div>}
+                    {m.sub&&<div style={{fontSize:10,color:'var(--text-muted)',marginTop:6}}>{m.sub}</div>}
                   </DeelCard>
                 ))}
               </div>
@@ -1675,7 +1715,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
           })()}
           <div style={{marginBottom:16}}>
             <div style={{fontSize:'var(--font-md)',fontWeight:600,color:'var(--text)',letterSpacing:0}}>Department Executive Summary</div>
-            <div style={{fontSize:13,color:'#616161',marginTop:2}}>{orgOpen.length+orgResolved.length} total tasks today</div>
+            <div style={{fontSize:13,color:'var(--text-secondary)',marginTop:2}} title="Count of items created today (rolling 24h) across every queue source. Distinct from Open Tasks (all open items, not just today) and from Status Pipeline (slices the same created-today set by status).">{orgOpen.length+orgResolved.length} total tasks today</div>
           </div>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:16}}>
             {/* Col 1: Status Pipeline */}
@@ -1685,12 +1725,12 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 {l:'Open',v:orgOpen.length,c:'var(--g)',iconEl:<i className="bi bi-circle" style={{fontSize:12}}/>},
                 {l:'New',v:orgNew,c:'#1f74b3',iconEl:<i className="bi bi-dot" style={{fontSize:16}}/>},
                 {l:'In Progress',v:orgIP,c:'#ed8d00',iconEl:<i className="bi bi-arrow-repeat" style={{fontSize:12}}/>},
-                {l:'Pause',v:orgWait,c:'#9e9e9e',iconEl:<i className="bi bi-pause-circle" style={{fontSize:12}}/>},
+                {l:'Pause',v:orgWait,c:'var(--text-muted)',iconEl:<i className="bi bi-pause-circle" style={{fontSize:12}}/>},
                 {l:'Resolved',v:orgResolved.length,c:'#29811e',iconEl:<i className="bi bi-check-circle-fill" style={{fontSize:12}}/>},
               ].map(s=>(
-                <div key={s.l} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:'1px solid #f5f5f5'}}>
+                <div key={s.l} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:'1px solid var(--border-light)'}}>
                   <span style={{color:s.c,width:16,textAlign:'center',display:'inline-flex',alignItems:'center',justifyContent:'center'}}>{s.iconEl}</span>
-                  <span style={{fontSize:13,color:'#1b1b1b',flex:1,fontWeight:500}}>{s.l}</span>
+                  <span style={{fontSize:13,color:'var(--text)',flex:1,fontWeight:500}}>{s.l}</span>
                   <span style={{fontSize:24,fontWeight:700,color:s.c,fontVariantNumeric:'tabular-nums'}}>{s.v}</span>
                 </div>
               ))}
@@ -1698,6 +1738,21 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             {/* Col 2: Source Breakdown */}
             <DeelCard>
               <CardTitle>By Source</CardTitle>
+              {srcEntries.length === 0 && (
+                /* 2026-05-21 audit F23: a brand-new dept (GIX / Payroll /
+                   Benefits) with no integrations + no live data renders this
+                   card empty. The blank space reads as a broken card; add a
+                   helpful zero-state pointing to Settings → Source
+                   Integrations so the admin knows where to fix it. */
+                <div style={{padding:'18px 8px',textAlign:'center',color:'var(--text-muted)',fontSize:12,lineHeight:1.5}}>
+                  <i className="bi bi-cloud-slash" style={{fontSize:22,display:'block',marginBottom:6,opacity:0.6}}></i>
+                  <div>No source data yet.</div>
+                  <div style={{marginTop:2}}>
+                    Configure integrations in{' '}
+                    <span onClick={()=>setView('settings')} style={{color:'#7c3aed',cursor:'pointer',fontWeight:600}}>Settings</span>.
+                  </div>
+                </div>
+              )}
               {srcEntries.map(([src,cnt])=>{
                 const tl=TOOLS[src];const pct=srcPctMap.get(src) ?? 0;
                 const isExpanded=expandedSource===src;
@@ -1709,16 +1764,16 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                     <div onClick={()=>setExpandedSource(isExpanded?null:src)}
                       style={{display:'flex',alignItems:'center',gap:10,padding:'8px 4px',cursor:'pointer',borderRadius:8,transition:'background .15s'}}
                       onMouseEnter={e=>e.currentTarget.style.background='#fafaf9'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                      <div style={{width:26,height:26,borderRadius:8,background:tl?.bg||'#f7f5f2',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                      <div style={{width:26,height:26,borderRadius:8,background:tl?.bg||'var(--surface-3)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
                         <i className={tl?.icon||'bi-circle'} style={{fontSize:11,color:srcBarColor}}></i>
                       </div>
-                      <span style={{fontSize:13,color:'#1b1b1b',flex:1,fontWeight:500}}>{tl?.label||src}</span>
+                      <span style={{fontSize:13,color:'var(--text)',flex:1,fontWeight:500}}>{tl?.label||src}</span>
                       <span style={{fontSize:20,fontWeight:700,color:'#1f74b3',fontVariantNumeric:'tabular-nums',cursor:'pointer'}}>{cnt}</span>
-                      <div style={{width:48,height:6,borderRadius:3,background:'#f0f0f0',marginLeft:4}}>
+                      <div style={{width:48,height:6,borderRadius:3,background:'var(--surface-3)',marginLeft:4}}>
                         <div style={{width:`${pct}%`,height:6,borderRadius:3,background:srcBarColor,transition:'width .3s'}}></div>
                       </div>
-                      <span style={{fontSize:10,color:'#9e9e9e',width:30,textAlign:'right',fontVariantNumeric:'tabular-nums'}}>{pct}%</span>
-                      <i className={isExpanded?'bi-chevron-up':'bi-chevron-down'} style={{fontSize:9,color:'#9e9e9e',marginLeft:2}}></i>
+                      <span style={{fontSize:10,color:'var(--text-muted)',width:30,textAlign:'right',fontVariantNumeric:'tabular-nums'}}>{pct}%</span>
+                      <i className={isExpanded?'bi-chevron-up':'bi-chevron-down'} style={{fontSize:9,color:'var(--text-muted)',marginLeft:2}}></i>
                     </div>
                     {isExpanded&&<MiniTicketList items={srcTasks} emptyMsg="No tickets from this source"/>}
                   </div>
@@ -1732,8 +1787,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 <div style={{position:'relative',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
                   <Ring pct={orgSlaComp} color={orgSlaComp>=90?'#29811e':orgSlaComp>=70?'#ed8d00':'#d42d35'} size={56} stroke={4.5}/>
                   <div style={{position:'absolute',textAlign:'center'}}>
-                    <div style={{fontSize:15,fontWeight:700,color:'#1b1b1b',fontVariantNumeric:'tabular-nums'}}>{orgSlaComp}%</div>
-                    <div style={{fontSize:7,color:'#9e9e9e',fontWeight:600}}>SLA</div>
+                    <div style={{fontSize:15,fontWeight:700,color:'var(--text)',fontVariantNumeric:'tabular-nums'}}>{orgSlaComp}%</div>
+                    <div style={{fontSize:7,color:'var(--text-muted)',fontWeight:600}}>SLA</div>
                   </div>
                 </div>
                 <div style={{flex:1}}>
@@ -1747,10 +1802,10 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                       <div key={row.key}>
                         <div onClick={()=>setExpandedSla(isExp?null:row.key)}
                           style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4,padding:'4px 6px',borderRadius:8,cursor:'pointer',transition:'background .15s'}}
-                          onMouseEnter={e=>e.currentTarget.style.background='#fafaf9'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                          <span style={{fontSize:12,color:'#616161',display:'flex',alignItems:'center',gap:5}}>
+                          onMouseEnter={e=>e.currentTarget.style.background='var(--surface-2)'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                          <span style={{fontSize:12,color:'var(--text-secondary)',display:'flex',alignItems:'center',gap:5}}>
                             {row.label}
-                            <i className={isExp?'bi-chevron-up':'bi-chevron-down'} style={{fontSize:8,color:'#9e9e9e'}}></i>
+                            <i className={isExp?'bi-chevron-up':'bi-chevron-down'} style={{fontSize:8,color:'var(--text-muted)'}}></i>
                           </span>
                           <span style={{fontSize:18,fontWeight:700,color:row.color,fontVariantNumeric:'tabular-nums',cursor:'pointer'}}>{row.count}</span>
                         </div>
@@ -1760,8 +1815,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   })}
                 </div>
               </div>
-              <div style={{borderTop:'1px solid #f0f0f0',paddingTop:14}}>
-                <div style={{fontSize:13,fontWeight:600,color:'#9e9e9e',textTransform:'none',letterSpacing:'normal',marginBottom:8}}>Overall Capacity</div>
+              <div style={{borderTop:'1px solid var(--border-light)',paddingTop:14}}>
+                <div style={{fontSize:13,fontWeight:600,color:'var(--text-secondary)',textTransform:'none',letterSpacing:'normal',marginBottom:8}}>Overall Capacity</div>
                 <div style={{display:'flex',gap:8}}>
                   {[
                     { lv: 'Low',  clr: '#1f74b3', desc: `< ${capLowMax}` },
@@ -1949,20 +2004,20 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                     const agentRow = (m, key, depth) => {
                       const live = liveOf(m.email);
                       return (
-                      <tr key={key} style={{borderBottom:'1px solid #f0f0f0',transition:'background .15s'}}
-                        onMouseEnter={e=>e.currentTarget.style.background='#fafaf9'}
+                      <tr key={key} style={{borderBottom:'1px solid var(--border-light)',transition:'background .15s'}}
+                        onMouseEnter={e=>e.currentTarget.style.background='var(--surface-2)'}
                         onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
                         <td style={{padding:'14px 24px',paddingLeft: indentFor(depth)}}>
                           <div style={{display:'flex',alignItems:'center',gap:10}}>
                             <Avatar name={m.name} size={32}/>
                             <div style={{minWidth:0}}>
-                              <div style={{fontWeight:600,color:'#1b1b1b',display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                              <div style={{fontWeight:600,color:'var(--text)',display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
                                 {m.name}
                                 <AccessBadge access={live?.access || m.access || 'agent'} />
                                 <LastSeenPill iso={live?.lastSeenAt} loading={!!rosterLoading} />
                                 <OOOBadge events={oooEventsByEmail.get((m.email || '').toLowerCase())} />
                               </div>
-                              <div style={{fontSize:11,color:'#9e9e9e'}}>{FLAGS[m.country]} {m.team}</div>
+                              <div style={{fontSize:11,color:'var(--text-muted)'}}>{FLAGS[m.country]} {m.team}</div>
                             </div>
                           </div>
                         </td>
@@ -1973,7 +2028,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                             canEdit={canEditMemberCountries(m.email)}
                           />
                         </td>
-                        <td style={{padding:'14px 16px',textAlign:'center',fontWeight:700,fontSize:16,color:'#1b1b1b'}}>{m.tc}</td>
+                        <td style={{padding:'14px 16px',textAlign:'center',fontWeight:700,fontSize:16,color:'var(--text)'}}>{m.tc}</td>
                         <td style={{padding:'14px 16px',textAlign:'center',fontWeight:600,color:'#1f74b3'}}>{m.open}</td>
                         <td style={{padding:'14px 16px',textAlign:'center',fontWeight:600,color:'#ed8d00'}}>{m.paused}</td>
                         <td style={{padding:'14px 16px',textAlign:'center',fontWeight:600,color:'#7c3aed'}}>{m.escalated}</td>
@@ -2121,8 +2176,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                     // section when the user has agents reporting to them
                     // without an intermediate TL.
                     const sectionLabel = (label) => (
-                      <tr key={`label-${label}`} style={{background:'#fafaf9',borderTop:'2px solid #e8e8e8'}}>
-                        <td colSpan={10} style={{padding:'10px 24px',fontSize:11,fontWeight:700,color:'#9e9e9e',letterSpacing:'0.04em',textTransform:'uppercase'}}>{label}</td>
+                      <tr key={`label-${label}`} style={{background:'var(--surface-2)',borderTop:'2px solid var(--border)'}}>
+                        <td colSpan={10} style={{padding:'10px 24px',fontSize:11,fontWeight:700,color:'var(--text-muted)',letterSpacing:'0.04em',textTransform:'uppercase'}}>{label}</td>
                       </tr>
                     );
 
@@ -2167,7 +2222,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 </tbody>
               </table>
             </div>
-            <div style={{padding:'10px 24px 14px',fontSize:11,color:'#9e9e9e',borderTop:'1px solid #f0f0f0',background:'#fafaf9'}}>
+            <div style={{padding:'10px 24px 14px',fontSize:11,color:'var(--text-muted)',borderTop:'1px solid var(--border-light)',background:'var(--surface-2)'}}>
               <i className="bi-info-circle" style={{marginRight:6}}></i>
               Totals aggregate Zendesk, Jira, Workbench, Onboarding, Offboarding. Amendments &amp; Redlines live in a shared pool (no server-side assignee) so they roll into team capacity but not per-agent counts. Baseline 30 tasks &#8209; &lt;20 Low &middot; 20&#8209;50 Medium &middot; &gt;50 High.
             </div>
