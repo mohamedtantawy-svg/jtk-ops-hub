@@ -1538,7 +1538,11 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             {/* KPI Summary Cards */}
             {settings.briefing_show_kpi_cards!==false&&<div style={{display:'flex',alignItems:'center',gap:'var(--space-4, 16px)',flexShrink:0}}>
               <KpiCard label="Workload" value={wl} color={wc} icon="bi-speedometer2" clickable onClick={()=>setView('my-queue')}/>
-              <KpiCard label="SLA Comp %" value={`${slaCompRate}%`} color={slaCompRate>=80?'#29811e':slaCompRate>=60?'#ed8d00':'#d42d35'} icon="bi-shield-check" clickable onClick={()=>setView('analytics')}/>
+              {/* 2026-05-21 audit U03: bump green threshold to 90% so a
+                  visible KPI tile of "88%" doesn't read as Good. ≥90% green,
+                  ≥75% orange, <75% red. Matches the org-breach ring below
+                  which already used 90/70 cuts. */}
+              <KpiCard label="SLA Comp %" value={`${slaCompRate}%`} color={slaCompRate>=90?'#29811e':slaCompRate>=75?'#ed8d00':'#d42d35'} icon="bi-shield-check" clickable onClick={()=>setView('analytics')}/>
               {/* Header KPI: every resolved item currently in the viewer's
                   scope (own / team / region / org). Cross-source — counts
                   Zendesk + Jira tickets + Workbench COMPLETED + CLOSED.

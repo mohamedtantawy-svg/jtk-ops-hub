@@ -29,6 +29,26 @@ import { COUNTRY_OWNERS } from '../data/countryOwners';
 // owners.
 
 // DJB2 string hash — small, stable, no deps.
+// Title-case a snake_case / UPPER_SNAKE database enum for display.
+// "EOR_DEFINITE_CONTRACT_ENDING" → "EOR Definite Contract Ending"
+// "expedite_eor_onboarding" → "Expedite EOR Onboarding"
+// Already-titled inputs (e.g. "Expedite EOR Onboarding") pass through unchanged.
+// 2026-05-21 audit U78: introduced to stop the Workbench TYPE column from
+// rendering raw upstream enums.
+const ENUM_ACRONYMS = new Set(['EOR', 'HRX', 'PTO', 'WL', 'IP', 'TC', 'OOO', 'SLA', 'MOC', 'KPI', 'EVL']);
+function prettifyTaskType(raw) {
+  if (!raw || typeof raw !== 'string') return raw;
+  // Heuristic: only transform when the string is clearly snake-case (contains
+  // an underscore and is uppercase-heavy). Otherwise pass through so existing
+  // display strings like "Expedite EOR Onboarding" stay intact.
+  if (!raw.includes('_')) return raw;
+  return raw.split(/[_\s]+/).filter(Boolean).map(part => {
+    const upper = part.toUpperCase();
+    if (ENUM_ACRONYMS.has(upper)) return upper;
+    return part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+  }).join(' ');
+}
+
 function _hashId(id) {
   let h = 5381;
   const s = String(id || '');
@@ -751,8 +771,11 @@ export function normalizeWorkbench(items = [], slaConfig = null) {
       subject: t.name || 'Untitled Task',
       // typeLabel drives the "Type" column when SourceTable is rendered with
       // showType=true — e.g. "Expedite EOR Onboarding", "HRX Escalation".
-      typeLabel: t.taskType || t.sourceType || 'Workbench',
-      function: t.taskType || t.sourceType || 'Workbench',
+      // 2026-05-21 audit U78: upstream sometimes serves snake_case database
+      // enums like "EOR_DEFINITE_CONTRACT_ENDING". Title-case them at the
+      // normalisation layer so the column never bleeds raw DB values.
+      typeLabel: prettifyTaskType(t.taskType || t.sourceType || 'Workbench'),
+      function: prettifyTaskType(t.taskType || t.sourceType || 'Workbench'),
       country: t.country || '',
       assignee: t.assignee?.name || '',
       assigneeEmail: (t.assignee?.email || '').toLowerCase(),
