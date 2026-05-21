@@ -131,16 +131,26 @@ function writeToLS(key, items) {
   } catch { return false; }
 }
 
-// Read the legacy global key (old format) so existing users don't lose data
-function readLegacy() {
-  try {
-    const raw = localStorage.getItem(LEGACY_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return null;
-    const items = parsed.map(migrateItem).filter(Boolean);
-    return items.length ? items : null;
-  } catch { return null; }
+// Retired 2026-05-21. The legacy `ops_hub_checklist` key was a SINGLE
+// global slot — no per-user suffix — so on a shared machine the next
+// user to log in would inherit the previous user's checklist. Duygu
+// Cakalli bug "Random to do's appear under my to do's. Only first
+// and last ones are my to do's." After the legacy bleed loads
+// foreign items into state, the persist effect mirrors them to
+// user-scoped LS + IDB + the server snapshot (via the debounced
+// PUT), making the contamination sticky across devices for the
+// affected user. The user-scoped `ops_hub_checklist_v2:<email>` key
+// has been the primary path since 2026-04-22 and the server
+// snapshot covers the cross-device case — anyone still genuinely
+// relying on the legacy slot lost their items the moment another
+// teammate signed into the same browser anyway.
+//
+// `cleanupLegacyChecklistKey()` runs once on mount to evict any
+// remaining bleed source. We don't read its contents — every read
+// is now user-scoped only.
+function cleanupLegacyChecklistKey() {
+  if (typeof localStorage === 'undefined') return;
+  try { localStorage.removeItem(LEGACY_KEY); } catch {}
 }
 
 // ── IndexedDB layer (durable backup) ────────────────────────────────────────
@@ -432,14 +442,19 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
   const key = storageKey(userEmail);
   const userKey = (userEmail || '').toLowerCase().trim() || 'anon';
 
-  // Sync-read on mount for instant paint — never starts empty if data exists
+  // Sync-read on mount for instant paint. Reads STRICTLY from the
+  // user-scoped key — see the cleanupLegacyChecklistKey block at module
+  // top for why the legacy fallback was removed.
   const [items, setItems] = useState(() => {
     const fromLS = readFromLS(key);
     if (fromLS && fromLS.items.length) return fromLS.items;
-    const legacy = readLegacy();
-    if (legacy && legacy.length) return legacy;
     return [];
   });
+
+  // Evict the legacy global slot once per mount so it can't bleed into
+  // the next user on the same browser. Idempotent — `removeItem` of a
+  // missing key is a no-op.
+  useEffect(() => { cleanupLegacyChecklistKey(); }, []);
   const [lastWriteTs, setLastWriteTs] = useState(0);
   const [expandedId, setExpandedId] = useState(null);
   const [draft, setDraft] = useState({ title: '', description: '', dueDate: '', priority: 'normal' });
