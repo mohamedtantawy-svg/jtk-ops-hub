@@ -1332,6 +1332,20 @@ const App=()=>{
   // managerial scopes as agent-tier so all agent-shape users land here.
   React.useEffect(() => {
     if (!effectiveUser) return;
+    // 2026-05-21 fix: wait for the live roster to hydrate before deciding
+    // which home to render. Pre-hydration, every user looks like an
+    // at_agent because DEFAULT_USER_ACCESS_MAP is built from the STATIC
+    // TEAM_MEMBERS baseline (where many managers — Insiya, Sarah, Kerri,
+    // etc. — are tagged `access: 'agent'` from before the override table
+    // existed). Flipping to agent-home on that stale read and then
+    // having to flip BACK to briefing once the real role arrives shows
+    // the manager a brief AgentHome paint, which they correctly read as
+    // "the cards don't show any tasks". With rosterVersion=0 we defer
+    // the routing decision until the live roster has loaded at least
+    // once — for managers with a populated localStorage cache (legacy
+    // or per-dept) hydration is synchronous on the very first render,
+    // so the briefing view paints with no flicker.
+    if (rosterVersion === 0) return;
     const dataScope = perms?.raw?.dataScope;
     if (!dataScope) return; // wait for accessType to resolve
     const isManagerial = dataScope === 'all_tasks' || dataScope === 'regional_tasks' || dataScope === 'team_tasks';
@@ -1344,7 +1358,7 @@ const App=()=>{
     // this, the admin sees AgentHome rendered with their own data until
     // they manually click the Home tab.
     if (isManagerial && view === 'agent-home') setView('briefing');
-  }, [effectiveUser, perms?.raw?.dataScope, view]);
+  }, [effectiveUser, perms?.raw?.dataScope, view, rosterVersion]);
 
   // ── Live integrations (Jira, Slack) ───────────────────────────────────────
   // Deel REST-v2 wrapper (useDeelData) retired 2026-05-13 — endpoints had

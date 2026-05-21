@@ -61,6 +61,33 @@ function readCache(deptIdArg) {
   } catch { return null; }
 }
 
+// One-shot legacy-cache read. Used ONLY for the initial useState seed so
+// existing users get an instant hydrated roster on first load after the
+// PR #751 dept-cache refactor — without this, every existing manager
+// (Insiya / Sarah / Megan / etc.) gets a new-key cache miss, initialises
+// to the static TEAM_MEMBERS baseline (where many managers are tagged
+// `access: 'agent'` from before the override table existed), resolves
+// perms to at_agent, and gets flipped into AgentHome by the home-routing
+// effect BEFORE the live /team-members fetch lands. The legacy data is
+// the user's pre-deploy view; for super-admins who may have switched
+// depts the data is whatever dept they were last in, which is still
+// safer than the baseline because (a) the very next /team-members fetch
+// overrides it with the current-dept payload, and (b) we deliberately
+// do NOT use this fallback on dept-switch refetches — only at mount.
+function readLegacyCacheOnce() {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const email = (localStorage.getItem('ops_hub_logged_in_email') || '').toLowerCase();
+    const key = email ? `${CACHE_KEY_BASE}:${email}` : CACHE_KEY_BASE;
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.items)) return null;
+    if (parsed.ts && Date.now() - parsed.ts > CACHE_TTL_MS) return null;
+    return parsed.items;
+  } catch { return null; }
+}
+
 function writeCache(deptIdArg, items) {
   if (typeof localStorage === 'undefined') return;
   try { localStorage.setItem(cacheKey(deptIdArg), JSON.stringify({ items, ts: Date.now() })); } catch {}
@@ -68,14 +95,17 @@ function writeCache(deptIdArg, items) {
 
 export function useTeamMembers() {
   // Initial state: cached items if present (instant paint with real
-  // lastSeenAt values), otherwise the static baseline. The fetch in the
-  // mount effect below revalidates either way.
+  // lastSeenAt values), otherwise fall back to the pre-PR #751 user-only
+  // cache so existing users don't lose their hydrated roster on the
+  // first load after deploy. Last resort: static baseline. The fetch
+  // in the mount effect below revalidates either way.
   const initialDeptId = getCurrentDeptIdSync();
-  const [members, setMembers] = useState(() => readCache(initialDeptId) || baselineAsMerged());
+  const initialCached = readCache(initialDeptId) || readLegacyCacheOnce();
+  const [members, setMembers] = useState(() => initialCached || baselineAsMerged());
   // `loading` is true only when we don't have cached data — the first paint
   // from cache is treated as "ready" so the Team view doesn't flash a
   // spinner over real data.
-  const [loading, setLoading] = useState(() => !readCache(initialDeptId));
+  const [loading, setLoading] = useState(() => !initialCached);
   const [error, setError] = useState(null);
   const mountedRef = useRef(true);
 
@@ -114,13 +144,41 @@ export function useTeamMembers() {
   // On dept change, swap to the target dept's cached roster (if any) and
   // refetch. This is what makes the chip-switch land on the right people
   // instantly when the user has visited the dept before.
+  //
+  // 2026-05-21 fix: distinguish "the dept just resolved on initial mount"
+  // (null → real UUID after /dept-scope/current lands) from "the user
+  // ACTUALLY switched dept via the chip" (real UUID → different real
+  // UUID). Only the latter should reset members to the new dept's
+  // cache — initial resolution should leave the useState initializer's
+  // legacy-cache fallback intact so managers don't briefly flip to
+  // AgentHome before the live /team-members fetch lands.
+  const didFirstDeptEffectRef = useRef(false);
+  const prevDeptIdRef = useRef(currentDeptId);
   useEffect(() => {
+    const prevDeptId = prevDeptIdRef.current;
+    prevDeptIdRef.current = currentDeptId;
+    // First effect invocation on mount — just fetch, don't touch members.
+    if (!didFirstDeptEffectRef.current) {
+      didFirstDeptEffectRef.current = true;
+      fetchMembers();
+      return;
+    }
+    // Initial null → real-dept transition: the dept is just resolving,
+    // not the user switching. Refetch so the new dept's payload lands,
+    // but DON'T reset members — the legacy-cache fallback is correct
+    // for the (typically single) dept this user belongs to.
+    if (!prevDeptId && currentDeptId) {
+      fetchMembers();
+      return;
+    }
+    // Real dept switch (HRX → GIX, GIX → HRX, ...): reset to the new
+    // dept's persisted cache so the chip flip paints instantly with
+    // the right people.
     const cached = readCache(currentDeptId);
     if (cached) {
       setMembers(cached);
       setLoading(false);
     } else {
-      // No cache for this dept yet — show baseline while we fetch.
       setMembers(baselineAsMerged());
       setLoading(true);
     }
