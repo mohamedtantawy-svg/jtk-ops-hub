@@ -94,12 +94,28 @@ function CalendarMode({
     return map;
   }, [events, alwaysShowEmails]);
 
-  // Stable, alphabetical row order by member name (fall back to email).
+  // Stable, alphabetical row order by member name (fall back to derived
+  // display name from email localpart, then finally to the raw email).
+  // 2026-05-21 audit F31: the previous fallback was the raw email, which
+  // produced inconsistent rows like "Abe Elkholi" next to
+  // "alice.muncapui@deel.com" / "alaetra.wilkerson@deel.com" — a visual
+  // mess that made the calendar look unprofessional. Now we derive
+  // "Alice Muncapui" / "Alaetra Wilkerson" from the localpart so unmatched
+  // roster members render in title-case alongside the named ones.
+  const nameFromEmail = (email) => {
+    if (!email) return '';
+    const local = String(email).split('@')[0] || '';
+    if (!local) return email;
+    const parts = local.split(/[._-]/).filter(Boolean);
+    if (parts.length === 0) return local;
+    return parts.map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' ');
+  };
   const personRows = useMemo(() => {
     return Array.from(byEmail.entries())
       .map(([email, evs]) => {
         const m = membersByEmail?.get(email);
-        return { email, name: m?.name || email, member: m, events: evs };
+        const name = m?.name || nameFromEmail(email);
+        return { email, name, member: m, events: evs };
       })
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [byEmail, membersByEmail]);
