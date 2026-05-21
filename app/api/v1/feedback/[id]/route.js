@@ -290,7 +290,17 @@ export async function PATCH(req, { params }) {
 }
 
 export async function DELETE(req, { params }) {
-  const { authorized, status: rs, error } = requireRole(req, 'admin');
+  // Mirrors PATCH's gate above (admin + regional_manager). The FE's trash
+  // affordance in FeedbackView is gated on `isAdmin`, which resolves to
+  // anyone with `can_manage_settings` — that's Admin AND Regional Manager
+  // (see accessControl.js: both bundle [...ALL_ADMIN_POWERS]). Until 2026-
+  // 05-20 the server gate was `'admin'`-only, so every RM click on the
+  // trash icon hit a 403 and surfaced as a silent "Delete failed" toast
+  // (Melissa Capicchiano 2026-05-20 "delete button also doesn't work" —
+  // she's a regional_manager triaging a duplicate she'd just posted).
+  // TL is intentionally excluded — they don't have can_manage_settings,
+  // so the FE never renders the button for them in the first place.
+  const { authorized, status: rs, error } = requireRole(req, 'admin', 'regional_manager');
   if (!authorized) return NextResponse.json({ error }, { status: rs });
 
   const { id } = await params;
