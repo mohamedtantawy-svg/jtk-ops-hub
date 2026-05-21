@@ -1732,6 +1732,21 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             {/* Col 2: Source Breakdown */}
             <DeelCard>
               <CardTitle>By Source</CardTitle>
+              {srcEntries.length === 0 && (
+                /* 2026-05-21 audit F23: a brand-new dept (GIX / Payroll /
+                   Benefits) with no integrations + no live data renders this
+                   card empty. The blank space reads as a broken card; add a
+                   helpful zero-state pointing to Settings → Source
+                   Integrations so the admin knows where to fix it. */
+                <div style={{padding:'18px 8px',textAlign:'center',color:'var(--text-muted)',fontSize:12,lineHeight:1.5}}>
+                  <i className="bi bi-cloud-slash" style={{fontSize:22,display:'block',marginBottom:6,opacity:0.6}}></i>
+                  <div>No source data yet.</div>
+                  <div style={{marginTop:2}}>
+                    Configure integrations in{' '}
+                    <span onClick={()=>setView('settings')} style={{color:'#7c3aed',cursor:'pointer',fontWeight:600}}>Settings</span>.
+                  </div>
+                </div>
+              )}
               {srcEntries.map(([src,cnt])=>{
                 const tl=TOOLS[src];const pct=srcPctMap.get(src) ?? 0;
                 const isExpanded=expandedSource===src;
