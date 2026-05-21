@@ -388,8 +388,8 @@ const DeelTopNav = ({
             <button
               type="button"
               onClick={() => setShowDeptPicker(p => !p)}
-              aria-label="Switch viewing department"
-              title={`Viewing: ${deptState.dept?.name || '—'}`}
+              aria-label="Switch active department"
+              title={`Dept: ${deptState.dept?.name || '—'}`}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 6,
                 padding: '6px 10px', height: 32,
@@ -405,7 +405,11 @@ const DeelTopNav = ({
             >
               <i className="bi bi-diagram-3-fill" style={{ fontSize: 11 }} />
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                Viewing: {deptState.dept?.name || (deptState.loading ? '…' : 'All')}
+                {/* 2026-05-21 audit U07: was "Viewing: HR Experience" — collided with
+                    the Briefing scope pill "Viewing: All" which means data-scope, not
+                    department. Renamed this prefix to "Dept:" so the two pills carry
+                    visibly distinct semantics. */}
+                Dept: {deptState.dept?.name || (deptState.loading ? '…' : 'All')}
               </span>
               <i className="bi bi-chevron-down" style={{ fontSize: 9 }} />
             </button>
@@ -490,9 +494,13 @@ const DeelTopNav = ({
               <div style={{ padding: '16px 16px 14px', borderBottom: '1px solid var(--border-light)', background: 'var(--surface-2)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                   <div style={{ width: 42, height: 42, borderRadius: '50%', background: 'var(--purple-accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 15, fontWeight: 700, flexShrink: 0 }}>{user?.initials || 'U'}</div>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{user?.name}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.email}</div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    {/* 2026-05-21 audit U40: name overflowed without ellipsis
+                        ("Mohamed" was rendering as "Mohaman..." cut off mid-
+                        word). Match the email row's truncation rules and
+                        surface the full name on hover. */}
+                    <div title={user?.name} style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.name}</div>
+                    <div title={user?.email} style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.email}</div>
                   </div>
                 </div>
               </div>

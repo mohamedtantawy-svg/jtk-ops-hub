@@ -1625,11 +1625,18 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                     from the hero banner — does NOT record an ack server-side.
                     Users can still review + acknowledge from the Announcements
                     tab. Per-user, persisted in localStorage. */}
+                {/* 2026-05-21 audit U01: X was nearly invisible (gray glyph
+                    on light pastel bg). Stronger background tint + larger
+                    glyph + darker default color give it proper discoverability;
+                    hover state amps the bg further. */}
                 <button
+                  aria-label="Dismiss from hero (you can still acknowledge from the Announcements tab)"
                   title="Dismiss from hero (you can still acknowledge from the Announcements tab)"
                   onClick={(e)=>{e.stopPropagation();dismissAck(comm.id);if(total>1)goNext();}}
-                  style={{position:'absolute',top:10,right:12,width:24,height:24,borderRadius:'50%',background:'rgba(0,0,0,0.06)',border:'none',cursor:'pointer',color:'var(--text-muted)',fontSize:12,display:'flex',alignItems:'center',justifyContent:'center'}}>
-                  <i className="bi-x"></i>
+                  onMouseEnter={(e)=>{e.currentTarget.style.background='rgba(0,0,0,0.16)';}}
+                  onMouseLeave={(e)=>{e.currentTarget.style.background='rgba(0,0,0,0.10)';}}
+                  style={{position:'absolute',top:10,right:12,width:28,height:28,borderRadius:'50%',background:'rgba(0,0,0,0.10)',border:'none',cursor:'pointer',color:'var(--text)',fontSize:14,display:'flex',alignItems:'center',justifyContent:'center',transition:'background .15s'}}>
+                  <i className="bi-x-lg" style={{fontSize:12}}></i>
                 </button>
               </div>
 
