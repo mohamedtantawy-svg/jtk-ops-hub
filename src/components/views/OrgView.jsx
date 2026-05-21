@@ -27,6 +27,14 @@ import BulkMoveBar from '../org/BulkMoveBar';
 import OrgAuditDrawer from '../org/OrgAuditDrawer';
 import { buildStructureCsv, buildMembersCsv, downloadCsv } from '../../utils/orgCsvExport';
 
+// Title-case a snake_case access enum for display. 2026-05-21 audit U93.
+// "regional_manager" → "Regional Manager"; "admin" → "Admin"; unknown values
+// pass through unchanged so unexpected enums still surface in the UI.
+function prettifyRole(access) {
+  if (!access || typeof access !== 'string') return '';
+  return access.split('_').filter(Boolean).map(s => s.charAt(0).toUpperCase() + s.slice(1).toLowerCase()).join(' ');
+}
+
 const VIEW_MODES = [
   { id: 'chart', label: 'Chart', icon: 'bi-diagram-3-fill' },
   { id: 'list',  label: 'List',  icon: 'bi-list-ul' },
@@ -811,13 +819,17 @@ function TablePreview({ nodes, members = [], tree, search, onSelectMember }) {
             onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
           >
             <div>
+              {/* 2026-05-21 audit U92: kind chips were "Department" capitalised
+                  but "member" lowercased — visual rhythm break. Match by
+                  capitalising both. */}
               <span style={{
                 padding: '2px 8px',
                 borderRadius: 'var(--radius-pill)',
                 background: 'var(--surface-3)',
                 color: 'var(--text-muted)',
                 fontSize: 'var(--font-xs)', fontWeight: 600,
-              }}>member</span>
+                textTransform: 'capitalize',
+              }}>Member</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <div style={{
@@ -833,7 +845,9 @@ function TablePreview({ nodes, members = [], tree, search, onSelectMember }) {
               </div>
             </div>
             <div style={{ color: 'var(--text-secondary)' }}>{m.title || '—'}</div>
-            <div style={{ textAlign: 'right', fontSize: 'var(--font-xs)', color: 'var(--text-muted)' }}>{m.access || ''}</div>
+            {/* 2026-05-21 audit U93: snake_case enum bleed-through; title-case
+                for display. "regional_manager" → "Regional Manager". */}
+            <div style={{ textAlign: 'right', fontSize: 'var(--font-xs)', color: 'var(--text-muted)' }}>{prettifyRole(m.access || '')}</div>
             <div style={{ textAlign: 'right', fontSize: 'var(--font-xs)', color: 'var(--text-muted)' }}>{m.country || ''}</div>
           </div>
         );
