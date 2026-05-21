@@ -446,7 +446,19 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
         }
       }
       if(status==='sent' && addToast){
-        addToast('success', scheduledFor?'Scheduled':'Sent', scheduledFor?`Will publish at ${new Date(scheduledFor).toLocaleString()}`:'Announcement sent to recipients');
+        // Differentiate edit-of-sent (where nothing is newly sent — the
+        // existing sent announcement just got its fields updated, no
+        // re-fan-out, no ack reset) from a fresh send. Laura Llopis
+        // 2026-05-20 bug: previously both paths showed "Sent —
+        // Announcement sent to recipients", so an approver editing a
+        // typo saw a misleading "sent to recipients" confirmation and
+        // worried the audience had been re-notified.
+        const isEditOfSent = !!editDraft && editDraft.status==='sent';
+        if (isEditOfSent) {
+          addToast('success', 'Updated', 'Announcement edits saved');
+        } else {
+          addToast('success', scheduledFor?'Scheduled':'Sent', scheduledFor?`Will publish at ${new Date(scheduledFor).toLocaleString()}`:'Announcement sent to recipients');
+        }
       }
     } catch(err) {
       console.error('[announcements] handleSend failed:', err.message);

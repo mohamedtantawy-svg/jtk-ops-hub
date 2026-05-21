@@ -87,8 +87,293 @@ export default function MultiCountryPicker({
   const inputRef = useRef(null);
 
   // Keep the draft in sync if the parent re-pushes a new selection (e.g.
-  // after a successful save the optimistic update flows back through).
-  useEffect(() => { setDraft(normaliseList(selected)); }, [selected]);
+  // after a successful save the optimistic update flows back through, or
+  // another admin's edit lands via the cross-session refresh in
+  // useTeamMembers).
+  //
+  // IMPORTANT: only sync while the popover is CLOSED. Every parent
+  // re-render passes a fresh `member?.countries || []` array reference
+  // into <MultiCountryPicker selected={…}> — and Home/Briefing re-renders
+  // constantly (MOC + TLOC pollers every 15 s, notifications/feedback/
+  // SLA-extensions every 30 s, useQueueUnifiedSync 30 s nowTick, etc.).
+  // Before 2026-05-21 this effect re-ran on every parent render and
+  // wiped the user's in-progress draft mid-edit. Symptom Insiya
+  // reported 2026-05-19: open the picker for Francesca, tick Austria,
+  // 2-3 s later a poll fires → effect runs → draft resets to the saved
+  // list → `dirty` flips back to false; the next click on the (now
+  // labelled "No changes") Save button hits the `!dirty` early-return
+  // in handleSave and `setOpen(false)` fires — the popover "disappears"
+  // and the new country was never saved. Gating on `!open` keeps the
+  // draft stable for the duration of an edit session; we resync on
+  // close so the next open shows the latest saved value.
+  useEffect(() => {
+    if (open) return;
+    setDraft(normaliseList(selected));
+  }, [selected, open]);
+
+  // Anchor the popover to the trigger via position:fixed AND render it
+  // through a portal to document.body. The portal is the load-bearing
+  // half: every top-level view is wrapped in `<div className="page-enter">`
+  // which carries a CSS `pageIn` animation with `transform: translateY(…)`.
+  // Any non-`none` transform on an ancestor makes that ancestor the new
+  // containing block for position:fixed descendants — so without the
+  // portal, the popover's `top:` coordinates were being interpreted
+  // relative to `.page-enter` instead of the viewport. When the user had
+  // scrolled the Home/Team/Leaders-Hub table down past the first row,
+  // `.page-enter` sat above the viewport (e.g. viewport-y -1232), and the
+  // popover rendered at viewport-y ≈ `.page-enter.top + r.bottom + 6`
+  // ≈ -833 — i.e. hidden above the viewport. Clicking the trigger again
+  // toggled `open` back to false, so to the user it looked like the
+  // picker "automatically closed" on click (Madeleine 2026-05-19, same
+  // symptom Mohamed/Madeleine reported 2026-05-15 which PR #652's
+  // position:fixed fix solved for `overflow:hidden` but NOT for the
+  // transform-creates-containing-block edge case).
+  //
+  // Portaling the popover under document.body escapes the transformed
+  // ancestor entirely so `top:` reads against the viewport again; the
+  // outside-click + scroll-recalc effects below keep working because
+  // refs propagate through portals.
+  useEffect(() => {
+    if (!open) { setPos(null); return; }
+    const update = () => {
+      const r = ref.current?.getBoundingClientRect();
+      if (!r) return;
+      const next = { top: Math.round(r.bottom + 6) };
+      if (align === 'right') {
+        next.right = Math.max(8, Math.round(window.innerWidth - r.right));
+      } else {
+        next.left = Math.round(r.left);
+      }
+      setPos(next);
+    };
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [open, align]);
+
+  // Anchor the popover to the trigger via position:fixed AND render it
+  // through a portal to document.body. The portal is the load-bearing
+  // half: every top-level view is wrapped in `<div className="page-enter">`
+  // which carries a CSS `pageIn` animation with `transform: translateY(…)`.
+  // Any non-`none` transform on an ancestor makes that ancestor the new
+  // containing block for position:fixed descendants — so without the
+  // portal, the popover's `top:` coordinates were being interpreted
+  // relative to `.page-enter` instead of the viewport. When the user had
+  // scrolled the Home/Team/Leaders-Hub table down past the first row,
+  // `.page-enter` sat above the viewport (e.g. viewport-y -1232), and the
+  // popover rendered at viewport-y ≈ `.page-enter.top + r.bottom + 6`
+  // ≈ -833 — i.e. hidden above the viewport. Clicking the trigger again
+  // toggled `open` back to false, so to the user it looked like the
+  // picker "automatically closed" on click (Madeleine 2026-05-19, same
+  // symptom Mohamed/Madeleine reported 2026-05-15 which PR #652's
+  // position:fixed fix solved for `overflow:hidden` but NOT for the
+  // transform-creates-containing-block edge case).
+  //
+  // Portaling the popover under document.body escapes the transformed
+  // ancestor entirely so `top:` reads against the viewport again; the
+  // outside-click + scroll-recalc effects below keep working because
+  // refs propagate through portals.
+  useEffect(() => {
+    if (!open) { setPos(null); return; }
+    const update = () => {
+      const r = ref.current?.getBoundingClientRect();
+      if (!r) return;
+      const next = { top: Math.round(r.bottom + 6) };
+      if (align === 'right') {
+        next.right = Math.max(8, Math.round(window.innerWidth - r.right));
+      } else {
+        next.left = Math.round(r.left);
+      }
+      setPos(next);
+    };
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [open, align]);
+
+  // Anchor the popover to the trigger via position:fixed AND render it
+  // through a portal to document.body. The portal is the load-bearing
+  // half: every top-level view is wrapped in `<div className="page-enter">`
+  // which carries a CSS `pageIn` animation with `transform: translateY(…)`.
+  // Any non-`none` transform on an ancestor makes that ancestor the new
+  // containing block for position:fixed descendants — so without the
+  // portal, the popover's `top:` coordinates were being interpreted
+  // relative to `.page-enter` instead of the viewport. When the user had
+  // scrolled the Home/Team/Leaders-Hub table down past the first row,
+  // `.page-enter` sat above the viewport (e.g. viewport-y -1232), and the
+  // popover rendered at viewport-y ≈ `.page-enter.top + r.bottom + 6`
+  // ≈ -833 — i.e. hidden above the viewport. Clicking the trigger again
+  // toggled `open` back to false, so to the user it looked like the
+  // picker "automatically closed" on click (Madeleine 2026-05-19, same
+  // symptom Mohamed/Madeleine reported 2026-05-15 which PR #652's
+  // position:fixed fix solved for `overflow:hidden` but NOT for the
+  // transform-creates-containing-block edge case).
+  //
+  // Portaling the popover under document.body escapes the transformed
+  // ancestor entirely so `top:` reads against the viewport again; the
+  // outside-click + scroll-recalc effects below keep working because
+  // refs propagate through portals.
+  useEffect(() => {
+    if (!open) { setPos(null); return; }
+    const update = () => {
+      const r = ref.current?.getBoundingClientRect();
+      if (!r) return;
+      const next = { top: Math.round(r.bottom + 6) };
+      if (align === 'right') {
+        next.right = Math.max(8, Math.round(window.innerWidth - r.right));
+      } else {
+        next.left = Math.round(r.left);
+      }
+      setPos(next);
+    };
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [open, align]);
+
+  // Anchor the popover to the trigger via position:fixed AND render it
+  // through a portal to document.body. The portal is the load-bearing
+  // half: every top-level view is wrapped in `<div className="page-enter">`
+  // which carries a CSS `pageIn` animation with `transform: translateY(…)`.
+  // Any non-`none` transform on an ancestor makes that ancestor the new
+  // containing block for position:fixed descendants — so without the
+  // portal, the popover's `top:` coordinates were being interpreted
+  // relative to `.page-enter` instead of the viewport. When the user had
+  // scrolled the Home/Team/Leaders-Hub table down past the first row,
+  // `.page-enter` sat above the viewport (e.g. viewport-y -1232), and the
+  // popover rendered at viewport-y ≈ `.page-enter.top + r.bottom + 6`
+  // ≈ -833 — i.e. hidden above the viewport. Clicking the trigger again
+  // toggled `open` back to false, so to the user it looked like the
+  // picker "automatically closed" on click (Madeleine 2026-05-19, same
+  // symptom Mohamed/Madeleine reported 2026-05-15 which PR #652's
+  // position:fixed fix solved for `overflow:hidden` but NOT for the
+  // transform-creates-containing-block edge case).
+  //
+  // Portaling the popover under document.body escapes the transformed
+  // ancestor entirely so `top:` reads against the viewport again; the
+  // outside-click + scroll-recalc effects below keep working because
+  // refs propagate through portals.
+  useEffect(() => {
+    if (!open) { setPos(null); return; }
+    const update = () => {
+      const r = ref.current?.getBoundingClientRect();
+      if (!r) return;
+      const next = { top: Math.round(r.bottom + 6) };
+      if (align === 'right') {
+        next.right = Math.max(8, Math.round(window.innerWidth - r.right));
+      } else {
+        next.left = Math.round(r.left);
+      }
+      setPos(next);
+    };
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [open, align]);
+
+  // Anchor the popover to the trigger via position:fixed AND render it
+  // through a portal to document.body. The portal is the load-bearing
+  // half: every top-level view is wrapped in `<div className="page-enter">`
+  // which carries a CSS `pageIn` animation with `transform: translateY(…)`.
+  // Any non-`none` transform on an ancestor makes that ancestor the new
+  // containing block for position:fixed descendants — so without the
+  // portal, the popover's `top:` coordinates were being interpreted
+  // relative to `.page-enter` instead of the viewport. When the user had
+  // scrolled the Home/Team/Leaders-Hub table down past the first row,
+  // `.page-enter` sat above the viewport (e.g. viewport-y -1232), and the
+  // popover rendered at viewport-y ≈ `.page-enter.top + r.bottom + 6`
+  // ≈ -833 — i.e. hidden above the viewport. Clicking the trigger again
+  // toggled `open` back to false, so to the user it looked like the
+  // picker "automatically closed" on click (Madeleine 2026-05-19, same
+  // symptom Mohamed/Madeleine reported 2026-05-15 which PR #652's
+  // position:fixed fix solved for `overflow:hidden` but NOT for the
+  // transform-creates-containing-block edge case).
+  //
+  // Portaling the popover under document.body escapes the transformed
+  // ancestor entirely so `top:` reads against the viewport again; the
+  // outside-click + scroll-recalc effects below keep working because
+  // refs propagate through portals.
+  useEffect(() => {
+    if (!open) { setPos(null); return; }
+    const update = () => {
+      const r = ref.current?.getBoundingClientRect();
+      if (!r) return;
+      const next = { top: Math.round(r.bottom + 6) };
+      if (align === 'right') {
+        next.right = Math.max(8, Math.round(window.innerWidth - r.right));
+      } else {
+        next.left = Math.round(r.left);
+      }
+      setPos(next);
+    };
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [open, align]);
+
+  // Anchor the popover to the trigger via position:fixed AND render it
+  // through a portal to document.body. The portal is the load-bearing
+  // half: every top-level view is wrapped in `<div className="page-enter">`
+  // which carries a CSS `pageIn` animation with `transform: translateY(…)`.
+  // Any non-`none` transform on an ancestor makes that ancestor the new
+  // containing block for position:fixed descendants — so without the
+  // portal, the popover's `top:` coordinates were being interpreted
+  // relative to `.page-enter` instead of the viewport. When the user had
+  // scrolled the Home/Team/Leaders-Hub table down past the first row,
+  // `.page-enter` sat above the viewport (e.g. viewport-y -1232), and the
+  // popover rendered at viewport-y ≈ `.page-enter.top + r.bottom + 6`
+  // ≈ -833 — i.e. hidden above the viewport. Clicking the trigger again
+  // toggled `open` back to false, so to the user it looked like the
+  // picker "automatically closed" on click (Madeleine 2026-05-19, same
+  // symptom Mohamed/Madeleine reported 2026-05-15 which PR #652's
+  // position:fixed fix solved for `overflow:hidden` but NOT for the
+  // transform-creates-containing-block edge case).
+  //
+  // Portaling the popover under document.body escapes the transformed
+  // ancestor entirely so `top:` reads against the viewport again; the
+  // outside-click + scroll-recalc effects below keep working because
+  // refs propagate through portals.
+  useEffect(() => {
+    if (!open) { setPos(null); return; }
+    const update = () => {
+      const r = ref.current?.getBoundingClientRect();
+      if (!r) return;
+      const next = { top: Math.round(r.bottom + 6) };
+      if (align === 'right') {
+        next.right = Math.max(8, Math.round(window.innerWidth - r.right));
+      } else {
+        next.left = Math.round(r.left);
+      }
+      setPos(next);
+    };
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [open, align]);
 
   // Anchor the popover to the trigger via position:fixed AND render it
   // through a portal to document.body. The portal is the load-bearing

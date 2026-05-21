@@ -138,7 +138,17 @@ export default function HrHubView({ user, onCreateHrHub }) {
   // the inline check on the RequestRow at line below; lifted so the
   // detail panel can read the same value.
   const isAdmin = isManager && (user?.role === 'admin' || (user?.access || '').toLowerCase().includes('admin'));
-  const [scope, setScope] = useState('mine');
+  // Default scope: managers (TL / RM / Admin / RM-on-call) land on "All
+  // Requests" because their primary triage need is the whole queue, not
+  // their personal submissions. Agents stay on "My Requests" so the
+  // landing page is their own pending work. Melissa Capicchiano 2026-05-20
+  // bug "MOC needs to see all requests instead of own requests/my
+  // requests": MOC is filled by a manager-level user, and the previous
+  // global `'mine'` default forced them to click into "All" on every
+  // visit. Note: `isManager` is captured at mount; the deep-link handler
+  // below (line ~365 `if (typeof d.scope === 'string') setScope(d.scope)`)
+  // still wins for tile-driven navigation.
+  const [scope, setScope] = useState(() => (isManager ? 'all' : 'mine'));
   const [flowFilter, setFlowFilter] = useState('all');
   // Default to 'new' so the landing page shows actionable work, not
   // historical resolved tasks. Olga Pastuszak 2026-05-14 feedback:
@@ -276,8 +286,8 @@ export default function HrHubView({ user, onCreateHrHub }) {
     // right end of the segmented control (matches Slack's "Mentions" tab
     // sitting after "Home" / "DMs").
     const scopes = isManager
-      ? ['mine', 'assigned', 'team', 'all', 'mentioned']
-      : ['mine', 'assigned', 'all', 'mentioned'];
+      ? ['all', 'team', 'assigned', 'mentioned', 'mine']
+      : ['all', 'assigned', 'mentioned', 'mine'];
     (async () => {
       const out = { mine: null, assigned: null, team: null, all: null, mentioned: null };
       for (const sc of scopes) {
@@ -457,9 +467,15 @@ export default function HrHubView({ user, onCreateHrHub }) {
           created it or whether it's on their team. Visible to all roles. */}
       <div style={scopeRow}>
         <div role="tablist" aria-label="Request scope" style={segmentedControl}>
+          {/* Segment order locked 2026-05-20 per Melissa's request: All
+              first (manager triage default), then Team, Assigned,
+              Mentioned, with My Requests last because the user's own
+              submissions are the least-frequent triage target. Same order
+              minus Team for non-managers. Default scope is computed at
+              mount above (managers → 'all', agents → 'mine'). */}
           {(isManager
-            ? [{ value: 'mine', label: 'My Requests' }, { value: 'team', label: 'Team Requests' }, { value: 'all', label: 'All Requests' }, { value: 'assigned', label: 'Assigned to me' }, { value: 'mentioned', label: 'Mentioned', icon: 'bi-at' }]
-            : [{ value: 'mine', label: 'My Requests' }, { value: 'all', label: 'All Requests' }, { value: 'assigned', label: 'Assigned to me' }, { value: 'mentioned', label: 'Mentioned', icon: 'bi-at' }]
+            ? [{ value: 'all', label: 'All Requests' }, { value: 'team', label: 'Team Requests' }, { value: 'assigned', label: 'Assigned to me' }, { value: 'mentioned', label: 'Mentioned', icon: 'bi-at' }, { value: 'mine', label: 'My Requests' }]
+            : [{ value: 'all', label: 'All Requests' }, { value: 'assigned', label: 'Assigned to me' }, { value: 'mentioned', label: 'Mentioned', icon: 'bi-at' }, { value: 'mine', label: 'My Requests' }]
           ).map(seg => {
             const active = scope === seg.value;
             const cnt = scopeCounts[seg.value];

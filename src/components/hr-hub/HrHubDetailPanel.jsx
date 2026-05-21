@@ -12,7 +12,7 @@
 // the panel is open. Server-persisted notifications still cover the
 // across-pages experience via the existing bell hook (link_view='hr_hub').
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   patchHrHubRequest,
   listHrHubComments,
@@ -112,6 +112,69 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
     const id = setInterval(tick, 5000);
     return () => { cancelled = true; clearInterval(id); };
   }, [requestId]);
+
+  // ── Slack-style auto-scroll for the comment thread ──────────────────────
+  // Olga Pastuszak 2026-05-20 bug "HR Hub - Sequence of comments not in
+  // order". The thread itself is and always was chronological ASC (server
+  // ORDER BY created_at ASC on both the detail endpoint and the polled
+  // /comments?since= endpoint; FE appends to the bottom on own-post + on
+  // poll), so technically "the newest is at the bottom" was already true.
+  // What Olga actually saw is a SCROLL-POSITION bug: the panel mounted at
+  // scrollTop=0 — i.e. showing the request title + status + fields + the
+  // OLDEST comments. The newest comments + composer sat below the fold
+  // until she manually scrolled. From her seat: her own freshly-posted
+  // reply was "at the bottom (visible near the composer)" while others'
+  // new replies appeared "stuck at the top of the view" — that "top" is
+  // the panel's default scroll position, which happens to land on the
+  // earliest comments in an ASC list.
+  //
+  // Fix: scroll to the latest comment on initial render, and Slack-style
+  // "follow mode" on subsequent additions (stay pinned to the bottom if
+  // already there; don't yank the user if they scrolled up to read
+  // history). Own posts always force-scroll because the user just
+  // submitted and expects to see their message — set
+  // forceScrollOnNextRenderRef BEFORE setComments so the layout effect
+  // catches it on the same render.
+  const scrollBodyRef = useRef(null);
+  const commentsEndRef = useRef(null);
+  const userIsAtBottomRef = useRef(true);
+  const initialScrollDoneRef = useRef(false);
+  const forceScrollOnNextRenderRef = useRef(false);
+
+  // Reset on request switch so panel-to-panel navigation rescroll to
+  // bottom each time. Without this, opening a second request after
+  // having scrolled up on the first would inherit
+  // initialScrollDone=true and miss the auto-scroll.
+  useEffect(() => {
+    initialScrollDoneRef.current = false;
+    userIsAtBottomRef.current = true;
+  }, [requestId]);
+
+  const handleCommentsScroll = useCallback(() => {
+    const el = scrollBodyRef.current;
+    if (!el) return;
+    // 80px tolerance — in-flight image loads / padding rounding
+    // shouldn't flip "follow mode" off when the user hasn't moved.
+    userIsAtBottomRef.current = (el.scrollHeight - el.scrollTop - el.clientHeight) < 80;
+  }, []);
+
+  useLayoutEffect(() => {
+    if (comments.length === 0) return;
+    const isInitial = !initialScrollDoneRef.current;
+    const forced = forceScrollOnNextRenderRef.current;
+    if (forced) forceScrollOnNextRenderRef.current = false;
+    const shouldScroll = isInitial || forced || userIsAtBottomRef.current;
+    if (!shouldScroll) return;
+    commentsEndRef.current?.scrollIntoView({
+      block: 'end',
+      behavior: isInitial ? 'auto' : 'smooth',
+    });
+    initialScrollDoneRef.current = true;
+    // We just snapped to the bottom — make sure the tracker reflects
+    // that even if onScroll hasn't fired yet (e.g. when the body wasn't
+    // scrollable enough to dispatch a real scroll event).
+    userIsAtBottomRef.current = true;
+  }, [comments]);
 
   const isFollowing = useMemo(() => {
     const e = (user?.email || '').toLowerCase();
@@ -245,7 +308,11 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
         </div>
 
         {/* Body */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '18px 22px 16px' }}>
+        <div
+          ref={scrollBodyRef}
+          onScroll={handleCommentsScroll}
+          style={{ flex: 1, overflowY: 'auto', padding: '18px 22px 16px' }}
+        >
           {loading && !request && (
             <div style={{ padding: 30, color: 'var(--text-muted)', fontSize: 13, textAlign: 'center' }}>Loading…</div>
           )}
@@ -388,6 +455,10 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
                       }}
                     />
                   ))}
+                  {/* Sentinel for Slack-style auto-scroll. Sits after the
+                      last comment so `scrollIntoView({ block: 'end' })`
+                      brings the latest comment + composer into view. */}
+                  <div ref={commentsEndRef} aria-hidden="true" />
                 </div>
               </div>
 
@@ -408,6 +479,12 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
                 // list and Activity log row count pick up the @-mention
                 // followers + comment_added log entry the server just
                 // wrote — without this they read stale until manual reload.
+                // Set the force-scroll flag BEFORE setComments so the
+                // layout effect catches it on the same render — the user
+                // just posted, they always want to see their message
+                // regardless of whether they had scrolled up to read
+                // older context.
+                forceScrollOnNextRenderRef.current = true;
                 setComments(prev => [...prev, created]);
                 // Server-side auto-advance: when a manager comments on a
                 // 'new' request, the route flips status to 'in_progress'
