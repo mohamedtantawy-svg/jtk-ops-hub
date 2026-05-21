@@ -855,7 +855,8 @@ CREATE INDEX IF NOT EXISTS idx_feedback_audience
 --     gaps, product feedback reviewed by leadership. Each escalation
 --     carries extra structured fields the ops_hub_feedback shape doesn't
 --     need (HRX function category, ideal solution, multi-country, linked
---     Zendesk / Jira URLs) — stored in `extras` JSONB so we don't pollute
+--     Zendesk / Jira URLs) — stored in an extras JSONB column so we
+--     don't pollute
 --     the column list with kind-specific nullable fields.
 --
 -- All existing rows default to 'ops_hub_feedback' (the original Feedback
