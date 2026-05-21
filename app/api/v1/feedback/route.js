@@ -14,6 +14,14 @@ import { query } from '../../../../src/lib/db';
 import { MEMBERS_BY_EMAIL } from '../../../../src/data/members';
 import { matchesAudience } from '../../../../src/data/comms';
 import { ensureRosterHydrated } from '../../../../src/lib/roster-server';
+import {
+  isValidEscalationFunctionKey,
+  isValidEscalationStatus,
+  escalationPriorityToDb,
+  normaliseEscalationCountries,
+  normaliseEscalationUrl,
+  ESCALATION_FIELD_LIMITS,
+} from '../../../../src/lib/escalation-zero-constants';
 
 const ALLOWED_SORT = new Set(['top', 'new', 'oldest', 'recently_updated']);
 
@@ -23,6 +31,38 @@ const ALLOWED_SORT = new Set(['top', 'new', 'oldest', 'recently_updated']);
 const ALLOWED_STATUS = new Set(['new', 'triaged', 'in_progress', 'paused', 'done', 'wont_do', 'duplicate']);
 const ALLOWED_PRIORITY = new Set(['low', 'medium', 'high', 'critical']);
 const ALLOWED_TYPE = new Set(['bug', 'improvement', 'question']);
+
+// Escalation Zero (2026-05-21) — second kind on the Feedback board.
+// `extras` JSONB carries the kind-specific structured fields (function,
+// countries, linked URLs, escalationStatus); the canonical priority is
+// mirrored onto the existing feedback_requests.priority column via the
+// escalationPriorityToDb() mapping so the existing index still works.
+const ALLOWED_KIND = new Set(['ops_hub_feedback', 'escalation_zero']);
+
+// Validate + normalise the escalation extras payload. Returns the cleaned
+// shape OR throws an Error with `.status=400` so the caller can surface a
+// helpful message. Pure function — no DB hits.
+function validateEscalationZeroExtras(rawExtras) {
+  const e = (rawExtras && typeof rawExtras === 'object') ? rawExtras : {};
+  const functionKey = typeof e.functionKey === 'string' && isValidEscalationFunctionKey(e.functionKey)
+    ? e.functionKey
+    : null;
+  if (!functionKey) {
+    throw Object.assign(new Error('HRX Function is required for Escalation Zero'), { status: 400 });
+  }
+  const countries = normaliseEscalationCountries(e.countries);
+  const linkedZdUrl = normaliseEscalationUrl(e.linkedZdUrl);
+  const linkedJiraUrl = normaliseEscalationUrl(e.linkedJiraUrl);
+  // priorityKey lives in extras so the FE can render the "Standard / Urgent"
+  // pill without the priority→dbValue translation drift. The top-level
+  // priority column is the database-canonical mirror.
+  const priorityKey = (e.priorityKey === 'urgent') ? 'urgent' : 'standard';
+  // escalationStatus mirrors the request's status into extras so cross-
+  // kind list filters (e.g. "All escalation_zero where status=on_hold")
+  // can use either column interchangeably. Init to 'new'.
+  const escalationStatus = isValidEscalationStatus(e.escalationStatus) ? e.escalationStatus : 'new';
+  return { functionKey, countries, linkedZdUrl, linkedJiraUrl, priorityKey, escalationStatus };
+}
 // Audience scope (Sarah Suge 2026-05-07 ask): submitters can restrict who
 // sees a feedback request. 'global' = everyone; the regional values
 // (emea / apac / americas / nam / latam) match member.team via
@@ -126,6 +166,10 @@ function rowToShape(row) {
     category: row.category,
     type: row.type,
     audience: row.audience || 'global',
+    // Escalation Zero partition (2026-05-21). Default 'ops_hub_feedback'
+    // for legacy rows that predate the column.
+    kind: row.kind || 'ops_hub_feedback',
+    extras: row.extras && typeof row.extras === 'object' ? row.extras : {},
     submitterId: row.submitter_id,
     submitterEmail: row.submitter_email,
     submitterName: row.submitter_name,
@@ -174,6 +218,11 @@ function rowToListShape(row) {
     category: row.category,
     type: row.type,
     audience: row.audience || 'global',
+    // Escalation Zero partition — needed in the list so the FE can
+    // render the kind-specific row template (function pill, country
+    // flags) without a second detail fetch per row.
+    kind: row.kind || 'ops_hub_feedback',
+    extras: row.extras && typeof row.extras === 'object' ? row.extras : {},
     submitterId: row.submitter_id,
     submitterEmail: row.submitter_email,
     submitterName: row.submitter_name,
@@ -201,6 +250,10 @@ export async function GET(req) {
   const status = url.searchParams.get('status') || null;
   const category = url.searchParams.get('category') || null;
   const type = url.searchParams.get('type') || null;
+  const kindRaw = url.searchParams.get('kind') || null;
+  // Reject unknown kinds so a typo'd query never silently leaks the
+  // wrong slice. Empty / missing returns all kinds (the union view).
+  const kind = kindRaw && ALLOWED_KIND.has(kindRaw) ? kindRaw : null;
   const sortRaw = url.searchParams.get('sort') || 'top';
   const sort = ALLOWED_SORT.has(sortRaw) ? sortRaw : 'top';
 
@@ -222,6 +275,7 @@ export async function GET(req) {
   if (status && ALLOWED_STATUS.has(status)) { params.push(status); filters.push(`r.status = $${params.length}`); }
   if (category) { params.push(category); filters.push(`r.category = $${params.length}`); }
   if (type && ALLOWED_TYPE.has(type)) { params.push(type); filters.push(`r.type = $${params.length}`); }
+  if (kind) { params.push(kind); filters.push(`r.kind = $${params.length}`); }
   const where = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
 
   // Explicit column projection — the previous `SELECT r.*` pulled the full
@@ -235,7 +289,8 @@ export async function GET(req) {
   // expand.
   const sql = `
     SELECT r.id, r.title, r.issue, r.proposed_resolution, r.status, r.priority,
-           r.category, r.type, r.audience, r.submitter_id, r.submitter_email,
+           r.category, r.type, r.audience, r.kind, r.extras,
+           r.submitter_id, r.submitter_email,
            r.submitter_name, r.assignee_id, r.resolution_note, r.duplicate_of,
            r.resolved_at, r.created_at, r.updated_at,
            a.email                     AS assignee_email,
@@ -296,12 +351,24 @@ export async function POST(req) {
   let body;
   try { body = await req.json(); } catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }); }
 
-  const title = clean(body.title, 200);
-  const issue = clean(body.issue, 8000);
+  // Kind partition (2026-05-21). Defaults to 'ops_hub_feedback' for the
+  // legacy Feedback board entry point. The Escalation Zero composer
+  // explicitly sets kind='escalation_zero' + supplies the structured
+  // extras payload validated below.
+  const kind = ALLOWED_KIND.has(body.kind) ? body.kind : 'ops_hub_feedback';
+
+  // Per-kind length limits — Escalation Zero allows much longer "ideal
+  // solution" text (10k chars per scoping doc) than the legacy 8k cap.
+  const titleMax = kind === 'escalation_zero' ? ESCALATION_FIELD_LIMITS.summaryMax : 200;
+  const issueMax = kind === 'escalation_zero' ? ESCALATION_FIELD_LIMITS.issueMax : 8000;
+  const resolutionMax = kind === 'escalation_zero' ? ESCALATION_FIELD_LIMITS.resolutionMax : 8000;
+
+  const title = clean(body.title, titleMax);
+  const issue = clean(body.issue, issueMax);
   if (!title || !issue) {
     return NextResponse.json({ error: 'title and issue are required' }, { status: 400 });
   }
-  const proposedResolution = clean(body.proposedResolution, 8000);
+  const proposedResolution = clean(body.proposedResolution, resolutionMax);
   const screenshot = typeof body.screenshot === 'string' ? body.screenshot : null;
   if (screenshot && screenshot.length > MAX_SCREENSHOT_BYTES) {
     return NextResponse.json(
@@ -312,8 +379,21 @@ export async function POST(req) {
   let attachments;
   try { attachments = sanitiseAttachments(body.attachments); }
   catch (e) { return NextResponse.json({ error: e.message }, { status: e.status || 400 }); }
+
+  // Validate + normalise the Escalation Zero extras payload. For
+  // ops_hub_feedback the extras are an empty object (any client-supplied
+  // extras are dropped — kind-specific fields shouldn't leak across).
+  let extras = {};
+  let priority = ALLOWED_PRIORITY.has(body.priority) ? body.priority : 'medium';
+  if (kind === 'escalation_zero') {
+    try { extras = validateEscalationZeroExtras(body.extras); }
+    catch (e) { return NextResponse.json({ error: e.message }, { status: e.status || 400 }); }
+    // Mirror the canonical priority into the existing column so the
+    // FE's priority filter + index keep working without a dual lookup.
+    priority = escalationPriorityToDb(extras.priorityKey);
+  }
+
   // Whitelist enums; default to safe values.
-  const priority = ALLOWED_PRIORITY.has(body.priority) ? body.priority : 'medium';
   const type = ALLOWED_TYPE.has(body.type) ? body.type : 'bug';
   const category = clean(body.category, 50);
   const audience = ALLOWED_AUDIENCE.has(String(body.audience || '').toLowerCase())
@@ -325,10 +405,14 @@ export async function POST(req) {
     const { rows } = await query(
       `INSERT INTO feedback_requests
          (title, issue, proposed_resolution, screenshot, attachments, priority, type, category, audience,
+          kind, extras,
           submitter_id, submitter_email, submitter_name)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9,
+               $10, $11::jsonb,
+               $12, $13, $14)
        RETURNING *`,
       [title, issue, proposedResolution, screenshot, JSON.stringify(attachments), priority, type, category, audience,
+       kind, JSON.stringify(extras),
        submitterId, user.email, user.name || null],
     );
     const created = rows[0];

@@ -20,7 +20,16 @@ import EmptyState from '../ui/EmptyState';
 import ImageLightbox from '../ui/ImageLightbox';
 import MentionTextarea from '../ui/MentionTextarea';
 import CreateFeedbackModal from '../modals/CreateFeedbackModal';
+import CreateEscalationZeroModal from '../modals/CreateEscalationZeroModal';
+import SubmitFeedbackPicker from '../modals/SubmitFeedbackPicker';
 import CommentReactions from '../ui/CommentReactions';
+import {
+  ESCALATION_FUNCTIONS,
+  ESCALATION_STATUSES,
+  escalationFunctionLabel,
+  escalationStatusMeta,
+  dbPriorityToEscalation,
+} from '../../lib/escalation-zero-constants';
 
 // ── Visual config ──────────────────────────────────────────────────────
 // Status labels were renamed 2026-05-11 to match the team's actual lifecycle:
@@ -155,7 +164,7 @@ function toMarkdown(item) {
   return lines.join('\n');
 }
 
-export default function FeedbackView({ user, addToast, openCompose, onComposeOpened }) {
+export default function FeedbackView({ user, addToast, openCompose, onComposeOpened, openPicker, onPickerOpened }) {
   const perms = useContext(PermissionsContext);
   const isPriv = perms?.isAdmin || perms?.dataScope === 'regional_tasks' || false;
 
@@ -169,6 +178,38 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('top');
   const [composeOpen, setComposeOpen] = useState(false);
+  // Escalation Zero composer + the picker that gates entry into either
+  // composer. 2026-05-21 split: New Request → picker (2 cards) → kind
+  // composer. Direct ?compose=escalation_zero deep-link is honoured below.
+  const [escalationComposeOpen, setEscalationComposeOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  // Top-level kind tab. Drives every list/board/counter filter below so the
+  // two workflows never bleed into each other visually. URL-mirrored so
+  // F5 + share-the-URL preserves the chosen surface. Default lands on
+  // Ops Hub Feedback (the historical Feedback board content).
+  const [kindFilter, setKindFilter] = useState('ops_hub_feedback'); // 'ops_hub_feedback' | 'escalation_zero'
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const v = params.get('kind');
+      if (v === 'escalation_zero' || v === 'ops_hub_feedback') {
+        setKindFilter(v);
+      }
+    } catch {}
+  }, []);
+  // Persist kind selection to the URL so a hard refresh restores the same
+  // tab. Mirrors how the deep-link `fb` param flows through.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const url = new URL(window.location.href);
+      if (kindFilter === 'escalation_zero') url.searchParams.set('kind', 'escalation_zero');
+      else url.searchParams.delete('kind');
+      window.history.replaceState({}, '', url.toString());
+    } catch {}
+  }, [kindFilter]);
   // Deep-link target (Carolina-style notification flow: click a feedback
   // notification → land on Feedback with the right row expanded). Read in
   // a useEffect-after-mount rather than the useState initialiser so SSR
@@ -206,6 +247,17 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openCompose]);
+
+  // 2026-05-21 — Submit Feedback picker entry point. App.jsx flips
+  // `openPicker` true when the TopNav Quick Create "Submit Feedback"
+  // option is chosen; we surface the 2-card picker on this tab.
+  useEffect(() => {
+    if (openPicker) {
+      setPickerOpen(true);
+      onPickerOpened?.();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openPicker]);
 
   // Bell deep-link handler. App.jsx fires `feedback:openDetail` with the
   // feedback id (and optionally a comment id) when the user clicks a
@@ -334,11 +386,25 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
     [expandedId],
   );
 
+  // 2026-05-21 — partition by kind FIRST so the Ops Hub Feedback tab
+  // never shows escalation_zero rows and vice versa. Items missing a
+  // `kind` field (legacy server payloads pre-#754) default to
+  // ops_hub_feedback to preserve the historical board content. Deep-link
+  // bypass: a `?fb=<id>` deep-link still surfaces the row even when its
+  // kind doesn't match the active tab — user explicitly asked for that id.
+  const kindedItems = useMemo(() => (
+    items.filter(item => {
+      if (matchesDeepLink(item)) return true;
+      const k = item.kind || 'ops_hub_feedback';
+      return k === kindFilter;
+    })
+  ), [items, kindFilter, matchesDeepLink]);
+
   const scopedItems = useMemo(() => (
     scopeFilter === 'mine'
-      ? items.filter(item => isMineFn(item) || matchesDeepLink(item))
-      : items
-  ), [items, scopeFilter, isMineFn, matchesDeepLink]);
+      ? kindedItems.filter(item => isMineFn(item) || matchesDeepLink(item))
+      : kindedItems
+  ), [kindedItems, scopeFilter, isMineFn, matchesDeepLink]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -439,35 +505,72 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
         @media (max-width: 760px)  { .feedback-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
         @media (max-width: 520px)  { .feedback-status-grid { grid-template-columns: 1fr; } }
       `}</style>
-      {/* Header */}
+      {/* Header — title + subtitle adapt to the active kind so the user
+          always knows which surface they're on. */}
       <div style={pageHead}>
         <div style={{ minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 40, height: 40, borderRadius: 12, background: '#f3eff8', color: '#7c3aed', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <i className="bi-megaphone-fill" style={{ fontSize: 19 }} />
+            <div style={{
+              width: 40, height: 40, borderRadius: 12,
+              background: kindFilter === 'escalation_zero' ? '#f3eff8' : '#fff8e6',
+              color: kindFilter === 'escalation_zero' ? '#7c3aed' : '#d97706',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <i className={kindFilter === 'escalation_zero' ? 'bi-stars' : 'bi-lightbulb-fill'} style={{ fontSize: 19 }} />
             </div>
             <div style={{ minWidth: 0 }}>
-              <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: 'var(--text)' }}>Feedback board</h1>
+              <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: 'var(--text)' }}>
+                {kindFilter === 'escalation_zero' ? 'Escalation Zero' : 'Ops Hub Feedback'}
+              </h1>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-                Bugs, ideas, and improvements for ops-hub. Vote on what matters most.
+                {kindFilter === 'escalation_zero'
+                  ? 'Strategic improvements, process gaps, product feedback. Reviewed by leadership.'
+                  : 'Bugs, ideas, and improvements for ops-hub. Vote on what matters most.'}
                 {lastSyncAt && <> · <span title={new Date(lastSyncAt).toISOString()}>synced {relTime(new Date(lastSyncAt).toISOString())}</span></>}
               </div>
             </div>
           </div>
         </div>
-        <button onClick={() => setComposeOpen(true)} style={primaryBtn}>
+        <button onClick={() => setPickerOpen(true)} style={primaryBtn}>
           <i className="bi-plus-circle-fill" style={{ fontSize: 13 }} /> New request
         </button>
       </div>
 
-      {/* Scope toggle (My requests | All requests) — primary nav. Count
-          ticked beside each segment so the user can pre-empt how busy
-          either view is before clicking. */}
+      {/* Kind tabs — Ops Hub Feedback vs Escalation Zero. Counts reflect
+          ALL items in each kind across every scope so the user can see how
+          full the other surface is before switching. 2026-05-21 split. */}
+      <div style={{ ...scopeRow, marginBottom: 12 }}>
+        <div role="tablist" aria-label="Feedback surface" style={segmentedControl}>
+          {[
+            { value: 'ops_hub_feedback', label: 'Ops Hub Feedback', icon: 'bi-lightbulb-fill', count: items.filter(it => (it.kind || 'ops_hub_feedback') === 'ops_hub_feedback').length },
+            { value: 'escalation_zero',  label: 'Escalation Zero',  icon: 'bi-stars',          count: items.filter(it => it.kind === 'escalation_zero').length },
+          ].map(seg => {
+            const active = kindFilter === seg.value;
+            return (
+              <button
+                key={seg.value}
+                role="tab"
+                aria-selected={active}
+                onClick={() => setKindFilter(seg.value)}
+                style={{ ...segmentBtn, ...(active ? segmentBtnActive : null) }}
+              >
+                <i className={seg.icon} style={{ fontSize: 13, marginRight: 6 }} />
+                {seg.label}
+                <span style={{ ...segmentCount, ...(active ? segmentCountActive : null) }}>{seg.count}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Scope toggle (My requests | All requests) — secondary nav within
+          the active kind. Count ticked beside each segment so the user can
+          pre-empt how busy either view is before clicking. */}
       <div style={scopeRow}>
         <div role="tablist" aria-label="Request scope" style={segmentedControl}>
           {[
-            { value: 'all',  label: 'All requests', count: items.length },
-            { value: 'mine', label: 'My requests',  count: items.filter(isMineFn).length },
+            { value: 'all',  label: 'All requests', count: kindedItems.length },
+            { value: 'mine', label: 'My requests',  count: kindedItems.filter(isMineFn).length },
           ].map(seg => {
             const active = scopeFilter === seg.value;
             return (
@@ -585,7 +688,7 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
             action={
               <button
                 onClick={items.length === 0
-                  ? () => setComposeOpen(true)
+                  ? () => setPickerOpen(true)
                   : () => { setStatusFilter('new'); setScopeFilter('all'); setTypeFilter(null); setSearch(''); }}
                 style={primaryBtn}
               >
@@ -627,13 +730,53 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
           currentUser={user}
         />
       )}
+
+      {/* 2026-05-21 — Submit Feedback picker (Ops Hub vs Escalation Zero).
+          Opens before the per-kind composer so the user explicitly picks
+          a flow each time. Direct deep-link from the TopNav also lands
+          here. */}
+      {pickerOpen && (
+        <SubmitFeedbackPicker
+          onClose={() => setPickerOpen(false)}
+          onPick={(kind) => {
+            setPickerOpen(false);
+            if (kind === 'escalation_zero') setEscalationComposeOpen(true);
+            else setComposeOpen(true);
+          }}
+        />
+      )}
+
+      {/* Escalation Zero composer — separate from CreateFeedbackModal
+          because the form shape is meaningfully different (function
+          dropdown, ideal solution at 10k chars, multi-country, linked
+          ZD / Jira URLs). Shares the same submit pipeline so the row
+          appears on the board the moment the POST resolves. */}
+      {escalationComposeOpen && (
+        <CreateEscalationZeroModal
+          onClose={() => setEscalationComposeOpen(false)}
+          onSubmit={handleSubmit}
+          currentUser={user}
+        />
+      )}
     </div>
   );
 }
 
 // ── Row ─────────────────────────────────────────────────────────────────
 function FeedbackRow({ item, expanded, onToggle, onVote, onStatusChange, onPriorityChange, onAssigneeChange, onDelete, onCopy, isPriv, isAdmin, user, fetchComments, submitComment, addToast }) {
-  const status = STATUS_CONFIG[item.status] || STATUS_CONFIG.new;
+  // For escalation_zero rows, the canonical workflow has 6 statuses
+  // (New, In Review, HRX Execute, On Hold, Resolved, Closed) stored on
+  // extras.escalationStatus. The DB column carries the mirrored
+  // 5-bucket value (new/in_progress/paused/done/wont_do) so the
+  // existing index + filter chips still work — we just relabel the pill
+  // to the canonical escalation status when present. Falls back to the
+  // standard STATUS_CONFIG entry when no extras hint exists (legacy
+  // rows, or ops_hub_feedback kind).
+  const isEscalation = item.kind === 'escalation_zero';
+  const escStatus = isEscalation ? escalationStatusMeta(item.extras?.escalationStatus || 'new') : null;
+  const status = (isEscalation && escStatus)
+    ? { label: escStatus.label, color: escStatus.color, bg: escStatus.bg, icon: escStatus.isPaused ? 'bi-pause-circle-fill' : 'bi-circle-fill', dot: escStatus.color }
+    : (STATUS_CONFIG[item.status] || STATUS_CONFIG.new);
   const priority = PRIORITY_CONFIG[item.priority] || PRIORITY_CONFIG.medium;
   const type = TYPE_CONFIG[item.type] || TYPE_CONFIG.bug;
   const submitter = item.submitterEmail ? MEMBERS_BY_EMAIL[item.submitterEmail.toLowerCase()] : null;
@@ -741,6 +884,29 @@ function FeedbackRow({ item, expanded, onToggle, onVote, onStatusChange, onPrior
             </span>
             {item.category && (
               <span style={mutedPill}>{item.category}</span>
+            )}
+            {/* Escalation Zero badges (2026-05-21) — function pill + a
+                country chip set so the row is scannable at a glance. The
+                priority pill above already reflects the Standard/Urgent
+                choice via the mirrored priority column. */}
+            {item.kind === 'escalation_zero' && item.extras?.functionKey && (
+              <span
+                style={{ ...mutedPill, gap: 4, background: '#f3eff8', color: '#7c3aed', borderColor: '#c4b1f9' }}
+                title={`HRX Function: ${escalationFunctionLabel(item.extras.functionKey)}`}
+              >
+                <i className="bi-tag-fill" style={{ fontSize: 10 }} />
+                {escalationFunctionLabel(item.extras.functionKey)}
+              </span>
+            )}
+            {item.kind === 'escalation_zero' && Array.isArray(item.extras?.countries) && item.extras.countries.length > 0 && (
+              <span
+                style={{ ...mutedPill, gap: 4 }}
+                title={`Countries: ${item.extras.countries.join(', ')}`}
+              >
+                <i className="bi-globe2" style={{ fontSize: 10 }} />
+                {item.extras.countries.slice(0, 3).join(' · ')}
+                {item.extras.countries.length > 3 && ` +${item.extras.countries.length - 3}`}
+              </span>
             )}
             {item.audience && item.audience !== 'global' && (
               <span
@@ -1112,8 +1278,48 @@ function ExpandedDetail({ item, isPriv, onStatusChange, onPriorityChange, onAssi
 
         {item.proposedResolution && (
           <>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 14, marginBottom: 6 }}>Proposed resolution</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 14, marginBottom: 6 }}>
+              {item.kind === 'escalation_zero' ? 'Ideal solution' : 'Proposed resolution'}
+            </div>
             <div style={prose}>{item.proposedResolution}</div>
+          </>
+        )}
+
+        {/* Escalation Zero linked items — clickable Zendesk + Jira links
+            beneath the long-form fields so the reviewer can hop straight
+            to the source ticket. Each URL was server-validated to be
+            http(s)-only so rendering as <a target="_blank"> is safe. */}
+        {item.kind === 'escalation_zero' && (item.extras?.linkedZdUrl || item.extras?.linkedJiraUrl) && (
+          <>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 14, marginBottom: 6 }}>
+              Linked items
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {item.extras?.linkedZdUrl && (
+                <a
+                  href={item.extras.linkedZdUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 8, background: 'var(--surface-2)', color: 'var(--text)', fontSize: 12.5, textDecoration: 'none', border: '1px solid var(--border-light)', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                >
+                  <i className="bi-life-preserver" style={{ fontSize: 13, color: '#0369a1', flexShrink: 0 }} />
+                  <span style={{ fontWeight: 600, flexShrink: 0 }}>Zendesk:</span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.extras.linkedZdUrl}</span>
+                </a>
+              )}
+              {item.extras?.linkedJiraUrl && (
+                <a
+                  href={item.extras.linkedJiraUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 8, background: 'var(--surface-2)', color: 'var(--text)', fontSize: 12.5, textDecoration: 'none', border: '1px solid var(--border-light)', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                >
+                  <i className="bi-kanban" style={{ fontSize: 13, color: '#7c3aed', flexShrink: 0 }} />
+                  <span style={{ fontWeight: 600, flexShrink: 0 }}>Jira / Workbench:</span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.extras.linkedJiraUrl}</span>
+                </a>
+              )}
+            </div>
           </>
         )}
 

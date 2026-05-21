@@ -922,6 +922,10 @@ const App=()=>{
 
   const [announceCompose,setAnnounceCompose]=useState(false);
   const [feedbackCompose,setFeedbackCompose]=useState(false);
+  // 2026-05-21 Submit Feedback picker — opened via the TopNav Quick
+  // Create "Submit Feedback" entry. FeedbackView consumes this prop and
+  // surfaces the 2-card picker (Ops Hub Feedback vs Escalation Zero).
+  const [feedbackPickerOpen,setFeedbackPickerOpen]=useState(false);
   const [toasts,setToasts]=useState([]);
   const [showSearch,setShowSearch]=useState(false);
   // SSR-safe default: don't render any onboarding modal during the SSR
@@ -2001,6 +2005,7 @@ const App=()=>{
         onLoginAsAdmin={handleLoginAsAdmin}
         onCreateAnnouncement={()=>{setView('announcements');setAnnounceCompose(true);}}
         onCreateFeedback={()=>{setView('feedback');setFeedbackCompose(true);}}
+        onSubmitFeedback={()=>{setView('feedback');setFeedbackPickerOpen(true);}}
         onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}
         onCreateLeaderAlert={()=>setLeaderAlertCreate(true)}
         onCreateUrgentAssist={()=>setUrgentAssistCreate(true)}
@@ -2042,7 +2047,7 @@ const App=()=>{
           {view==='settings'      &&perms?.canView('settings')!==false     &&<div className="page-enter"><SettingsView settings={settings} setSettings={setSettings} user={user} addToast={addToast} tasks={tasks} setTasks={setTasks} subFilter={subFilter} accessTypes={accessTypes} setAccessTypes={setAccessTypes} userAccessMap={userAccessMap} setUserAccessMap={setUserAccessMap} perms={perms}/></div>}
           {view==='slack'         &&perms?.canView('slack')!==false        &&<div className="page-enter"><Slack tasks={tasks.filter(t=>t.source==='slack')} setTasks={setTasks} onEscalMgr={()=>{}} addToast={addToast} user={effectiveUser}/></div>}
           {view==='alerts'        &&perms?.canView('alerts')!==false       &&<div className="page-enter"><Alerts tasks={perms?.scopeTasks?.(tasksWithSlaExt,MEMBERS)||tasksWithSlaExt} setTasks={setTasks}/></div>}
-          {view==='feedback'      &&perms?.canView('feedback')!==false     &&<div className="page-enter"><FeedbackView user={effectiveUser} addToast={addToast} openCompose={feedbackCompose} onComposeOpened={()=>setFeedbackCompose(false)}/></div>}
+          {view==='feedback'      &&perms?.canView('feedback')!==false     &&<div className="page-enter"><FeedbackView user={effectiveUser} addToast={addToast} openCompose={feedbackCompose} onComposeOpened={()=>setFeedbackCompose(false)} openPicker={feedbackPickerOpen} onPickerOpened={()=>setFeedbackPickerOpen(false)}/></div>}
           {view==='hr-hub'        &&perms?.canView('hr-hub')!==false       &&<div className="page-enter"><HrHubView user={effectiveUser} onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}/></div>}
           {view==='org'           &&perms?.canView('org')!==false          &&<div className="page-enter"><OrgView user={effectiveUser} realUser={user} onImpersonate={handleImpersonate}/></div>}
           {view==='notifications' &&<div className="page-enter"><NotificationsView notifs={mergedNotifs} unreadCount={mergedNotifs.filter(n=>!n.read).length} markAllRead={markAllRead} markRead={(serverId)=>serverNotifs.markRead(serverId)} markUnread={(serverId)=>serverNotifs.markUnread(serverId)} onNotifClick={handleNotifClick}/></div>}

@@ -14,11 +14,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getHrHubSettings, putHrHubSettings } from '../../../src/services/hrHubApi';
 
+// 2026-05-21 split: Escalation Zero + Ops Hub Feedback moved out of HR
+// Hub to the Feedback board. The settings panel only manages the
+// surviving HR-ops flows now. The retired flows' settings rows in
+// app_settings stay intact (harmless; would be needed if the flows are
+// ever brought back) but the Settings UI no longer offers tabs for them.
 const FLOWS = [
   { id: 'hr_request',      label: 'HR Request' },
   { id: 'hr_reporting',    label: 'HR Reporting' },
-  { id: 'escalation_zero', label: 'Escalation Zero' },
-  { id: 'feedback',        label: 'Ops Hub Feedback' },
 ];
 
 export default function HrHubSettingsPanel({ onClose }) {

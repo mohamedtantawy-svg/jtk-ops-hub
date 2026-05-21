@@ -846,6 +846,46 @@ ALTER TABLE feedback_requests
 CREATE INDEX IF NOT EXISTS idx_feedback_audience
   ON feedback_requests(audience) WHERE audience <> 'global';
 
+-- ── Escalation Zero kind partition (2026-05-21) ─────────────────────────────
+-- Feedback board now hosts two distinct workflows:
+--   • ops_hub_feedback — original feature: bug/improvement on Ops Hub itself.
+--   • escalation_zero  — the migrated HRX Escalation Zero workflow (was a
+--     HR Hub flow before this PR; the Slack #hrx-escalations-zero channel
+--     is the historical primary intake). Strategic improvements, process
+--     gaps, product feedback reviewed by leadership. Each escalation
+--     carries extra structured fields the ops_hub_feedback shape doesn't
+--     need (HRX function category, ideal solution, multi-country, linked
+--     Zendesk / Jira URLs) — stored in an extras JSONB column so we
+--     don't pollute
+--     the column list with kind-specific nullable fields.
+--
+-- All existing rows default to 'ops_hub_feedback' (the original Feedback
+-- board content). New escalation_zero rows are created via the new picker
+-- modal; the team starts from zero — no historical migration from the
+-- HR Hub escalation_zero flow per Mohamed's spec.
+ALTER TABLE feedback_requests
+  ADD COLUMN IF NOT EXISTS kind VARCHAR(32) NOT NULL DEFAULT 'ops_hub_feedback',
+  ADD COLUMN IF NOT EXISTS extras JSONB NOT NULL DEFAULT '{}'::jsonb;
+-- CHECK constraint added as a separate idempotent DO block (ALTER TABLE
+-- ADD CONSTRAINT IF NOT EXISTS isn't supported pre-PG 9.6, but a catalog
+-- lookup is portable).
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'feedback_requests_kind_check'
+       AND conrelid = 'feedback_requests'::regclass
+  ) THEN
+    ALTER TABLE feedback_requests
+      ADD CONSTRAINT feedback_requests_kind_check
+      CHECK (kind IN ('ops_hub_feedback','escalation_zero'));
+  END IF;
+END $$;
+-- Partial index — most reads filter by kind. Without this every list query
+-- would table-scan ~hundreds of feedback rows to surface ~10 escalations.
+CREATE INDEX IF NOT EXISTS idx_feedback_kind
+  ON feedback_requests(kind, created_at DESC);
+
 -- ── Country-ownership junction (2026-04-30) ─────────────────────────────────
 -- Replaces the static src/data/countryOwners.js map with a DB-backed source
 -- of truth. Each row says "this email owns this country" — the Queue's

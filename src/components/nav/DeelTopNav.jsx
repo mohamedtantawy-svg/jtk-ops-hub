@@ -68,11 +68,15 @@ const MORE_TABS = [];
  * truthy value for managerial views (e.g. due to a stale memoised hook
  * snapshot), agents never see the action. Defense-in-depth complement to
  * the existing viewReq check (audit F9). */
+// 2026-05-21 split: "Ops Hub Feedback" renamed to "Submit Feedback" and
+// rewired to open the 2-card picker (Ops Hub Feedback vs Escalation Zero).
+// The HR Hub Request description no longer mentions Escalation Zero or
+// Feedback — those moved to the Feedback board.
 const CREATE_ACTIONS = [
-  { icon: 'bi-broadcast-pin',     label: 'HR Hub Request',    action: 'hr-hub',        desc: 'HR Request, Report, Escalation Zero, or Feedback' },
+  { icon: 'bi-broadcast-pin',     label: 'HR Hub Request',    action: 'hr-hub',        desc: 'HR Request or HR Reporting' },
   { icon: 'bi-broadcast',         label: 'New Leaders Alert', action: 'leader-alerts', desc: 'Quick alert visible to every manager', viewReq: 'leader-alerts', managerialOnly: true },
   { icon: 'bi-exclamation-octagon', label: 'New Urgent Assist', action: 'urgent-assist', desc: 'Log a manual urgent-assist request' },
-  { icon: 'bi-lightbulb',         label: 'Ops Hub Feedback',  action: 'feedback',      desc: 'Report a bug or improvement' },
+  { icon: 'bi-lightbulb',         label: 'Submit Feedback',   action: 'submit-feedback', desc: 'Ops Hub Feedback or Escalation Zero' },
   { icon: 'bi-megaphone',         label: 'New Announcement',  action: 'announcement',  desc: 'Post to the team' },
   { icon: 'bi-tags',               label: 'New Tag Group',     action: 'mention-group', desc: 'Slack-style @-handle that pings a group at once' },
 ];
@@ -89,7 +93,7 @@ const DeelTopNav = ({
   notifSound,
   onLogout,
   onLoginAsAdmin,
-  onCreateAnnouncement, onCreateFeedback,
+  onCreateAnnouncement, onCreateFeedback, onSubmitFeedback,
   onCreateHrHub,
   onCreateLeaderAlert,
   onCreateUrgentAssist,
@@ -149,6 +153,12 @@ const DeelTopNav = ({
   const handleCreate = (action) => {
     setShowCreate(false);
     if (action === 'announcement') { onCreateAnnouncement?.(); setView('announcements'); }
+    // 2026-05-21 split: "Submit Feedback" replaces the old "feedback" entry
+    // and opens the picker (Ops Hub Feedback vs Escalation Zero) instead
+    // of jumping straight into the Feedback composer. The legacy `feedback`
+    // action stays as a fallback so any stale caller still works (lands
+    // on the Feedback view with no preselected composer).
+    else if (action === 'submit-feedback') { setView('feedback'); onSubmitFeedback?.(); }
     else if (action === 'feedback')   { setView('feedback'); onCreateFeedback?.(); }
     else if (action === 'hr-hub')     { onCreateHrHub?.(); }
     else if (action === 'leader-alerts') { onCreateLeaderAlert?.(); }
