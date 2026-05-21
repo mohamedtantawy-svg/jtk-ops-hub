@@ -1180,7 +1180,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
 
   // ── Card section title ──────────────────────────────────────────────
   const CardTitle=({children})=>(
-    <div style={{fontSize:13,fontWeight:600,color:'#9e9e9e',textTransform:'none',letterSpacing:'normal',marginBottom:14}}>{children}</div>
+    <div style={{fontSize:13,fontWeight:600,color:'var(--text-secondary)',textTransform:'none',letterSpacing:'normal',marginBottom:14}}>{children}</div>
   );
 
   // ── KPI mini card for hero ──────────────────────────────────────────
@@ -1685,12 +1685,12 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 {l:'Open',v:orgOpen.length,c:'var(--g)',iconEl:<i className="bi bi-circle" style={{fontSize:12}}/>},
                 {l:'New',v:orgNew,c:'#1f74b3',iconEl:<i className="bi bi-dot" style={{fontSize:16}}/>},
                 {l:'In Progress',v:orgIP,c:'#ed8d00',iconEl:<i className="bi bi-arrow-repeat" style={{fontSize:12}}/>},
-                {l:'Pause',v:orgWait,c:'#9e9e9e',iconEl:<i className="bi bi-pause-circle" style={{fontSize:12}}/>},
+                {l:'Pause',v:orgWait,c:'var(--text-muted)',iconEl:<i className="bi bi-pause-circle" style={{fontSize:12}}/>},
                 {l:'Resolved',v:orgResolved.length,c:'#29811e',iconEl:<i className="bi bi-check-circle-fill" style={{fontSize:12}}/>},
               ].map(s=>(
-                <div key={s.l} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:'1px solid #f5f5f5'}}>
+                <div key={s.l} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderBottom:'1px solid var(--border-light)'}}>
                   <span style={{color:s.c,width:16,textAlign:'center',display:'inline-flex',alignItems:'center',justifyContent:'center'}}>{s.iconEl}</span>
-                  <span style={{fontSize:13,color:'#1b1b1b',flex:1,fontWeight:500}}>{s.l}</span>
+                  <span style={{fontSize:13,color:'var(--text)',flex:1,fontWeight:500}}>{s.l}</span>
                   <span style={{fontSize:24,fontWeight:700,color:s.c,fontVariantNumeric:'tabular-nums'}}>{s.v}</span>
                 </div>
               ))}
@@ -1709,16 +1709,16 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                     <div onClick={()=>setExpandedSource(isExpanded?null:src)}
                       style={{display:'flex',alignItems:'center',gap:10,padding:'8px 4px',cursor:'pointer',borderRadius:8,transition:'background .15s'}}
                       onMouseEnter={e=>e.currentTarget.style.background='#fafaf9'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                      <div style={{width:26,height:26,borderRadius:8,background:tl?.bg||'#f7f5f2',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                      <div style={{width:26,height:26,borderRadius:8,background:tl?.bg||'var(--surface-3)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
                         <i className={tl?.icon||'bi-circle'} style={{fontSize:11,color:srcBarColor}}></i>
                       </div>
-                      <span style={{fontSize:13,color:'#1b1b1b',flex:1,fontWeight:500}}>{tl?.label||src}</span>
+                      <span style={{fontSize:13,color:'var(--text)',flex:1,fontWeight:500}}>{tl?.label||src}</span>
                       <span style={{fontSize:20,fontWeight:700,color:'#1f74b3',fontVariantNumeric:'tabular-nums',cursor:'pointer'}}>{cnt}</span>
-                      <div style={{width:48,height:6,borderRadius:3,background:'#f0f0f0',marginLeft:4}}>
+                      <div style={{width:48,height:6,borderRadius:3,background:'var(--surface-3)',marginLeft:4}}>
                         <div style={{width:`${pct}%`,height:6,borderRadius:3,background:srcBarColor,transition:'width .3s'}}></div>
                       </div>
-                      <span style={{fontSize:10,color:'#9e9e9e',width:30,textAlign:'right',fontVariantNumeric:'tabular-nums'}}>{pct}%</span>
-                      <i className={isExpanded?'bi-chevron-up':'bi-chevron-down'} style={{fontSize:9,color:'#9e9e9e',marginLeft:2}}></i>
+                      <span style={{fontSize:10,color:'var(--text-muted)',width:30,textAlign:'right',fontVariantNumeric:'tabular-nums'}}>{pct}%</span>
+                      <i className={isExpanded?'bi-chevron-up':'bi-chevron-down'} style={{fontSize:9,color:'var(--text-muted)',marginLeft:2}}></i>
                     </div>
                     {isExpanded&&<MiniTicketList items={srcTasks} emptyMsg="No tickets from this source"/>}
                   </div>
@@ -1732,8 +1732,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 <div style={{position:'relative',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
                   <Ring pct={orgSlaComp} color={orgSlaComp>=90?'#29811e':orgSlaComp>=70?'#ed8d00':'#d42d35'} size={56} stroke={4.5}/>
                   <div style={{position:'absolute',textAlign:'center'}}>
-                    <div style={{fontSize:15,fontWeight:700,color:'#1b1b1b',fontVariantNumeric:'tabular-nums'}}>{orgSlaComp}%</div>
-                    <div style={{fontSize:7,color:'#9e9e9e',fontWeight:600}}>SLA</div>
+                    <div style={{fontSize:15,fontWeight:700,color:'var(--text)',fontVariantNumeric:'tabular-nums'}}>{orgSlaComp}%</div>
+                    <div style={{fontSize:7,color:'var(--text-muted)',fontWeight:600}}>SLA</div>
                   </div>
                 </div>
                 <div style={{flex:1}}>
@@ -1747,10 +1747,10 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                       <div key={row.key}>
                         <div onClick={()=>setExpandedSla(isExp?null:row.key)}
                           style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4,padding:'4px 6px',borderRadius:8,cursor:'pointer',transition:'background .15s'}}
-                          onMouseEnter={e=>e.currentTarget.style.background='#fafaf9'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
-                          <span style={{fontSize:12,color:'#616161',display:'flex',alignItems:'center',gap:5}}>
+                          onMouseEnter={e=>e.currentTarget.style.background='var(--surface-2)'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                          <span style={{fontSize:12,color:'var(--text-secondary)',display:'flex',alignItems:'center',gap:5}}>
                             {row.label}
-                            <i className={isExp?'bi-chevron-up':'bi-chevron-down'} style={{fontSize:8,color:'#9e9e9e'}}></i>
+                            <i className={isExp?'bi-chevron-up':'bi-chevron-down'} style={{fontSize:8,color:'var(--text-muted)'}}></i>
                           </span>
                           <span style={{fontSize:18,fontWeight:700,color:row.color,fontVariantNumeric:'tabular-nums',cursor:'pointer'}}>{row.count}</span>
                         </div>
@@ -1760,8 +1760,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   })}
                 </div>
               </div>
-              <div style={{borderTop:'1px solid #f0f0f0',paddingTop:14}}>
-                <div style={{fontSize:13,fontWeight:600,color:'#9e9e9e',textTransform:'none',letterSpacing:'normal',marginBottom:8}}>Overall Capacity</div>
+              <div style={{borderTop:'1px solid var(--border-light)',paddingTop:14}}>
+                <div style={{fontSize:13,fontWeight:600,color:'var(--text-secondary)',textTransform:'none',letterSpacing:'normal',marginBottom:8}}>Overall Capacity</div>
                 <div style={{display:'flex',gap:8}}>
                   {[
                     { lv: 'Low',  clr: '#1f74b3', desc: `< ${capLowMax}` },
@@ -1949,20 +1949,20 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                     const agentRow = (m, key, depth) => {
                       const live = liveOf(m.email);
                       return (
-                      <tr key={key} style={{borderBottom:'1px solid #f0f0f0',transition:'background .15s'}}
-                        onMouseEnter={e=>e.currentTarget.style.background='#fafaf9'}
+                      <tr key={key} style={{borderBottom:'1px solid var(--border-light)',transition:'background .15s'}}
+                        onMouseEnter={e=>e.currentTarget.style.background='var(--surface-2)'}
                         onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
                         <td style={{padding:'14px 24px',paddingLeft: indentFor(depth)}}>
                           <div style={{display:'flex',alignItems:'center',gap:10}}>
                             <Avatar name={m.name} size={32}/>
                             <div style={{minWidth:0}}>
-                              <div style={{fontWeight:600,color:'#1b1b1b',display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                              <div style={{fontWeight:600,color:'var(--text)',display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
                                 {m.name}
                                 <AccessBadge access={live?.access || m.access || 'agent'} />
                                 <LastSeenPill iso={live?.lastSeenAt} loading={!!rosterLoading} />
                                 <OOOBadge events={oooEventsByEmail.get((m.email || '').toLowerCase())} />
                               </div>
-                              <div style={{fontSize:11,color:'#9e9e9e'}}>{FLAGS[m.country]} {m.team}</div>
+                              <div style={{fontSize:11,color:'var(--text-muted)'}}>{FLAGS[m.country]} {m.team}</div>
                             </div>
                           </div>
                         </td>
@@ -1973,7 +1973,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                             canEdit={canEditMemberCountries(m.email)}
                           />
                         </td>
-                        <td style={{padding:'14px 16px',textAlign:'center',fontWeight:700,fontSize:16,color:'#1b1b1b'}}>{m.tc}</td>
+                        <td style={{padding:'14px 16px',textAlign:'center',fontWeight:700,fontSize:16,color:'var(--text)'}}>{m.tc}</td>
                         <td style={{padding:'14px 16px',textAlign:'center',fontWeight:600,color:'#1f74b3'}}>{m.open}</td>
                         <td style={{padding:'14px 16px',textAlign:'center',fontWeight:600,color:'#ed8d00'}}>{m.paused}</td>
                         <td style={{padding:'14px 16px',textAlign:'center',fontWeight:600,color:'#7c3aed'}}>{m.escalated}</td>
@@ -2121,8 +2121,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                     // section when the user has agents reporting to them
                     // without an intermediate TL.
                     const sectionLabel = (label) => (
-                      <tr key={`label-${label}`} style={{background:'#fafaf9',borderTop:'2px solid #e8e8e8'}}>
-                        <td colSpan={10} style={{padding:'10px 24px',fontSize:11,fontWeight:700,color:'#9e9e9e',letterSpacing:'0.04em',textTransform:'uppercase'}}>{label}</td>
+                      <tr key={`label-${label}`} style={{background:'var(--surface-2)',borderTop:'2px solid var(--border)'}}>
+                        <td colSpan={10} style={{padding:'10px 24px',fontSize:11,fontWeight:700,color:'var(--text-muted)',letterSpacing:'0.04em',textTransform:'uppercase'}}>{label}</td>
                       </tr>
                     );
 
@@ -2167,7 +2167,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 </tbody>
               </table>
             </div>
-            <div style={{padding:'10px 24px 14px',fontSize:11,color:'#9e9e9e',borderTop:'1px solid #f0f0f0',background:'#fafaf9'}}>
+            <div style={{padding:'10px 24px 14px',fontSize:11,color:'var(--text-muted)',borderTop:'1px solid var(--border-light)',background:'var(--surface-2)'}}>
               <i className="bi-info-circle" style={{marginRight:6}}></i>
               Totals aggregate Zendesk, Jira, Workbench, Onboarding, Offboarding. Amendments &amp; Redlines live in a shared pool (no server-side assignee) so they roll into team capacity but not per-agent counts. Baseline 30 tasks &#8209; &lt;20 Low &middot; 20&#8209;50 Medium &middot; &gt;50 High.
             </div>
