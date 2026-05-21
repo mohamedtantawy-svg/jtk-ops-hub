@@ -2100,6 +2100,23 @@ ALTER TABLE urgent_assist_schedule
 CREATE UNIQUE INDEX IF NOT EXISTS uniq_urgent_assist_schedule_date_dept
   ON urgent_assist_schedule(schedule_date, org_node_id)
   WHERE org_node_id IS NOT NULL;
+
+-- ── Zendesk recently-solved cache (2026-05-21) ─────────────────────────────
+-- Persists app/api/v1/queue/route.js _zdRecentlySolvedCache across pod
+-- restarts. Without this, every deploy wipes the in-memory Map and the
+-- Briefing "Resolved" KPI drops massively for Zendesk until 24h of new
+-- diffs re-accumulate. Each row holds the full Zendesk ticket payload as
+-- it appeared at the moment the ticket dropped from actionable, plus the
+-- solved_at timestamp the diff stamped. 24h TTL is enforced in the queue
+-- route itself (same code path that ages out the in-memory Map also
+-- DELETEs from this table).
+CREATE TABLE IF NOT EXISTS zd_recently_solved (
+  ticket_id BIGINT PRIMARY KEY,
+  row_json JSONB NOT NULL,
+  solved_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_zd_recently_solved_solved_at
+  ON zd_recently_solved(solved_at);
 `;
 
 export async function runMigrations() {

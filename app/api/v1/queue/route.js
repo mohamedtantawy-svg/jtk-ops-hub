@@ -475,7 +475,7 @@ async function batchFetchUsers(userIds, fetchOpts = {}) {
   return userMap;
 }
 
-// ── In-memory diff-based "recently solved" tracking ─────────────────────────
+// ── Diff-based "recently solved" tracking ──────────────────────────────────
 // 2026-05-19 — replaces the expensive `status:solved updated<24hours` Zendesk
 // fetch (which fan-out + maxPages combined could exceed the FE's 90s timeout
 // and return 503). Insight from Mohamed: a ticket that was in our actionable
@@ -485,37 +485,126 @@ async function batchFetchUsers(userIds, fetchOpts = {}) {
 // fetch, diff against the next sync, and stamp dropouts as solved with the
 // sync timestamp. 24h aging keeps the cache bounded.
 //
-// In-memory + per-pod. Multi-pod inconsistency is acceptable — within a
-// single pod the diff is internally consistent, and the 2-min response
-// cache means a single user's view is stable. Survives across requests but
-// not across pod restarts; after a restart the recently-solved list rebuilds
-// over the next sync cycle.
-const _zdLastActionableSnapshot = new Map(); // id → raw Zendesk row
-const _zdRecentlySolvedCache    = new Map(); // id → { row, solvedAt (ms) }
+// 2026-05-21 — backing store added (`zd_recently_solved` Postgres table) so
+// the cache survives pod restarts. Previously it was per-pod only; every
+// deploy wiped the Map and the Briefing "Resolved" KPI plummeted (Abe + Mohamed
+// 2026-05-21). The snapshot itself is still pod-local — after a restart the
+// first sync can't detect dropouts that happened DURING the deploy gap, but
+// the persisted recently-solved entries are restored on hydrate so the 24h
+// window of historical resolutions is preserved end-to-end.
+const _zdLastActionableSnapshot = new Map(); // id → raw Zendesk row (pod-local)
+const _zdRecentlySolvedCache    = new Map(); // id → { row, solvedAt (ms) } (persisted)
 const ZD_RECENTLY_SOLVED_TTL_MS = 24 * 60 * 60 * 1000;
 
-function _diffAndStampSolved(currentActionableRows) {
+// Hydrate-on-first-call gate. Set to a Promise the first time hydration
+// starts so concurrent /queue requests during cold start all await the SAME
+// hydration round-trip instead of racing duplicate SELECTs.
+let _zdRecentlySolvedHydrate = null;
+
+async function _hydrateRecentlySolvedFromDb() {
+  if (_zdRecentlySolvedHydrate) return _zdRecentlySolvedHydrate;
+  _zdRecentlySolvedHydrate = (async () => {
+    try {
+      const { query } = await import('../../../../src/lib/db');
+      // Age out stale rows at hydrate time — cheap one-shot cleanup that
+      // shrinks the SELECT and keeps the in-memory Map bounded.
+      const cutoff = new Date(Date.now() - ZD_RECENTLY_SOLVED_TTL_MS).toISOString();
+      await query('DELETE FROM zd_recently_solved WHERE solved_at < $1', [cutoff]);
+      const { rows } = await query(
+        `SELECT ticket_id, row_json,
+                FLOOR(EXTRACT(EPOCH FROM solved_at) * 1000)::bigint AS solved_at_ms
+           FROM zd_recently_solved`,
+      );
+      for (const r of rows) {
+        const id = Number(r.ticket_id);
+        if (!Number.isFinite(id)) continue;
+        _zdRecentlySolvedCache.set(id, {
+          row: r.row_json,
+          solvedAt: Number(r.solved_at_ms),
+        });
+      }
+      console.log(`[zd-recently-solved] hydrated ${rows.length} entries from DB`);
+    } catch (err) {
+      console.warn('[zd-recently-solved] hydrate failed:', err?.message);
+      // Don't poison the gate — let the next request retry hydration so a
+      // transient DB blip on cold start doesn't permanently block the cache.
+      _zdRecentlySolvedHydrate = null;
+    }
+  })();
+  return _zdRecentlySolvedHydrate;
+}
+
+// Fire-and-forget persistence. Failure is logged but doesn't fail the
+// /queue response — the in-memory Map is still authoritative for THIS
+// pod's responses, and a subsequent diff will re-attempt the writes.
+async function _persistRecentlySolvedDelta(insertEntries, deleteIds) {
+  if (insertEntries.length === 0 && deleteIds.size === 0) return;
+  try {
+    const { query } = await import('../../../../src/lib/db');
+    if (insertEntries.length > 0) {
+      const values = [];
+      const placeholders = [];
+      let idx = 1;
+      for (const [id, entry] of insertEntries) {
+        values.push(id, JSON.stringify(entry.row), new Date(entry.solvedAt).toISOString());
+        placeholders.push(`($${idx++}::bigint, $${idx++}::jsonb, $${idx++}::timestamptz)`);
+      }
+      // ON CONFLICT updates row_json + solved_at — handy if a ticket bounces
+      // out of actionable, gets re-opened, then dropped again within 24h.
+      await query(
+        `INSERT INTO zd_recently_solved (ticket_id, row_json, solved_at)
+              VALUES ${placeholders.join(', ')}
+         ON CONFLICT (ticket_id) DO UPDATE
+                 SET row_json = EXCLUDED.row_json,
+                     solved_at = EXCLUDED.solved_at`,
+        values,
+      );
+    }
+    if (deleteIds.size > 0) {
+      await query(
+        'DELETE FROM zd_recently_solved WHERE ticket_id = ANY($1::bigint[])',
+        [[...deleteIds]],
+      );
+    }
+  } catch (err) {
+    console.warn('[zd-recently-solved] persist failed:', err?.message);
+  }
+}
+
+async function _diffAndStampSolved(currentActionableRows) {
+  await _hydrateRecentlySolvedFromDb();
+
   const now = Date.now();
   const currentIds = new Set();
   for (const t of currentActionableRows) {
     if (t?.id != null) currentIds.add(t.id);
   }
+  // Track every in-memory mutation so we can mirror it to the DB after.
+  const insertEntries = []; // [id, { row, solvedAt }]
+  const deleteIds = new Set();
+
   // 1. Anything in last snapshot that isn't in current → just-solved.
   //    Copy the row from the snapshot (Zendesk-side data was correct at the
   //    moment we last saw it) and stamp our own solvedAt.
   for (const [id, row] of _zdLastActionableSnapshot) {
     if (!currentIds.has(id)) {
-      _zdRecentlySolvedCache.set(id, { row: { ...row, status: 'solved' }, solvedAt: now });
+      const entry = { row: { ...row, status: 'solved' }, solvedAt: now };
+      _zdRecentlySolvedCache.set(id, entry);
+      insertEntries.push([id, entry]);
     }
   }
   // 2. Anything that came BACK into actionable (re-opened) drops from cache.
   for (const id of currentIds) {
-    if (_zdRecentlySolvedCache.has(id)) _zdRecentlySolvedCache.delete(id);
+    if (_zdRecentlySolvedCache.has(id)) {
+      _zdRecentlySolvedCache.delete(id);
+      deleteIds.add(id);
+    }
   }
   // 3. Age out entries older than 24h.
   for (const [id, entry] of _zdRecentlySolvedCache) {
     if (now - entry.solvedAt > ZD_RECENTLY_SOLVED_TTL_MS) {
       _zdRecentlySolvedCache.delete(id);
+      deleteIds.add(id);
     }
   }
   // 4. Refresh snapshot for next sync.
@@ -523,6 +612,9 @@ function _diffAndStampSolved(currentActionableRows) {
   for (const t of currentActionableRows) {
     if (t?.id != null) _zdLastActionableSnapshot.set(t.id, t);
   }
+
+  // Mirror to DB without blocking the response. Failures are logged.
+  _persistRecentlySolvedDelta(insertEntries, deleteIds).catch(() => {});
 }
 
 // ── Phase 13c (2026-05-21): non-HRX dept Zendesk fetcher ────────────────────
@@ -739,7 +831,11 @@ async function fetchZendeskQueue() {
     // bottleneck — 5-bucket fan-out + 10 pages each = up to 50 Zendesk
     // calls just for resolved. Internal diff is O(actionable) + zero
     // upstream calls.
-    _diffAndStampSolved(actionableRows);
+    //
+    // 2026-05-21: now async because the first call after a pod restart
+    // hydrates the recently-solved Map from `zd_recently_solved` so the
+    // Briefing "Resolved" KPI survives deploys.
+    await _diffAndStampSolved(actionableRows);
     const recentlySolvedRows = [];
     for (const entry of _zdRecentlySolvedCache.values()) {
       if (!seenZd.has(entry.row.id)) {
