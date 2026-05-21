@@ -1,14 +1,18 @@
 // ── CreateHrHubRequestModal ─────────────────────────────────────────────
 // Two-pane composer for the HR Hub:
-//   1. Flow picker — 4 large cards (HR Request, HR Reporting, Escalation
-//      Zero, Ops Hub Feedback). The user picks one to start.
+//   1. Flow picker — 2 large cards (HR Request, HR Reporting). The user
+//      picks one to start. Escalation Zero + Ops Hub Feedback moved out
+//      to the Feedback board 2026-05-21 — they share a kind+extras
+//      partition there. The HR Hub now strictly hosts HR-ops flows.
 //   2. Per-flow form — fields are rendered from the flow's settings (the
 //      same JSON the Settings panel edits in Stage 6). Cascading
 //      dropdowns (HR Request: Function → Type) work out of the box.
 //
 // Open with `flow={null}` to show the picker; pass `flow="hr_request"`
-// (or any of the four flow ids) to skip the picker and land directly on
-// the form. Both entry points come from DeelTopNav's + button.
+// or `flow="hr_reporting"` to skip the picker and land directly on the
+// form. Legacy `flow="escalation_zero"` / `flow="feedback"` no longer
+// open the matching form — the FE callers were updated alongside this
+// change; any orphan caller falls back to the picker.
 //
 // Attachments use the same paste/drag/drop/picker pattern as the
 // Feedback modal so muscle memory is preserved.
@@ -23,6 +27,11 @@ const MAX_ATTACHMENTS = 5;
 const MAX_TOTAL_PAYLOAD_BYTES = 25 * 1024 * 1024;
 const ACCEPTED_VIDEO_TYPES = new Set(['video/mp4', 'video/webm', 'video/quicktime', 'video/x-m4v']);
 
+// 2026-05-21 split: Escalation Zero + Ops Hub Feedback live on the
+// Feedback board now (with a kind+extras partition), so the HR Hub picker
+// is back down to its two original ops flows. Callers that still pass
+// `initialFlow="escalation_zero"` or `"feedback"` land on the picker —
+// the UI nudges them to the Feedback board's Submit Feedback flow.
 const FLOW_CARDS = [
   {
     id: 'hr_request',
@@ -40,23 +49,12 @@ const FLOW_CARDS = [
     accent: '#dc2626',
     bg: '#fef2f2',
   },
-  {
-    id: 'escalation_zero',
-    label: 'Escalation Zero',
-    desc: 'Strategic improvement, process gap, or product feedback. Reviewed by leadership.',
-    icon: 'bi-stars',
-    accent: '#7c3aed',
-    bg: '#f3eff8',
-  },
-  {
-    id: 'feedback',
-    label: 'Ops Hub Feedback',
-    desc: 'Bug or improvement idea about the Ops Hub app itself.',
-    icon: 'bi-lightbulb',
-    accent: '#d97706',
-    bg: '#fff8e6',
-  },
 ];
+
+// Flow ids that used to open here but now live on the Feedback board.
+// Used to surface a "Use Submit Feedback instead" hint if a stale caller
+// still passes one of these as initialFlow.
+const RETIRED_FLOWS = new Set(['escalation_zero', 'feedback']);
 
 function fileToDataUri(file) {
   return new Promise((resolve, reject) => {
@@ -478,7 +476,12 @@ function AttachmentField({ attachments, setAttachments, error, setError }) {
  *   task link, the requester's manager, and an "Escalating from queue" banner.
  */
 export default function CreateHrHubRequestModal({ initialFlow = null, prefill = null, onClose, onCreated }) {
-  const [flow, setFlow] = useState(initialFlow);
+  // 2026-05-21: legacy callers may still pass `escalation_zero` or
+  // `feedback` as initialFlow. Those flows moved to the Feedback board;
+  // we clear them so the picker shows instead of trying to mount a form
+  // for a flow that no longer has settings here.
+  const initial = initialFlow && !RETIRED_FLOWS.has(initialFlow) ? initialFlow : null;
+  const [flow, setFlow] = useState(initial);
   const [settings, setSettings] = useState(null);
   const [loadingSettings, setLoadingSettings] = useState(false);
   // Seed `values` from `prefill` on first render so the FE inputs already

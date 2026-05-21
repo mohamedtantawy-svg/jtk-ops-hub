@@ -16,6 +16,13 @@ import { query } from '../../../../../src/lib/db';
 import { MEMBERS_BY_EMAIL } from '../../../../../src/data/members';
 import { matchesAudience } from '../../../../../src/data/comms';
 import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
+import {
+  isValidEscalationFunctionKey,
+  isValidEscalationStatus,
+  escalationPriorityToDb,
+  normaliseEscalationCountries,
+  normaliseEscalationUrl,
+} from '../../../../../src/lib/escalation-zero-constants';
 
 // Notify the submitter (and previous commenters) when a feedback request
 // transitions status — same fan-out shape the comment route uses, kept
@@ -128,6 +135,10 @@ function rowToShape(row) {
     category: row.category,
     type: row.type,
     audience: row.audience || 'global',
+    // Escalation Zero partition (2026-05-21). See app/api/v1/feedback/route.js
+    // for the kind + extras shape contract.
+    kind: row.kind || 'ops_hub_feedback',
+    extras: row.extras && typeof row.extras === 'object' ? row.extras : {},
     submitterId: row.submitter_id,
     submitterEmail: row.submitter_email,
     submitterName: row.submitter_name,
@@ -247,6 +258,51 @@ export async function PATCH(req, { params }) {
   if (body.resolutionNote !== undefined) push('resolution_note', body.resolutionNote ? String(body.resolutionNote).slice(0, 8000) : null);
   if (body.title !== undefined) push('title', String(body.title).slice(0, 200));
   if (body.duplicateOf !== undefined) push('duplicate_of', body.duplicateOf || null);
+
+  // ── Escalation Zero extras (2026-05-21) ──────────────────────────────────
+  // For kind='escalation_zero' rows, admins can patch the structured extras
+  // fields (functionKey, countries, linkedZdUrl, linkedJiraUrl, priorityKey,
+  // escalationStatus). We merge into the existing extras JSONB rather than
+  // overwriting so partial edits don't drop fields the caller didn't send.
+  // Whitelisting + normalisation mirrors POST so updates can't smuggle in
+  // invalid data after creation.
+  if (body.extras !== undefined && body.extras && typeof body.extras === 'object') {
+    const e = body.extras;
+    const patch = {};
+    if (e.functionKey !== undefined) {
+      if (!isValidEscalationFunctionKey(e.functionKey)) {
+        return NextResponse.json({ error: 'invalid extras.functionKey' }, { status: 400 });
+      }
+      patch.functionKey = e.functionKey;
+    }
+    if (e.countries !== undefined) {
+      patch.countries = normaliseEscalationCountries(e.countries);
+    }
+    if (e.linkedZdUrl !== undefined) {
+      patch.linkedZdUrl = normaliseEscalationUrl(e.linkedZdUrl);
+    }
+    if (e.linkedJiraUrl !== undefined) {
+      patch.linkedJiraUrl = normaliseEscalationUrl(e.linkedJiraUrl);
+    }
+    if (e.priorityKey !== undefined) {
+      patch.priorityKey = (e.priorityKey === 'urgent') ? 'urgent' : 'standard';
+      // Mirror the canonical priority onto the existing column so the
+      // existing priority filter + index stay consistent.
+      push('priority', escalationPriorityToDb(patch.priorityKey));
+    }
+    if (e.escalationStatus !== undefined) {
+      if (!isValidEscalationStatus(e.escalationStatus)) {
+        return NextResponse.json({ error: 'invalid extras.escalationStatus' }, { status: 400 });
+      }
+      patch.escalationStatus = e.escalationStatus;
+    }
+    if (Object.keys(patch).length > 0) {
+      // jsonb concat (||) merges keys; null values would clear them but we
+      // don't expose that path because the FE never sends nulls for these.
+      values.push(JSON.stringify(patch));
+      sets.push(`extras = COALESCE(extras, '{}'::jsonb) || $${values.length}::jsonb`);
+    }
+  }
 
   if (sets.length === 0) {
     return NextResponse.json({ error: 'No updatable fields supplied' }, { status: 400 });

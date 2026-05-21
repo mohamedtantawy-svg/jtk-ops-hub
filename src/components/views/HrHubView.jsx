@@ -47,9 +47,16 @@ const STATUS_BY_VALUE = Object.fromEntries(STATUS_FILTERS.map(s => [s.value, s])
 // Per-flow visuals mirror the create-modal cards so the surface feels
 // consistent — same icon + accent across the picker, the row chip, and
 // the flow filter pill.
+// 2026-05-21 split: Escalation Zero + Ops Hub Feedback moved out of HR
+// Hub to the Feedback board (kind partition). The visual map keeps the
+// retired flow IDs so legacy rows still in the DB render their own
+// chip / label on the HR Hub list rather than showing as "unknown" —
+// but they're hidden from the picker + filters so the team can't open
+// new ones here. The list filter dropdown only surfaces the live flows.
 const FLOW_VISUALS = {
   hr_request:        { label: 'HR Request',       short: 'Request',     icon: 'bi-send-fill',         color: '#1f74b3', bg: '#e0f2fe' },
   hr_reporting:      { label: 'HR Reporting',     short: 'Reporting',   icon: 'bi-megaphone-fill',    color: '#dc2626', bg: '#fef2f2' },
+  // Retired — kept for legacy row rendering only, not picked up by FLOW_FILTERS.
   escalation_zero:   { label: 'Escalation Zero',  short: 'Escalation',  icon: 'bi-stars',             color: '#7c3aed', bg: '#f3eff8' },
   feedback:          { label: 'Ops Hub Feedback', short: 'Feedback',    icon: 'bi-lightbulb-fill',    color: '#d97706', bg: '#fff8e6' },
   hide_task_request: { label: 'Hide Task',        short: 'Hide Task',   icon: 'bi-eye-slash-fill',    color: '#d42d35', bg: '#fef2f2' },
@@ -59,8 +66,6 @@ const FLOW_FILTERS = [
   { value: 'all',                    label: 'All flows',   icon: 'bi-grid-fill',         color: 'var(--text)' },
   { value: 'hr_request',             label: 'Requests',    icon: 'bi-send-fill',          color: '#1f74b3' },
   { value: 'hr_reporting',           label: 'Reporting',   icon: 'bi-megaphone-fill',     color: '#dc2626' },
-  { value: 'escalation_zero',        label: 'Escalations', icon: 'bi-stars',             color: '#7c3aed' },
-  { value: 'feedback',               label: 'Feedback',    icon: 'bi-lightbulb-fill',     color: '#d97706' },
   { value: 'hide_task_request',      label: 'Hide Task',   icon: 'bi-eye-slash-fill',     color: '#d42d35' },
   { value: 'sla_extension_request',  label: 'SLA Extension', icon: 'bi-clock-history',   color: '#d97706' },
 ];
@@ -207,7 +212,14 @@ export default function HrHubView({ user, onCreateHrHub }) {
         res = await tryFetch();
       }
       if (seq !== reqSeqRef.current) return;
-      setItems(res?.items || []);
+      // 2026-05-21 split: Escalation Zero + Ops Hub Feedback moved to the
+      // Feedback board. Legacy rows still exist in hr_hub_requests but
+      // we filter them out of the HR Hub list so the team doesn't have
+      // a second surface for the same workflow. The rows are still in
+      // the DB (no destructive change) — if needed for archaeology, they
+      // can be queried directly.
+      const filtered = (res?.items || []).filter(it => it.flow !== 'escalation_zero' && it.flow !== 'feedback');
+      setItems(filtered);
       setCursor(res?.nextCursor || null);
       setLastSyncAt(Date.now());
     } catch (err) {
@@ -234,7 +246,10 @@ export default function HrHubView({ user, onCreateHrHub }) {
         cursor,
         limit: 25,
       });
-      setItems(prev => [...prev, ...(res?.items || [])]);
+      // Apply the same legacy-flow filter on pagination so escalation_zero /
+      // feedback rows never surface in the HR Hub list.
+      const filtered = (res?.items || []).filter(it => it.flow !== 'escalation_zero' && it.flow !== 'feedback');
+      setItems(prev => [...prev, ...filtered]);
       setCursor(res?.nextCursor || null);
     } catch (err) {
       setError(err?.message || 'Could not load more');
@@ -448,7 +463,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
           <div style={{ minWidth: 0 }}>
             <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: 'var(--text)' }}>HR Hub</h1>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-              HR Requests, Reporting, Escalation Zero, and Ops Hub Feedback in one place.
+              HR Requests, Reporting, Hide Task and SLA Extension flows in one place.
               {lastSyncAt && <> · synced {relTime(new Date(lastSyncAt).toISOString())}</>}
             </div>
           </div>
