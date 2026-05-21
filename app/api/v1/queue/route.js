@@ -12,7 +12,7 @@ import { searchTickets, showManyUsers, isZendeskConfigured } from '../../../../s
 import { loadSlaRowsForTicketIds, warmSlaCacheForTicketIds } from '../../../../src/lib/zendesk-sla-sync';
 import { searchIssues, isJiraConfigured, resolveHrxOwnerFields, emailsFromJiraFieldValue } from '../../../../src/lib/jira-api';
 import { getCurrentDeptSlugAndId } from '../../../../src/lib/dept-scope';
-import { SLUGS } from '../../../../src/lib/dept-integrations';
+import { SLUGS, resolveZendeskConfig, resolveJiraConfig } from '../../../../src/lib/dept-integrations';
 
 // Jira custom fields (by display-name substring) that, together with the
 // built-in `assignee` and `reporter`, govern whether a ticket belongs to our
@@ -322,7 +322,11 @@ function adfToText(node) {
 // `loadSlaRowsForTicketIds`). That cache carries Zendesk's authoritative
 // breach state + active stage and is the source of truth for the SLA
 // pill on every ticket.
-async function paginatedZendeskSearch(query, { maxPages = 10, perPage = 100 } = {}) {
+async function paginatedZendeskSearch(query, { maxPages = 10, perPage = 100 } = {}, fetchOpts = {}) {
+  // Phase 13c (2026-05-21): fetchOpts carries per-dept auth overrides
+  // (tokenOverride/subdomainOverride/emailOverride) for non-HRX queue
+  // reads. HRX path leaves fetchOpts empty and behaviour is byte-identical
+  // to pre-13c.
   const allResults = [];
   let page = 1;
   // `truncated` flips to true when we exited the loop because of the maxPages
@@ -344,7 +348,7 @@ async function paginatedZendeskSearch(query, { maxPages = 10, perPage = 100 } = 
       page,
       sort_by: 'updated_at',
       sort_order: 'desc',
-    });
+    }, fetchOpts);
     const results = res?.results || [];
     if (typeof res?.count === 'number') serverTotal = res.count;
     allResults.push(...results);
@@ -391,11 +395,12 @@ const ZENDESK_DATE_BUCKETS = [
   { older: '730days',  newer: null      }, // older than 2 years
 ];
 
-async function paginatedZendeskSearchAllTime(baseQuery, { maxPages = 10, perPage = 100 } = {}) {
+async function paginatedZendeskSearchAllTime(baseQuery, { maxPages = 10, perPage = 100 } = {}, fetchOpts = {}) {
+  // Phase 13c (2026-05-21): fetchOpts forwarded to every inner search.
   // Fast path: try one unbucketed query. Most statuses (incl. solved
   // updated<24h) fit comfortably under 1000. No splitting cost when not
   // needed.
-  const first = await paginatedZendeskSearch(baseQuery, { maxPages, perPage });
+  const first = await paginatedZendeskSearch(baseQuery, { maxPages, perPage }, fetchOpts);
   if (!first.truncated) return first;
 
   console.log(`[queue] Zendesk query "${baseQuery}" truncated at 1000-hit cap — splitting into date buckets`);
@@ -421,7 +426,7 @@ async function paginatedZendeskSearchAllTime(baseQuery, { maxPages = 10, perPage
     if (b.newer) dateParts.push(`created<${b.newer}`);
     if (b.older) dateParts.push(`created>${b.older}`);
     const subQuery = `${baseQuery} ${dateParts.join(' ')}`.trim();
-    const { results, truncated } = await paginatedZendeskSearch(subQuery, { maxPages, perPage });
+    const { results, truncated } = await paginatedZendeskSearch(subQuery, { maxPages, perPage }, fetchOpts);
     for (const t of results) {
       if (t?.id == null || seenIds.has(t.id)) continue;
       seenIds.add(t.id);
@@ -448,7 +453,9 @@ async function paginatedZendeskSearchAllTime(baseQuery, { maxPages = 10, perPage
 }
 
 // ── Batch user lookup with pagination (handles >100 users) ───────────────────
-async function batchFetchUsers(userIds) {
+async function batchFetchUsers(userIds, fetchOpts = {}) {
+  // Phase 13c: fetchOpts forwards per-dept auth overrides so a GIX query
+  // resolves users from GIX's Zendesk instance, not HRX's.
   const userMap = {};
   const idArray = [...userIds];
 
@@ -456,7 +463,7 @@ async function batchFetchUsers(userIds) {
   for (let i = 0; i < idArray.length; i += 100) {
     const batch = idArray.slice(i, i + 100);
     try {
-      const res = await showManyUsers(batch);
+      const res = await showManyUsers(batch, fetchOpts);
       for (const u of (res?.users || [])) {
         userMap[u.id] = { name: u.name, email: u.email };
       }
@@ -515,6 +522,179 @@ function _diffAndStampSolved(currentActionableRows) {
   _zdLastActionableSnapshot.clear();
   for (const t of currentActionableRows) {
     if (t?.id != null) _zdLastActionableSnapshot.set(t.id, t);
+  }
+}
+
+// ── Phase 13c (2026-05-21): non-HRX dept Zendesk fetcher ────────────────────
+// Lighter than the HRX path: skips the policy_metrics DB enrichment + the
+// HRX recently-solved diff + the HRX-specific 4 custom fields (those are
+// HRX-territory data and not configured in other depts' Zendesk instances).
+// Returns the SAME item shape so the FE renders identically — paused
+// detection, basic FRT/NRT heuristic from metric_set, SLA window from the
+// shared queue_sla_thresholds.zendesk config.
+//
+// `deptCfg` must come from resolveZendeskConfig(slug) — provides token +
+// subdomain + email + group + tokenSource. If null (env vars missing) the
+// fetcher returns an empty result with status='skipped' so the FE renders
+// "Configure your Zendesk in Settings" rather than HRX leaking through.
+async function fetchZendeskQueueForDept(deptCfg) {
+  if (!deptCfg) return { items: [], status: 'skipped', count: 0, truncated: false, serverTotal: 0, error: 'Zendesk not configured for this department' };
+
+  const groupName = deptCfg.group || '';
+  if (!groupName) {
+    return { items: [], status: 'skipped', count: 0, truncated: false, serverTotal: 0, error: 'Dept Zendesk group not configured' };
+  }
+
+  const fetchOpts = {
+    tokenOverride: deptCfg.token,
+    subdomainOverride: deptCfg.subdomain || undefined,
+    emailOverride: deptCfg.email || undefined,
+  };
+  // If subdomain/email weren't set in the dept config, fall back to the
+  // shared env vars — they're shared across HRX + GIX today per
+  // dept-integrations comments. The `_zendeskFetch` helper handles undefined
+  // overrides by falling through to module-level constants.
+
+  try {
+    const statusQueries = ['new', 'open', 'pending', 'hold'].map(
+      s => `group:"${groupName}" status:${s}`,
+    );
+    const actionableResults = await Promise.all(
+      statusQueries.map(q => paginatedZendeskSearchAllTime(q, { maxPages: 10 }, fetchOpts)),
+    );
+
+    let zdTruncated = false;
+    let zdServerTotal = 0;
+    const seenZd = new Set();
+    const actionableRows = [];
+    for (const { results, truncated, serverTotal } of actionableResults) {
+      for (const t of results) {
+        if (!seenZd.has(t.id)) { seenZd.add(t.id); actionableRows.push(t); }
+      }
+      if (truncated) zdTruncated = true;
+      if (typeof serverTotal === 'number') zdServerTotal += serverTotal;
+    }
+
+    if (actionableRows.length === 0) {
+      return {
+        items: [],
+        status: 'ok',
+        count: 0,
+        truncated: zdTruncated,
+        serverTotal: zdServerTotal || 0,
+        error: null,
+      };
+    }
+
+    // Resolve user names — use the dept's Zendesk instance.
+    const userIds = new Set();
+    for (const t of actionableRows) {
+      if (t.assignee_id) userIds.add(t.assignee_id);
+      if (t.requester_id) userIds.add(t.requester_id);
+    }
+    const userMap = await batchFetchUsers(userIds, fetchOpts);
+
+    // Same SLA thresholds — set on the team-tab and shared across depts. A
+    // per-dept SLA override is a follow-up if any dept wants different limits.
+    const { zendeskActiveMins, zendeskPausedMins } = await getSlaOverrides();
+
+    const items = actionableRows.map(t => {
+      const assignee = userMap[t.assignee_id] || {};
+      const requester = userMap[t.requester_id] || {};
+      const appStatus = ZD_STATUS_MAP[t.status] || 'new';
+      const isPausedStatus = appStatus === 'waiting';
+
+      // Lightweight SLA anchor — same shape as HRX path so the FE renders
+      // the same pill. metric_set is sideloaded by Zendesk Search on
+      // include=metric_sets when the param is set; if it's absent we fall
+      // back to updated_at.
+      const metric = t.metric_set || {};
+      const tsMs = (s) => {
+        if (!s) return null;
+        const n = Date.parse(s);
+        return Number.isFinite(n) && n > 0 ? n : null;
+      };
+      const requesterMs = tsMs(metric.requester_updated_at);
+      const assigneeMs  = tsMs(metric.assignee_updated_at);
+      const assignedMs  = tsMs(metric.assigned_at);
+      const createdMs   = tsMs(t.created_at);
+      const updatedMs   = tsMs(t.updated_at);
+      const pausedAnchorMs = assigneeMs || updatedMs || createdMs || null;
+
+      let slaMetric = null;
+      let activeAnchorMs = null;
+      if (isPausedStatus && appStatus !== 'resolved') {
+        if (t.status === 'pending') slaMetric = 'rwt';
+        else if (t.status === 'hold') slaMetric = 'put';
+      }
+      if (!isPausedStatus && appStatus !== 'resolved') {
+        const hasMetricSet = !!t.metric_set;
+        const rtm = metric.reply_time_in_minutes;
+        const replyMins = (rtm && typeof rtm === 'object') ? rtm.calendar : rtm;
+        if (hasMetricSet && replyMins == null) {
+          slaMetric = 'frt';
+          activeAnchorMs = Math.max(createdMs || 0, assignedMs || 0) || createdMs;
+        } else if (requesterMs && (!assigneeMs || requesterMs > assigneeMs)) {
+          slaMetric = 'nrt';
+          activeAnchorMs = requesterMs;
+        } else if (!hasMetricSet) {
+          if (updatedMs && (Date.now() - updatedMs) < zendeskActiveMins * 60 * 1000) {
+            slaMetric = null;
+          } else {
+            slaMetric = 'nrt';
+            activeAnchorMs = updatedMs || createdMs;
+          }
+        }
+      }
+      const slaAnchorIso = isPausedStatus
+        ? (pausedAnchorMs ? new Date(pausedAnchorMs).toISOString() : t.created_at)
+        : (activeAnchorMs ? new Date(activeAnchorMs).toISOString() : t.created_at);
+
+      return {
+        id: `ZD-${t.id}`,
+        source: 'zendesk',
+        externalId: String(t.id),
+        subject: t.subject || '(no subject)',
+        description: (t.description || '').substring(0, 200),
+        status: appStatus,
+        zdStatus: t.status || null,
+        priority: ZD_PRIORITY_MAP[t.priority] || 'medium',
+        type: detectType(t.subject, t.tags || []),
+        country: detectCountry(t.subject, t.tags || []),
+        assigneeEmail: assignee.email || null,
+        assigneeName: assignee.name || null,
+        requesterName: requester.name || 'Unknown',
+        requesterEmail: requester.email || null,
+        lastCustomerResponseAt: slaAnchorIso,
+        createdAt: t.created_at,
+        updatedAt: t.updated_at,
+        pausedAt: isPausedStatus ? slaAnchorIso : null,
+        slaMinsOverride: isPausedStatus ? zendeskPausedMins : zendeskActiveMins,
+        slaMetric,
+        // No HRX custom fields — return an empty record so Detail.jsx
+        // doesn't crash trying to read .HRX_RESPONSIBLE etc.
+        customFields: {},
+        externalUrl: deptCfg.subdomain
+          ? `https://${deptCfg.subdomain}.zendesk.com/agent/tickets/${t.id}`
+          : (ZD_SUBDOMAIN ? `https://${ZD_SUBDOMAIN}.zendesk.com/agent/tickets/${t.id}` : ''),
+        tags: t.tags || [],
+        // No policy_metrics enrichment for non-HRX. slaSource hints to the
+        // FE that the breach detection is the local heuristic, not Zendesk's
+        // truth — pill renders the same way.
+        slaSource: 'local_metric_set',
+        slaBreachAt: null,
+        slaFrtBreachAt: null,
+        slaNrtBreachAt: null,
+        slaRwtBreachAt: null,
+        slaPutBreachAt: null,
+      };
+    });
+
+    console.log(`[queue/${deptCfg.tokenSource || 'dept'}] Zendesk fetched ${items.length} tickets via group="${groupName}"`);
+    return { items, status: 'ok', count: items.length, truncated: zdTruncated, serverTotal: zdServerTotal || items.length, error: null };
+  } catch (err) {
+    console.warn(`[queue/dept] Zendesk fetch failed for group="${groupName}":`, err.message);
+    return { items: [], status: 'error', count: 0, truncated: false, serverTotal: 0, error: err.message };
   }
 }
 
@@ -1181,6 +1361,162 @@ async function fetchJiraQueue() {
   }
 }
 
+// ── Phase 13c (2026-05-21): non-HRX dept Jira fetcher ───────────────────────
+// Pulls Jira tickets where the dept's team field matches one of the
+// configured ownerFieldValues. Lighter than the HRX path: no email chunking
+// (deptCfg.ownerFieldValues is a small list of team names, not 100+ emails),
+// no HRX_OWNER_FIELD_NAMES discovery, no custom-field plumbing — just one
+// JQL query per (value × bucket).
+//
+// Filter strategy: Jira's built-in Team custom field is `"Team[Team]"` in
+// JQL syntax. For GIX this matches tickets tagged with the "Global Mobility"
+// team. If the live GIX Jira setup uses a different custom field (e.g.
+// 'Assigned Team', 'Department'), surface the actual field name and we'll
+// extend dept-integrations.js with an explicit `ownerJqlField` config knob.
+async function fetchJiraQueueForDept(deptCfg) {
+  if (!deptCfg) return { items: [], status: 'skipped', count: 0, truncated: false, error: 'Jira not configured for this department' };
+  if (!Array.isArray(deptCfg.projectKeys) || deptCfg.projectKeys.length === 0) {
+    return { items: [], status: 'skipped', count: 0, truncated: false, error: 'Dept Jira projectKeys missing' };
+  }
+  if (!Array.isArray(deptCfg.ownerFieldValues) || deptCfg.ownerFieldValues.length === 0) {
+    return { items: [], status: 'skipped', count: 0, truncated: false, error: 'Dept Jira ownerFieldValues missing' };
+  }
+
+  const fetchOpts = {
+    tokenOverride: deptCfg.token,
+    baseUrlOverride: deptCfg.baseUrl || undefined,
+    emailOverride: deptCfg.email || undefined,
+  };
+
+  try {
+    const { jiraMins } = await getSlaOverrides();
+    const projectFilter = `project IN (${deptCfg.projectKeys.join(', ')})`;
+    const statusFilter = `statusCategory != Done AND (resolution IS EMPTY OR resolution = Unresolved)`;
+    const resolvedFilter = `statusCategory = Done AND resolved >= -24h`;
+    const teamValues = deptCfg.ownerFieldValues.map(v => `"${v}"`).join(', ');
+    // Jira built-in Team custom field — `"Team[Team]"` is the documented
+    // JQL syntax for the Team field across Jira Cloud + Data Center. If a
+    // dept stores the team value in a different custom field, add an
+    // `ownerJqlField` config option to dept-integrations.js and substitute
+    // it here.
+    const teamFilter = `"Team[Team]" in (${teamValues})`;
+
+    // Two clauses: active + recently-resolved (last 24h, mirrors HRX).
+    const jqlQueries = [
+      `${projectFilter} AND ${teamFilter} AND ${statusFilter} ORDER BY updated DESC`,
+      `${projectFilter} AND ${teamFilter} AND ${resolvedFilter} ORDER BY resolved DESC`,
+    ];
+
+    const allIssues = [];
+    const seenKeys = new Set();
+    const pageSize = 100;
+    const MAX_ISSUES_PER_CLAUSE = 2000;
+    let jiraTruncated = false;
+
+    const fieldsToFetch = [
+      'summary', 'status', 'assignee', 'reporter', 'priority',
+      'created', 'updated', 'issuetype', 'project', 'labels', 'description',
+    ];
+
+    for (const jql of jqlQueries) {
+      let nextPageToken;
+      let fetched = 0;
+      let safetyPages = 0;
+      const MAX_PAGES = Math.ceil(MAX_ISSUES_PER_CLAUSE / pageSize) + 1;
+      while (true) {
+        let result;
+        try {
+          result = await searchIssues(jql, {
+            maxResults: pageSize,
+            nextPageToken,
+            fields: fieldsToFetch,
+          }, fetchOpts);
+        } catch (clauseErr) {
+          console.warn('[queue/dept] Jira clause failed, continuing:', clauseErr.message);
+          break;
+        }
+        const issues = result?.issues || [];
+        for (const issue of issues) {
+          if (issue?.key && !seenKeys.has(issue.key)) {
+            seenKeys.add(issue.key);
+            allIssues.push(issue);
+          }
+        }
+        fetched += issues.length;
+        if (result?.isLast) break;
+        if (!result?.nextPageToken) break;
+        if (fetched >= MAX_ISSUES_PER_CLAUSE) {
+          if (!result?.isLast && result?.nextPageToken) jiraTruncated = true;
+          break;
+        }
+        if (++safetyPages >= MAX_PAGES) {
+          if (!result?.isLast && result?.nextPageToken) jiraTruncated = true;
+          break;
+        }
+        nextPageToken = result.nextPageToken;
+      }
+    }
+
+    const items = allIssues.map(issue => {
+      const f = issue.fields || {};
+      const statusName = f.status?.name || '';
+      const statusCategoryKey = (f.status?.statusCategory?.key || '').toLowerCase();
+      const priorityName = f.priority?.name || '';
+      const assignee = f.assignee || {};
+      const reporter = f.reporter || {};
+
+      const statusFromCategory =
+        statusCategoryKey === 'done' ? 'resolved' :
+        statusCategoryKey === 'new'  ? 'new' :
+        'in_progress';
+      const appStatus = JIRA_STATUS_MAP[statusName.toLowerCase()] || statusFromCategory;
+
+      const reporterEmailLower = reporter.emailAddress
+        ? reporter.emailAddress.toLowerCase()
+        : null;
+      const ownerEmails = new Set();
+      if (reporterEmailLower) ownerEmails.add(reporterEmailLower);
+      if (assignee.emailAddress) ownerEmails.add(assignee.emailAddress.toLowerCase());
+
+      return {
+        id: issue.key,
+        source: 'jira',
+        externalId: issue.key,
+        subject: f.summary || '(no summary)',
+        description: adfToText(f.description).substring(0, 200),
+        status: appStatus,
+        priority: JIRA_PRIORITY_MAP[priorityName.toLowerCase()] || 'medium',
+        type: detectType(f.summary, [], f.labels || []),
+        country: detectCountry(f.summary, f.labels || []),
+        assigneeEmail: assignee.emailAddress || null,
+        assigneeName: assignee.displayName || null,
+        secondaryAssigneeEmails: [...ownerEmails],
+        // No HRX-owner custom fields in non-HRX projects — assignee + reporter
+        // are the visibility cohort. jiraHrxEmails empty so the FE's
+        // "Raised by You" vs "Actionable" classifier defaults to assignee.
+        jiraHrxEmails: [],
+        jiraReporterEmail: reporterEmailLower,
+        requesterName: reporter.displayName || 'System',
+        requesterEmail: reporter.emailAddress || null,
+        lastCustomerResponseAt: f.updated,
+        createdAt: f.created,
+        updatedAt: f.updated,
+        slaMinsOverride: jiraMins,
+        externalUrl: JIRA_BASE ? `${JIRA_BASE}/browse/${issue.key}` : '',
+        tags: f.labels || [],
+        jiraStatus: statusName,
+        jiraType: f.issuetype?.name || null,
+      };
+    });
+
+    console.log(`[queue/${deptCfg.tokenSource || 'dept'}] Jira fetched ${items.length} tickets via Team[Team] in (${teamValues})`);
+    return { items, status: 'ok', count: items.length, truncated: jiraTruncated, error: null };
+  } catch (err) {
+    console.error('[queue/dept] Jira fetch error:', err.message);
+    return { items: [], status: 'error', count: 0, truncated: false, error: err.message };
+  }
+}
+
 // ── Main handler ─────────────────────────────────────────────────────────────
 // Supports per-source fetching via ?source=zendesk|jira for independent sync.
 // Without ?source, fetches both (legacy/combined mode).
@@ -1194,37 +1530,22 @@ export async function GET(req) {
   // the latest roster (TTL-gated; collapses concurrent calls into one query).
   await ensureRosterHydrated();
 
-  // Phase 13b (2026-05-20): dispatch by current dept.
-  //   • HRX: byte-identical to pre-Phase-13b. The entire 1300-line GET
-  //     handler below runs unchanged.
-  //   • Non-HRX dept: the /api/v1/queue route returns an empty payload
-  //     for now. Per-dept Zendesk + Jira write actions DO route through
-  //     the dept's tokens (see queue/[ticketId]/actions + queue/reassign).
-  //     The full non-HRX READ fetch (Zendesk by group + Jira by ownerField
-  //     value) lands in Phase 13c — designed to be smaller than the HRX
-  //     path (no SLA enrichment / no historical bucket splitting) so it
-  //     can be iterated on with real prod data without risking HRX.
-  //
-  // Why empty rather than partial: HRX's queue logic carries a lot of
-  // assumptions (HRX_OWNER_FIELD_NAMES, ADMIN_EMAILS_LIST, country tag
-  // detection, SLA Promised cache). Reusing those in a non-HRX context
-  // could silently surface HRX-flavored data to the wrong tenant. Empty
-  // is the safe default; mohamed accesses Global Immigration's queue
-  // today via /api/v1/workspaces/gix/queue (Zendesk, already wired).
-  {
-    const deptInfo = await getCurrentDeptSlugAndId(user, req);
-    const isHrx = !deptInfo || deptInfo.deptSlug === SLUGS.HR_EXPERIENCE;
-    if (!isHrx) {
-      return NextResponse.json({
-        items: [],
-        total: 0,
-        truncated: false,
-        _deptDispatchStub: true,
-        _deptSlug: deptInfo.deptSlug,
-        _note: 'Non-HRX queue read lands in Phase 13c. Use /api/v1/workspaces/gix/queue for Zendesk today.',
-      });
-    }
-  }
+  // Phase 13c (2026-05-21): dispatch by current dept.
+  //   • HRX: the original 1300-line fetchZendeskQueue + fetchJiraQueue
+  //     run with HRX env vars + the HRX-specific email roster.
+  //   • Non-HRX dept: dispatch to the lightweight fetchZendeskQueueForDept
+  //     + fetchJiraQueueForDept using the dept's tokens + group + team
+  //     filter from src/lib/dept-integrations.js. The cache key includes
+  //     the dept slug so HRX + non-HRX never share a cache row.
+  const deptInfo = await getCurrentDeptSlugAndId(user, req);
+  const deptSlug = deptInfo?.deptSlug || null;
+  const isHrx = !deptInfo || deptSlug === SLUGS.HR_EXPERIENCE;
+  const deptZendeskCfg = isHrx ? null : resolveZendeskConfig(deptSlug);
+  const deptJiraCfg = isHrx ? null : resolveJiraConfig(deptSlug);
+  // Per-dept cache namespace so a non-HRX dispatch never serves a
+  // stale HRX payload (or vice versa). The deptSlug is the natural
+  // partition key; for HRX we use 'hrx' for readability.
+  const cacheNS = isHrx ? SLUGS.HR_EXPERIENCE : (deptSlug || 'no-dept');
 
   const url = new URL(req.url);
   const bustCache = url.searchParams.has('_t');
@@ -1232,7 +1553,11 @@ export async function GET(req) {
 
   // ── Per-source fetch (new: independent sync per source) ───────────────────
   if (source === 'zendesk' || source === 'jira') {
-    const cacheKey = `queue_${source}`;
+    // Per-dept cache namespace — HRX cache rows never overlap a non-HRX
+    // dispatch result (and vice versa). Important: a viewer flipping the
+    // dept-picker chip from HRX → GIX must NOT see a recent HRX cache hit
+    // here.
+    const cacheKey = `queue_${source}_${cacheNS}`;
     const ttl = source === 'zendesk' ? 2 * 60_000 : 3 * 60_000; // ZD 2min, Jira 3min
 
     if (!bustCache) {
@@ -1247,7 +1572,16 @@ export async function GET(req) {
 
     let result;
     try {
-      const fetched = source === 'zendesk' ? await fetchZendeskQueue() : await fetchJiraQueue();
+      // Phase 13c dispatch: pick the HRX path or the per-dept lightweight
+      // fetcher based on the resolved dept-slug. A non-HRX dept with
+      // unconfigured env vars returns an empty {items: []} — the FE shows
+      // the "configure your integrations" empty state instead of HRX data.
+      let fetched;
+      if (source === 'zendesk') {
+        fetched = isHrx ? await fetchZendeskQueue() : await fetchZendeskQueueForDept(deptZendeskCfg);
+      } else {
+        fetched = isHrx ? await fetchJiraQueue() : await fetchJiraQueueForDept(deptJiraCfg);
+      }
       result = {
         source,
         items: fetched.items,
@@ -1269,7 +1603,7 @@ export async function GET(req) {
     } catch (fetchErr) {
       const stale = cacheGet(cacheKey, STALE_TTL);
       if (stale) {
-        console.warn(`[queue/${source}] Fetch failed, returning stale:`, fetchErr.message);
+        console.warn(`[queue/${source}/${cacheNS}] Fetch failed, returning stale:`, fetchErr.message);
         return NextResponse.json({
           ...stale,
           items: scopeQueueItems(stale.items || [], user),
@@ -1286,8 +1620,9 @@ export async function GET(req) {
   }
 
   // ── Combined fetch (legacy: both sources in one call) ─────────────────────
+  const combinedCacheKey = `${CACHE_KEY}_${cacheNS}`;
   if (!bustCache) {
-    const fresh = cacheGet(CACHE_KEY, CACHE_TTL);
+    const fresh = cacheGet(combinedCacheKey, CACHE_TTL);
     if (fresh) {
       return NextResponse.json({
         ...fresh,
@@ -1296,13 +1631,13 @@ export async function GET(req) {
     }
   }
 
-  const stale = !bustCache ? cacheGet(CACHE_KEY, STALE_TTL) : null;
+  const stale = !bustCache ? cacheGet(combinedCacheKey, STALE_TTL) : null;
 
   let response;
   try {
     const [zendesk, jira] = await Promise.all([
-      fetchZendeskQueue(),
-      fetchJiraQueue(),
+      isHrx ? fetchZendeskQueue() : fetchZendeskQueueForDept(deptZendeskCfg),
+      isHrx ? fetchJiraQueue() : fetchJiraQueueForDept(deptJiraCfg),
     ]);
 
     const seen = new Set();
@@ -1338,10 +1673,10 @@ export async function GET(req) {
 
     // Cache combined result only — per-source caches are populated independently
     // to avoid tripling memory usage by storing the same data 3x.
-    cacheSet(CACHE_KEY, response);
+    cacheSet(combinedCacheKey, response);
   } catch (fetchErr) {
     if (stale) {
-      console.warn('[queue] Fetch failed, returning stale cache:', fetchErr.message);
+      console.warn(`[queue/${cacheNS}] Fetch failed, returning stale cache:`, fetchErr.message);
       return NextResponse.json({
         ...stale,
         items: scopeQueueItems(stale.items || [], user),
