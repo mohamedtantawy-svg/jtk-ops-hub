@@ -1025,7 +1025,7 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
         {row.assignee ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
             <Avatar name={row.assignee} size="xs" />
-            <span style={{ fontSize: 11, color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 80, borderBottom: row.assigneeIsSynthetic ? '1px dashed #9e9e9e' : 'none', paddingBottom: row.assigneeIsSynthetic ? 1 : 0 }}>
+            <span style={{ fontSize: 11, color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 80, borderBottom: row.assigneeIsSynthetic ? '1px dashed var(--text-muted)' : 'none', paddingBottom: row.assigneeIsSynthetic ? 1 : 0 }}>
               {row.assignee.split(' ')[0]}
             </span>
           </div>
