@@ -25,6 +25,8 @@ import { applySlaExtensionsToRows } from '../../utils/applySlaExtensions';
 import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
 import { useCapacitySettings } from '../../hooks/useCapacitySettings';
 import { COUNTRY_OWNERS, OWNER_COUNTRIES } from '../../data/countryOwners';
+import { useCurrentDept } from '../../hooks/useCurrentDept';
+import { getHubBrand } from '../../lib/hub-brand';
 
 const CARD = {
   background: 'var(--surface)',
@@ -75,6 +77,9 @@ function fmtDuration(secs) {
 
 export default function TeamLeadHome({ user, tasks = [], setView, managerOnCall }) {
   const { queueUnified, hiddenTasks, slaExtensions } = useContext(IntegrationsContext);
+  // 2026-05-22 — dept-branded "HR Hub" pending tile.
+  const deptState = useCurrentDept();
+  const hubBrand = useMemo(() => getHubBrand(deptState.dept), [deptState.dept]);
   // Approved SLA extensions push per-row deadlines out. Queue.jsx and
   // BriefingView.jsx apply this overlay so their breach counts honour
   // extended windows — TeamLeadHome must do the same or its strip
@@ -435,7 +440,7 @@ export default function TeamLeadHome({ user, tasks = [], setView, managerOnCall 
             />
             <DecisionTile
               icon="bi-clipboard-check-fill"
-              label="HR Hub pending"
+              label={`${hubBrand.hubLabel} pending`}
               count={null}
               hint="(coming soon)"
               onClick={() => setView?.('hr-hub')}

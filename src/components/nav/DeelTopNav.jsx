@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useContext } from 'react';
 import { PermissionsContext } from '../../App';
 import { isApprover } from '../../data/approvers';
 import { useCurrentDept } from '../../hooks/useCurrentDept';
+import { getHubBrand } from '../../lib/hub-brand';
 import Avatar from '../ui/Avatar';
 import NotificationPanel from './NotificationPanel';
 
@@ -25,6 +26,9 @@ const OWNER_EMAIL = 'mohamed.tantawy@deel.com';
 const PRIMARY_TABS = [
   { id: 'briefing',      icon: 'bi-house',                label: 'Home' },
   { id: 'my-queue',      icon: 'bi-inbox',                label: 'Workspace' },
+  // 2026-05-22: label is dept-branded ("HR Hub" / "GIX Hub" / "Benefits Hub" /
+  // …) — the static value here is the cold-paint fallback; the runtime label
+  // comes from getHubBrand(deptState.dept) inside the render below.
   { id: 'hr-hub',        icon: 'bi-broadcast-pin',        label: 'HR Hub' },
   // OOO & Handovers — single-tab surface (HANDOVERS_PLAN.md). Visible to
   // everyone; visibility is naturally scoped by the reporting tree on
@@ -72,6 +76,9 @@ const MORE_TABS = [];
 // rewired to open the 2-card picker (Ops Hub Feedback vs Escalation Zero).
 // The HR Hub Request description no longer mentions Escalation Zero or
 // Feedback — those moved to the Feedback board.
+// 2026-05-22: HR Hub Request `label` + `desc` are dept-branded at render
+// time. The static strings here are cold-paint fallbacks only — see the
+// brand override applied to `visibleCreate` below.
 const CREATE_ACTIONS = [
   { icon: 'bi-broadcast-pin',     label: 'HR Hub Request',    action: 'hr-hub',        desc: 'HR Request or HR Reporting' },
   { icon: 'bi-broadcast',         label: 'New Leaders Alert', action: 'leader-alerts', desc: 'Quick alert visible to every manager', viewReq: 'leader-alerts', managerialOnly: true },
@@ -189,15 +196,27 @@ const DeelTopNav = ({
     // managerial views in stale-perms windows.
     return !perms || perms.canView(t.id) === true;
   };
-  const visiblePrimary = PRIMARY_TABS.filter(tabAllowed);
+  // 2026-05-22 — dept-branded "HR Hub" surfaces. Immigration users see
+  // "GIX Hub", Benefits users "Benefits Hub", etc. See src/lib/hub-brand.js.
+  // Resolved per-render because the super-admin can switch depts without
+  // a page reload (useCurrentDept v2).
+  const hubBrand = getHubBrand(deptState.dept);
+
+  const visiblePrimary = PRIMARY_TABS
+    .filter(tabAllowed)
+    .map(t => (t.id === 'hr-hub' ? { ...t, label: hubBrand.hubLabel } : t));
   const visibleMore = MORE_TABS.filter(tabAllowed);
-  const visibleCreate = CREATE_ACTIONS.filter(ca => {
-    if (ca.restrictToEmail && emailLc !== ca.restrictToEmail.toLowerCase()) return false;
-    if (ca.managerialOnly && isAgentTier) return false;
-    if (ca.perm && !perms?.canDo(ca.perm)) return false;
-    if (ca.viewReq && !perms?.canView(ca.viewReq)) return false;
-    return true;
-  });
+  const visibleCreate = CREATE_ACTIONS
+    .filter(ca => {
+      if (ca.restrictToEmail && emailLc !== ca.restrictToEmail.toLowerCase()) return false;
+      if (ca.managerialOnly && isAgentTier) return false;
+      if (ca.perm && !perms?.canDo(ca.perm)) return false;
+      if (ca.viewReq && !perms?.canView(ca.viewReq)) return false;
+      return true;
+    })
+    .map(ca => (ca.action === 'hr-hub'
+      ? { ...ca, label: hubBrand.quickCreateLabel, desc: hubBrand.quickCreateDesc }
+      : ca));
   const isMoreActive = visibleMore.some(t => t.id === view);
 
   const dropdown = {

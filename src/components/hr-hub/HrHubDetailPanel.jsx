@@ -27,6 +27,8 @@ import { TASK_SOURCE_DISPLAY } from '../../../src/utils/applySlaExtensions';
 import HrHubComposer from './HrHubComposer';
 import ImageLightbox from '../ui/ImageLightbox';
 import CommentReactions from '../ui/CommentReactions';
+import { useCurrentDept } from '../../../src/hooks/useCurrentDept';
+import { getHubBrand } from '../../../src/lib/hub-brand';
 
 const SLA_EXT_REASON_LABELS = {
   immigration: 'Immigration',
@@ -52,6 +54,9 @@ const PRIORITY_OPTIONS = [
   { id: 'critical', label: 'Critical' },
 ];
 
+// 2026-05-22 — `hr_request` / `hr_reporting` labels are dept-branded at
+// render time via getHubBrand(). The values here are cold-paint fallbacks
+// and the labels for retired flows that never received the rebrand.
 const FLOW_LABELS = {
   hr_request: 'HR Request',
   hr_reporting: 'HR Reporting',
@@ -77,6 +82,11 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
   const initialComments = detail?.comments || [];
   const followers = detail?.followers || [];
   const log = detail?.log || [];
+
+  // 2026-05-22 — dept-branded HR Hub. Placed ABOVE every early return so
+  // React hook ordering stays stable across renders (mistake #43 in SKILL).
+  const deptState = useCurrentDept();
+  const hubBrand = useMemo(() => getHubBrand(deptState.dept), [deptState.dept]);
 
   // Local comments state — seeded from initialComments and grown by the
   // polling effect. We seed only when the parent's initialComments array
@@ -223,7 +233,11 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
   }, [requestId, onItemUpdated, onRefresh]);
 
   if (!requestId) return null;
-  const flowLabel = FLOW_LABELS[request?.flow] || request?.flow || '';
+  const flowLabelOverrides = {
+    hr_request:   hubBrand.requestLabel,
+    hr_reporting: hubBrand.reportingLabel,
+  };
+  const flowLabel = flowLabelOverrides[request?.flow] || FLOW_LABELS[request?.flow] || request?.flow || '';
 
   // Approve/Deny gate — mirrors RequestRow's canDecide (HrHubView line
   // 730+) so the row + drawer enforce the same workflow. Mohamed

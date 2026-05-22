@@ -13,6 +13,8 @@ import {
   loadStoredSubjectWidth,
   saveStoredSubjectWidth,
 } from '../../lib/queue-subject-width';
+import { useCurrentDept } from '../../hooks/useCurrentDept';
+import { getHubBrand } from '../../lib/hub-brand';
 
 // Subject column width — shared resize affordance with Queue.jsx (ZD/Jira).
 // The Workbench bug Chaitanya Raju Uppalapati flagged 2026-05-22 ("Workbench
@@ -231,6 +233,11 @@ export default function SourceTable({
   onBulkReassign,            // (rows[]) => void — bulk variant; enables checkboxes + bulk-bar Reassign button
   notesApi = null,           // useTaskNotes() return — enables the Note column when present
 }) {
+  // 2026-05-22 — dept-branded escalation button. The "Escalate to HR Hub"
+  // tooltip becomes "Escalate to GIX Hub" / "Escalate to Benefits Hub" / …
+  // for users in those depts. See src/lib/hub-brand.js.
+  const deptState = useCurrentDept();
+  const hubBrand = useMemo(() => getHubBrand(deptState.dept), [deptState.dept]);
   // ── User-resizable Subject column ────────────────────────────────────────
   // Mirrors the ZD/Jira Queue resize (see Queue.jsx for the parent comment).
   // State holds the React-visible width (drives the table's inline CSS
@@ -799,6 +806,7 @@ export default function SourceTable({
                     showNoteColumn={hasNotes}
                     hasNote={noteHas}
                     onOpenNote={hasNotes ? () => setNoteModalRow(row) : null}
+                    escalateLabel={hubBrand.escalateLabel}
                   />
                 );
               })}
@@ -967,7 +975,7 @@ function NoteModal({ row, initialText, maxLength, onSave, onDelete, onClose }) {
 }
 
 // ── Row component ──
-const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, dateField = 'startDate', showClient = false, showType = false, hideUpdated = false, hideContract = false, onHide = null, onEscalate = null, onReassign = null, onSlaExtension = null, isSelectable = false, isSelected = false, onToggleSelection = null, showNoteColumn = false, hasNote = false, onOpenNote = null }) {
+const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, dateField = 'startDate', showClient = false, showType = false, hideUpdated = false, hideContract = false, onHide = null, onEscalate = null, onReassign = null, onSlaExtension = null, isSelectable = false, isSelected = false, onToggleSelection = null, showNoteColumn = false, hasNote = false, onOpenNote = null, escalateLabel = 'Escalate to HR Hub' }) {
   const [hov, setHov] = useState(false);
   const sev = row.status?.severity || 'info';
   const isUrgent = sev === 'critical';
@@ -1269,8 +1277,8 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onEscalate(); }}
-                aria-label={`Escalate "${row.subject || row.id}" to HR Hub`}
-                title="Escalate to HR Hub"
+                aria-label={`${escalateLabel}: "${row.subject || row.id}"`}
+                title={escalateLabel}
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: 4,
                   padding: '3px 8px', borderRadius: 6,

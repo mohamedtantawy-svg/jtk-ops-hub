@@ -13,18 +13,28 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getHrHubSettings, putHrHubSettings } from '../../../src/services/hrHubApi';
+import { useCurrentDept } from '../../../src/hooks/useCurrentDept';
+import { getHubBrand } from '../../../src/lib/hub-brand';
 
 // 2026-05-21 split: Escalation Zero + Ops Hub Feedback moved out of HR
 // Hub to the Feedback board. The settings panel only manages the
 // surviving HR-ops flows now. The retired flows' settings rows in
 // app_settings stay intact (harmless; would be needed if the flows are
 // ever brought back) but the Settings UI no longer offers tabs for them.
+// 2026-05-22 — flow labels are dept-branded at render time. Static values
+// here are cold-paint fallbacks.
 const FLOWS = [
   { id: 'hr_request',      label: 'HR Request' },
   { id: 'hr_reporting',    label: 'HR Reporting' },
 ];
 
 export default function HrHubSettingsPanel({ onClose }) {
+  const deptState = useCurrentDept();
+  const hubBrand = useMemo(() => getHubBrand(deptState.dept), [deptState.dept]);
+  const flows = useMemo(() => ([
+    { id: 'hr_request',   label: hubBrand.requestLabel },
+    { id: 'hr_reporting', label: hubBrand.reportingLabel },
+  ]), [hubBrand]);
   const [activeFlow, setActiveFlow] = useState('hr_request');
   const [tab, setTab] = useState('dropdowns');     // statuses | fields | dropdowns | auto_assign
   const [bundles, setBundles] = useState({});      // flow → { settings, loading, error }
@@ -81,7 +91,7 @@ export default function HrHubSettingsPanel({ onClose }) {
         }}>
           <i className="bi bi-gear" style={{ fontSize: 16, color: 'var(--text)' }} />
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>HR Hub Settings</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>{hubBrand.hubLabel} Settings</div>
             <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
               Configure statuses, fields, dropdowns, and auto-assign rules per flow. Changes apply immediately.
             </div>
@@ -94,7 +104,7 @@ export default function HrHubSettingsPanel({ onClose }) {
         {/* Flow + tab switcher */}
         <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
           <div style={{ borderRight: '1px solid var(--border)', width: 200, padding: '8px 0' }}>
-            {FLOWS.map(f => (
+            {flows.map(f => (
               <button
                 key={f.id}
                 onClick={() => setActiveFlow(f.id)}

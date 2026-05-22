@@ -28,6 +28,8 @@
 
 import { useContext, useMemo, useState, useEffect, useCallback } from 'react';
 import { IntegrationsContext } from '../../App';
+import { useCurrentDept } from '../../hooks/useCurrentDept';
+import { getHubBrand } from '../../lib/hub-brand';
 import { TOOLS, getCountryName } from '../../data/constants';
 import { slaInfo, getUrl } from '../../utils/helpers';
 import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
@@ -89,6 +91,9 @@ function fmtDuration(secs) {
 
 export default function AgentHome({ user, tasks = [], setView, comms = [], ackEmails = null, isAckedByMe: isAckedByMeProp = null }) {
   const { queueUnified, hiddenTasks, slaExtensions } = useContext(IntegrationsContext);
+  // 2026-05-22 — dept-branded "HR Hub" tile label.
+  const deptState = useCurrentDept();
+  const hubBrand = useMemo(() => getHubBrand(deptState.dept), [deptState.dept]);
   // Approved SLA extensions push the per-row deadline out. Queue.jsx and
   // BriefingView.jsx both apply this overlay so their breach counts
   // reflect the extended windows. AgentHome must do the same — without it
@@ -634,10 +639,10 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
           color="#0e7490"
           accent="linear-gradient(135deg, #0369a1 0%, #0e7490 100%)"
           bgLight="#ecfeff"
-          label="HR Hub"
+          label={hubBrand.hubLabel}
           hint="open requests you raised"
           count={hrHubMine}
-          ctaLabel="Open HR Hub"
+          ctaLabel={`Open ${hubBrand.hubLabel}`}
           onClick={() => setView?.('hr-hub')}
         />
         <InboxTile

@@ -22,6 +22,8 @@ import { TOOLS } from '../../data/constants';
 import { slaInfo } from '../../utils/helpers';
 import { apiFetch } from '../../services/api';
 import MultiCountryPicker from '../team/MultiCountryPicker';
+import { useCurrentDept } from '../../hooks/useCurrentDept';
+import { getHubBrand } from '../../lib/hub-brand';
 
 // ── Pure helpers (mirrored from Team.jsx so the look matches) ──────────────
 
@@ -212,6 +214,9 @@ export function TriageStrip({ sourceRows = [], tickets = [], onNavigate }) {
 // ── DecisionsStrip ───────────────────────────────────────────────────────
 
 export function DecisionsStrip({ onNavigate }) {
+  // 2026-05-22 — dept-branded HR Hub tile label.
+  const deptState = useCurrentDept();
+  const hubBrand = useMemo(() => getHubBrand(deptState.dept), [deptState.dept]);
   const [hrHubPending, setHrHubPending] = useState(null);
   const [leaderAlerts, setLeaderAlerts] = useState(null);
   const [urgentAssist, setUrgentAssist] = useState(null);
@@ -376,7 +381,7 @@ export function DecisionsStrip({ onNavigate }) {
     <div style={{ display: 'flex', gap: 12 }}>
       {tile({
         icon: 'bi-clipboard-check-fill',
-        label: 'HR Hub',
+        label: hubBrand.hubLabel,
         hint: 'team raised or assigned to me',
         count: hrHubPending,
         color: '#0e7490',

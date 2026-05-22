@@ -19,6 +19,8 @@
 
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { getHrHubSettings, createHrHubRequest } from '../../services/hrHubApi';
+import { useCurrentDept } from '../../hooks/useCurrentDept';
+import { getHubBrand } from '../../lib/hub-brand';
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 10 * 1024 * 1024;
@@ -32,6 +34,9 @@ const ACCEPTED_VIDEO_TYPES = new Set(['video/mp4', 'video/webm', 'video/quicktim
 // is back down to its two original ops flows. Callers that still pass
 // `initialFlow="escalation_zero"` or `"feedback"` land on the picker —
 // the UI nudges them to the Feedback board's Submit Feedback flow.
+// 2026-05-22: `label` is dept-branded — see getHubBrand() inside the
+// component body. The static literals here are cold-paint fallbacks for
+// the rare render before useCurrentDept resolves.
 const FLOW_CARDS = [
   {
     id: 'hr_request',
@@ -488,6 +493,16 @@ function AttachmentField({ attachments, setAttachments, error, setError }) {
  *   task link, the requester's manager, and an "Escalating from queue" banner.
  */
 export default function CreateHrHubRequestModal({ initialFlow = null, prefill = null, onClose, onCreated }) {
+  // 2026-05-22 — dept-branded modal title + flow card labels. Immigration
+  // (`gix`) renders "Submit to GIX Hub" + "GIX Request" / "GIX Reporting";
+  // HR Experience renders the original "HR" branding. See src/lib/hub-brand.js.
+  const deptState = useCurrentDept();
+  const hubBrand = useMemo(() => getHubBrand(deptState.dept), [deptState.dept]);
+  const FLOW_LABEL_OVERRIDES = useMemo(() => ({
+    hr_request:   hubBrand.requestLabel,
+    hr_reporting: hubBrand.reportingLabel,
+  }), [hubBrand]);
+
   // 2026-05-21: legacy callers may still pass `escalation_zero` or
   // `feedback` as initialFlow. Those flows moved to the Feedback board;
   // we clear them so the picker shows instead of trying to mount a form
@@ -698,7 +713,9 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
           )}
           <div style={{ flex: 1 }}>
             <div id="hrhub-create-title" style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>
-              {flow ? card?.label || 'New request' : 'Submit to HR Hub'}
+              {flow
+                ? (FLOW_LABEL_OVERRIDES[flow] || card?.label || 'New request')
+                : hubBrand.submitTitle}
             </div>
             {!flow && (
               <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
@@ -781,7 +798,7 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
                   }}>
                     <i className={`bi ${c.icon}`} />
                   </div>
-                  <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>{c.label}</div>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>{FLOW_LABEL_OVERRIDES[c.id] || c.label}</div>
                   <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.45 }}>{c.desc}</div>
                 </button>
               ))}
@@ -796,7 +813,7 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
 
           {flow && !loadingSettings && fields.length === 0 && (
             <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
-              This flow has no editable fields configured. Contact an HR Hub Admin.
+              This flow has no editable fields configured. Contact a {hubBrand.hubLabel} Admin.
             </div>
           )}
 

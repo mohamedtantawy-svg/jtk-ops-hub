@@ -30,6 +30,7 @@ import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
 import { useTaskNotes } from '../../hooks/useTaskNotes';
 import { useTeamDataVersion } from '../../hooks/useTeamDataVersion';
 import { useCurrentDept } from '../../hooks/useCurrentDept';
+import { getHubBrand } from '../../lib/hub-brand';
 import {
   SUBJECT_WIDTH_MIN,
   clampSubjectWidth as clampSubjectWidthShared,
@@ -181,6 +182,10 @@ const Queue = ({ user, tasks, subFilter }) => {
   // behavior because its visibleSources profile sets all 6 → true.
   const deptState = useCurrentDept();
   const visibleSources = deptState?.visibleSources;
+  // 2026-05-22 — dept-branded escalation button + banner copy. Defaults
+  // to "HR" cold-paint until useCurrentDept resolves the dept (HRX users
+  // keep the original wording).
+  const hubBrand = useMemo(() => getHubBrand(deptState?.dept), [deptState?.dept]);
 
   // Filters always start in their default state to keep SSR HTML identical
   // to the first client render. The `useEffect` below rehydrates from
@@ -1729,6 +1734,7 @@ const Queue = ({ user, tasks, subFilter }) => {
                     onEscalate={() => setEscalateModalTask(taskDescriptor)}
                     hasNote={taskNotes.hasNote(task.source, task.id)}
                     onOpenNote={() => setNoteModalTask(task)}
+                    escalateLabel={hubBrand.escalateLabel}
                   />;
                 })}
                 {ticketBottomPad > 0 && (
@@ -1887,7 +1893,7 @@ const SlaPill = ({ active, onClick, tone, count, label, hint }) => {
 };
 
 // ── Table row component ──
-const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onSlaExtension, onEscalate, hasNote = false, onOpenNote = null }) => {
+const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onSlaExtension, onEscalate, hasNote = false, onOpenNote = null, escalateLabel = 'Escalate to HR Hub' }) => {
   const [hov, setHov] = useState(false);
   const assignee = resolveAssignee(task);
   const sla = slaInfo(task);
@@ -2016,8 +2022,8 @@ const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onSlaExtension, on
           <button
             type="button"
             onClick={() => onEscalate?.()}
-            aria-label={`Escalate "${task.subject || task.id}" to HR Hub`}
-            title="Escalate to HR Hub"
+            aria-label={`${escalateLabel}: "${task.subject || task.id}"`}
+            title={escalateLabel}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: 4,
               padding: '3px 8px', borderRadius: 6,
