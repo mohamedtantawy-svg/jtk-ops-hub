@@ -12,7 +12,7 @@ import { searchTickets, showManyUsers, isZendeskConfigured } from '../../../../s
 import { loadSlaRowsForTicketIds, warmSlaCacheForTicketIds } from '../../../../src/lib/zendesk-sla-sync';
 import { searchIssues, isJiraConfigured, resolveHrxOwnerFields, emailsFromJiraFieldValue } from '../../../../src/lib/jira-api';
 import { getCurrentDeptSlugAndId } from '../../../../src/lib/dept-scope';
-import { SLUGS, resolveZendeskConfig, resolveJiraConfig, getJiraExclusionForHrx } from '../../../../src/lib/dept-integrations';
+import { SLUGS, resolveZendeskConfig, resolveJiraConfig } from '../../../../src/lib/dept-integrations';
 
 // Jira custom fields (by display-name substring) that, together with the
 // built-in `assignee` and `reporter`, govern whether a ticket belongs to our
@@ -1241,15 +1241,19 @@ function buildJiraJqlQueries(ownerFieldIds = {}) {
   // native relative time bound, no client-side post-filter needed.
   const resolvedFilter = `statusCategory = Done AND resolved >= -24h`;
 
-  // 2026-05-22: dept-isolation — any ticket claimed by another dept
-  // (GIX's Team="Global Mobility", "Mobility Terminations" request type,
-  // or project = GMSD) is excluded from HRX's queue. Source of truth is
-  // dept-integrations.js so adding/changing a dept's claim updates HRX
-  // automatically. Returns null when no other dept has Jira claims, in
-  // which case the suffix is omitted and HRX behavior is identical to
-  // pre-2026-05-22.
-  const otherDeptExclusion = getJiraExclusionForHrx();
-  const exclusionSuffix = otherDeptExclusion ? ` AND ${otherDeptExclusion}` : '';
+  // 2026-05-22 REVERTED: the JQL-based dept exclusion I shipped in #785
+  // dropped to ZERO HRX tickets in prod. Cause: Jira's 3-valued logic.
+  // For a typical HRX ticket with no `Team[Team]` and no `"Request Type"`
+  // set, those clauses evaluate to UNKNOWN, an OR of UNKNOWNs is UNKNOWN,
+  // and NOT(UNKNOWN) is UNKNOWN — which Jira treats as "no match" and
+  // filters the row out. So every HRX ticket without those GIX-specific
+  // fields explicitly set got dropped. Reverting to the pre-#785 JQL
+  // restores HRX immediately. HRX/GIX overlap-prevention on the Jira
+  // side will be reintroduced as a POST-FETCH filter (after we
+  // materialise Team + Request Type per ticket) in a follow-up; that's
+  // 3VL-safe since we compare actual values in JS, not in JQL.
+  // Workbench's exclusion (in deel-api.js#listWorkbenchTasks) is already
+  // post-fetch and keeps working — no revert needed there.
 
   // Roles that can make a ticket "ours": primary assignee, reporter, plus
   // any HRX-owner custom fields discovered dynamically.
@@ -1268,8 +1272,8 @@ function buildJiraJqlQueries(ownerFieldIds = {}) {
   for (const roleField of roleFields) {
     for (const chunk of emailChunks) {
       const emailsList = chunk.map(e => `"${e}"`).join(', ');
-      queries.push(`${projectFilter} AND ${roleField} IN (${emailsList}) AND ${statusFilter}${exclusionSuffix} ORDER BY updated DESC`);
-      queries.push(`${projectFilter} AND ${roleField} IN (${emailsList}) AND ${resolvedFilter}${exclusionSuffix} ORDER BY resolved DESC`);
+      queries.push(`${projectFilter} AND ${roleField} IN (${emailsList}) AND ${statusFilter} ORDER BY updated DESC`);
+      queries.push(`${projectFilter} AND ${roleField} IN (${emailsList}) AND ${resolvedFilter} ORDER BY resolved DESC`);
     }
   }
   return queries;
