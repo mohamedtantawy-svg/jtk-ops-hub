@@ -1,39 +1,35 @@
 'use client';
 
-import { lazy, Suspense, useState, useEffect } from 'react';
+import { lazy, Suspense } from 'react';
 
-import {
-  detectWorkspace,
-  WORKSPACE_IDS,
-  getWorkspace,
-  userHasAccess,
-  SELECTED_WORKSPACE_KEY,
-} from './workspaceRegistry';
-import WorkspacePicker from './WorkspacePicker';
-import { fetchMemberships } from './membersApi';
-
-// Top-level decision-maker. Authoritative for which workspace mounts.
+// 2026-05-22 (final cut): WorkspacePicker retired from the live flow.
+// All departments (HRX, Global Immigration, Payroll Operations, Benefits
+// Operations) are now multi-tenant under the HR Hub shell via the Phase
+// 11+ dept-scope isolation (org_node_id stamp on every row + per-dept
+// read filter + super-admin TopNav picker chip). The legacy four-card
+// landing was a holdover from before that work; new users + returning
+// users both land directly on HR Hub's LoginScreen now, sign in with
+// Google, and the existing /api/v1/me + /dept-scope/current chain
+// resolves them into their own department's data on first paint.
 //
-// 1. Unauthenticated → WorkspacePicker (URL param does NOT bypass auth).
-// 2. Authenticated + HR resolved → mount HR App.jsx (no membership check;
-//    HR is open to all @deel.com via SSO).
-// 3. Authenticated + non-HR resolved → MembershipGate fetches the user's
-//    DB-backed memberships (the workspace_members table) before rendering.
-//    If the user is on the allowlist, the workspace mounts with their role
-//    in context (so admin tabs can be conditionally shown). If not, the
-//    picker re-renders with an access-denied banner.
+// What's intentionally NOT deleted in this PR:
+//   • WorkspacePicker.jsx, workspaceRegistry.js, MembershipGate, and the
+//     three legacy workspace apps (command-center/, payroll/, gix/) all
+//     live in the tree but are unreachable from this router. Keeping
+//     them avoids a sprawling delete that would risk hitting another
+//     file we don't see today; a follow-up can prune them once we
+//     confirm nobody depends on the legacy paths.
+//   • The `ops_hub_workspace_selected` + `ops_hub_workspace_memberships`
+//     localStorage keys some users still have on their machines are
+//     harmless leftovers — never read by the new flow.
 //
-// File-based `userHasAccess` is kept as a defensive bootstrap fallback for
-// when the memberships endpoint is unreachable — without it, an API
-// outage would lock every user out of every non-HR workspace.
+// Failure mode: if HrApp's lazy import ever fails (e.g. chunk 404
+// after deploy + stale CDN), the Suspense fallback below stays visible.
+// That's the same fallback the picker used and the same fallback
+// HrApp's pre-2026-05-22 path used, so we're not introducing a new
+// failure surface.
 
 const HrApp = lazy(() => import('../../App'));
-const CommandCenterApp = lazy(() => import('../command-center/CommandCenterApp'));
-const PayrollApp = lazy(() => import('../payroll/PayrollApp'));
-const GIXApp = lazy(() => import('../gix/GIXApp'));
-
-const MEMBERSHIPS_CACHE_KEY = 'ops_hub_workspace_memberships';
-const MEMBERSHIPS_TTL_MS = 5 * 60 * 1000;
 
 function loadingScreen() {
   return (
@@ -52,135 +48,15 @@ function loadingScreen() {
   );
 }
 
-function readEmail() {
-  try { return localStorage.getItem('ops_hub_logged_in_email') || null; } catch { return null; }
-}
-function readUrlWorkspaceParam() {
-  try {
-    const sp = new URLSearchParams(window.location.search);
-    return sp.get('workspace');
-  } catch { return null; }
-}
-function readSelectedWorkspace() {
-  try { return localStorage.getItem(SELECTED_WORKSPACE_KEY) || null; } catch { return null; }
-}
-
-function readCachedMemberships(email) {
-  try {
-    const raw = localStorage.getItem(MEMBERSHIPS_CACHE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (parsed?.email !== email) return null;
-    if (Date.now() - (parsed.ts || 0) > MEMBERSHIPS_TTL_MS) return null;
-    return parsed.memberships || [];
-  } catch { return null; }
-}
-function writeCachedMemberships(email, memberships) {
-  try {
-    localStorage.setItem(MEMBERSHIPS_CACHE_KEY, JSON.stringify({ email, memberships, ts: Date.now() }));
-  } catch {}
-}
-
-function resolveRole(memberships, workspaceId) {
-  if (!Array.isArray(memberships)) return null;
-  const hit = memberships.find(m => m.workspaceId === workspaceId);
-  return hit?.role || null;
-}
-
-// Gate that fetches memberships before rendering the workspace. Caches in
-// localStorage with a short TTL so navigations within the session are fast.
-function MembershipGate({ workspaceId, workspace, email, WorkspaceApp }) {
-  const cached = readCachedMemberships(email);
-  const [memberships, setMemberships] = useState(cached);
-  const [loading, setLoading] = useState(!cached);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    // Always background-refresh, even if we have cache — gives the user the
-    // freshest role on every nav without blocking render.
-    fetchMemberships()
-      .then(data => {
-        if (cancelled) return;
-        const list = data?.memberships || [];
-        writeCachedMemberships(email, list);
-        setMemberships(list);
-        setError(null);
-      })
-      .catch(err => {
-        if (cancelled) return;
-        // If we already had cached data, keep using it. Only fail if we
-        // have nothing.
-        if (!cached) setError(err);
-      })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [email, cached]);
-
-  // While loading and no cache, show the loader.
-  if (loading && !memberships) return loadingScreen();
-
-  // Determine access:
-  //   - Primary: DB memberships (what the user actually has now)
-  //   - Fallback: file-based allowlist (defensive — covers API outage)
-  const hasDbAccess = Array.isArray(memberships)
-    && memberships.some(m => m.workspaceId === workspaceId);
-  const hasFileAccess = userHasAccess(workspaceId, email);
-
-  if (!hasDbAccess && !hasFileAccess) {
-    return <WorkspacePicker accessDeniedFor={workspaceId} />;
-  }
-
-  // Role comes from DB if available; otherwise default to 'member' (file
-  // allowlist doesn't carry role info).
-  const role = resolveRole(memberships, workspaceId) || 'member';
-
+export default function WorkspaceRouter() {
+  // Single-mount: HR Hub for everyone, authenticated or not. HrApp
+  // already handles the unauthenticated case by rendering LoginScreen
+  // (Google OAuth → callback → email in localStorage → re-render with
+  // authenticated dashboard). Post-login the user lands in their
+  // home department via getCurrentDeptId — no picker, no detour.
   return (
     <Suspense fallback={loadingScreen()}>
-      <WorkspaceApp email={email} workspace={workspace} role={role} />
+      <HrApp />
     </Suspense>
-  );
-}
-
-export default function WorkspaceRouter() {
-  // Read localStorage + URL ONCE at mount (snapshot survives strict-mode
-  // double-render in dev).
-  const [snapshot] = useState(() => ({
-    email: readEmail(),
-    urlParam: readUrlWorkspaceParam(),
-    selectedWorkspace: readSelectedWorkspace(),
-  }));
-  const { email, urlParam, selectedWorkspace } = snapshot;
-
-  if (!email) {
-    return <WorkspacePicker initialSelected={selectedWorkspace} />;
-  }
-
-  const workspaceId = detectWorkspace({ email, urlParam, selectedWorkspace });
-
-  if (workspaceId === WORKSPACE_IDS.HR) {
-    return <Suspense fallback={loadingScreen()}><HrApp /></Suspense>;
-  }
-
-  const workspace = getWorkspace(workspaceId);
-  if (!workspace) {
-    return <Suspense fallback={loadingScreen()}><HrApp /></Suspense>;
-  }
-
-  let WorkspaceApp;
-  switch (workspaceId) {
-    case WORKSPACE_IDS.COMMAND_CENTER: WorkspaceApp = CommandCenterApp; break;
-    case WORKSPACE_IDS.PAYROLL:        WorkspaceApp = PayrollApp;       break;
-    case WORKSPACE_IDS.GIX:            WorkspaceApp = GIXApp;           break;
-    default:                            WorkspaceApp = HrApp;
-  }
-
-  return (
-    <MembershipGate
-      workspaceId={workspaceId}
-      workspace={workspace}
-      email={email}
-      WorkspaceApp={WorkspaceApp}
-    />
   );
 }
