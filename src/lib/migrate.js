@@ -3,6 +3,7 @@ import { seedCountryOwnersIfEmpty } from './country-owners-seed';
 import { seedHrHubSettingsIfNeeded } from './hr-hub-seed';
 import { seedLeaderAlertsSettingsIfNeeded } from './leader-alerts-seed';
 import { seedTimeOffEventsIfNeeded } from './time-off-seed';
+import { seedGixTimeOffEventsIfNeeded } from './dept-time-off-seed';
 import { seedHandoverDefaultsIfNeeded } from './handover-defaults-seed';
 import { seedWorkspaceMembersIfNeeded } from './workspace-members-seed';
 import { seedCountryHandoverDocsIfNeeded } from './country-handover-docs-seed';
@@ -2266,6 +2267,28 @@ export async function runMigrations() {
     }
   } catch (err) {
     console.warn('[db] Global Immigration roster seed failed:', err?.message);
+  }
+
+  // GIX time-off baseline (2026-05-22 — Mohamed Tantawy): 691 events for
+  // 81 GIX members from "GIX Time Off Report May 22 2026.csv". MUST run
+  // AFTER both the dept-tenancy backfill (so the backfill never touches
+  // these rows) AND the Global Immigration roster seed (so the work
+  // emails resolve to known team members). Each row is INSERTed with
+  // `org_node_id` pre-stamped to the GIX dept UUID so Phase 11e's read
+  // filter shows them only under GIX. HRX users won't see them — the
+  // filter explicitly compares dept UUIDs, not "is in HR Experience
+  // subtree". Idempotent via gix_time_off_seed_version sentinel.
+  try {
+    const gixToResult = await seedGixTimeOffEventsIfNeeded();
+    if (gixToResult?.reseeded) {
+      console.log(`[db] GIX time-off seeded to v${gixToResult.version}: ${gixToResult.inserted} inserted, ${gixToResult.skipped} already present, deptId=${gixToResult.deptId?.slice(0, 8)}`);
+    } else if (gixToResult?.skipped && gixToResult?.reason && gixToResult.reason !== 'version-current') {
+      // Surface dept-not-found / empty-payload so a config drift is loud,
+      // but stay quiet for the normal "already at version" skip.
+      console.warn(`[db] GIX time-off seed skipped: ${gixToResult.reason}`);
+    }
+  } catch (err) {
+    console.warn('[db] GIX time-off seed failed:', err?.message);
   }
 
   // Phase C 2026-05-18: when HANDOVER_DEFAULTS_VERSION bumps, refresh the
