@@ -1336,6 +1336,18 @@ ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS assignee_manually_set BOOLEA
 CREATE INDEX IF NOT EXISTS idx_hr_hub_request_auto_assign
   ON hr_hub_request(flow, assignee_email) WHERE assignee_manually_set = FALSE;
 
+-- 2026-05-22 — OOO cover. When a new request resolves to an assignee
+-- who's currently out of office, we re-route to the assignee's manager
+-- (next non-OOO ancestor) and stamp the original here so the lazy
+-- reconciler (and the next manual reassign attempt) can flip the row
+-- back to the original once they return. NULL means "no cover in
+-- effect" — the common case. See src/lib/hr-hub-ooo.js for the rules.
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS cover_for_assignee_email VARCHAR(255);
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS cover_for_assignee_name  VARCHAR(255);
+CREATE INDEX IF NOT EXISTS idx_hr_hub_request_cover_for
+  ON hr_hub_request(LOWER(cover_for_assignee_email))
+  WHERE cover_for_assignee_email IS NOT NULL;
+
 -- Phase 2 — the active hide list. Manager-approved entries land here and
 -- every queue's render path checks (task_source, task_id) against this
 -- table. UNIQUE so a duplicate approval can't double-insert.

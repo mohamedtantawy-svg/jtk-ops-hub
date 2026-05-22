@@ -425,6 +425,32 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
                 </LabeledPicker>
                 <LabeledPicker label="Assignee">
                   <PickerAssignee value={request.assigneeEmail} valueName={request.assigneeName} onChange={(email, name) => updateField({ assigneeEmail: email, assigneeName: name })} disabled={savingField === 'assigneeEmail'} />
+                  {/* 2026-05-22 — when the row was auto-routed because
+                      the requested assignee is OOO, surface a small
+                      badge so the manager knows it's a cover (and
+                      that the row will flip back automatically when
+                      the original returns from leave). */}
+                  {request.coverForAssigneeEmail && (
+                    <div
+                      title={`Auto-covered while ${request.coverForAssigneeName || request.coverForAssigneeEmail} is OOO. Reassigns back automatically when they're back.`}
+                      style={{
+                        marginTop: 6,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        padding: '2px 8px',
+                        borderRadius: 999,
+                        background: '#fff7ed',
+                        color: '#9a3412',
+                        border: '1px solid #fed7aa',
+                        fontSize: 10,
+                        fontWeight: 600,
+                      }}
+                    >
+                      <i className="bi-airplane" style={{ fontSize: 10 }} />
+                      Covering for {request.coverForAssigneeName || request.coverForAssigneeEmail} (OOO)
+                    </div>
+                  )}
                 </LabeledPicker>
               </div>
 

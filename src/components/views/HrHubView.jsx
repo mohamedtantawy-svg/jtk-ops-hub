@@ -865,6 +865,33 @@ function RequestRow({ item, active, onClick, viewerEmail, isManager, isAdmin, on
               <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{item.assigneeName}</span>
             </>
           )}
+          {/* 2026-05-22 — OOO cover badge: surfaces that the row was
+              auto-routed away from a leave-taking assignee. The
+              reconciler flips it back automatically on their return,
+              so the badge is informational (not actionable). */}
+          {item.coverForAssigneeEmail && (
+            <span
+              title={`Auto-covered while ${item.coverForAssigneeName || item.coverForAssigneeEmail} is OOO. Will reassign back automatically.`}
+              style={{
+                marginLeft: 6,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 3,
+                padding: '1px 6px',
+                borderRadius: 999,
+                background: '#fff7ed',
+                color: '#9a3412',
+                border: '1px solid #fed7aa',
+                fontSize: 9,
+                fontWeight: 700,
+                letterSpacing: 0.2,
+                textTransform: 'uppercase',
+              }}
+            >
+              <i className="bi-airplane" style={{ fontSize: 8 }} />
+              OOO cover
+            </span>
+          )}
         </span>
       </span>
 

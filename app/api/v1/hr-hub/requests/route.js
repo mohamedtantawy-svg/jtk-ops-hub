@@ -27,6 +27,7 @@ import {
   addFollower,
   writeLog,
 } from '../../../../../src/lib/hr-hub-helpers';
+import { resolveAssigneeWithOooCover, reconcileOooCovers } from '../../../../../src/lib/hr-hub-ooo';
 import {
   ALLOWED_TASK_SOURCES as ALLOWED_SLA_EXT_TASK_SOURCES,
   ALLOWED_REASON_CODES as ALLOWED_SLA_EXT_REASON_CODES,
@@ -126,6 +127,13 @@ export async function GET(req) {
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   await ensureRosterHydrated();
+  // 2026-05-22 — flip any rows whose OOO-covered original is now back.
+  // Throttled to one run per minute at the module level, so a busy
+  // workspace with dozens of list calls per minute only pays the cost
+  // once. Awaited so the rows we return reflect the most-recent state
+  // — the user shouldn't see "still covered by manager" 30s after the
+  // original logged in.
+  await reconcileOooCovers();
 
   const { searchParams } = new URL(req.url);
   const flow = searchParams.get('flow');
@@ -270,6 +278,7 @@ export async function GET(req) {
     SELECT id, flow, status, priority, function_area, request_type, report_type,
            title, summary,
            created_by_email, created_by_name, assignee_email, assignee_name,
+           cover_for_assignee_email, cover_for_assignee_name,
            team_lead_email, cc_email, created_at, updated_at, resolved_at,
            task_source, task_id, task_url, task_subject,
            sla_ext_requested_days, sla_ext_reason_code, sla_ext_acknowledged,
@@ -306,6 +315,11 @@ export async function GET(req) {
     createdByName: row.created_by_name,
     assigneeEmail: row.assignee_email,
     assigneeName: row.assignee_name,
+    // 2026-05-22 — when the row was OOO-redirected, the FE can render
+    // a "covering for X (OOO)" badge so the actual assignee knows the
+    // request will flip back automatically.
+    coverForAssigneeEmail: row.cover_for_assignee_email,
+    coverForAssigneeName: row.cover_for_assignee_name,
     teamLeadEmail: row.team_lead_email,
     ccEmail: row.cc_email,
     createdAt: row.created_at,
@@ -516,6 +530,25 @@ export async function POST(req) {
   // up on next boot.
   const submitterDeptId = await getCurrentDeptId(user, req);
 
+  // 2026-05-22 — Jose Ruales spec: if the resolved assignee is currently
+  // OOO, re-route to their first non-OOO manager and stamp the original
+  // in cover_for_assignee_email. The reconciler restores them the moment
+  // they're back. Applies to every HR Hub flow (hr_request, hr_reporting,
+  // sla_extension_request, hide_task_request, …) across every dept.
+  // `assignee_manually_set` is unaffected by the cover redirect — a
+  // covered row is still considered "auto-assigned" so the TLOC rotation
+  // can pick it up on the next swap, and a manual reassign still flips
+  // the flag to TRUE via the [id] route's existing logic.
+  let coverForEmail = null;
+  let coverForName = null;
+  if (assigneeEmail) {
+    const resolved = await resolveAssigneeWithOooCover(assigneeEmail, assigneeName);
+    assigneeEmail = resolved.assigneeEmail;
+    assigneeName = resolved.assigneeName;
+    coverForEmail = resolved.coverForEmail;
+    coverForName = resolved.coverForName;
+  }
+
   const insert = await query(
     `INSERT INTO hr_hub_request
        (flow, priority,
@@ -528,7 +561,8 @@ export async function POST(req) {
         task_source, task_id, task_url, task_subject,
         sla_ext_requested_days, sla_ext_reason_code, sla_ext_acknowledged,
         assignee_manually_set,
-        org_node_id)
+        org_node_id,
+        cover_for_assignee_email, cover_for_assignee_name)
      VALUES ($1, $2,
              $3, $4, $5,
              $6, $7, $8,
@@ -539,7 +573,8 @@ export async function POST(req) {
              $17, $18, $19, $20,
              $21, $22, $23,
              $24,
-             $25)
+             $25,
+             $26, $27)
      RETURNING id, status, created_at`,
     [
       flow, priority,
@@ -553,6 +588,7 @@ export async function POST(req) {
       slaExtRequestedDays, slaExtReasonCode, slaExtAcknowledged,
       assigneeManuallySet,
       submitterDeptId,
+      coverForEmail, coverForName,
     ],
   );
 
@@ -564,6 +600,11 @@ export async function POST(req) {
   await addFollower(newId, callerEmail, 'creator');
   if (ccEmail) await addFollower(newId, ccEmail, 'tagged');
   if (assigneeEmail) await addFollower(newId, assigneeEmail, 'assignee');
+  // 2026-05-22 — the OOO-covered original still follows the row so they
+  // pick up the audit trail + comment stream the moment they return.
+  // The reconciler reassigns the row back automatically; following keeps
+  // them in the loop in the meantime.
+  if (coverForEmail) await addFollower(newId, coverForEmail, 'assignee');
 
   await writeLog(
     newId,
@@ -572,6 +613,19 @@ export async function POST(req) {
     null,
     { flow, summary: summary.slice(0, 200), functionArea: body.functionArea, requestType: body.requestType, reportType: body.reportType },
   );
+  // Audit the OOO redirect as a separate log entry so the request
+  // history shows BOTH "created" and "auto_cover_assigned" — keeps the
+  // signal explicit ("the system, not the requester, decided to route
+  // this elsewhere because the chosen assignee is OOO").
+  if (coverForEmail) {
+    await writeLog(
+      newId,
+      { email: null, name: 'System' },
+      'auto_cover_assigned',
+      { assigneeEmail: coverForEmail },
+      { assigneeEmail, coverForEmail, reason: 'assignee_currently_ooo' },
+    );
+  }
 
   return NextResponse.json({ id: newId }, { status: 201 });
 }
