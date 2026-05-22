@@ -29,6 +29,12 @@ import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
 import { useTaskNotes } from '../../hooks/useTaskNotes';
 import { useTeamDataVersion } from '../../hooks/useTeamDataVersion';
 import { useCurrentDept } from '../../hooks/useCurrentDept';
+import {
+  SUBJECT_WIDTH_MIN,
+  clampSubjectWidth as clampSubjectWidthShared,
+  loadStoredSubjectWidth,
+  saveStoredSubjectWidth,
+} from '../../lib/queue-subject-width';
 import UnifiedSyncButton from './UnifiedSyncButton';
 import SourceTable from './SourceTable';
 import ErrorBoundary from '../ui/ErrorBoundary';
@@ -130,44 +136,24 @@ const loadFilters = (email) => {
 // ── Subject column width (user-resizable) ───────────────────────────────────
 // Carolina Ferreira 2026-05-20 bug "Jira queue" / "Under the Jira queue we
 // cannot see the full ticket title, and therefore we don't know to which
-// employee it is referring to. Not seeing the employee's name makes us
-// having to open all tickets individually, to double check the status."
-// Proposed resolution: "Can we have the option to extend the column
-// manually?"
+// employee it is referring to." Chaitanya Raju Uppalapati 2026-05-22 bug:
+// same problem on Workbench's Subject column ("Workbench Title should be
+// extendable just like in workbench to be able to see the name of the
+// Employee"). The Workbench / Onb / Off / Amend / Redline / IP tables share
+// SourceTable, so the same resize affordance applies to all six.
 //
-// Mechanic: the Subject column header renders a 6 px drag handle on its
-// right edge. Mousedown starts a drag that mutates the table's
+// Mechanic: the Subject column header renders a drag handle on its right
+// edge. Mousedown starts a drag that mutates the table's
 // `--queue-subject-width` CSS variable directly on the DOM (so virtualized
 // rows update without a React re-render storm); mouseup syncs React state
 // + persists to localStorage so the next mount keeps the user's chosen
-// width. Same email-scoped key pattern the rest of the Queue uses (skill
-// rule #5 — user-scoped cache). Default bumped from the previous effective
-// 320 px to 480 px so even users who never resize see ~50% more title.
+// width. Storage / clamp helpers live in `src/lib/queue-subject-width.js`
+// so the SourceTable mirror reuses them (skill rule #5 — user-scoped
+// cache). Default bumped from the previous effective 320 px to 480 px so
+// even users who never resize see ~50% more title.
 const SUBJECT_WIDTH_DEFAULT = 480;
-const SUBJECT_WIDTH_MIN = 240;
-const SUBJECT_WIDTH_MAX = 900;
 const SUBJECT_WIDTH_STORAGE_BASE = 'ops_hub_queue_subject_width';
-const subjectWidthKey = (email) => {
-  const lc = (email || '').toLowerCase();
-  return lc ? `${SUBJECT_WIDTH_STORAGE_BASE}:${lc}` : SUBJECT_WIDTH_STORAGE_BASE;
-};
-const clampSubjectWidth = (n) => {
-  if (!Number.isFinite(n)) return SUBJECT_WIDTH_DEFAULT;
-  return Math.min(SUBJECT_WIDTH_MAX, Math.max(SUBJECT_WIDTH_MIN, Math.round(n)));
-};
-const loadStoredSubjectWidth = (email) => {
-  if (typeof window === 'undefined') return SUBJECT_WIDTH_DEFAULT;
-  try {
-    const raw = localStorage.getItem(subjectWidthKey(email));
-    if (!raw) return SUBJECT_WIDTH_DEFAULT;
-    return clampSubjectWidth(parseInt(raw, 10));
-  } catch { return SUBJECT_WIDTH_DEFAULT; }
-};
-const saveStoredSubjectWidth = (email, w) => {
-  if (typeof window === 'undefined' || !email) return;
-  try { localStorage.setItem(subjectWidthKey(email), String(w)); }
-  catch { /* quota or private-mode — width still applies for this session */ }
-};
+const clampSubjectWidth = (n) => clampSubjectWidthShared(n, SUBJECT_WIDTH_DEFAULT);
 
 // Map a WORK_SOURCES tab id → its `visibleSources` key on the dept-scope
 // payload. Jira + Zendesk are NOT in visibleSources (they're available
@@ -267,14 +253,14 @@ const Queue = ({ user, tasks, subFilter }) => {
   // in-flight value during a drag so onmousemove can update the DOM
   // directly without going through React. `tableElRef` lets the drag
   // handler reach into the table to set the variable per frame.
-  const [subjectWidth, setSubjectWidth] = useState(() => loadStoredSubjectWidth(user?.email));
+  const [subjectWidth, setSubjectWidth] = useState(() => loadStoredSubjectWidth(SUBJECT_WIDTH_STORAGE_BASE, user?.email, SUBJECT_WIDTH_DEFAULT));
   const subjectWidthRef = useRef(subjectWidth);
   useEffect(() => { subjectWidthRef.current = subjectWidth; }, [subjectWidth]);
   const tableElRef = useRef(null);
   // Re-load if the signed-in email changes mid-session (impersonation +
   // login-as-dept-admin flows swap `user` without a remount).
   useEffect(() => {
-    const next = loadStoredSubjectWidth(user?.email);
+    const next = loadStoredSubjectWidth(SUBJECT_WIDTH_STORAGE_BASE, user?.email, SUBJECT_WIDTH_DEFAULT);
     setSubjectWidth(next);
   }, [user?.email]);
 
@@ -299,7 +285,7 @@ const Queue = ({ user, tasks, subFilter }) => {
       document.body.style.cursor = '';
       const final = subjectWidthRef.current;
       setSubjectWidth(final);
-      saveStoredSubjectWidth(user?.email, final);
+      saveStoredSubjectWidth(SUBJECT_WIDTH_STORAGE_BASE, user?.email, final);
     };
     document.body.style.userSelect = 'none';
     document.body.style.cursor = 'col-resize';
@@ -2117,6 +2103,16 @@ const ResizableSubjectTh = memo(function ResizableSubjectTh({ sortCol, sortDir, 
           <i className="bi-caret-up-fill" style={{ color: active && sortDir === 'asc' ? '#1b1b1b' : '#ccc' }} />
           <i className="bi-caret-down-fill" style={{ color: active && sortDir === 'desc' ? '#1b1b1b' : '#ccc', marginTop: -3 }} />
         </span>
+        {/* Persistent resize-affordance icon next to the label so the user
+            knows the column is widenable before they ever touch the right
+            edge. Faint at rest; the hit-target lives on the right-edge
+            handle below, not on this icon. */}
+        <i
+          className="bi-arrows"
+          aria-hidden="true"
+          title="Drag the right edge to resize"
+          style={{ fontSize: 10, color: 'var(--text-muted)', opacity: handleHov ? 1 : 0.55, marginLeft: 2, transition: 'opacity .12s' }}
+        />
       </span>
       <div
         role="separator"
@@ -2131,14 +2127,29 @@ const ResizableSubjectTh = memo(function ResizableSubjectTh({ sortCol, sortDir, 
         style={{
           position: 'absolute',
           top: 0, right: 0, bottom: 0,
-          width: 6,
+          width: 8,
           cursor: 'col-resize',
-          // Show a thin blue rail on hover so the affordance is
-          // discoverable without cluttering the header at rest.
-          background: handleHov ? '#1f74b3' : 'transparent',
-          transition: 'background .12s',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          paddingRight: 2,
         }}
-      />
+      >
+        {/* Persistent thin rail so the affordance is always visible — not
+            just on hover. Thickens + flips to the brand accent when the
+            user hovers, matching the cursor change. */}
+        <span
+          aria-hidden="true"
+          style={{
+            display: 'block',
+            width: handleHov ? 3 : 2,
+            height: handleHov ? '70%' : '55%',
+            background: handleHov ? '#1f74b3' : 'var(--border)',
+            borderRadius: 2,
+            transition: 'width .12s, height .12s, background .12s',
+          }}
+        />
+      </div>
     </th>
   );
 });

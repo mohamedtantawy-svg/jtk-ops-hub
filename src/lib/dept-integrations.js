@@ -89,16 +89,34 @@ export const DEPT_INTEGRATIONS = {
     },
     jira: {
       tokenEnvVar: 'JIRA_GIX',
-      projectKeys: ['COHD', 'OSHD'], // same projects as HRX
-      // Filter to the "Global Mobility" team — mohamed's spec said
-      // "exactly the same tickets rules as HRX but the team name is
-      // Global Mobility". Stored as a list so future co-team setups can
-      // share the same Jira surface (e.g. ['Global Mobility', 'GIX-EMEA']).
-      ownerFieldValues: ['Global Mobility'],
+      // 2026-05-22: spec from Mohamed — three clauses, each fetched as
+      // active + resolved-in-24h, de-duped by issue key:
+      //   1. COHD + OSHD with Team = "Global Mobility"
+      //   2. COHD with Request Type = "Mobility Terminations"
+      //      (catches tickets the Global Mobility team owns by request
+      //       type even when the Team field isn't set)
+      //   3. All actionable tickets in GMSD (immigration's own project;
+      //      no team filter — same actionable rules as HRX)
+      // fetchJiraQueueForDept appends `AND statusCategory != Done AND
+      // (resolution IS EMPTY OR resolution = Unresolved)` (active) and
+      // `AND statusCategory = Done AND resolved >= -24h` (resolved-24h)
+      // to each clause before paginating. HRX's queue is shielded from
+      // these via getJiraExclusionForHrx() so a ticket never appears in
+      // both queues.
+      jqlClauses: [
+        `project IN (COHD, OSHD) AND "Team[Team]" in ("Global Mobility")`,
+        `project = COHD AND "Request Type" = "Mobility Terminations"`,
+        `project = GMSD`,
+      ],
     },
     workbench: {
       tokenEnvVar: 'DEEL_ADMIN_GIX',
-      teamFilter: ['Mobility Operations', 'GSC - Mobility'],
+      // 2026-05-22: Mohamed confirmed the upstream `teamName` values for
+      // the GSC / GIX immigration backlog. Any task whose teamName
+      // (case-insensitive) matches one of these lands in the GIX surface.
+      // HRX path uses getWorkbenchTeamExclusionForHrx() to drop these so
+      // the same task can't appear in HRX's queue.
+      teamFilter: ['Mobility Operations', 'GSC - Mobility', 'GIX'],
       // Phase 13b (2026-05-20): wired via the per-call adminTokenOverride
       // added to deel-api.js#deelFetch + the post-fetch teamNameFilter
       // in listWorkbenchTasks. HRX is untouched (no overrides passed).
@@ -173,6 +191,15 @@ export function resolveWorkbenchConfig(deptSlug) {
 
 /**
  * Jira readout. Returns null when Jira is not configured for this dept.
+ *
+ * Two shapes are supported on `cfg.jira`:
+ *   • `jqlClauses: string[]` — preferred. Each clause is a JQL fragment;
+ *     the dept fetcher appends active / resolved-24h status suffixes and
+ *     fans out one query per clause × bucket, deduping by issue key.
+ *   • `projectKeys + ownerFieldValues` — legacy single-clause shorthand;
+ *     converted to one `project IN (...) AND "Team[Team]" in (...)`
+ *     clause at fetch time. Kept so a brand-new dept can wire a simple
+ *     project + team setup without writing JQL.
  */
 export function resolveJiraConfig(deptSlug) {
   const cfg = getDeptIntegrations(deptSlug);
@@ -183,10 +210,59 @@ export function resolveJiraConfig(deptSlug) {
     token,
     baseUrl: process.env.JIRA_BASE_URL || '',
     email: process.env.JIRA_USER_EMAIL || '',
+    jqlClauses: Array.isArray(cfg.jira.jqlClauses) ? cfg.jira.jqlClauses.slice() : null,
     projectKeys: cfg.jira.projectKeys || [],
     ownerFieldValues: cfg.jira.ownerFieldValues || null,
     tokenSource: cfg.jira.tokenEnvVar,
   };
+}
+
+/**
+ * Returns a JQL fragment HRX's fetcher should AND into every query so
+ * tickets claimed by any non-HRX dept never enter HRX's result set.
+ * Composes from each non-HRX dept's `jqlClauses` (or the legacy
+ * project+ownerFieldValues shape), joined by OR inside a single NOT().
+ * Returns null when no other dept has Jira claims (HRX queue is
+ * unfiltered then — matches pre-2026-05-22 behaviour).
+ */
+export function getJiraExclusionForHrx() {
+  const fragments = [];
+  for (const [slug, cfg] of Object.entries(DEPT_INTEGRATIONS)) {
+    if (slug === HR_EXPERIENCE_SLUG) continue;
+    if (!cfg?.jira) continue;
+    if (Array.isArray(cfg.jira.jqlClauses) && cfg.jira.jqlClauses.length > 0) {
+      for (const c of cfg.jira.jqlClauses) fragments.push(`(${c})`);
+      continue;
+    }
+    // Legacy shape — same single-clause shorthand the dept fetcher uses.
+    if (Array.isArray(cfg.jira.projectKeys) && cfg.jira.projectKeys.length > 0
+        && Array.isArray(cfg.jira.ownerFieldValues) && cfg.jira.ownerFieldValues.length > 0) {
+      const projs = cfg.jira.projectKeys.join(', ');
+      const teams = cfg.jira.ownerFieldValues.map(v => `"${v}"`).join(', ');
+      fragments.push(`(project IN (${projs}) AND "Team[Team]" in (${teams}))`);
+    }
+  }
+  if (fragments.length === 0) return null;
+  return `NOT (${fragments.join(' OR ')})`;
+}
+
+/**
+ * Returns the union of every non-HRX dept's Workbench `teamFilter`
+ * values, lower-cased and de-duped. HRX's workbench path AND-NOTs these
+ * so a task tagged with e.g. teamName="GSC - Mobility" never lands in
+ * HRX's queue. Returns null when no other dept has a workbench team
+ * filter set.
+ */
+export function getWorkbenchTeamExclusionForHrx() {
+  const out = new Set();
+  for (const [slug, cfg] of Object.entries(DEPT_INTEGRATIONS)) {
+    if (slug === HR_EXPERIENCE_SLUG) continue;
+    if (!Array.isArray(cfg?.workbench?.teamFilter)) continue;
+    for (const t of cfg.workbench.teamFilter) {
+      if (typeof t === 'string' && t.trim()) out.add(t.trim());
+    }
+  }
+  return out.size > 0 ? Array.from(out) : null;
 }
 
 /**

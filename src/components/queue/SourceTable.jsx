@@ -2,11 +2,29 @@
 // Unified table for all work sources (onboarding, offboarding, amendments,
 // redlines, workbench, and the combined "All" view).
 // Expects normalized rows with a common shape.
-import { useState, useMemo, useRef, useEffect, memo } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback, memo } from 'react';
 import { TOOLS, getFlag, getCountryName } from '../../data/constants';
 import Avatar from '../ui/Avatar';
 import { useVirtualRows } from '../../hooks/useVirtualRows';
 import { elapsedBizMs } from '../../utils/bizTime';
+import {
+  SUBJECT_WIDTH_MIN,
+  clampSubjectWidth as clampSubjectWidthShared,
+  loadStoredSubjectWidth,
+  saveStoredSubjectWidth,
+} from '../../lib/queue-subject-width';
+
+// Subject column width — shared resize affordance with Queue.jsx (ZD/Jira).
+// The Workbench bug Chaitanya Raju Uppalapati flagged 2026-05-22 ("Workbench
+// Title should be extendable just like in workbench to be able to see the
+// name of the Employee") applies to every Deel source that flows through
+// this component. Different storage base than Queue.jsx so the wider
+// Workbench column doesn't auto-balloon the ZD/Jira table (and vice versa);
+// the CSS variable name `--queue-subject-width` is shared so styling stays
+// uniform.
+const SOURCE_SUBJECT_WIDTH_DEFAULT = 280;
+const SOURCE_SUBJECT_WIDTH_STORAGE_BASE = 'ops_hub_source_subject_width';
+const clampSourceSubjectWidth = (n) => clampSubjectWidthShared(n, SOURCE_SUBJECT_WIDTH_DEFAULT);
 
 // Fixed row height for virtualization. Rows below `<SourceRow />` are
 // locked to this height via inline style + `overflow:hidden` on cells so
@@ -213,6 +231,51 @@ export default function SourceTable({
   onBulkReassign,            // (rows[]) => void — bulk variant; enables checkboxes + bulk-bar Reassign button
   notesApi = null,           // useTaskNotes() return — enables the Note column when present
 }) {
+  // ── User-resizable Subject column ────────────────────────────────────────
+  // Mirrors the ZD/Jira Queue resize (see Queue.jsx for the parent comment).
+  // State holds the React-visible width (drives the table's inline CSS
+  // variable on next render); `subjectWidthRef` carries the in-flight value
+  // during a drag so onmousemove can update the DOM directly without going
+  // through React; `tableElRef` lets the drag handler reach the <table> to
+  // set the variable per frame. The same variable name is used in Queue.jsx
+  // so the th + td share styling tokens (storage keys are separate so each
+  // table keeps its own width).
+  const [subjectWidth, setSubjectWidth] = useState(() => loadStoredSubjectWidth(SOURCE_SUBJECT_WIDTH_STORAGE_BASE, viewerEmail, SOURCE_SUBJECT_WIDTH_DEFAULT));
+  const subjectWidthRef = useRef(subjectWidth);
+  useEffect(() => { subjectWidthRef.current = subjectWidth; }, [subjectWidth]);
+  const tableElRef = useRef(null);
+  // Re-load if the signed-in email changes mid-session (impersonation +
+  // login-as-dept-admin swap `viewerEmail` without a remount).
+  useEffect(() => {
+    setSubjectWidth(loadStoredSubjectWidth(SOURCE_SUBJECT_WIDTH_STORAGE_BASE, viewerEmail, SOURCE_SUBJECT_WIDTH_DEFAULT));
+  }, [viewerEmail]);
+  const handleSubjectResizeStart = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startWidth = subjectWidthRef.current;
+    const onMove = (mv) => {
+      const next = clampSourceSubjectWidth(startWidth + (mv.clientX - startX));
+      subjectWidthRef.current = next;
+      if (tableElRef.current) {
+        tableElRef.current.style.setProperty('--queue-subject-width', `${next}px`);
+      }
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+      document.body.style.cursor = '';
+      const final = subjectWidthRef.current;
+      setSubjectWidth(final);
+      saveStoredSubjectWidth(SOURCE_SUBJECT_WIDTH_STORAGE_BASE, viewerEmail, final);
+    };
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'col-resize';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [viewerEmail]);
+
   // Note modal state — opened from any row's Note button. One modal per
   // table; the active row is held here so SourceRow stays stateless.
   const [noteModalRow, setNoteModalRow] = useState(null);
@@ -627,7 +690,17 @@ export default function SourceTable({
       {/* ── Table ── */}
       {sorted.length > 0 && (
         <div ref={scrollerRef} style={{ flex: 1, overflowY: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+          <table
+            ref={tableElRef}
+            style={{
+              width: '100%', borderCollapse: 'collapse', fontSize: 13,
+              // Inline CSS variable consumed by the Subject <th> + the
+              // Subject <td> in SourceRow. Mutated directly via tableElRef
+              // during drag for instant resizing without re-rendering every
+              // virtualized row.
+              '--queue-subject-width': `${subjectWidth}px`,
+            }}
+          >
             <thead>
               <tr style={{ background: 'var(--surface-2)', position: 'sticky', top: 0, zIndex: 2 }}>
                 {canBulk && (
@@ -643,7 +716,12 @@ export default function SourceTable({
                   </th>
                 )}
                 {showSourceColumn && <th style={{ ...thStyle, width: 70 }}>Source</th>}
-                <SortTh col="subject"   label="Employee"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, textAlign: 'left', minWidth: 150, maxWidth: 180 }} />
+                <ResizableSubjectTh
+                  sortCol={sortCol}
+                  sortDir={sortDir}
+                  onSort={toggleSort}
+                  onResizeStart={handleSubjectResizeStart}
+                />
                 {showClient && <SortTh col="clientName" label="Organization" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, textAlign: 'left', minWidth: 120, maxWidth: 150 }} />}
                 {showType && <SortTh col="typeLabel" label="Type" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 90 }} />}
                 <SortTh col="country"   label="Country"    sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 80 }} />
@@ -960,10 +1038,14 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
 
       {/* Subject — 2026-05-21 audit F29: full subject surfaced via
           `title=` so a hovered truncated row shows the complete name
-          without forcing the user to expand the column. */}
-      <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: 'var(--text)', maxWidth: 180 }}
+          without forcing the user to expand the column. 2026-05-22:
+          width is now driven by the user-resizable `--queue-subject-
+          width` CSS variable (Chaitanya Raju Uppalapati feedback on
+          the Workbench title). Inner span re-uses ellipsis so a long
+          subject still truncates within whatever width the user picked. */}
+      <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: 'var(--text)', maxWidth: 'var(--queue-subject-width, 280px)' }}
         title={row.subject || ''}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
           <div style={{
             width: 26, height: 26, borderRadius: '50%',
             background: tool?.bg || '#f3f3f3',
@@ -1366,6 +1448,95 @@ function StatusPill({ label, count, active, onClick, color }) {
 }
 
 // ── Sortable table header ──
+// ── ResizableSubjectTh ─────────────────────────────────────────────────────
+// Mirrors SortTh's sort UI (click to toggle ▲/▼) but adds a drag handle on
+// the right edge that lets the user widen / narrow the Subject column.
+// Reads its width from the table-level `--queue-subject-width` CSS variable
+// (driven by SourceTable's resize state) so the th + every SourceRow td
+// stay in lockstep without prop-drilling. Storage is email-scoped (helpers
+// live in src/lib/queue-subject-width.js). The persistent rail + bi-arrows
+// hint at the label tell the user the column is widenable before they ever
+// hover the edge — per the Workbench-title feedback (Chaitanya 2026-05-22)
+// asking for a clearer affordance.
+const ResizableSubjectTh = memo(function ResizableSubjectTh({ sortCol, sortDir, onSort, onResizeStart }) {
+  const active = sortCol === 'subject';
+  const sortState = active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
+  const [handleHov, setHandleHov] = useState(false);
+  const onKey = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSort('subject'); }
+  };
+  return (
+    <th
+      role="columnheader"
+      aria-sort={sortState}
+      onClick={() => onSort('subject')}
+      onKeyDown={onKey}
+      tabIndex={0}
+      style={{
+        ...thStyle,
+        width: 'var(--queue-subject-width, 280px)',
+        minWidth: SUBJECT_WIDTH_MIN,
+        textAlign: 'left',
+        cursor: 'pointer',
+        userSelect: 'none',
+        position: 'relative',
+      }}
+      aria-label={`Sort by Employee${active ? `, currently ${sortState}` : ''}. Drag the right edge to resize the column.`}
+    >
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        Employee
+        <span aria-hidden="true" style={{ display: 'inline-flex', flexDirection: 'column', lineHeight: 1, gap: 0, fontSize: 7, marginTop: -1 }}>
+          <i className="bi-caret-up-fill" style={{ color: active && sortDir === 'asc' ? '#1b1b1b' : '#ccc' }} />
+          <i className="bi-caret-down-fill" style={{ color: active && sortDir === 'desc' ? '#1b1b1b' : '#ccc', marginTop: -3 }} />
+        </span>
+        {/* Persistent resize-affordance icon — faint at rest so users see
+            the column is widenable before hovering the right edge. */}
+        <i
+          className="bi-arrows"
+          aria-hidden="true"
+          title="Drag the right edge to resize"
+          style={{ fontSize: 10, color: 'var(--text-muted)', opacity: handleHov ? 1 : 0.55, marginLeft: 2, transition: 'opacity .12s' }}
+        />
+      </span>
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize Employee column"
+        title="Drag to resize"
+        onMouseDown={onResizeStart}
+        onClick={(e) => e.stopPropagation()}
+        onKeyDown={(e) => e.stopPropagation()}
+        onMouseEnter={() => setHandleHov(true)}
+        onMouseLeave={() => setHandleHov(false)}
+        style={{
+          position: 'absolute',
+          top: 0, right: 0, bottom: 0,
+          width: 8,
+          cursor: 'col-resize',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'flex-end',
+          paddingRight: 2,
+        }}
+      >
+        {/* Persistent thin rail — always visible, thickens + accents on
+            hover. Matches the Queue.jsx (ZD/Jira) handle exactly. */}
+        <span
+          aria-hidden="true"
+          style={{
+            display: 'block',
+            width: handleHov ? 3 : 2,
+            height: handleHov ? '70%' : '55%',
+            background: handleHov ? '#1f74b3' : 'var(--border)',
+            borderRadius: 2,
+            transition: 'width .12s, height .12s, background .12s',
+          }}
+        />
+      </div>
+    </th>
+  );
+});
+
 function SortTh({ col, label, sortCol, sortDir, onSort, style }) {
   const active = sortCol === col;
   const sortState = active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';

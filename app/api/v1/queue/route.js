@@ -12,7 +12,7 @@ import { searchTickets, showManyUsers, isZendeskConfigured } from '../../../../s
 import { loadSlaRowsForTicketIds, warmSlaCacheForTicketIds } from '../../../../src/lib/zendesk-sla-sync';
 import { searchIssues, isJiraConfigured, resolveHrxOwnerFields, emailsFromJiraFieldValue } from '../../../../src/lib/jira-api';
 import { getCurrentDeptSlugAndId } from '../../../../src/lib/dept-scope';
-import { SLUGS, resolveZendeskConfig, resolveJiraConfig } from '../../../../src/lib/dept-integrations';
+import { SLUGS, resolveZendeskConfig, resolveJiraConfig, getJiraExclusionForHrx } from '../../../../src/lib/dept-integrations';
 
 // Jira custom fields (by display-name substring) that, together with the
 // built-in `assignee` and `reporter`, govern whether a ticket belongs to our
@@ -1241,6 +1241,16 @@ function buildJiraJqlQueries(ownerFieldIds = {}) {
   // native relative time bound, no client-side post-filter needed.
   const resolvedFilter = `statusCategory = Done AND resolved >= -24h`;
 
+  // 2026-05-22: dept-isolation — any ticket claimed by another dept
+  // (GIX's Team="Global Mobility", "Mobility Terminations" request type,
+  // or project = GMSD) is excluded from HRX's queue. Source of truth is
+  // dept-integrations.js so adding/changing a dept's claim updates HRX
+  // automatically. Returns null when no other dept has Jira claims, in
+  // which case the suffix is omitted and HRX behavior is identical to
+  // pre-2026-05-22.
+  const otherDeptExclusion = getJiraExclusionForHrx();
+  const exclusionSuffix = otherDeptExclusion ? ` AND ${otherDeptExclusion}` : '';
+
   // Roles that can make a ticket "ours": primary assignee, reporter, plus
   // any HRX-owner custom fields discovered dynamically.
   const roleFields = ['assignee', 'reporter'];
@@ -1258,8 +1268,8 @@ function buildJiraJqlQueries(ownerFieldIds = {}) {
   for (const roleField of roleFields) {
     for (const chunk of emailChunks) {
       const emailsList = chunk.map(e => `"${e}"`).join(', ');
-      queries.push(`${projectFilter} AND ${roleField} IN (${emailsList}) AND ${statusFilter} ORDER BY updated DESC`);
-      queries.push(`${projectFilter} AND ${roleField} IN (${emailsList}) AND ${resolvedFilter} ORDER BY resolved DESC`);
+      queries.push(`${projectFilter} AND ${roleField} IN (${emailsList}) AND ${statusFilter}${exclusionSuffix} ORDER BY updated DESC`);
+      queries.push(`${projectFilter} AND ${roleField} IN (${emailsList}) AND ${resolvedFilter}${exclusionSuffix} ORDER BY resolved DESC`);
     }
   }
   return queries;
@@ -1471,11 +1481,21 @@ async function fetchJiraQueue() {
 // extend dept-integrations.js with an explicit `ownerJqlField` config knob.
 async function fetchJiraQueueForDept(deptCfg) {
   if (!deptCfg) return { items: [], status: 'skipped', count: 0, truncated: false, error: 'Jira not configured for this department' };
-  if (!Array.isArray(deptCfg.projectKeys) || deptCfg.projectKeys.length === 0) {
-    return { items: [], status: 'skipped', count: 0, truncated: false, error: 'Dept Jira projectKeys missing' };
+
+  // 2026-05-22: `jqlClauses` is the preferred config shape (multi-clause).
+  // The dept fetcher iterates each clause × {active, resolved-24h} and
+  // de-dupes by issue.key. Legacy `projectKeys + ownerFieldValues` is
+  // collapsed to a single equivalent clause for back-compat.
+  let baseClauses = Array.isArray(deptCfg.jqlClauses) ? deptCfg.jqlClauses.slice() : null;
+  if ((!baseClauses || baseClauses.length === 0)
+      && Array.isArray(deptCfg.projectKeys) && deptCfg.projectKeys.length > 0
+      && Array.isArray(deptCfg.ownerFieldValues) && deptCfg.ownerFieldValues.length > 0) {
+    const projs = deptCfg.projectKeys.join(', ');
+    const teams = deptCfg.ownerFieldValues.map(v => `"${v}"`).join(', ');
+    baseClauses = [`project IN (${projs}) AND "Team[Team]" in (${teams})`];
   }
-  if (!Array.isArray(deptCfg.ownerFieldValues) || deptCfg.ownerFieldValues.length === 0) {
-    return { items: [], status: 'skipped', count: 0, truncated: false, error: 'Dept Jira ownerFieldValues missing' };
+  if (!baseClauses || baseClauses.length === 0) {
+    return { items: [], status: 'skipped', count: 0, truncated: false, error: 'Dept Jira config has no clauses (set jqlClauses or projectKeys+ownerFieldValues)' };
   }
 
   const fetchOpts = {
@@ -1486,22 +1506,16 @@ async function fetchJiraQueueForDept(deptCfg) {
 
   try {
     const { jiraMins } = await getSlaOverrides();
-    const projectFilter = `project IN (${deptCfg.projectKeys.join(', ')})`;
     const statusFilter = `statusCategory != Done AND (resolution IS EMPTY OR resolution = Unresolved)`;
     const resolvedFilter = `statusCategory = Done AND resolved >= -24h`;
-    const teamValues = deptCfg.ownerFieldValues.map(v => `"${v}"`).join(', ');
-    // Jira built-in Team custom field — `"Team[Team]"` is the documented
-    // JQL syntax for the Team field across Jira Cloud + Data Center. If a
-    // dept stores the team value in a different custom field, add an
-    // `ownerJqlField` config option to dept-integrations.js and substitute
-    // it here.
-    const teamFilter = `"Team[Team]" in (${teamValues})`;
 
-    // Two clauses: active + recently-resolved (last 24h, mirrors HRX).
-    const jqlQueries = [
-      `${projectFilter} AND ${teamFilter} AND ${statusFilter} ORDER BY updated DESC`,
-      `${projectFilter} AND ${teamFilter} AND ${resolvedFilter} ORDER BY resolved DESC`,
-    ];
+    // Active + resolved-in-24h per base clause. ORDER BY differs per
+    // bucket so each clause's pagination prioritises the freshest rows.
+    const jqlQueries = [];
+    for (const base of baseClauses) {
+      jqlQueries.push(`${base} AND ${statusFilter} ORDER BY updated DESC`);
+      jqlQueries.push(`${base} AND ${resolvedFilter} ORDER BY resolved DESC`);
+    }
 
     const allIssues = [];
     const seenKeys = new Set();
@@ -1514,10 +1528,20 @@ async function fetchJiraQueueForDept(deptCfg) {
       'created', 'updated', 'issuetype', 'project', 'labels', 'description',
     ];
 
+    // Track per-clause failures so a fully-broken config (wrong token,
+    // bad field name, etc.) returns status='error' instead of silently
+    // looking like "all clauses returned 0 results". 2026-05-22 GIX
+    // diagnostic surfaced this gap.
+    let clausesAttempted = 0;
+    let clausesFailed = 0;
+    const clauseErrors = [];
+
     for (const jql of jqlQueries) {
+      clausesAttempted++;
       let nextPageToken;
       let fetched = 0;
       let safetyPages = 0;
+      let clauseErrored = false;
       const MAX_PAGES = Math.ceil(MAX_ISSUES_PER_CLAUSE / pageSize) + 1;
       while (true) {
         let result;
@@ -1529,6 +1553,15 @@ async function fetchJiraQueueForDept(deptCfg) {
           }, fetchOpts);
         } catch (clauseErr) {
           console.warn('[queue/dept] Jira clause failed, continuing:', clauseErr.message);
+          if (!clauseErrored) {
+            clauseErrored = true;
+            clausesFailed++;
+            // Capture the first error per clause; subsequent paginate
+            // failures of the same clause don't add noise. Truncated to
+            // 200 chars so a long Jira response body can't bloat the
+            // meta payload.
+            clauseErrors.push(String(clauseErr.message || clauseErr).slice(0, 200));
+          }
           break;
         }
         const issues = result?.issues || [];
@@ -1551,6 +1584,17 @@ async function fetchJiraQueueForDept(deptCfg) {
         }
         nextPageToken = result.nextPageToken;
       }
+    }
+
+    // If every clause failed, surface that as an error rather than
+    // pretending the queue is empty. A partial failure (some clauses
+    // worked, some didn't) keeps status='ok' so the working data still
+    // renders, but the error list reaches the FE meta payload.
+    if (clausesAttempted > 0 && clausesFailed === clausesAttempted) {
+      return {
+        items: [], status: 'error', count: 0, truncated: false,
+        error: `All ${clausesAttempted} Jira clauses failed: ${clauseErrors[0]}`,
+      };
     }
 
     const items = allIssues.map(issue => {
@@ -1605,8 +1649,11 @@ async function fetchJiraQueueForDept(deptCfg) {
       };
     });
 
-    console.log(`[queue/${deptCfg.tokenSource || 'dept'}] Jira fetched ${items.length} tickets via Team[Team] in (${teamValues})`);
-    return { items, status: 'ok', count: items.length, truncated: jiraTruncated, error: null };
+    const partialError = clausesFailed > 0
+      ? `${clausesFailed}/${clausesAttempted} Jira clauses failed: ${clauseErrors[0]}`
+      : null;
+    console.log(`[queue/${deptCfg.tokenSource || 'dept'}] Jira fetched ${items.length} tickets across ${baseClauses.length} clause(s)${partialError ? ` (${clausesFailed} clause(s) failed)` : ''}`);
+    return { items, status: 'ok', count: items.length, truncated: jiraTruncated, error: partialError };
   } catch (err) {
     console.error('[queue/dept] Jira fetch error:', err.message);
     return { items: [], status: 'error', count: 0, truncated: false, error: err.message };

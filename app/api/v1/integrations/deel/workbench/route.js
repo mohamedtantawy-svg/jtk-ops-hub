@@ -7,7 +7,7 @@ import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { listWorkbenchTasks, isDeelConfigured } from '../../../../../../src/lib/deel-api';
 import { getCurrentDeptSlugAndId } from '../../../../../../src/lib/dept-scope';
-import { isDeelSourceVisible, resolveWorkbenchConfig, SLUGS } from '../../../../../../src/lib/dept-integrations';
+import { isDeelSourceVisible, resolveWorkbenchConfig, SLUGS, getWorkbenchTeamExclusionForHrx } from '../../../../../../src/lib/dept-integrations';
 import { cacheGet, cacheSet } from '../../../../../../src/lib/server-cache';
 import { scopeWorkbenchTasks } from '../../../../../../src/lib/queue-scoping';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
@@ -92,9 +92,15 @@ export async function GET(req) {
         cacheKey,
         async () => {
           // Phase 13b: per-dept fetch params — HRX gets the unchanged
-          // signature; non-HRX adds adminTokenOverride + teamNameFilter.
+          // token signature but ALSO adds a teamNameExclude for any
+          // teams claimed by another dept (GIX's "GSC - Mobility" etc.)
+          // so the same task can't render in two queues. 2026-05-22.
+          // Non-HRX path uses an inclusive teamNameFilter only.
           const fetchParams = isHrx
-            ? { limit: parseInt(limit, 10) }
+            ? {
+                limit: parseInt(limit, 10),
+                teamNameExclude: getWorkbenchTeamExclusionForHrx() || undefined,
+              }
             : {
                 limit: parseInt(limit, 10),
                 adminTokenOverride: workbenchCfg.token,

@@ -20,6 +20,7 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'r
 import {
   listHrHubRequests,
   getHrHubRequest,
+  getHrHubRequestCounts,
 } from '../../services/hrHubApi';
 import { approveHideTask } from '../../services/hideTaskApi';
 import HrHubDetailPanel from '../hr-hub/HrHubDetailPanel';
@@ -259,67 +260,35 @@ export default function HrHubView({ user, onCreateHrHub }) {
   }, [cursor, flowQuery, scope, statusFilter, debouncedSearch, loadingMore]);
 
   // ── Counts for status cards + scope toggle ─────────────────────────────
-  // Both reflect the *current* scope + flow filter so badges stay in sync
-  // with whatever the user's looking at. We don't filter for this — we
-  // ask the server for the unfiltered (by status) set under the same
-  // scope/flow, then count locally. Cheap because the page size is 25 +
-  // the four status totals fit a single round-trip.
+  // Single round-trip to /hr-hub/requests/counts. The server runs real
+  // SQL COUNT(*) queries scoped to the caller's dept (+ current scope/
+  // flow/search), so the badges reflect actual totals — not the
+  // truncated 100-row list this used to count from. Mohamed Tantawy
+  // 2026-05-22 caught the truncation on HR Experience (Resolved 89 +
+  // New 11 = exactly 100, masking the real cumulative resolved figure).
+  //
+  // byStatus follows the current scope (so the 5 status cards reflect
+  // what's in scope today). byScope is pending-only (excludes resolved
+  // + rejected) per the 2026-05-04 spec — each scope pill is its own
+  // scope so the badges show "things still pending action".
   const [statusCounts, setStatusCounts] = useState({ new: 0, in_progress: 0, on_hold: 0, resolved: 0, rejected: 0, total: 0 });
   const [scopeCounts, setScopeCounts] = useState({ mine: null, assigned: null, team: null, all: null, mentioned: null });
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const r = await listHrHubRequests({
+        const r = await getHrHubRequestCounts({
           flow: flowQuery,
           scope,
           search: debouncedSearch || undefined,
-          limit: 100,
         });
         if (cancelled) return;
-        const counts = { new: 0, in_progress: 0, on_hold: 0, resolved: 0, rejected: 0, total: (r?.items || []).length };
-        for (const it of r?.items || []) {
-          if (counts[it.status] != null) counts[it.status]++;
-        }
-        setStatusCounts(counts);
+        if (r?.byStatus) setStatusCounts(r.byStatus);
+        if (r?.byScope) setScopeCounts(r.byScope);
       } catch { /* swallow */ }
     })();
     return () => { cancelled = true; };
   }, [flowQuery, scope, debouncedSearch]);
-
-  // Scope counts run once per flow change — small queries per segment.
-  // 2026-05-04: counts exclude resolved per the user spec ("if it's
-  // resolved, then it's out of counting"). The badge on each scope pill
-  // should reflect "things still pending action", not the historical
-  // total. Same rule applied across Urgent Assist + Leaders Hub.
-  // 2026-05-07: 'assigned' segment added (assignee_email = caller); shown
-  // for every role so non-managers also see what's been routed to them.
-  useEffect(() => {
-    let cancelled = false;
-    // `mentioned` is available to every role — anyone can be tagged in a
-    // comment regardless of access level. Ordered last so it sits at the
-    // right end of the segmented control (matches Slack's "Mentions" tab
-    // sitting after "Home" / "DMs").
-    const scopes = isManager
-      ? ['all', 'team', 'assigned', 'mentioned', 'mine']
-      : ['all', 'assigned', 'mentioned', 'mine'];
-    (async () => {
-      const out = { mine: null, assigned: null, team: null, all: null, mentioned: null };
-      for (const sc of scopes) {
-        try {
-          const r = await listHrHubRequests({ flow: flowQuery, scope: sc, limit: 100 });
-          if (cancelled) return;
-          const items = r?.items || [];
-          // Exclude both terminal statuses — `rejected` (added 2026-05-12)
-          // is closed-without-resolving, equally "out of counting" for the
-          // pending-action scope badge.
-          out[sc] = items.filter(i => i.status !== 'resolved' && i.status !== 'rejected').length;
-        } catch { /* swallow */ }
-      }
-      if (!cancelled) setScopeCounts(out);
-    })();
-    return () => { cancelled = true; };
-  }, [flowQuery, isManager]);
 
   // Local sort — server returns newest-first by default; we re-sort client-side
   // for the small page (25 rows) so toggling sort doesn't refetch.
