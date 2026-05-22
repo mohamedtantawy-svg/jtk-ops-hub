@@ -19,6 +19,7 @@ import { useOffboardingData } from './useOffboardingData';
 import { useChangeRequestData } from './useChangeRequestData';
 import { useWorkbenchData } from './useWorkbenchData';
 import { useIncentivePlansData } from './useIncentivePlansData';
+import { useImmigrationTasksData } from './useImmigrationTasksData';
 
 const TICK_MS = 30_000;
 
@@ -39,6 +40,11 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
   const changeRequestData = useChangeRequestData(enabled, userEmail);
   const workbenchData = useWorkbenchData(enabled, userEmail);
   const incentivePlansData = useIncentivePlansData(enabled, userEmail);
+  // 2026-05-22: GIX-only "Immigration Tasks" source. HRX scope gets
+  // `disabled: true` from the route → the hook drops to an empty cache.
+  // Cost on HRX = a single 401-fast HTTP round trip per refresh cycle,
+  // same as the current cost of every other non-HRX-visible source.
+  const immigrationTasksData = useImmigrationTasksData(enabled, userEmail);
 
   // ── Shared "now" tick — one 30s timer powers every "X min ago" label ─────
   // Pauses while the tab is hidden so we don't wake the CPU for nothing;
@@ -182,6 +188,16 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
         lastSyncAt: incentivePlansData.lastSyncAt ?? null,
         retry: incentivePlansData.refresh,
       },
+      immigrationTasks: {
+        id: 'immigrationTasks',
+        label: 'Immigration Tasks',
+        count: immigrationTasksData.tasks?.length ?? 0,
+        loading: !!immigrationTasksData.loading,
+        isRefreshing: !!immigrationTasksData.isRefreshing,
+        error: immigrationTasksData.error || null,
+        lastSyncAt: immigrationTasksData.lastSyncAt ?? null,
+        retry: immigrationTasksData.refresh,
+      },
     };
   }, [
     queueSync?.sources?.zendesk, queueSync?.sources?.jira, queueSync?.refresh,
@@ -198,6 +214,8 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
     workbenchData.error, workbenchData.lastSyncAt, workbenchData.refresh,
     incentivePlansData.items, incentivePlansData.loading, incentivePlansData.isRefreshing,
     incentivePlansData.error, incentivePlansData.lastSyncAt, incentivePlansData.refresh,
+    immigrationTasksData.tasks, immigrationTasksData.loading, immigrationTasksData.isRefreshing,
+    immigrationTasksData.error, immigrationTasksData.lastSyncAt, immigrationTasksData.refresh,
   ]);
 
   // ── Aggregated meta for the UnifiedSyncButton ────────────────────────────
@@ -334,7 +352,8 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
     try { changeRequestData.refresh(); } catch {}
     try { workbenchData.refresh(); } catch {}
     try { incentivePlansData.refresh(); } catch {}
-  }, [queueSync, onboardingData, pausedOnboardingData, offboardingData, changeRequestData, workbenchData, incentivePlansData]);
+    try { immigrationTasksData.refresh(); } catch {}
+  }, [queueSync, onboardingData, pausedOnboardingData, offboardingData, changeRequestData, workbenchData, incentivePlansData, immigrationTasksData]);
 
   return {
     onboardingData,
@@ -343,6 +362,7 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
     changeRequestData,
     workbenchData,
     incentivePlansData,
+    immigrationTasksData,
     sources,
     meta,
     refreshAll,

@@ -67,6 +67,10 @@ const EMPTY_VISIBLE_SOURCES = Object.freeze({
   redlines: false,
   incentivePlans: false,
   workbench: false,
+  // 2026-05-22: GIX-only "Immigration Tasks" source. Defaults to false so
+  // the FE never shows the tab until the per-dept profile resolves and
+  // confirms visibility (only true for the Global Immigration dept).
+  immigrationTasks: false,
 });
 
 // 2026-05-21 — initial Set is empty AND .size === 0 so consumers can
