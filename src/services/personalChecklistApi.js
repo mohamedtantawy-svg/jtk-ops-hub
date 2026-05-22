@@ -17,3 +17,12 @@ export async function putChecklistSnapshot(items, { signal } = {}) {
     signal,
   });
 }
+
+// 2026-05-22 — Wipe the server snapshot. Used by the PersonalChecklist
+// "Clear all" affordance so users whose snapshot got contaminated by
+// the pre-#747 legacy-bleed bug can recover. Server returns 204 so
+// apiFetch may resolve with null/undefined — caller should treat any
+// non-throw as success.
+export async function clearChecklistSnapshot({ signal } = {}) {
+  return apiFetch('/personal-checklist', { method: 'DELETE', signal });
+}
