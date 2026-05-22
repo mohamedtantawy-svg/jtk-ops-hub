@@ -84,6 +84,14 @@ export const DEPT_INTEGRATIONS = {
       // Reuses the workspace-zendesk-api 'gix' config so we don't duplicate
       // the same token registration in two places.
       tokenEnvVar: 'Zendesk_API_Payroll_GIX',
+      // 2026-05-22 (afternoon): Mohamed sent the stable Zendesk group_id
+      // for the Immigration Experience group. Using the numeric ID via
+      // Zendesk Search's `group_id:` operator is more resilient than
+      // `group:"..."` (group names can be renamed in Zendesk; IDs don't
+      // change). Fetcher prefers groupId when set; defaultGroup stays as
+      // documentation + fallback if the ID is ever wiped.
+      groupIdEnvVar: 'ZENDESK_GIX_GROUP_ID',
+      defaultGroupId: '26903282539025',
       groupEnvVar: 'ZENDESK_GIX_GROUP',
       defaultGroup: 'Immigration Experience',
     },
@@ -113,11 +121,26 @@ export const DEPT_INTEGRATIONS = {
     },
     workbench: {
       tokenEnvVar: 'DEEL_ADMIN_GIX',
-      // 2026-05-22: Mohamed confirmed the upstream `teamName` values for
-      // the GSC / GIX immigration backlog. Any task whose teamName
-      // (case-insensitive) matches one of these lands in the GIX surface.
-      // HRX path uses getWorkbenchTeamExclusionForHrx() to drop these so
-      // the same task can't appear in HRX's queue.
+      // 2026-05-22 (afternoon): Mohamed pulled a real Mobility workbench
+      // task and verified the Deel-side team membership. Each Deel task
+      // belongs to exactly ONE team (`team.id` + `team.name`); the API's
+      // `teamIds[]` query param scopes which teams' tasks the caller
+      // sees. The three names below ("GSC - Mobility", "Mobility
+      // Operations", "GIX") all resolve to the same Deel team UUID
+      // `eb6ed10b-aadb-4a08-a695-0a4772f37466` on the immigration
+      // backlog he sampled.
+      //
+      // teamIds[] is the AUTHORITATIVE scope — without it, the upstream
+      // call defaults to HRX_OPERATIONS_TEAM_ID which the GIX admin
+      // token has no access to (returns 0 silently). teamFilter is a
+      // defensive post-fetch name match, kept for the case where Deel
+      // ever serves multi-team tasks against this teamId.
+      //
+      // If Mohamed later confirms GSC - Mobility and Mobility Operations
+      // are SEPARATE Deel teams with their own UUIDs, add their UUIDs
+      // here too — the array fans out to `teamIds[]=uuid&teamIds[]=...`
+      // on the Deel admin call.
+      teamIds: ['eb6ed10b-aadb-4a08-a695-0a4772f37466'],
       teamFilter: ['Mobility Operations', 'GSC - Mobility', 'GIX'],
       // Phase 13b (2026-05-20): wired via the per-call adminTokenOverride
       // added to deel-api.js#deelFetch + the post-fetch teamNameFilter
@@ -175,9 +198,14 @@ export function visibleDeelSourcesFor(deptSlug) {
 }
 
 /**
- * Workbench-specific config readout. Returns { token, teamFilter } or
- * null if Workbench is not configured for this dept. The token is
+ * Workbench-specific config readout. Returns { token, teamIds, teamFilter }
+ * or null if Workbench is not configured for this dept. The token is
  * resolved through process.env so a Nexus rotation kicks in immediately.
+ *
+ * `teamIds` is the AUTHORITATIVE Deel-side scope — what gets sent as
+ * `teamIds[]` to /admin/ops_workbench/tasks. Required for non-HRX depts
+ * (their admin tokens don't have access to HRX_OPERATIONS_TEAM_ID).
+ * `teamFilter` is a defensive post-fetch name match, layered on top.
  */
 export function resolveWorkbenchConfig(deptSlug) {
   const cfg = getDeptIntegrations(deptSlug);
@@ -186,6 +214,9 @@ export function resolveWorkbenchConfig(deptSlug) {
   if (!token) return null;
   return {
     token,
+    teamIds: Array.isArray(cfg.workbench.teamIds) && cfg.workbench.teamIds.length > 0
+      ? cfg.workbench.teamIds.slice()
+      : null,
     teamFilter: cfg.workbench.teamFilter || null,
     tokenSource: cfg.workbench.tokenEnvVar,
   };
@@ -249,16 +280,24 @@ export function getWorkbenchTeamExclusionForHrx() {
 
 /**
  * Zendesk readout. Returns null when not configured for this dept.
+ *
+ * `groupId` is preferred (Zendesk Search `group_id:<id>` — stable across
+ * group renames). `group` (name-based search) stays as a documentation
+ * label + last-resort fallback when no ID is available.
  */
 export function resolveZendeskConfig(deptSlug) {
   const cfg = getDeptIntegrations(deptSlug);
   if (!cfg?.zendesk?.tokenEnvVar) return null;
   const token = process.env[cfg.zendesk.tokenEnvVar] || '';
   if (!token) return null;
+  const groupId = (cfg.zendesk.groupIdEnvVar && process.env[cfg.zendesk.groupIdEnvVar])
+    || cfg.zendesk.defaultGroupId
+    || null;
   return {
     token,
     subdomain: process.env.ZENDESK_SUBDOMAIN || '',
     email: process.env.ZENDESK_EMAIL || '',
+    groupId: groupId ? String(groupId) : null,
     group: process.env[cfg.zendesk.groupEnvVar] || cfg.zendesk.defaultGroup,
     tokenSource: cfg.zendesk.tokenEnvVar,
   };

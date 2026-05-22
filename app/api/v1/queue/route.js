@@ -632,10 +632,17 @@ async function _diffAndStampSolved(currentActionableRows) {
 async function fetchZendeskQueueForDept(deptCfg) {
   if (!deptCfg) return { items: [], status: 'skipped', count: 0, truncated: false, serverTotal: 0, error: 'Zendesk not configured for this department' };
 
+  // 2026-05-22 (afternoon): prefer `group_id:<numeric>` over `group:"name"`.
+  // The numeric group_id is stable across Zendesk group renames, and
+  // Mohamed sent the GIX Immigration Experience group_id directly. Falls
+  // back to name match only if no ID is configured for this dept (kept
+  // so a future dept can wire just a name without the ID).
+  const groupId = deptCfg.groupId || '';
   const groupName = deptCfg.group || '';
-  if (!groupName) {
-    return { items: [], status: 'skipped', count: 0, truncated: false, serverTotal: 0, error: 'Dept Zendesk group not configured' };
+  if (!groupId && !groupName) {
+    return { items: [], status: 'skipped', count: 0, truncated: false, serverTotal: 0, error: 'Dept Zendesk group not configured (neither group_id nor group name)' };
   }
+  const groupClause = groupId ? `group_id:${groupId}` : `group:"${groupName}"`;
 
   const fetchOpts = {
     tokenOverride: deptCfg.token,
@@ -649,7 +656,7 @@ async function fetchZendeskQueueForDept(deptCfg) {
 
   try {
     const statusQueries = ['new', 'open', 'pending', 'hold'].map(
-      s => `group:"${groupName}" status:${s}`,
+      s => `${groupClause} status:${s}`,
     );
     const actionableResults = await Promise.all(
       statusQueries.map(q => paginatedZendeskSearchAllTime(q, { maxPages: 10 }, fetchOpts)),
@@ -782,10 +789,10 @@ async function fetchZendeskQueueForDept(deptCfg) {
       };
     });
 
-    console.log(`[queue/${deptCfg.tokenSource || 'dept'}] Zendesk fetched ${items.length} tickets via group="${groupName}"`);
+    console.log(`[queue/${deptCfg.tokenSource || 'dept'}] Zendesk fetched ${items.length} tickets via ${groupClause}`);
     return { items, status: 'ok', count: items.length, truncated: zdTruncated, serverTotal: zdServerTotal || items.length, error: null };
   } catch (err) {
-    console.warn(`[queue/dept] Zendesk fetch failed for group="${groupName}":`, err.message);
+    console.warn(`[queue/dept] Zendesk fetch failed for ${groupClause}:`, err.message);
     return { items: [], status: 'error', count: 0, truncated: false, serverTotal: 0, error: err.message };
   }
 }
