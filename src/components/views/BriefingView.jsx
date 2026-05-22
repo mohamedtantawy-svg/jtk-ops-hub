@@ -835,14 +835,22 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // member" instead of the raw scope total, so a 2,500-task team
   // doesn't always read High when it's only ~25 per agent. Agents
   // (own scope) keep the existing per-person threshold logic.
-  const totalActiveAcrossSources = scope.length
-    + onboardingRows.length + pausedOnboardingRows.length
-    + offboardingRows.length + amendmentRows.length
-    + redlineRows.length + workbenchActiveRows.length + incentivePlanRows.length;
-  const teamSize = isOwnScope ? 1 : Math.max(1, visibleEmails.size);
+  //
+  // 2026-05-22: must be lockstep with the displayed `teamAvg` string
+  // ("Team avg: 53.3 tasks/agent · 87 agents"). The previous version
+  // divided `totalActiveAcrossSources` (raw row counts incl. unassigned
+  // amendments/redlines/incentive_plans) by `visibleEmails.size`
+  // (everyone the viewer can see — agents + TLs + RMs + admins) which
+  // dragged the per-person avg below the actual per-agent avg and
+  // flipped the badge from "Good" to "Low" for HR Experience even when
+  // the visible per-agent avg was 53 (squarely in the Good band).
+  // Wiring to `teamAvg` directly keeps the Workload tile + the
+  // Overall Capacity legend telling the same story.
+  const agentTaskTotal = scopeAgents.reduce((s, a) => s + a.tc, 0);
+  const teamSize = isOwnScope ? 1 : Math.max(1, scopeAgents.length);
   const myCount = isOwnScope
     ? personal.length
-    : Math.round(totalActiveAcrossSources / teamSize);
+    : Math.round(teamAvg);
   const myWlBand = classifyWorkload(myCount);
   const wl = myWlBand.wl;
   const wc = myWlBand.wc;
@@ -1504,7 +1512,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   {label:'SLA Compliance',weight:wSLA,value:`${slaCompRate}%`,score:slaCompRate,sub:`${Math.max(0, slaTotal - slaBreachTotal)}/${slaTotal} on-time · everything except Jira`,icon:'bi-shield-check'},
                   {label:'Resolution Rate',weight:wRes,value:`${resRate}%`,score:resScore,sub:`${zdClosedCount} closed · ${zdOpenAndOnHoldCount} open + on-hold · Zendesk only · 50% = excellent`,icon:'bi-check2-all'},
                   {label:'Avg Response Time',weight:wResp,value:avgResponseTime>=60?`${Math.round(avgResponseTime/60)}h ${avgResponseTime%60}m`:`${avgResponseTime}m`,score:respScore,sub:`Zendesk biz-day · ${zdActive.length} active ticket(s) · ${respScore>=80?'Fast':respScore>=60?'Normal':respScore>=40?'Slow':'Very slow'}`,icon:'bi-clock-history'},
-                  {label:'Team Capacity',weight:wCap,value:wl,score:wlScore,sub: isOwnScope ? `${myCount} tasks · ${Math.round(capPct)}% of ${capHighMin}` : `${myCount} avg / agent · ${totalActiveAcrossSources} tasks ÷ ${teamSize} ${teamSize === 1 ? 'member' : 'members'}`,icon:'bi-speedometer2'},
+                  {label:'Team Capacity',weight:wCap,value:wl,score:wlScore,sub: isOwnScope ? `${myCount} tasks · ${Math.round(capPct)}% of ${capHighMin}` : `${myCount} avg / agent · ${agentTaskTotal} tasks ÷ ${teamSize} ${teamSize === 1 ? 'agent' : 'agents'}`,icon:'bi-speedometer2'},
                 ].map(row=>{
                   const rc=row.score>=80?'#29811e':row.score>=60?'#ed8d00':'#d42d35';
                   return(
