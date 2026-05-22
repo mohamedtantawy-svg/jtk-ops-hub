@@ -803,3 +803,120 @@ export function normalizeWorkbench(items = [], slaConfig = null) {
     };
   });
 }
+
+// ── Immigration Tasks (Mobility Actions) — GIX-only ────────────────────────
+// 2026-05-22 (evening). Source: `/admin/mobility/actions` via the GIX
+// admin token. Each task has its OWN `dueDate` (per-task SLA), so the
+// SLA window is derived per-row from (dueDate - createdAt) rather than
+// a flat policy. Status enum:
+//   • ONGOING — active (queried explicitly by status[]=ONGOING)
+//   • COMPLETED / ARCHIVED / CANCELLED — terminal (filtered out
+//     upstream; flagged here as defence in depth in case upstream
+//     ever changes its mind)
+//
+// Task-type display: the upstream returns SCREAMING_SNAKE_CASE enums
+// (UPLOAD_DOCUMENT / FILL_FORM / QUOTE_APPROVAL / ...). The friendly
+// `name` field already carries the rendered label ("Document upload"),
+// so we prefer that for the Type column.
+function prettifyImmigrationTaskName(t) {
+  if (typeof t?.name === 'string' && t.name.trim()) return t.name.trim();
+  const raw = String(t?.taskType || '').replace(/_/g, ' ').toLowerCase();
+  return raw ? raw.replace(/\b\w/g, c => c.toUpperCase()) : 'Immigration Task';
+}
+
+const DEEL_MOBILITY_CASE_URL = (caseId, taskId) => {
+  if (!caseId) return '';
+  const base = `https://admin.deel.network/mobility/case-management/cases/${caseId}`;
+  return taskId ? `${base}?taskId=${taskId}` : base;
+};
+
+export function normalizeImmigrationTasks(items = []) {
+  return (items || []).map(t => {
+    const taskId = String(t?.id || '');
+    const caseData = t?.caseData || {};
+    const applicantName = caseData.applicant?.name || '';
+    const caseName = caseData.name || '';
+    // Subject combines applicant + case so the operator sees both axes
+    // in one glance (mirrors the upstream UI's "Immigration case" cell
+    // which shows case name + applicant on two lines — we pack into one
+    // with a separator since SourceTable's subject is single-line).
+    const subject = applicantName && caseName
+      ? `${applicantName} · ${caseName}`
+      : (applicantName || caseName || 'Immigration Task');
+
+    // Per-row SLA window: createdAt → dueDate. Min 1d so a degenerate
+    // zero-window row doesn't make every task look "at risk" by
+    // proportional band.
+    const ONE_DAY_MS = 86_400_000;
+    const createdMs = t?.createdAt ? new Date(t.createdAt).getTime() : NaN;
+    const dueMs     = t?.dueDate   ? new Date(t.dueDate).getTime()   : NaN;
+    const now       = Date.now();
+    const slaWindowMs = Number.isFinite(createdMs) && Number.isFinite(dueMs) && dueMs > createdMs
+      ? Math.max(ONE_DAY_MS, dueMs - createdMs)
+      : ONE_DAY_MS;
+    const slaRemaining = Number.isFinite(dueMs)
+      ? Math.round((dueMs - now) / 1000) // seconds, matches other queues
+      : 0;
+    const slaBreachStatus = slaRemaining <= 0 ? 'SLA_BREACHED' : 'SLA_NOT_BREACHED';
+
+    // Status mapping. Upstream `ONGOING` → "Active" pill — matches
+    // Mohamed's "Active only" filter. Terminal states map to resolved
+    // if they ever leak past the upstream filter.
+    const rawStatus = String(t?.status || '').toUpperCase();
+    const isResolved = rawStatus === 'COMPLETED' || rawStatus === 'ARCHIVED' || rawStatus === 'CANCELLED';
+    const status = isResolved
+      ? { label: 'Resolved', severity: 'info',   color: '#29811e' }
+      : { label: 'Active',   severity: 'active', color: '#1f74b3' };
+
+    // Case-team summary (e.g. "Greta Klevinskiene + 2 agents" in the
+    // upstream UI). The upstream returns `caseTeamPublicProfileIds` —
+    // just IDs, no resolver yet. Surface the count so the FE can
+    // render a "+ N" affordance; defer name resolution to a follow-up.
+    const teamIds = Array.isArray(t?.caseTeamPublicProfileIds) ? t.caseTeamPublicProfileIds : [];
+    const caseTeamCount = teamIds.length;
+
+    return {
+      id: taskId,
+      source: 'immigration_tasks',
+      subject,
+      // Type column shows the task name ("Document upload" / "Form filling").
+      typeLabel: prettifyImmigrationTaskName(t),
+      function: prettifyImmigrationTaskName(t),
+      country: caseData.country || '',
+      assignee: t?.assignee?.name || '',
+      assigneeEmail: (t?.assignee?.email || '').toLowerCase(),
+      // Client column shows the customer organisation when present
+      // (e.g. "Deel HQ", "Cognite") — same column offboarding/amendments
+      // use for the customer.
+      clientName: caseData.organization?.name || '',
+      // Surface the case name + ID + URL separately so a follow-up can
+      // render a dedicated "Immigration case" link cell without
+      // re-parsing the subject.
+      caseName,
+      caseId: String(caseData.id || ''),
+      caseUrl: caseData.id ? DEEL_MOBILITY_CASE_URL(caseData.id) : '',
+      processName: t?.processName || '',
+      stepName: t?.stepName || '',
+      createdAt: t?.createdAt || '',
+      updatedAt: t?.updatedAt || t?.createdAt || '',
+      // Per-task due date — primary date the SourceTable renders
+      // (configured via dateField='dueDate' + dateLabel='Due Date'
+      // from Queue.jsx).
+      dueDate: t?.dueDate || '',
+      dueInDays: typeof t?.dueInDays === 'number' ? t.dueInDays : null,
+      status,
+      // Deep-link to the case + task in admin.deel.network. Format
+      // confirmed by Mohamed via screenshot.
+      taskUrl: DEEL_MOBILITY_CASE_URL(caseData.id, taskId),
+      caseTeamCount,
+      caseTeamIds: teamIds,
+      isPaused: false,
+      pausedAt: null,
+      isResolved,
+      resolvedAt: isResolved ? (t?.completedAt || null) : null,
+      slaRemaining,
+      slaBreachStatus,
+      slaWindowMs,
+    };
+  });
+}

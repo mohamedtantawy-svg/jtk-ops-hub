@@ -432,6 +432,11 @@ export function filterByCountryOrAssignee(items, user) {
 export const scopeZendeskTickets   = (items, user) => filterByAssignee(items, user);
 export const scopeJiraIssues       = (items, user) => filterByAssignee(items, user);
 export const scopeWorkbenchTasks   = (items, user) => filterByAssignee(items, user);
+// 2026-05-22: GIX-only Immigration Tasks. Every row from
+// /admin/mobility/actions has a real `assignee.email`, so the same
+// pure-assignee scope as Zendesk/Jira/Workbench applies — agent sees
+// own, TL sees direct reports, RM sees subtree, admin sees all.
+export const scopeImmigrationTasks = (items, user) => filterByAssignee(items, user);
 
 // Agents see ASSIGNEE-only (with country fallback only for orphan rows),
 // while TL / Regional / Admin keep the broader country-OR-assignee union so

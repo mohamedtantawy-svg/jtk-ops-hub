@@ -2019,3 +2019,53 @@ export async function listWorkbenchTasks(params = {}) {
 // `getPayslips` (/rest/v2/contracts/<id>/payslips) was dead code as of
 // 2026-05-13 — no caller anywhere in src/ or app/. Removed alongside the
 // REST-v2 deprecation pass.
+
+/**
+ * Immigration / Mobility Actions list.
+ *
+ * Backs the GIX dept's "Immigration Tasks" queue source. Hits
+ * /admin/mobility/actions with the upstream's status filters:
+ *   - caseStatus[]=OPEN  → only active immigration cases
+ *   - status[]=ONGOING   → only tasks awaiting action (Mohamed's
+ *                          "Active only" requirement)
+ *
+ * Caller passes the GIX admin token via `adminTokenOverride`. HRX never
+ * calls this — the workbench route layer gates the source via
+ * `isDeelSourceVisible(slug, 'immigrationTasks')`, which only returns
+ * true for the GIX dept.
+ *
+ * Pagination via `take` + `skip` (Deel's standard offset-style for the
+ * /admin/mobility namespace). Defaults to take=100 — well above the ~40
+ * actionable items the GIX page surfaces today, with headroom for growth.
+ * Returns the raw `items` array; the route handler normalises to the
+ * standard queue row shape before serving.
+ */
+export async function listImmigrationActions(params = {}) {
+  const take = Math.min(200, Math.max(1, params.take || 100));
+  const adminTokenOverride = params.adminTokenOverride || null;
+  const fetchOpts = adminTokenOverride ? { adminTokenOverride } : {};
+
+  const all = [];
+  let skip = 0;
+  // Safety cap so a runaway upstream can't paginate forever. 5 pages × 200 =
+  // 1000 max — far above expected steady-state.
+  let pages = 0;
+  while (pages < 5) {
+    pages++;
+    const qs = new URLSearchParams();
+    qs.append('caseStatus[]', 'OPEN');
+    qs.append('status[]', 'ONGOING');
+    qs.set('take', String(take));
+    if (skip > 0) qs.set('skip', String(skip));
+    const res = await deelFetch(`/admin/mobility/actions?${qs.toString()}`, fetchOpts);
+    const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
+    if (items.length === 0) break;
+    all.push(...items);
+    // Upstream may surface `total` or `count`; if present + fully covered, stop.
+    const upstreamTotal = res?.total ?? res?.count ?? null;
+    if (upstreamTotal != null && all.length >= upstreamTotal) break;
+    if (items.length < take) break;
+    skip += items.length;
+  }
+  return { items: all, total: all.length };
+}

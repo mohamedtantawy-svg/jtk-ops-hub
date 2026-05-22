@@ -38,6 +38,10 @@ const EMPTY_DEEL_SOURCES = Object.freeze({
   redlines: false,
   incentivePlans: false,
   workbench: false,
+  // 2026-05-22 (evening): GIX-only source backing /admin/mobility/actions.
+  // Every new dept defaults to false so a freshly stood-up dept never
+  // accidentally hits the immigration backlog.
+  immigrationTasks: false,
 });
 
 export const DEPT_INTEGRATIONS = {
@@ -69,6 +73,9 @@ export const DEPT_INTEGRATIONS = {
       redlines: true,
       incentivePlans: true,
       workbench: true,
+      // Immigration Tasks is GIX-only by design — HRX never queries
+      // /admin/mobility/actions.
+      immigrationTasks: false,
     },
   },
 
@@ -153,6 +160,10 @@ export const DEPT_INTEGRATIONS = {
       redlines: false,
       incentivePlans: false,
       workbench: true,
+      // 2026-05-22 (evening): GIX-only source — backs the "Immigration
+      // Tasks" queue surface. Hits /admin/mobility/actions with the
+      // GIX admin token (DEEL_ADMIN_GIX). HRX never sees this source.
+      immigrationTasks: true,
     },
   },
 

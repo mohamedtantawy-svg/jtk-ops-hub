@@ -17,6 +17,7 @@ import {
   scopeAmendmentRequests,
   scopeRedlineRequests,
   scopeIncentivePlans,
+  scopeImmigrationTasks,
   scopeHiddenTasks,
   filterByAssignee as scopeTicketsByAssignee,
   getVisibleEmails,
@@ -47,6 +48,7 @@ import {
   normalizeWorkbench,
   normalizePausedOnboarding,
   normalizeIncentivePlans,
+  normalizeImmigrationTasks,
 } from '../../utils/normalizeSourceRows';
 import { isUrgentAssistTaskType } from '../../lib/urgent-assist-task-types';
 import CreateHideTaskRequestModal from '../modals/CreateHideTaskRequestModal';
@@ -93,6 +95,7 @@ const WORK_SOURCES = [
   { id: 'redlines',       label: 'Redlines',       icon: 'bi-file-earmark-diff',  color: '#7c3aed', bg: '#f3eff8' },
   { id: 'incentive_plans',label: 'Incentive Plans',icon: 'bi-cash-coin',          color: '#0e7490', bg: '#ecfeff' },
   { id: 'workbench',      label: 'Workbench',      icon: 'bi-grid-3x3-gap-fill',  color: '#0369a1', bg: '#eff6ff' },
+  { id: 'immigration_tasks', label: 'Immigration Tasks', icon: 'bi-passport-fill',color: '#0369a1', bg: '#e0f2fe' },
   { id: 'jira',           label: 'Jira',           icon: 'bi-kanban-fill',        color: '#1f74b3', bg: '#e8f0fe' },
   { id: 'zendesk',        label: 'Zendesk',        icon: 'bi-headset',            color: '#29811e', bg: '#e8f5e9' },
 ];
@@ -166,6 +169,9 @@ const SOURCE_TAB_TO_VISIBILITY_KEY = {
   redlines: 'redlines',
   incentive_plans: 'incentivePlans',
   workbench: 'workbench',
+  // 2026-05-22: GIX-only — `visibleSources.immigrationTasks` is true only
+  // for the Global Immigration dept profile in dept-integrations.js.
+  immigration_tasks: 'immigrationTasks',
 };
 
 const Queue = ({ user, tasks, subFilter }) => {
@@ -413,6 +419,7 @@ const Queue = ({ user, tasks, subFilter }) => {
     changeRequestData = { amendments: [], redlines: [] },
     workbenchData = { tasks: [] },
     incentivePlansData = { items: [] },
+    immigrationTasksData = { tasks: [] },
     meta: syncMeta = {},
     sources: syncSources = {},
     refreshAll: syncRefreshAll = () => {},
@@ -440,6 +447,11 @@ const Queue = ({ user, tasks, subFilter }) => {
   );
   const workbenchRowsAll        = useMemo(() => normalizeWorkbench(workbenchTasksFiltered, queueSla).filter(r => !isHiddenKey('workbench', r.id)), [workbenchTasksFiltered, queueSla, isHiddenKey]);
   const incentivePlanRowsAll    = useMemo(() => normalizeIncentivePlans(incentivePlansData.items, queueSla).filter(r => !isHiddenKey('incentive_plans', r.id)), [incentivePlansData.items, queueSla, isHiddenKey]);
+  // 2026-05-22: GIX-only Immigration Tasks rows. `normalizeImmigrationTasks`
+  // already derives per-row SLA from (dueDate - createdAt), so the
+  // queueSla flat policy is intentionally NOT passed — each task carries
+  // its own deadline.
+  const immigrationTaskRowsAll  = useMemo(() => normalizeImmigrationTasks(immigrationTasksData.tasks || []).filter(r => !isHiddenKey('immigration_tasks', r.id)), [immigrationTasksData.tasks, isHiddenKey]);
 
   const isAdmin = isAdminUser(user);
   const isLead = perms?.dataScope === 'team_tasks';
@@ -548,6 +560,10 @@ const Queue = ({ user, tasks, subFilter }) => {
   const redlineRows     = useMemo(() => applySlaExtensionsToRows(scopeRedlineRequests(redlineRowsAll, user), slaExtensionMap, 'redlines'), [redlineRowsAll, user, slaExtensionMap, teamDataVersion]);
   const workbenchRows   = useMemo(() => applySlaExtensionsToRows(scopeWorkbenchTasks(workbenchRowsAll, user), slaExtensionMap, 'workbench'), [workbenchRowsAll, user, slaExtensionMap, teamDataVersion]);
   const incentivePlanRows = useMemo(() => applySlaExtensionsToRows(scopeIncentivePlans(incentivePlanRowsAll, user), slaExtensionMap, 'incentive_plans'), [incentivePlanRowsAll, user, slaExtensionMap, teamDataVersion]);
+  // Immigration tasks share the standard SLA-extension keyed map (source +
+  // id), so a future per-row SLA-extension request flow can apply here
+  // identically to the other Deel sources.
+  const immigrationTaskRows = useMemo(() => applySlaExtensionsToRows(scopeImmigrationTasks(immigrationTaskRowsAll, user), slaExtensionMap, 'immigration_tasks'), [immigrationTaskRowsAll, user, slaExtensionMap, teamDataVersion]);
   // Workbench is the only Deel source that intentionally surfaces resolved
   // rows (24h of COMPLETED + CLOSED) so the "RESOLVED TODAY" section can
   // render. Strip them from the cross-source "All" aggregates so the
@@ -556,6 +572,12 @@ const Queue = ({ user, tasks, subFilter }) => {
   // the full `tblWorkbenchRows` set so it can render its own resolved
   // section directly.
   const workbenchActiveRows = useMemo(() => workbenchRows.filter(r => !r.isResolved), [workbenchRows]);
+  // Immigration Tasks normaliser only emits `ONGOING` rows today (upstream
+  // already filters by `status[]=ONGOING`), but mirror the workbench
+  // pattern in case the upstream ever surfaces COMPLETED in the same
+  // pull — keeps the open/paused/resolved partitions consistent across
+  // sources.
+  const immigrationTaskActiveRows = useMemo(() => immigrationTaskRows.filter(r => !r.isResolved), [immigrationTaskRows]);
   // Per-role view of the Hidden audit list. `hiddenTasks.items` stays
   // global (so `hiddenKeys` keeps filtering hidden rows out of every
   // queue for everyone — hides are universal), but the Hidden TAB now
@@ -707,6 +729,7 @@ const Queue = ({ user, tasks, subFilter }) => {
   const visRedlineRows     = useMemo(() => applyPanelFilter(redlineRows),     [redlineRows, applyPanelFilter]);
   const visWorkbenchRows   = useMemo(() => applyPanelFilter(workbenchRows),   [workbenchRows, applyPanelFilter]);
   const visIncentivePlanRows = useMemo(() => applyPanelFilter(incentivePlanRows), [incentivePlanRows, applyPanelFilter]);
+  const visImmigrationTaskRows = useMemo(() => applyPanelFilter(immigrationTaskRows), [immigrationTaskRows, applyPanelFilter]);
 
   // Per-source SLA severity classifier. At-risk = "less than 25% of the SLA
   // window remaining" — proportional to whatever active/paused window the
@@ -747,6 +770,7 @@ const Queue = ({ user, tasks, subFilter }) => {
   const tblRedlineRows     = useMemo(() => applySlaFilter(visRedlineRows),     [visRedlineRows,     applySlaFilter]);
   const tblWorkbenchRows   = useMemo(() => applySlaFilter(visWorkbenchRows),   [visWorkbenchRows,   applySlaFilter]);
   const tblIncentivePlanRows = useMemo(() => applySlaFilter(visIncentivePlanRows), [visIncentivePlanRows, applySlaFilter]);
+  const tblImmigrationTaskRows = useMemo(() => applySlaFilter(visImmigrationTaskRows), [visImmigrationTaskRows, applySlaFilter]);
 
   // Tally a row set into { atRisk, breached, onTrack } using the proportional
   // at-risk band (windowMs/4). Mirrors rowSlaSeverity exactly so pill counts,
@@ -820,6 +844,7 @@ const Queue = ({ user, tasks, subFilter }) => {
     // don't keep ticking against the SLA bands.
     if (workSource === 'workbench')       return tallyDeelSla(mineOnlyForSla(visWorkbenchRows.filter(r => !r.isResolved)));
     if (workSource === 'incentive_plans') return tallyDeelSla(mineOnlyForSla(visIncentivePlanRows));
+    if (workSource === 'immigration_tasks') return tallyDeelSla(mineOnlyForSla(visImmigrationTaskRows.filter(r => !r.isResolved)));
     // Admin Hidden tab — no SLA semantics. Pills sit at zero so they don't
     // borrow numbers from the underlying ZD/Jira queue.
     if (workSource === 'hidden') return { atRiskCount: 0, breachedCount: 0, onTrackCount: 0 };
@@ -834,7 +859,7 @@ const Queue = ({ user, tasks, subFilter }) => {
     const atRisk = slaBase.filter(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; }).length;
     const breached = slaBase.filter(t => { const s = slaInfo(t); return s && s.breach; }).length;
     return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: slaBase.length - atRisk - breached };
-  }, [workSource, fTool, hasNonSlaActiveFilters, workspaceHomeSla, visPreSla, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows, visIncentivePlanRows, tallyDeelSla, mineOnlyForSla]);
+  }, [workSource, fTool, hasNonSlaActiveFilters, workspaceHomeSla, visPreSla, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows, visIncentivePlanRows, visImmigrationTaskRows, tallyDeelSla, mineOnlyForSla]);
 
   // ── View-aware header counts ──
   // For each Deel source we read the SLA-filtered row set so the "N open"
@@ -859,17 +884,19 @@ const Queue = ({ user, tasks, subFilter }) => {
       return { open: wbOpen, paused: wbPaused, resolved: wbResolved };
     }
     if (workSource === 'incentive_plans') return { open: tblIncentivePlanRows.length, paused: 0, resolved: 0 };
+    if (workSource === 'immigration_tasks') return { open: tblImmigrationTaskRows.length, paused: 0, resolved: 0 };
     if (workSource === 'hidden') return { open: scopedHiddenItems.length, paused: 0, resolved: 0 };
     const sourceOpen = fTool ? 0 : (
       tblOnboardingRows.length + tblOffboardingRows.length + tblAmendmentRows.length
       + tblRedlineRows.length + tblWorkbenchRows.length + tblIncentivePlanRows.length
+      + tblImmigrationTaskRows.length
     );
     return {
       open: active.length + sourceOpen,
       paused: snoozed.length,
       resolved: done.length,
     };
-  }, [workSource, fTool, active, snoozed, done, tblOnboardingRows, tblOffboardingRows, tblAmendmentRows, tblRedlineRows, tblWorkbenchRows, tblIncentivePlanRows, scopedHiddenItems]);
+  }, [workSource, fTool, active, snoozed, done, tblOnboardingRows, tblOffboardingRows, tblAmendmentRows, tblRedlineRows, tblWorkbenchRows, tblIncentivePlanRows, tblImmigrationTaskRows, scopedHiddenItems]);
 
   const rawCounts = useMemo(() => {
     if (workSource === 'onboarding')      return { open: onboardingRows.length };
@@ -878,13 +905,14 @@ const Queue = ({ user, tasks, subFilter }) => {
     if (workSource === 'redlines')        return { open: redlineRows.length };
     if (workSource === 'workbench')       return { open: workbenchActiveRows.length };
     if (workSource === 'incentive_plans') return { open: incentivePlanRows.length };
+    if (workSource === 'immigration_tasks') return { open: immigrationTaskActiveRows.length };
     if (workSource === 'hidden') return { open: scopedHiddenItems.length };
     const base = fTool ? baseVis.filter(t => t.source === fTool) : baseVis;
     const srcExtra = fTool ? 0 : allSourceRows.length;
     return {
       open: base.filter(t => t.status !== 'resolved' && t.status !== 'waiting').length + srcExtra,
     };
-  }, [workSource, fTool, baseVis, allSourceRows, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, incentivePlanRows, scopedHiddenItems]);
+  }, [workSource, fTool, baseVis, allSourceRows, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, incentivePlanRows, immigrationTaskActiveRows, scopedHiddenItems]);
   const hiddenByFilters = Math.max(0, rawCounts.open - headerCounts.open);
 
   // Persist filters to localStorage — user-scoped so two people on the
@@ -1005,7 +1033,7 @@ const Queue = ({ user, tasks, subFilter }) => {
           )}
 
           {(isAdmin || isLead) && (() => {
-            const sourceLabels = { onboarding: 'Onboarding', offboarding: 'Offboarding', amendments: 'Amendments', redlines: 'Redlines', workbench: 'Workbench', incentive_plans: 'Incentive Plans', hidden: 'Hidden' };
+            const sourceLabels = { onboarding: 'Onboarding', offboarding: 'Offboarding', amendments: 'Amendments', redlines: 'Redlines', workbench: 'Workbench', incentive_plans: 'Incentive Plans', immigration_tasks: 'Immigration Tasks', hidden: 'Hidden' };
             const toolLabels = { zendesk: 'Zendesk', jira: 'Jira' };
             const viewLabel = sourceLabels[workSource] || toolLabels[fTool] || (isAdmin ? 'All Tasks' : user.team);
             return <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', marginLeft: 6 }}>{viewLabel}</span>;
@@ -1059,6 +1087,7 @@ const Queue = ({ user, tasks, subFilter }) => {
               : workSource === 'redlines' ? redlineRows
               : workSource === 'workbench' ? workbenchActiveRows
               : workSource === 'incentive_plans' ? incentivePlanRows
+              : workSource === 'immigration_tasks' ? immigrationTaskActiveRows
               : [];
             const present = new Set(rowsForPanel.map(r => r?.status?.severity).filter(Boolean));
             statusOptions = ['critical', 'warning', 'active', 'info']
@@ -1121,6 +1150,7 @@ const Queue = ({ user, tasks, subFilter }) => {
                   : ws.id === 'redlines' ? visRedlineRows.length
                   : ws.id === 'workbench' ? visWorkbenchRows.filter(r => !r.isResolved).length
                   : ws.id === 'incentive_plans' ? visIncentivePlanRows.length
+                  : ws.id === 'immigration_tasks' ? visImmigrationTaskRows.filter(r => !r.isResolved).length
                   : ws.id === 'jira' ? jiraCount
                   : ws.id === 'zendesk' ? zdCount
                   : ws.id === 'hidden' ? scopedHiddenItems.length
@@ -1394,6 +1424,37 @@ const Queue = ({ user, tasks, subFilter }) => {
             onReassign={canReassign ? (row) => setReassignModalTask({ source: 'incentive_plans', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country, assigneeEmail: row.assigneeEmail || null, assigneeName: row.assignee || null, hasOverride: !!row.reassignedFromEmail }) : null}
             onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'incentive_plans')))}
             onBulkReassign={canReassign ? (rows) => setBulkReassignTasks(rows.map(r => buildTaskDescriptor(r, 'incentive_plans'))) : null}
+          />
+        </ErrorBoundary>
+      )}
+      {workSource === 'immigration_tasks' && (
+        <ErrorBoundary>
+          {/* 2026-05-22: GIX-only source. Subject = "Applicant · Case"
+              one-liner. clientName=organization, typeLabel=task type
+              ("Document upload" / "Form filling" / etc.). Sorted by
+              SLA tier so the most urgent due dates surface first. */}
+          <SourceTable
+            viewerEmail={user?.email}
+            notesApi={taskNotes}
+            rows={tblImmigrationTaskRows}
+            loading={immigrationTasksData.loading}
+            error={immigrationTasksData.error}
+            onRefresh={immigrationTasksData.refresh}
+            emptyIcon="bi-passport"
+            emptyLabel="No immigration tasks"
+            emptySubLabel="All Mobility actions are caught up"
+            sortDefault="sla"
+            showClient
+            showType
+            hideStatusPills
+            hideUpdated
+            hideContract
+            dateField="dueDate"
+            dateLabel="Due Date"
+            onHide={(row) => setHideModalTask({ source: 'immigration_tasks', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onSlaExtension={(row) => setSlaExtensionModalTask({ source: 'immigration_tasks', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onEscalate={(row) => setEscalateModalTask({ source: 'immigration_tasks', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
+            onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'immigration_tasks')))}
           />
         </ErrorBoundary>
       )}

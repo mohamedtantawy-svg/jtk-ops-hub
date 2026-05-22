@@ -80,6 +80,21 @@ export async function fetchDeelIncentivePlans({ status, bustCache } = {}) {
   return apiFetch(`/integrations/deel/incentive-plans${qs ? `?${qs}` : ''}`);
 }
 
+// 2026-05-22 (evening): GIX-only Immigration Tasks source. Backs the
+// "Immigration Tasks" queue surface for Global Immigration. HRX gets a
+// `disabled: true` response from this endpoint because HRX deelSources
+// has `immigrationTasks: false`, so HRX FE branches short-circuit it
+// before issuing the request anyway. Same 60s timeout convention as
+// Workbench / Offboarding to give the server's warming-payload
+// fallback a clean window.
+export async function fetchDeelImmigrationTasks({ take, bustCache } = {}) {
+  const params = new URLSearchParams();
+  if (take) params.set('take', String(take));
+  if (bustCache) params.set('bust', '1');
+  const qs = params.toString();
+  return apiFetch(`/integrations/deel/immigration-tasks${qs ? `?${qs}` : ''}`, { timeoutMs: 60_000 });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Jira
 // ─────────────────────────────────────────────────────────────────────────────
