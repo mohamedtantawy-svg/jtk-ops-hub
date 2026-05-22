@@ -1,0 +1,3463 @@
+{
+  "sourceFile": "GIX Time Off Report May 22 2026.csv",
+  "deptSlug": "gix",
+  "generatedAt": "2026-05-22T09:27:24.000Z",
+  "rowCount": 691,
+  "rows": [
+    {
+      "work_email": "adriana.diez@deel.com",
+      "start_date": "2026-02-02",
+      "end_date": "2026-02-02"
+    },
+    {
+      "work_email": "adriana.diez@deel.com",
+      "start_date": "2026-04-10",
+      "end_date": "2026-04-10"
+    },
+    {
+      "work_email": "adriana.diez@deel.com",
+      "start_date": "2026-04-27",
+      "end_date": "2026-04-29"
+    },
+    {
+      "work_email": "adriana.diez@deel.com",
+      "start_date": "2026-05-20",
+      "end_date": "2026-05-20"
+    },
+    {
+      "work_email": "adriana.diez@deel.com",
+      "start_date": "2026-03-25",
+      "end_date": "2026-03-25"
+    },
+    {
+      "work_email": "adriana.diez@deel.com",
+      "start_date": "2026-12-31",
+      "end_date": "2026-12-31"
+    },
+    {
+      "work_email": "adriana.diez@deel.com",
+      "start_date": "2026-01-06",
+      "end_date": "2026-01-06"
+    },
+    {
+      "work_email": "adriana.diez@deel.com",
+      "start_date": "2026-04-17",
+      "end_date": "2026-04-17"
+    },
+    {
+      "work_email": "adriana.diez@deel.com",
+      "start_date": "2026-01-19",
+      "end_date": "2026-01-19"
+    },
+    {
+      "work_email": "adriana.diez@deel.com",
+      "start_date": "2026-04-30",
+      "end_date": "2026-04-30"
+    },
+    {
+      "work_email": "adriana.diez@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "adriana.diez@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "adriana.diez@deel.com",
+      "start_date": "2026-02-04",
+      "end_date": "2026-02-04"
+    },
+    {
+      "work_email": "adriana.diez@deel.com",
+      "start_date": "2026-02-05",
+      "end_date": "2026-02-05"
+    },
+    {
+      "work_email": "adriana.diez@deel.com",
+      "start_date": "2026-12-24",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "adriana.diez@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "alanna.rizel@deel.com",
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "alanna.rizel@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "alanna.rizel@deel.com",
+      "start_date": "2026-02-16",
+      "end_date": "2026-02-16"
+    },
+    {
+      "work_email": "alanna.rizel@deel.com",
+      "start_date": "2026-11-11",
+      "end_date": "2026-11-11"
+    },
+    {
+      "work_email": "alanna.rizel@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "alanna.rizel@deel.com",
+      "start_date": "2026-11-26",
+      "end_date": "2026-11-26"
+    },
+    {
+      "work_email": "alanna.rizel@deel.com",
+      "start_date": "2026-06-19",
+      "end_date": "2026-06-19"
+    },
+    {
+      "work_email": "alanna.rizel@deel.com",
+      "start_date": "2026-09-07",
+      "end_date": "2026-09-07"
+    },
+    {
+      "work_email": "alanna.rizel@deel.com",
+      "start_date": "2026-10-12",
+      "end_date": "2026-10-12"
+    },
+    {
+      "work_email": "alanna.rizel@deel.com",
+      "start_date": "2026-07-03",
+      "end_date": "2026-07-03"
+    },
+    {
+      "work_email": "alanna.rizel@deel.com",
+      "start_date": "2026-01-19",
+      "end_date": "2026-01-19"
+    },
+    {
+      "work_email": "allison.galindo@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "andrea.chang@deel.com",
+      "start_date": "2026-06-03",
+      "end_date": "2026-06-03"
+    },
+    {
+      "work_email": "andrea.chang@deel.com",
+      "start_date": "2026-10-12",
+      "end_date": "2026-10-12"
+    },
+    {
+      "work_email": "andrea.chang@deel.com",
+      "start_date": "2026-03-24",
+      "end_date": "2026-03-24"
+    },
+    {
+      "work_email": "andrea.chang@deel.com",
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "andrea.chang@deel.com",
+      "start_date": "2026-08-17",
+      "end_date": "2026-08-17"
+    },
+    {
+      "work_email": "andrea.chang@deel.com",
+      "start_date": "2026-11-23",
+      "end_date": "2026-11-23"
+    },
+    {
+      "work_email": "andrea.chang@deel.com",
+      "start_date": "2026-07-09",
+      "end_date": "2026-07-09"
+    },
+    {
+      "work_email": "andrea.chang@deel.com",
+      "start_date": "2026-04-02",
+      "end_date": "2026-04-02"
+    },
+    {
+      "work_email": "andrea.chang@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "andrea.chang@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "andrea.chang@deel.com",
+      "start_date": "2026-12-08",
+      "end_date": "2026-12-08"
+    },
+    {
+      "work_email": "andrea.chang@deel.com",
+      "start_date": "2026-01-26",
+      "end_date": "2026-02-06"
+    },
+    {
+      "work_email": "aniket.dutta@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "aniket.dutta@deel.com",
+      "start_date": "2026-03-19",
+      "end_date": "2026-03-20"
+    },
+    {
+      "work_email": "aniket.dutta@deel.com",
+      "start_date": "2026-05-06",
+      "end_date": "2026-05-06"
+    },
+    {
+      "work_email": "aniket.dutta@deel.com",
+      "start_date": "2026-06-01",
+      "end_date": "2026-06-01"
+    },
+    {
+      "work_email": "aniket.dutta@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "aniket.dutta@deel.com",
+      "start_date": "2026-02-05",
+      "end_date": "2026-02-06"
+    },
+    {
+      "work_email": "aniket.dutta@deel.com",
+      "start_date": "2026-01-26",
+      "end_date": "2026-01-26"
+    },
+    {
+      "work_email": "aniket.dutta@deel.com",
+      "start_date": "2026-05-05",
+      "end_date": "2026-05-05"
+    },
+    {
+      "work_email": "antonella.baletto@deel.com",
+      "start_date": "2026-06-22",
+      "end_date": "2026-06-22"
+    },
+    {
+      "work_email": "antonella.baletto@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "antonella.baletto@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "antonella.baletto@deel.com",
+      "start_date": "2026-07-09",
+      "end_date": "2026-07-09"
+    },
+    {
+      "work_email": "antonella.baletto@deel.com",
+      "start_date": "2026-02-16",
+      "end_date": "2026-02-17"
+    },
+    {
+      "work_email": "antonella.baletto@deel.com",
+      "start_date": "2026-06-15",
+      "end_date": "2026-06-15"
+    },
+    {
+      "work_email": "antonella.baletto@deel.com",
+      "start_date": "2026-06-19",
+      "end_date": "2026-06-19"
+    },
+    {
+      "work_email": "antonella.baletto@deel.com",
+      "start_date": "2026-10-12",
+      "end_date": "2026-10-12"
+    },
+    {
+      "work_email": "antonella.baletto@deel.com",
+      "start_date": "2026-11-23",
+      "end_date": "2026-11-23"
+    },
+    {
+      "work_email": "antonella.baletto@deel.com",
+      "start_date": "2026-01-02",
+      "end_date": "2026-01-02"
+    },
+    {
+      "work_email": "antonella.baletto@deel.com",
+      "start_date": "2026-06-17",
+      "end_date": "2026-06-17"
+    },
+    {
+      "work_email": "antonella.baletto@deel.com",
+      "start_date": "2026-01-19",
+      "end_date": "2026-01-19"
+    },
+    {
+      "work_email": "arjun.kamath@deel.com",
+      "start_date": "2026-09-04",
+      "end_date": "2026-09-04"
+    },
+    {
+      "work_email": "arjun.kamath@deel.com",
+      "start_date": "2026-10-02",
+      "end_date": "2026-10-02"
+    },
+    {
+      "work_email": "arjun.kamath@deel.com",
+      "start_date": "2026-04-30",
+      "end_date": "2026-04-30"
+    },
+    {
+      "work_email": "arjun.kamath@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "arjun.kamath@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "arjun.kamath@deel.com",
+      "start_date": "2026-02-24",
+      "end_date": "2026-02-24"
+    },
+    {
+      "work_email": "arjun.kamath@deel.com",
+      "start_date": "2026-09-14",
+      "end_date": "2026-09-14"
+    },
+    {
+      "work_email": "arjun.kamath@deel.com",
+      "start_date": "2026-10-26",
+      "end_date": "2026-10-26"
+    },
+    {
+      "work_email": "arjun.kamath@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "arjun.kamath@deel.com",
+      "start_date": "2026-11-27",
+      "end_date": "2026-11-27"
+    },
+    {
+      "work_email": "arjun.kamath@deel.com",
+      "start_date": "2026-05-08",
+      "end_date": "2026-05-08"
+    },
+    {
+      "work_email": "arjun.kamath@deel.com",
+      "start_date": "2026-01-22",
+      "end_date": "2026-01-22"
+    },
+    {
+      "work_email": "arjun.kamath@deel.com",
+      "start_date": "2026-04-20",
+      "end_date": "2026-04-20"
+    },
+    {
+      "work_email": "arjun.kamath@deel.com",
+      "start_date": "2026-03-18",
+      "end_date": "2026-03-18"
+    },
+    {
+      "work_email": "arjun.kamath@deel.com",
+      "start_date": "2026-05-04",
+      "end_date": "2026-05-07"
+    },
+    {
+      "work_email": "arjun.kamath@deel.com",
+      "start_date": "2026-04-06",
+      "end_date": "2026-04-06"
+    },
+    {
+      "work_email": "arjun.kamath@deel.com",
+      "start_date": "2026-06-26",
+      "end_date": "2026-06-26"
+    },
+    {
+      "work_email": "arjun.kamath@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-02"
+    },
+    {
+      "work_email": "ashley.acevedo@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "ashley.acevedo@deel.com",
+      "start_date": "2026-08-31",
+      "end_date": "2026-09-04"
+    },
+    {
+      "work_email": "ashley.acevedo@deel.com",
+      "start_date": "2026-07-27",
+      "end_date": "2026-07-31"
+    },
+    {
+      "work_email": "ashley.acevedo@deel.com",
+      "start_date": "2026-01-06",
+      "end_date": "2026-01-06"
+    },
+    {
+      "work_email": "ashley.acevedo@deel.com",
+      "start_date": "2026-05-15",
+      "end_date": "2026-05-15"
+    },
+    {
+      "work_email": "ashley.acevedo@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "ashley.acevedo@deel.com",
+      "start_date": "2026-08-03",
+      "end_date": "2026-08-07"
+    },
+    {
+      "work_email": "ashley.acevedo@deel.com",
+      "start_date": "2026-04-02",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "ashley.acevedo@deel.com",
+      "start_date": "2026-04-01",
+      "end_date": "2026-04-01"
+    },
+    {
+      "work_email": "beata.sroda@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "beata.sroda@deel.com",
+      "start_date": "2026-04-06",
+      "end_date": "2026-04-06"
+    },
+    {
+      "work_email": "beata.sroda@deel.com",
+      "start_date": "2026-06-26",
+      "end_date": "2026-06-29"
+    },
+    {
+      "work_email": "beata.sroda@deel.com",
+      "start_date": "2026-01-06",
+      "end_date": "2026-01-06"
+    },
+    {
+      "work_email": "beata.sroda@deel.com",
+      "start_date": "2026-05-04",
+      "end_date": "2026-05-08"
+    },
+    {
+      "work_email": "beata.sroda@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "breno.freire@deel.com",
+      "start_date": "2026-06-04",
+      "end_date": "2026-06-04"
+    },
+    {
+      "work_email": "breno.freire@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "breno.freire@deel.com",
+      "start_date": "2026-11-30",
+      "end_date": "2026-11-30"
+    },
+    {
+      "work_email": "breno.freire@deel.com",
+      "start_date": "2026-12-21",
+      "end_date": "2026-12-24"
+    },
+    {
+      "work_email": "breno.freire@deel.com",
+      "start_date": "2026-10-05",
+      "end_date": "2026-10-05"
+    },
+    {
+      "work_email": "breno.freire@deel.com",
+      "start_date": "2026-12-07",
+      "end_date": "2026-12-07"
+    },
+    {
+      "work_email": "breno.freire@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "breno.freire@deel.com",
+      "start_date": "2026-12-28",
+      "end_date": "2026-12-31"
+    },
+    {
+      "work_email": "breno.freire@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "breno.freire@deel.com",
+      "start_date": "2026-01-02",
+      "end_date": "2026-01-02"
+    },
+    {
+      "work_email": "brygida.duszynska@deel.com",
+      "start_date": "2026-03-10",
+      "end_date": "2026-03-30"
+    },
+    {
+      "work_email": "brygida.duszynska@deel.com",
+      "start_date": "2026-03-31",
+      "end_date": "2026-04-20"
+    },
+    {
+      "work_email": "brygida.duszynska@deel.com",
+      "start_date": "2026-05-11",
+      "end_date": "2026-09-27"
+    },
+    {
+      "work_email": "brygida.duszynska@deel.com",
+      "start_date": "2026-01-20",
+      "end_date": "2026-02-16"
+    },
+    {
+      "work_email": "brygida.duszynska@deel.com",
+      "start_date": "2026-02-17",
+      "end_date": "2026-03-09"
+    },
+    {
+      "work_email": "brygida.duszynska@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-19"
+    },
+    {
+      "work_email": "brygida.duszynska@deel.com",
+      "start_date": "2026-04-21",
+      "end_date": "2026-05-03"
+    },
+    {
+      "work_email": "callum.middleton@deel.com",
+      "start_date": "2026-03-23",
+      "end_date": "2026-03-27"
+    },
+    {
+      "work_email": "callum.middleton@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "callum.middleton@deel.com",
+      "start_date": "2026-05-26",
+      "end_date": "2026-05-29"
+    },
+    {
+      "work_email": "carla.plata@deel.com",
+      "start_date": "2026-03-25",
+      "end_date": "2026-03-26"
+    },
+    {
+      "work_email": "carla.plata@deel.com",
+      "start_date": "2026-06-04",
+      "end_date": "2026-06-04"
+    },
+    {
+      "work_email": "carla.plata@deel.com",
+      "start_date": "2026-01-30",
+      "end_date": "2026-01-30"
+    },
+    {
+      "work_email": "carla.plata@deel.com",
+      "start_date": "2026-04-07",
+      "end_date": "2026-04-07"
+    },
+    {
+      "work_email": "carla.plata@deel.com",
+      "start_date": "2026-01-12",
+      "end_date": "2026-01-12"
+    },
+    {
+      "work_email": "carla.plata@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "carla.plata@deel.com",
+      "start_date": "2026-04-02",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "carla.plata@deel.com",
+      "start_date": "2026-03-23",
+      "end_date": "2026-03-23"
+    },
+    {
+      "work_email": "catalina.oyarzo@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "catalina.oyarzo@deel.com",
+      "start_date": "2026-05-21",
+      "end_date": "2026-05-21"
+    },
+    {
+      "work_email": "catalina.oyarzo@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "catalina.oyarzo@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "chahat.sharma@deel.com",
+      "start_date": "2026-02-16",
+      "end_date": "2026-02-16"
+    },
+    {
+      "work_email": "chahat.sharma@deel.com",
+      "start_date": "2026-02-17",
+      "end_date": "2026-02-20"
+    },
+    {
+      "work_email": "chahat.sharma@deel.com",
+      "start_date": "2026-05-04",
+      "end_date": "2026-05-07"
+    },
+    {
+      "work_email": "chahat.sharma@deel.com",
+      "start_date": "2026-02-23",
+      "end_date": "2026-02-24"
+    },
+    {
+      "work_email": "charlotte.gachon@deel.com",
+      "start_date": "2026-05-14",
+      "end_date": "2026-05-14"
+    },
+    {
+      "work_email": "charlotte.gachon@deel.com",
+      "start_date": "2026-05-15",
+      "end_date": "2026-05-15"
+    },
+    {
+      "work_email": "charlotte.gachon@deel.com",
+      "start_date": "2026-02-16",
+      "end_date": "2026-02-16"
+    },
+    {
+      "work_email": "charlotte.gachon@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "charlotte.gachon@deel.com",
+      "start_date": "2026-09-03",
+      "end_date": "2026-09-04"
+    },
+    {
+      "work_email": "charlotte.gachon@deel.com",
+      "start_date": "2026-07-14",
+      "end_date": "2026-07-14"
+    },
+    {
+      "work_email": "charlotte.gachon@deel.com",
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "charlotte.gachon@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "charlotte.gachon@deel.com",
+      "start_date": "2026-05-08",
+      "end_date": "2026-05-08"
+    },
+    {
+      "work_email": "charlotte.gachon@deel.com",
+      "start_date": "2026-04-06",
+      "end_date": "2026-04-06"
+    },
+    {
+      "work_email": "charlotte.gachon@deel.com",
+      "start_date": "2026-11-11",
+      "end_date": "2026-11-11"
+    },
+    {
+      "work_email": "charlotte.gachon@deel.com",
+      "start_date": "2026-10-05",
+      "end_date": "2026-10-16"
+    },
+    {
+      "work_email": "charlotte.gachon@deel.com",
+      "start_date": "2026-08-11",
+      "end_date": "2026-08-12"
+    },
+    {
+      "work_email": "charlotte.gachon@deel.com",
+      "start_date": "2026-07-01",
+      "end_date": "2026-07-03"
+    },
+    {
+      "work_email": "charlotte.gachon@deel.com",
+      "start_date": "2026-03-12",
+      "end_date": "2026-03-18"
+    },
+    {
+      "work_email": "christine.gerkrath@deel.com",
+      "start_date": "2026-03-17",
+      "end_date": "2026-03-20"
+    },
+    {
+      "work_email": "christine.gerkrath@deel.com",
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "christine.gerkrath@deel.com",
+      "start_date": "2026-04-06",
+      "end_date": "2026-04-06"
+    },
+    {
+      "work_email": "christine.gerkrath@deel.com",
+      "start_date": "2026-06-04",
+      "end_date": "2026-06-04"
+    },
+    {
+      "work_email": "christine.gerkrath@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "christine.gerkrath@deel.com",
+      "start_date": "2026-03-16",
+      "end_date": "2026-03-16"
+    },
+    {
+      "work_email": "christine.gerkrath@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "christine.gerkrath@deel.com",
+      "start_date": "2026-01-21",
+      "end_date": "2026-02-11"
+    },
+    {
+      "work_email": "christine.gerkrath@deel.com",
+      "start_date": "2026-03-04",
+      "end_date": "2026-03-04"
+    },
+    {
+      "work_email": "christine.gerkrath@deel.com",
+      "start_date": "2026-03-10",
+      "end_date": "2026-03-10"
+    },
+    {
+      "work_email": "christine.gerkrath@deel.com",
+      "start_date": "2026-03-23",
+      "end_date": "2026-03-27"
+    },
+    {
+      "work_email": "christine.gerkrath@deel.com",
+      "start_date": "2026-07-16",
+      "end_date": "2026-07-21"
+    },
+    {
+      "work_email": "christine.gerkrath@deel.com",
+      "start_date": "2026-03-11",
+      "end_date": "2026-03-13"
+    },
+    {
+      "work_email": "christine.gerkrath@deel.com",
+      "start_date": "2026-05-14",
+      "end_date": "2026-05-14"
+    },
+    {
+      "work_email": "christine.gerkrath@deel.com",
+      "start_date": "2026-03-30",
+      "end_date": "2026-03-31"
+    },
+    {
+      "work_email": "clare.macmillanbell@deel.com",
+      "start_date": "2026-09-10",
+      "end_date": "2026-09-14"
+    },
+    {
+      "work_email": "clare.macmillanbell@deel.com",
+      "start_date": "2026-09-04",
+      "end_date": "2026-09-04"
+    },
+    {
+      "work_email": "clare.macmillanbell@deel.com",
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "clare.macmillanbell@deel.com",
+      "start_date": "2026-06-19",
+      "end_date": "2026-06-19"
+    },
+    {
+      "work_email": "clare.macmillanbell@deel.com",
+      "start_date": "2026-06-09",
+      "end_date": "2026-06-15"
+    },
+    {
+      "work_email": "clare.macmillanbell@deel.com",
+      "start_date": "2026-02-23",
+      "end_date": "2026-02-23"
+    },
+    {
+      "work_email": "clare.macmillanbell@deel.com",
+      "start_date": "2026-09-16",
+      "end_date": "2026-09-20"
+    },
+    {
+      "work_email": "clare.macmillanbell@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-06"
+    },
+    {
+      "work_email": "clare.macmillanbell@deel.com",
+      "start_date": "2026-05-04",
+      "end_date": "2026-05-04"
+    },
+    {
+      "work_email": "clare.macmillanbell@deel.com",
+      "start_date": "2026-04-29",
+      "end_date": "2026-04-29"
+    },
+    {
+      "work_email": "constanza.santopietro@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "dahiana.plazas@deel.com",
+      "start_date": "2026-06-19",
+      "end_date": "2026-06-19"
+    },
+    {
+      "work_email": "dahiana.plazas@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "dahiana.plazas@deel.com",
+      "start_date": "2026-12-07",
+      "end_date": "2026-12-07"
+    },
+    {
+      "work_email": "dahiana.plazas@deel.com",
+      "start_date": "2026-05-26",
+      "end_date": "2026-05-29"
+    },
+    {
+      "work_email": "dahiana.plazas@deel.com",
+      "start_date": "2026-06-15",
+      "end_date": "2026-06-18"
+    },
+    {
+      "work_email": "dahiana.plazas@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "dahiana.plazas@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "dahiana.plazas@deel.com",
+      "start_date": "2026-06-08",
+      "end_date": "2026-06-08"
+    },
+    {
+      "work_email": "dahiana.plazas@deel.com",
+      "start_date": "2026-09-24",
+      "end_date": "2026-09-24"
+    },
+    {
+      "work_email": "dahiana.plazas@deel.com",
+      "start_date": "2026-06-24",
+      "end_date": "2026-06-24"
+    },
+    {
+      "work_email": "dahiana.plazas@deel.com",
+      "start_date": "2026-04-06",
+      "end_date": "2026-04-06"
+    },
+    {
+      "work_email": "dahiana.plazas@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "dahiana.plazas@deel.com",
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "dahiana.plazas@deel.com",
+      "start_date": "2026-06-09",
+      "end_date": "2026-06-09"
+    },
+    {
+      "work_email": "dahiana.plazas@deel.com",
+      "start_date": "2026-09-11",
+      "end_date": "2026-09-11"
+    },
+    {
+      "work_email": "dahiana.plazas@deel.com",
+      "start_date": "2026-06-10",
+      "end_date": "2026-06-12"
+    },
+    {
+      "work_email": "dahiana.plazas@deel.com",
+      "start_date": "2026-01-06",
+      "end_date": "2026-01-06"
+    },
+    {
+      "work_email": "dahiana.plazas@deel.com",
+      "start_date": "2026-12-08",
+      "end_date": "2026-12-08"
+    },
+    {
+      "work_email": "dahiana.plazas@deel.com",
+      "start_date": "2026-10-12",
+      "end_date": "2026-10-12"
+    },
+    {
+      "work_email": "darragh.cull@deel.com",
+      "start_date": "2026-02-27",
+      "end_date": "2026-02-27"
+    },
+    {
+      "work_email": "darragh.cull@deel.com",
+      "start_date": "2026-03-11",
+      "end_date": "2026-03-11"
+    },
+    {
+      "work_email": "darragh.cull@deel.com",
+      "start_date": "2026-04-13",
+      "end_date": "2026-04-13"
+    },
+    {
+      "work_email": "darragh.cull@deel.com",
+      "start_date": "2026-06-15",
+      "end_date": "2026-06-15"
+    },
+    {
+      "work_email": "darragh.cull@deel.com",
+      "start_date": "2026-06-16",
+      "end_date": "2026-06-16"
+    },
+    {
+      "work_email": "darragh.cull@deel.com",
+      "start_date": "2026-01-02",
+      "end_date": "2026-01-02"
+    },
+    {
+      "work_email": "darragh.cull@deel.com",
+      "start_date": "2026-03-17",
+      "end_date": "2026-03-18"
+    },
+    {
+      "work_email": "darragh.cull@deel.com",
+      "start_date": "2026-06-02",
+      "end_date": "2026-06-02"
+    },
+    {
+      "work_email": "darragh.cull@deel.com",
+      "start_date": "2026-05-14",
+      "end_date": "2026-05-14"
+    },
+    {
+      "work_email": "darragh.cull@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "darragh.cull@deel.com",
+      "start_date": "2026-05-11",
+      "end_date": "2026-05-13"
+    },
+    {
+      "work_email": "darragh.cull@deel.com",
+      "start_date": "2026-05-27",
+      "end_date": "2026-05-27"
+    },
+    {
+      "work_email": "derek.house@deel.com",
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "derek.house@deel.com",
+      "start_date": "2026-02-13",
+      "end_date": "2026-02-13"
+    },
+    {
+      "work_email": "derek.house@deel.com",
+      "start_date": "2026-04-06",
+      "end_date": "2026-04-06"
+    },
+    {
+      "work_email": "derek.house@deel.com",
+      "start_date": "2026-07-03",
+      "end_date": "2026-07-10"
+    },
+    {
+      "work_email": "derek.house@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "derek.house@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "derek.house@deel.com",
+      "start_date": "2026-05-04",
+      "end_date": "2026-05-04"
+    },
+    {
+      "work_email": "elaine.kok@deel.com",
+      "start_date": "2026-06-26",
+      "end_date": "2026-06-26"
+    },
+    {
+      "work_email": "elaine.kok@deel.com",
+      "start_date": "2026-04-30",
+      "end_date": "2026-04-30"
+    },
+    {
+      "work_email": "elaine.kok@deel.com",
+      "start_date": "2026-03-17",
+      "end_date": "2026-03-17"
+    },
+    {
+      "work_email": "elaine.kok@deel.com",
+      "start_date": "2026-04-28",
+      "end_date": "2026-04-28"
+    },
+    {
+      "work_email": "elaine.kok@deel.com",
+      "start_date": "2026-02-17",
+      "end_date": "2026-02-18"
+    },
+    {
+      "work_email": "elaine.kok@deel.com",
+      "start_date": "2026-02-09",
+      "end_date": "2026-02-09"
+    },
+    {
+      "work_email": "elaine.kok@deel.com",
+      "start_date": "2026-04-29",
+      "end_date": "2026-04-29"
+    },
+    {
+      "work_email": "elaine.kok@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "elaine.kok@deel.com",
+      "start_date": "2026-05-04",
+      "end_date": "2026-05-04"
+    },
+    {
+      "work_email": "eliane.suarez@deel.com",
+      "start_date": "2026-03-30",
+      "end_date": "2026-04-01"
+    },
+    {
+      "work_email": "eliane.suarez@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-09"
+    },
+    {
+      "work_email": "eliane.suarez@deel.com",
+      "start_date": "2026-03-23",
+      "end_date": "2026-03-23"
+    },
+    {
+      "work_email": "eliane.suarez@deel.com",
+      "start_date": "2026-01-21",
+      "end_date": "2026-01-21"
+    },
+    {
+      "work_email": "eliane.suarez@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "eliane.suarez@deel.com",
+      "start_date": "2026-03-11",
+      "end_date": "2026-03-11"
+    },
+    {
+      "work_email": "eliane.suarez@deel.com",
+      "start_date": "2026-05-08",
+      "end_date": "2026-05-08"
+    },
+    {
+      "work_email": "eliane.suarez@deel.com",
+      "start_date": "2026-05-18",
+      "end_date": "2026-05-18"
+    },
+    {
+      "work_email": "eliane.suarez@deel.com",
+      "start_date": "2026-04-02",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "erica.wiessner@deel.com",
+      "start_date": "2026-09-07",
+      "end_date": "2026-09-07"
+    },
+    {
+      "work_email": "erica.wiessner@deel.com",
+      "start_date": "2026-08-21",
+      "end_date": "2026-08-28"
+    },
+    {
+      "work_email": "erica.wiessner@deel.com",
+      "start_date": "2026-11-27",
+      "end_date": "2026-11-27"
+    },
+    {
+      "work_email": "erica.wiessner@deel.com",
+      "start_date": "2026-05-04",
+      "end_date": "2026-05-08"
+    },
+    {
+      "work_email": "erica.wiessner@deel.com",
+      "start_date": "2026-01-02",
+      "end_date": "2026-01-02"
+    },
+    {
+      "work_email": "erica.wiessner@deel.com",
+      "start_date": "2026-02-02",
+      "end_date": "2026-02-02"
+    },
+    {
+      "work_email": "erica.wiessner@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "erica.wiessner@deel.com",
+      "start_date": "2026-08-03",
+      "end_date": "2026-08-07"
+    },
+    {
+      "work_email": "erica.wiessner@deel.com",
+      "start_date": "2026-12-28",
+      "end_date": "2026-12-30"
+    },
+    {
+      "work_email": "erica.wiessner@deel.com",
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "erica.wiessner@deel.com",
+      "start_date": "2026-02-16",
+      "end_date": "2026-02-16"
+    },
+    {
+      "work_email": "erica.wiessner@deel.com",
+      "start_date": "2026-12-24",
+      "end_date": "2026-12-24"
+    },
+    {
+      "work_email": "erica.wiessner@deel.com",
+      "start_date": "2026-11-26",
+      "end_date": "2026-11-26"
+    },
+    {
+      "work_email": "erica.wiessner@deel.com",
+      "start_date": "2026-12-31",
+      "end_date": "2026-12-31"
+    },
+    {
+      "work_email": "erica.wiessner@deel.com",
+      "start_date": "2026-10-12",
+      "end_date": "2026-10-12"
+    },
+    {
+      "work_email": "erica.wiessner@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "erica.wiessner@deel.com",
+      "start_date": "2026-06-19",
+      "end_date": "2026-06-19"
+    },
+    {
+      "work_email": "erica.wiessner@deel.com",
+      "start_date": "2026-01-19",
+      "end_date": "2026-01-19"
+    },
+    {
+      "work_email": "erica.wiessner@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "erica.wiessner@deel.com",
+      "start_date": "2026-11-11",
+      "end_date": "2026-11-11"
+    },
+    {
+      "work_email": "erica.wiessner@deel.com",
+      "start_date": "2026-07-03",
+      "end_date": "2026-07-03"
+    },
+    {
+      "work_email": "facundo.berdini@deel.com",
+      "start_date": "2026-03-24",
+      "end_date": "2026-03-24"
+    },
+    {
+      "work_email": "facundo.berdini@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "facundo.berdini@deel.com",
+      "start_date": "2026-03-20",
+      "end_date": "2026-03-23"
+    },
+    {
+      "work_email": "facundo.berdini@deel.com",
+      "start_date": "2026-04-02",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "facundo.berdini@deel.com",
+      "start_date": "2026-06-05",
+      "end_date": "2026-06-05"
+    },
+    {
+      "work_email": "facundo.berdini@deel.com",
+      "start_date": "2026-03-25",
+      "end_date": "2026-04-01"
+    },
+    {
+      "work_email": "farah.zaman@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "fran.logiudice@deel.com",
+      "start_date": "2026-07-13",
+      "end_date": "2026-07-14"
+    },
+    {
+      "work_email": "fran.logiudice@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "fran.logiudice@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "fran.logiudice@deel.com",
+      "start_date": "2026-06-30",
+      "end_date": "2026-06-30"
+    },
+    {
+      "work_email": "fran.logiudice@deel.com",
+      "start_date": "2026-06-02",
+      "end_date": "2026-06-02"
+    },
+    {
+      "work_email": "fran.logiudice@deel.com",
+      "start_date": "2026-06-26",
+      "end_date": "2026-06-26"
+    },
+    {
+      "work_email": "fran.logiudice@deel.com",
+      "start_date": "2026-01-06",
+      "end_date": "2026-01-06"
+    },
+    {
+      "work_email": "fran.logiudice@deel.com",
+      "start_date": "2026-03-23",
+      "end_date": "2026-03-27"
+    },
+    {
+      "work_email": "fran.logiudice@deel.com",
+      "start_date": "2026-06-29",
+      "end_date": "2026-06-29"
+    },
+    {
+      "work_email": "fran.logiudice@deel.com",
+      "start_date": "2026-04-08",
+      "end_date": "2026-04-10"
+    },
+    {
+      "work_email": "fran.logiudice@deel.com",
+      "start_date": "2026-07-20",
+      "end_date": "2026-07-24"
+    },
+    {
+      "work_email": "fran.logiudice@deel.com",
+      "start_date": "2026-04-06",
+      "end_date": "2026-04-06"
+    },
+    {
+      "work_email": "greta.klevinskiene@deel.com",
+      "start_date": "2026-05-26",
+      "end_date": "2026-05-29"
+    },
+    {
+      "work_email": "greta.klevinskiene@deel.com",
+      "start_date": "2026-05-08",
+      "end_date": "2026-05-08"
+    },
+    {
+      "work_email": "greta.klevinskiene@deel.com",
+      "start_date": "2026-05-04",
+      "end_date": "2026-05-04"
+    },
+    {
+      "work_email": "greta.klevinskiene@deel.com",
+      "start_date": "2026-08-31",
+      "end_date": "2026-08-31"
+    },
+    {
+      "work_email": "greta.klevinskiene@deel.com",
+      "start_date": "2026-01-02",
+      "end_date": "2026-01-02"
+    },
+    {
+      "work_email": "greta.klevinskiene@deel.com",
+      "start_date": "2026-02-17",
+      "end_date": "2026-02-17"
+    },
+    {
+      "work_email": "greta.klevinskiene@deel.com",
+      "start_date": "2026-07-20",
+      "end_date": "2026-07-20"
+    },
+    {
+      "work_email": "greta.klevinskiene@deel.com",
+      "start_date": "2026-05-21",
+      "end_date": "2026-05-22"
+    },
+    {
+      "work_email": "greta.klevinskiene@deel.com",
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "greta.klevinskiene@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-06"
+    },
+    {
+      "work_email": "greta.klevinskiene@deel.com",
+      "start_date": "2026-07-30",
+      "end_date": "2026-08-03"
+    },
+    {
+      "work_email": "greta.klevinskiene@deel.com",
+      "start_date": "2026-08-04",
+      "end_date": "2026-08-07"
+    },
+    {
+      "work_email": "guillermo.harrsch@deel.com",
+      "start_date": "2026-09-16",
+      "end_date": "2026-09-16"
+    },
+    {
+      "work_email": "guillermo.harrsch@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "guillermo.harrsch@deel.com",
+      "start_date": "2026-01-09",
+      "end_date": "2026-03-05"
+    },
+    {
+      "work_email": "guillermo.harrsch@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "guillermo.harrsch@deel.com",
+      "start_date": "2026-11-16",
+      "end_date": "2026-11-16"
+    },
+    {
+      "work_email": "guillermo.harrsch@deel.com",
+      "start_date": "2026-03-16",
+      "end_date": "2026-03-16"
+    },
+    {
+      "work_email": "guillermo.harrsch@deel.com",
+      "start_date": "2026-04-02",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "guillermo.harrsch@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "hanna.sirnio@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-06"
+    },
+    {
+      "work_email": "hanna.sirnio@deel.com",
+      "start_date": "2026-05-04",
+      "end_date": "2026-05-21"
+    },
+    {
+      "work_email": "hanna.sirnio@deel.com",
+      "start_date": "2026-04-07",
+      "end_date": "2026-04-30"
+    },
+    {
+      "work_email": "hanna.sirnio@deel.com",
+      "start_date": "2026-06-19",
+      "end_date": "2026-06-20"
+    },
+    {
+      "work_email": "hanna.sirnio@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-06"
+    },
+    {
+      "work_email": "hanna.sirnio@deel.com",
+      "start_date": "2026-05-22",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "hanna.sirnio@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "hanna.sirnio@deel.com",
+      "start_date": "2026-05-14",
+      "end_date": "2026-05-14"
+    },
+    {
+      "work_email": "hanna.sirnio@deel.com",
+      "start_date": "2026-05-26",
+      "end_date": "2026-07-31"
+    },
+    {
+      "work_email": "hanna.sirnio@deel.com",
+      "start_date": "2026-04-01",
+      "end_date": "2026-04-02"
+    },
+    {
+      "work_email": "hanna.sirnio@deel.com",
+      "start_date": "2026-08-07",
+      "end_date": "2026-08-07"
+    },
+    {
+      "work_email": "heejin.jeon@deel.com",
+      "start_date": "2026-06-19",
+      "end_date": "2026-06-19"
+    },
+    {
+      "work_email": "heejin.jeon@deel.com",
+      "start_date": "2026-01-19",
+      "end_date": "2026-01-19"
+    },
+    {
+      "work_email": "heejin.jeon@deel.com",
+      "start_date": "2026-09-07",
+      "end_date": "2026-09-07"
+    },
+    {
+      "work_email": "heejin.jeon@deel.com",
+      "start_date": "2026-10-12",
+      "end_date": "2026-10-12"
+    },
+    {
+      "work_email": "heejin.jeon@deel.com",
+      "start_date": "2026-02-27",
+      "end_date": "2026-02-27"
+    },
+    {
+      "work_email": "heejin.jeon@deel.com",
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "heejin.jeon@deel.com",
+      "start_date": "2026-07-03",
+      "end_date": "2026-07-03"
+    },
+    {
+      "work_email": "heejin.jeon@deel.com",
+      "start_date": "2026-06-08",
+      "end_date": "2026-06-08"
+    },
+    {
+      "work_email": "heejin.jeon@deel.com",
+      "start_date": "2026-02-16",
+      "end_date": "2026-02-16"
+    },
+    {
+      "work_email": "heejin.jeon@deel.com",
+      "start_date": "2026-04-21",
+      "end_date": "2026-04-24"
+    },
+    {
+      "work_email": "heejin.jeon@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "heejin.jeon@deel.com",
+      "start_date": "2026-01-05",
+      "end_date": "2026-01-12"
+    },
+    {
+      "work_email": "heejin.jeon@deel.com",
+      "start_date": "2026-04-10",
+      "end_date": "2026-04-10"
+    },
+    {
+      "work_email": "heejin.jeon@deel.com",
+      "start_date": "2026-09-25",
+      "end_date": "2026-09-25"
+    },
+    {
+      "work_email": "heejin.jeon@deel.com",
+      "start_date": "2026-11-26",
+      "end_date": "2026-11-26"
+    },
+    {
+      "work_email": "heejin.jeon@deel.com",
+      "start_date": "2026-03-13",
+      "end_date": "2026-03-13"
+    },
+    {
+      "work_email": "heejin.jeon@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "iara.haertel@deel.com",
+      "start_date": "2026-06-15",
+      "end_date": "2026-06-15"
+    },
+    {
+      "work_email": "iara.haertel@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "iara.haertel@deel.com",
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "iara.haertel@deel.com",
+      "start_date": "2026-12-07",
+      "end_date": "2026-12-08"
+    },
+    {
+      "work_email": "inanna.castor@deel.com",
+      "start_date": "2026-01-19",
+      "end_date": "2026-01-19"
+    },
+    {
+      "work_email": "inanna.castor@deel.com",
+      "start_date": "2026-01-05",
+      "end_date": "2026-01-05"
+    },
+    {
+      "work_email": "inanna.castor@deel.com",
+      "start_date": "2026-01-09",
+      "end_date": "2026-01-09"
+    },
+    {
+      "work_email": "jacob.mgiba@deel.com",
+      "start_date": "2026-03-04",
+      "end_date": "2026-03-05"
+    },
+    {
+      "work_email": "jacob.mgiba@deel.com",
+      "start_date": "2026-04-20",
+      "end_date": "2026-04-20"
+    },
+    {
+      "work_email": "jacob.mgiba@deel.com",
+      "start_date": "2026-01-16",
+      "end_date": "2026-01-16"
+    },
+    {
+      "work_email": "jacob.mgiba@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-06"
+    },
+    {
+      "work_email": "jacob.mgiba@deel.com",
+      "start_date": "2026-01-12",
+      "end_date": "2026-01-14"
+    },
+    {
+      "work_email": "jacob.mgiba@deel.com",
+      "start_date": "2026-05-06",
+      "end_date": "2026-05-07"
+    },
+    {
+      "work_email": "jacob.mgiba@deel.com",
+      "start_date": "2026-01-15",
+      "end_date": "2026-01-15"
+    },
+    {
+      "work_email": "jaikishan.bhatia@deel.com",
+      "start_date": "2026-04-14",
+      "end_date": "2026-04-14"
+    },
+    {
+      "work_email": "jaikishan.bhatia@deel.com",
+      "start_date": "2026-05-15",
+      "end_date": "2026-05-15"
+    },
+    {
+      "work_email": "jaikishan.bhatia@deel.com",
+      "start_date": "2026-02-25",
+      "end_date": "2026-02-25"
+    },
+    {
+      "work_email": "jaikishan.bhatia@deel.com",
+      "start_date": "2026-03-12",
+      "end_date": "2026-03-12"
+    },
+    {
+      "work_email": "jaikishan.bhatia@deel.com",
+      "start_date": "2026-01-06",
+      "end_date": "2026-01-07"
+    },
+    {
+      "work_email": "jane.lee@deel.com",
+      "start_date": "2026-11-11",
+      "end_date": "2026-11-11"
+    },
+    {
+      "work_email": "jane.lee@deel.com",
+      "start_date": "2026-10-12",
+      "end_date": "2026-10-12"
+    },
+    {
+      "work_email": "jane.lee@deel.com",
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "jane.lee@deel.com",
+      "start_date": "2026-06-19",
+      "end_date": "2026-06-19"
+    },
+    {
+      "work_email": "jane.lee@deel.com",
+      "start_date": "2026-01-26",
+      "end_date": "2026-01-26"
+    },
+    {
+      "work_email": "jane.lee@deel.com",
+      "start_date": "2026-08-28",
+      "end_date": "2026-09-04"
+    },
+    {
+      "work_email": "jane.lee@deel.com",
+      "start_date": "2026-07-03",
+      "end_date": "2026-07-03"
+    },
+    {
+      "work_email": "jane.lee@deel.com",
+      "start_date": "2026-10-13",
+      "end_date": "2026-10-16"
+    },
+    {
+      "work_email": "jane.lee@deel.com",
+      "start_date": "2026-02-16",
+      "end_date": "2026-02-16"
+    },
+    {
+      "work_email": "jane.lee@deel.com",
+      "start_date": "2026-09-07",
+      "end_date": "2026-09-07"
+    },
+    {
+      "work_email": "jane.lee@deel.com",
+      "start_date": "2026-03-31",
+      "end_date": "2026-04-01"
+    },
+    {
+      "work_email": "jane.lee@deel.com",
+      "start_date": "2026-01-19",
+      "end_date": "2026-01-19"
+    },
+    {
+      "work_email": "joel.willcox@deel.com",
+      "start_date": "2026-01-16",
+      "end_date": "2026-01-29"
+    },
+    {
+      "work_email": "joel.willcox@deel.com",
+      "start_date": "2026-02-06",
+      "end_date": "2026-02-06"
+    },
+    {
+      "work_email": "joel.willcox@deel.com",
+      "start_date": "2026-02-02",
+      "end_date": "2026-02-05"
+    },
+    {
+      "work_email": "joel.willcox@deel.com",
+      "start_date": "2026-01-30",
+      "end_date": "2026-01-30"
+    },
+    {
+      "work_email": "joel.willcox@deel.com",
+      "start_date": "2026-01-05",
+      "end_date": "2026-01-05"
+    },
+    {
+      "work_email": "julian.meneilley@deel.com",
+      "start_date": "2026-07-01",
+      "end_date": "2026-07-01"
+    },
+    {
+      "work_email": "julian.meneilley@deel.com",
+      "start_date": "2026-05-22",
+      "end_date": "2026-05-22"
+    },
+    {
+      "work_email": "julian.meneilley@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "julian.meneilley@deel.com",
+      "start_date": "2026-02-16",
+      "end_date": "2026-02-16"
+    },
+    {
+      "work_email": "julian.meneilley@deel.com",
+      "start_date": "2026-09-07",
+      "end_date": "2026-09-07"
+    },
+    {
+      "work_email": "julian.meneilley@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "julian.meneilley@deel.com",
+      "start_date": "2026-05-18",
+      "end_date": "2026-05-18"
+    },
+    {
+      "work_email": "julian.meneilley@deel.com",
+      "start_date": "2026-10-12",
+      "end_date": "2026-10-12"
+    },
+    {
+      "work_email": "kaleen.guzman@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "kaleen.guzman@deel.com",
+      "start_date": "2026-03-16",
+      "end_date": "2026-03-25"
+    },
+    {
+      "work_email": "kara.guan@deel.com",
+      "start_date": "2026-04-27",
+      "end_date": "2026-04-27"
+    },
+    {
+      "work_email": "kara.guan@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-06"
+    },
+    {
+      "work_email": "kara.guan@deel.com",
+      "start_date": "2026-05-19",
+      "end_date": "2026-05-19"
+    },
+    {
+      "work_email": "katherine.cruzat@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-05"
+    },
+    {
+      "work_email": "katherine.cruzat@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-04"
+    },
+    {
+      "work_email": "katherine.cruzat@deel.com",
+      "start_date": "2026-04-02",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "katy.siu@deel.com",
+      "start_date": "2026-03-18",
+      "end_date": "2026-03-18"
+    },
+    {
+      "work_email": "katy.siu@deel.com",
+      "start_date": "2026-02-23",
+      "end_date": "2026-02-23"
+    },
+    {
+      "work_email": "katy.siu@deel.com",
+      "start_date": "2026-03-10",
+      "end_date": "2026-03-10"
+    },
+    {
+      "work_email": "katy.siu@deel.com",
+      "start_date": "2026-02-16",
+      "end_date": "2026-02-16"
+    },
+    {
+      "work_email": "katy.siu@deel.com",
+      "start_date": "2026-04-23",
+      "end_date": "2026-04-24"
+    },
+    {
+      "work_email": "kevin.omeye@deel.com",
+      "start_date": "2026-06-26",
+      "end_date": "2026-06-26"
+    },
+    {
+      "work_email": "kevin.omeye@deel.com",
+      "start_date": "2026-04-06",
+      "end_date": "2026-04-06"
+    },
+    {
+      "work_email": "kevin.omeye@deel.com",
+      "start_date": "2026-03-02",
+      "end_date": "2026-03-02"
+    },
+    {
+      "work_email": "kevin.omeye@deel.com",
+      "start_date": "2026-05-18",
+      "end_date": "2026-05-18"
+    },
+    {
+      "work_email": "kevin.omeye@deel.com",
+      "start_date": "2026-05-21",
+      "end_date": "2026-05-21"
+    },
+    {
+      "work_email": "kevin.omeye@deel.com",
+      "start_date": "2026-01-02",
+      "end_date": "2026-01-02"
+    },
+    {
+      "work_email": "leah.mcrae@deel.com",
+      "start_date": "2026-07-01",
+      "end_date": "2026-07-01"
+    },
+    {
+      "work_email": "leah.mcrae@deel.com",
+      "start_date": "2026-09-07",
+      "end_date": "2026-09-07"
+    },
+    {
+      "work_email": "leah.mcrae@deel.com",
+      "start_date": "2026-05-18",
+      "end_date": "2026-05-18"
+    },
+    {
+      "work_email": "leah.mcrae@deel.com",
+      "start_date": "2026-10-12",
+      "end_date": "2026-10-12"
+    },
+    {
+      "work_email": "leah.mcrae@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-06"
+    },
+    {
+      "work_email": "leah.mcrae@deel.com",
+      "start_date": "2026-06-08",
+      "end_date": "2026-06-12"
+    },
+    {
+      "work_email": "leah.mcrae@deel.com",
+      "start_date": "2026-09-30",
+      "end_date": "2026-09-30"
+    },
+    {
+      "work_email": "leah.mcrae@deel.com",
+      "start_date": "2026-11-11",
+      "end_date": "2026-11-11"
+    },
+    {
+      "work_email": "leah.mcrae@deel.com",
+      "start_date": "2026-12-24",
+      "end_date": "2026-12-24"
+    },
+    {
+      "work_email": "leah.mcrae@deel.com",
+      "start_date": "2026-06-24",
+      "end_date": "2026-06-24"
+    },
+    {
+      "work_email": "leah.mcrae@deel.com",
+      "start_date": "2026-08-03",
+      "end_date": "2026-08-03"
+    },
+    {
+      "work_email": "leah.mcrae@deel.com",
+      "start_date": "2026-09-08",
+      "end_date": "2026-09-11"
+    },
+    {
+      "work_email": "leah.mcrae@deel.com",
+      "start_date": "2026-02-16",
+      "end_date": "2026-02-16"
+    },
+    {
+      "work_email": "leah.mcrae@deel.com",
+      "start_date": "2026-08-31",
+      "end_date": "2026-09-04"
+    },
+    {
+      "work_email": "leah.mcrae@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "liseth.villacob@deel.com",
+      "start_date": "2026-03-17",
+      "end_date": "2026-03-18"
+    },
+    {
+      "work_email": "liseth.villacob@deel.com",
+      "start_date": "2026-04-10",
+      "end_date": "2026-04-15"
+    },
+    {
+      "work_email": "luna.lu@deel.com",
+      "start_date": "2026-12-24",
+      "end_date": "2026-12-24"
+    },
+    {
+      "work_email": "luna.lu@deel.com",
+      "start_date": "2026-02-16",
+      "end_date": "2026-02-16"
+    },
+    {
+      "work_email": "luna.lu@deel.com",
+      "start_date": "2026-09-07",
+      "end_date": "2026-09-07"
+    },
+    {
+      "work_email": "luna.lu@deel.com",
+      "start_date": "2026-10-12",
+      "end_date": "2026-10-12"
+    },
+    {
+      "work_email": "luna.lu@deel.com",
+      "start_date": "2026-07-01",
+      "end_date": "2026-07-01"
+    },
+    {
+      "work_email": "luna.lu@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "luna.lu@deel.com",
+      "start_date": "2026-05-05",
+      "end_date": "2026-05-06"
+    },
+    {
+      "work_email": "luna.lu@deel.com",
+      "start_date": "2026-08-03",
+      "end_date": "2026-08-03"
+    },
+    {
+      "work_email": "luna.lu@deel.com",
+      "start_date": "2026-11-11",
+      "end_date": "2026-11-11"
+    },
+    {
+      "work_email": "luna.lu@deel.com",
+      "start_date": "2026-02-09",
+      "end_date": "2026-02-13"
+    },
+    {
+      "work_email": "luna.lu@deel.com",
+      "start_date": "2026-05-18",
+      "end_date": "2026-05-18"
+    },
+    {
+      "work_email": "luna.lu@deel.com",
+      "start_date": "2026-03-12",
+      "end_date": "2026-03-12"
+    },
+    {
+      "work_email": "luna.lu@deel.com",
+      "start_date": "2026-09-30",
+      "end_date": "2026-09-30"
+    },
+    {
+      "work_email": "luna.lu@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "luna.lu@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "madiha.azam@deel.com",
+      "start_date": "2026-04-21",
+      "end_date": "2026-04-21"
+    },
+    {
+      "work_email": "madiha.azam@deel.com",
+      "start_date": "2026-01-30",
+      "end_date": "2026-01-30"
+    },
+    {
+      "work_email": "madiha.azam@deel.com",
+      "start_date": "2026-03-19",
+      "end_date": "2026-03-19"
+    },
+    {
+      "work_email": "madiha.azam@deel.com",
+      "start_date": "2026-03-09",
+      "end_date": "2026-03-09"
+    },
+    {
+      "work_email": "madiha.azam@deel.com",
+      "start_date": "2026-05-26",
+      "end_date": "2026-05-29"
+    },
+    {
+      "work_email": "madiha.azam@deel.com",
+      "start_date": "2026-01-02",
+      "end_date": "2026-01-02"
+    },
+    {
+      "work_email": "madiha.azam@deel.com",
+      "start_date": "2026-06-01",
+      "end_date": "2026-06-01"
+    },
+    {
+      "work_email": "maite.bocutti@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "maite.bocutti@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "maite.bocutti@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "maite.bocutti@deel.com",
+      "start_date": "2026-02-17",
+      "end_date": "2026-02-17"
+    },
+    {
+      "work_email": "maite.bocutti@deel.com",
+      "start_date": "2026-11-20",
+      "end_date": "2026-11-20"
+    },
+    {
+      "work_email": "maite.bocutti@deel.com",
+      "start_date": "2026-09-07",
+      "end_date": "2026-09-07"
+    },
+    {
+      "work_email": "maite.bocutti@deel.com",
+      "start_date": "2026-06-04",
+      "end_date": "2026-06-05"
+    },
+    {
+      "work_email": "maite.bocutti@deel.com",
+      "start_date": "2026-11-02",
+      "end_date": "2026-11-02"
+    },
+    {
+      "work_email": "maite.bocutti@deel.com",
+      "start_date": "2026-04-21",
+      "end_date": "2026-04-21"
+    },
+    {
+      "work_email": "maite.bocutti@deel.com",
+      "start_date": "2026-02-16",
+      "end_date": "2026-02-16"
+    },
+    {
+      "work_email": "maite.bocutti@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "maite.bocutti@deel.com",
+      "start_date": "2026-02-11",
+      "end_date": "2026-02-11"
+    },
+    {
+      "work_email": "maite.bocutti@deel.com",
+      "start_date": "2026-04-20",
+      "end_date": "2026-04-20"
+    },
+    {
+      "work_email": "maite.bocutti@deel.com",
+      "start_date": "2026-01-02",
+      "end_date": "2026-01-02"
+    },
+    {
+      "work_email": "maite.bocutti@deel.com",
+      "start_date": "2026-10-12",
+      "end_date": "2026-10-12"
+    },
+    {
+      "work_email": "marcin.farganus@deel.com",
+      "start_date": "2026-04-06",
+      "end_date": "2026-04-06"
+    },
+    {
+      "work_email": "marcin.farganus@deel.com",
+      "start_date": "2026-02-25",
+      "end_date": "2026-02-25"
+    },
+    {
+      "work_email": "marcin.farganus@deel.com",
+      "start_date": "2026-04-10",
+      "end_date": "2026-04-13"
+    },
+    {
+      "work_email": "marcin.farganus@deel.com",
+      "start_date": "2026-06-15",
+      "end_date": "2026-06-26"
+    },
+    {
+      "work_email": "marcin.farganus@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "maria.badaloni@deel.com",
+      "start_date": "2026-04-02",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "maria.badaloni@deel.com",
+      "start_date": "2026-06-29",
+      "end_date": "2026-07-09"
+    },
+    {
+      "work_email": "maria.badaloni@deel.com",
+      "start_date": "2026-12-08",
+      "end_date": "2026-12-08"
+    },
+    {
+      "work_email": "maria.badaloni@deel.com",
+      "start_date": "2026-01-06",
+      "end_date": "2026-01-06"
+    },
+    {
+      "work_email": "maria.badaloni@deel.com",
+      "start_date": "2026-03-04",
+      "end_date": "2026-03-13"
+    },
+    {
+      "work_email": "maria.badaloni@deel.com",
+      "start_date": "2026-10-12",
+      "end_date": "2026-10-12"
+    },
+    {
+      "work_email": "maria.badaloni@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "maria.badaloni@deel.com",
+      "start_date": "2026-05-15",
+      "end_date": "2026-05-15"
+    },
+    {
+      "work_email": "maria.badaloni@deel.com",
+      "start_date": "2026-11-02",
+      "end_date": "2026-11-02"
+    },
+    {
+      "work_email": "maria.badaloni@deel.com",
+      "start_date": "2026-11-09",
+      "end_date": "2026-11-09"
+    },
+    {
+      "work_email": "maria.badaloni@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "maria.badaloni@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "maria.badaloni@deel.com",
+      "start_date": "2026-12-07",
+      "end_date": "2026-12-07"
+    },
+    {
+      "work_email": "maria.badaloni@deel.com",
+      "start_date": "2026-08-24",
+      "end_date": "2026-08-28"
+    },
+    {
+      "work_email": "maria.soto@deel.com",
+      "start_date": "2026-03-19",
+      "end_date": "2026-03-20"
+    },
+    {
+      "work_email": "maria.soto@deel.com",
+      "start_date": "2026-06-15",
+      "end_date": "2026-06-16"
+    },
+    {
+      "work_email": "maria.soto@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "maria.soto@deel.com",
+      "start_date": "2026-04-30",
+      "end_date": "2026-04-30"
+    },
+    {
+      "work_email": "maria.soto@deel.com",
+      "start_date": "2026-10-12",
+      "end_date": "2026-10-12"
+    },
+    {
+      "work_email": "maria.soto@deel.com",
+      "start_date": "2026-06-18",
+      "end_date": "2026-06-18"
+    },
+    {
+      "work_email": "maria.soto@deel.com",
+      "start_date": "2026-04-10",
+      "end_date": "2026-04-10"
+    },
+    {
+      "work_email": "maria.soto@deel.com",
+      "start_date": "2026-11-23",
+      "end_date": "2026-11-23"
+    },
+    {
+      "work_email": "maria.soto@deel.com",
+      "start_date": "2026-06-17",
+      "end_date": "2026-06-17"
+    },
+    {
+      "work_email": "maria.soto@deel.com",
+      "start_date": "2026-04-24",
+      "end_date": "2026-04-24"
+    },
+    {
+      "work_email": "maria.soto@deel.com",
+      "start_date": "2026-07-09",
+      "end_date": "2026-07-09"
+    },
+    {
+      "work_email": "maria.soto@deel.com",
+      "start_date": "2026-06-19",
+      "end_date": "2026-06-19"
+    },
+    {
+      "work_email": "maria.soto@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "maria.soto@deel.com",
+      "start_date": "2026-06-22",
+      "end_date": "2026-06-22"
+    },
+    {
+      "work_email": "maria.soto@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "maria.soto@deel.com",
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "maria.soto@deel.com",
+      "start_date": "2026-02-16",
+      "end_date": "2026-02-16"
+    },
+    {
+      "work_email": "maria.soto@deel.com",
+      "start_date": "2026-08-17",
+      "end_date": "2026-08-17"
+    },
+    {
+      "work_email": "martina.jaurena@deel.com",
+      "start_date": "2026-02-02",
+      "end_date": "2026-02-06"
+    },
+    {
+      "work_email": "martina.jaurena@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "mashael.aljassim@deel.com",
+      "start_date": "2026-05-26",
+      "end_date": "2026-05-29"
+    },
+    {
+      "work_email": "mashael.aljassim@deel.com",
+      "start_date": "2026-05-04",
+      "end_date": "2026-05-08"
+    },
+    {
+      "work_email": "max.rizza@deel.com",
+      "start_date": "2026-11-23",
+      "end_date": "2026-11-23"
+    },
+    {
+      "work_email": "max.rizza@deel.com",
+      "start_date": "2026-07-09",
+      "end_date": "2026-07-10"
+    },
+    {
+      "work_email": "max.rizza@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-03"
+    },
+    {
+      "work_email": "max.rizza@deel.com",
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "max.rizza@deel.com",
+      "start_date": "2026-08-17",
+      "end_date": "2026-08-17"
+    },
+    {
+      "work_email": "max.rizza@deel.com",
+      "start_date": "2026-12-07",
+      "end_date": "2026-12-08"
+    },
+    {
+      "work_email": "max.rizza@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "max.rizza@deel.com",
+      "start_date": "2026-06-15",
+      "end_date": "2026-06-15"
+    },
+    {
+      "work_email": "max.rizza@deel.com",
+      "start_date": "2026-10-12",
+      "end_date": "2026-10-12"
+    },
+    {
+      "work_email": "mohammed.alhashemi@deel.com",
+      "start_date": "2026-06-08",
+      "end_date": "2026-06-08"
+    },
+    {
+      "work_email": "mohammed.alhashemi@deel.com",
+      "start_date": "2026-02-06",
+      "end_date": "2026-02-06"
+    },
+    {
+      "work_email": "mohammed.alhashemi@deel.com",
+      "start_date": "2026-05-26",
+      "end_date": "2026-05-29"
+    },
+    {
+      "work_email": "mohammed.alhashemi@deel.com",
+      "start_date": "2026-06-25",
+      "end_date": "2026-06-29"
+    },
+    {
+      "work_email": "mohammed.alhashemi@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "neethu.harilal@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "neethu.harilal@deel.com",
+      "start_date": "2026-03-27",
+      "end_date": "2026-03-27"
+    },
+    {
+      "work_email": "neethu.harilal@deel.com",
+      "start_date": "2026-01-23",
+      "end_date": "2026-01-26"
+    },
+    {
+      "work_email": "neethu.harilal@deel.com",
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "neethu.harilal@deel.com",
+      "start_date": "2026-10-20",
+      "end_date": "2026-10-21"
+    },
+    {
+      "work_email": "neethu.harilal@deel.com",
+      "start_date": "2026-03-06",
+      "end_date": "2026-03-06"
+    },
+    {
+      "work_email": "neethu.harilal@deel.com",
+      "start_date": "2026-04-17",
+      "end_date": "2026-04-20"
+    },
+    {
+      "work_email": "neethu.harilal@deel.com",
+      "start_date": "2026-08-26",
+      "end_date": "2026-08-28"
+    },
+    {
+      "work_email": "neethu.harilal@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "neethu.harilal@deel.com",
+      "start_date": "2026-11-30",
+      "end_date": "2026-11-30"
+    },
+    {
+      "work_email": "neethu.harilal@deel.com",
+      "start_date": "2026-07-06",
+      "end_date": "2026-07-06"
+    },
+    {
+      "work_email": "neethu.harilal@deel.com",
+      "start_date": "2026-04-15",
+      "end_date": "2026-04-15"
+    },
+    {
+      "work_email": "neethu.harilal@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "nesreen.starkey@deel.com",
+      "start_date": "2026-04-07",
+      "end_date": "2026-04-08"
+    },
+    {
+      "work_email": "nesreen.starkey@deel.com",
+      "start_date": "2026-07-06",
+      "end_date": "2026-07-06"
+    },
+    {
+      "work_email": "nesreen.starkey@deel.com",
+      "start_date": "2026-05-15",
+      "end_date": "2026-05-15"
+    },
+    {
+      "work_email": "nesreen.starkey@deel.com",
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "nesreen.starkey@deel.com",
+      "start_date": "2026-05-14",
+      "end_date": "2026-05-14"
+    },
+    {
+      "work_email": "nesreen.starkey@deel.com",
+      "start_date": "2026-05-04",
+      "end_date": "2026-05-04"
+    },
+    {
+      "work_email": "nesreen.starkey@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-06"
+    },
+    {
+      "work_email": "nesreen.starkey@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "nesreen.starkey@deel.com",
+      "start_date": "2026-08-31",
+      "end_date": "2026-08-31"
+    },
+    {
+      "work_email": "nesreen.starkey@deel.com",
+      "start_date": "2026-12-28",
+      "end_date": "2026-12-28"
+    },
+    {
+      "work_email": "nesreen.starkey@deel.com",
+      "start_date": "2026-08-03",
+      "end_date": "2026-08-07"
+    },
+    {
+      "work_email": "nico.weichers@deel.com",
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "nico.weichers@deel.com",
+      "start_date": "2026-05-14",
+      "end_date": "2026-05-14"
+    },
+    {
+      "work_email": "nico.weichers@deel.com",
+      "start_date": "2026-01-07",
+      "end_date": "2026-01-07"
+    },
+    {
+      "work_email": "nico.weichers@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "nico.weichers@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-06"
+    },
+    {
+      "work_email": "nico.weichers@deel.com",
+      "start_date": "2026-06-04",
+      "end_date": "2026-06-04"
+    },
+    {
+      "work_email": "nico.weichers@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "nura.alieva@deel.com",
+      "start_date": "2026-05-26",
+      "end_date": "2026-05-29"
+    },
+    {
+      "work_email": "olga.sotiriou@deel.com",
+      "start_date": "2026-10-28",
+      "end_date": "2026-10-28"
+    },
+    {
+      "work_email": "olga.sotiriou@deel.com",
+      "start_date": "2026-03-25",
+      "end_date": "2026-03-25"
+    },
+    {
+      "work_email": "olga.sotiriou@deel.com",
+      "start_date": "2026-04-10",
+      "end_date": "2026-04-10"
+    },
+    {
+      "work_email": "olga.sotiriou@deel.com",
+      "start_date": "2026-06-01",
+      "end_date": "2026-06-01"
+    },
+    {
+      "work_email": "olga.sotiriou@deel.com",
+      "start_date": "2026-02-27",
+      "end_date": "2026-02-27"
+    },
+    {
+      "work_email": "olga.sotiriou@deel.com",
+      "start_date": "2026-01-02",
+      "end_date": "2026-01-07"
+    },
+    {
+      "work_email": "olga.sotiriou@deel.com",
+      "start_date": "2026-02-23",
+      "end_date": "2026-02-23"
+    },
+    {
+      "work_email": "olga.sotiriou@deel.com",
+      "start_date": "2026-04-13",
+      "end_date": "2026-04-13"
+    },
+    {
+      "work_email": "olga.sotiriou@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "olga.sotiriou@deel.com",
+      "start_date": "2026-08-17",
+      "end_date": "2026-08-21"
+    },
+    {
+      "work_email": "olga.sotiriou@deel.com",
+      "start_date": "2026-04-14",
+      "end_date": "2026-04-17"
+    },
+    {
+      "work_email": "olga.sotiriou@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "olga.sotiriou@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "pam.chen@deel.com",
+      "start_date": "2026-05-27",
+      "end_date": "2026-05-27"
+    },
+    {
+      "work_email": "pam.chen@deel.com",
+      "start_date": "2026-05-26",
+      "end_date": "2026-05-26"
+    },
+    {
+      "work_email": "patrick.chang@deel.com",
+      "start_date": "2026-06-19",
+      "end_date": "2026-06-19"
+    },
+    {
+      "work_email": "patrick.chang@deel.com",
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "patrick.chang@deel.com",
+      "start_date": "2026-02-16",
+      "end_date": "2026-02-16"
+    },
+    {
+      "work_email": "patrick.chang@deel.com",
+      "start_date": "2026-01-19",
+      "end_date": "2026-01-19"
+    },
+    {
+      "work_email": "patrick.chang@deel.com",
+      "start_date": "2026-11-26",
+      "end_date": "2026-11-26"
+    },
+    {
+      "work_email": "patrick.chang@deel.com",
+      "start_date": "2026-09-07",
+      "end_date": "2026-09-07"
+    },
+    {
+      "work_email": "patrick.chang@deel.com",
+      "start_date": "2026-11-11",
+      "end_date": "2026-11-11"
+    },
+    {
+      "work_email": "patrick.chang@deel.com",
+      "start_date": "2026-10-12",
+      "end_date": "2026-10-12"
+    },
+    {
+      "work_email": "patrick.chang@deel.com",
+      "start_date": "2026-01-02",
+      "end_date": "2026-01-02"
+    },
+    {
+      "work_email": "patrick.chang@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "patrick.chang@deel.com",
+      "start_date": "2026-07-03",
+      "end_date": "2026-07-03"
+    },
+    {
+      "work_email": "paula.schlitt@deel.com",
+      "start_date": "2026-01-19",
+      "end_date": "2026-01-19"
+    },
+    {
+      "work_email": "paula.schlitt@deel.com",
+      "start_date": "2026-06-19",
+      "end_date": "2026-06-19"
+    },
+    {
+      "work_email": "paula.schlitt@deel.com",
+      "start_date": "2026-02-13",
+      "end_date": "2026-02-13"
+    },
+    {
+      "work_email": "paula.schlitt@deel.com",
+      "start_date": "2026-06-29",
+      "end_date": "2026-07-02"
+    },
+    {
+      "work_email": "paula.schlitt@deel.com",
+      "start_date": "2026-02-18",
+      "end_date": "2026-02-27"
+    },
+    {
+      "work_email": "paula.schlitt@deel.com",
+      "start_date": "2026-11-26",
+      "end_date": "2026-11-27"
+    },
+    {
+      "work_email": "paula.schlitt@deel.com",
+      "start_date": "2026-04-09",
+      "end_date": "2026-04-09"
+    },
+    {
+      "work_email": "paula.schlitt@deel.com",
+      "start_date": "2026-11-11",
+      "end_date": "2026-11-11"
+    },
+    {
+      "work_email": "paula.schlitt@deel.com",
+      "start_date": "2026-02-09",
+      "end_date": "2026-02-09"
+    },
+    {
+      "work_email": "paula.schlitt@deel.com",
+      "start_date": "2026-04-10",
+      "end_date": "2026-04-10"
+    },
+    {
+      "work_email": "paula.schlitt@deel.com",
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "paula.schlitt@deel.com",
+      "start_date": "2026-07-06",
+      "end_date": "2026-10-25"
+    },
+    {
+      "work_email": "paula.schlitt@deel.com",
+      "start_date": "2026-02-16",
+      "end_date": "2026-02-16"
+    },
+    {
+      "work_email": "paula.schlitt@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "paula.schlitt@deel.com",
+      "start_date": "2026-07-03",
+      "end_date": "2026-07-03"
+    },
+    {
+      "work_email": "paulina.hermosillo@deel.com",
+      "start_date": "2026-11-26",
+      "end_date": "2026-11-26"
+    },
+    {
+      "work_email": "paulina.hermosillo@deel.com",
+      "start_date": "2026-01-19",
+      "end_date": "2026-01-19"
+    },
+    {
+      "work_email": "paulina.hermosillo@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "paulina.hermosillo@deel.com",
+      "start_date": "2026-10-12",
+      "end_date": "2026-10-12"
+    },
+    {
+      "work_email": "paulina.hermosillo@deel.com",
+      "start_date": "2026-09-07",
+      "end_date": "2026-09-07"
+    },
+    {
+      "work_email": "paulina.hermosillo@deel.com",
+      "start_date": "2026-05-19",
+      "end_date": "2026-05-20"
+    },
+    {
+      "work_email": "paulina.hermosillo@deel.com",
+      "start_date": "2026-12-24",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "paulina.hermosillo@deel.com",
+      "start_date": "2026-03-27",
+      "end_date": "2026-03-27"
+    },
+    {
+      "work_email": "paulina.hermosillo@deel.com",
+      "start_date": "2026-02-17",
+      "end_date": "2026-02-17"
+    },
+    {
+      "work_email": "paulina.hermosillo@deel.com",
+      "start_date": "2026-05-14",
+      "end_date": "2026-05-14"
+    },
+    {
+      "work_email": "paulina.hermosillo@deel.com",
+      "start_date": "2026-07-03",
+      "end_date": "2026-07-03"
+    },
+    {
+      "work_email": "paulina.hermosillo@deel.com",
+      "start_date": "2026-04-13",
+      "end_date": "2026-04-13"
+    },
+    {
+      "work_email": "paulina.hermosillo@deel.com",
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "pragnya.sudheendra@deel.com",
+      "start_date": "2026-03-16",
+      "end_date": "2026-03-16"
+    },
+    {
+      "work_email": "pragnya.sudheendra@deel.com",
+      "start_date": "2026-01-20",
+      "end_date": "2026-01-21"
+    },
+    {
+      "work_email": "pragnya.sudheendra@deel.com",
+      "start_date": "2026-07-03",
+      "end_date": "2026-07-03"
+    },
+    {
+      "work_email": "pragnya.sudheendra@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "pragnya.sudheendra@deel.com",
+      "start_date": "2026-02-16",
+      "end_date": "2026-02-16"
+    },
+    {
+      "work_email": "pragnya.sudheendra@deel.com",
+      "start_date": "2026-11-11",
+      "end_date": "2026-11-11"
+    },
+    {
+      "work_email": "pragnya.sudheendra@deel.com",
+      "start_date": "2026-03-11",
+      "end_date": "2026-03-11"
+    },
+    {
+      "work_email": "pragnya.sudheendra@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "pragnya.sudheendra@deel.com",
+      "start_date": "2026-06-19",
+      "end_date": "2026-06-19"
+    },
+    {
+      "work_email": "pragnya.sudheendra@deel.com",
+      "start_date": "2026-10-12",
+      "end_date": "2026-10-12"
+    },
+    {
+      "work_email": "pragnya.sudheendra@deel.com",
+      "start_date": "2026-01-19",
+      "end_date": "2026-01-19"
+    },
+    {
+      "work_email": "pragnya.sudheendra@deel.com",
+      "start_date": "2026-11-26",
+      "end_date": "2026-11-26"
+    },
+    {
+      "work_email": "pragnya.sudheendra@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "pragnya.sudheendra@deel.com",
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "pragnya.sudheendra@deel.com",
+      "start_date": "2026-09-07",
+      "end_date": "2026-09-07"
+    },
+    {
+      "work_email": "pragnya.sudheendra@deel.com",
+      "start_date": "2026-11-06",
+      "end_date": "2026-11-06"
+    },
+    {
+      "work_email": "pragnya.sudheendra@deel.com",
+      "start_date": "2026-03-06",
+      "end_date": "2026-03-09"
+    },
+    {
+      "work_email": "rafaela.costa@deel.com",
+      "start_date": "2026-01-19",
+      "end_date": "2026-01-19"
+    },
+    {
+      "work_email": "rafaela.costa@deel.com",
+      "start_date": "2026-11-26",
+      "end_date": "2026-11-26"
+    },
+    {
+      "work_email": "rafaela.costa@deel.com",
+      "start_date": "2026-07-03",
+      "end_date": "2026-07-03"
+    },
+    {
+      "work_email": "rafaela.costa@deel.com",
+      "start_date": "2026-11-11",
+      "end_date": "2026-11-11"
+    },
+    {
+      "work_email": "rafaela.costa@deel.com",
+      "start_date": "2026-02-16",
+      "end_date": "2026-03-01"
+    },
+    {
+      "work_email": "rafaela.costa@deel.com",
+      "start_date": "2026-09-07",
+      "end_date": "2026-09-07"
+    },
+    {
+      "work_email": "rafaela.costa@deel.com",
+      "start_date": "2026-04-06",
+      "end_date": "2026-04-19"
+    },
+    {
+      "work_email": "rafaela.costa@deel.com",
+      "start_date": "2026-10-12",
+      "end_date": "2026-10-12"
+    },
+    {
+      "work_email": "rafaela.costa@deel.com",
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "rafaela.costa@deel.com",
+      "start_date": "2026-06-19",
+      "end_date": "2026-06-19"
+    },
+    {
+      "work_email": "rafaela.costa@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "ricky.espana@deel.com",
+      "start_date": "2026-04-20",
+      "end_date": "2026-04-21"
+    },
+    {
+      "work_email": "ricky.espana@deel.com",
+      "start_date": "2026-01-22",
+      "end_date": "2026-01-26"
+    },
+    {
+      "work_email": "ricky.espana@deel.com",
+      "start_date": "2026-01-19",
+      "end_date": "2026-01-19"
+    },
+    {
+      "work_email": "sadaf.afaq@deel.com",
+      "start_date": "2026-03-09",
+      "end_date": "2026-03-16"
+    },
+    {
+      "work_email": "safa.hadami@deel.com",
+      "start_date": "2026-05-26",
+      "end_date": "2026-05-29"
+    },
+    {
+      "work_email": "safa.hadami@deel.com",
+      "start_date": "2026-01-02",
+      "end_date": "2026-01-02"
+    },
+    {
+      "work_email": "safa.hadami@deel.com",
+      "start_date": "2026-04-07",
+      "end_date": "2026-04-17"
+    },
+    {
+      "work_email": "safa.hadami@deel.com",
+      "start_date": "2026-07-27",
+      "end_date": "2026-08-07"
+    },
+    {
+      "work_email": "safa.hadami@deel.com",
+      "start_date": "2026-05-04",
+      "end_date": "2026-05-04"
+    },
+    {
+      "work_email": "safa.hadami@deel.com",
+      "start_date": "2026-01-26",
+      "end_date": "2026-01-28"
+    },
+    {
+      "work_email": "safa.hadami@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "safa.hadami@deel.com",
+      "start_date": "2026-02-20",
+      "end_date": "2026-02-20"
+    },
+    {
+      "work_email": "safa.hadami@deel.com",
+      "start_date": "2026-04-06",
+      "end_date": "2026-04-06"
+    },
+    {
+      "work_email": "safa.hadami@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "safa.hadami@deel.com",
+      "start_date": "2026-05-25",
+      "end_date": "2026-05-25"
+    },
+    {
+      "work_email": "salima.talata@deel.com",
+      "start_date": "2026-05-28",
+      "end_date": "2026-05-29"
+    },
+    {
+      "work_email": "salima.talata@deel.com",
+      "start_date": "2026-04-22",
+      "end_date": "2026-04-22"
+    },
+    {
+      "work_email": "salima.talata@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-02"
+    },
+    {
+      "work_email": "salima.talata@deel.com",
+      "start_date": "2026-03-20",
+      "end_date": "2026-03-20"
+    },
+    {
+      "work_email": "salima.talata@deel.com",
+      "start_date": "2026-07-13",
+      "end_date": "2026-07-24"
+    },
+    {
+      "work_email": "sebas.bonina@deel.com",
+      "start_date": "2026-04-02",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "seyi.faronbi@deel.com",
+      "start_date": "2026-07-01",
+      "end_date": "2026-07-01"
+    },
+    {
+      "work_email": "seyi.faronbi@deel.com",
+      "start_date": "2026-06-03",
+      "end_date": "2026-06-05"
+    },
+    {
+      "work_email": "seyi.faronbi@deel.com",
+      "start_date": "2026-06-08",
+      "end_date": "2026-06-08"
+    },
+    {
+      "work_email": "seyi.faronbi@deel.com",
+      "start_date": "2026-05-18",
+      "end_date": "2026-05-18"
+    },
+    {
+      "work_email": "seyi.faronbi@deel.com",
+      "start_date": "2026-02-16",
+      "end_date": "2026-02-16"
+    },
+    {
+      "work_email": "seyi.faronbi@deel.com",
+      "start_date": "2026-10-12",
+      "end_date": "2026-10-12"
+    },
+    {
+      "work_email": "seyi.faronbi@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-06"
+    },
+    {
+      "work_email": "seyi.faronbi@deel.com",
+      "start_date": "2026-09-07",
+      "end_date": "2026-09-07"
+    },
+    {
+      "work_email": "seyi.faronbi@deel.com",
+      "start_date": "2026-03-27",
+      "end_date": "2026-03-27"
+    },
+    {
+      "work_email": "seyi.faronbi@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "sheryl.saniel@deel.com",
+      "start_date": "2026-03-05",
+      "end_date": "2026-03-05"
+    },
+    {
+      "work_email": "sheryl.saniel@deel.com",
+      "start_date": "2026-04-07",
+      "end_date": "2026-04-07"
+    },
+    {
+      "work_email": "sheryl.saniel@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "sheryl.saniel@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "sheryl.saniel@deel.com",
+      "start_date": "2026-04-06",
+      "end_date": "2026-04-06"
+    },
+    {
+      "work_email": "sophia.aziz@deel.com",
+      "start_date": "2026-04-24",
+      "end_date": "2026-04-24"
+    },
+    {
+      "work_email": "sophia.aziz@deel.com",
+      "start_date": "2026-05-27",
+      "end_date": "2026-05-27"
+    },
+    {
+      "work_email": "sophia.aziz@deel.com",
+      "start_date": "2026-03-20",
+      "end_date": "2026-03-20"
+    },
+    {
+      "work_email": "sophia.aziz@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "sophia.aziz@deel.com",
+      "start_date": "2026-03-19",
+      "end_date": "2026-03-19"
+    },
+    {
+      "work_email": "stefan.poliakov@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-14"
+    },
+    {
+      "work_email": "stefan.poliakov@deel.com",
+      "start_date": "2026-05-15",
+      "end_date": "2026-06-03"
+    },
+    {
+      "work_email": "stefan.poliakov@deel.com",
+      "start_date": "2026-01-02",
+      "end_date": "2026-04-30"
+    },
+    {
+      "work_email": "stefan.poliakov@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "taylor.marshall@deel.com",
+      "start_date": "2026-12-31",
+      "end_date": "2026-12-31"
+    },
+    {
+      "work_email": "taylor.marshall@deel.com",
+      "start_date": "2026-07-01",
+      "end_date": "2026-07-01"
+    },
+    {
+      "work_email": "taylor.marshall@deel.com",
+      "start_date": "2026-03-27",
+      "end_date": "2026-03-27"
+    },
+    {
+      "work_email": "taylor.marshall@deel.com",
+      "start_date": "2026-10-02",
+      "end_date": "2026-10-02"
+    },
+    {
+      "work_email": "taylor.marshall@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "taylor.marshall@deel.com",
+      "start_date": "2026-07-13",
+      "end_date": "2026-07-17"
+    },
+    {
+      "work_email": "taylor.marshall@deel.com",
+      "start_date": "2026-06-24",
+      "end_date": "2026-06-24"
+    },
+    {
+      "work_email": "taylor.marshall@deel.com",
+      "start_date": "2026-09-30",
+      "end_date": "2026-09-30"
+    },
+    {
+      "work_email": "taylor.marshall@deel.com",
+      "start_date": "2026-01-02",
+      "end_date": "2026-01-02"
+    },
+    {
+      "work_email": "taylor.marshall@deel.com",
+      "start_date": "2026-10-12",
+      "end_date": "2026-10-12"
+    },
+    {
+      "work_email": "taylor.marshall@deel.com",
+      "start_date": "2026-05-18",
+      "end_date": "2026-05-18"
+    },
+    {
+      "work_email": "taylor.marshall@deel.com",
+      "start_date": "2026-09-07",
+      "end_date": "2026-09-07"
+    },
+    {
+      "work_email": "taylor.marshall@deel.com",
+      "start_date": "2026-04-15",
+      "end_date": "2026-04-15"
+    },
+    {
+      "work_email": "taylor.marshall@deel.com",
+      "start_date": "2026-08-03",
+      "end_date": "2026-08-03"
+    },
+    {
+      "work_email": "taylor.marshall@deel.com",
+      "start_date": "2026-12-24",
+      "end_date": "2026-12-24"
+    },
+    {
+      "work_email": "taylor.marshall@deel.com",
+      "start_date": "2026-04-06",
+      "end_date": "2026-04-06"
+    },
+    {
+      "work_email": "taylor.marshall@deel.com",
+      "start_date": "2026-08-20",
+      "end_date": "2026-08-21"
+    },
+    {
+      "work_email": "taylor.marshall@deel.com",
+      "start_date": "2026-02-16",
+      "end_date": "2026-02-16"
+    },
+    {
+      "work_email": "taylor.marshall@deel.com",
+      "start_date": "2026-03-17",
+      "end_date": "2026-03-17"
+    },
+    {
+      "work_email": "taylor.marshall@deel.com",
+      "start_date": "2026-04-03",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "taylor.marshall@deel.com",
+      "start_date": "2026-10-01",
+      "end_date": "2026-10-01"
+    },
+    {
+      "work_email": "taylor.marshall@deel.com",
+      "start_date": "2026-12-25",
+      "end_date": "2026-12-25"
+    },
+    {
+      "work_email": "valen.hernandez@deel.com",
+      "start_date": "2026-03-23",
+      "end_date": "2026-03-23"
+    },
+    {
+      "work_email": "valen.hernandez@deel.com",
+      "start_date": "2026-06-15",
+      "end_date": "2026-06-15"
+    },
+    {
+      "work_email": "valen.hernandez@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "valen.hernandez@deel.com",
+      "start_date": "2026-04-02",
+      "end_date": "2026-04-03"
+    },
+    {
+      "work_email": "valentin.malvasi@deel.com",
+      "start_date": "2026-04-01",
+      "end_date": "2026-04-17"
+    },
+    {
+      "work_email": "valentin.malvasi@deel.com",
+      "start_date": "2026-02-13",
+      "end_date": "2026-02-13"
+    },
+    {
+      "work_email": "valentin.malvasi@deel.com",
+      "start_date": "2026-02-18",
+      "end_date": "2026-02-19"
+    },
+    {
+      "work_email": "valentin.malvasi@deel.com",
+      "start_date": "2026-02-16",
+      "end_date": "2026-02-17"
+    },
+    {
+      "work_email": "valentin.malvasi@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "valentina.rojas@deel.com",
+      "start_date": "2026-03-23",
+      "end_date": "2026-03-23"
+    },
+    {
+      "work_email": "valentina.rojas@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "valentina.rojas@deel.com",
+      "start_date": "2026-03-13",
+      "end_date": "2026-03-13"
+    },
+    {
+      "work_email": "valentina.rojas@deel.com",
+      "start_date": "2026-03-12",
+      "end_date": "2026-03-12"
+    },
+    {
+      "work_email": "valentina.rojas@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "valentina.rojas@deel.com",
+      "start_date": "2026-03-06",
+      "end_date": "2026-03-06"
+    },
+    {
+      "work_email": "valentina.rojas@deel.com",
+      "start_date": "2026-04-02",
+      "end_date": "2026-04-02"
+    },
+    {
+      "work_email": "valentina.rojas@deel.com",
+      "start_date": "2026-01-12",
+      "end_date": "2026-01-12"
+    },
+    {
+      "work_email": "victoria.albuquerque@deel.com",
+      "start_date": "2026-04-10",
+      "end_date": "2026-04-10"
+    },
+    {
+      "work_email": "victoria.albuquerque@deel.com",
+      "start_date": "2026-06-01",
+      "end_date": "2026-06-01"
+    },
+    {
+      "work_email": "victoria.albuquerque@deel.com",
+      "start_date": "2026-04-21",
+      "end_date": "2026-04-21"
+    },
+    {
+      "work_email": "victoria.albuquerque@deel.com",
+      "start_date": "2026-05-01",
+      "end_date": "2026-05-01"
+    },
+    {
+      "work_email": "victoria.albuquerque@deel.com",
+      "start_date": "2026-01-01",
+      "end_date": "2026-01-01"
+    },
+    {
+      "work_email": "victoria.albuquerque@deel.com",
+      "start_date": "2026-02-16",
+      "end_date": "2026-02-18"
+    },
+    {
+      "work_email": "victoria.albuquerque@deel.com",
+      "start_date": "2026-01-02",
+      "end_date": "2026-01-02"
+    }
+  ]
+}
