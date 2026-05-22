@@ -31,6 +31,7 @@ import { useTaskNotes } from '../../hooks/useTaskNotes';
 import { useTeamDataVersion } from '../../hooks/useTeamDataVersion';
 import { useCurrentDept } from '../../hooks/useCurrentDept';
 import { getHubBrand } from '../../lib/hub-brand';
+import { useHideResolved } from '../../hooks/useHideResolved';
 import {
   SUBJECT_WIDTH_MIN,
   clampSubjectWidth as clampSubjectWidthShared,
@@ -186,6 +187,10 @@ const Queue = ({ user, tasks, subFilter }) => {
   // to "HR" cold-paint until useCurrentDept resolves the dept (HRX users
   // keep the original wording).
   const hubBrand = useMemo(() => getHubBrand(deptState?.dept), [deptState?.dept]);
+  // 2026-05-22 — Celine Taruc's request: persistent "hide resolved" toggle
+  // on the queue header. Email-scoped via the hook (different identities
+  // on the same browser keep separate preferences).
+  const { hideResolved, toggleHideResolved } = useHideResolved(user?.email);
 
   // Filters always start in their default state to keep SSR HTML identical
   // to the first client render. The `useEffect` below rehydrates from
@@ -942,12 +947,16 @@ const Queue = ({ user, tasks, subFilter }) => {
       out.push({ kind: 'header', label: 'PAUSED', color: '#6b6560', bg: '#faf9f7', icon: 'bi-pause-circle-fill', count: snoozed.length });
       for (const t of snoozed) out.push({ kind: 'row', row: t });
     }
-    if (done.length > 0) {
+    // 2026-05-22 — `hideResolved` (per-user preference) suppresses the
+    // RESOLVED TODAY band entirely. The header counter still surfaces the
+    // resolved count via `headerCounts.resolved` so the toggle has visible
+    // affordance ("12 resolved" + hidden eye icon).
+    if (!hideResolved && done.length > 0) {
       out.push({ kind: 'header', label: 'RESOLVED TODAY', color: '#29811e', bg: '#f9faf8', icon: 'bi-check-circle', count: done.length });
       for (const t of done) out.push({ kind: 'row', row: t });
     }
     return out;
-  }, [active, snoozed, done]);
+  }, [active, snoozed, done, hideResolved]);
   // Base ticket columns + Actions + Note (always rendered, since Queue
   // owns the notes hook unconditionally).
   const ticketColSpan = (settings.sla_enabled !== false ? 9 : 8) + 2;
@@ -1054,6 +1063,31 @@ const Queue = ({ user, tasks, subFilter }) => {
             <span style={{ fontWeight: 600, color: 'var(--text)' }}>{headerCounts.open}</span> open
             {headerCounts.paused > 0 && <span title="Tasks paused / waiting on requester — excluded from the SLA tier pills."> &middot; <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>{headerCounts.paused}</span> paused</span>}
             {headerCounts.resolved > 0 && <span title="Resolved within this session — Briefing's Resolved KPI also includes the persisted server-side 24h window."> &middot; <span style={{ fontWeight: 600, color: '#29811e' }}>{headerCounts.resolved}</span> resolved</span>}
+            {/* 2026-05-22 — Celine Taruc request: eye toggle to hide the
+                RESOLVED TODAY band. Persists per-user via useHideResolved.
+                Only renders when there's actually a resolved set to hide,
+                so users without resolved rows aren't confused by a dead
+                toggle. */}
+            {headerCounts.resolved > 0 && (
+              <button
+                type="button"
+                onClick={toggleHideResolved}
+                aria-pressed={hideResolved}
+                title={hideResolved ? 'Show resolved tickets' : 'Hide resolved tickets'}
+                style={{
+                  marginLeft: 4, padding: '2px 6px', borderRadius: 6,
+                  background: hideResolved ? '#f3eff8' : 'transparent',
+                  border: hideResolved ? '1px solid #d4c4f0' : '1px solid var(--border)',
+                  color: hideResolved ? '#7c3aed' : 'var(--text-muted)',
+                  fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  fontFamily: 'inherit', transition: 'background .12s, border-color .12s',
+                }}
+              >
+                <i className={hideResolved ? 'bi-eye-slash' : 'bi-eye'} style={{ fontSize: 11 }} />
+                {hideResolved ? 'Show' : 'Hide'}
+              </button>
+            )}
           </span>
 
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>

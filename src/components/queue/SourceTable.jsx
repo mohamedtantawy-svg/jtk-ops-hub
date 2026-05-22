@@ -15,6 +15,7 @@ import {
 } from '../../lib/queue-subject-width';
 import { useCurrentDept } from '../../hooks/useCurrentDept';
 import { getHubBrand } from '../../lib/hub-brand';
+import { useHideResolved } from '../../hooks/useHideResolved';
 
 // Subject column width — shared resize affordance with Queue.jsx (ZD/Jira).
 // The Workbench bug Chaitanya Raju Uppalapati flagged 2026-05-22 ("Workbench
@@ -238,6 +239,12 @@ export default function SourceTable({
   // for users in those depts. See src/lib/hub-brand.js.
   const deptState = useCurrentDept();
   const hubBrand = useMemo(() => getHubBrand(deptState.dept), [deptState.dept]);
+  // 2026-05-22 — Celine Taruc request: persistent "hide resolved" toggle.
+  // Shares the localStorage key with Queue.jsx (`ops_hub_hide_resolved:<email>`)
+  // so toggling from either surface flips both. Re-render flows through
+  // the hook's useState — the BroadcastChannel sync isn't required because
+  // both consumers re-mount when the queue source tab changes.
+  const { hideResolved, toggleHideResolved } = useHideResolved(viewerEmail);
   // ── User-resizable Subject column ────────────────────────────────────────
   // Mirrors the ZD/Jira Queue resize (see Queue.jsx for the parent comment).
   // State holds the React-visible width (drives the table's inline CSS
@@ -535,14 +542,17 @@ export default function SourceTable({
     // spans both Mine and Others. Splitting it would dilute the signal (an
     // agent doesn't need to scan "who else closed something") and matches
     // the Zendesk queue's single bottom resolved section.
+    // 2026-05-22 — `hideResolved` (per-user) suppresses the band; the count
+    // chip in the filter row still surfaces the resolved tally so the
+    // toggle has visible affordance.
     const resolvedCount = mineResolved.length + othersResolved.length;
-    if (resolvedCount > 0) {
+    if (!hideResolved && resolvedCount > 0) {
       out.push({ kind: 'header', tone: 'resolved', label: 'RESOLVED TODAY', count: resolvedCount });
       for (const r of mineResolved) out.push({ kind: 'row', row: r });
       for (const r of othersResolved) out.push({ kind: 'row', row: r });
     }
     return out;
-  }, [mineActive, minePaused, mineResolved, othersActive, othersPaused, othersResolved, hasMineSection]);
+  }, [mineActive, minePaused, mineResolved, othersActive, othersPaused, othersResolved, hasMineSection, hideResolved]);
 
   const scrollerRef = useRef(null);
   const { startIdx, endIdx, topPad, bottomPad } = useVirtualRows({
@@ -602,15 +612,41 @@ export default function SourceTable({
           </button>
         )}
 
-        <span aria-live="polite" aria-atomic="true" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+        <span aria-live="polite" aria-atomic="true" style={{ fontSize: 11, color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           {(() => {
             const resolvedN = mineResolved.length + othersResolved.length;
             const activeN = sorted.length - resolvedN;
             if (resolvedN > 0) {
-              return <>{activeN} active{activeN === 1 ? '' : ''} · <span style={{ color: '#29811e' }}>{resolvedN} resolved</span></>;
+              return <span>{activeN} active · <span style={{ color: '#29811e' }}>{resolvedN} resolved</span></span>;
             }
-            return `${sorted.length} ${sorted.length === 1 ? 'task' : 'tasks'}`;
+            return <span>{`${sorted.length} ${sorted.length === 1 ? 'task' : 'tasks'}`}</span>;
           })()}
+          {/* 2026-05-22 — Celine Taruc request: eye toggle to hide the
+              RESOLVED TODAY band on the Workbench / Deel source panels.
+              Mirrors the toggle in the parent Queue header so a user
+              flipping it on one queue sees consistent state across the
+              workspace. Only renders when there's a resolved tail to
+              hide. */}
+          {(mineResolved.length + othersResolved.length) > 0 && (
+            <button
+              type="button"
+              onClick={toggleHideResolved}
+              aria-pressed={hideResolved}
+              title={hideResolved ? 'Show resolved tasks' : 'Hide resolved tasks'}
+              style={{
+                padding: '2px 6px', borderRadius: 6,
+                background: hideResolved ? '#f3eff8' : 'transparent',
+                border: hideResolved ? '1px solid #d4c4f0' : '1px solid var(--border)',
+                color: hideResolved ? '#7c3aed' : 'var(--text-muted)',
+                fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                fontFamily: 'inherit', transition: 'background .12s, border-color .12s',
+              }}
+            >
+              <i className={hideResolved ? 'bi-eye-slash' : 'bi-eye'} style={{ fontSize: 11 }} />
+              {hideResolved ? 'Show' : 'Hide'}
+            </button>
+          )}
         </span>
       </div>
       )}
