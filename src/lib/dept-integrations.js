@@ -84,6 +84,14 @@ export const DEPT_INTEGRATIONS = {
       // Reuses the workspace-zendesk-api 'gix' config so we don't duplicate
       // the same token registration in two places.
       tokenEnvVar: 'Zendesk_API_Payroll_GIX',
+      // 2026-05-22 (afternoon): Mohamed sent the stable Zendesk group_id
+      // for the Immigration Experience group. Using the numeric ID via
+      // Zendesk Search's `group_id:` operator is more resilient than
+      // `group:"..."` (group names can be renamed in Zendesk; IDs don't
+      // change). Fetcher prefers groupId when set; defaultGroup stays as
+      // documentation + fallback if the ID is ever wiped.
+      groupIdEnvVar: 'ZENDESK_GIX_GROUP_ID',
+      defaultGroupId: '26903282539025',
       groupEnvVar: 'ZENDESK_GIX_GROUP',
       defaultGroup: 'Immigration Experience',
     },
@@ -272,16 +280,24 @@ export function getWorkbenchTeamExclusionForHrx() {
 
 /**
  * Zendesk readout. Returns null when not configured for this dept.
+ *
+ * `groupId` is preferred (Zendesk Search `group_id:<id>` — stable across
+ * group renames). `group` (name-based search) stays as a documentation
+ * label + last-resort fallback when no ID is available.
  */
 export function resolveZendeskConfig(deptSlug) {
   const cfg = getDeptIntegrations(deptSlug);
   if (!cfg?.zendesk?.tokenEnvVar) return null;
   const token = process.env[cfg.zendesk.tokenEnvVar] || '';
   if (!token) return null;
+  const groupId = (cfg.zendesk.groupIdEnvVar && process.env[cfg.zendesk.groupIdEnvVar])
+    || cfg.zendesk.defaultGroupId
+    || null;
   return {
     token,
     subdomain: process.env.ZENDESK_SUBDOMAIN || '',
     email: process.env.ZENDESK_EMAIL || '',
+    groupId: groupId ? String(groupId) : null,
     group: process.env[cfg.zendesk.groupEnvVar] || cfg.zendesk.defaultGroup,
     tokenSource: cfg.zendesk.tokenEnvVar,
   };
