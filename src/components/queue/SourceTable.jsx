@@ -16,6 +16,7 @@ import {
 import { useCurrentDept } from '../../hooks/useCurrentDept';
 import { getHubBrand } from '../../lib/hub-brand';
 import { useHideResolved } from '../../hooks/useHideResolved';
+import { isSlaExtensionLocked } from '../../utils/applySlaExtensions';
 
 // Subject column width — shared resize affordance with Queue.jsx (ZD/Jira).
 // The Workbench bug Chaitanya Raju Uppalapati flagged 2026-05-22 ("Workbench
@@ -1363,26 +1364,67 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
                 Reassign
               </button>
             )}
-            {onSlaExtension && (
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); onSlaExtension(); }}
-                aria-label={`Request SLA extension for "${row.subject || row.id}"`}
-                title="Request to extend the SLA on this task"
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                  padding: '3px 8px', borderRadius: 6,
-                  background: hov ? '#fff7ed' : '#f5f4f2',
-                  color: hov ? '#d97706' : '#9e9e9e',
-                  border: hov ? '1px solid #fed7aa' : '1px solid transparent',
-                  fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
-                  cursor: 'pointer', fontFamily: 'inherit',
-                }}
-              >
-                <i className="bi-clock-history" style={{ fontSize: 9 }} />
-                SLA Extension
-              </button>
-            )}
+            {onSlaExtension && (() => {
+              // 2026-05-22 — Madeleine Solares Decuir reported that the
+              // SLA Extension button kept appearing on offboarding rows
+              // even after the team had already requested an extension,
+              // so they re-clicked and were silently blocked by the
+              // server's 409 dedup. When the row has an active extension
+              // with >12h remaining OR a pending request, render a
+              // non-clickable badge that surfaces the state so the user
+              // knows not to ask again. Once the active window drops
+              // below 12h the lockout lifts and the action returns.
+              const locked = isSlaExtensionLocked(row);
+              if (locked) {
+                const isPending = !!row.slaExtensionPending;
+                const ext = row.slaExtension;
+                const expiresAt = ext?.expiresAt ? new Date(ext.expiresAt) : null;
+                const expiresLabel = expiresAt && !isNaN(expiresAt)
+                  ? expiresAt.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+                  : null;
+                const tooltip = isPending
+                  ? `SLA extension request is in review (submitted ${row.slaExtensionPending?.createdAt ? new Date(row.slaExtensionPending.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'recently'}). You can request another once it resolves.`
+                  : `SLA extended until ${expiresLabel || 'the extended deadline'}. A new request can be raised once the extension is within 12h of breaching.`;
+                return (
+                  <span
+                    aria-label={tooltip}
+                    title={tooltip}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                      padding: '3px 8px', borderRadius: 6,
+                      background: '#fff7ed',
+                      color: '#9a3412',
+                      border: '1px solid #fed7aa',
+                      fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
+                      cursor: 'default', fontFamily: 'inherit',
+                    }}
+                  >
+                    <i className={isPending ? 'bi-hourglass-split' : 'bi-clock-history'} style={{ fontSize: 9 }} />
+                    {isPending ? 'Ext. requested' : 'Ext. active'}
+                  </span>
+                );
+              }
+              return (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onSlaExtension(); }}
+                  aria-label={`Request SLA extension for "${row.subject || row.id}"`}
+                  title="Request to extend the SLA on this task"
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                    padding: '3px 8px', borderRadius: 6,
+                    background: hov ? '#fff7ed' : '#f5f4f2',
+                    color: hov ? '#d97706' : '#9e9e9e',
+                    border: hov ? '1px solid #fed7aa' : '1px solid transparent',
+                    fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
+                    cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >
+                  <i className="bi-clock-history" style={{ fontSize: 9 }} />
+                  SLA Extension
+                </button>
+              );
+            })()}
             {onHide && (
               <button
                 type="button"

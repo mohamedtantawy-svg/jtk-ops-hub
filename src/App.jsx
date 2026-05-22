@@ -468,8 +468,8 @@ const App=()=>{
   // reference when nothing matches an active extension so the useMemo is
   // a no-op for tickets without extensions.
   const tasksWithSlaExt = React.useMemo(
-    () => attachSlaExtensionToTickets(tasks, slaExtensions?.map || null),
-    [tasks, slaExtensions?.map],
+    () => attachSlaExtensionToTickets(tasks, slaExtensions?.map || null, slaExtensions?.pendingMap || null),
+    [tasks, slaExtensions?.map, slaExtensions?.pendingMap],
   );
   // Top-nav badge for Urgent Assist — counts unresolved items where
   // assignee = effectiveUser (covers impersonation correctly). Sources

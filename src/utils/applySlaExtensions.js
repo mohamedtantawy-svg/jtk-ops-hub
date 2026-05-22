@@ -25,6 +25,12 @@
 // to / already breached).
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+// 2026-05-22 — Madeleine's ask: a new SLA Extension can only be requested
+// when the existing one is within 12h of breaching. Until that threshold,
+// the row's action button is disabled and a visible badge surfaces the
+// active extension so the requester doesn't keep re-clicking the action.
+const EXTENSION_LOCKOUT_WINDOW_MS = 12 * 60 * 60 * 1000;
+export { EXTENSION_LOCKOUT_WINDOW_MS };
 
 // Human-readable display metadata for the 8 queue sources accepted by
 // SLA Extension / Hide Task requests. Centralised so the request card,
@@ -50,28 +56,44 @@ export const TASK_SOURCE_DISPLAY = {
  *   src/lib/sla-extension-helpers.js
  * @param {string} source - canonical source name (e.g. 'onboarding',
  *   'zendesk') used to build the lookup key
+ * @param {Map<string, object> | null | undefined} [pendingMap] - keyed
+ *   on the same shape. When the row matches a pending entry, it gets
+ *   `slaExtensionPending` stamped so the FE can surface "extension
+ *   requested" and disable the row's re-request action. Optional;
+ *   omitting it preserves previous behaviour.
  * @returns {Array<object>} the rows with the override applied
  */
-export function applySlaExtensionsToRows(rows, extensionMap, source) {
+export function applySlaExtensionsToRows(rows, extensionMap, source, pendingMap) {
   if (!Array.isArray(rows) || rows.length === 0) return rows;
-  if (!extensionMap || typeof extensionMap.get !== 'function' || extensionMap.size === 0) return rows;
+  const hasActiveMap = extensionMap && typeof extensionMap.get === 'function' && extensionMap.size > 0;
+  const hasPendingMap = pendingMap && typeof pendingMap.get === 'function' && pendingMap.size > 0;
+  if (!hasActiveMap && !hasPendingMap) return rows;
   const now = Date.now();
   return rows.map(r => {
     if (!r || r.id == null) return r;
     const key = `${source}:${String(r.id)}`;
-    const ext = extensionMap.get(key);
-    if (!ext || !ext.expiresAt) return r;
-    const expiresMs = Date.parse(ext.expiresAt);
-    if (!Number.isFinite(expiresMs) || expiresMs <= now) return r;
-    const remainingMs = expiresMs - now;
-    const approvedDays = Number(ext.approvedDays) || 0;
-    return {
-      ...r,
-      slaExtension: ext,
-      slaRemaining: Math.round(remainingMs / 1000),
-      slaBreachStatus: 'SLA_NOT_BREACHED',
-      slaWindowMs: approvedDays * DAY_MS,
-    };
+    const ext = hasActiveMap ? extensionMap.get(key) : null;
+    const pending = hasPendingMap ? pendingMap.get(key) : null;
+    if (!ext && !pending) return r;
+    let next = r;
+    if (ext && ext.expiresAt) {
+      const expiresMs = Date.parse(ext.expiresAt);
+      if (Number.isFinite(expiresMs) && expiresMs > now) {
+        const remainingMs = expiresMs - now;
+        const approvedDays = Number(ext.approvedDays) || 0;
+        next = {
+          ...next,
+          slaExtension: ext,
+          slaRemaining: Math.round(remainingMs / 1000),
+          slaBreachStatus: 'SLA_NOT_BREACHED',
+          slaWindowMs: approvedDays * DAY_MS,
+        };
+      }
+    }
+    if (pending) {
+      next = { ...next, slaExtensionPending: pending };
+    }
+    return next;
   });
 }
 
@@ -84,21 +106,38 @@ export function applySlaExtensionsToRows(rows, extensionMap, source) {
  *
  * Returns the SAME array reference when no row matches an active extension,
  * so downstream `useMemo` consumers don't re-render unnecessarily.
+ *
+ * 2026-05-22 — also stamps `slaExtensionPending` when the optional
+ * pendingMap matches, so the queue row can lock the SLA Extension action
+ * + show a badge while a request is in review.
  */
-export function attachSlaExtensionToTickets(tasks, extensionMap) {
+export function attachSlaExtensionToTickets(tasks, extensionMap, pendingMap) {
   if (!Array.isArray(tasks) || tasks.length === 0) return tasks;
-  if (!extensionMap || typeof extensionMap.get !== 'function' || extensionMap.size === 0) return tasks;
+  const hasActiveMap = extensionMap && typeof extensionMap.get === 'function' && extensionMap.size > 0;
+  const hasPendingMap = pendingMap && typeof pendingMap.get === 'function' && pendingMap.size > 0;
+  if (!hasActiveMap && !hasPendingMap) return tasks;
   const now = Date.now();
   let mutated = false;
   const out = tasks.map(t => {
     if (!t || !t.source || t.id == null) return t;
     if (t.source !== 'zendesk' && t.source !== 'jira') return t;
-    const ext = extensionMap.get(`${t.source}:${String(t.id)}`);
-    if (!ext || !ext.expiresAt) return t;
-    const expiresMs = Date.parse(ext.expiresAt);
-    if (!Number.isFinite(expiresMs) || expiresMs <= now) return t;
-    mutated = true;
-    return { ...t, slaExtension: ext };
+    const key = `${t.source}:${String(t.id)}`;
+    const ext = hasActiveMap ? extensionMap.get(key) : null;
+    const pending = hasPendingMap ? pendingMap.get(key) : null;
+    if (!ext && !pending) return t;
+    let next = t;
+    if (ext && ext.expiresAt) {
+      const expiresMs = Date.parse(ext.expiresAt);
+      if (Number.isFinite(expiresMs) && expiresMs > now) {
+        next = { ...next, slaExtension: ext };
+        mutated = true;
+      }
+    }
+    if (pending) {
+      next = { ...next, slaExtensionPending: pending };
+      mutated = true;
+    }
+    return next;
   });
   return mutated ? out : tasks;
 }
@@ -119,4 +158,40 @@ export function buildExtensionMap(listItems) {
     map.set(`${e.taskSource}:${String(e.taskId)}`, e);
   }
   return map;
+}
+
+/**
+ * Build a Map<key, pending> from the pending request shape returned by
+ * /api/v1/sla-extension/list. Last-write-wins per key — the API already
+ * orders by createdAt DESC so the freshest pending request wins.
+ */
+export function buildPendingExtensionMap(pendingItems) {
+  const map = new Map();
+  if (!Array.isArray(pendingItems)) return map;
+  for (const p of pendingItems) {
+    if (!p || !p.taskSource || p.taskId == null) continue;
+    const key = `${p.taskSource}:${String(p.taskId)}`;
+    if (!map.has(key)) map.set(key, p);
+  }
+  return map;
+}
+
+/**
+ * Should the row's "SLA Extension" action be locked? Returns true when:
+ *   - An active extension exists with MORE than EXTENSION_LOCKOUT_WINDOW_MS
+ *     remaining (the row is comfortably extended; re-requesting now is
+ *     wasteful and would be 409'd by the server), OR
+ *   - A pending sla_extension_request is in review for this task.
+ *
+ * Once the active extension has <12h remaining, the lockout lifts so the
+ * requester can ask for a fresh extension before the original lapses.
+ */
+export function isSlaExtensionLocked(row) {
+  if (!row || typeof row !== 'object') return false;
+  if (row.slaExtensionPending) return true;
+  const ext = row.slaExtension;
+  if (!ext || !ext.expiresAt) return false;
+  const expiresMs = Date.parse(ext.expiresAt);
+  if (!Number.isFinite(expiresMs)) return false;
+  return (expiresMs - Date.now()) > EXTENSION_LOCKOUT_WINDOW_MS;
 }
