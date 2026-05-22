@@ -1897,23 +1897,68 @@ export async function listWorkbenchTasks(params = {}) {
   }
 
   // Phase 13b: pre-projection team filter for non-HRX depts. Runs on the
-  // raw upstream rows (which still carry `teamName` / `team.name`) — the
-  // projection below drops the team field per the 2026-05-12 memory
-  // audit, so post-projection filtering wouldn't work.
+  // raw upstream rows (the projection below drops the team field per
+  // the 2026-05-12 memory audit, so post-projection filtering wouldn't
+  // work). When neither include nor exclude is set, allItems passes
+  // through (= legacy HRX behaviour, byte-identical to pre-Phase-13b).
   //
-  // 2026-05-22: HRX path now uses `teamNameExclude` to drop tasks
-  // claimed by other depts (GIX). When neither include nor exclude is
-  // set, allItems passes through (= legacy HRX behaviour, byte-identical
-  // to pre-Phase-13b).
+  // 2026-05-22 (evening fix): the previous candidate list only looked
+  // at `t.teamName` / `t.team?.name` / `t._teamName`. Mohamed's real GIX
+  // task JSON exposed the upstream's actual field path —
+  // `t.taskConfiguration.team.name` — and ALSO surfaced the team's UUID
+  // at `t.taskConfiguration.team.id`. The filter was silently dropping
+  // every legitimately-GIX task because none of the original candidates
+  // matched. Two changes here:
+  //   • Add `taskConfiguration.team.name` to the name candidates so the
+  //     name-based filter (back-compat) actually works.
+  //   • Add a parallel `teamIdOf()` that reads `taskConfiguration.team.id`
+  //     and prefer that over the name path when the caller passes
+  //     `teamIds` (which it does for every non-HRX dept now). Matching
+  //     by UUID is bulletproof vs. team renames; the name path stays
+  //     as a fallback for any future dept that wires names only.
   const teamNameOf = (t) => {
-    const candidates = [t.teamName, t.team?.name, t._teamName];
+    const candidates = [
+      t.teamName,
+      t.team?.name,
+      t._teamName,
+      t.taskConfiguration?.team?.name,
+    ];
     for (const c of candidates) {
       if (typeof c === 'string' && c.trim()) return c.toLowerCase();
     }
     return null;
   };
+  const teamIdOf = (t) => {
+    const candidates = [
+      t.teamId,
+      t.team?.id,
+      t.taskConfiguration?.team?.id,
+    ];
+    for (const c of candidates) {
+      if (typeof c === 'string' && c.trim()) return c;
+    }
+    return null;
+  };
+  // Lower-cased + de-duped sets so the filter checks are O(1) per task.
+  const includeIdSet = Array.isArray(params.teamIds) && params.teamIds.length > 0
+    ? new Set(params.teamIds.map(s => String(s)))
+    : null;
   let sourceItems = allItems;
-  if (teamNameFilter) {
+  // Prefer UUID-based include filter when teamIds is provided — matches
+  // the same UUIDs we passed upstream, immune to team renames + reliable
+  // when the upstream nests the team object under `taskConfiguration`.
+  // The teamNameFilter stays as a fallback for any future dept that
+  // wires names only.
+  if (includeIdSet) {
+    sourceItems = sourceItems.filter(t => {
+      const tid = teamIdOf(t);
+      // Keep the row when its team UUID matches one we asked for. Tasks
+      // without an identifiable team are dropped under this branch (the
+      // caller explicitly scoped to a UUID set; ambiguous rows are out
+      // of scope).
+      return tid !== null && includeIdSet.has(tid);
+    });
+  } else if (teamNameFilter) {
     sourceItems = sourceItems.filter(t => {
       const tn = teamNameOf(t);
       return tn !== null && teamNameFilter.includes(tn);
