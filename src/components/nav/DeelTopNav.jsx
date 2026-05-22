@@ -83,6 +83,11 @@ const CREATE_ACTIONS = [
   { icon: 'bi-broadcast-pin',     label: 'HR Hub Request',    action: 'hr-hub',        desc: 'HR Request or HR Reporting' },
   { icon: 'bi-broadcast',         label: 'New Leaders Alert', action: 'leader-alerts', desc: 'Quick alert visible to every manager', viewReq: 'leader-alerts', managerialOnly: true },
   { icon: 'bi-exclamation-octagon', label: 'New Urgent Assist', action: 'urgent-assist', desc: 'Log a manual urgent-assist request' },
+  // 2026-05-22 — Melissa Capicchiano + Mohamed: dedicated entry for
+  // after-hours Case Monitoring requests. Lands on the same Urgent
+  // Assist queue but rendered distinctly so the MOC spots monitoring
+  // rows at a glance. Eye icon + purple = "watch this".
+  { icon: 'bi-eye-fill',           label: 'New Case Monitoring', action: 'case-monitoring', desc: 'Ask the MOC to watch a task after hours' },
   { icon: 'bi-lightbulb',         label: 'Submit Feedback',   action: 'submit-feedback', desc: 'Ops Hub Feedback or Escalation Zero' },
   { icon: 'bi-megaphone',         label: 'New Announcement',  action: 'announcement',  desc: 'Post to the team' },
   { icon: 'bi-tags',               label: 'New Tag Group',     action: 'mention-group', desc: 'Slack-style @-handle that pings a group at once' },
@@ -104,6 +109,7 @@ const DeelTopNav = ({
   onCreateHrHub,
   onCreateLeaderAlert,
   onCreateUrgentAssist,
+  onCreateCaseMonitoring,
   onManageMentionGroups,
   leaderAlertsBadge = 0,
   urgentAssistBadge = 0,
@@ -170,6 +176,7 @@ const DeelTopNav = ({
     else if (action === 'hr-hub')     { onCreateHrHub?.(); }
     else if (action === 'leader-alerts') { onCreateLeaderAlert?.(); }
     else if (action === 'urgent-assist') { onCreateUrgentAssist?.(); }
+    else if (action === 'case-monitoring') { onCreateCaseMonitoring?.(); }
     else if (action === 'mention-group') { onManageMentionGroups?.(); }
   };
 

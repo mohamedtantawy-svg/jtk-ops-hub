@@ -113,6 +113,13 @@ function fromManual(row) {
     id: `m:${row.id}`,
     rawId: row.id,
     source: 'manual',
+    // 2026-05-22 — Case Monitoring rows are stored in the same
+    // `urgent_assist_request` table with `kind='case_monitoring'`. Pass
+    // through both fields so UrgentAssistView can render them distinctly.
+    // Workbench rows (fromWorkbench) never set `kind`, so they fall back
+    // to the default 'urgent_assist' treatment.
+    kind: row.kind === 'case_monitoring' ? 'case_monitoring' : 'urgent_assist',
+    actionRequired: row.actionRequired || null,
     subject: row.subject,
     requestType: row.requestType || 'HRX Urgent Assist Request',
     country: row.country || '',

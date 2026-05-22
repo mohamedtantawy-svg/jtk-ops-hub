@@ -971,7 +971,10 @@ const App=()=>{
   // Urgent Assist create modal — boolean toggle. When true the modal is
   // open; the form posts directly to /api/v1/urgent-assist and bumps the
   // refresh nonce on success so UrgentAssistView reloads without a remount.
-  const [urgentAssistCreate,setUrgentAssistCreate]=useState(false);
+  // 2026-05-22 — `urgentAssistCreate` is now a small descriptor instead
+  // of a plain boolean so the same modal can open in either mode
+  // (urgent_assist | case_monitoring). null = closed; { kind } = open.
+  const [urgentAssistCreate,setUrgentAssistCreate]=useState(null);
   const [urgentAssistRefreshNonce,setUrgentAssistRefreshNonce]=useState(0);
   const [leaderAlertsBadge,setLeaderAlertsBadge]=useState(0);
   // Bumped after a successful POST so LeaderAlertsView's fetch effect
@@ -2083,7 +2086,8 @@ const App=()=>{
         onSubmitFeedback={()=>{setView('feedback');setFeedbackPickerOpen(true);}}
         onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}
         onCreateLeaderAlert={()=>setLeaderAlertCreate(true)}
-        onCreateUrgentAssist={()=>setUrgentAssistCreate(true)}
+        onCreateUrgentAssist={()=>setUrgentAssistCreate({kind:'urgent_assist'})}
+        onCreateCaseMonitoring={()=>setUrgentAssistCreate({kind:'case_monitoring'})}
         onManageMentionGroups={()=>setMentionGroupsOpen(true)}
         leaderAlertsBadge={leaderAlertsBadge}
         urgentAssistBadge={urgentAssistBadge}
@@ -2126,7 +2130,7 @@ const App=()=>{
           {view==='hr-hub'        &&perms?.canView('hr-hub')!==false       &&<div className="page-enter"><HrHubView user={effectiveUser} onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}/></div>}
           {view==='org'           &&perms?.canView('org')!==false          &&<div className="page-enter"><OrgView user={effectiveUser} realUser={user} onImpersonate={handleImpersonate}/></div>}
           {view==='notifications' &&<div className="page-enter"><NotificationsView notifs={mergedNotifs} unreadCount={mergedNotifs.filter(n=>!n.read).length} markAllRead={markAllRead} markRead={(serverId)=>serverNotifs.markRead(serverId)} markUnread={(serverId)=>serverNotifs.markUnread(serverId)} onNotifClick={handleNotifClick}/></div>}
-          {view==='urgent-assist' &&perms?.canView('urgent-assist')!==false&&<div className="page-enter" key={urgentAssistRefreshNonce}><UrgentAssistView user={effectiveUser} onCreate={()=>setUrgentAssistCreate(true)} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall} onOpenSchedule={() => setView('urgent-assist-schedule')}/></div>}
+          {view==='urgent-assist' &&perms?.canView('urgent-assist')!==false&&<div className="page-enter" key={urgentAssistRefreshNonce}><UrgentAssistView user={effectiveUser} onCreate={()=>setUrgentAssistCreate({kind:'urgent_assist'})} onCreateCaseMonitoring={()=>setUrgentAssistCreate({kind:'case_monitoring'})} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall} onOpenSchedule={() => setView('urgent-assist-schedule')}/></div>}
           {view==='urgent-assist-schedule' &&perms?.canView('urgent-assist-schedule')!==false&&<div className="page-enter"><UrgentAssistScheduleView/></div>}
           {/* Leaders Hub — wraps the alerts view + the team admin surface
               behind a single sub-toggle. Default sub-tab is alerts. The
@@ -2150,7 +2154,7 @@ const App=()=>{
       {mocAlert && <MocAlertModal mocName={mocAlert.mocName} onDismiss={dismissMocAlert} onOpenView={openMocView} />}
       {tlocAlert && <TlocAlertModal tlocName={tlocAlert.tlocName} onDismiss={dismissTlocAlert} onOpenView={openTlocView} />}
       {leaderAlertCreate&&<CreateLeaderAlertModal onClose={()=>setLeaderAlertCreate(false)} onCreated={(alert)=>{setLeaderAlertCreate(false);setView('leader-alerts');setLeaderAlertsRefreshNonce(n=>n+1);addToast?.({kind:'success',message:`Posted${alert?.title?`: "${alert.title.slice(0,60)}${alert.title.length>60?'…':''}"`:' alert'}.`});}}/>}
-      {urgentAssistCreate&&<CreateUrgentAssistModal currentUser={effectiveUser} onClose={()=>setUrgentAssistCreate(false)} onCreated={(row)=>{setUrgentAssistCreate(false);setView('urgent-assist');setUrgentAssistRefreshNonce(n=>n+1);addToast?.({kind:'success',message:`Urgent Assist created${row?.subject?`: "${row.subject.slice(0,60)}${row.subject.length>60?'…':''}"`:''}.`});}}/>}
+      {urgentAssistCreate&&<CreateUrgentAssistModal currentUser={effectiveUser} initialKind={urgentAssistCreate.kind} onClose={()=>setUrgentAssistCreate(null)} onCreated={(row)=>{const isMon=urgentAssistCreate.kind==='case_monitoring';setUrgentAssistCreate(null);setView('urgent-assist');setUrgentAssistRefreshNonce(n=>n+1);addToast?.({kind:'success',message:`${isMon?'Case Monitoring':'Urgent Assist'} created${row?.subject?`: "${row.subject.slice(0,60)}${row.subject.length>60?'…':''}"`:''}.`});}}/>}
       {projectModal  &&<CreateProjectModal onConfirm={confirmProject} onClose={()=>setProjectModal(null)} project={typeof projectModal==='object'?projectModal:null} currentUser={effectiveUser}/>}
       {requestModal  &&<CreateRequestModal onConfirm={confirmRequest} onClose={()=>setRequestModal(false)} currentUser={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks}/>}
       {createEscalModal&&<CreateEscalationModal onConfirm={confirmManualEscal} onClose={()=>setCreateEscalModal(false)} currentUser={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks}/>}

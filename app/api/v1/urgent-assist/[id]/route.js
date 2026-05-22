@@ -36,6 +36,8 @@ function rowToJson(row) {
   return {
     id: row.id,
     source: 'manual',
+    // 2026-05-22 — same shape as the list endpoint. See route.js comment.
+    kind: row.kind || 'urgent_assist',
     subject: row.subject,
     requestType: row.request_type,
     country: row.country,
@@ -46,6 +48,7 @@ function rowToJson(row) {
     teamLeadEmail: row.team_lead_email,
     linkUrl: row.link_url,
     description: row.description,
+    actionRequired: row.action_required || null,
     status: row.status,
     priority: row.priority,
     createdAt: row.created_at,
@@ -62,6 +65,7 @@ async function loadRow(id, currentDeptId) {
     `SELECT id, subject, request_type, country, assignee_email, assignee_name,
             created_by_email, created_by_name, team_lead_email,
             link_url, description, status, priority,
+            kind, action_required,
             created_at, updated_at, resolved_at
        FROM urgent_assist_request
        WHERE id = $1 AND org_node_id = $2`,
