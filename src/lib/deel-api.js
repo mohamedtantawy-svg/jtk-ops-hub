@@ -1751,6 +1751,15 @@ export async function listWorkbenchTasks(params = {}) {
   const teamNameFilter = Array.isArray(params.teamNameFilter)
     ? params.teamNameFilter.map(s => String(s).toLowerCase())
     : null;
+  // 2026-05-22: HRX path uses `teamNameExclude` instead of (or alongside)
+  // `teamNameFilter` to drop tasks claimed by other depts (e.g. GIX's
+  // "GSC - Mobility" / "Mobility Operations" / "GIX" teams). When both
+  // are set, include-then-exclude is applied — a task must be in
+  // teamNameFilter AND not in teamNameExclude. HRX passes only
+  // teamNameExclude; GIX passes only teamNameFilter.
+  const teamNameExclude = Array.isArray(params.teamNameExclude)
+    ? params.teamNameExclude.map(s => String(s).toLowerCase())
+    : null;
   const fetchOpts = adminTokenOverride ? { adminTokenOverride } : {};
   // Whether to also pull recently-completed tasks. Default ON so the queue
   // and Briefing's "resolved today" count includes Workbench tasks closed
@@ -1890,23 +1899,34 @@ export async function listWorkbenchTasks(params = {}) {
   // Phase 13b: pre-projection team filter for non-HRX depts. Runs on the
   // raw upstream rows (which still carry `teamName` / `team.name`) — the
   // projection below drops the team field per the 2026-05-12 memory
-  // audit, so post-projection filtering wouldn't work. HRX path
-  // (teamNameFilter === null) skips this and projects allItems unchanged.
-  const sourceItems = teamNameFilter
-    ? allItems.filter(t => {
-        const candidates = [
-          t.teamName,
-          t.team?.name,
-          t._teamName,
-        ];
-        for (const c of candidates) {
-          if (typeof c === 'string' && teamNameFilter.includes(c.toLowerCase())) {
-            return true;
-          }
-        }
-        return false;
-      })
-    : allItems;
+  // audit, so post-projection filtering wouldn't work.
+  //
+  // 2026-05-22: HRX path now uses `teamNameExclude` to drop tasks
+  // claimed by other depts (GIX). When neither include nor exclude is
+  // set, allItems passes through (= legacy HRX behaviour, byte-identical
+  // to pre-Phase-13b).
+  const teamNameOf = (t) => {
+    const candidates = [t.teamName, t.team?.name, t._teamName];
+    for (const c of candidates) {
+      if (typeof c === 'string' && c.trim()) return c.toLowerCase();
+    }
+    return null;
+  };
+  let sourceItems = allItems;
+  if (teamNameFilter) {
+    sourceItems = sourceItems.filter(t => {
+      const tn = teamNameOf(t);
+      return tn !== null && teamNameFilter.includes(tn);
+    });
+  }
+  if (teamNameExclude) {
+    sourceItems = sourceItems.filter(t => {
+      const tn = teamNameOf(t);
+      // Drop only when we have a team name AND it matches the exclude
+      // list. Tasks without a team field stay (HRX's typical case).
+      return !(tn !== null && teamNameExclude.includes(tn));
+    });
+  }
 
   // Slim projection — only fields consumed downstream by the queue route,
   // normalizeWorkbench, and queue-scoping. Per the 2026-05-12 memory audit
