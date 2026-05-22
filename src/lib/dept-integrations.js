@@ -100,9 +100,11 @@ export const DEPT_INTEGRATIONS = {
       // fetchJiraQueueForDept appends `AND statusCategory != Done AND
       // (resolution IS EMPTY OR resolution = Unresolved)` (active) and
       // `AND statusCategory = Done AND resolved >= -24h` (resolved-24h)
-      // to each clause before paginating. HRX's queue is shielded from
-      // these via getJiraExclusionForHrx() so a ticket never appears in
-      // both queues.
+      // to each clause before paginating. HRX/GIX overlap on Jira is a
+      // known follow-up (post-fetch filter pending); the previous JQL
+      // exclusion was reverted after PR #785 dropped every HRX ticket
+      // to zero because Jira 3VL treats UNKNOWN-on-missing-field as
+      // non-matching under NOT.
       jqlClauses: [
         `project IN (COHD, OSHD) AND "Team[Team]" in ("Global Mobility")`,
         `project = COHD AND "Request Type" = "Mobility Terminations"`,
@@ -218,40 +220,20 @@ export function resolveJiraConfig(deptSlug) {
 }
 
 /**
- * Returns a JQL fragment HRX's fetcher should AND into every query so
- * tickets claimed by any non-HRX dept never enter HRX's result set.
- * Composes from each non-HRX dept's `jqlClauses` (or the legacy
- * project+ownerFieldValues shape), joined by OR inside a single NOT().
- * Returns null when no other dept has Jira claims (HRX queue is
- * unfiltered then — matches pre-2026-05-22 behaviour).
- */
-export function getJiraExclusionForHrx() {
-  const fragments = [];
-  for (const [slug, cfg] of Object.entries(DEPT_INTEGRATIONS)) {
-    if (slug === HR_EXPERIENCE_SLUG) continue;
-    if (!cfg?.jira) continue;
-    if (Array.isArray(cfg.jira.jqlClauses) && cfg.jira.jqlClauses.length > 0) {
-      for (const c of cfg.jira.jqlClauses) fragments.push(`(${c})`);
-      continue;
-    }
-    // Legacy shape — same single-clause shorthand the dept fetcher uses.
-    if (Array.isArray(cfg.jira.projectKeys) && cfg.jira.projectKeys.length > 0
-        && Array.isArray(cfg.jira.ownerFieldValues) && cfg.jira.ownerFieldValues.length > 0) {
-      const projs = cfg.jira.projectKeys.join(', ');
-      const teams = cfg.jira.ownerFieldValues.map(v => `"${v}"`).join(', ');
-      fragments.push(`(project IN (${projs}) AND "Team[Team]" in (${teams}))`);
-    }
-  }
-  if (fragments.length === 0) return null;
-  return `NOT (${fragments.join(' OR ')})`;
-}
-
-/**
  * Returns the union of every non-HRX dept's Workbench `teamFilter`
  * values, lower-cased and de-duped. HRX's workbench path AND-NOTs these
  * so a task tagged with e.g. teamName="GSC - Mobility" never lands in
  * HRX's queue. Returns null when no other dept has a workbench team
  * filter set.
+ *
+ * 2026-05-22: there used to be a sibling `getJiraExclusionForHrx()` that
+ * composed a `NOT (...)` JQL fragment from other depts' clauses. It was
+ * removed after PR #785 because Jira's 3-valued logic dropped EVERY HRX
+ * ticket that didn't have the GIX-specific fields set (UNKNOWN inside a
+ * NOT filters the row out). Jira HRX/GIX overlap-prevention will return
+ * as a POST-FETCH filter in a follow-up — 3VL-safe because we compare
+ * actual values in JS, not in JQL. Workbench keeps its exclusion here
+ * because that filter runs in JS already.
  */
 export function getWorkbenchTeamExclusionForHrx() {
   const out = new Set();
