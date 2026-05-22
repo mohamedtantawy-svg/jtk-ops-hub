@@ -4,6 +4,7 @@ import { MEMBERS, MEMBERS_BY_EMAIL, TEAM_MEMBERS, getDirectReports, getAllReport
 import { useTeamMembers } from '../../hooks/useTeamMembers';
 import { useTeamDataVersion } from '../../hooks/useTeamDataVersion';
 import { useCurrentDept } from '../../hooks/useCurrentDept';
+import { getHubBrand } from '../../lib/hub-brand';
 import { matchesAudience } from '../../data/comms';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import { CALENDAR_EVENTS } from '../../data/calendar';
@@ -632,8 +633,12 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // ── Personal checklist count (incomplete only) ────────────────────────
   // Reads the per-user key written by PersonalChecklist.jsx. Re-reads on
   // `storage` events so adding/toggling an item in another tab updates the
-  // tile without a refresh. Falls back to the legacy global key for users
-  // who haven't triggered a write since the schema change.
+  // tile without a refresh.
+  // 2026-05-22 — dropped the legacy `ops_hub_checklist` fallback (and the
+  // tombstone-aware filter). The legacy global key was a cross-user leak
+  // source on shared machines (Duygu Cakalli bug, see PR #747) and is
+  // now evicted on every PersonalChecklist mount; the count tile must
+  // not regress that hardening by reading the same global slot.
   const [checklistCount, setChecklistCount] = useState(0);
   useEffect(() => {
     const userKey = (user.email || '').toLowerCase().trim()
@@ -641,16 +646,18 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
       : 'ops_hub_checklist_v2';
     const readCount = () => {
       try {
-        const raw = localStorage.getItem(userKey) || localStorage.getItem('ops_hub_checklist');
+        const raw = localStorage.getItem(userKey);
         if (!raw) return 0;
         const parsed = JSON.parse(raw);
         const items = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.items) ? parsed.items : []);
-        return items.filter(i => i && !i.done).length;
+        // Skip soft-deleted tombstones (PersonalChecklist keeps them in
+        // the array for cross-device sync; we never display them).
+        return items.filter(i => i && !i.done && !i.deleted).length;
       } catch { return 0; }
     };
     setChecklistCount(readCount());
     const onStorage = (e) => {
-      if (!e.key || e.key === userKey || e.key === 'ops_hub_checklist') setChecklistCount(readCount());
+      if (!e.key || e.key === userKey) setChecklistCount(readCount());
     };
     window.addEventListener('storage', onStorage);
     // Cross-tab channel the checklist itself uses for instant updates
@@ -732,7 +739,9 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // freshly added before the boot-time backfill ran isn't invisible.
   // Empty Set (cold paint, before /dept-scope/current resolves) also
   // means "include" — equivalent to pre-PR #745 behaviour.
-  const { deptId: currentDeptId, currentDeptNodeIds } = useCurrentDept();
+  const { deptId: currentDeptId, currentDeptNodeIds, dept: currentDept } = useCurrentDept();
+  // 2026-05-22 — dept-branded "HR Hub" quick-link tile.
+  const hubBrand = useMemo(() => getHubBrand(currentDept), [currentDept]);
   const inCurrentDept = useCallback((m) => {
     if (!currentDeptId) return true;
     if (!currentDeptNodeIds || currentDeptNodeIds.size === 0) return true;
@@ -2455,7 +2464,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   {v:'my-queue',icon:'bi-inbox-fill',l:'Queue',c:'var(--g)',bg:'#e8f0fe'},
                   {v:'escalations',icon:'bi-arrow-up-circle-fill',l:'Escalations',c:'#1f74b3',bg:'#e8f0fe'},
                   // 'Reports' (hr-reports) tile retired 2026-05-02 — replaced by HR Hub.
-                  {v:'hr-hub',icon:'bi-broadcast-pin',l:'HR Hub',c:'#8b6dca',bg:'#f3eff8'},
+                  {v:'hr-hub',icon:'bi-broadcast-pin',l:hubBrand.hubLabel,c:'#8b6dca',bg:'#f3eff8'},
                   {v:'team',icon:'bi-people-fill',l:'Team',c:'#ed8d00',bg:'#fff8e6'},
                   {v:'analytics',icon:'bi-bar-chart-line-fill',l:'Analytics',c:'#1f74b3',bg:'#e8f0fe'},
                 ];

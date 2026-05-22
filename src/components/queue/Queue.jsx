@@ -8,7 +8,7 @@ import { useVirtualRows } from '../../hooks/useVirtualRows';
 const TICKET_ROW_HEIGHT = 44;
 import { MEMBERS_BY_EMAIL } from '../../data/members';
 import { slaInfo, getUrl } from '../../utils/helpers';
-import { applySlaExtensionsToRows } from '../../utils/applySlaExtensions';
+import { applySlaExtensionsToRows, isSlaExtensionLocked } from '../../utils/applySlaExtensions';
 import {
   scopeOffboardingCases,
   scopeWorkbenchTasks,
@@ -30,6 +30,8 @@ import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
 import { useTaskNotes } from '../../hooks/useTaskNotes';
 import { useTeamDataVersion } from '../../hooks/useTeamDataVersion';
 import { useCurrentDept } from '../../hooks/useCurrentDept';
+import { getHubBrand } from '../../lib/hub-brand';
+import { useHideResolved } from '../../hooks/useHideResolved';
 import {
   SUBJECT_WIDTH_MIN,
   clampSubjectWidth as clampSubjectWidthShared,
@@ -181,6 +183,14 @@ const Queue = ({ user, tasks, subFilter }) => {
   // behavior because its visibleSources profile sets all 6 → true.
   const deptState = useCurrentDept();
   const visibleSources = deptState?.visibleSources;
+  // 2026-05-22 — dept-branded escalation button + banner copy. Defaults
+  // to "HR" cold-paint until useCurrentDept resolves the dept (HRX users
+  // keep the original wording).
+  const hubBrand = useMemo(() => getHubBrand(deptState?.dept), [deptState?.dept]);
+  // 2026-05-22 — Celine Taruc's request: persistent "hide resolved" toggle
+  // on the queue header. Email-scoped via the hook (different identities
+  // on the same browser keep separate preferences).
+  const { hideResolved, toggleHideResolved } = useHideResolved(user?.email);
 
   // Filters always start in their default state to keep SSR HTML identical
   // to the first client render. The `useEffect` below rehydrates from
@@ -451,7 +461,16 @@ const Queue = ({ user, tasks, subFilter }) => {
   // already derives per-row SLA from (dueDate - createdAt), so the
   // queueSla flat policy is intentionally NOT passed — each task carries
   // its own deadline.
-  const immigrationTaskRowsAll  = useMemo(() => normalizeImmigrationTasks(immigrationTasksData.tasks || []).filter(r => !isHiddenKey('immigration_tasks', r.id)), [immigrationTasksData.tasks, isHiddenKey]);
+  // 2026-05-22 — Immigration Tasks rows arrive PRE-NORMALISED from
+  // /api/v1/integrations/deel/immigration-tasks (the route calls
+  // normalizeImmigrationTasks server-side before scoping by assigneeEmail).
+  // Re-running the normaliser here was destroying every field that came
+  // from a nested object (caseData / assignee) because the second pass
+  // would read `t.caseData?.applicant?.name` on a row that no longer has
+  // caseData, falling back to '' for subject / country / assignee /
+  // taskUrl. Symptom: all 300 GIX rows rendered "Immigration Task" +
+  // "--" + "Unassigned" + no Open link. Fix is to use the rows as-is.
+  const immigrationTaskRowsAll  = useMemo(() => (immigrationTasksData.tasks || []).filter(r => !isHiddenKey('immigration_tasks', r.id)), [immigrationTasksData.tasks, isHiddenKey]);
 
   const isAdmin = isAdminUser(user);
   const isLead = perms?.dataScope === 'team_tasks';
@@ -531,6 +550,10 @@ const Queue = ({ user, tasks, subFilter }) => {
   // consumers (rowSlaSeverity, slaTier, BriefingView aggregates) read
   // the overridden fields naturally — no per-consumer code change.
   const slaExtensionMap = slaExtensions?.map || null;
+  // 2026-05-22 — pending sla_extension_request map drives the row-level
+  // "extension requested" badge + locks the SLA Extension action so users
+  // don't keep re-clicking (Madeleine Solares Decuir feedback).
+  const slaExtensionPendingMap = slaExtensions?.pendingMap || null;
   // Bumps when the roster or country-ownership map mutates (Team-tab edit
   // in this session OR another user's session pulling fresh data via the
   // visibility/focus/poll refetch). Threaded into every scope memo so
@@ -543,8 +566,8 @@ const Queue = ({ user, tasks, subFilter }) => {
   const teamDataVersion = useTeamDataVersion();
   const onboardingActionRowsScoped = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user), [onboardingRowsAll, user, teamDataVersion]);
   const pausedOnboardingRowsScoped = useMemo(() => scopePausedOnboarding(pausedOnboardingRowsAll, user), [pausedOnboardingRowsAll, user, teamDataVersion]);
-  const onboardingActionRows = useMemo(() => applySlaExtensionsToRows(onboardingActionRowsScoped, slaExtensionMap, 'onboarding'), [onboardingActionRowsScoped, slaExtensionMap]);
-  const pausedOnboardingRows = useMemo(() => applySlaExtensionsToRows(pausedOnboardingRowsScoped, slaExtensionMap, 'onboarding'), [pausedOnboardingRowsScoped, slaExtensionMap]);
+  const onboardingActionRows = useMemo(() => applySlaExtensionsToRows(onboardingActionRowsScoped, slaExtensionMap, 'onboarding', slaExtensionPendingMap), [onboardingActionRowsScoped, slaExtensionMap, slaExtensionPendingMap]);
+  const pausedOnboardingRows = useMemo(() => applySlaExtensionsToRows(pausedOnboardingRowsScoped, slaExtensionMap, 'onboarding', slaExtensionPendingMap), [pausedOnboardingRowsScoped, slaExtensionMap, slaExtensionPendingMap]);
   const onboardingRows = useMemo(() => {
     const seen = new Set();
     const merged = [];
@@ -555,15 +578,15 @@ const Queue = ({ user, tasks, subFilter }) => {
     }
     return merged;
   }, [onboardingActionRows, pausedOnboardingRows]);
-  const offboardingRows = useMemo(() => applySlaExtensionsToRows(scopeOffboardingCases(offboardingRowsAll, user), slaExtensionMap, 'offboarding'), [offboardingRowsAll, user, slaExtensionMap, teamDataVersion]);
-  const amendmentRows   = useMemo(() => applySlaExtensionsToRows(scopeAmendmentRequests(amendmentRowsAll, user), slaExtensionMap, 'amendments'), [amendmentRowsAll, user, slaExtensionMap, teamDataVersion]);
-  const redlineRows     = useMemo(() => applySlaExtensionsToRows(scopeRedlineRequests(redlineRowsAll, user), slaExtensionMap, 'redlines'), [redlineRowsAll, user, slaExtensionMap, teamDataVersion]);
-  const workbenchRows   = useMemo(() => applySlaExtensionsToRows(scopeWorkbenchTasks(workbenchRowsAll, user), slaExtensionMap, 'workbench'), [workbenchRowsAll, user, slaExtensionMap, teamDataVersion]);
-  const incentivePlanRows = useMemo(() => applySlaExtensionsToRows(scopeIncentivePlans(incentivePlanRowsAll, user), slaExtensionMap, 'incentive_plans'), [incentivePlanRowsAll, user, slaExtensionMap, teamDataVersion]);
+  const offboardingRows = useMemo(() => applySlaExtensionsToRows(scopeOffboardingCases(offboardingRowsAll, user), slaExtensionMap, 'offboarding', slaExtensionPendingMap), [offboardingRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion]);
+  const amendmentRows   = useMemo(() => applySlaExtensionsToRows(scopeAmendmentRequests(amendmentRowsAll, user), slaExtensionMap, 'amendments', slaExtensionPendingMap), [amendmentRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion]);
+  const redlineRows     = useMemo(() => applySlaExtensionsToRows(scopeRedlineRequests(redlineRowsAll, user), slaExtensionMap, 'redlines', slaExtensionPendingMap), [redlineRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion]);
+  const workbenchRows   = useMemo(() => applySlaExtensionsToRows(scopeWorkbenchTasks(workbenchRowsAll, user), slaExtensionMap, 'workbench', slaExtensionPendingMap), [workbenchRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion]);
+  const incentivePlanRows = useMemo(() => applySlaExtensionsToRows(scopeIncentivePlans(incentivePlanRowsAll, user), slaExtensionMap, 'incentive_plans', slaExtensionPendingMap), [incentivePlanRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion]);
   // Immigration tasks share the standard SLA-extension keyed map (source +
   // id), so a future per-row SLA-extension request flow can apply here
   // identically to the other Deel sources.
-  const immigrationTaskRows = useMemo(() => applySlaExtensionsToRows(scopeImmigrationTasks(immigrationTaskRowsAll, user), slaExtensionMap, 'immigration_tasks'), [immigrationTaskRowsAll, user, slaExtensionMap, teamDataVersion]);
+  const immigrationTaskRows = useMemo(() => applySlaExtensionsToRows(scopeImmigrationTasks(immigrationTaskRowsAll, user), slaExtensionMap, 'immigration_tasks', slaExtensionPendingMap), [immigrationTaskRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion]);
   // Workbench is the only Deel source that intentionally surfaces resolved
   // rows (24h of COMPLETED + CLOSED) so the "RESOLVED TODAY" section can
   // render. Strip them from the cross-source "All" aggregates so the
@@ -937,12 +960,16 @@ const Queue = ({ user, tasks, subFilter }) => {
       out.push({ kind: 'header', label: 'PAUSED', color: '#6b6560', bg: '#faf9f7', icon: 'bi-pause-circle-fill', count: snoozed.length });
       for (const t of snoozed) out.push({ kind: 'row', row: t });
     }
-    if (done.length > 0) {
+    // 2026-05-22 — `hideResolved` (per-user preference) suppresses the
+    // RESOLVED TODAY band entirely. The header counter still surfaces the
+    // resolved count via `headerCounts.resolved` so the toggle has visible
+    // affordance ("12 resolved" + hidden eye icon).
+    if (!hideResolved && done.length > 0) {
       out.push({ kind: 'header', label: 'RESOLVED TODAY', color: '#29811e', bg: '#f9faf8', icon: 'bi-check-circle', count: done.length });
       for (const t of done) out.push({ kind: 'row', row: t });
     }
     return out;
-  }, [active, snoozed, done]);
+  }, [active, snoozed, done, hideResolved]);
   // Base ticket columns + Actions + Note (always rendered, since Queue
   // owns the notes hook unconditionally).
   const ticketColSpan = (settings.sla_enabled !== false ? 9 : 8) + 2;
@@ -1049,6 +1076,31 @@ const Queue = ({ user, tasks, subFilter }) => {
             <span style={{ fontWeight: 600, color: 'var(--text)' }}>{headerCounts.open}</span> open
             {headerCounts.paused > 0 && <span title="Tasks paused / waiting on requester — excluded from the SLA tier pills."> &middot; <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>{headerCounts.paused}</span> paused</span>}
             {headerCounts.resolved > 0 && <span title="Resolved within this session — Briefing's Resolved KPI also includes the persisted server-side 24h window."> &middot; <span style={{ fontWeight: 600, color: '#29811e' }}>{headerCounts.resolved}</span> resolved</span>}
+            {/* 2026-05-22 — Celine Taruc request: eye toggle to hide the
+                RESOLVED TODAY band. Persists per-user via useHideResolved.
+                Only renders when there's actually a resolved set to hide,
+                so users without resolved rows aren't confused by a dead
+                toggle. */}
+            {headerCounts.resolved > 0 && (
+              <button
+                type="button"
+                onClick={toggleHideResolved}
+                aria-pressed={hideResolved}
+                title={hideResolved ? 'Show resolved tickets' : 'Hide resolved tickets'}
+                style={{
+                  marginLeft: 4, padding: '2px 6px', borderRadius: 6,
+                  background: hideResolved ? '#f3eff8' : 'transparent',
+                  border: hideResolved ? '1px solid #d4c4f0' : '1px solid var(--border)',
+                  color: hideResolved ? '#7c3aed' : 'var(--text-muted)',
+                  fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  fontFamily: 'inherit', transition: 'background .12s, border-color .12s',
+                }}
+              >
+                <i className={hideResolved ? 'bi-eye-slash' : 'bi-eye'} style={{ fontSize: 11 }} />
+                {hideResolved ? 'Show' : 'Hide'}
+              </button>
+            )}
           </span>
 
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -1451,6 +1503,14 @@ const Queue = ({ user, tasks, subFilter }) => {
             hideContract
             dateField="dueDate"
             dateLabel="Due Date"
+            /* 2026-05-22 — Pablo Gonzalez ask: primary column carries the
+               task name ("Document upload" / "Form filling" / "Quote
+               approval" — what admin calls "Task type"). Secondary
+               column carries "Applicant · Case" so triage sees who/what
+               the task is for. Both header labels updated to match the
+               data the column actually shows. */
+            subjectLabel="Task"
+            clientLabel="Applicant · Case"
             onHide={(row) => setHideModalTask({ source: 'immigration_tasks', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onSlaExtension={(row) => setSlaExtensionModalTask({ source: 'immigration_tasks', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'immigration_tasks', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
@@ -1729,6 +1789,7 @@ const Queue = ({ user, tasks, subFilter }) => {
                     onEscalate={() => setEscalateModalTask(taskDescriptor)}
                     hasNote={taskNotes.hasNote(task.source, task.id)}
                     onOpenNote={() => setNoteModalTask(task)}
+                    escalateLabel={hubBrand.escalateLabel}
                   />;
                 })}
                 {ticketBottomPad > 0 && (
@@ -1762,7 +1823,16 @@ const Queue = ({ user, tasks, subFilter }) => {
       {slaExtensionModalTask && (
         <CreateSlaExtensionModal
           task={slaExtensionModalTask}
-          onClose={() => setSlaExtensionModalTask(null)}
+          onClose={() => {
+            setSlaExtensionModalTask(null);
+            // 2026-05-22 — refresh the SLA extension list so the row's
+            // "Ext. requested" badge appears immediately after a new
+            // request is submitted, instead of waiting up to 30s for
+            // the next poll. The hook short-circuits if a fetch is
+            // already in flight, so this is safe to call on every
+            // close (even cancellations).
+            try { slaExtensions?.refresh?.(); } catch {}
+          }}
         />
       )}
 
@@ -1887,7 +1957,7 @@ const SlaPill = ({ active, onClick, tone, count, label, hint }) => {
 };
 
 // ── Table row component ──
-const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onSlaExtension, onEscalate, hasNote = false, onOpenNote = null }) => {
+const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onSlaExtension, onEscalate, hasNote = false, onOpenNote = null, escalateLabel = 'Escalate to HR Hub' }) => {
   const [hov, setHov] = useState(false);
   const assignee = resolveAssignee(task);
   const sla = slaInfo(task);
@@ -2016,8 +2086,8 @@ const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onSlaExtension, on
           <button
             type="button"
             onClick={() => onEscalate?.()}
-            aria-label={`Escalate "${task.subject || task.id}" to HR Hub`}
-            title="Escalate to HR Hub"
+            aria-label={`${escalateLabel}: "${task.subject || task.id}"`}
+            title={escalateLabel}
             style={{
               display: 'inline-flex', alignItems: 'center', gap: 4,
               padding: '3px 8px', borderRadius: 6,
@@ -2031,26 +2101,62 @@ const QueueRow = memo(({ task, slaAgeClass, settings, onHide, onSlaExtension, on
             <i className="bi-arrow-up-right-circle" style={{ fontSize: 9 }} />
             Escalate
           </button>
-          {onSlaExtension && (
-            <button
-              type="button"
-              onClick={() => onSlaExtension?.()}
-              aria-label={`Request SLA extension for "${task.subject || task.id}"`}
-              title="Request to extend the SLA on this task"
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                padding: '3px 8px', borderRadius: 6,
-                background: hov ? '#fff7ed' : '#f5f4f2',
-                color: hov ? '#d97706' : '#9e9e9e',
-                border: hov ? '1px solid #fed7aa' : '1px solid transparent',
-                fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
-                cursor: 'pointer', fontFamily: 'inherit',
-              }}
-            >
-              <i className="bi-clock-history" style={{ fontSize: 9 }} />
-              SLA Extension
-            </button>
-          )}
+          {onSlaExtension && (() => {
+            // 2026-05-22 — mirrors the SourceTable lockout (see comment
+            // there). When an extension is active with >12h remaining
+            // OR a pending request is in review, render a non-clickable
+            // badge so requesters don't re-click and get 409'd.
+            const locked = isSlaExtensionLocked(task);
+            if (locked) {
+              const isPending = !!task.slaExtensionPending;
+              const ext = task.slaExtension;
+              const expiresAt = ext?.expiresAt ? new Date(ext.expiresAt) : null;
+              const expiresLabel = expiresAt && !isNaN(expiresAt)
+                ? expiresAt.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+                : null;
+              const tooltip = isPending
+                ? `SLA extension request is in review (submitted ${task.slaExtensionPending?.createdAt ? new Date(task.slaExtensionPending.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'recently'}). You can request another once it resolves.`
+                : `SLA extended until ${expiresLabel || 'the extended deadline'}. A new request can be raised once the extension is within 12h of breaching.`;
+              return (
+                <span
+                  aria-label={tooltip}
+                  title={tooltip}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                    padding: '3px 8px', borderRadius: 6,
+                    background: '#fff7ed',
+                    color: '#9a3412',
+                    border: '1px solid #fed7aa',
+                    fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
+                    cursor: 'default', fontFamily: 'inherit',
+                  }}
+                >
+                  <i className={isPending ? 'bi-hourglass-split' : 'bi-clock-history'} style={{ fontSize: 9 }} />
+                  {isPending ? 'Ext. requested' : 'Ext. active'}
+                </span>
+              );
+            }
+            return (
+              <button
+                type="button"
+                onClick={() => onSlaExtension?.()}
+                aria-label={`Request SLA extension for "${task.subject || task.id}"`}
+                title="Request to extend the SLA on this task"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '3px 8px', borderRadius: 6,
+                  background: hov ? '#fff7ed' : '#f5f4f2',
+                  color: hov ? '#d97706' : '#9e9e9e',
+                  border: hov ? '1px solid #fed7aa' : '1px solid transparent',
+                  fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
+                  cursor: 'pointer', fontFamily: 'inherit',
+                }}
+              >
+                <i className="bi-clock-history" style={{ fontSize: 9 }} />
+                SLA Extension
+              </button>
+            );
+          })()}
           <button
             type="button"
             onClick={() => onHide?.()}

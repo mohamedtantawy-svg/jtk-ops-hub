@@ -23,6 +23,7 @@ import {
   listFollowerEmails,
   addFollower,
 } from '../../../../../../src/lib/hr-hub-helpers';
+import { resolveAssigneeWithOooCover } from '../../../../../../src/lib/hr-hub-ooo';
 
 // `rejected` is a terminal state (alongside `resolved`) introduced
 // 2026-05-12 — Megan reported HR requests/reporting sometimes get
@@ -57,6 +58,7 @@ export async function GET(req, { params }) {
               title, summary, ideal_solution, resolution_note,
               links, attachments,
               created_by_email, created_by_name, assignee_email, assignee_name,
+              cover_for_assignee_email, cover_for_assignee_name,
               team_lead_email, cc_email, created_at, updated_at, resolved_at,
               task_source, task_id, task_url, task_subject,
               sla_ext_requested_days, sla_ext_reason_code, sla_ext_acknowledged,
@@ -121,6 +123,8 @@ export async function GET(req, { params }) {
       createdByName: r.created_by_name,
       assigneeEmail: r.assignee_email,
       assigneeName: r.assignee_name,
+      coverForAssigneeEmail: r.cover_for_assignee_email,
+      coverForAssigneeName: r.cover_for_assignee_name,
       teamLeadEmail: r.team_lead_email,
       ccEmail: r.cc_email,
       createdAt: r.created_at,
@@ -252,11 +256,35 @@ export async function PATCH(req, { params }) {
   }
 
   if (patch.assigneeEmail !== undefined) {
-    const newEmail = patch.assigneeEmail ? String(patch.assigneeEmail).toLowerCase() : null;
-    if (newEmail !== (existing.assignee_email || null)) {
-      const newName = newEmail ? (memberByEmail(newEmail)?.name || null) : null;
-      updates.push(`assignee_email = $${p++}`); values.push(newEmail);
-      updates.push(`assignee_name  = $${p++}`); values.push(newName);
+    const rawNewEmail = patch.assigneeEmail ? String(patch.assigneeEmail).toLowerCase() : null;
+    if (rawNewEmail !== (existing.assignee_email || null)) {
+      const rawNewName = rawNewEmail ? (memberByEmail(rawNewEmail)?.name || null) : null;
+      // 2026-05-22 — Jose Ruales spec: a manual reassign to an OOO
+      // user is re-routed to their first non-OOO manager. The original
+      // is stamped in cover_for_assignee_email so the reconciler can
+      // flip the row back the moment they're back. Manual reassign to
+      // a non-OOO user clears any prior cover (the requester explicitly
+      // chose this owner). Null assignee (unassign) also clears the
+      // cover — there's no original to restore.
+      let effectiveEmail = rawNewEmail;
+      let effectiveName = rawNewName;
+      let nextCoverEmail = null;
+      let nextCoverName = null;
+      let redirected = false;
+      if (rawNewEmail) {
+        const resolved = await resolveAssigneeWithOooCover(rawNewEmail, rawNewName);
+        effectiveEmail = resolved.assigneeEmail;
+        effectiveName = resolved.assigneeName;
+        nextCoverEmail = resolved.coverForEmail;
+        nextCoverName = resolved.coverForName;
+        redirected = resolved.redirected;
+      }
+      updates.push(`assignee_email = $${p++}`); values.push(effectiveEmail);
+      updates.push(`assignee_name  = $${p++}`); values.push(effectiveName);
+      // Cover stamp always overwrites — null when the new assignee is
+      // not OOO, populated when the redirect kicked in.
+      updates.push(`cover_for_assignee_email = $${p++}`); values.push(nextCoverEmail);
+      updates.push(`cover_for_assignee_name  = $${p++}`); values.push(nextCoverName);
       // Mark as manually-assigned so the next Team Lead On Call
       // rotation skips this row (Mohamed 2026-05-14 spec: "the
       // assignment should change as well with exception to anything
@@ -266,11 +294,20 @@ export async function PATCH(req, { params }) {
       logs.push({
         event: 'assignee_change',
         before: { assigneeEmail: existing.assignee_email },
-        after: { assigneeEmail: newEmail, manuallySet: true },
+        after: { assigneeEmail: effectiveEmail, manuallySet: true },
       });
-      after.assigneeEmail = newEmail;
-      // Auto-follow: any new assignee starts following.
-      if (newEmail) await addFollower(id, newEmail, 'assignee');
+      if (redirected) {
+        logs.push({
+          event: 'auto_cover_assigned',
+          before: { assigneeEmail: nextCoverEmail },
+          after: { assigneeEmail: effectiveEmail, coverForEmail: nextCoverEmail, reason: 'assignee_currently_ooo' },
+        });
+      }
+      after.assigneeEmail = effectiveEmail;
+      // Auto-follow: any new assignee starts following. The covered
+      // original also gets added so they pick up the trail on return.
+      if (effectiveEmail) await addFollower(id, effectiveEmail, 'assignee');
+      if (nextCoverEmail) await addFollower(id, nextCoverEmail, 'assignee');
     }
   }
 

@@ -27,6 +27,8 @@ import { TASK_SOURCE_DISPLAY } from '../../../src/utils/applySlaExtensions';
 import HrHubComposer from './HrHubComposer';
 import ImageLightbox from '../ui/ImageLightbox';
 import CommentReactions from '../ui/CommentReactions';
+import { useCurrentDept } from '../../../src/hooks/useCurrentDept';
+import { getHubBrand } from '../../../src/lib/hub-brand';
 
 const SLA_EXT_REASON_LABELS = {
   immigration: 'Immigration',
@@ -52,6 +54,9 @@ const PRIORITY_OPTIONS = [
   { id: 'critical', label: 'Critical' },
 ];
 
+// 2026-05-22 — `hr_request` / `hr_reporting` labels are dept-branded at
+// render time via getHubBrand(). The values here are cold-paint fallbacks
+// and the labels for retired flows that never received the rebrand.
 const FLOW_LABELS = {
   hr_request: 'HR Request',
   hr_reporting: 'HR Reporting',
@@ -77,6 +82,11 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
   const initialComments = detail?.comments || [];
   const followers = detail?.followers || [];
   const log = detail?.log || [];
+
+  // 2026-05-22 — dept-branded HR Hub. Placed ABOVE every early return so
+  // React hook ordering stays stable across renders (mistake #43 in SKILL).
+  const deptState = useCurrentDept();
+  const hubBrand = useMemo(() => getHubBrand(deptState.dept), [deptState.dept]);
 
   // Local comments state — seeded from initialComments and grown by the
   // polling effect. We seed only when the parent's initialComments array
@@ -223,7 +233,11 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
   }, [requestId, onItemUpdated, onRefresh]);
 
   if (!requestId) return null;
-  const flowLabel = FLOW_LABELS[request?.flow] || request?.flow || '';
+  const flowLabelOverrides = {
+    hr_request:   hubBrand.requestLabel,
+    hr_reporting: hubBrand.reportingLabel,
+  };
+  const flowLabel = flowLabelOverrides[request?.flow] || FLOW_LABELS[request?.flow] || request?.flow || '';
 
   // Approve/Deny gate — mirrors RequestRow's canDecide (HrHubView line
   // 730+) so the row + drawer enforce the same workflow. Mohamed
@@ -411,6 +425,32 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
                 </LabeledPicker>
                 <LabeledPicker label="Assignee">
                   <PickerAssignee value={request.assigneeEmail} valueName={request.assigneeName} onChange={(email, name) => updateField({ assigneeEmail: email, assigneeName: name })} disabled={savingField === 'assigneeEmail'} />
+                  {/* 2026-05-22 — when the row was auto-routed because
+                      the requested assignee is OOO, surface a small
+                      badge so the manager knows it's a cover (and
+                      that the row will flip back automatically when
+                      the original returns from leave). */}
+                  {request.coverForAssigneeEmail && (
+                    <div
+                      title={`Auto-covered while ${request.coverForAssigneeName || request.coverForAssigneeEmail} is OOO. Reassigns back automatically when they're back.`}
+                      style={{
+                        marginTop: 6,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        padding: '2px 8px',
+                        borderRadius: 999,
+                        background: '#fff7ed',
+                        color: '#9a3412',
+                        border: '1px solid #fed7aa',
+                        fontSize: 10,
+                        fontWeight: 600,
+                      }}
+                    >
+                      <i className="bi-airplane" style={{ fontSize: 10 }} />
+                      Covering for {request.coverForAssigneeName || request.coverForAssigneeEmail} (OOO)
+                    </div>
+                  )}
                 </LabeledPicker>
               </div>
 

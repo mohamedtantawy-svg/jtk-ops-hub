@@ -37,7 +37,7 @@
 // Works for every role (Agent / Team Lead / Regional Manager / Admin/Director).
 // ─────────────────────────────────────────────────────────────────────────────
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { fetchChecklistSnapshot, putChecklistSnapshot } from '../../services/personalChecklistApi';
+import { fetchChecklistSnapshot, putChecklistSnapshot, clearChecklistSnapshot } from '../../services/personalChecklistApi';
 
 const LEGACY_KEY = 'ops_hub_checklist';
 const SYNC_CHANNEL = 'ops_hub_checklist_sync';
@@ -718,6 +718,45 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
     setItems(prev => prev.map(i => i.id === id ? { ...i, [field]: value, updatedAt: Date.now() } : i));
   }, []);
 
+  // 2026-05-22 — "Clear all to-dos" escape hatch. The pre-#747 legacy-key
+  // bleed left some users (Duygu) with foreign items inside their own
+  // server snapshot. The previous fix (#747) stopped NEW bleed but
+  // explicitly didn't programmatically purge the existing contamination
+  // — there's no email stamp on items to tell legitimate ones apart
+  // from leaked ones, so a user-initiated wipe is the only safe path.
+  //
+  // The flow:
+  //   1. DELETE /api/v1/personal-checklist  → drops the JWT-user's row.
+  //   2. Local LS + IDB wiped synchronously so a tab refresh doesn't
+  //      resurrect from cache.
+  //   3. State reset to [] AND `skipNextServerPushRef` set so the
+  //      debounced PUT effect doesn't immediately race a re-write with
+  //      an empty list (the DELETE already cleared the row; PUT-ing []
+  //      would just be a no-op on the merge, but the dedup keeps log
+  //      noise down).
+  //   4. BroadcastChannel notifies other tabs of the same user so they
+  //      mirror the empty state — without this a second tab would push
+  //      its stale local snapshot back up via its own debounced PUT.
+  const [confirmingClear, setConfirmingClear] = useState(false);
+  const clearAll = useCallback(async () => {
+    setConfirmingClear(false);
+    try {
+      await clearChecklistSnapshot();
+    } catch {
+      // Server-side wipe failed — keep going with the local wipe so
+      // the user at least sees an empty list. A future PUT will resync.
+    }
+    skipNextWriteRef.current = true;
+    skipNextServerPushRef.current = true;
+    try { localStorage.removeItem(key); } catch {}
+    try { idbWrite(userKey, []); } catch {}
+    const ts = Date.now();
+    setItems([]);
+    setLastWriteTs(ts);
+    const ch = getChannel();
+    if (ch) { try { ch.postMessage({ userKey, items: [], ts }); } catch {} }
+  }, [key, userKey]);
+
   // ── Derived ──────────────────────────────────────────────────────────────
   // Tombstones (`deleted: true`) live in the persistence layer for cross-
   // device sync but never render — strip them at the display boundary.
@@ -935,9 +974,103 @@ const PersonalChecklist = ({ user, variant = 'compact' }) => {
               </span>
             )}
             <span style={{ fontSize: primary ? 12 : 11, color: 'var(--text-muted)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{doneCount}/{liveItems.length}</span>
+            {/* 2026-05-22 — "Clear all" escape hatch for users whose
+                server snapshot was contaminated by the pre-#747 legacy
+                bleed. Hidden unless there's at least one item so the
+                empty-state isn't cluttered. */}
+            <button
+              type="button"
+              onClick={() => setConfirmingClear(true)}
+              aria-label="Clear all to-dos"
+              title="Clear all to-dos"
+              style={{
+                background: 'transparent',
+                border: '1px solid var(--border)',
+                color: 'var(--text-muted)',
+                cursor: 'pointer',
+                padding: primary ? '3px 8px' : '2px 6px',
+                borderRadius: 6,
+                fontSize: 10,
+                fontWeight: 600,
+                fontFamily: 'inherit',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                transition: 'background .12s, color .12s, border-color .12s',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = '#fee2e2'; e.currentTarget.style.color = '#d42d35'; e.currentTarget.style.borderColor = '#fecaca'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
+            >
+              <i className="bi-trash" style={{ fontSize: 10 }} />
+              Clear all
+            </button>
           </div>
         )}
       </div>
+
+      {/* 2026-05-22 — Confirm modal for the "Clear all" action. Light
+          inline overlay so the affordance reads as a destructive
+          confirmation rather than a popover. Pinned to the panel via
+          position:absolute so the user can't lose context by scrolling
+          a real page-level dialog away. */}
+      {confirmingClear && (
+        <div
+          onClick={() => setConfirmingClear(false)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)',
+            zIndex: 1500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="checklist-clear-title"
+        >
+          <div onClick={e => e.stopPropagation()} style={{
+            width: 'min(420px, 100%)', background: 'var(--surface)',
+            borderRadius: 14, padding: 20,
+            boxShadow: '0 12px 48px rgba(0,0,0,0.32)',
+            border: '1px solid var(--border)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 10,
+                background: '#fee2e2', color: '#d42d35',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
+              }}>
+                <i className="bi-trash" style={{ fontSize: 16 }} />
+              </div>
+              <div id="checklist-clear-title" style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>
+                Clear every to-do?
+              </div>
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 16 }}>
+              This permanently deletes every item in your to-do list, on every device. Use this if you see items that aren't yours — your list will reset to empty.
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => setConfirmingClear(false)}
+                style={{
+                  height: 34, padding: '0 14px', borderRadius: 8,
+                  border: '1px solid var(--border)', background: 'var(--surface)',
+                  color: 'var(--text-secondary)', fontSize: 13, fontWeight: 600,
+                  cursor: 'pointer', fontFamily: 'inherit',
+                }}
+              >Cancel</button>
+              <button
+                type="button"
+                onClick={clearAll}
+                autoFocus
+                style={{
+                  height: 34, padding: '0 16px', borderRadius: 8,
+                  border: 'none', background: '#d42d35', color: 'white',
+                  fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+                }}
+              >Clear all</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Progress bar (primary only, only if there are items) */}
       {primary && liveItems.length > 0 && (

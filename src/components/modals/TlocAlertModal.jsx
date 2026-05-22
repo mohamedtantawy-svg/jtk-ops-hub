@@ -11,10 +11,16 @@
 // warmer amber/red because HR-Hub work is a calmer signal than urgent
 // assist. Both stay literal so they read the same in light + dark mode.
 
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { playAlertSound } from '../../utils/playAlertSound';
+import { useCurrentDept } from '../../hooks/useCurrentDept';
+import { getHubBrand } from '../../lib/hub-brand';
 
 export default function TlocAlertModal({ tlocName, onDismiss, onOpenView }) {
+  // 2026-05-22 — dept-branded copy ("New GIX Requests…" for GIX users).
+  const deptState = useCurrentDept();
+  const hubBrand = useMemo(() => getHubBrand(deptState.dept), [deptState.dept]);
+
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onDismiss?.(); };
     document.addEventListener('keydown', onKey);
@@ -66,7 +72,7 @@ export default function TlocAlertModal({ tlocName, onDismiss, onOpenView }) {
               You are the Team Lead on Call now
             </div>
             <div style={{ fontSize: 13, fontWeight: 500, marginTop: 4, opacity: 0.94 }}>
-              New HR Requests and HR Reporting items will auto-route to you until rotated.
+              New {hubBrand.requestLabel}s and {hubBrand.reportingLabel} items will auto-route to you until rotated.
             </div>
           </div>
         </div>

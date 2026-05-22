@@ -13,6 +13,10 @@ import {
   loadStoredSubjectWidth,
   saveStoredSubjectWidth,
 } from '../../lib/queue-subject-width';
+import { useCurrentDept } from '../../hooks/useCurrentDept';
+import { getHubBrand } from '../../lib/hub-brand';
+import { useHideResolved } from '../../hooks/useHideResolved';
+import { isSlaExtensionLocked } from '../../utils/applySlaExtensions';
 
 // Subject column width — shared resize affordance with Queue.jsx (ZD/Jira).
 // The Workbench bug Chaitanya Raju Uppalapati flagged 2026-05-22 ("Workbench
@@ -230,7 +234,31 @@ export default function SourceTable({
   onBulkEscalate,            // (rows[]) => void — bulk variant; enables checkboxes + bulk-bar Escalate button
   onBulkReassign,            // (rows[]) => void — bulk variant; enables checkboxes + bulk-bar Reassign button
   notesApi = null,           // useTaskNotes() return — enables the Note column when present
+  subjectLabel = 'Employee', // 2026-05-22 — header label for the primary
+                              // (resizable) column. Defaults to 'Employee'
+                              // for every queue that lists workers; the
+                              // Immigration Tasks panel overrides this to
+                              // 'Task' since the column carries the task
+                              // name ("Document upload" etc.) not a person.
+  clientLabel = 'Organization', // 2026-05-22 — header label for the
+                              // secondary "client" column (shown when
+                              // showClient is true). Immigration Tasks
+                              // panel overrides to 'Applicant · Case'
+                              // because the column now carries triage
+                              // info ("Pearce Dolan · Right to Work")
+                              // instead of the customer org name.
 }) {
+  // 2026-05-22 — dept-branded escalation button. The "Escalate to HR Hub"
+  // tooltip becomes "Escalate to GIX Hub" / "Escalate to Benefits Hub" / …
+  // for users in those depts. See src/lib/hub-brand.js.
+  const deptState = useCurrentDept();
+  const hubBrand = useMemo(() => getHubBrand(deptState.dept), [deptState.dept]);
+  // 2026-05-22 — Celine Taruc request: persistent "hide resolved" toggle.
+  // Shares the localStorage key with Queue.jsx (`ops_hub_hide_resolved:<email>`)
+  // so toggling from either surface flips both. Re-render flows through
+  // the hook's useState — the BroadcastChannel sync isn't required because
+  // both consumers re-mount when the queue source tab changes.
+  const { hideResolved, toggleHideResolved } = useHideResolved(viewerEmail);
   // ── User-resizable Subject column ────────────────────────────────────────
   // Mirrors the ZD/Jira Queue resize (see Queue.jsx for the parent comment).
   // State holds the React-visible width (drives the table's inline CSS
@@ -528,14 +556,17 @@ export default function SourceTable({
     // spans both Mine and Others. Splitting it would dilute the signal (an
     // agent doesn't need to scan "who else closed something") and matches
     // the Zendesk queue's single bottom resolved section.
+    // 2026-05-22 — `hideResolved` (per-user) suppresses the band; the count
+    // chip in the filter row still surfaces the resolved tally so the
+    // toggle has visible affordance.
     const resolvedCount = mineResolved.length + othersResolved.length;
-    if (resolvedCount > 0) {
+    if (!hideResolved && resolvedCount > 0) {
       out.push({ kind: 'header', tone: 'resolved', label: 'RESOLVED TODAY', count: resolvedCount });
       for (const r of mineResolved) out.push({ kind: 'row', row: r });
       for (const r of othersResolved) out.push({ kind: 'row', row: r });
     }
     return out;
-  }, [mineActive, minePaused, mineResolved, othersActive, othersPaused, othersResolved, hasMineSection]);
+  }, [mineActive, minePaused, mineResolved, othersActive, othersPaused, othersResolved, hasMineSection, hideResolved]);
 
   const scrollerRef = useRef(null);
   const { startIdx, endIdx, topPad, bottomPad } = useVirtualRows({
@@ -595,15 +626,41 @@ export default function SourceTable({
           </button>
         )}
 
-        <span aria-live="polite" aria-atomic="true" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+        <span aria-live="polite" aria-atomic="true" style={{ fontSize: 11, color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           {(() => {
             const resolvedN = mineResolved.length + othersResolved.length;
             const activeN = sorted.length - resolvedN;
             if (resolvedN > 0) {
-              return <>{activeN} active{activeN === 1 ? '' : ''} · <span style={{ color: '#29811e' }}>{resolvedN} resolved</span></>;
+              return <span>{activeN} active · <span style={{ color: '#29811e' }}>{resolvedN} resolved</span></span>;
             }
-            return `${sorted.length} ${sorted.length === 1 ? 'task' : 'tasks'}`;
+            return <span>{`${sorted.length} ${sorted.length === 1 ? 'task' : 'tasks'}`}</span>;
           })()}
+          {/* 2026-05-22 — Celine Taruc request: eye toggle to hide the
+              RESOLVED TODAY band on the Workbench / Deel source panels.
+              Mirrors the toggle in the parent Queue header so a user
+              flipping it on one queue sees consistent state across the
+              workspace. Only renders when there's a resolved tail to
+              hide. */}
+          {(mineResolved.length + othersResolved.length) > 0 && (
+            <button
+              type="button"
+              onClick={toggleHideResolved}
+              aria-pressed={hideResolved}
+              title={hideResolved ? 'Show resolved tasks' : 'Hide resolved tasks'}
+              style={{
+                padding: '2px 6px', borderRadius: 6,
+                background: hideResolved ? '#f3eff8' : 'transparent',
+                border: hideResolved ? '1px solid #d4c4f0' : '1px solid var(--border)',
+                color: hideResolved ? '#7c3aed' : 'var(--text-muted)',
+                fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                fontFamily: 'inherit', transition: 'background .12s, border-color .12s',
+              }}
+            >
+              <i className={hideResolved ? 'bi-eye-slash' : 'bi-eye'} style={{ fontSize: 11 }} />
+              {hideResolved ? 'Show' : 'Hide'}
+            </button>
+          )}
         </span>
       </div>
       )}
@@ -721,8 +778,9 @@ export default function SourceTable({
                   sortDir={sortDir}
                   onSort={toggleSort}
                   onResizeStart={handleSubjectResizeStart}
+                  subjectLabel={subjectLabel}
                 />
-                {showClient && <SortTh col="clientName" label="Organization" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, textAlign: 'left', minWidth: 120, maxWidth: 150 }} />}
+                {showClient && <SortTh col="clientName" label={clientLabel} sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, textAlign: 'left', minWidth: 120, maxWidth: 150 }} />}
                 {showType && <SortTh col="typeLabel" label="Type" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 90 }} />}
                 <SortTh col="country"   label="Country"    sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 80 }} />
                 <SortTh col="assignee"  label="Assignee"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 90 }} />
@@ -799,6 +857,7 @@ export default function SourceTable({
                     showNoteColumn={hasNotes}
                     hasNote={noteHas}
                     onOpenNote={hasNotes ? () => setNoteModalRow(row) : null}
+                    escalateLabel={hubBrand.escalateLabel}
                   />
                 );
               })}
@@ -967,7 +1026,7 @@ function NoteModal({ row, initialText, maxLength, onSave, onDelete, onClose }) {
 }
 
 // ── Row component ──
-const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, dateField = 'startDate', showClient = false, showType = false, hideUpdated = false, hideContract = false, onHide = null, onEscalate = null, onReassign = null, onSlaExtension = null, isSelectable = false, isSelected = false, onToggleSelection = null, showNoteColumn = false, hasNote = false, onOpenNote = null }) {
+const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = false, dateField = 'startDate', showClient = false, showType = false, hideUpdated = false, hideContract = false, onHide = null, onEscalate = null, onReassign = null, onSlaExtension = null, isSelectable = false, isSelected = false, onToggleSelection = null, showNoteColumn = false, hasNote = false, onOpenNote = null, escalateLabel = 'Escalate to HR Hub' }) {
   const [hov, setHov] = useState(false);
   const sev = row.status?.severity || 'info';
   const isUrgent = sev === 'critical';
@@ -1269,8 +1328,8 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onEscalate(); }}
-                aria-label={`Escalate "${row.subject || row.id}" to HR Hub`}
-                title="Escalate to HR Hub"
+                aria-label={`${escalateLabel}: "${row.subject || row.id}"`}
+                title={escalateLabel}
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: 4,
                   padding: '3px 8px', borderRadius: 6,
@@ -1305,26 +1364,67 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
                 Reassign
               </button>
             )}
-            {onSlaExtension && (
-              <button
-                type="button"
-                onClick={(e) => { e.stopPropagation(); onSlaExtension(); }}
-                aria-label={`Request SLA extension for "${row.subject || row.id}"`}
-                title="Request to extend the SLA on this task"
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 4,
-                  padding: '3px 8px', borderRadius: 6,
-                  background: hov ? '#fff7ed' : '#f5f4f2',
-                  color: hov ? '#d97706' : '#9e9e9e',
-                  border: hov ? '1px solid #fed7aa' : '1px solid transparent',
-                  fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
-                  cursor: 'pointer', fontFamily: 'inherit',
-                }}
-              >
-                <i className="bi-clock-history" style={{ fontSize: 9 }} />
-                SLA Extension
-              </button>
-            )}
+            {onSlaExtension && (() => {
+              // 2026-05-22 — Madeleine Solares Decuir reported that the
+              // SLA Extension button kept appearing on offboarding rows
+              // even after the team had already requested an extension,
+              // so they re-clicked and were silently blocked by the
+              // server's 409 dedup. When the row has an active extension
+              // with >12h remaining OR a pending request, render a
+              // non-clickable badge that surfaces the state so the user
+              // knows not to ask again. Once the active window drops
+              // below 12h the lockout lifts and the action returns.
+              const locked = isSlaExtensionLocked(row);
+              if (locked) {
+                const isPending = !!row.slaExtensionPending;
+                const ext = row.slaExtension;
+                const expiresAt = ext?.expiresAt ? new Date(ext.expiresAt) : null;
+                const expiresLabel = expiresAt && !isNaN(expiresAt)
+                  ? expiresAt.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+                  : null;
+                const tooltip = isPending
+                  ? `SLA extension request is in review (submitted ${row.slaExtensionPending?.createdAt ? new Date(row.slaExtensionPending.createdAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'recently'}). You can request another once it resolves.`
+                  : `SLA extended until ${expiresLabel || 'the extended deadline'}. A new request can be raised once the extension is within 12h of breaching.`;
+                return (
+                  <span
+                    aria-label={tooltip}
+                    title={tooltip}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                      padding: '3px 8px', borderRadius: 6,
+                      background: '#fff7ed',
+                      color: '#9a3412',
+                      border: '1px solid #fed7aa',
+                      fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
+                      cursor: 'default', fontFamily: 'inherit',
+                    }}
+                  >
+                    <i className={isPending ? 'bi-hourglass-split' : 'bi-clock-history'} style={{ fontSize: 9 }} />
+                    {isPending ? 'Ext. requested' : 'Ext. active'}
+                  </span>
+                );
+              }
+              return (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onSlaExtension(); }}
+                  aria-label={`Request SLA extension for "${row.subject || row.id}"`}
+                  title="Request to extend the SLA on this task"
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                    padding: '3px 8px', borderRadius: 6,
+                    background: hov ? '#fff7ed' : '#f5f4f2',
+                    color: hov ? '#d97706' : '#9e9e9e',
+                    border: hov ? '1px solid #fed7aa' : '1px solid transparent',
+                    fontSize: 10, fontWeight: 600, whiteSpace: 'nowrap',
+                    cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >
+                  <i className="bi-clock-history" style={{ fontSize: 9 }} />
+                  SLA Extension
+                </button>
+              );
+            })()}
             {onHide && (
               <button
                 type="button"
@@ -1458,7 +1558,7 @@ function StatusPill({ label, count, active, onClick, color }) {
 // hint at the label tell the user the column is widenable before they ever
 // hover the edge — per the Workbench-title feedback (Chaitanya 2026-05-22)
 // asking for a clearer affordance.
-const ResizableSubjectTh = memo(function ResizableSubjectTh({ sortCol, sortDir, onSort, onResizeStart }) {
+const ResizableSubjectTh = memo(function ResizableSubjectTh({ sortCol, sortDir, onSort, onResizeStart, subjectLabel = 'Employee' }) {
   const active = sortCol === 'subject';
   const sortState = active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
   const [handleHov, setHandleHov] = useState(false);
@@ -1481,10 +1581,10 @@ const ResizableSubjectTh = memo(function ResizableSubjectTh({ sortCol, sortDir, 
         userSelect: 'none',
         position: 'relative',
       }}
-      aria-label={`Sort by Employee${active ? `, currently ${sortState}` : ''}. Drag the right edge to resize the column.`}
+      aria-label={`Sort by ${subjectLabel}${active ? `, currently ${sortState}` : ''}. Drag the right edge to resize the column.`}
     >
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-        Employee
+        {subjectLabel}
         <span aria-hidden="true" style={{ display: 'inline-flex', flexDirection: 'column', lineHeight: 1, gap: 0, fontSize: 7, marginTop: -1 }}>
           <i className="bi-caret-up-fill" style={{ color: active && sortDir === 'asc' ? '#1b1b1b' : '#ccc' }} />
           <i className="bi-caret-down-fill" style={{ color: active && sortDir === 'desc' ? '#1b1b1b' : '#ccc', marginTop: -3 }} />
@@ -1501,7 +1601,7 @@ const ResizableSubjectTh = memo(function ResizableSubjectTh({ sortCol, sortDir, 
       <div
         role="separator"
         aria-orientation="vertical"
-        aria-label="Resize Employee column"
+        aria-label={`Resize ${subjectLabel} column`}
         title="Drag to resize"
         onMouseDown={onResizeStart}
         onClick={(e) => e.stopPropagation()}

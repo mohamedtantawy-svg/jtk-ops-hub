@@ -44,12 +44,15 @@ export const ALL_VIEWS = [
   // reporting-tree scope clips what each user actually sees.
   'ooo',
   'urgent-assist',
-  // HRX Urgent Assist MOC Schedule — calendar surface for the daily
+  // Urgent Assist MOC Schedule — calendar surface for the daily
   // rotation across EMEA / NAM / APAC. Reached from the Urgent Assist
-  // top-right "View schedule" button; gated to managers via
-  // MANAGERIAL_ONLY_VIEWS so agents don't see the entry (the read
-  // endpoint is open to authed users but the surface is designed for
-  // managers maintaining the rotation — Duygu Cakalli 2026-05-14).
+  // top-right "MOC Schedule" button. 2026-05-22 (Sao Auste feedback):
+  // every department member should be able to access their own dept's
+  // schedule, not just managers — the read endpoint is already
+  // dept-scoped (Phase 11f `urgent_assist_schedule.org_node_id`) so
+  // every user naturally sees only their own dept's rotation. Edit
+  // rights are still gated inside the view via the existing
+  // `can_manage_settings` / dept-admin checks; read access is open.
   'urgent-assist-schedule',
   // 'notifications' is the full-page sibling of the bell dropdown
   // (src/components/views/NotificationsView.jsx). Open to every signed-in
@@ -81,7 +84,14 @@ export const ALL_VIEWS = [
 // `perms.canView('team')` now returns false everywhere (topnav, quick-
 // tile, and direct URL deep-link `?view=team`), matching the strict rule
 // "Agents must NEVER access the Team tab or Leaders Alerts".
-const MANAGERIAL_ONLY_VIEWS = new Set(['leader-alerts', 'team', 'lead-home', 'urgent-assist-schedule']);
+// 2026-05-22 — `urgent-assist-schedule` removed from this set per Sao
+// Auste feedback. Schedule reads are open to every authenticated user;
+// dept isolation (Phase 11f) keeps each member on their own dept's
+// rotation, and edit gates inside the view still restrict mutation
+// to admins / dept-admins. Leaving the entry here would have agents
+// (Sao's role) bounced back to the homepage when they click the
+// "MOC Schedule" button — the symptom reported in the bug.
+const MANAGERIAL_ONLY_VIEWS = new Set(['leader-alerts', 'team', 'lead-home']);
 
 export const ALL_ACTIONS = [
   // Task actions

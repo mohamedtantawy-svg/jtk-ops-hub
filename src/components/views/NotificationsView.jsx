@@ -20,7 +20,10 @@ import {
   NotificationGroupCard,
   pluralize,
 } from '../nav/NotificationPanel';
+import { useCurrentDept } from '../../hooks/useCurrentDept';
+import { getHubBrand } from '../../lib/hub-brand';
 
+// 2026-05-22: HR Hub label is dept-branded at render time below.
 const SURFACE_FILTERS = [
   { id: 'hr_hub',         label: 'HR Hub',         color: '#1f74b3' },
   { id: 'feedback',       label: 'Feedback',       color: '#7c3aed' },
@@ -36,6 +39,12 @@ export default function NotificationsView({
   markUnread,
   onNotifClick,
 }) {
+  const deptState = useCurrentDept();
+  const hubBrand = useMemo(() => getHubBrand(deptState.dept), [deptState.dept]);
+  const surfaceFilters = useMemo(
+    () => SURFACE_FILTERS.map(f => (f.id === 'hr_hub' ? { ...f, label: hubBrand.hubLabel } : f)),
+    [hubBrand],
+  );
   const [scope, setScope] = useState('all');           // 'all' | 'unread' | 'mentions'
   const [surface, setSurface] = useState(null);        // linkView id or null
   const [search, setSearch] = useState('');
@@ -184,7 +193,7 @@ export default function NotificationsView({
       {/* Filter bar — surface chips + search */}
       <div style={filterBar}>
         <div className="notif-surface-row" style={{ flex: '1 1 auto', minWidth: 0 }}>
-          {SURFACE_FILTERS.map(s => {
+          {surfaceFilters.map(s => {
             const active = surface === s.id;
             const cnt = surfaceCounts[s.id] || 0;
             return (

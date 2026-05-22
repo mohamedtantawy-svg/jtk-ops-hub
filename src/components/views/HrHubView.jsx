@@ -30,6 +30,8 @@ import ApproveSlaExtensionModal from '../modals/ApproveSlaExtensionModal';
 import DenySlaExtensionModal from '../modals/DenySlaExtensionModal';
 import { TASK_SOURCE_DISPLAY } from '../../utils/applySlaExtensions';
 import { PermissionsContext, IntegrationsContext } from '../../App';
+import { useCurrentDept } from '../../hooks/useCurrentDept';
+import { getHubBrand } from '../../lib/hub-brand';
 
 // Single source of truth for status visuals — same shape as Feedback's
 // STATUS_FILTERS so the four buttons feel identical across the two tabs.
@@ -121,6 +123,20 @@ function isManagerRole(user, perms) {
 export default function HrHubView({ user, onCreateHrHub }) {
   const perms = useContext(PermissionsContext);
   const integrations = useContext(IntegrationsContext);
+  // 2026-05-22 — dept-branded hub. Immigration users see "GIX Hub" in the
+  // hero + flow chips; Benefits users see "Benefits Hub"; HR Experience
+  // keeps "HR Hub". See src/lib/hub-brand.js.
+  const deptState = useCurrentDept();
+  const hubBrand = useMemo(() => getHubBrand(deptState.dept), [deptState.dept]);
+  // Brand-aware copy of FLOW_VISUALS — overrides the long-form label for
+  // the two live HR-ops flows so row tooltips + empty-state strings carry
+  // the dept's short name. The retired entries (escalation_zero, feedback)
+  // stay unchanged because they were renamed before the multi-tenant work.
+  const flowVisuals = useMemo(() => ({
+    ...FLOW_VISUALS,
+    hr_request:   { ...FLOW_VISUALS.hr_request,   label: hubBrand.requestLabel },
+    hr_reporting: { ...FLOW_VISUALS.hr_reporting, label: hubBrand.reportingLabel },
+  }), [hubBrand]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [denyModalReq, setDenyModalReq] = useState(null);
   // SLA Extension review modals — separate state so the approve flow can
@@ -445,9 +461,9 @@ export default function HrHubView({ user, onCreateHrHub }) {
             <i className="bi-broadcast-pin" style={{ fontSize: 20 }} />
           </div>
           <div style={{ minWidth: 0 }}>
-            <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: 'var(--text)' }}>HR Hub</h1>
+            <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: 'var(--text)' }}>{hubBrand.hubLabel}</h1>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-              HR Requests, Reporting, Hide Task and SLA Extension flows in one place.
+              {hubBrand.short} Requests, Reporting, Hide Task and SLA Extension flows in one place.
               {lastSyncAt && <> · synced {relTime(new Date(lastSyncAt).toISOString())}</>}
             </div>
           </div>
@@ -592,7 +608,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
             <i className={loading ? 'bi-arrow-clockwise spin' : 'bi-arrow-clockwise'} style={{ fontSize: 13, color: 'var(--text-muted)' }} />
           </button>
           {perms?.canManageHrHub && (
-            <button onClick={() => setSettingsOpen(true)} title="HR Hub Settings" style={iconBtn}>
+            <button onClick={() => setSettingsOpen(true)} title={`${hubBrand.hubLabel} Settings`} style={iconBtn}>
               <i className="bi-gear" style={{ fontSize: 13, color: 'var(--text-muted)' }} />
             </button>
           )}
@@ -632,6 +648,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
                 isAdmin={isAdmin}
                 onApprove={handleTaskApprove}
                 onDeny={handleTaskDeny}
+                flowVisuals={flowVisuals}
               />
             ))}
             {cursor && (
@@ -730,8 +747,8 @@ const HIDE_REASON_LABELS = {
 // status pill — visible only while the request is unresolved. The buttons
 // stop propagation so the row click (→ open detail) still works for the
 // rest of the row surface.
-function RequestRow({ item, active, onClick, viewerEmail, isManager, isAdmin, onApprove, onDeny }) {
-  const flow = FLOW_VISUALS[item.flow] || FLOW_VISUALS.hr_request;
+function RequestRow({ item, active, onClick, viewerEmail, isManager, isAdmin, onApprove, onDeny, flowVisuals = FLOW_VISUALS }) {
+  const flow = flowVisuals[item.flow] || flowVisuals.hr_request;
   const status = STATUS_BY_VALUE[item.status] || STATUS_BY_VALUE.new;
   const priColor = PRIORITY_DOT[item.priority] || PRIORITY_DOT.medium;
   const isHide = item.flow === 'hide_task_request';
@@ -847,6 +864,33 @@ function RequestRow({ item, active, onClick, viewerEmail, isManager, isAdmin, on
               <span style={{ color: 'var(--text-muted)' }}>→</span>{' '}
               <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{item.assigneeName}</span>
             </>
+          )}
+          {/* 2026-05-22 — OOO cover badge: surfaces that the row was
+              auto-routed away from a leave-taking assignee. The
+              reconciler flips it back automatically on their return,
+              so the badge is informational (not actionable). */}
+          {item.coverForAssigneeEmail && (
+            <span
+              title={`Auto-covered while ${item.coverForAssigneeName || item.coverForAssigneeEmail} is OOO. Will reassign back automatically.`}
+              style={{
+                marginLeft: 6,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 3,
+                padding: '1px 6px',
+                borderRadius: 999,
+                background: '#fff7ed',
+                color: '#9a3412',
+                border: '1px solid #fed7aa',
+                fontSize: 9,
+                fontWeight: 700,
+                letterSpacing: 0.2,
+                textTransform: 'uppercase',
+              }}
+            >
+              <i className="bi-airplane" style={{ fontSize: 8 }} />
+              OOO cover
+            </span>
           )}
         </span>
       </span>
@@ -1002,7 +1046,7 @@ function EmptyState({ scope, flowFilter, statusFilter }) {
     accent = '#7c3aed';
   } else if (statusFilter === 'new' && scope === 'mine') {
     title = "You're all caught up!";
-    body = `No new ${FLOW_VISUALS[flowFilter]?.label || 'requests'} on your plate. Try widening the flow filter.`;
+    body = `No new ${flowVisuals[flowFilter]?.label || 'requests'} on your plate. Try widening the flow filter.`;
     icon = 'bi-emoji-smile';
     accent = '#7c3aed';
   } else if (statusFilter) {
@@ -1013,7 +1057,7 @@ function EmptyState({ scope, flowFilter, statusFilter }) {
     title = 'Nothing on your plate yet';
     body = 'Hit New request in the header to submit one.';
   } else if (flowFilter !== 'all') {
-    title = `No ${FLOW_VISUALS[flowFilter]?.label || flowFilter} yet`;
+    title = `No ${flowVisuals[flowFilter]?.label || flowFilter} yet`;
     body = 'Switch the flow filter or hit New request to add one.';
   }
   return (

@@ -91,6 +91,28 @@ export async function GET(req) {
   }
 }
 
+// 2026-05-22 — DELETE wipes the JWT-user's snapshot wholesale. Provided
+// so that users contaminated by the pre-#747 legacy-bleed bug (Duygu's
+// case — "Random to do's appear under my to do's") can self-serve a
+// reset from the PersonalChecklist "Clear all" affordance. The auth gate
+// is the JWT email, same as PUT, so a user can only clear their OWN
+// snapshot — admins included. Returns 204 on success regardless of
+// whether a row existed.
+export async function DELETE(req) {
+  const user = getAuthUser(req);
+  if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  try {
+    await query(
+      `DELETE FROM personal_checklist_snapshots WHERE LOWER(user_email) = LOWER($1)`,
+      [user.email],
+    );
+    return new NextResponse(null, { status: 204 });
+  } catch (err) {
+    console.error('[personal-checklist DELETE]', err.message);
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
+  }
+}
+
 export async function PUT(req) {
   const user = getAuthUser(req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

@@ -1260,6 +1260,36 @@ CREATE INDEX IF NOT EXISTS idx_urgent_assist_creator        ON urgent_assist_req
 CREATE INDEX IF NOT EXISTS idx_urgent_assist_team_lead      ON urgent_assist_request(team_lead_email, status);
 CREATE INDEX IF NOT EXISTS idx_urgent_assist_country        ON urgent_assist_request(country, status);
 
+-- 2026-05-22 — Case Monitoring kind (Melissa Capicchiano bug + Mohamed
+-- ext). A "case monitoring" row is a different beast from a regular
+-- urgent assist: the requester wants the Manager On Call to WATCH a
+-- specific Deel task after hours and take a defined action if it
+-- triggers (countersign, escalate, deposit, etc.). It is logged on the
+-- same urgent_assist surface so the MOC has one queue to scan, but the
+-- row carries an explicit action_required field + renders distinctly.
+-- NOTE: never embed backticks inside this template — the whole
+-- SCHEMA_SQL is wrapped in a JS template literal and a stray backtick
+-- closes the string mid-stream. Caused the PR #809 build break — see
+-- the follow-up hotfix.
+ALTER TABLE urgent_assist_request
+  ADD COLUMN IF NOT EXISTS kind VARCHAR(24) NOT NULL DEFAULT 'urgent_assist';
+-- Guard the kind enum at the DB level so a future writer can't sneak in
+-- an unknown value. Defensive — the route handler already validates.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'urgent_assist_request_kind_check'
+  ) THEN
+    ALTER TABLE urgent_assist_request
+      ADD CONSTRAINT urgent_assist_request_kind_check
+      CHECK (kind IN ('urgent_assist', 'case_monitoring'));
+  END IF;
+END$$;
+ALTER TABLE urgent_assist_request
+  ADD COLUMN IF NOT EXISTS action_required TEXT;
+CREATE INDEX IF NOT EXISTS idx_urgent_assist_kind_status
+  ON urgent_assist_request(kind, status, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS urgent_assist_log (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   request_id   UUID NOT NULL REFERENCES urgent_assist_request(id) ON DELETE CASCADE,
@@ -1335,6 +1365,18 @@ ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS assignee_manually_set BOOLEA
 -- before this).
 CREATE INDEX IF NOT EXISTS idx_hr_hub_request_auto_assign
   ON hr_hub_request(flow, assignee_email) WHERE assignee_manually_set = FALSE;
+
+-- 2026-05-22 — OOO cover. When a new request resolves to an assignee
+-- who's currently out of office, we re-route to the assignee's manager
+-- (next non-OOO ancestor) and stamp the original here so the lazy
+-- reconciler (and the next manual reassign attempt) can flip the row
+-- back to the original once they return. NULL means "no cover in
+-- effect" — the common case. See src/lib/hr-hub-ooo.js for the rules.
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS cover_for_assignee_email VARCHAR(255);
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS cover_for_assignee_name  VARCHAR(255);
+CREATE INDEX IF NOT EXISTS idx_hr_hub_request_cover_for
+  ON hr_hub_request(LOWER(cover_for_assignee_email))
+  WHERE cover_for_assignee_email IS NOT NULL;
 
 -- Phase 2 — the active hide list. Manager-approved entries land here and
 -- every queue's render path checks (task_source, task_id) against this

@@ -121,7 +121,7 @@ function StatusSelect({ value, onChange, disabled }) {
   );
 }
 
-export default function UrgentAssistView({ user, onCreate, managerOnCall, onChangeManagerOnCall, onOpenSchedule }) {
+export default function UrgentAssistView({ user, onCreate, onCreateCaseMonitoring, managerOnCall, onChangeManagerOnCall, onOpenSchedule }) {
   const perms = useContext(PermissionsContext);
   const isAdmin = isAdminRole(user) || perms?.dataScope === 'all_tasks';
   const isManager = isManagerRole(user) || perms?.dataScope === 'team_tasks' || perms?.dataScope === 'regional_tasks';
@@ -361,6 +361,29 @@ export default function UrgentAssistView({ user, onCreate, managerOnCall, onChan
               MOC Schedule
             </button>
           )}
+          {/* 2026-05-22 — Case Monitoring CTA. Distinct purple/eye treatment
+              so it reads as "watch this" rather than "log an urgent" —
+              matches the row styling on the table below + the dropdown
+              entry under the top "+" Quick Create. */}
+          {onCreateCaseMonitoring && (
+            <button
+              type="button"
+              onClick={onCreateCaseMonitoring}
+              aria-label="Add a case for the Manager On Call to monitor after hours"
+              title="Ask the MOC to watch a task after hours and take a defined action if it triggers"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '8px 14px', borderRadius: 8,
+                background: '#7c3aed', color: 'white',
+                fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                border: 'none',
+                boxShadow: '0 1px 4px rgba(124,58,237,0.25)',
+              }}
+            >
+              <i className="bi-eye-fill" style={{ fontSize: 13 }} />
+              Add Case to Monitor
+            </button>
+          )}
           {onCreate && (
             <button
               type="button"
@@ -569,36 +592,89 @@ function UrgentRow({ row, managerOnCall, onStatusChange, onDelete }) {
     || managerOnCall?.email
     || '';
 
+  // 2026-05-22 — case_monitoring rows render visually distinct so the
+  // MOC spots them at a glance in the unified queue. Purple left-border
+  // accent (cell-level so it survives the row-hover tint), purple-tinted
+  // background, eye icon in the subject cell, "MONITORING" chip in the
+  // Type column. Regular urgent_assist rows keep their existing look.
+  const isMonitoring = row.kind === 'case_monitoring';
+  const monitoringBg = hov ? '#f5efff' : '#faf6ff';
   return (
     <tr
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
         borderBottom: '1px solid #f0efed',
-        background: hov ? '#faf8ff' : 'white',
+        background: isMonitoring ? monitoringBg : (hov ? '#faf8ff' : 'white'),
         transition: 'background .1s',
       }}
     >
-      <td style={{ ...tdStyle, textAlign: 'left', fontWeight: 600, color: 'var(--text)', maxWidth: 320, paddingLeft: 24 }}>
+      <td style={{
+        ...tdStyle,
+        textAlign: 'left', fontWeight: 600, color: 'var(--text)',
+        maxWidth: 320, paddingLeft: isMonitoring ? 20 : 24,
+        // Left rail accent — only on the first cell so it draws a clean
+        // vertical line down the whole monitoring row without doubling
+        // up on the table border.
+        borderLeft: isMonitoring ? '4px solid #7c3aed' : '4px solid transparent',
+      }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <i
-            className={row.isManual ? 'bi-pencil-square' : 'bi-grid-3x3-gap-fill'}
-            title={row.isManual ? 'Manually created' : 'From Workbench'}
-            style={{ fontSize: 12, color: row.isManual ? '#7c3aed' : '#0369a1', flexShrink: 0 }}
+            className={isMonitoring
+              ? 'bi-eye-fill'
+              : (row.isManual ? 'bi-pencil-square' : 'bi-grid-3x3-gap-fill')}
+            title={isMonitoring
+              ? 'Case Monitoring — MOC watch request'
+              : (row.isManual ? 'Manually created' : 'From Workbench')}
+            style={{ fontSize: 12, color: isMonitoring ? '#7c3aed' : (row.isManual ? '#7c3aed' : '#0369a1'), flexShrink: 0 }}
           />
           <span title={row.subject} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>
             {row.subject}
           </span>
         </div>
+        {/* 2026-05-22 — Action Required sub-line on monitoring rows so the
+            MOC can read the playbook without opening a detail drawer.
+            Truncated to the row width via ellipsis; full text on hover
+            via the title attribute. */}
+        {isMonitoring && row.actionRequired && (
+          <div
+            title={row.actionRequired}
+            style={{
+              marginTop: 4, marginLeft: 18,
+              fontSize: 11, color: '#7c3aed', fontWeight: 600,
+              maxWidth: 302, whiteSpace: 'nowrap',
+              overflow: 'hidden', textOverflow: 'ellipsis',
+              display: 'flex', alignItems: 'center', gap: 4,
+            }}
+          >
+            <i className="bi-arrow-right-circle-fill" style={{ fontSize: 9 }} />
+            <span>If triggered: {row.actionRequired}</span>
+          </div>
+        )}
       </td>
       {/* 2026-05-21 audit F41: type taxonomy fragmented as
           "Urgent Assist" / "HRX Urgent Assist" / "Expedite Request (HRX)".
           Collapse the display: canonical chip says "Urgent Assist" with a
           sub-type chip ("Manual" / "Workbench" / "Expedite") so origin is
           still visible without three different parent labels. Original
-          string surfaced via `title=` so reporting + grep still work. */}
+          string surfaced via `title=` so reporting + grep still work.
+          2026-05-22 — case_monitoring rows replace the dual-chip with a
+          single bold MONITORING chip so the MOC reads the row's intent
+          instantly. */}
       <td style={{ ...tdStyle, fontSize: 11, color: 'var(--text-secondary)' }} title={row.requestType}>
-        {(() => {
+        {isMonitoring ? (
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            padding: '3px 10px', borderRadius: 128,
+            background: '#7c3aed', color: 'white',
+            fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
+            textTransform: 'uppercase', whiteSpace: 'nowrap',
+            boxShadow: '0 1px 3px rgba(124,58,237,0.25)',
+          }}>
+            <i className="bi-eye-fill" style={{ fontSize: 9 }} />
+            Monitoring
+          </span>
+        ) : (() => {
           const raw = String(row.requestType || '');
           const isExpedite = /expedite/i.test(raw);
           const subType = isExpedite

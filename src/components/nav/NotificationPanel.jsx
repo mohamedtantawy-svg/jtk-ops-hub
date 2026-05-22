@@ -22,6 +22,8 @@
 
 import { useMemo, useState } from 'react';
 import Avatar from '../ui/Avatar';
+import { useCurrentDept } from '../../hooks/useCurrentDept';
+import { getHubBrand } from '../../lib/hub-brand';
 
 export const VIEW_LABELS = {
   hr_hub: 'HR Hub',
@@ -335,7 +337,12 @@ export default function NotificationPanel({
 export function NotificationGroupCard({ group, onClick, onMarkRead, onMarkUnread, canMarkRead, canMarkUnread }) {
   const [hov, setHov] = useState(false);
   const m = metaFor(group.latestType || 'info');
-  const surfaceLabel = VIEW_LABELS[group.linkView] || '';
+  // 2026-05-22 — dept-branded "HR Hub" source pill on each notification card.
+  const deptState = useCurrentDept();
+  const hubBrand = useMemo(() => getHubBrand(deptState.dept), [deptState.dept]);
+  const surfaceLabel = group.linkView === 'hr_hub'
+    ? hubBrand.hubLabel
+    : (VIEW_LABELS[group.linkView] || '');
   const summaryChips = useMemo(() => {
     const out = [];
     const counts = group.typeCounts || {};

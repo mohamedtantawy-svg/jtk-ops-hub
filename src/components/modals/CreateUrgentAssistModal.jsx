@@ -64,18 +64,56 @@ function isValidUrl(value) {
   return /^https?:\/\/\S+$/i.test(value.trim());
 }
 
-export default function CreateUrgentAssistModal({ onClose, onCreated, currentUser }) {
+// 2026-05-22 — Case Monitoring is a different flow from a regular
+// urgent assist: the requester asks the Manager On Call to WATCH a
+// specific Deel task after hours and take a defined action if it
+// triggers. Visual treatment is purple/eye-tinted instead of the
+// regular red exclamation so the MOC can spot monitoring rows at a
+// glance on the unified queue.
+const KIND_META = {
+  urgent_assist: {
+    icon: 'bi-exclamation-octagon-fill',
+    iconBg: '#fef2f2',
+    iconColor: '#d42d35',
+    titleText: 'New Urgent Assist',
+    subText: 'Logs a manual urgent-assist request — 6h SLA from now.',
+    submitLabel: 'Create Urgent Assist',
+    defaultPriority: 'high',
+    requiresLink: false,
+    requiresActionRequired: false,
+  },
+  case_monitoring: {
+    icon: 'bi-eye-fill',
+    iconBg: '#f3e8ff',
+    iconColor: '#7c3aed',
+    titleText: 'Add Case to Monitor',
+    subText: "After-hours watch request for the Manager On Call. They'll monitor the task and take the action you describe if it triggers.",
+    submitLabel: 'Add to Monitor',
+    defaultPriority: 'critical',
+    requiresLink: true,
+    requiresActionRequired: true,
+  },
+};
+
+export default function CreateUrgentAssistModal({ onClose, onCreated, currentUser, initialKind = 'urgent_assist' }) {
   const backdropRef = useRef(null);
   const firstFieldRef = useRef(null);
 
+  const kind = initialKind === 'case_monitoring' ? 'case_monitoring' : 'urgent_assist';
+  const meta = KIND_META[kind];
+  const isCaseMonitoring = kind === 'case_monitoring';
+
   const [subject, setSubject] = useState('');
-  const [requestType, setRequestType] = useState(REQUEST_TYPES[0]);
+  const [requestType, setRequestType] = useState(isCaseMonitoring ? 'Case Monitoring' : REQUEST_TYPES[0]);
   const [country, setCountry] = useState('');
   const [assigneeEmail, setAssigneeEmail] = useState('');
   const [status, setStatus] = useState('new');
-  const [priority, setPriority] = useState('high');
+  const [priority, setPriority] = useState(meta.defaultPriority);
   const [linkUrl, setLinkUrl] = useState('');
   const [description, setDescription] = useState('');
+  // 2026-05-22 — case_monitoring only. The MOC's playbook ("if X happens,
+  // do Y"). Required on submit when kind === 'case_monitoring'.
+  const [actionRequired, setActionRequired] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
 
@@ -108,7 +146,9 @@ export default function CreateUrgentAssistModal({ onClose, onCreated, currentUse
 
   const subjectOk = subject.trim().length > 0;
   const linkOk = isValidUrl(linkUrl.trim());
-  const canSubmit = subjectOk && linkOk && !submitting;
+  const linkRequiredOk = !meta.requiresLink || (linkUrl.trim().length > 0 && linkOk);
+  const actionRequiredOk = !meta.requiresActionRequired || actionRequired.trim().length > 0;
+  const canSubmit = subjectOk && linkOk && linkRequiredOk && actionRequiredOk && !submitting;
 
   const handleSubmit = async (e) => {
     e?.preventDefault?.();
@@ -118,6 +158,7 @@ export default function CreateUrgentAssistModal({ onClose, onCreated, currentUse
     try {
       const assignee = MEMBERS_BY_EMAIL[assigneeEmail.toLowerCase()] || null;
       const payload = {
+        kind,
         subject: subject.trim(),
         requestType,
         country: country || null,
@@ -125,6 +166,7 @@ export default function CreateUrgentAssistModal({ onClose, onCreated, currentUse
         assigneeName: assignee?.name || null,
         linkUrl: linkUrl.trim() || null,
         description: description.trim() || null,
+        actionRequired: isCaseMonitoring ? actionRequired.trim() : null,
         status,
         priority,
       };
@@ -132,7 +174,7 @@ export default function CreateUrgentAssistModal({ onClose, onCreated, currentUse
       onCreated?.(created);
       onClose?.();
     } catch (err) {
-      setError(err?.message || 'Failed to create urgent assist');
+      setError(err?.message || `Failed to create ${isCaseMonitoring ? 'case monitoring' : 'urgent assist'}`);
       setSubmitting(false);
     }
   };
@@ -154,14 +196,18 @@ export default function CreateUrgentAssistModal({ onClose, onCreated, currentUse
         maxHeight: '90vh', overflowY: 'auto',
         boxShadow: '0 8px 40px rgba(0,0,0,0.18)',
       }}>
-        {/* Header */}
+        {/* Header — branded per kind (red exclamation for urgent_assist,
+            purple eye for case_monitoring). The kind is fixed for the
+            lifetime of the modal: callers open it with `initialKind` and
+            the user picks the kind ANTE via the top-nav Quick Create or
+            the Urgent Assist view's dual-buttons row. */}
         <div style={{ padding: '18px 20px', borderBottom: '1px solid #f0efed', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <i className="bi-exclamation-octagon-fill" style={{ fontSize: 18, color: '#d42d35' }} />
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: meta.iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <i className={meta.icon} style={{ fontSize: 18, color: meta.iconColor }} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div id="urgent-assist-title" style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>New Urgent Assist</div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Logs a manual urgent-assist request — 6h SLA from now.</div>
+            <div id="urgent-assist-title" style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>{meta.titleText}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{meta.subText}</div>
           </div>
           <button
             type="button"
@@ -229,13 +275,14 @@ export default function CreateUrgentAssistModal({ onClose, onCreated, currentUse
               </select>
             </div>
             <div>
-              <label htmlFor="ua-link" style={labelStyle}>Link to Task</label>
+              <label htmlFor="ua-link" style={labelStyle}>{meta.requiresLink ? 'Link to Task *' : 'Link to Task'}</label>
               <input
                 id="ua-link"
                 type="url"
                 value={linkUrl}
                 onChange={e => setLinkUrl(e.target.value)}
                 placeholder="https://…"
+                required={meta.requiresLink}
                 style={{ ...inputStyle, borderColor: linkUrl && !linkOk ? '#d42d35' : '#e8e8e8' }}
               />
               {linkUrl && !linkOk && (
@@ -247,17 +294,46 @@ export default function CreateUrgentAssistModal({ onClose, onCreated, currentUse
           </div>
 
           <div>
-            <label htmlFor="ua-desc" style={labelStyle}>Description</label>
+            <label htmlFor="ua-desc" style={labelStyle}>
+              {isCaseMonitoring ? 'What to watch out for' : 'Description'}
+            </label>
             <textarea
               id="ua-desc"
               value={description}
               onChange={e => setDescription(e.target.value)}
               maxLength={20000}
-              placeholder="Optional context, linked tickets, what's blocking…"
-              rows={4}
+              placeholder={isCaseMonitoring
+                ? "Describe the case the MOC should monitor — current state, triggers to watch for, any deadlines."
+                : "Optional context, linked tickets, what's blocking…"}
+              rows={isCaseMonitoring ? 5 : 4}
               style={{ ...inputStyle, resize: 'vertical' }}
             />
           </div>
+
+          {/* 2026-05-22 — Case Monitoring only. The MOC's playbook. */}
+          {isCaseMonitoring && (
+            <div>
+              <label htmlFor="ua-action" style={labelStyle}>Action required *</label>
+              <textarea
+                id="ua-action"
+                value={actionRequired}
+                onChange={e => setActionRequired(e.target.value)}
+                maxLength={20000}
+                placeholder="If the case triggers, the MOC should… (countersign, escalate to TL on call, deposit, cancel offboarding, etc.)"
+                rows={3}
+                required
+                style={{
+                  ...inputStyle,
+                  resize: 'vertical',
+                  borderColor: actionRequiredOk ? '#e8e8e8' : '#fde68a',
+                  background: actionRequiredOk ? 'var(--surface)' : '#fffbeb',
+                }}
+              />
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                Be explicit. The MOC will read this verbatim when the case fires after hours.
+              </div>
+            </div>
+          )}
 
           {error && (
             <div role="alert" style={{ padding: '8px 12px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, color: '#991b1b', fontSize: 12 }}>
@@ -278,13 +354,13 @@ export default function CreateUrgentAssistModal({ onClose, onCreated, currentUse
               disabled={!canSubmit}
               style={{
                 padding: '9px 18px', borderRadius: 10, border: 'none',
-                background: canSubmit ? '#1b1b1b' : '#9e9e9e',
+                background: canSubmit ? (isCaseMonitoring ? '#7c3aed' : '#1b1b1b') : '#9e9e9e',
                 color: 'white', fontSize: 13, fontWeight: 600,
                 cursor: canSubmit ? 'pointer' : 'not-allowed',
                 fontFamily: 'inherit',
               }}
             >
-              {submitting ? 'Creating…' : 'Create Urgent Assist'}
+              {submitting ? 'Creating…' : meta.submitLabel}
             </button>
           </div>
         </form>

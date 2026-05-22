@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listSlaExtensions } from '../services/slaExtensionApi';
-import { buildExtensionMap } from '../utils/applySlaExtensions';
+import { buildExtensionMap, buildPendingExtensionMap } from '../utils/applySlaExtensions';
 
 const CACHE_KEY = 'ops_hub_sla_extensions_cache';
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -31,9 +31,9 @@ function readCache() {
   } catch { return null; }
 }
 
-function writeCache(items) {
+function writeCache(items, pending) {
   if (typeof localStorage === 'undefined') return;
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ items, ts: Date.now() })); }
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ items, pending, ts: Date.now() })); }
   catch {}
 }
 
@@ -52,6 +52,11 @@ function getChannel() {
 export function useSlaExtensions(enabled = true) {
   const cached = readCache();
   const [items, setItems] = useState(() => cached?.items || []);
+  // 2026-05-22 — pending list mirrors items but covers in-review
+  // sla_extension_request hr_hub_request rows. Drives the row-level
+  // "extension requested" badge + the action-button lockout so users
+  // don't keep clicking and getting 409s.
+  const [pending, setPending] = useState(() => Array.isArray(cached?.pending) ? cached.pending : []);
   const [loading, setLoading] = useState(() => !cached);
   const [error, setError] = useState(null);
 
@@ -70,11 +75,13 @@ export function useSlaExtensions(enabled = true) {
         const res = await listSlaExtensions();
         if (!mountedRef.current) return null;
         const nextItems = Array.isArray(res?.items) ? res.items : [];
+        const nextPending = Array.isArray(res?.pending) ? res.pending : [];
         setItems(nextItems);
+        setPending(nextPending);
         setError(null);
-        writeCache(nextItems);
+        writeCache(nextItems, nextPending);
         const ch = getChannel();
-        if (ch) { try { ch.postMessage({ items: nextItems, ts: Date.now() }); } catch {} }
+        if (ch) { try { ch.postMessage({ items: nextItems, pending: nextPending, ts: Date.now() }); } catch {} }
         return nextItems;
       } catch (err) {
         if (!mountedRef.current) return null;
@@ -114,6 +121,7 @@ export function useSlaExtensions(enabled = true) {
     const handler = (e) => {
       if (!e?.data || !Array.isArray(e.data.items)) return;
       setItems(e.data.items);
+      if (Array.isArray(e.data.pending)) setPending(e.data.pending);
     };
     ch.addEventListener('message', handler);
     return () => ch.removeEventListener('message', handler);
@@ -122,12 +130,15 @@ export function useSlaExtensions(enabled = true) {
   // Memo the Map so referential equality lets downstream consumers skip
   // re-applying the override unless the list actually changed.
   const map = useMemo(() => buildExtensionMap(items), [items]);
+  const pendingMap = useMemo(() => buildPendingExtensionMap(pending), [pending]);
 
   return useMemo(() => ({
     items,
     map,
+    pending,
+    pendingMap,
     loading,
     error,
     refresh: () => refresh(),
-  }), [items, map, loading, error, refresh]);
+  }), [items, map, pending, pendingMap, loading, error, refresh]);
 }
