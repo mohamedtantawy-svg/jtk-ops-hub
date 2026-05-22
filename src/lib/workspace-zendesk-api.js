@@ -37,16 +37,33 @@ const WORKSPACE_CONFIG = {
   },
 };
 
+// 2026-05-22 (evening): the `Zendesk_API_Payroll_GIX` env var is
+// mixed-case. Some Nexus / K8s configmap deployments normalize env
+// var names to uppercase at storage time, which would make the
+// literal lookup miss. Try the literal name first, then ALL_CAPS,
+// then lowercase before giving up. Matches the resilient lookup in
+// dept-integrations.js so both Zendesk codepaths (workspace + dept)
+// see the same env var under any casing.
+function readEnvResilient(name) {
+  if (!name) return '';
+  const tried = [name, name.toUpperCase(), name.toLowerCase()];
+  for (const v of tried) {
+    const value = process.env[v];
+    if (value) return value;
+  }
+  return '';
+}
+
 function readToken(workspaceId) {
   const cfg = WORKSPACE_CONFIG[workspaceId];
   if (!cfg) return '';
-  return process.env[cfg.tokenEnv] || '';
+  return readEnvResilient(cfg.tokenEnv);
 }
 
 export function getWorkspaceZendeskGroup(workspaceId) {
   const cfg = WORKSPACE_CONFIG[workspaceId];
   if (!cfg) return '';
-  return process.env[cfg.groupEnv] || cfg.defaultGroup;
+  return readEnvResilient(cfg.groupEnv) || cfg.defaultGroup;
 }
 
 export function isWorkspaceZendeskConfigured(workspaceId) {

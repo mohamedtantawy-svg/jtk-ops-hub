@@ -210,7 +210,7 @@ export function visibleDeelSourcesFor(deptSlug) {
 export function resolveWorkbenchConfig(deptSlug) {
   const cfg = getDeptIntegrations(deptSlug);
   if (!cfg?.workbench?.tokenEnvVar) return null;
-  const token = process.env[cfg.workbench.tokenEnvVar] || '';
+  const token = readEnvResilient(cfg.workbench.tokenEnvVar);
   if (!token) return null;
   return {
     token,
@@ -237,7 +237,7 @@ export function resolveWorkbenchConfig(deptSlug) {
 export function resolveJiraConfig(deptSlug) {
   const cfg = getDeptIntegrations(deptSlug);
   if (!cfg?.jira?.tokenEnvVar) return null;
-  const token = process.env[cfg.jira.tokenEnvVar] || '';
+  const token = readEnvResilient(cfg.jira.tokenEnvVar);
   if (!token) return null;
   return {
     token,
@@ -279,6 +279,32 @@ export function getWorkbenchTeamExclusionForHrx() {
 }
 
 /**
+ * Read an env var resilient to common Nexus / K8s casing variants. Some
+ * platforms normalize env var names to uppercase on storage; Node's
+ * `process.env` is strictly case-sensitive on Linux pods. If our literal
+ * name happens to be mixed-case (e.g. `Zendesk_API_Payroll_GIX`), an
+ * operator-typed all-caps Nexus entry would never be visible to the
+ * code. Try the literal name first; if empty, try ALL_CAPS and
+ * lowercase variants so a single typo doesn't take down a whole dept.
+ *
+ * 2026-05-22 (evening): Mohamed confirmed Zendesk_API_Payroll_GIX was
+ * added in Nexus prod twice; new pod at 10:08 still reported
+ * "not_configured" from two independent codepaths. The mixed-case
+ * literal is the most likely culprit — covering the casing variants
+ * here is defence in depth so the wiring doesn't depend on operators
+ * matching the exact mixed-case spelling.
+ */
+export function readEnvResilient(name) {
+  if (!name) return '';
+  const tried = [name, name.toUpperCase(), name.toLowerCase()];
+  for (const variant of tried) {
+    const v = process.env[variant];
+    if (v) return v;
+  }
+  return '';
+}
+
+/**
  * Zendesk readout. Returns null when not configured for this dept.
  *
  * `groupId` is preferred (Zendesk Search `group_id:<id>` — stable across
@@ -288,9 +314,9 @@ export function getWorkbenchTeamExclusionForHrx() {
 export function resolveZendeskConfig(deptSlug) {
   const cfg = getDeptIntegrations(deptSlug);
   if (!cfg?.zendesk?.tokenEnvVar) return null;
-  const token = process.env[cfg.zendesk.tokenEnvVar] || '';
+  const token = readEnvResilient(cfg.zendesk.tokenEnvVar);
   if (!token) return null;
-  const groupId = (cfg.zendesk.groupIdEnvVar && process.env[cfg.zendesk.groupIdEnvVar])
+  const groupId = (cfg.zendesk.groupIdEnvVar && readEnvResilient(cfg.zendesk.groupIdEnvVar))
     || cfg.zendesk.defaultGroupId
     || null;
   return {
@@ -298,7 +324,7 @@ export function resolveZendeskConfig(deptSlug) {
     subdomain: process.env.ZENDESK_SUBDOMAIN || '',
     email: process.env.ZENDESK_EMAIL || '',
     groupId: groupId ? String(groupId) : null,
-    group: process.env[cfg.zendesk.groupEnvVar] || cfg.zendesk.defaultGroup,
+    group: readEnvResilient(cfg.zendesk.groupEnvVar) || cfg.zendesk.defaultGroup,
     tokenSource: cfg.zendesk.tokenEnvVar,
   };
 }
