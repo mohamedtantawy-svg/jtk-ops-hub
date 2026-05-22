@@ -1264,9 +1264,13 @@ CREATE INDEX IF NOT EXISTS idx_urgent_assist_country        ON urgent_assist_req
 -- ext). A "case monitoring" row is a different beast from a regular
 -- urgent assist: the requester wants the Manager On Call to WATCH a
 -- specific Deel task after hours and take a defined action if it
--- triggers (countersign, escalate, deposit, etc.). It's logged on the
+-- triggers (countersign, escalate, deposit, etc.). It is logged on the
 -- same urgent_assist surface so the MOC has one queue to scan, but the
--- row carries an explicit `action_required` field + renders distinctly.
+-- row carries an explicit action_required field + renders distinctly.
+-- NOTE: never embed backticks inside this template — the whole
+-- SCHEMA_SQL is wrapped in a JS template literal and a stray backtick
+-- closes the string mid-stream. Caused the PR #809 build break — see
+-- the follow-up hotfix.
 ALTER TABLE urgent_assist_request
   ADD COLUMN IF NOT EXISTS kind VARCHAR(24) NOT NULL DEFAULT 'urgent_assist';
 -- Guard the kind enum at the DB level so a future writer can't sneak in
