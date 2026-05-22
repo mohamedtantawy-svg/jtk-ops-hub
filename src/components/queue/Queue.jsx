@@ -461,7 +461,16 @@ const Queue = ({ user, tasks, subFilter }) => {
   // already derives per-row SLA from (dueDate - createdAt), so the
   // queueSla flat policy is intentionally NOT passed — each task carries
   // its own deadline.
-  const immigrationTaskRowsAll  = useMemo(() => normalizeImmigrationTasks(immigrationTasksData.tasks || []).filter(r => !isHiddenKey('immigration_tasks', r.id)), [immigrationTasksData.tasks, isHiddenKey]);
+  // 2026-05-22 — Immigration Tasks rows arrive PRE-NORMALISED from
+  // /api/v1/integrations/deel/immigration-tasks (the route calls
+  // normalizeImmigrationTasks server-side before scoping by assigneeEmail).
+  // Re-running the normaliser here was destroying every field that came
+  // from a nested object (caseData / assignee) because the second pass
+  // would read `t.caseData?.applicant?.name` on a row that no longer has
+  // caseData, falling back to '' for subject / country / assignee /
+  // taskUrl. Symptom: all 300 GIX rows rendered "Immigration Task" +
+  // "--" + "Unassigned" + no Open link. Fix is to use the rows as-is.
+  const immigrationTaskRowsAll  = useMemo(() => (immigrationTasksData.tasks || []).filter(r => !isHiddenKey('immigration_tasks', r.id)), [immigrationTasksData.tasks, isHiddenKey]);
 
   const isAdmin = isAdminUser(user);
   const isLead = perms?.dataScope === 'team_tasks';
@@ -1490,6 +1499,14 @@ const Queue = ({ user, tasks, subFilter }) => {
             hideContract
             dateField="dueDate"
             dateLabel="Due Date"
+            /* 2026-05-22 — Pablo Gonzalez ask: primary column carries the
+               task name ("Document upload" / "Form filling" / "Quote
+               approval" — what admin calls "Task type"). Secondary
+               column carries "Applicant · Case" so triage sees who/what
+               the task is for. Both header labels updated to match the
+               data the column actually shows. */
+            subjectLabel="Task"
+            clientLabel="Applicant · Case"
             onHide={(row) => setHideModalTask({ source: 'immigration_tasks', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onSlaExtension={(row) => setSlaExtensionModalTask({ source: 'immigration_tasks', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'immigration_tasks', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}

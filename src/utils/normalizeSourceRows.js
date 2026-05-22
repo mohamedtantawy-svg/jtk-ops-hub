@@ -836,13 +836,16 @@ export function normalizeImmigrationTasks(items = []) {
     const caseData = t?.caseData || {};
     const applicantName = caseData.applicant?.name || '';
     const caseName = caseData.name || '';
-    // Subject combines applicant + case so the operator sees both axes
-    // in one glance (mirrors the upstream UI's "Immigration case" cell
-    // which shows case name + applicant on two lines — we pack into one
-    // with a separator since SourceTable's subject is single-line).
-    const subject = applicantName && caseName
-      ? `${applicantName} · ${caseName}`
-      : (applicantName || caseName || 'Immigration Task');
+    // 2026-05-22 — Pablo Gonzalez (Immigration team) asked for the
+    // primary column to show the task name (e.g. "Document upload" /
+    // "Form filling" / "Quote approval") which is what the admin UI
+    // labels "Task type". The applicant + case combo moves into the
+    // secondary "client" slot (ORGANIZATION column in the panel) so
+    // triagers still see who/what the task is for in one row, and the
+    // organization name (Deel HQ / Saunders / etc.) falls back when
+    // applicant/case are missing.
+    const taskName = prettifyImmigrationTaskName(t);
+    const subject = taskName;
 
     // Per-row SLA window: createdAt → dueDate. Min 1d so a degenerate
     // zero-window row doesn't make every task look "at risk" by
@@ -883,12 +886,24 @@ export function normalizeImmigrationTasks(items = []) {
       typeLabel: prettifyImmigrationTaskName(t),
       function: prettifyImmigrationTaskName(t),
       country: caseData.country || '',
-      assignee: t?.assignee?.name || '',
+      // 2026-05-22 — assignee fallback chain. The upstream sometimes
+      // populates `t.assignee` and sometimes only `caseData.activeAgent`
+      // (string name) + `caseData.activeAgentId` (profile id). Without
+      // the fallback the column read "Unassigned" for rows where the
+      // case had an active agent but the task wasn't directly
+      // assignee-stamped. assigneeEmail can't be derived from the case
+      // activeAgent (no email is exposed there) so it stays empty in
+      // that branch — TL/RM scope falls through to country-fallback
+      // visibility per _scopeByAssignedOrUnassigned.
+      assignee: t?.assignee?.name || caseData.activeAgent || '',
       assigneeEmail: (t?.assignee?.email || '').toLowerCase(),
-      // Client column shows the customer organisation when present
-      // (e.g. "Deel HQ", "Cognite") — same column offboarding/amendments
-      // use for the customer.
-      clientName: caseData.organization?.name || '',
+      // 2026-05-22 — `clientName` populates the panel's secondary cell
+      // (rendered as ORGANIZATION). Triage needs the applicant + case
+      // before the customer org, so prefer that combo and fall back to
+      // the organisation name when applicant data is missing.
+      clientName: (applicantName && caseName)
+        ? `${applicantName} · ${caseName}`
+        : (applicantName || caseName || caseData.organization?.name || ''),
       // Surface the case name + ID + URL separately so a follow-up can
       // render a dedicated "Immigration case" link cell without
       // re-parsing the subject.

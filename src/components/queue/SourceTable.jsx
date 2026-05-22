@@ -233,6 +233,19 @@ export default function SourceTable({
   onBulkEscalate,            // (rows[]) => void — bulk variant; enables checkboxes + bulk-bar Escalate button
   onBulkReassign,            // (rows[]) => void — bulk variant; enables checkboxes + bulk-bar Reassign button
   notesApi = null,           // useTaskNotes() return — enables the Note column when present
+  subjectLabel = 'Employee', // 2026-05-22 — header label for the primary
+                              // (resizable) column. Defaults to 'Employee'
+                              // for every queue that lists workers; the
+                              // Immigration Tasks panel overrides this to
+                              // 'Task' since the column carries the task
+                              // name ("Document upload" etc.) not a person.
+  clientLabel = 'Organization', // 2026-05-22 — header label for the
+                              // secondary "client" column (shown when
+                              // showClient is true). Immigration Tasks
+                              // panel overrides to 'Applicant · Case'
+                              // because the column now carries triage
+                              // info ("Pearce Dolan · Right to Work")
+                              // instead of the customer org name.
 }) {
   // 2026-05-22 — dept-branded escalation button. The "Escalate to HR Hub"
   // tooltip becomes "Escalate to GIX Hub" / "Escalate to Benefits Hub" / …
@@ -764,8 +777,9 @@ export default function SourceTable({
                   sortDir={sortDir}
                   onSort={toggleSort}
                   onResizeStart={handleSubjectResizeStart}
+                  subjectLabel={subjectLabel}
                 />
-                {showClient && <SortTh col="clientName" label="Organization" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, textAlign: 'left', minWidth: 120, maxWidth: 150 }} />}
+                {showClient && <SortTh col="clientName" label={clientLabel} sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, textAlign: 'left', minWidth: 120, maxWidth: 150 }} />}
                 {showType && <SortTh col="typeLabel" label="Type" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 90 }} />}
                 <SortTh col="country"   label="Country"    sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 80 }} />
                 <SortTh col="assignee"  label="Assignee"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 90 }} />
@@ -1502,7 +1516,7 @@ function StatusPill({ label, count, active, onClick, color }) {
 // hint at the label tell the user the column is widenable before they ever
 // hover the edge — per the Workbench-title feedback (Chaitanya 2026-05-22)
 // asking for a clearer affordance.
-const ResizableSubjectTh = memo(function ResizableSubjectTh({ sortCol, sortDir, onSort, onResizeStart }) {
+const ResizableSubjectTh = memo(function ResizableSubjectTh({ sortCol, sortDir, onSort, onResizeStart, subjectLabel = 'Employee' }) {
   const active = sortCol === 'subject';
   const sortState = active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none';
   const [handleHov, setHandleHov] = useState(false);
@@ -1525,10 +1539,10 @@ const ResizableSubjectTh = memo(function ResizableSubjectTh({ sortCol, sortDir, 
         userSelect: 'none',
         position: 'relative',
       }}
-      aria-label={`Sort by Employee${active ? `, currently ${sortState}` : ''}. Drag the right edge to resize the column.`}
+      aria-label={`Sort by ${subjectLabel}${active ? `, currently ${sortState}` : ''}. Drag the right edge to resize the column.`}
     >
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-        Employee
+        {subjectLabel}
         <span aria-hidden="true" style={{ display: 'inline-flex', flexDirection: 'column', lineHeight: 1, gap: 0, fontSize: 7, marginTop: -1 }}>
           <i className="bi-caret-up-fill" style={{ color: active && sortDir === 'asc' ? '#1b1b1b' : '#ccc' }} />
           <i className="bi-caret-down-fill" style={{ color: active && sortDir === 'desc' ? '#1b1b1b' : '#ccc', marginTop: -3 }} />
@@ -1545,7 +1559,7 @@ const ResizableSubjectTh = memo(function ResizableSubjectTh({ sortCol, sortDir, 
       <div
         role="separator"
         aria-orientation="vertical"
-        aria-label="Resize Employee column"
+        aria-label={`Resize ${subjectLabel} column`}
         title="Drag to resize"
         onMouseDown={onResizeStart}
         onClick={(e) => e.stopPropagation()}
