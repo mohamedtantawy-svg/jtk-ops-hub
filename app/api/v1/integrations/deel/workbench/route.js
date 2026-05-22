@@ -95,7 +95,13 @@ export async function GET(req) {
           // token signature but ALSO adds a teamNameExclude for any
           // teams claimed by another dept (GIX's "GSC - Mobility" etc.)
           // so the same task can't render in two queues. 2026-05-22.
-          // Non-HRX path uses an inclusive teamNameFilter only.
+          //
+          // 2026-05-22 (afternoon): non-HRX dept path now also passes
+          // `teamIds` — the AUTHORITATIVE Deel-side team scope — sourced
+          // from dept-integrations.js. Without this, listWorkbenchTasks
+          // defaults to teamIds=[HRX_OPERATIONS_TEAM_ID], which the GIX
+          // admin token has no access to (silently returns 0). The
+          // post-fetch teamNameFilter stays as a defensive layer.
           const fetchParams = isHrx
             ? {
                 limit: parseInt(limit, 10),
@@ -104,6 +110,7 @@ export async function GET(req) {
             : {
                 limit: parseInt(limit, 10),
                 adminTokenOverride: workbenchCfg.token,
+                teamIds: workbenchCfg.teamIds || undefined,
                 teamNameFilter: workbenchCfg.teamFilter || [],
               };
           const result = await listWorkbenchTasks(fetchParams);
