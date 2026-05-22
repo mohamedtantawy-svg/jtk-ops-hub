@@ -24,6 +24,22 @@ export async function getHrHubRequest(id) {
   return apiFetch(`/hr-hub/requests/${encodeURIComponent(id)}`);
 }
 
+// Returns { byStatus: { new, in_progress, on_hold, resolved, rejected, total },
+//           byScope:  { all, mine, team, assigned, mentioned } }
+// where byStatus respects scope/flow/search and byScope is pending-only
+// (excludes resolved + rejected per the 2026-05-04 spec). Replaces the
+// two `listHrHubRequests({ limit: 100 })` calls HrHubView used to count
+// from — those counted a TRUNCATED list (the list route caps at 100), so
+// once a workspace crossed ~100 rows the totals stopped matching reality.
+export async function getHrHubRequestCounts({ flow, scope = 'mine', search } = {}) {
+  const p = new URLSearchParams();
+  if (flow) p.set('flow', flow);
+  if (scope) p.set('scope', scope);
+  if (search) p.set('search', search);
+  const qs = p.toString();
+  return apiFetch(`/hr-hub/requests/counts${qs ? `?${qs}` : ''}`);
+}
+
 export async function createHrHubRequest(payload) {
   return apiFetch('/hr-hub/requests', {
     method: 'POST',
