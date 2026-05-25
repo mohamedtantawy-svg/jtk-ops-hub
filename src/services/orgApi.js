@@ -70,6 +70,35 @@ export async function revokeNodeAdmin(id, email) {
   });
 }
 
+// ── Per-node assignments (Phase 12a, 2026-05-25) ─────────────────────────
+// SWAT Functions + Responsibilities for a department. `kind` filters the
+// list ('swat_function' | 'responsibility'); omit to fetch both.
+export async function listNodeAssignments(nodeId, { kind } = {}) {
+  const qs = kind ? `?kind=${encodeURIComponent(kind)}` : '';
+  return apiFetch(`/org/nodes/${encodeURIComponent(nodeId)}/assignments${qs}`);
+}
+
+export async function createNodeAssignment(nodeId, payload) {
+  return apiFetch(`/org/nodes/${encodeURIComponent(nodeId)}/assignments`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function patchNodeAssignment(nodeId, assignmentId, patch) {
+  return apiFetch(
+    `/org/nodes/${encodeURIComponent(nodeId)}/assignments/${encodeURIComponent(assignmentId)}`,
+    { method: 'PATCH', body: JSON.stringify(patch) },
+  );
+}
+
+export async function archiveNodeAssignment(nodeId, assignmentId) {
+  return apiFetch(
+    `/org/nodes/${encodeURIComponent(nodeId)}/assignments/${encodeURIComponent(assignmentId)}`,
+    { method: 'DELETE' },
+  );
+}
+
 // ── Vacancies (Phase 5) ──────────────────────────────────────────────────
 export async function listNodeVacancies(id) {
   return apiFetch(`/org/nodes/${encodeURIComponent(id)}/vacancies`);
