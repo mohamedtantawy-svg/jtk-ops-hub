@@ -1705,9 +1705,17 @@ async function fetchJiraQueueForDept(deptCfg) {
     // bad field name, etc.) returns status='error' instead of silently
     // looking like "all clauses returned 0 results". 2026-05-22 GIX
     // diagnostic surfaced this gap.
+    //
+    // 2026-05-25 — also track per-clause raw-fetch count so a "0
+    // tickets across 3 clause(s)" log can be attributed to a specific
+    // clause (Phase 4 audit). Pre-dedup count — captures "did the
+    // upstream return anything for this JQL" independent of whether
+    // later clauses already saw those issues. Issue keys themselves
+    // are NOT logged (PII / noise); only counts.
     let clausesAttempted = 0;
     let clausesFailed = 0;
     const clauseErrors = [];
+    const clauseFetchCounts = [];
 
     for (const jql of jqlQueries) {
       clausesAttempted++;
@@ -1757,6 +1765,7 @@ async function fetchJiraQueueForDept(deptCfg) {
         }
         nextPageToken = result.nextPageToken;
       }
+      clauseFetchCounts.push(clauseErrored ? 'ERR' : String(fetched));
     }
 
     // If every clause failed, surface that as an error rather than
@@ -1833,7 +1842,15 @@ async function fetchJiraQueueForDept(deptCfg) {
     const partialError = clausesFailed > 0
       ? `${clausesFailed}/${clausesAttempted} Jira clauses failed: ${clauseErrors[0]}`
       : null;
-    console.log(`[queue/${deptCfg.tokenSource || 'dept'}] Jira fetched ${items.length} tickets across ${baseClauses.length} clause(s)${partialError ? ` (${clausesFailed} clause(s) failed)` : ''}`);
+    // Per-clause breakdown: each entry is the pre-dedup fetched count
+    // for one (baseClause × statusFilter) pair, in order. With 3 base
+    // clauses × 2 status filters (active + resolved-24h) the per-clause
+    // count list has 6 entries. A trailing 'ERR' means that clause threw
+    // before completing pagination. "0 across 3 clause(s)" with all
+    // counts at 0 = a config / data issue worth investigating; one
+    // clause at 0 while others have data = that specific JQL doesn't
+    // match (field name, value, or project key mismatch).
+    console.log(`[queue/${deptCfg.tokenSource || 'dept'}] Jira fetched ${items.length} tickets across ${baseClauses.length} clause(s)${partialError ? ` (${clausesFailed} clause(s) failed)` : ''} | per-jql=[${clauseFetchCounts.join(',')}]`);
     return { items, status: 'ok', count: items.length, truncated: jiraTruncated, error: partialError };
   } catch (err) {
     console.error('[queue/dept] Jira fetch error:', err.message);
