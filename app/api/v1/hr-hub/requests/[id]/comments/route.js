@@ -18,6 +18,7 @@ import {
   writeNotifications,
 } from '../../../../../../../src/lib/hr-hub-helpers';
 import { loadGroupsByHandle } from '../../../../../../../src/lib/mention-groups';
+import { getCurrentDeptId } from '../../../../../../../src/lib/dept-scope';
 
 const MAX_BODY_BYTES = 20000;
 const MAX_ATTACHMENTS = 5;
@@ -138,8 +139,11 @@ export async function POST(req, { params }) {
   const callerName = user.name || memberByEmail(callerEmail)?.name || callerEmail;
   // Load group handles once per POST so `@hrxtools` expands to every
   // member email and they all become followers + get notified, exactly
-  // as if the author had typed each member individually.
-  const groupsByHandle = await loadGroupsByHandle();
+  // as if the author had typed each member individually. Phase 12b
+  // (2026-05-25): scoped to caller's current dept so an HRX comment
+  // can't ever fan out to a Payroll-only handle (or vice versa).
+  const deptId = await getCurrentDeptId(user, req);
+  const groupsByHandle = await loadGroupsByHandle({ deptId });
   const mentionEmails = parseMentions(text, groupsByHandle);
 
   const insert = await query(

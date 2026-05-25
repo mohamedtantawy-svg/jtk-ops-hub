@@ -14,6 +14,7 @@ import { MEMBERS_BY_EMAIL } from '../../../../../../src/data/members';
 import { matchesAudience } from '../../../../../../src/data/comms';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
 import { loadGroupsByHandle } from '../../../../../../src/lib/mention-groups';
+import { getCurrentDeptId } from '../../../../../../src/lib/dept-scope';
 
 // Audience gate (Sarah Suge 2026-05-07). Returns true when the viewer is
 // allowed to read/comment on the feedback row. Author + admin always pass.
@@ -193,7 +194,12 @@ export async function POST(req, { params }) {
     const submitterEmail = (parent.rows[0].submitter_email || '').toLowerCase();
     const requestTitle = parent.rows[0].title || '(feedback request)';
 
-    const groupsByHandle = await loadGroupsByHandle();
+    // Phase 12b: Feedback is cross-dept but @-mention fan-out is scoped
+    // to the commenter's own dept — typing @hrxtools as an HRX user
+    // expands to HRX members; a Payroll user typing the same handle on
+    // the same row would expand to Payroll's @hrxtools (if any).
+    const deptId = await getCurrentDeptId(user, req);
+    const groupsByHandle = await loadGroupsByHandle({ deptId });
     const mentionEmails = parseMentions(text, groupsByHandle);
 
     const { rows } = await query(

@@ -12,11 +12,19 @@
 
 import { query } from './db';
 
-const BACKFILL_VERSION = 1;
+// Bump to v2 (2026-05-25) to fold mention_group into the same backfill
+// (Phase 12b — per-dept mention groups). Skill mistake #51: never re-run a
+// seed body without bumping the sentinel — the v1-completed guard would
+// otherwise skip the mention_group UPDATE on every boot. Tables already
+// stamped in v1 stay no-ops (UPDATE ... WHERE org_node_id IS NULL).
+const BACKFILL_VERSION = 2;
 const BACKFILL_KEY = 'dept_backfill_version';
 const HR_EXPERIENCE_SLUG = 'hr-experience';
 
-// Every table that gained org_node_id in the Phase 11a SCHEMA_SQL block.
+// Every table that gained org_node_id in the Phase 11a SCHEMA_SQL block
+// plus the Phase 12b addition (mention_group). Re-runs are idempotent —
+// each UPDATE is `WHERE org_node_id IS NULL`, so already-stamped rows are
+// skipped automatically.
 const SURFACE_TABLES = [
   'announcements',
   'hr_hub_request',
@@ -27,6 +35,7 @@ const SURFACE_TABLES = [
   'handovers',
   'tasks',
   'workspace_members',
+  'mention_group',
 ];
 
 export async function backfillHrExperienceTenancyIfNeeded() {

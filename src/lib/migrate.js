@@ -2123,6 +2123,40 @@ ALTER TABLE workspace_members      ADD COLUMN IF NOT EXISTS org_node_id UUID REF
 CREATE INDEX IF NOT EXISTS idx_workspace_members_org_node       ON workspace_members(org_node_id);
 
 -- ────────────────────────────────────────────────────────────────────────────
+-- Phase 12b (2026-05-25) — per-dept mention groups
+--
+-- Mention groups gain org_node_id so each dept owns its own pool of
+-- @-handles. Josephine Tuoyo feedback "internal group tag on ops hub not
+-- working" — the underlying server fan-out was already correct, but:
+--   (a) every dept saw every other depts groups in the picker, polluting
+--       the namespace and making per-dept @-coordination impossible;
+--   (b) without per-dept tagging, an HRX user could accidentally @-ping a
+--       Payroll-only handle (or vice versa), surfacing notifications to
+--       the wrong tenant.
+--
+-- Nullable on ADD; the boot-time backfillHrExperienceTenancyIfNeeded
+-- (bumped to v2) stamps every legacy row with HR Experience. Two depts
+-- can now reuse the same handle (e.g. @leads in both HRX and GIX is two
+-- distinct fan-outs). The legacy global unique on LOWER(handle) is
+-- replaced with a partial (org_node_id, LOWER(handle)) unique so handle
+-- reuse across depts is allowed but stays unique within a dept.
+-- ────────────────────────────────────────────────────────────────────────────
+ALTER TABLE mention_group
+  ADD COLUMN IF NOT EXISTS org_node_id UUID REFERENCES org_nodes(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_mention_group_org_node ON mention_group(org_node_id);
+
+-- Swap the global handle unique for a per-dept unique. The DROP is
+-- defensive (IF EXISTS) since older instances will not have the old
+-- index after this runs once. The new index is partial on
+-- org_node_id IS NOT NULL so the brief boot-time window between this
+-- DDL and the v2 backfill (which stamps NULL rows with HRX) doesn't
+-- trip the constraint on legacy rows.
+DROP INDEX IF EXISTS uniq_mention_group_handle;
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_mention_group_dept_handle
+  ON mention_group(org_node_id, LOWER(handle))
+  WHERE org_node_id IS NOT NULL;
+
+-- ────────────────────────────────────────────────────────────────────────────
 -- Phase 11j (2026-05-20) — fix urgent_assist_schedule unique constraint
 --
 -- The original CREATE TABLE declares schedule_date UNIQUE at column level,
