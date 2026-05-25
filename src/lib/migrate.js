@@ -2193,6 +2193,89 @@ CREATE INDEX IF NOT EXISTS idx_org_node_assignments_node_kind_active
   ON org_node_assignments(node_id, kind) WHERE is_archived = false;
 CREATE INDEX IF NOT EXISTS idx_org_node_assignments_sort
   ON org_node_assignments(node_id, kind, sort_order);
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Work Tasks (Phase 1, 2026-05-25)
+-- ────────────────────────────────────────────────────────────────────────────
+-- First-class manual task management for every Ops Hub user. Distinct from
+-- the legacy "tasks" table (which mirrors queue-source rows from Zendesk /
+-- Jira / Workbench / Onboarding) -- work_tasks are user-created entities
+-- with multi-assignee, due dates, comments, and notification fan-out.
+-- Dept-scoped via org_node_id, matching the multi-tenant contract.
+--
+-- Migration story: existing personal_checklist_snapshots are auto-imported
+-- into work_tasks per-user on first visit (source = imported_checklist).
+CREATE TABLE IF NOT EXISTS work_tasks (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_node_id     UUID REFERENCES org_nodes(id) ON DELETE SET NULL,
+  title           VARCHAR(500) NOT NULL,
+  description     TEXT,
+  status          VARCHAR(30) NOT NULL DEFAULT 'todo'
+                    CHECK (status IN ('todo','in_progress','blocked','done','archived')),
+  priority        VARCHAR(20) NOT NULL DEFAULT 'normal'
+                    CHECK (priority IN ('urgent','high','normal','low')),
+  creator_email   VARCHAR(255) NOT NULL,
+  assignee_emails TEXT[] NOT NULL DEFAULT '{}',
+  follower_emails TEXT[] NOT NULL DEFAULT '{}',
+  project_id      UUID,
+  parent_task_id  UUID REFERENCES work_tasks(id) ON DELETE SET NULL,
+  due_date        TIMESTAMPTZ,
+  started_at      TIMESTAMPTZ,
+  completed_at    TIMESTAMPTZ,
+  tags            TEXT[] NOT NULL DEFAULT '{}',
+  source          VARCHAR(40) NOT NULL DEFAULT 'manual',
+  source_id       VARCHAR(255),
+  external_url    TEXT,
+  is_archived     BOOLEAN NOT NULL DEFAULT false,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- Hot reads: per-dept active list, per-user (creator / assignee / follower)
+-- listing, status + due-date based filters. GIN indexes on the email arrays
+-- so "tasks assigned to me" stays a single index lookup.
+CREATE INDEX IF NOT EXISTS idx_work_tasks_dept_active
+  ON work_tasks(org_node_id) WHERE NOT is_archived;
+CREATE INDEX IF NOT EXISTS idx_work_tasks_creator
+  ON work_tasks(LOWER(creator_email)) WHERE NOT is_archived;
+CREATE INDEX IF NOT EXISTS idx_work_tasks_assignees_gin
+  ON work_tasks USING GIN (assignee_emails);
+CREATE INDEX IF NOT EXISTS idx_work_tasks_followers_gin
+  ON work_tasks USING GIN (follower_emails);
+CREATE INDEX IF NOT EXISTS idx_work_tasks_status_priority_due
+  ON work_tasks(status, priority, due_date) WHERE NOT is_archived;
+CREATE INDEX IF NOT EXISTS idx_work_tasks_due_active
+  ON work_tasks(due_date) WHERE NOT is_archived AND status IN ('todo','in_progress','blocked');
+CREATE INDEX IF NOT EXISTS idx_work_tasks_source
+  ON work_tasks(source, source_id) WHERE source_id IS NOT NULL;
+
+-- Comments thread on a task. Mention chips resolved server-side at write,
+-- so the FE can render them without client-side @-token re-parsing.
+CREATE TABLE IF NOT EXISTS work_task_comments (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_id         UUID NOT NULL REFERENCES work_tasks(id) ON DELETE CASCADE,
+  author_email    VARCHAR(255) NOT NULL,
+  author_name     VARCHAR(255),
+  body            TEXT NOT NULL,
+  mention_emails  TEXT[] NOT NULL DEFAULT '{}',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  edited_at       TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_work_task_comments_task_created
+  ON work_task_comments(task_id, created_at);
+
+-- Append-only activity log -- never UPDATE / DELETE from app code. Powers
+-- the detail-drawer history pane and the audit story.
+CREATE TABLE IF NOT EXISTS work_task_activity (
+  id              BIGSERIAL PRIMARY KEY,
+  task_id         UUID NOT NULL REFERENCES work_tasks(id) ON DELETE CASCADE,
+  actor_email     VARCHAR(255) NOT NULL,
+  actor_name      VARCHAR(255),
+  event_type      VARCHAR(40) NOT NULL,
+  payload         JSONB,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_work_task_activity_task
+  ON work_task_activity(task_id, created_at DESC);
 `;
 
 export async function runMigrations() {

@@ -46,6 +46,11 @@ const PRIMARY_TABS = [
   // / sub-teams / people. Visible to everyone (read-only for agents); edit
   // access gated by `can_manage_org` admin power inside the view itself.
   { id: 'org',           icon: 'bi-diagram-3',            label: 'Org' },
+  // Tasks (Phase 1, 2026-05-25) — manual task + project management. Open
+  // to every signed-in user; dept-scoped on the server. Anyone can create
+  // their own todos; assignment + comments + notifications all flow
+  // through the standard fan-out.
+  { id: 'tasks',         icon: 'bi-check2-square',        label: 'Tasks' },
   { id: 'feedback',      icon: 'bi-lightbulb',            label: 'Feedback' },
   { id: 'announcements', icon: 'bi-megaphone',            label: 'Announcements' },
 ];
@@ -80,6 +85,10 @@ const MORE_TABS = [];
 // time. The static strings here are cold-paint fallbacks only — see the
 // brand override applied to `visibleCreate` below.
 const CREATE_ACTIONS = [
+  // 2026-05-25: New Task at the top of the dropdown — fastest path to
+  // capture work for yourself or others. Routes to the Tasks tab with
+  // the composer expanded.
+  { icon: 'bi-check2-square',     label: 'New Task',          action: 'work-task',     desc: 'Quick todo for you or a teammate' },
   { icon: 'bi-broadcast-pin',     label: 'HR Hub Request',    action: 'hr-hub',        desc: 'HR Request or HR Reporting' },
   { icon: 'bi-broadcast',         label: 'New Leaders Alert', action: 'leader-alerts', desc: 'Quick alert visible to every manager', viewReq: 'leader-alerts', managerialOnly: true },
   { icon: 'bi-exclamation-octagon', label: 'New Urgent Assist', action: 'urgent-assist', desc: 'Log a manual urgent-assist request' },
@@ -110,6 +119,7 @@ const DeelTopNav = ({
   onCreateLeaderAlert,
   onCreateUrgentAssist,
   onCreateCaseMonitoring,
+  onCreateWorkTask,
   onManageMentionGroups,
   leaderAlertsBadge = 0,
   urgentAssistBadge = 0,
@@ -178,6 +188,7 @@ const DeelTopNav = ({
     else if (action === 'urgent-assist') { onCreateUrgentAssist?.(); }
     else if (action === 'case-monitoring') { onCreateCaseMonitoring?.(); }
     else if (action === 'mention-group') { onManageMentionGroups?.(); }
+    else if (action === 'work-task') { onCreateWorkTask?.(); }
   };
 
   const unread = notifs ? notifs.filter(n => !n.read).length : 0;

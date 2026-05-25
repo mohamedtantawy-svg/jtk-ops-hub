@@ -67,6 +67,12 @@ export const ALL_VIEWS = [
   // and per-node delegation rows in `org_node_admins`. Not in
   // MANAGERIAL_ONLY_VIEWS — agents see the chart but can't mutate it.
   'org',
+  // Tasks (Phase 1, 2026-05-25) — manual task + project management surface
+  // that replaces the home-page PersonalChecklist. Open to every signed-in
+  // user; each task is dept-scoped server-side so cross-tenancy data
+  // doesn't leak. Anyone can create their own; edit gated to creator /
+  // assignee / follower / dept admin.
+  'tasks',
   'settings',
 ];
 
@@ -165,6 +171,7 @@ export const VIEW_LABELS = {
   'urgent-assist-schedule': 'Urgent Assist Schedule',
   'notifications': 'Notifications',
   'org':           'Org',
+  'tasks':         'Tasks',
   'settings':      'Settings',
 };
 
