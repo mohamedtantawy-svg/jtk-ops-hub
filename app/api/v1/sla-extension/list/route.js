@@ -49,23 +49,37 @@ export async function GET(req) {
     ),
     // Pending = an `sla_extension_request` hr_hub_request that's still in
     // an actionable status. Resolved/Rejected fall out automatically.
+    //
+    // 2026-05-25 — the previous query selected `requester_email,
+    // requester_name`. Those columns never existed on hr_hub_request
+    // (the table uses `created_by_email`/`created_by_name`), so the
+    // query threw on every poll, the .catch returned an empty pending
+    // list, and the FE could never gray the SLA-extension button for
+    // in-review requests. Server-side 409 still blocked actual
+    // duplicates so no data corruption — just a chatty error log and
+    // bad UX. Fixed by reading the correct columns; the JSON output
+    // shape (requestedByEmail / requestedByName) is preserved so no
+    // consumer needs to change.
+    //
+    // 'pending_requester' (Fix #5) is included in the status filter so
+    // an extension request waiting on the original requester also
+    // locks out duplicate submissions for the same task.
     query(
       `SELECT id, task_source, task_id, task_url, task_subject,
               sla_ext_requested_days, sla_ext_reason_code,
-              requester_email, requester_name,
+              created_by_email, created_by_name,
               status, created_at, updated_at
          FROM hr_hub_request
         WHERE flow = 'sla_extension_request'
-          AND status IN ('new', 'in_progress', 'on_hold')
+          AND status IN ('new', 'in_progress', 'on_hold', 'pending_requester')
           AND task_source IS NOT NULL
           AND task_id IS NOT NULL
         ORDER BY created_at DESC
         LIMIT 5000`,
     ).catch(err => {
-      // Defensive: if the table or column lookup fails on a brand-new
-      // env, fall back to no pending data rather than 500-ing the whole
-      // list — the FE still functions, it just can't gray the button
-      // for in-review requests on that env until the migration runs.
+      // Truly defensive: a fresh env where SCHEMA_SQL hasn't run yet
+      // shouldn't crash this list — the active-extensions branch is
+      // still useful on its own. Pending data degrades gracefully.
       console.warn('[sla-extension/list pending] fallback:', err.message);
       return { rows: [] };
     }),
@@ -97,8 +111,12 @@ export async function GET(req) {
     taskSubject: r.task_subject,
     requestedDays: r.sla_ext_requested_days,
     reasonCode: r.sla_ext_reason_code,
-    requestedByEmail: r.requester_email,
-    requestedByName: r.requester_name,
+    // hr_hub_request's submitter columns are created_by_*; the JSON
+    // shape stays requestedBy* so it matches the active-extension
+    // branch above and any external consumer reads the same field name
+    // regardless of which DB table backs the request.
+    requestedByEmail: r.created_by_email,
+    requestedByName: r.created_by_name,
     status: r.status,
     createdAt: r.created_at,
     updatedAt: r.updated_at,

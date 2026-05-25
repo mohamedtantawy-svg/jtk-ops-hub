@@ -608,11 +608,23 @@ const OFFBOARDING_MAX_PAGES = 1000;
 // stretches of closed records (COMPLETED dominates the unfiltered tail)
 // and needed 200 empty pages of slack to be confident we were past the
 // actionable horizon. With the server-side filter, every page returned
-// is *already* actionable, so an empty page is much rarer and far more
-// meaningful — 20 in a row reliably signals "we've drained the queue".
-// Tightening this from 200 → 20 saves ~5 minutes of wall time on a
-// cold scan when the upstream filter does its job.
-const OFFBOARDING_EMPTY_PAGE_STOP = 20;
+// is *already* in the actionable status; an "empty" page client-side
+// means every row in it failed isOffboardingActionable (almost always
+// excluded flow steps clustered late in the lifecycle).
+//
+// Live tuning history:
+//   • 200 (legacy unfiltered scan) — necessary, but ~5 min wall time.
+//   • 20  (first post-filter setting) — much faster, but live log
+//          2026-05-25 showed it firing on PROCESSING at page 30 while
+//          upstream had ~283 more PROCESSING rows past the horizon.
+//          At ~41% kept-rate, that's up to ~116 actionable rows
+//          potentially missed per cycle if any sat in the tail.
+//   • 40  (current) — doubles the slack so 2,000 consecutive drops are
+//          required before stopping. Worst-case wall-time impact is
+//          +30s when the tail is genuinely all-excluded; in the happy
+//          path the early-stop fires no later than today. Halves the
+//          risk of a stuck PROCESSING row falling past the horizon.
+const OFFBOARDING_EMPTY_PAGE_STOP = 40;
 
 function isOffboardingActionable(t) {
   if (t?.isDuplicate === true) return false;
@@ -701,6 +713,14 @@ export async function listOffboardingCases() {
     let cursor = null;
     let page = 0;
     let emptyRun = 0;
+    // Rolling drop-reason histogram for the most recent ~5 pages of
+    // scanned rows. When the early-stop fires we log this so on the
+    // next cycle we can validate the "tail is all-excluded" assumption
+    // with real data instead of intuition. Ring-buffer style: keep only
+    // the last ~250 rows so the histogram reflects the immediate tail.
+    const tailReasons = { duplicate: 0, excludedStep: 0, otherDrop: 0, sampleSteps: {} };
+    let tailCount = 0;
+    const TAIL_SAMPLE_LIMIT = 250;
     for (; page < OFFBOARDING_MAX_PAGES; page++) {
       const qs = cursor ? `cursor=${encodeURIComponent(cursor)}` : initialQs;
       const res = await deelFetch(`/admin/eor/terminations_v3?${qs}`);
@@ -709,7 +729,33 @@ export async function listOffboardingCases() {
       for (const t of res?.terminations || []) {
         local.scanned++;
         recordStatus(t);
-        if (!isOffboardingActionable(t)) continue;
+        const actionable = isOffboardingActionable(t);
+        if (!actionable) {
+          // Classify the drop so the early-stop diagnostic has signal.
+          if (tailCount >= TAIL_SAMPLE_LIMIT) {
+            // Approximate a rolling window by zeroing the oldest bucket
+            // proportionally — keeps the histogram dominated by the
+            // most recent tail without managing an actual array.
+            tailReasons.duplicate     = Math.floor(tailReasons.duplicate     * 0.96);
+            tailReasons.excludedStep  = Math.floor(tailReasons.excludedStep  * 0.96);
+            tailReasons.otherDrop     = Math.floor(tailReasons.otherDrop     * 0.96);
+          } else {
+            tailCount++;
+          }
+          if (t?.isDuplicate === true) {
+            tailReasons.duplicate++;
+          } else {
+            const flows = Array.isArray(t.terminationFlowStatuses) ? t.terminationFlowStatuses : [];
+            const excluded = flows.find(f => OFFBOARDING_EXCLUDED_STEPS.has(f));
+            if (excluded) {
+              tailReasons.excludedStep++;
+              tailReasons.sampleSteps[excluded] = (tailReasons.sampleSteps[excluded] || 0) + 1;
+            } else {
+              tailReasons.otherDrop++;
+            }
+          }
+          continue;
+        }
         local.kept.push(t);
         keptThisPage++;
       }
@@ -717,7 +763,8 @@ export async function listOffboardingCases() {
       cursor = res?.cursor || null;
       if (!cursor) break;
       if (emptyRun >= OFFBOARDING_EMPTY_PAGE_STOP) {
-        console.log(`[offboarding] early-stop on status=${status}: ${OFFBOARDING_EMPTY_PAGE_STOP} empty pages in a row at page ${page + 1}`);
+        const remaining = (local.statusTotal ?? 0) - local.scanned;
+        console.log(`[offboarding] early-stop on status=${status}: ${OFFBOARDING_EMPTY_PAGE_STOP} empty pages in a row at page ${page + 1} | unscanned-tail≈${remaining} | tail-drops: duplicate=${tailReasons.duplicate} excludedStep=${tailReasons.excludedStep} otherDrop=${tailReasons.otherDrop} sample=${JSON.stringify(tailReasons.sampleSteps)}`);
         break;
       }
     }

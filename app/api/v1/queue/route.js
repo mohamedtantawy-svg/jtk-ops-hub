@@ -479,6 +479,13 @@ async function paginatedZendeskSearchAllTime(baseQuery, { maxPages = 10, perPage
   const allResults = [];
   const seenIds = new Set();
   let stillTruncated = false;
+  // Per-bucket diagnostic so we can see WHICH window overflows. Live
+  // 2026-05-25 GIX pending pile: 1107/1122 recovered, but the residual
+  // couldn't be attributed to a specific bucket without this. The
+  // shape we'd expect on GIX (deployed 2026-05-20) is the <7d bucket
+  // dominating with the rest empty; if a different bucket is the
+  // overflow we want to know before tuning.
+  const bucketStats = [];
   // Anchor the user-facing "of X" hint on the unbucketed first probe.
   // Summing each bucket's `res.count` produced bogus inflated totals
   // (verified 2026-05-19: solved-24h probe count = 2156, but the
@@ -499,11 +506,17 @@ async function paginatedZendeskSearchAllTime(baseQuery, { maxPages = 10, perPage
     if (b.older) dateParts.push(`created>${b.older}`);
     const subQuery = `${baseQuery} ${dateParts.join(' ')}`.trim();
     const { results, truncated } = await paginatedZendeskSearch(subQuery, { maxPages, perPage }, fetchOpts);
+    let added = 0;
     for (const t of results) {
       if (t?.id == null || seenIds.has(t.id)) continue;
       seenIds.add(t.id);
       allResults.push(t);
+      added++;
     }
+    const label = b.newer && b.older ? `${b.older}-${b.newer}`
+                : b.newer            ? `<${b.newer}`
+                :                       `>${b.older}`;
+    bucketStats.push(`${label}=${added}${truncated ? '!' : ''}`);
     if (truncated) stillTruncated = true;
   }
 
@@ -516,7 +529,7 @@ async function paginatedZendeskSearchAllTime(baseQuery, { maxPages = 10, perPage
     && allResults.length < firstProbeServerTotal * 0.95
   );
 
-  console.log(`[queue] Zendesk bucket-split of "${baseQuery}" recovered ${allResults.length} tickets (${honestTruncated ? 'truncated — refine filter' : 'fully covered'}, upstream estimate=${firstProbeServerTotal})`);
+  console.log(`[queue] Zendesk bucket-split of "${baseQuery}" recovered ${allResults.length} tickets (${honestTruncated ? 'truncated — refine filter' : 'fully covered'}, upstream estimate=${firstProbeServerTotal}, buckets: ${bucketStats.join(' ')})`);
   return {
     results: allResults,
     truncated: honestTruncated,
@@ -1692,9 +1705,17 @@ async function fetchJiraQueueForDept(deptCfg) {
     // bad field name, etc.) returns status='error' instead of silently
     // looking like "all clauses returned 0 results". 2026-05-22 GIX
     // diagnostic surfaced this gap.
+    //
+    // 2026-05-25 — also track per-clause raw-fetch count so a "0
+    // tickets across 3 clause(s)" log can be attributed to a specific
+    // clause (Phase 4 audit). Pre-dedup count — captures "did the
+    // upstream return anything for this JQL" independent of whether
+    // later clauses already saw those issues. Issue keys themselves
+    // are NOT logged (PII / noise); only counts.
     let clausesAttempted = 0;
     let clausesFailed = 0;
     const clauseErrors = [];
+    const clauseFetchCounts = [];
 
     for (const jql of jqlQueries) {
       clausesAttempted++;
@@ -1744,6 +1765,7 @@ async function fetchJiraQueueForDept(deptCfg) {
         }
         nextPageToken = result.nextPageToken;
       }
+      clauseFetchCounts.push(clauseErrored ? 'ERR' : String(fetched));
     }
 
     // If every clause failed, surface that as an error rather than
@@ -1820,7 +1842,15 @@ async function fetchJiraQueueForDept(deptCfg) {
     const partialError = clausesFailed > 0
       ? `${clausesFailed}/${clausesAttempted} Jira clauses failed: ${clauseErrors[0]}`
       : null;
-    console.log(`[queue/${deptCfg.tokenSource || 'dept'}] Jira fetched ${items.length} tickets across ${baseClauses.length} clause(s)${partialError ? ` (${clausesFailed} clause(s) failed)` : ''}`);
+    // Per-clause breakdown: each entry is the pre-dedup fetched count
+    // for one (baseClause × statusFilter) pair, in order. With 3 base
+    // clauses × 2 status filters (active + resolved-24h) the per-clause
+    // count list has 6 entries. A trailing 'ERR' means that clause threw
+    // before completing pagination. "0 across 3 clause(s)" with all
+    // counts at 0 = a config / data issue worth investigating; one
+    // clause at 0 while others have data = that specific JQL doesn't
+    // match (field name, value, or project key mismatch).
+    console.log(`[queue/${deptCfg.tokenSource || 'dept'}] Jira fetched ${items.length} tickets across ${baseClauses.length} clause(s)${partialError ? ` (${clausesFailed} clause(s) failed)` : ''} | per-jql=[${clauseFetchCounts.join(',')}]`);
     return { items, status: 'ok', count: items.length, truncated: jiraTruncated, error: partialError };
   } catch (err) {
     console.error('[queue/dept] Jira fetch error:', err.message);
