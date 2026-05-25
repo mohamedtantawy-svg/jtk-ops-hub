@@ -1,8 +1,9 @@
 // ── POST /api/v1/handovers/:id/accept ──────────────────────────────────
 // Coverer accepts. Caller must be the listed coverer; row moves from
-// pending → accepted. After mutation we may advance the handover to
-// pending_manager_approval (if approval required) or directly to
-// approved (recomputeAfterCovererChange does the math).
+// pending → accepted. When the last coverer accepts,
+// recomputeAfterCovererChange advances the handover straight to
+// APPROVED — TL/manager approval was removed from the state machine
+// 2026-05-18 (HANDOVER_TEMPLATE_REVAMP_PLAN.md §4.2).
 
 import { NextResponse } from 'next/server';
 import { withTransaction } from '../../../../../../src/lib/db';

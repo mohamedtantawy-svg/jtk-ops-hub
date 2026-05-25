@@ -99,8 +99,21 @@ export async function GET(req) {
 
   const lcEmail = user.email.toLowerCase();
 
-  const whereParts = ['t.org_node_id = $1'];
-  const values = [deptId];
+  // 2026-05-25 — Mohamed Tantawy: "Tasks should be only visible to the
+  // team member who created the task or assigned to it." Tightened from
+  // the previous dept-wide read model (canEditWorkTask's now-stale
+  // comment still says "Anyone authed can READ a task in their dept" —
+  // that's the old contract). The hard scope here is creator OR
+  // assignee OR follower — followers stay in because the existing
+  // follower feature is an explicit opt-in stake (you add someone to
+  // keep them in the loop; making them blind to the row would just
+  // break the feature). Layered on top of dept scope, so an HRX user
+  // never sees a GIX task even if somehow listed.
+  const whereParts = [
+    't.org_node_id = $1',
+    `(LOWER(t.creator_email) = $2 OR $2 = ANY(t.assignee_emails) OR $2 = ANY(t.follower_emails))`,
+  ];
+  const values = [deptId, lcEmail];
   if (!includeArchived) {
     whereParts.push("t.is_archived = false AND t.status <> 'archived'");
   }
@@ -116,7 +129,9 @@ export async function GET(req) {
     values.push(projectId);
     whereParts.push(`t.project_id = $${values.length}`);
   }
-  // Scope is layered on top of dept-scope.
+  // Optional client-side narrowing on top of the stakeholder scope.
+  // 'mine' / 'assigned' / 'followed' tighten to a single bucket; 'all'
+  // and unset leave the union from the WHERE clause above.
   if (scope === 'mine') {
     values.push(lcEmail);
     whereParts.push(`LOWER(t.creator_email) = $${values.length}`);

@@ -11,7 +11,7 @@
 // having to flip filters. A small segmented control lets them narrow
 // to just-assigned-to-me / just-created-by-me.
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useWorkTasks } from '../../hooks/useWorkTasks';
 import { useTeamMembers } from '../../hooks/useTeamMembers';
 import { useOrgNodes } from '../../hooks/useOrgNodes';
@@ -60,7 +60,7 @@ function formatRel(iso) {
   return diff < 0 ? `${Math.round(abs / d)}d ago` : `in ${Math.round(abs / d)}d`;
 }
 
-export default function TasksQueuePanel({ user }) {
+export default function TasksQueuePanel({ user, focusTaskId, onTaskFocused }) {
   const tm = useTeamMembers();
   const org = useOrgNodes();
   const deptState = useCurrentDept();
@@ -71,6 +71,18 @@ export default function TasksQueuePanel({ user }) {
   const [composerBusy, setComposerBusy] = useState(false);
   const [composerError, setComposerError] = useState(null);
   const [detailTaskId, setDetailTaskId] = useState(null);
+
+  // 2026-05-25 — Tasks moved from a top-level view into this Workspace
+  // queue panel. The bell + tour CTA + Home "Open Tasks" links route a
+  // task id through App.jsx → Queue → here; we open the detail drawer
+  // and clear focusTaskId via onTaskFocused so the id doesn't survive a
+  // subsequent tab switch.
+  useEffect(() => {
+    if (focusTaskId) {
+      setDetailTaskId(focusTaskId);
+      onTaskFocused?.();
+    }
+  }, [focusTaskId, onTaskFocused]);
 
   const { tasks, oooEmails, loading, error, reload, create } = useWorkTasks(user?.email, {
     filters: { /* no server filter; we narrow client-side per scope */ },

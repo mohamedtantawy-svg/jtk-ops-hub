@@ -25,6 +25,53 @@ const HRX_OWNER_FIELD_NAMES = [
   'hrx responsible',
 ];
 
+// 2026-05-25 — Trish Lee (Feedback): COHD-408589 shows "Client Approval"
+// in Jira but "Pending Legal" in OpsHub. Root cause: JSM Approvals are a
+// distinct concept from the workflow status. When an approval is active
+// the JSM UI renders the approval-stage name as the prominent pill (e.g.
+// "Client Approval", "Pending Wet Ink") while `fields.status.name` keeps
+// returning the underlying workflow step ("Pending Legal", "Pending HRX
+// Review"). Surface the active approval's name as the displayed status
+// when present so OpsHub matches what users see on Jira.
+//
+// Field-name substring used for discovery via resolveHrxOwnerFields (the
+// helper is generic — it just returns the first customfield whose name
+// includes the needle). Most JSM projects expose approvals under a
+// customfield literally named "Approval" or "Approvals"; the substring
+// match catches both.
+const JIRA_APPROVAL_FIELD_NAMES = ['approval'];
+
+// Extract the active approval's display name from a JSM approval field
+// value. JSM serialises approvals as an array of objects (one per
+// approval step) with shape:
+//   { id, name, approvers: [...], createdDate, completedDate,
+//     decision: 'pending' | 'approved' | 'declined', finalDecision }
+// The active one is the entry with `decision === 'pending'` (or where
+// `finalDecision` is missing/null). When multiple are pending we pick
+// the most recently created so the user sees the latest step. Falls
+// back to a singular object shape if the upstream returns one approval
+// directly. Returns null when no active approval is found.
+function extractActiveApprovalName(raw) {
+  if (!raw) return null;
+  const list = Array.isArray(raw) ? raw : [raw];
+  let best = null;
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue;
+    const decision = String(item.decision || item.finalDecision || '').toLowerCase();
+    // Pending = not yet decided; some JSM responses use empty string
+    // for the in-flight state, so treat both as active.
+    const isPending = decision === '' || decision === 'pending' || decision === 'needs decision';
+    if (!isPending) continue;
+    const name = typeof item.name === 'string' ? item.name.trim() : '';
+    if (!name) continue;
+    const createdMs = item.createdDate ? Date.parse(item.createdDate) : 0;
+    if (!best || createdMs > best.createdMs) {
+      best = { name, createdMs };
+    }
+  }
+  return best ? best.name : null;
+}
+
 // Project allow-list — the queue surfaces ONLY tickets in these Jira
 // projects. Without this filter, HRX team members assigned/reporting on
 // (e.g.) the EOR Compliance project (key `EC`) drag those tickets into the
@@ -1366,6 +1413,12 @@ async function fetchJiraQueue() {
     const ownerFieldIds = await resolveHrxOwnerFields(HRX_OWNER_FIELD_NAMES);
     const ownerFieldList = Object.values(ownerFieldIds);
 
+    // Same dynamic-discovery pattern for the JSM approval field. Null
+    // when the instance doesn't have one — we silently fall back to
+    // `f.status.name` in the row mapper below.
+    const approvalFieldIds = await resolveHrxOwnerFields(JIRA_APPROVAL_FIELD_NAMES);
+    const approvalFieldId = approvalFieldIds['approval'] || null;
+
     const jqlQueries = buildJiraJqlQueries(ownerFieldIds);
     const allIssues = [];
     const seenKeys = new Set();       // dedup across clauses — same key never lands twice
@@ -1388,6 +1441,7 @@ async function fetchJiraQueue() {
       'created', 'updated', 'issuetype', 'project', 'labels',
       'description',
       ...ownerFieldList,
+      ...(approvalFieldId ? [approvalFieldId] : []),
     ];
 
     // Paginate each clause independently; union the results. Running them
@@ -1454,7 +1508,19 @@ async function fetchJiraQueue() {
 
     const items = allIssues.map(issue => {
       const f = issue.fields || {};
-      const statusName = f.status?.name || '';
+      const workflowStatusName = f.status?.name || '';
+      // 2026-05-25 — JSM Approvals take precedence over the workflow
+      // status name when active. JSM renders the approval-stage pill
+      // ("Client Approval", "Pending Wet Ink") prominently while
+      // `fields.status.name` keeps returning the underlying workflow
+      // step ("Pending Legal", "Pending HRX Review"), and Trish Lee
+      // reported (correctly) that the two not matching in OpsHub is
+      // confusing. When an approval is pending we surface its name as
+      // the displayed status; otherwise fall through to the workflow.
+      const activeApprovalName = approvalFieldId
+        ? extractActiveApprovalName(f[approvalFieldId])
+        : null;
+      const statusName = activeApprovalName || workflowStatusName;
       // Jira returns status.statusCategory.key ∈ {"new","indeterminate","done"}
       // — the universal 3-value taxonomy every workflow's statuses are mapped
       // to. We use it as a robust fallback when a custom status name
@@ -1466,7 +1532,11 @@ async function fetchJiraQueue() {
 
       // Status: prefer fine-grained name match (gives us "waiting" for
       // "Client Approval" etc.), fall back to statusCategory for unmapped
-      // names so we never mislabel a done ticket as in_progress.
+      // names so we never mislabel a done ticket as in_progress. The
+      // approval-stage names (e.g. "Client Approval") already live in
+      // JIRA_STATUS_MAP → 'waiting', so an active approval correctly
+      // buckets the row as paused even when the underlying workflow
+      // step would map to 'in_progress'.
       const statusFromCategory =
         statusCategoryKey === 'done' ? 'resolved' :
         statusCategoryKey === 'new'  ? 'new' :
@@ -1600,9 +1670,22 @@ async function fetchJiraQueueForDept(deptCfg) {
     const MAX_ISSUES_PER_CLAUSE = 2000;
     let jiraTruncated = false;
 
+    // Discover the JSM approval custom field for this dept's Jira
+    // instance. listJiraFields() / resolveHrxOwnerFields hit the
+    // default (HRX) Jira even when fetchOpts target a different
+    // instance — for now we only discover against the HRX-default
+    // field cache, which is correct when the dept's Jira is the same
+    // letsdeel.atlassian.net instance (COHD-style approval workflows).
+    // If a future dept routes to a different Jira tenant entirely
+    // (e.g. a separate workspace for GIX), the field discovery will
+    // need an opts-aware variant — out of scope for this PR.
+    const deptApprovalFieldIds = await resolveHrxOwnerFields(JIRA_APPROVAL_FIELD_NAMES);
+    const deptApprovalFieldId = deptApprovalFieldIds['approval'] || null;
+
     const fieldsToFetch = [
       'summary', 'status', 'assignee', 'reporter', 'priority',
       'created', 'updated', 'issuetype', 'project', 'labels', 'description',
+      ...(deptApprovalFieldId ? [deptApprovalFieldId] : []),
     ];
 
     // Track per-clause failures so a fully-broken config (wrong token,
@@ -1676,7 +1759,15 @@ async function fetchJiraQueueForDept(deptCfg) {
 
     const items = allIssues.map(issue => {
       const f = issue.fields || {};
-      const statusName = f.status?.name || '';
+      const workflowStatusName = f.status?.name || '';
+      // 2026-05-25 — mirror the HRX path: prefer the active JSM
+      // approval name over the workflow status when one is pending.
+      // See extractActiveApprovalName + JIRA_APPROVAL_FIELD_NAMES at
+      // the top of this file for the why.
+      const activeApprovalName = deptApprovalFieldId
+        ? extractActiveApprovalName(f[deptApprovalFieldId])
+        : null;
+      const statusName = activeApprovalName || workflowStatusName;
       const statusCategoryKey = (f.status?.statusCategory?.key || '').toLowerCase();
       const priorityName = f.priority?.name || '';
       const assignee = f.assignee || {};

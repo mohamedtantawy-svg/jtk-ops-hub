@@ -314,9 +314,14 @@ export async function notifyMany(client, recipients, type, handoverId, payload) 
 // ── Status recompute after coverer accept / decline ────────────────────
 // After every coverer mutation, if the handover sits in
 // PENDING_COVERAGE_ACCEPTANCE and ALL coverers are now accepted, advance
-// to either PENDING_MANAGER_APPROVAL (when settings require approval) or
-// straight to APPROVED. Returns the new status or the original when no
-// transition fires.
+// straight to APPROVED. TL/manager approval was removed from the state
+// machine 2026-05-18 (HANDOVER_TEMPLATE_REVAMP_PLAN.md §4.2). Until this
+// fix, the function still read `handover.manager_approval_required`
+// (DB default TRUE) and routed every new acceptance through
+// PENDING_MANAGER_APPROVAL — which kept paging managers like Ljubica
+// long after the approval step was retired. The boot-time backfill in
+// migrate.js cleans rows up post-deploy, so this only needed the
+// transition itself rectified.
 
 export async function recomputeAfterCovererChange(client, handover, actor) {
   if (handover.status !== HANDOVER_STATUSES.PENDING_COVERAGE_ACCEPTANCE) {
@@ -331,37 +336,24 @@ export async function recomputeAfterCovererChange(client, handover, actor) {
   const anyDeclined = rows.some(r => r.acceptance_status === 'declined');
   if (anyPending || anyDeclined) return handover;
 
-  // All accepted — advance.
-  const requiresApproval = handover.manager_approval_required !== false;
-  const next = requiresApproval
-    ? HANDOVER_STATUSES.PENDING_MANAGER_APPROVAL
-    : HANDOVER_STATUSES.APPROVED;
-  const updated = await transitionStatus(client, handover, next, {
+  // All accepted — advance straight to APPROVED. The lifecycle cron is
+  // what flips approved → active → completed.
+  const updated = await transitionStatus(client, handover, HANDOVER_STATUSES.APPROVED, {
     actor,
-    logEventType: requiresApproval
-      ? HANDOVER_EVENT_TYPES.SUBMITTED   // re-stamped: the manager needs to review
-      : HANDOVER_EVENT_TYPES.MANAGER_APPROVED,
+    logEventType: HANDOVER_EVENT_TYPES.MANAGER_APPROVED,
     logDetail: { reason: 'all_coverers_accepted' },
   });
 
-  // Fan-out notifications for the new status.
-  if (requiresApproval && updated.manager_email) {
-    await notifyUser(client, updated.manager_email, HANDOVER_NOTIFICATION_TYPES.PENDING_APPROVAL, updated.id, {
-      title: 'Handover awaiting your approval',
-      body: `${updated.requester_email} → cover ${formatRange(updated.start_date, updated.end_date)}`,
-      actor,
-    });
-  } else {
-    const coverers = await loadCoverers(updated.id, client);
-    await notifyMany(client, [
-      updated.requester_email,
-      ...coverers.map(c => c.coverer_email),
-    ], HANDOVER_NOTIFICATION_TYPES.APPROVED, updated.id, {
-      title: 'Handover approved (no manager approval required)',
-      body: `Covers ${formatRange(updated.start_date, updated.end_date)}`,
-      actor,
-    });
-  }
+  // Notify requester + coverers that the handover is now approved.
+  const coverers = await loadCoverers(updated.id, client);
+  await notifyMany(client, [
+    updated.requester_email,
+    ...coverers.map(c => c.coverer_email),
+  ], HANDOVER_NOTIFICATION_TYPES.APPROVED, updated.id, {
+    title: 'Handover approved',
+    body: `Covers ${formatRange(updated.start_date, updated.end_date)}`,
+    actor,
+  });
 
   return updated;
 }
