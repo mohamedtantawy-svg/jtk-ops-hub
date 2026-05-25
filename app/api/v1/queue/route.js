@@ -479,6 +479,13 @@ async function paginatedZendeskSearchAllTime(baseQuery, { maxPages = 10, perPage
   const allResults = [];
   const seenIds = new Set();
   let stillTruncated = false;
+  // Per-bucket diagnostic so we can see WHICH window overflows. Live
+  // 2026-05-25 GIX pending pile: 1107/1122 recovered, but the residual
+  // couldn't be attributed to a specific bucket without this. The
+  // shape we'd expect on GIX (deployed 2026-05-20) is the <7d bucket
+  // dominating with the rest empty; if a different bucket is the
+  // overflow we want to know before tuning.
+  const bucketStats = [];
   // Anchor the user-facing "of X" hint on the unbucketed first probe.
   // Summing each bucket's `res.count` produced bogus inflated totals
   // (verified 2026-05-19: solved-24h probe count = 2156, but the
@@ -499,11 +506,17 @@ async function paginatedZendeskSearchAllTime(baseQuery, { maxPages = 10, perPage
     if (b.older) dateParts.push(`created>${b.older}`);
     const subQuery = `${baseQuery} ${dateParts.join(' ')}`.trim();
     const { results, truncated } = await paginatedZendeskSearch(subQuery, { maxPages, perPage }, fetchOpts);
+    let added = 0;
     for (const t of results) {
       if (t?.id == null || seenIds.has(t.id)) continue;
       seenIds.add(t.id);
       allResults.push(t);
+      added++;
     }
+    const label = b.newer && b.older ? `${b.older}-${b.newer}`
+                : b.newer            ? `<${b.newer}`
+                :                       `>${b.older}`;
+    bucketStats.push(`${label}=${added}${truncated ? '!' : ''}`);
     if (truncated) stillTruncated = true;
   }
 
@@ -516,7 +529,7 @@ async function paginatedZendeskSearchAllTime(baseQuery, { maxPages = 10, perPage
     && allResults.length < firstProbeServerTotal * 0.95
   );
 
-  console.log(`[queue] Zendesk bucket-split of "${baseQuery}" recovered ${allResults.length} tickets (${honestTruncated ? 'truncated — refine filter' : 'fully covered'}, upstream estimate=${firstProbeServerTotal})`);
+  console.log(`[queue] Zendesk bucket-split of "${baseQuery}" recovered ${allResults.length} tickets (${honestTruncated ? 'truncated — refine filter' : 'fully covered'}, upstream estimate=${firstProbeServerTotal}, buckets: ${bucketStats.join(' ')})`);
   return {
     results: allResults,
     truncated: honestTruncated,
