@@ -190,7 +190,7 @@ export async function reconcileOooCovers({ force = false } = {}) {
                 cover_for_assignee_email, cover_for_assignee_name
            FROM hr_hub_request
           WHERE cover_for_assignee_email IS NOT NULL
-            AND status IN ('new', 'in_progress', 'on_hold')
+            AND status IN ('new', 'in_progress', 'on_hold', 'pending_requester')
           ORDER BY updated_at ASC
           LIMIT 500`,
       );
