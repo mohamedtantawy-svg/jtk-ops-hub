@@ -191,7 +191,12 @@ function ConfigurationsCard({ items, refresh, addToast }) {
                   fontSize: 12, color: 'var(--text)',
                 }}>
                   {[
-                    ['manager_approval_required', 'Manager approval required'],
+                    // 'manager_approval_required' removed 2026-05-25 —
+                    // TL/manager approval was retired from the handover
+                    // state machine 2026-05-18. The column still exists
+                    // on handover_settings for history but no transition
+                    // reads it; hiding the toggle so admins don't think
+                    // they can re-enable a flow that no longer runs.
                     ['coverer_acceptance_required', 'Coverer acceptance required'],
                     ['allow_country_split', 'Per-coverer country split allowed'],
                     ['reminder_48h_enabled', '48h reminder enabled'],
