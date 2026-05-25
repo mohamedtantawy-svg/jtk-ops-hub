@@ -90,6 +90,25 @@ const relTime = (m) => {
   return '1y+ ago';
 };
 
+// Canonicalize ISO-2 country codes so display-name dupes merge into a
+// single dropdown option and the filter matches both code variants.
+// 2026-05-25 — Pablo Gonzalez (GIX) reported the country filter "does
+// not apply" for some queues. Two distinct root causes overlapped:
+//   1. `applyQueueFilter` (Jira/Zendesk tab counts) skipped fCountry —
+//      see comment further down where it's now applied.
+//   2. The dropdown showed "United Kingdom" twice (one row for 'GB',
+//      one for 'UK') because some sources tag rows with the canonical
+//      ISO-2 code 'GB' (Zendesk Destination Country custom field) and
+//      others with 'UK' (Jira keyword-scan via detectCountry's
+//      COUNTRY_KEYWORDS map). Selecting one variant leaked the other
+//      out of the filter. Canonicalizing 'UK' → 'GB' here unifies
+//      both at every comparison site.
+const CC_ALIASES = { UK: 'GB' };
+const canonicalCC = (cc) => {
+  const c = String(cc || '').toUpperCase();
+  return CC_ALIASES[c] || c;
+};
+
 // ── Work Source Button config ──
 const WORK_SOURCES = [
   { id: 'onboarding',     label: 'Onboarding',     icon: 'bi-person-plus-fill',   color: '#7c3aed', bg: '#f3eff8' },
@@ -227,7 +246,15 @@ const Queue = ({ user, tasks, subFilter }) => {
     if (typeof saved.fJiraActionable === 'boolean') setFJiraActionable(saved.fJiraActionable);
     if (typeof saved.fJiraRaised === 'boolean') setFJiraRaised(saved.fJiraRaised);
     if (saved.fUnassigned) setFUnassigned(true);
-    if (Array.isArray(saved.fCountry)) setFCountry(saved.fCountry);
+    // Canonicalize on restore so legacy 'UK' saved values normalize to
+    // 'GB' and the dropdown's GB-keyed option matches them. Without this,
+    // a user whose localStorage holds ['UK'] from before this fix would
+    // see "0 rows" on first paint because the new dropdown only emits
+    // canonical 'GB'.
+    if (Array.isArray(saved.fCountry)) {
+      const normalized = [...new Set(saved.fCountry.map(canonicalCC).filter(Boolean))];
+      setFCountry(normalized);
+    }
   }, [user?.email]);
 
   // Cross-view filter intent — fires when a Briefing/AgentHome card asks the
@@ -667,7 +694,7 @@ const Queue = ({ user, tasks, subFilter }) => {
     if (fTool)          _vis = _vis.filter(t => t.source === fTool);
     if (fStatus.length) _vis = _vis.filter(t => fStatus.includes(t.status));
     if (fUnassigned)    _vis = _vis.filter(t => !t.assigneeId && !t.assigneeEmail);
-    if (fCountry.length) _vis = _vis.filter(t => fCountry.includes(String(t.country || '').toUpperCase()));
+    if (fCountry.length) _vis = _vis.filter(t => fCountry.includes(canonicalCC(t.country)));
     const _visPreSla = _vis.filter(t => !t.isCalendarBooking);
     if (fSla === 'ok')       _vis = _vis.filter(t => { const s = slaInfo(t); return s && s.ok; });
     if (fSla === 'at_risk')  _vis = _vis.filter(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; });
@@ -789,7 +816,7 @@ const Queue = ({ user, tasks, subFilter }) => {
     let r = Array.isArray(rows) ? rows : [];
     if (fStatus.length) r = r.filter(row => fStatus.includes(row?.status?.severity));
     if (fUnassigned)    r = r.filter(row => !row?.assigneeEmail);
-    if (fCountry.length) r = r.filter(row => fCountry.includes(String(row?.country || '').toUpperCase()));
+    if (fCountry.length) r = r.filter(row => fCountry.includes(canonicalCC(row?.country)));
     return r;
   }, [fStatus, fUnassigned, fCountry]);
 
@@ -1167,10 +1194,20 @@ const Queue = ({ user, tasks, subFilter }) => {
 
         {/* Line 2: Q-buttons + Status filter + Unassigned + Jira filters + Clear */}
         {(() => {
+          // 2026-05-25 — fCountry check added here so Jira/Zendesk tab
+          // counts respect the country picker. Pablo Gonzalez (GIX)
+          // reported the "numbers on Qs still stay the same in some
+          // Queues" — Onboarding/Offboarding/Amendments/Redlines/
+          // Workbench/IP/Immigration-Tasks already filtered counts via
+          // applyPanelFilter; Jira/Zendesk did not because this gate
+          // only checked status + unassigned. Now matches the row-level
+          // filter at the top of the memoized chain so the tab badge
+          // count agrees with what the table renders.
           const applyQueueFilter = (t) => {
             if (t.status === 'resolved') return false;
             if (fStatus.length && !fStatus.includes(t.status)) return false;
             if (fUnassigned && (t.assigneeId || t.assigneeEmail)) return false;
+            if (fCountry.length && !fCountry.includes(canonicalCC(t.country))) return false;
             return true;
           };
           const jiraCount = baseVis.filter(t => t.source === 'jira' && applyQueueFilter(t)).length;
@@ -1214,7 +1251,7 @@ const Queue = ({ user, tasks, subFilter }) => {
           // many rows each option would surface.
           const countryCounts = new Map();
           const tally = (cc) => {
-            const code = String(cc || '').toUpperCase();
+            const code = canonicalCC(cc);
             if (!code) return;
             countryCounts.set(code, (countryCounts.get(code) || 0) + 1);
           };
