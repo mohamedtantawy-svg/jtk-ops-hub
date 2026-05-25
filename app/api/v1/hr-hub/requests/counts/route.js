@@ -43,12 +43,21 @@ export async function GET(req) {
   const flow = searchParams.get('flow');
   const scope = searchParams.get('scope') || 'mine';
   const search = searchParams.get('search');
+  // 2026-05-22 — accept `flows=a,b` for multi-flow filters (briefing tile
+  // for SLA Extension & Hide-Task needs both `hide_task_request` and
+  // `sla_extension_request`). Single-value `flow=` stays back-compat.
+  const flowsParam = searchParams.get('flows');
+  const flowList = flowsParam
+    ? flowsParam.split(',').map(s => s.trim()).filter(Boolean)
+    : (flow ? [flow] : []);
 
   if (!ALLOWED_SCOPES.has(scope)) {
     return NextResponse.json({ error: `Invalid scope: ${scope}` }, { status: 400 });
   }
-  if (flow && !ALLOWED_FLOWS.has(flow)) {
-    return NextResponse.json({ error: `Invalid flow: ${flow}` }, { status: 400 });
+  for (const f of flowList) {
+    if (!ALLOWED_FLOWS.has(f)) {
+      return NextResponse.json({ error: `Invalid flow: ${f}` }, { status: 400 });
+    }
   }
 
   const callerEmail = String(user.email).toLowerCase();
@@ -71,7 +80,13 @@ export async function GET(req) {
   } else {
     baseFilters.push(`FALSE`);
   }
-  if (flow) { baseFilters.push(`flow = $${p++}`); baseParams.push(flow); }
+  if (flowList.length === 1) {
+    baseFilters.push(`flow = $${p++}`);
+    baseParams.push(flowList[0]);
+  } else if (flowList.length > 1) {
+    baseFilters.push(`flow = ANY($${p++}::text[])`);
+    baseParams.push(flowList);
+  }
   if (search) {
     baseFilters.push(`(LOWER(summary) LIKE $${p} OR LOWER(COALESCE(title,'')) LIKE $${p})`);
     baseParams.push(`%${String(search).toLowerCase()}%`);
@@ -127,6 +142,22 @@ export async function GET(req) {
   const visibleEmails = getVisibleEmailsForAccess(callerEmail);
   const teamEmails = Array.from(visibleEmails).filter(e => e && e !== callerEmail);
   const teamHasReports = teamEmails.length > 0;
+  // 2026-05-22 — Mohamed Tantawy spec: Briefing strip's HR Hub / SLA
+  // Extension tiles surface a role-scoped count that's NOT one of the
+  // existing scope pills. Compute it here so the FE doesn't have to
+  // re-union two queries client-side (the old approach was 6 list calls
+  // per tile, capped at 100 each — admin counts were truncated for any
+  // busy dept).
+  //   • Admin            → everything in the dept (no extra predicate).
+  //   • RM / TL          → raised by anyone in the subtree (incl. self) OR
+  //                        assigned to caller — i.e. anything I need to
+  //                        watch as a manager.
+  //   • Team Member      → raised by me OR assigned to me.
+  // Same union semantics for the SLA Extension tile when `flows=` narrows
+  // the row universe to hide_task_request + sla_extension_request.
+  const callerAccess = (callerMember?.access || '').toLowerCase();
+  const isAdminCaller = callerAccess === 'admin';
+  const isManagerCaller = callerAccess === 'team_lead' || callerAccess === 'regional_manager' || isAdminCaller;
 
   const scopeParams = [...baseParams];
   let kp = p;
@@ -134,6 +165,21 @@ export async function GET(req) {
   scopeParams.push(callerEmail);
   const teamArrayPlaceholder = teamHasReports ? `$${kp++}::text[]` : null;
   if (teamHasReports) scopeParams.push(teamEmails);
+
+  // briefingTile filter expression keyed off caller's role. Admins land
+  // on TRUE (= the unfiltered pending universe = all_count). Managers OR
+  // the subtree-created predicate with the assigned-to-caller predicate.
+  // Agents fold to created_by=caller OR assignee=caller.
+  let briefingTileFilter;
+  if (isAdminCaller) {
+    briefingTileFilter = 'TRUE';
+  } else if (isManagerCaller && teamHasReports) {
+    // Manager with reports: union of subtree (incl. self) + assigned.
+    briefingTileFilter = `(LOWER(created_by_email) = ANY(${teamArrayPlaceholder}) OR LOWER(created_by_email) = ${callerPlaceholder} OR LOWER(assignee_email) = ${callerPlaceholder})`;
+  } else {
+    // Manager with empty subtree OR agent — created_by=caller OR assigned.
+    briefingTileFilter = `(LOWER(created_by_email) = ${callerPlaceholder} OR LOWER(assignee_email) = ${callerPlaceholder})`;
+  }
 
   const scopeSql = `
     WITH pending AS (
@@ -155,7 +201,8 @@ export async function GET(req) {
       ${teamHasReports
         ? `COUNT(*) FILTER (WHERE LOWER(created_by_email) = ANY(${teamArrayPlaceholder}))::int    AS team_count,`
         : `0::int                                                                                  AS team_count,`}
-      COUNT(*) FILTER (WHERE mentioned_me)::int                                                    AS mentioned_count
+      COUNT(*) FILTER (WHERE mentioned_me)::int                                                    AS mentioned_count,
+      COUNT(*) FILTER (WHERE ${briefingTileFilter})::int                                           AS briefing_tile_count
     FROM pending`;
 
   const [{ rows: statusRows }, { rows: scopeRows }] = await Promise.all([
@@ -169,13 +216,16 @@ export async function GET(req) {
     byStatus.total += Number(r.n) || 0;
   }
 
-  const sRow = scopeRows[0] || { all_count: 0, mine_count: 0, assigned_count: 0, team_count: 0, mentioned_count: 0 };
+  const sRow = scopeRows[0] || { all_count: 0, mine_count: 0, assigned_count: 0, team_count: 0, mentioned_count: 0, briefing_tile_count: 0 };
   const byScope = {
-    all:       Number(sRow.all_count)       || 0,
-    mine:      Number(sRow.mine_count)      || 0,
-    assigned:  Number(sRow.assigned_count)  || 0,
-    team:      Number(sRow.team_count)      || 0,
-    mentioned: Number(sRow.mentioned_count) || 0,
+    all:          Number(sRow.all_count)           || 0,
+    mine:         Number(sRow.mine_count)          || 0,
+    assigned:     Number(sRow.assigned_count)      || 0,
+    team:         Number(sRow.team_count)          || 0,
+    mentioned:    Number(sRow.mentioned_count)     || 0,
+    // Role-scoped union for the Briefing strip tile. See briefingTileFilter
+    // construction above for the exact predicate per role.
+    briefingTile: Number(sRow.briefing_tile_count) || 0,
   };
 
   return NextResponse.json({ byStatus, byScope });

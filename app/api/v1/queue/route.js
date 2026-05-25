@@ -238,6 +238,31 @@ function detectCountry(subject, tags = []) {
   return '';
 }
 
+// Resolve a Zendesk custom-field value (tagger option value, plain text,
+// or an ISO code typed by an admin) into our 2-letter ISO country code.
+//   • If the field meta carries `options` (tagger dropdown), look up the
+//     option whose `value` matches and run detectCountry on the option
+//     NAME — that's the human-readable label like "United Arab Emirates"
+//     which detectCountry's keyword map already handles.
+//   • Falls back to "value is already a 2-letter ISO code" (case-insensitive).
+//   • Final fallback: run detectCountry directly on the raw value, so
+//     a text-typed "Brazil" / "uae" / "south korea" still resolves.
+// Returns '' when nothing maps — caller falls back to subject/tag detection.
+function normalizeCountryFromCustomField(raw, fieldMeta) {
+  if (raw == null) return '';
+  const s = String(raw).trim();
+  if (!s) return '';
+  if (Array.isArray(fieldMeta?.options) && fieldMeta.options.length > 0) {
+    const opt = fieldMeta.options.find(o => String(o.value) === s);
+    if (opt?.name) {
+      const code = detectCountry(opt.name, []);
+      if (code) return code;
+    }
+  }
+  if (/^[a-zA-Z]{2}$/.test(s)) return s.toUpperCase();
+  return detectCountry(s, []);
+}
+
 // ── Tag / label → function type mapping ──────────────────────────────────────
 const TYPE_KEYWORDS = {
   onboarding:    'Onboarding',
@@ -697,9 +722,30 @@ async function fetchZendeskQueueForDept(deptCfg) {
     // per-dept SLA override is a follow-up if any dept wants different limits.
     const { zendeskActiveMins, zendeskPausedMins } = await getSlaOverrides();
 
+    // 2026-05-22 — Pablo Gonzalez "Destination Country is not picked up in
+    // the Queue properly". Resolve the custom-field metadata so we can read
+    // Destination Country (preferred for GIX visa tickets where the
+    // subject is just a visa name) and fall back to Employee Country / the
+    // detectCountry keyword scan if Destination Country is empty. Cache
+    // hit on subsequent calls — resolveCustomFieldIds caches the meta for
+    // an hour. GIX and HRX share the same Zendesk subdomain today (per
+    // dept-integrations.js comments), so the field IDs are stable across
+    // depts. Defensive null-meta: a brand-new Zendesk with no fields gets
+    // an empty record + the row falls through to detectCountry below.
+    const customFieldMeta = await resolveCustomFieldIds().catch(() => null);
+
     const items = actionableRows.map(t => {
       const assignee = userMap[t.assignee_id] || {};
       const requester = userMap[t.requester_id] || {};
+      const customFields = customFieldMeta ? extractCustomFieldValues(t, customFieldMeta) : {};
+      const destinationCountry = normalizeCountryFromCustomField(
+        customFields.destinationCountry,
+        customFieldMeta?.destinationCountry,
+      );
+      const employeeCountry = normalizeCountryFromCustomField(
+        customFields.employeeCountry,
+        customFieldMeta?.employeeCountry,
+      );
       const appStatus = ZD_STATUS_MAP[t.status] || 'new';
       const isPausedStatus = appStatus === 'waiting';
 
@@ -759,7 +805,13 @@ async function fetchZendeskQueueForDept(deptCfg) {
         zdStatus: t.status || null,
         priority: ZD_PRIORITY_MAP[t.priority] || 'medium',
         type: detectType(t.subject, t.tags || []),
-        country: detectCountry(t.subject, t.tags || []),
+        // 2026-05-22 — for GIX/Immigration the row's country is the
+        // Destination Country custom field (where the visa is going).
+        // Falls back to Employee Country and finally the keyword scan on
+        // subject/tags so HRX-style tickets that share this codepath
+        // still resolve. The flag/filter/getCountryName helpers
+        // downstream all expect the 2-letter ISO code.
+        country: destinationCountry || employeeCountry || detectCountry(t.subject, t.tags || []),
         assigneeEmail: assignee.email || null,
         assigneeName: assignee.name || null,
         requesterName: requester.name || 'Unknown',
@@ -770,9 +822,10 @@ async function fetchZendeskQueueForDept(deptCfg) {
         pausedAt: isPausedStatus ? slaAnchorIso : null,
         slaMinsOverride: isPausedStatus ? zendeskPausedMins : zendeskActiveMins,
         slaMetric,
-        // No HRX custom fields — return an empty record so Detail.jsx
-        // doesn't crash trying to read .HRX_RESPONSIBLE etc.
-        customFields: {},
+        // Same custom-field record shape as the HRX path, populated for
+        // GIX too so Detail.jsx can edit Destination Country / Employee
+        // Country inline without crashing on undefined property reads.
+        customFields,
         externalUrl: deptCfg.subdomain
           ? `https://${deptCfg.subdomain}.zendesk.com/agent/tickets/${t.id}`
           : (ZD_SUBDOMAIN ? `https://${ZD_SUBDOMAIN}.zendesk.com/agent/tickets/${t.id}` : ''),
@@ -893,8 +946,21 @@ async function fetchZendeskQueue() {
     const items = allTickets.map(t => {
       const assignee = userMap[t.assignee_id] || {};
       const requester = userMap[t.requester_id] || {};
-      // Read the per-ticket values for our 4 fields from t.custom_fields.
+      // Read the per-ticket values for our tracked fields from t.custom_fields.
       const customFields = extractCustomFieldValues(t, customFieldMeta);
+      // 2026-05-22 — resolve country from Destination Country first
+      // (immigration-style tickets where the subject is a visa name),
+      // then Employee Country, finally fall back to the keyword scan.
+      // Same hierarchy as the GIX path so a Destination-Country-tagged
+      // HRX ticket renders the right flag too.
+      const destinationCountry = normalizeCountryFromCustomField(
+        customFields.destinationCountry,
+        customFieldMeta?.destinationCountry,
+      );
+      const employeeCountry = normalizeCountryFromCustomField(
+        customFields.employeeCountry,
+        customFieldMeta?.employeeCountry,
+      );
       const appStatus = ZD_STATUS_MAP[t.status] || 'new';
       // Paused buckets (`pending`/`hold`) get the paused SLA window;
       // active buckets (`new`/`open`) get the active window. The FE
@@ -1043,7 +1109,7 @@ async function fetchZendeskQueue() {
         zdStatus: t.status || null,
         priority: ZD_PRIORITY_MAP[t.priority] || 'medium',
         type: detectType(t.subject, t.tags || []),
-        country: detectCountry(t.subject, t.tags || []),
+        country: destinationCountry || employeeCountry || detectCountry(t.subject, t.tags || []),
         assigneeEmail: assignee.email || null,
         assigneeName: assignee.name || null,
         requesterName: requester.name || 'Unknown',

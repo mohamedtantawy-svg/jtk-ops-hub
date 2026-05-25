@@ -124,13 +124,26 @@ export async function PATCH(req, { params }) {
     if (existingRows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     const existing = existingRows[0];
 
-    // Authorisation: creator OR Alerts Admin can mutate. Future stages may
-    // open up status changes more widely; for Stage 1 we keep it tight so
-    // a wrong button click can't accidentally close someone else's alert.
+    // Authorisation (2026-05-22 — Olga Pastuszak "Can't change the
+    // Leader's Alert status when submitted by Others"):
+    //   • Meta fields (severity / category / title / body / impact_tags /
+    //     links / attachments) — creator OR Alerts Admin only. Keeps the
+    //     original "Stage 1" intent: a wrong click can't reword someone
+    //     else's alert.
+    //   • Status — open to any signed-in user in the same dept. The
+    //     org_node_id check above already verified dept membership, so
+    //     this only widens within the visible scope. Every change is
+    //     logged in leader_alert_log with the actor's email, so accidental
+    //     transitions stay traceable and reversible.
+    // Olga's specific case: her manager filed an alert, she needs to mark
+    // it "In Progress" while she works on the underlying issue. Pre-fix
+    // the button was disabled for her even though she could see the row.
     const isAdmin = await canAdministerLeaderAlerts(user);
     const isCreator = (existing.created_by_email || '').toLowerCase() === user.email.toLowerCase();
-    if (!isAdmin && !isCreator) {
-      return NextResponse.json({ error: 'Only the creator or an Alerts Admin can edit this alert' }, { status: 403 });
+    const META_FIELDS = ['severity', 'category', 'title', 'body', 'impact_tags', 'links', 'attachments'];
+    const isMutatingMeta = META_FIELDS.some(k => payload[k] !== undefined);
+    if (isMutatingMeta && !isAdmin && !isCreator) {
+      return NextResponse.json({ error: 'Only the creator or an Alerts Admin can edit this alert\'s severity, category, title, body, tags, links or attachments' }, { status: 403 });
     }
 
     const sets = [];

@@ -238,52 +238,41 @@ export function DecisionsStrip({ onNavigate }) {
 
     // Count semantics (each tile answers "what's waiting on me?"):
     //
-    //   • hrHubPending    — open HR Hub requests across every flow that
-    //                       were either raised by someone in the caller's
-    //                       subtree (scope=team) OR assigned to the caller
-    //                       (scope=assigned). De-duped by id since the
-    //                       same row can appear in both scopes.
+    //   • hrHubPending    — role-scoped union of team-raised + assigned-
+    //                       to-me (admin → everything in the dept, RM/TL →
+    //                       subtree + assigned, agent → mine + assigned).
+    //                       Server-side COUNT(*) via /hr-hub/requests/counts.
     //   • leaderAlerts    — sidebar-badge unacked count, server filters by
     //                       severity threshold + caller's ack rows.
-    //   • urgentAssist    — open Urgent-Assist where someone in my subtree
-    //                       is the assignee. Endpoint takes a single
-    //                       status; we make 3 parallel calls and sum.
-    //   • approvalsCount  — HR-Hub requests of flow IN (hide_task_request,
-    //                       sla_extension_request) that are still
-    //                       actionable (not yet resolved). scope=team
-    //                       covers caller's full subtree.
+    //   • urgentAssist    — same role-scoped union (assignee-only — Urgent
+    //                       Assist is "who's actioning"). Server-side
+    //                       COUNT(*) via /urgent-assist/counts.
+    //   • approvalsCount  — same role-scoped union, narrowed to
+    //                       hide_task_request + sla_extension_request via
+    //                       the counts endpoint's `flows=` filter.
+    //
+    // 2026-05-22 — Mohamed Tantawy spec: tile count rules per role apply
+    // globally regardless of dept (HR Hub == GIX Hub == Benefits Hub etc.):
+    //   Admin       → everything in the dept
+    //   RM          → assigned + raised by anyone in reporting subtree
+    //   TL          → assigned + raised by team (direct reports)
+    //   Team Member → assigned + raised by me
+    // Implemented in the new server-side `byScope.briefingTile` derivation
+    // so the four tiles share the same role logic without re-deriving on
+    // the client. Old fan-out (16 list calls per strip mount, capped at
+    // 100-200 rows each — admin counts truncated for any busy dept) is
+    // replaced by 4 single-call COUNT(*) queries.
     //
     // Per-tile independent dispatch — Mohamed 2026-05-19: "the numbers
-    // doesn't show until its loaded which doesn't make sense." Before
-    // this, all 16 calls sat behind a single `await Promise.all(...)`
-    // and every tile rendered "—" until the SLOWEST call returned —
-    // dominated by the heavy `/hr-hub/requests` list payload. Splitting
-    // into 4 parallel-but-independent tile blocks lets each tile flip
-    // from "—" to its count as its own data arrives. Leader alerts
-    // (1 call) shows fastest; the others follow as their fan-outs
-    // settle.
+    // doesn't show until its loaded which doesn't make sense." Each tile
+    // flips from "—" to its count as its own data arrives. Leader alerts
+    // (1 call) shows fastest; the others follow as their counts settle.
 
-    // ── HR Hub tile — union team-raised + assigned-to-me, dedup by id ──
-    Promise.all([
-      safe('/hr-hub/requests?status=new&scope=team&limit=100'),
-      safe('/hr-hub/requests?status=in_progress&scope=team&limit=100'),
-      safe('/hr-hub/requests?status=on_hold&scope=team&limit=100'),
-      safe('/hr-hub/requests?status=new&scope=assigned&limit=100'),
-      safe('/hr-hub/requests?status=in_progress&scope=assigned&limit=100'),
-      safe('/hr-hub/requests?status=on_hold&scope=assigned&limit=100'),
-    ]).then(([tn, tip, toh, an, aip, aoh]) => {
-      if (cancelled) return;
-      if (!tn && !tip && !toh && !an && !aip && !aoh) return;
-      const seenIds = new Set();
-      let unique = 0;
-      for (const r of [...itemsOf(tn), ...itemsOf(tip), ...itemsOf(toh),
-                       ...itemsOf(an), ...itemsOf(aip), ...itemsOf(aoh)]) {
-        const id = r?.id;
-        if (id == null || seenIds.has(id)) continue;
-        seenIds.add(id);
-        unique++;
-      }
-      setHrHubPending(unique);
+    // ── HR Hub tile — role-scoped briefingTile count, all flows ──
+    safe('/hr-hub/requests/counts').then(j => {
+      if (cancelled || !j) return;
+      const n = j?.byScope?.briefingTile;
+      if (typeof n === 'number') setHrHubPending(n);
     });
 
     // ── Leader Alerts tile — single endpoint, fastest path ──
@@ -292,29 +281,18 @@ export function DecisionsStrip({ onNavigate }) {
       if (j) setLeaderAlerts(j.count ?? 0);
     });
 
-    // ── Urgent Assist tile — 3 status buckets, sum lengths ──
-    Promise.all([
-      safe('/urgent-assist?scope=team&status=new&limit=200'),
-      safe('/urgent-assist?scope=team&status=in_progress&limit=200'),
-      safe('/urgent-assist?scope=team&status=on_hold&limit=200'),
-    ]).then(([n, ip, oh]) => {
-      if (cancelled) return;
-      if (!n && !ip && !oh) return;
-      setUrgentAssist(itemsOf(n).length + itemsOf(ip).length + itemsOf(oh).length);
+    // ── Urgent Assist tile — role-scoped briefingTile count ──
+    safe('/urgent-assist/counts').then(j => {
+      if (cancelled || !j) return;
+      const n = j?.byScope?.briefingTile;
+      if (typeof n === 'number') setUrgentAssist(n);
     });
 
-    // ── SLA Ext + Hide-Task approvals tile — 6 calls (2 flows × 3 statuses) ──
-    Promise.all([
-      safe('/hr-hub/requests?flow=hide_task_request&status=new&scope=team&limit=100'),
-      safe('/hr-hub/requests?flow=hide_task_request&status=in_progress&scope=team&limit=100'),
-      safe('/hr-hub/requests?flow=hide_task_request&status=on_hold&scope=team&limit=100'),
-      safe('/hr-hub/requests?flow=sla_extension_request&status=new&scope=team&limit=100'),
-      safe('/hr-hub/requests?flow=sla_extension_request&status=in_progress&scope=team&limit=100'),
-      safe('/hr-hub/requests?flow=sla_extension_request&status=on_hold&scope=team&limit=100'),
-    ]).then((all) => {
-      if (cancelled || all.every(x => !x)) return;
-      const sum = all.reduce((acc, j) => acc + itemsOf(j).length, 0);
-      setApprovalsCount(sum);
+    // ── SLA Ext + Hide-Task tile — counts narrowed to the two flows ──
+    safe('/hr-hub/requests/counts?flows=hide_task_request,sla_extension_request').then(j => {
+      if (cancelled || !j) return;
+      const n = j?.byScope?.briefingTile;
+      if (typeof n === 'number') setApprovalsCount(n);
     });
 
     return () => { cancelled = true; };

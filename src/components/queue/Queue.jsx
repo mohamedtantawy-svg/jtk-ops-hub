@@ -246,6 +246,38 @@ const Queue = ({ user, tasks, subFilter }) => {
     return () => window.removeEventListener('queue:setSlaFilter', handler);
   }, []);
   const [workSource, setWorkSource] = useState(null);
+
+  // Pablo Gonzalez 2026-05-22 — "Pressing tasks in the daily summary bring
+  // me to as blank page". Briefing's ApproachingBreach / MiniTicketList
+  // used to call a no-op `setSelTask` + `setView('my-queue')`, so the user
+  // landed on Queue's WorkspaceHome with no source filter. On HRX with lots
+  // of data the home is busy enough that it doesn't read as broken, but on
+  // newer dept tenants (GIX / Payroll / Benefits) with sparse data it looks
+  // like a blank page. Briefing now dispatches `queue:focusSource` with
+  // `{ source }` after setView, so we land inside the source panel that
+  // actually contains the task they clicked.
+  useEffect(() => {
+    const handler = (e) => {
+      const src = e?.detail?.source;
+      if (typeof src !== 'string' || !src) return;
+      if (src === 'zendesk' || src === 'jira') {
+        setWorkSource(null);
+        setFTool(src);
+        return;
+      }
+      // Deel source panels — each has its own workSource id. Defensive
+      // allowlist (no setWorkSource for unknown ids).
+      if (src === 'onboarding' || src === 'offboarding' ||
+          src === 'amendments' || src === 'redlines' ||
+          src === 'workbench' || src === 'incentive_plans' ||
+          src === 'immigration_tasks' || src === 'hidden') {
+        setFTool(null);
+        setWorkSource(src);
+      }
+    };
+    window.addEventListener('queue:focusSource', handler);
+    return () => window.removeEventListener('queue:focusSource', handler);
+  }, []);
   // ── Column sort for the ZD/Jira table ─────────────────────────────────────
   // Default = SLA tier (Breached → At-Risk → On Track), oldest-first within
   // each tier. Clicking a column header switches primary sort to that column;
@@ -703,7 +735,16 @@ const Queue = ({ user, tasks, subFilter }) => {
       });
     };
     const _sorted = sortArr(_vis.filter(t => t.status !== 'resolved' && t.status !== 'waiting'));
-    const _snoozed = _vis.filter(t => t.status === 'waiting');
+    // 2026-05-22 — Pablo Gonzalez "you are showing the paused cases first,
+    // you need to follow the same sorting as HR department". On HRX the
+    // visible top of the queue is active rows (already SLA-tiered), so
+    // even when paused rows fell through in fetch order nobody noticed.
+    // On GIX the actionable Zendesk tickets land in pending/hold (paused)
+    // by default — every row drops into _snoozed, so without a tier sort
+    // the worst breaches scattered randomly through the list. Apply the
+    // same sortArr to paused rows so Breached → At Risk → On Track is
+    // preserved inside the PAUSED section too.
+    const _snoozed = sortArr(_vis.filter(t => t.status === 'waiting'));
     const _done = _vis.filter(t => t.status === 'resolved');
     const _all = [..._sorted, ..._snoozed, ..._done];
     return { baseVis: _baseVis, visPreSla: _visPreSla, active: _sorted, snoozed: _snoozed, done: _done, all: _all };

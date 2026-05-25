@@ -13,8 +13,15 @@
 import { getTicketFields, isZendeskConfigured } from './zendesk-api';
 
 // FE key → ZD field title (case-insensitive, trimmed match).
+// 2026-05-22 — Pablo Gonzalez "Destination Country is not picked up in the
+// Queue properly". GIX (Immigration) tickets carry a "Destination Country"
+// dropdown that's the authoritative country for visa tickets where the
+// subject is a visa name (L-1B, B1, EOR Visa) with no embedded country
+// keyword. Added alongside Employee Country so HRX behaviour stays
+// byte-identical while GIX picks the right field below in queue/route.js.
 export const ZD_CUSTOM_FIELD_TITLES = {
   employeeCountry:    'Employee Country',
+  destinationCountry: 'Destination Country',
   form:               'Form',
   rootCauseSupport:   'Root Cause - Support',
   rootCauseSelector:  'Root Cause Selector',

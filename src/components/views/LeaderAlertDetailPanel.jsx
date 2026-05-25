@@ -214,7 +214,15 @@ const LeaderAlertDetailPanel = ({
   const myEmailLc = (user?.email || '').toLowerCase();
   const acked = ackedEmailSet.has(myEmailLc);
   const isCreator = (alert?.created_by_email || '').toLowerCase() === myEmailLc;
+  // 2026-05-22 — Olga Pastuszak "Can't change the Leader's Alert status
+  // when submitted by Others". Status is now open to any user in the
+  // dept (server-side org_node_id check still applies), while severity /
+  // category / title / body / etc. stay restricted to creator + Alerts
+  // Admin. canEdit = meta-edit gate. canChangeStatus = anyone scoped in.
+  // Every status change is recorded in leader_alert_log with the actor,
+  // so accidental transitions are traceable and reversible.
   const canEdit = isCreator || !!perms?.canManageLeaderAlerts;
+  const canChangeStatus = !!user?.email;
 
   const myFollower = followers.find(f => (f.email || '').toLowerCase() === myEmailLc);
   const muted = !!myFollower?.muted;
@@ -403,7 +411,7 @@ const LeaderAlertDetailPanel = ({
                   value={alert.status}
                   options={STATUS_OPTIONS.map(s => ({ id: s, label: STATUS_META[s].label, color: STATUS_META[s].color, icon: STATUS_META[s].icon }))}
                   onChange={changeStatus}
-                  disabled={!canEdit || busy}
+                  disabled={!canChangeStatus || busy}
                 />
                 <ControlPill
                   label="Severity"

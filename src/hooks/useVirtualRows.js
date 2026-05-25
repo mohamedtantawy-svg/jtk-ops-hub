@@ -24,9 +24,29 @@ import { useEffect, useState, useCallback } from 'react';
 export function useVirtualRows({ rowCount, rowHeight = 44, overscan = 8, scrollerRef }) {
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(600);
+  // 2026-05-22 — Pablo Gonzalez "Queue goes half blank as you scroll down
+  // and large amount of tasks": Queue.jsx's ticket scroller (ZD/Jira) is
+  // mounted conditionally — `{(fTool || hasActiveFilters) && (<div ref=
+  // {ticketScrollerRef}>…</div>)}`. The user lands on the workspace home
+  // first, so on Queue's initial render `ticketScrollerRef.current` is
+  // null. The original effect below had empty deps and bailed out on null,
+  // so when the user later clicked a ZD/Jira tab the scroller mounted but
+  // NO scroll listener / ResizeObserver was ever attached — el.scrollTop
+  // stayed at 0 forever and the virtualizer rendered only rows 0..N at the
+  // top, with the rest of the list as a giant empty spacer below. SourceTable
+  // (Workbench, Onboarding, etc.) avoided this because SourceTable itself
+  // mounts as a unit when the user picks the source — its own scrollerRef
+  // is attached on the FIRST effect run inside SourceTable.
+  // Mirror the ref's current into state so the listener-attaching effect
+  // re-runs the moment the div actually attaches in the DOM.
+  const [scroller, setScroller] = useState(null);
+  useEffect(() => {
+    const el = scrollerRef?.current || null;
+    setScroller(prev => (prev === el ? prev : el));
+  });
 
   useEffect(() => {
-    const el = scrollerRef?.current;
+    const el = scroller;
     if (!el) return;
 
     // 2026-05-19 — windowed-vs-element scroll fallback. The Queue scroller
@@ -76,10 +96,7 @@ export function useVirtualRows({ rowCount, rowHeight = 44, overscan = 8, scrolle
       window.removeEventListener('resize', sync);
       if (ro) ro.disconnect();
     };
-    // scrollerRef is a ref object — not part of the dep array intentionally;
-    // the effect runs once on mount and tears down on unmount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [scroller]);
 
   // When the underlying list shrinks (filter toggled, background polling
   // refresh returning fewer rows, etc.) the browser clamps `el.scrollTop`
