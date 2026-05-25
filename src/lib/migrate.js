@@ -1043,8 +1043,16 @@ CREATE INDEX IF NOT EXISTS idx_hr_hub_request_team_lead  ON hr_hub_request(team_
 DO $$ BEGIN
   ALTER TABLE hr_hub_request DROP CONSTRAINT IF EXISTS hr_hub_request_status_check;
   ALTER TABLE hr_hub_request ADD CONSTRAINT hr_hub_request_status_check
-    CHECK (status IN ('new','in_progress','on_hold','resolved','rejected'));
+    CHECK (status IN ('new','in_progress','on_hold','pending_requester','resolved','rejected'));
 END $$;
+-- 'pending_requester' (2026-05-25) — Josephine Tuoyo asked for an explicit
+-- state covering "waiting on the requester to come back with info".
+-- Distinct from on_hold (paused by us) and from in_progress (we are
+-- actively working). Non-terminal: counts as open in the briefing tiles +
+-- HR Hub queue. Applies across every department because the lifecycle is
+-- a single canonical set; per-flow label overrides via HrHubSettingsPanel
+-- still work as before. Existing rows continue to satisfy the new
+-- constraint (additive enum extension).
 
 CREATE TABLE IF NOT EXISTS hr_hub_comment (
   id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),

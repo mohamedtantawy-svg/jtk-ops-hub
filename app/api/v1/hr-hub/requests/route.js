@@ -37,7 +37,7 @@ import {
 
 const ALLOWED_FLOWS = new Set(['hr_request', 'hr_reporting', 'escalation_zero', 'feedback', 'hide_task_request', 'sla_extension_request']);
 const ALLOWED_HIDE_REASON_CODES = new Set(['internal_deel_employee', 'test_task', 'other']);
-const ALLOWED_STATUSES = new Set(['new', 'in_progress', 'on_hold', 'resolved', 'rejected']);
+const ALLOWED_STATUSES = new Set(['new', 'in_progress', 'on_hold', 'pending_requester', 'resolved', 'rejected']);
 const ALLOWED_PRIORITIES = new Set(['low', 'medium', 'high', 'critical']);
 // `assigned` = items where assignee_email matches the caller. Distinct from
 // `mine` (which keys off created_by_email) — a manager who triages a request
@@ -453,7 +453,7 @@ export async function POST(req) {
         WHERE flow = 'sla_extension_request'
           AND task_source = $1
           AND task_id     = $2
-          AND status IN ('new', 'in_progress', 'on_hold')
+          AND status IN ('new', 'in_progress', 'on_hold', 'pending_requester')
         LIMIT 1`,
       [taskSource, taskId],
     );

@@ -36,14 +36,20 @@ import { getHubBrand } from '../../lib/hub-brand';
 // Single source of truth for status visuals — same shape as Feedback's
 // STATUS_FILTERS so the four buttons feel identical across the two tabs.
 const STATUS_FILTERS = [
-  { value: 'new',         label: 'New',         icon: 'bi-circle-fill',          color: '#0369a1', bg: '#e0f2fe', tint: '#bae6fd' },
-  { value: 'in_progress', label: 'In Progress', icon: 'bi-arrow-repeat',         color: '#d97706', bg: '#fff8e6', tint: '#fde68a' },
-  { value: 'on_hold',     label: 'On Hold',     icon: 'bi-pause-circle-fill',    color: '#737373', bg: '#f5f5f4', tint: '#e7e5e4' },
-  { value: 'resolved',    label: 'Resolved',    icon: 'bi-check-circle-fill',    color: '#15803d', bg: '#e8f5e9', tint: '#bbf7d0' },
+  { value: 'new',               label: 'New',               icon: 'bi-circle-fill',          color: '#0369a1', bg: '#e0f2fe', tint: '#bae6fd' },
+  { value: 'in_progress',       label: 'In Progress',       icon: 'bi-arrow-repeat',         color: '#d97706', bg: '#fff8e6', tint: '#fde68a' },
+  // Josephine Tuoyo 2026-05-25 — explicit state for "waiting on the
+  // requester to come back with info". Distinct from on_hold (we paused)
+  // and from in_progress (we are actively working). Non-terminal: still
+  // counted as open everywhere. Purple semantic to read distinct from
+  // in_progress amber + on_hold grey.
+  { value: 'pending_requester', label: 'Pending Requester', icon: 'bi-hourglass-split',      color: '#7c3aed', bg: '#f3eff8', tint: '#e9d5ff' },
+  { value: 'on_hold',           label: 'On Hold',           icon: 'bi-pause-circle-fill',    color: '#737373', bg: '#f5f5f4', tint: '#e7e5e4' },
+  { value: 'resolved',          label: 'Resolved',          icon: 'bi-check-circle-fill',    color: '#15803d', bg: '#e8f5e9', tint: '#bbf7d0' },
   // Terminal "closed without resolving" (2026-05-12) — Megan reported HR
   // requests sometimes get declined, not resolved. Red literal stays
   // semantic across light/dark themes.
-  { value: 'rejected',    label: 'Rejected',    icon: 'bi-x-circle-fill',        color: '#991b1b', bg: '#fee2e2', tint: '#fecaca' },
+  { value: 'rejected',          label: 'Rejected',          icon: 'bi-x-circle-fill',        color: '#991b1b', bg: '#fee2e2', tint: '#fecaca' },
 ];
 const STATUS_BY_VALUE = Object.fromEntries(STATUS_FILTERS.map(s => [s.value, s]));
 
@@ -426,17 +432,15 @@ export default function HrHubView({ user, onCreateHrHub }) {
   return (
     <div style={page}>
       <style>{`
-        /* 5 status cards (new/in_progress/on_hold/resolved/rejected) since
-           2026-05-12. Wider screens fit all five on one row; mid-widths
-           collapse to 3-up, narrow to 2-up so each card stays readable. */
-        .hrhub-status-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
-        @media (max-width: 1200px) { .hrhub-status-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        /* 6 status cards (new/in_progress/pending_requester/on_hold/resolved/
+           rejected) since 2026-05-25. Wider screens fit all six on one row;
+           mid-widths collapse to 3-up (2 rows of 3), narrow to 2-up. */
+        .hrhub-status-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+        @media (max-width: 1400px) { .hrhub-status-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
         @media (max-width: 900px)  {
           .hrhub-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-          /* 2026-05-21 audit F11: at 2-column the 5th card (Rejected)
-             previously orphaned alone on row 3. Span it full-width so
-             the grid reads as 2+2+1-full instead of 2+2+1-half. */
-          .hrhub-status-grid > :nth-child(5):last-child { grid-column: span 2; }
+          /* With 6 cards in 2-col, layout is 2+2+2 — no orphan, so the old
+             5th-child full-span rule is no longer needed. */
         }
         /* 2026-05-21 audit F49: segments wrap mid-text at narrow viewports
            because the container is inline-flex with no overflow rule.

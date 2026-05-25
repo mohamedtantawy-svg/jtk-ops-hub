@@ -30,9 +30,14 @@ import { resolveAssigneeWithOooCover } from '../../../../../../src/lib/hr-hub-oo
 // declined, not resolved. Both share rank 3 so moving between them
 // (e.g. an admin reclassifies a closure) doesn't trip the
 // backwards-direction guard below.
-const ALLOWED_STATUSES = ['new', 'in_progress', 'on_hold', 'resolved', 'rejected'];
+const ALLOWED_STATUSES = ['new', 'in_progress', 'on_hold', 'pending_requester', 'resolved', 'rejected'];
+// `pending_requester` shares rank 2 with `on_hold` — both are "we're not
+// actively working, we're waiting" states, just for different reasons
+// (on_hold = paused by us, pending_requester = waiting on the requester).
+// Moving between them is a sideways transition that the backwards-guard
+// allows freely. Josephine Tuoyo 2026-05-25.
 const STATUS_ORDER = {
-  new: 0, in_progress: 1, on_hold: 2, resolved: 3, rejected: 3,
+  new: 0, in_progress: 1, on_hold: 2, pending_requester: 2, resolved: 3, rejected: 3,
 };
 const ALLOWED_PRIORITIES = new Set(['low', 'medium', 'high', 'critical']);
 
