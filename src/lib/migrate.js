@@ -2160,6 +2160,39 @@ CREATE TABLE IF NOT EXISTS zd_recently_solved (
 );
 CREATE INDEX IF NOT EXISTS idx_zd_recently_solved_solved_at
   ON zd_recently_solved(solved_at);
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Per-department assignments (Phase 12a, 2026-05-25)
+-- ────────────────────────────────────────────────────────────────────────────
+-- Each row names a "function" (SWAT) or "responsibility" inside a department,
+-- with one or more primary assignees (email[]) and zero or more backups.
+-- Stored polymorphically via the kind column so SWAT and Responsibilities
+-- share the same shape; the FE sub-tabs filter by kind. FK is to org_nodes
+-- generically so a future team-level usage does not need a schema change --
+-- the UI gates rendering to top-level departments for v1.
+--
+-- Soft-delete only (is_archived). Cascading delete from org_nodes is safe
+-- because dept archival already requires an explicit operator action;
+-- automatic cleanup of orphaned assignments is the right semantic.
+CREATE TABLE IF NOT EXISTS org_node_assignments (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  node_id         UUID NOT NULL REFERENCES org_nodes(id) ON DELETE CASCADE,
+  kind            VARCHAR(40) NOT NULL CHECK (kind IN ('swat_function','responsibility')),
+  name            VARCHAR(255) NOT NULL,
+  description     TEXT,
+  assignee_emails TEXT[] NOT NULL DEFAULT '{}',
+  backup_emails   TEXT[] NOT NULL DEFAULT '{}',
+  sort_order      INT NOT NULL DEFAULT 0,
+  is_archived     BOOLEAN NOT NULL DEFAULT false,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_by      VARCHAR(255),
+  updated_by      VARCHAR(255)
+);
+CREATE INDEX IF NOT EXISTS idx_org_node_assignments_node_kind_active
+  ON org_node_assignments(node_id, kind) WHERE is_archived = false;
+CREATE INDEX IF NOT EXISTS idx_org_node_assignments_sort
+  ON org_node_assignments(node_id, kind, sort_order);
 `;
 
 export async function runMigrations() {

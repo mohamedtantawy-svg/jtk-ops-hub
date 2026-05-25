@@ -10,7 +10,7 @@
 // light/dark/responsive parity is automatic. No hardcoded hex outside the
 // per-node accent slot.
 
-import { useCallback, useContext, useMemo, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { PermissionsContext } from '../../App';
 import { useTeamMembers } from '../../hooks/useTeamMembers';
 import { useOrgNodes } from '../../hooks/useOrgNodes';
@@ -25,6 +25,7 @@ import AddMemberModal from '../org/AddMemberModal';
 import OrgMovePreviewModal from '../org/OrgMovePreviewModal';
 import BulkMoveBar from '../org/BulkMoveBar';
 import OrgAuditDrawer from '../org/OrgAuditDrawer';
+import DeptManagementPanel from '../org/DeptManagementPanel';
 import { buildStructureCsv, buildMembersCsv, downloadCsv } from '../../utils/orgCsvExport';
 
 // Title-case a snake_case access enum for display. 2026-05-21 audit U93.
@@ -185,10 +186,43 @@ export default function OrgView({ user, realUser, onImpersonate }) {
   const [formState, setFormState] = useState(null); // { mode, parent?, defaultKind?, node? }
   const [archiveTarget, setArchiveTarget] = useState(null);
 
+  // Phase 12a (2026-05-25): clicking a top-level department drills into its
+  // dedicated management view (SWAT Functions + Responsibilities). Clicks
+  // on sub-depts and teams keep the old "open edit form" behaviour — the
+  // explicit Edit menu item also routes through openEdit so admins still
+  // have a single, predictable path to rename/recolour any node.
+  const [selectedDeptId, setSelectedDeptId] = useState(null);
+
   const openCreateRoot = () => setFormState({ mode: 'create', defaultKind: 'department', parent: null });
   const openCreateChild = (parent, kind) => setFormState({ mode: 'create', parent, defaultKind: kind });
   const openEdit = (node) => setFormState({ mode: 'edit', node, parent: node.parentId ? org.tree.byId.get(node.parentId) : null });
   const closeForm = () => setFormState(null);
+
+  // Branch click-on-node behaviour: top-level depts open the management
+  // panel; everything else opens the edit form (unchanged). Defined as a
+  // memoised callback so the OrgTreeView / OrgChartCanvas don't re-render
+  // their entire row trees when an unrelated piece of OrgView state moves.
+  const handleNodeClick = useCallback((node) => {
+    if (!node) return;
+    if (node.kind === 'department' && !node.parentId) {
+      setSelectedDeptId(node.id);
+    } else {
+      openEdit(node);
+    }
+  }, []);
+  const closeDeptPanel = useCallback(() => setSelectedDeptId(null), []);
+
+  // If the selected dept gets archived or removed from the tree (e.g.
+  // restructure ops), drop the selection so we don't render an orphaned
+  // panel against a stale node.
+  const selectedDeptNode = selectedDeptId ? org.tree.byId?.get(selectedDeptId) : null;
+  useEffect(() => {
+    if (!selectedDeptId) return;
+    if (!selectedDeptNode || selectedDeptNode.isArchived
+        || selectedDeptNode.kind !== 'department' || selectedDeptNode.parentId) {
+      setSelectedDeptId(null);
+    }
+  }, [selectedDeptId, selectedDeptNode]);
 
   // Phase 8: clicking Archive on an already-archived node restores it.
   const handleArchiveOrRestore = async (node) => {
@@ -344,6 +378,10 @@ export default function OrgView({ user, realUser, onImpersonate }) {
         </div>
 
         {/* ── Toolbar ─────────────────────────────────────────────────────── */}
+        {/* Hidden in dept-management mode — view-mode toggles and the
+            org-wide search aren't applicable inside a single dept's panel.
+            Use "Back to Org" in the panel header to return. */}
+        {!selectedDeptNode && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 12,
           marginTop: 18, flexWrap: 'wrap',
@@ -447,6 +485,7 @@ export default function OrgView({ user, realUser, onImpersonate }) {
             )}
           </div>
         </div>
+        )}
       </div>
 
       {/* ── Body ─────────────────────────────────────────────────────────── */}
@@ -470,6 +509,17 @@ export default function OrgView({ user, realUser, onImpersonate }) {
           />
         ) : showWelcome ? (
           <WelcomeScaffold canEdit={canEdit} onCreate={openCreateRoot} />
+        ) : selectedDeptNode ? (
+          <DeptManagementPanel
+            node={selectedDeptNode}
+            members={members}
+            tree={org.tree}
+            rootNodes={org.rootNodes}
+            perms={perms}
+            onBack={closeDeptPanel}
+            onLoginAsDeptAdmin={handleLoginAsDeptAdmin}
+            isGlobalSuperAdmin={isGlobalSuperAdmin}
+          />
         ) : viewMode === 'chart' ? (
           <OrgChartCanvas
             tree={org.tree}
@@ -478,7 +528,7 @@ export default function OrgView({ user, realUser, onImpersonate }) {
             search={search}
             canEdit={canEdit}
             sumDescendants={org.sumDescendants}
-            onSelectNode={openEdit}
+            onSelectNode={handleNodeClick}
             onEdit={openEdit}
             onAddChild={openCreateChild}
             onArchive={handleArchiveOrRestore}
@@ -504,12 +554,12 @@ export default function OrgView({ user, realUser, onImpersonate }) {
             onAddChild={openCreateChild}
             onArchive={handleArchiveOrRestore}
             onAddMember={(node) => setAddMemberTo(node)}
-            onSelect={openEdit}
+            onSelect={handleNodeClick}
             isGlobalSuperAdmin={isGlobalSuperAdmin}
             onLoginAsDeptAdmin={handleLoginAsDeptAdmin}
           />
         ) : (
-          <TablePreview nodes={org.nodes} members={members} tree={org.tree} search={search} onSelectMember={(m) => setSelectedMember(m)} />
+          <TablePreview nodes={org.nodes} members={members} tree={org.tree} search={search} onSelectMember={(m) => setSelectedMember(m)} onSelectDept={(node) => setSelectedDeptId(node.id)} />
         )}
       </div>
 
@@ -685,7 +735,7 @@ function WelcomeScaffold({ canEdit, onCreate }) {
 // admins can scan who's where without bouncing to the chart. Sort: kind
 // (Department first, then Team), then name. Members appear indented below
 // their parent node with their org-path resolved from the tree map.
-function TablePreview({ nodes, members = [], tree, search, onSelectMember }) {
+function TablePreview({ nodes, members = [], tree, search, onSelectMember, onSelectDept }) {
   const lc = (search || '').toLowerCase().trim();
   const matchesNode = (n) => !lc || n.name.toLowerCase().includes(lc) || (n.leadEmail || '').toLowerCase().includes(lc);
   const matchesMember = (m) => !lc
@@ -772,16 +822,27 @@ function TablePreview({ nodes, members = [], tree, search, onSelectMember }) {
         }
         if (r.kind === 'node') {
           const n = r.node;
+          const isTopLevelDept = n.kind === 'department' && !n.parentId;
+          const canDrill = isTopLevelDept && !!onSelectDept;
           return (
-            <div key={n.id} style={{
-              display: 'grid',
-              gridTemplateColumns: '140px 1fr 1fr 100px 100px',
-              padding: '10px 16px',
-              borderBottom: !isLast ? '1px solid var(--border-light)' : 'none',
-              alignItems: 'center',
-              fontSize: 'var(--font-md)', color: 'var(--text)',
-              background: n.kind === 'department' ? 'var(--purple-light)' : 'var(--surface-2)',
-            }}>
+            <div
+              key={n.id}
+              onClick={canDrill ? () => onSelectDept(n) : undefined}
+              role={canDrill ? 'button' : undefined}
+              tabIndex={canDrill ? 0 : undefined}
+              onKeyDown={canDrill ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectDept(n); } } : undefined}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '140px 1fr 1fr 100px 100px',
+                padding: '10px 16px',
+                borderBottom: !isLast ? '1px solid var(--border-light)' : 'none',
+                alignItems: 'center',
+                fontSize: 'var(--font-md)', color: 'var(--text)',
+                background: n.kind === 'department' ? 'var(--purple-light)' : 'var(--surface-2)',
+                cursor: canDrill ? 'pointer' : 'default',
+              }}
+              title={canDrill ? 'Open department management' : undefined}
+            >
               <div>
                 <span style={{
                   padding: '2px 8px',
@@ -792,7 +853,10 @@ function TablePreview({ nodes, members = [], tree, search, onSelectMember }) {
                   textTransform: 'capitalize',
                 }}>{n.kind}</span>
               </div>
-              <div style={{ fontWeight: 700 }}>{n.name}</div>
+              <div style={{ fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                {n.name}
+                {canDrill && <i className="bi bi-arrow-right-short" style={{ color: 'var(--purple)' }} aria-hidden="true" />}
+              </div>
               <div style={{ color: 'var(--text-secondary)' }}>{n.leadEmail || '—'}</div>
               <div style={{ textAlign: 'right', fontWeight: 600 }}>{(byNode.get(n.id) || []).length}</div>
               <div style={{ textAlign: 'right', color: n.vacantCount ? 'var(--orange)' : 'var(--text-muted)', fontWeight: n.vacantCount ? 700 : 500 }}>{n.vacantCount || 0}</div>
