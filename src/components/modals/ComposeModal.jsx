@@ -286,8 +286,22 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
   }
 
   return (
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:10000,display:'flex',alignItems:'center',justifyContent:'center'}} onClick={onClose}>
-      <div style={{background:'var(--surface)',borderRadius:16,width:'100%',maxWidth:620,maxHeight:'90vh',display:'flex',flexDirection:'column',boxShadow:'0 4px 24px rgba(0,0,0,0.15)',overflow:'hidden',animation:'modalIn .18s cubic-bezier(.34,1.56,.64,1) forwards'}} onClick={e=>e.stopPropagation()}>
+    <div
+      style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:10000,display:'flex',alignItems:'center',justifyContent:'center'}}
+      // 2026-05-22 — Olga Pastuszak "The Announcement window vanishes
+      // while editing text". Drag-selecting text inside an input/textarea
+      // and releasing the mouse outside the modal used to fire a `click`
+      // on the backdrop (browsers fire click on the common ancestor of
+      // mousedown + mouseup, which is the backdrop when one foot is
+      // outside) — `onClick={onClose}` then discarded the draft. Switch
+      // to mousedown-on-backdrop-ONLY: only fire close when the gesture
+      // actually started on the backdrop (`e.target === e.currentTarget`).
+      // Mirrors CreateFeedbackModal / CreateLeaderAlertModal etc., which
+      // use the same pattern. Clicks/drags that originate inside the
+      // modal never reach this handler with target === currentTarget.
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div style={{background:'var(--surface)',borderRadius:16,width:'100%',maxWidth:620,maxHeight:'90vh',display:'flex',flexDirection:'column',boxShadow:'0 4px 24px rgba(0,0,0,0.15)',overflow:'hidden',animation:'modalIn .18s cubic-bezier(.34,1.56,.64,1) forwards'}} onMouseDown={e=>e.stopPropagation()}>
         <div style={{padding:'24px 24px 0',display:'flex',alignItems:'center',gap:10}}>
           <div style={{width:36,height:36,borderRadius:9,background:'#e3f2fd',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
             <i className="bi-pencil-square" style={{color:'#1565c0',fontSize:16}}></i>
