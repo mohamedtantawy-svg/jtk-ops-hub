@@ -1660,6 +1660,20 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
             redlinesCount={redlineRows.length}
             workbenchCount={workbenchActiveRows.length}
             incentivePlansCount={incentivePlanRows.length}
+            // Paused (on-hold) sub-counts — fed to the breakdown line on each
+            // step card. Carolina Ferreira 2026-05-25 feedback: "25 open ZD
+            // tickets, when in fact I only 3 that are open, and 22 paused."
+            // Tickets pause via Zendesk status='hold' (normalised to 'waiting'
+            // in our pipeline). Deel sources carry an explicit isPaused flag
+            // per row.
+            zdPausedCount={baseVis.filter(t => t.source === 'zendesk' && t.status === 'waiting').length}
+            jiraPausedCount={baseVis.filter(t => t.source === 'jira' && t.status === 'waiting').length}
+            onboardingPausedCount={onboardingRows.filter(r => r.isPaused).length}
+            offboardingPausedCount={offboardingRows.filter(r => r.isPaused).length}
+            amendmentsPausedCount={amendmentRows.filter(r => r.isPaused).length}
+            redlinesPausedCount={redlineRows.filter(r => r.isPaused).length}
+            workbenchPausedCount={workbenchActiveRows.filter(r => r.isPaused).length}
+            incentivePlansPausedCount={incentivePlanRows.filter(r => r.isPaused).length}
             sourceRowsAll={allSourceRows}
             breachedCount={workspaceHomeSla.breachedCount}
           />
