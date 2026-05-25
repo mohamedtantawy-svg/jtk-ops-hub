@@ -58,6 +58,7 @@ import CreateSlaExtensionModal from '../modals/CreateSlaExtensionModal';
 import ReassignTaskModal from '../modals/ReassignTaskModal';
 import CreateHrHubRequestModal from '../modals/CreateHrHubRequestModal';
 import HiddenTasksPanel from './HiddenTasksPanel';
+import TasksQueuePanel from './TasksQueuePanel';
 import WorkspaceHome from './WorkspaceHome';
 
 // ── Live assignee lookup ───────────────────────────────────────────────────
@@ -111,6 +112,12 @@ const WORK_SOURCES = [
 // sees everything). `hiddenTasks.hiddenKeys` is intentionally NOT
 // scoped — hides are universal at the queue-display layer.
 const HIDDEN_TAB = { id: 'hidden', label: 'Hidden', icon: 'bi-eye-slash-fill', color: '#d42d35', bg: '#fef2f2' };
+
+// Phase 2 (2026-05-25): synthetic "Tasks" source rendered ahead of the
+// admin-only Hidden tab. Backed by the work_tasks API rather than the
+// unified queue sync; data + behaviours live in TasksQueuePanel which
+// reuses the same composer + drawer the standalone Tasks tab uses.
+const WORK_TASKS_TAB = { id: 'work_tasks', label: 'Tasks', icon: 'bi-check2-square', color: '#7c3aed', bg: '#f3eff8' };
 
 const PRIORITY_DOT = { critical: '#dc2626', high: '#d97706', medium: '#0369a1', low: '#9b928a' };
 
@@ -912,6 +919,7 @@ const Queue = ({ user, tasks, subFilter }) => {
     // Admin Hidden tab — no SLA semantics. Pills sit at zero so they don't
     // borrow numbers from the underlying ZD/Jira queue.
     if (workSource === 'hidden') return { atRiskCount: 0, breachedCount: 0, onTrackCount: 0 };
+    if (workSource === 'work_tasks') return { atRiskCount: 0, breachedCount: 0, onTrackCount: 0 };
     let slaBase;
     if (workSource === 'jira') slaBase = visPreSla.filter(t => t.source === 'jira');
     else if (workSource === 'zendesk') slaBase = visPreSla.filter(t => t.source === 'zendesk');
@@ -950,6 +958,8 @@ const Queue = ({ user, tasks, subFilter }) => {
     if (workSource === 'incentive_plans') return { open: tblIncentivePlanRows.length, paused: 0, resolved: 0 };
     if (workSource === 'immigration_tasks') return { open: tblImmigrationTaskRows.length, paused: 0, resolved: 0 };
     if (workSource === 'hidden') return { open: scopedHiddenItems.length, paused: 0, resolved: 0 };
+    // Work-tasks live in their own backend; the panel does its own counting.
+    if (workSource === 'work_tasks') return { open: 0, paused: 0, resolved: 0 };
     const sourceOpen = fTool ? 0 : (
       tblOnboardingRows.length + tblOffboardingRows.length + tblAmendmentRows.length
       + tblRedlineRows.length + tblWorkbenchRows.length + tblIncentivePlanRows.length
@@ -971,6 +981,7 @@ const Queue = ({ user, tasks, subFilter }) => {
     if (workSource === 'incentive_plans') return { open: incentivePlanRows.length };
     if (workSource === 'immigration_tasks') return { open: immigrationTaskActiveRows.length };
     if (workSource === 'hidden') return { open: scopedHiddenItems.length };
+    if (workSource === 'work_tasks') return { open: 0 };
     const base = fTool ? baseVis.filter(t => t.source === fTool) : baseVis;
     const srcExtra = fTool ? 0 : allSourceRows.length;
     return {
@@ -1223,7 +1234,7 @@ const Queue = ({ user, tasks, subFilter }) => {
             // wrap also gives narrow desktops / tablets a usable layout instead
             // of a horizontal-scroll filter row.
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', overflow: 'visible', paddingBottom: 2 }}>
-              {[...WORK_SOURCES, HIDDEN_TAB].filter(ws => {
+              {[...WORK_SOURCES, WORK_TASKS_TAB, HIDDEN_TAB].filter(ws => {
                 // Phase 14.1 visibility gate: if a Deel source is set to
                 // false in the current dept's profile, drop its tab from
                 // the row. The hook starts with EMPTY_VISIBLE_SOURCES
@@ -1247,6 +1258,7 @@ const Queue = ({ user, tasks, subFilter }) => {
                   : ws.id === 'jira' ? jiraCount
                   : ws.id === 'zendesk' ? zdCount
                   : ws.id === 'hidden' ? scopedHiddenItems.length
+                  : ws.id === 'work_tasks' ? null
                   : 0;
                 const handleClick = () => {
                   if (isQueueFilter) {
@@ -1277,11 +1289,13 @@ const Queue = ({ user, tasks, subFilter }) => {
                     }}>
                     <i className={ws.icon} style={{ fontSize: 12 }}></i>
                     {ws.label}
-                    <span style={{
-                      padding: '1px 7px', borderRadius: 128, fontSize: 10, fontWeight: 700,
-                      background: isActive ? `${ws.color}20` : '#f2f2f2',
-                      color: isActive ? ws.color : '#9e9e9e',
-                    }}>{count}</span>
+                    {count != null && (
+                      <span style={{
+                        padding: '1px 7px', borderRadius: 128, fontSize: 10, fontWeight: 700,
+                        background: isActive ? `${ws.color}20` : '#f2f2f2',
+                        color: isActive ? ws.color : '#9e9e9e',
+                      }}>{count}</span>
+                    )}
                     {sourceFailing && (
                       <span aria-label="Sync failing" style={{
                         width: 7, height: 7, borderRadius: '50%', background: '#d42d35',
@@ -1562,6 +1576,11 @@ const Queue = ({ user, tasks, subFilter }) => {
       {workSource === 'hidden' && (
         <ErrorBoundary>
           <HiddenTasksPanel hiddenTasks={scopedHiddenTasks} />
+        </ErrorBoundary>
+      )}
+      {workSource === 'work_tasks' && (
+        <ErrorBoundary>
+          <TasksQueuePanel user={user} />
         </ErrorBoundary>
       )}
 

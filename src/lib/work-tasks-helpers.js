@@ -304,3 +304,131 @@ export function canEditWorkTask(user, task, { isDeptAdmin = false } = {}) {
   if ((task.followers || []).some(e => String(e).toLowerCase() === lc)) return true;
   return false;
 }
+
+// ── Phase 2 — Personal-checklist migration ──────────────────────────────
+// Auto-imports a user's old PersonalChecklist items (from
+// personal_checklist_snapshots) into work_tasks the first time they hit
+// the Tasks API. Idempotent: an app_settings sentinel keyed
+// `checklist_migrated_for:<email>` blocks repeat runs. The migration is
+// non-destructive -- the snapshot row stays intact so anyone still on
+// an unupgraded tab keeps seeing their checklist until they refresh,
+// and a re-migration would simply find the sentinel and skip.
+//
+// Mapping:
+//   item.title       → work_tasks.title
+//   item.description → work_tasks.description
+//   item.priority    → work_tasks.priority (urgent / high / normal / low)
+//   item.dueDate     → work_tasks.due_date (YYYY-MM-DD → 23:59 local)
+//   item.done        → work_tasks.status ('done' if true, else 'todo')
+//   item.updatedAt   → work_tasks.completed_at (only when done)
+//   item.id          → work_tasks.source_id (so re-runs dedupe)
+//
+// Returns { migrated, skipped } -- migrated rows are NEW INSERTs only;
+// skipped rows already had a matching source_id under this user.
+export async function migratePersonalChecklistIfNeeded(userEmail, orgNodeId) {
+  if (!userEmail) return { migrated: 0, skipped: 0 };
+  const email = String(userEmail).toLowerCase();
+  const sentinelKey = `checklist_migrated_for:${email}`;
+  try {
+    const { rows: sentinelRows } = await query(
+      `SELECT 1 FROM app_settings WHERE key = $1 LIMIT 1`,
+      [sentinelKey],
+    );
+    if (sentinelRows.length > 0) {
+      return { migrated: 0, skipped: 0, alreadyDone: true };
+    }
+  } catch (err) {
+    console.warn('[work-tasks migration] sentinel check failed:', err?.message);
+    return { migrated: 0, skipped: 0, error: err?.message };
+  }
+
+  // Pull the snapshot. Quietly bail when the row doesn't exist -- that's
+  // a brand new user with nothing to migrate. Stamp the sentinel anyway
+  // so subsequent boots don't re-query.
+  let snapshot;
+  try {
+    const { rows } = await query(
+      `SELECT items FROM personal_checklist_snapshots WHERE user_email = $1 LIMIT 1`,
+      [email],
+    );
+    snapshot = rows[0];
+  } catch (err) {
+    console.warn('[work-tasks migration] snapshot read failed:', err?.message);
+    return { migrated: 0, skipped: 0, error: err?.message };
+  }
+
+  const items = Array.isArray(snapshot?.items) ? snapshot.items : [];
+  // Filter to alive, well-formed entries. Tombstones (deleted: true) and
+  // missing-title rows are silently dropped.
+  const live = items.filter(it =>
+    it && typeof it === 'object' && !it.deleted
+    && typeof it.title === 'string' && it.title.trim()
+  );
+
+  let migrated = 0;
+  let skipped = 0;
+  for (const it of live) {
+    const title = String(it.title).trim().slice(0, TASK_NAME_MAX);
+    if (!title) continue;
+    const description = typeof it.description === 'string'
+      ? it.description.slice(0, TASK_DESCRIPTION_MAX)
+      : null;
+    const priority = VALID_PRIORITIES.has(it.priority) ? it.priority : 'normal';
+    const status = it.done === true ? 'done' : 'todo';
+    let dueDate = null;
+    if (typeof it.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(it.dueDate)) {
+      // End-of-day local — keeps the original "due on this day" intent
+      // instead of midnight (which reads as "due the day before").
+      dueDate = `${it.dueDate}T23:59:00`;
+    }
+    const completedAt = status === 'done'
+      ? (Number.isFinite(Number(it.updatedAt)) ? new Date(Number(it.updatedAt)) : new Date())
+      : null;
+    const sourceId = it.id != null ? String(it.id).slice(0, 255) : null;
+    try {
+      // Dedupe by (creator_email, source_id) when source_id is present.
+      if (sourceId) {
+        const { rows: existing } = await query(
+          `SELECT 1 FROM work_tasks
+            WHERE LOWER(creator_email) = $1
+              AND source = 'imported_checklist'
+              AND source_id = $2
+            LIMIT 1`,
+          [email, sourceId],
+        );
+        if (existing.length > 0) { skipped += 1; continue; }
+      }
+      await query(
+        `INSERT INTO work_tasks (
+           org_node_id, title, description, status, priority, creator_email,
+           assignee_emails, follower_emails, due_date, completed_at,
+           source, source_id
+         ) VALUES ($1, $2, $3, $4, $5, $6, ARRAY[$6]::text[], '{}', $7, $8, 'imported_checklist', $9)`,
+        [orgNodeId || null, title, description, status, priority, email, dueDate, completedAt, sourceId],
+      );
+      migrated += 1;
+    } catch (err) {
+      // Don't poison the loop -- log and keep going.
+      console.warn('[work-tasks migration] insert failed for item', sourceId, ':', err?.message);
+    }
+  }
+
+  // Stamp the sentinel regardless of how many migrated, so we don't keep
+  // re-scanning the snapshot on every page hit.
+  try {
+    await query(
+      `INSERT INTO app_settings (key, value, updated_by, updated_at)
+       VALUES ($1, $2::jsonb, $3, NOW())
+       ON CONFLICT (key) DO UPDATE
+         SET value = EXCLUDED.value, updated_at = NOW()`,
+      [sentinelKey, JSON.stringify({ migrated, skipped, at: new Date().toISOString() }), email],
+    );
+  } catch (err) {
+    console.warn('[work-tasks migration] sentinel write failed:', err?.message);
+  }
+
+  if (migrated > 0 || skipped > 0) {
+    console.log(`[work-tasks migration] ${email}: ${migrated} migrated, ${skipped} skipped`);
+  }
+  return { migrated, skipped };
+}

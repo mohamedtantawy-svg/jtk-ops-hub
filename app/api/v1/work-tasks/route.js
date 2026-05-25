@@ -22,6 +22,7 @@ import {
   fetchOooEmails,
   fanOutTaskNotifications,
   recordTaskActivity,
+  migratePersonalChecklistIfNeeded,
   VALID_STATUSES,
   VALID_PRIORITIES,
   TASK_NAME_MAX,
@@ -62,6 +63,19 @@ export async function GET(req) {
   if (!deptId) {
     // User has no dept — return empty list rather than 500.
     return NextResponse.json({ tasks: [], oooEmails: [], dept: null });
+  }
+
+  // Phase 2 (2026-05-25): silent one-time migration of the user's
+  // PersonalChecklist into work_tasks. The helper short-circuits on a
+  // sentinel after the first run so this stays cheap on every subsequent
+  // request. Errors inside the migration don't block the list response --
+  // they're logged and the user still sees whatever's already in
+  // work_tasks. Run BEFORE the list query so the freshly-migrated rows
+  // appear in the same response as the legacy checklist used to.
+  try {
+    await migratePersonalChecklistIfNeeded(user.email, deptId);
+  } catch (err) {
+    console.warn('[work-tasks GET] migration step failed:', err?.message);
   }
 
   const { searchParams } = new URL(req.url);
