@@ -118,11 +118,20 @@ export async function GET(req) {
   //     right read scope for "browse other people's OOO" (Team/All), but
   //     it's the wrong scope when the row's own authorisation says you
   //     belong on it.
+  //   • 'all'             — Christina Shalaby feedback 2026-05-25:
+  //     non-managers need full-dept visibility to plan triage / urgent-
+  //     assist coverage. The dept filter above (`e.org_node_id =
+  //     currentDeptId`) already enforces tenancy — every row visible
+  //     under 'all' belongs to the caller's dept, so layering the
+  //     reporting-tree clip on top wrongly collapses 'all' to 'team'
+  //     for non-managers. Lens 'all' literally means "everything in
+  //     scope" (LENSES hint copy) where scope = current dept.
   if (
     !isAdminUser(user) &&
     lens !== LENS_IDS.MINE &&
     lens !== LENS_IDS.DRAFTS &&
-    lens !== LENS_IDS.COVERING
+    lens !== LENS_IDS.COVERING &&
+    lens !== LENS_IDS.ALL
   ) {
     const visible = Array.from(getVisibleOOOEmails(user));
     if (visible.length === 0) {

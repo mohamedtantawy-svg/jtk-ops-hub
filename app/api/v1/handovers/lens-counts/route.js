@@ -16,6 +16,7 @@ import { query } from '../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { getVisibleOOOEmails, isAdminUser } from '../../../../../src/lib/queue-scoping';
 import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
+import { getCurrentDeptId } from '../../../../../src/lib/dept-scope';
 
 export async function GET(req) {
   const user = getAuthUser(req);
@@ -81,7 +82,17 @@ export async function GET(req) {
       [callerEmail],
     );
 
-    // Team / all — visible-scope upcoming event count.
+    // Team / all — upcoming event counts.
+    //   • Team = caller's reporting-tree cohort (peer agents, direct
+    //     reports, peer TLs under the same RM, etc. — see getVisibleOOOEmails).
+    //     Excludes the caller so the surface separates Mine vs My team.
+    //   • All  = everything in scope. For non-admins, scope = the caller's
+    //     current dept (Phase 11e dept isolation). Previously this
+    //     collapsed to the team set, making the "All" chip identical to
+    //     "My team" for non-managers and leaving Christina Shalaby unable
+    //     to see the full HRX team's PTO when planning triage / urgent-
+    //     assist coverage. The dept_id filter still enforces tenancy, so
+    //     opening up the count to the whole dept doesn't leak cross-dept.
     let teamCount = 0;
     let allCount  = 0;
     if (visibleEmails === null) {
@@ -93,28 +104,48 @@ export async function GET(req) {
       );
       teamCount = r.rows[0]?.c || 0;
       allCount  = teamCount;
-    } else if (visibleEmails.length > 0) {
-      const r = await query(
-        `SELECT COUNT(*)::int AS c
-           FROM time_off_events
-          WHERE status = 'approved'
-            AND end_date >= CURRENT_DATE
-            AND LOWER(work_email) = ANY($1::text[])`,
-        [visibleEmails],
-      );
-      teamCount = r.rows[0]?.c || 0;
-      // Team excludes the caller (the surface separates Mine vs My team).
-      const teamOnly = await query(
-        `SELECT COUNT(*)::int AS c
-           FROM time_off_events
-          WHERE status = 'approved'
-            AND end_date >= CURRENT_DATE
-            AND LOWER(work_email) = ANY($1::text[])
-            AND LOWER(work_email) <> $2`,
-        [visibleEmails, callerEmail],
-      );
-      teamCount = teamOnly.rows[0]?.c || 0;
-      allCount = r.rows[0]?.c || 0;
+    } else {
+      // Team count = visible-scope cohort, excluding caller. Even if the
+      // visible set is empty (caller has no peers), the query is safe.
+      if (visibleEmails.length > 0) {
+        const teamOnly = await query(
+          `SELECT COUNT(*)::int AS c
+             FROM time_off_events
+            WHERE status = 'approved'
+              AND end_date >= CURRENT_DATE
+              AND LOWER(work_email) = ANY($1::text[])
+              AND LOWER(work_email) <> $2`,
+          [visibleEmails, callerEmail],
+        );
+        teamCount = teamOnly.rows[0]?.c || 0;
+      }
+
+      // All count = whole-dept upcoming events. Falls back to the team
+      // count when no dept can be resolved (defence-in-depth — should
+      // not happen post-Phase 11e backfill, but keeps the surface
+      // useful rather than blank if dept resolution ever blanks).
+      const currentDeptId = await getCurrentDeptId(user, req);
+      if (currentDeptId) {
+        const r = await query(
+          `SELECT COUNT(*)::int AS c
+             FROM time_off_events
+            WHERE status = 'approved'
+              AND end_date >= CURRENT_DATE
+              AND org_node_id = $1`,
+          [currentDeptId],
+        );
+        allCount = r.rows[0]?.c || 0;
+      } else if (visibleEmails.length > 0) {
+        const r = await query(
+          `SELECT COUNT(*)::int AS c
+             FROM time_off_events
+            WHERE status = 'approved'
+              AND end_date >= CURRENT_DATE
+              AND LOWER(work_email) = ANY($1::text[])`,
+          [visibleEmails],
+        );
+        allCount = r.rows[0]?.c || 0;
+      }
     }
 
     return NextResponse.json({
