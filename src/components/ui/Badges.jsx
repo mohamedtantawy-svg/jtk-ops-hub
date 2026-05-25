@@ -69,20 +69,31 @@ const fmtRemain=(rem)=>{
 };
 
 export const SlaBadge=memo(({sla,status})=>{
-  if(status==='waiting'){
-    return <span style={{...badgeBase,background:'#f5f3f0',color:'#9b928a',border:'1px solid #e8e4df'}} title="SLA paused while snoozed"><i className="bi-pause-circle" style={{fontSize:9,marginRight:2}}></i>Paused</span>;
-  }
+  // 2026-05-22 — Pablo Gonzalez "the status and SLA doesn't look correct"
+  // on GIX (Immigration). Zendesk pending/hold tickets — every GIX ticket
+  // in actionable triage — used to short-circuit here to a generic grey
+  // "Paused" pill regardless of breach state. helpers.js#slaInfo already
+  // returns a real SLA object for ZD paused tickets with slaMetric='rwt'
+  // (pending) or 'put' (hold) since the 2026-05-19 Track-B fix, so the
+  // pill can show the breach tier + remaining/overdue time against the
+  // paused window. Pause icon stays in front of the time so the row is
+  // still visually distinguishable from an active-clock ticket.
+  const paused = status==='waiting';
   if(sla){
+    const pauseIcon = paused ? <i className="bi-pause-circle" style={{fontSize:9,marginRight:2}}></i> : null;
     if(sla.breach){
       const overdue=sla.remain?fmtRemain(Math.abs(sla.remain)):null;
-      return <span style={{...badgeBase,background:'var(--red-light, #fef2f2)',color:'var(--red, #b91c1c)',border:'1px solid var(--red-mid, #fee2e2)'}} title={overdue?`Breached ${overdue} ago`:'SLA Breached'}>{overdue?`-${overdue}`:'BREACH'}</span>;
+      return <span style={{...badgeBase,background:'var(--red-light, #fef2f2)',color:'var(--red, #b91c1c)',border:'1px solid var(--red-mid, #fee2e2)'}} title={paused?(overdue?`Paused — SLA breached ${overdue} ago`:'Paused — SLA breached'):(overdue?`Breached ${overdue} ago`:'SLA Breached')}>{pauseIcon}{overdue?`-${overdue}`:'BREACH'}</span>;
     }
     const timeLeft=sla.remain?fmtRemain(sla.remain):null;
     if(sla.ok){
-      return <span style={{...badgeBase,background:'var(--surface-3, #f5f3f0)',color:'var(--text-secondary, #6b6560)',border:'1px solid var(--border, #e8e4df)'}} title={timeLeft?`${timeLeft} remaining`:'On track'}>{timeLeft||'OK'}</span>;
+      return <span style={{...badgeBase,background:'var(--surface-3, #f5f3f0)',color:'var(--text-secondary, #6b6560)',border:'1px solid var(--border, #e8e4df)'}} title={paused?(timeLeft?`Paused — ${timeLeft} remaining`:'Paused — on track'):(timeLeft?`${timeLeft} remaining`:'On track')}>{pauseIcon}{timeLeft||'OK'}</span>;
     }
     // At Risk
-    return <span style={{...badgeBase,background:'var(--orange-light, #fffbeb)',color:'var(--orange, #b45309)',border:'1px solid var(--orange-mid, #fef3c7)'}} title={`${timeLeft} remaining — at risk`}>{timeLeft||sla.short}</span>;
+    return <span style={{...badgeBase,background:'var(--orange-light, #fffbeb)',color:'var(--orange, #b45309)',border:'1px solid var(--orange-mid, #fef3c7)'}} title={paused?`Paused — ${timeLeft} remaining (at risk)`:`${timeLeft} remaining — at risk`}>{pauseIcon}{timeLeft||sla.short}</span>;
+  }
+  if(paused){
+    return <span style={{...badgeBase,background:'#f5f3f0',color:'#9b928a',border:'1px solid #e8e4df'}} title="SLA paused while snoozed"><i className="bi-pause-circle" style={{fontSize:9,marginRight:2}}></i>Paused</span>;
   }
   if(status==='resolved'){
     return <span style={{...badgeBase,color:'var(--text-muted, #9b928a)',fontSize:'var(--font-xs, 11px)'}}>--</span>;
