@@ -41,7 +41,7 @@ import Avatar from '../ui/Avatar';
 import OOOBadge from '../ui/OOOBadge';
 import { useTimeOffEvents } from '../../hooks/useTimeOffEvents';
 import { ToolBadge, FnBadge } from '../ui/Badges';
-import PersonalChecklist from '../home/PersonalChecklist';
+import BriefingMyTasks from '../home/BriefingMyTasks';
 import CoverageBanner from '../ooo/CoverageBanner';
 import CoverageCard from '../ooo/CoverageCard';
 import OOOAlert from '../home/OOOAlert';
@@ -2298,18 +2298,27 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
           `}</style>
           <div className={`briefing-main-grid${isOwnScope ? ' is-agent' : ''}`}>
 
-            {/* ── COL 1: My To-Do (Personal Checklist, primary variant) ──────
-                Pilar reported that the old "Priority Tasks" column was visually
-                dominant but clicking it did nothing useful — the only live
-                action was to jump to /my-queue. We've promoted the Personal
-                Checklist to take its slot: a real, actionable workspace that
-                users can interact with directly. Works identically for every
-                role (Agent / Team Lead / Regional Manager / Admin/Director)
-                since it's user-scoped storage, not tied to any role query.
-                Live ticket priorities remain surfaced via the KPI tile row
-                above (Active Requests → click through to Queue) and via the
-                Sources breakdown in the KPI tiles' expanded state. */}
-            <PersonalChecklist user={user} variant="primary" />
+            {/* ── COL 1: My Tasks (Phase 2, 2026-05-25) ─────────────────────
+                Replaces the legacy PersonalChecklist with BriefingMyTasks,
+                which reads the same work_tasks backend the Tasks tab + Queue
+                Tasks source use. The user's old PersonalChecklist items are
+                auto-migrated on first work-tasks API hit (sentinel in
+                app_settings) so nothing is lost on the switchover. Quick-
+                add stays on Briefing (single-line composer) so the muscle
+                memory of "type a todo on home" still works; the list view
+                + full management lives in the Tasks tab. */}
+            <BriefingMyTasks
+              user={user}
+              onOpenTasks={() => setView?.('tasks')}
+              onOpenTask={(taskId) => {
+                try {
+                  const url = new URL(window.location.href);
+                  url.searchParams.set('task', taskId);
+                  window.history.replaceState({}, '', url.toString());
+                } catch {}
+                setView?.('tasks');
+              }}
+            />
 
             {/* ── COL 2: Context Panel ──────────────────────────────────────── */}
             <div style={{display:'flex',flexDirection:'column',gap:16}}>

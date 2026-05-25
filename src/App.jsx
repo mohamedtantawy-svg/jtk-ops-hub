@@ -134,6 +134,8 @@ import Alerts from './components/views/Alerts';
 import FeedbackView from './components/views/FeedbackView';
 import HrHubView from './components/views/HrHubView';
 import OrgView from './components/views/OrgView';
+import WorkTasksView from './components/views/WorkTasksView';
+import WorkTasksTour from './components/work-tasks/WorkTasksTour';
 import NotificationsView from './components/views/NotificationsView';
 import LeaderAlertsView from './components/views/LeaderAlertsView';
 import LeadersHubView from './components/views/LeadersHubView';
@@ -966,6 +968,24 @@ const App=()=>{
   // (initialFlow=null) lets the user choose; deep-links from queue rows
   // (Stage 7) will preselect a flow.
   const [hrHubCreate,setHrHubCreate]=useState(null);
+  // Tasks deep-link target — read from `?task=<id>` on first paint so F5 /
+  // notification clicks / shared URLs land on the right task. WorkTasksView
+  // consumes this once and clears via onTaskFocused. Per skill mistake #31:
+  // URL params MUST be read in the useState initialiser, not a useEffect,
+  // so the first render of the Tasks view sees the right id.
+  const [focusTaskId,setFocusTaskId]=useState(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const url = new URL(window.location.href);
+      return url.searchParams.get('task') || null;
+    } catch { return null; }
+  });
+  // One-time Tasks onboarding tour (2026-05-25). Auto-opens the first
+  // time a user signs in after the Phase 1-3 deploy. Persisted server-
+  // side via /api/v1/work-tasks/tour-status (app_settings sentinel).
+  // Skipped during impersonation so admins testing as another user
+  // don't trip the target's tour.
+  const [showWorkTasksTour,setShowWorkTasksTour]=useState(false);
   const [mentionGroupsOpen,setMentionGroupsOpen]=useState(false);
   const [leaderAlertCreate,setLeaderAlertCreate]=useState(false);
   // Urgent Assist create modal — boolean toggle. When true the modal is
@@ -1106,6 +1126,33 @@ const App=()=>{
   // has interacted (mouse/keyboard/scroll/touch) in the last 90 s AND
   // the tab is visible. Idle background tabs never bump last_seen_at.
   useActivityHeartbeat(user?.email || null);
+
+  // ── One-time Tasks onboarding tour (2026-05-25) ──────────────────────
+  // Fetches /api/v1/work-tasks/tour-status once per user load and pops
+  // the modal if `seen === false`. The modal POSTs back on dismiss so
+  // it never appears again for the same email. Skipped while a super-
+  // admin is impersonating (we'd be showing the target's tour and
+  // tripping their sentinel) and skipped during a deep-link nav
+  // (focusTaskId set) so we don't blanket-cover the destination.
+  useEffect(() => {
+    const email = user?.email;
+    if (!email) return;
+    if (impersonating) return;
+    if (focusTaskId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetch('/work-tasks/tour-status');
+        if (!cancelled && res && res.seen === false) {
+          setShowWorkTasksTour(true);
+        }
+      } catch (err) {
+        // Fail-closed: don't show the tour if we can't confirm it's unseen.
+        if (!cancelled) console.warn('[work-tasks-tour] status fetch failed:', err?.message);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.email, impersonating, focusTaskId]);
 
   // Combine the in-memory popup feed (announcements arrival, toasts) with
   // the server feed for a single bell. Server rows go first so a fresh
@@ -1269,6 +1316,18 @@ const App=()=>{
           try { window.dispatchEvent(new CustomEvent('feedback:openDetail', { detail })); }
           catch {}
         }, 60);
+      } else if (n.linkView === 'tasks' && n.linkId) {
+        // Tasks deep-link (Phase 1, 2026-05-25): flip the view + stash the
+        // task id in focusTaskId so WorkTasksView opens the detail drawer
+        // on mount. URL stamp survives F5 / share-the-URL so a notification
+        // forwarded to a teammate still lands on the same task.
+        try {
+          const url = new URL(window.location.href);
+          url.searchParams.set('task', n.linkId);
+          window.history.replaceState({}, '', url.toString());
+        } catch {}
+        setFocusTaskId(n.linkId);
+        setView('tasks');
       }
       return;
     }
@@ -2088,6 +2147,7 @@ const App=()=>{
         onCreateLeaderAlert={()=>setLeaderAlertCreate(true)}
         onCreateUrgentAssist={()=>setUrgentAssistCreate({kind:'urgent_assist'})}
         onCreateCaseMonitoring={()=>setUrgentAssistCreate({kind:'case_monitoring'})}
+        onCreateWorkTask={()=>setView('tasks')}
         onManageMentionGroups={()=>setMentionGroupsOpen(true)}
         leaderAlertsBadge={leaderAlertsBadge}
         urgentAssistBadge={urgentAssistBadge}
@@ -2129,6 +2189,7 @@ const App=()=>{
           {view==='feedback'      &&perms?.canView('feedback')!==false     &&<div className="page-enter"><FeedbackView user={effectiveUser} addToast={addToast} openCompose={feedbackCompose} onComposeOpened={()=>setFeedbackCompose(false)} openPicker={feedbackPickerOpen} onPickerOpened={()=>setFeedbackPickerOpen(false)}/></div>}
           {view==='hr-hub'        &&perms?.canView('hr-hub')!==false       &&<div className="page-enter"><HrHubView user={effectiveUser} onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}/></div>}
           {view==='org'           &&perms?.canView('org')!==false          &&<div className="page-enter"><OrgView user={effectiveUser} realUser={user} onImpersonate={handleImpersonate}/></div>}
+          {view==='tasks'         &&perms?.canView('tasks')!==false        &&<div className="page-enter"><WorkTasksView user={effectiveUser} focusTaskId={focusTaskId} onTaskFocused={()=>setFocusTaskId(null)}/></div>}
           {view==='notifications' &&<div className="page-enter"><NotificationsView notifs={mergedNotifs} unreadCount={mergedNotifs.filter(n=>!n.read).length} markAllRead={markAllRead} markRead={(serverId)=>serverNotifs.markRead(serverId)} markUnread={(serverId)=>serverNotifs.markUnread(serverId)} onNotifClick={handleNotifClick}/></div>}
           {view==='urgent-assist' &&perms?.canView('urgent-assist')!==false&&<div className="page-enter" key={urgentAssistRefreshNonce}><UrgentAssistView user={effectiveUser} onCreate={()=>setUrgentAssistCreate({kind:'urgent_assist'})} onCreateCaseMonitoring={()=>setUrgentAssistCreate({kind:'case_monitoring'})} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall} onOpenSchedule={() => setView('urgent-assist-schedule')}/></div>}
           {view==='urgent-assist-schedule' &&perms?.canView('urgent-assist-schedule')!==false&&<div className="page-enter"><UrgentAssistScheduleView/></div>}
@@ -2150,6 +2211,17 @@ const App=()=>{
       </div>
       {createModal   &&<CreateTaskModal onConfirm={confirmCreate} onClose={()=>setCreateModal(false)} currentUser={effectiveUser}/>}
       {hrHubCreate   &&<CreateHrHubRequestModal initialFlow={hrHubCreate.initialFlow||null} onClose={()=>setHrHubCreate(null)} onCreated={(id,flow)=>{setHrHubCreate(null);setView('hr-hub');addToast?.({kind:'success',message:`Submitted to HR Hub${flow?` (${flow.replace('_',' ')})`:''}.`});}}/>}
+      {/* Gate the Tasks tour behind the existing Onboarding modal so we
+          never stack two welcome modals on a brand-new user's first
+          session. The tour also waits out an open global search / create
+          modal — once the user has dismissed those, the tour pops next. */}
+      {showWorkTasksTour && !showOnboard && !createModal && !hrHubCreate && (
+        <WorkTasksTour
+          user={effectiveUser}
+          onClose={() => setShowWorkTasksTour(false)}
+          onGoToTasks={() => setView('tasks')}
+        />
+      )}
       {mentionGroupsOpen&&<ManageMentionGroupsModal onClose={()=>setMentionGroupsOpen(false)}/>}
       {mocAlert && <MocAlertModal mocName={mocAlert.mocName} onDismiss={dismissMocAlert} onOpenView={openMocView} />}
       {tlocAlert && <TlocAlertModal tlocName={tlocAlert.tlocName} onDismiss={dismissTlocAlert} onOpenView={openTlocView} />}

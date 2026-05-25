@@ -42,7 +42,7 @@ import {
 import { applySlaExtensionsToRows } from '../../utils/applySlaExtensions';
 import { matchesAudience } from '../../data/comms';
 import { apiFetch } from '../../services/api';
-import PersonalChecklist from '../home/PersonalChecklist';
+import BriefingMyTasks from '../home/BriefingMyTasks';
 import PendingAcksBanner from './PendingAcksBanner';
 import StaleCountryDocsBanner from './StaleCountryDocsBanner';
 
@@ -765,9 +765,23 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
         </div>
       </div>
 
-      {/* ── Personal Checklist — full width ────────────────────────── */}
+      {/* ── My Tasks (Phase 2, 2026-05-25) ─────────────────────────────
+          Replaces the legacy PersonalChecklist with the unified work_tasks
+          backend so this draft AgentHome route stays consistent with the
+          main Briefing surface + the dedicated Tasks tab. */}
       <div>
-        <PersonalChecklist user={user} variant="primary" />
+        <BriefingMyTasks
+          user={user}
+          onOpenTasks={() => setView?.('tasks')}
+          onOpenTask={(taskId) => {
+            try {
+              const url = new URL(window.location.href);
+              url.searchParams.set('task', taskId);
+              window.history.replaceState({}, '', url.toString());
+            } catch {}
+            setView?.('tasks');
+          }}
+        />
       </div>
 
       {/* ── Footer hint ─────────────────────────────────────────────── */}

@@ -2160,6 +2160,168 @@ CREATE TABLE IF NOT EXISTS zd_recently_solved (
 );
 CREATE INDEX IF NOT EXISTS idx_zd_recently_solved_solved_at
   ON zd_recently_solved(solved_at);
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Per-department assignments (Phase 12a, 2026-05-25)
+-- ────────────────────────────────────────────────────────────────────────────
+-- Each row names a "function" (SWAT) or "responsibility" inside a department,
+-- with one or more primary assignees (email[]) and zero or more backups.
+-- Stored polymorphically via the kind column so SWAT and Responsibilities
+-- share the same shape; the FE sub-tabs filter by kind. FK is to org_nodes
+-- generically so a future team-level usage does not need a schema change --
+-- the UI gates rendering to top-level departments for v1.
+--
+-- Soft-delete only (is_archived). Cascading delete from org_nodes is safe
+-- because dept archival already requires an explicit operator action;
+-- automatic cleanup of orphaned assignments is the right semantic.
+CREATE TABLE IF NOT EXISTS org_node_assignments (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  node_id         UUID NOT NULL REFERENCES org_nodes(id) ON DELETE CASCADE,
+  kind            VARCHAR(40) NOT NULL CHECK (kind IN ('swat_function','responsibility')),
+  name            VARCHAR(255) NOT NULL,
+  description     TEXT,
+  assignee_emails TEXT[] NOT NULL DEFAULT '{}',
+  backup_emails   TEXT[] NOT NULL DEFAULT '{}',
+  sort_order      INT NOT NULL DEFAULT 0,
+  is_archived     BOOLEAN NOT NULL DEFAULT false,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_by      VARCHAR(255),
+  updated_by      VARCHAR(255)
+);
+CREATE INDEX IF NOT EXISTS idx_org_node_assignments_node_kind_active
+  ON org_node_assignments(node_id, kind) WHERE is_archived = false;
+CREATE INDEX IF NOT EXISTS idx_org_node_assignments_sort
+  ON org_node_assignments(node_id, kind, sort_order);
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Work Tasks (Phase 1, 2026-05-25)
+-- ────────────────────────────────────────────────────────────────────────────
+-- First-class manual task management for every Ops Hub user. Distinct from
+-- the legacy "tasks" table (which mirrors queue-source rows from Zendesk /
+-- Jira / Workbench / Onboarding) -- work_tasks are user-created entities
+-- with multi-assignee, due dates, comments, and notification fan-out.
+-- Dept-scoped via org_node_id, matching the multi-tenant contract.
+--
+-- Migration story: existing personal_checklist_snapshots are auto-imported
+-- into work_tasks per-user on first visit (source = imported_checklist).
+CREATE TABLE IF NOT EXISTS work_tasks (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_node_id     UUID REFERENCES org_nodes(id) ON DELETE SET NULL,
+  title           VARCHAR(500) NOT NULL,
+  description     TEXT,
+  status          VARCHAR(30) NOT NULL DEFAULT 'todo'
+                    CHECK (status IN ('todo','in_progress','blocked','done','archived')),
+  priority        VARCHAR(20) NOT NULL DEFAULT 'normal'
+                    CHECK (priority IN ('urgent','high','normal','low')),
+  creator_email   VARCHAR(255) NOT NULL,
+  assignee_emails TEXT[] NOT NULL DEFAULT '{}',
+  follower_emails TEXT[] NOT NULL DEFAULT '{}',
+  project_id      UUID,
+  parent_task_id  UUID REFERENCES work_tasks(id) ON DELETE SET NULL,
+  due_date        TIMESTAMPTZ,
+  started_at      TIMESTAMPTZ,
+  completed_at    TIMESTAMPTZ,
+  tags            TEXT[] NOT NULL DEFAULT '{}',
+  source          VARCHAR(40) NOT NULL DEFAULT 'manual',
+  source_id       VARCHAR(255),
+  external_url    TEXT,
+  is_archived     BOOLEAN NOT NULL DEFAULT false,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+-- Hot reads: per-dept active list, per-user (creator / assignee / follower)
+-- listing, status + due-date based filters. GIN indexes on the email arrays
+-- so "tasks assigned to me" stays a single index lookup.
+CREATE INDEX IF NOT EXISTS idx_work_tasks_dept_active
+  ON work_tasks(org_node_id) WHERE NOT is_archived;
+CREATE INDEX IF NOT EXISTS idx_work_tasks_creator
+  ON work_tasks(LOWER(creator_email)) WHERE NOT is_archived;
+CREATE INDEX IF NOT EXISTS idx_work_tasks_assignees_gin
+  ON work_tasks USING GIN (assignee_emails);
+CREATE INDEX IF NOT EXISTS idx_work_tasks_followers_gin
+  ON work_tasks USING GIN (follower_emails);
+CREATE INDEX IF NOT EXISTS idx_work_tasks_status_priority_due
+  ON work_tasks(status, priority, due_date) WHERE NOT is_archived;
+CREATE INDEX IF NOT EXISTS idx_work_tasks_due_active
+  ON work_tasks(due_date) WHERE NOT is_archived AND status IN ('todo','in_progress','blocked');
+CREATE INDEX IF NOT EXISTS idx_work_tasks_source
+  ON work_tasks(source, source_id) WHERE source_id IS NOT NULL;
+
+-- Comments thread on a task. Mention chips resolved server-side at write,
+-- so the FE can render them without client-side @-token re-parsing.
+CREATE TABLE IF NOT EXISTS work_task_comments (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_id         UUID NOT NULL REFERENCES work_tasks(id) ON DELETE CASCADE,
+  author_email    VARCHAR(255) NOT NULL,
+  author_name     VARCHAR(255),
+  body            TEXT NOT NULL,
+  mention_emails  TEXT[] NOT NULL DEFAULT '{}',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  edited_at       TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_work_task_comments_task_created
+  ON work_task_comments(task_id, created_at);
+
+-- Append-only activity log -- never UPDATE / DELETE from app code. Powers
+-- the detail-drawer history pane and the audit story.
+CREATE TABLE IF NOT EXISTS work_task_activity (
+  id              BIGSERIAL PRIMARY KEY,
+  task_id         UUID NOT NULL REFERENCES work_tasks(id) ON DELETE CASCADE,
+  actor_email     VARCHAR(255) NOT NULL,
+  actor_name      VARCHAR(255),
+  event_type      VARCHAR(40) NOT NULL,
+  payload         JSONB,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_work_task_activity_task
+  ON work_task_activity(task_id, created_at DESC);
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Work Projects (Phase 3, 2026-05-25)
+-- ────────────────────────────────────────────────────────────────────────────
+-- Optional container for grouping work_tasks. Dept-scoped via org_node_id
+-- like every other multi-tenant entity. Owners + members are stored as
+-- email[] arrays for cheap fan-out + linear-time membership tests.
+-- The work_tasks.project_id column already exists from Phase 1 with no
+-- FK constraint; Phase 3 adds the FK now that work_projects exists.
+CREATE TABLE IF NOT EXISTS work_projects (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_node_id     UUID REFERENCES org_nodes(id) ON DELETE SET NULL,
+  name            VARCHAR(255) NOT NULL,
+  description     TEXT,
+  status          VARCHAR(30) NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active','paused','completed','archived')),
+  color           VARCHAR(20),
+  icon            VARCHAR(60),
+  creator_email   VARCHAR(255) NOT NULL,
+  owner_emails    TEXT[] NOT NULL DEFAULT '{}',
+  member_emails   TEXT[] NOT NULL DEFAULT '{}',
+  due_date        TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_work_projects_dept
+  ON work_projects(org_node_id) WHERE status <> 'archived';
+CREATE INDEX IF NOT EXISTS idx_work_projects_owners
+  ON work_projects USING GIN (owner_emails);
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Work Task SLA notifications (Phase 3, 2026-05-25)
+-- ────────────────────────────────────────────────────────────────────────────
+-- Idempotency ledger for the tasks-sla-sync cron. One row per task per
+-- breach point ('due_soon' = 24h-before; 'overdue' = after due). The cron
+-- INSERTs (task_id, kind) before fanning out the notification, and skips
+-- on conflict, so a re-run within the hour never double-fires the bell.
+-- Cleared automatically when the parent task is deleted (CASCADE).
+CREATE TABLE IF NOT EXISTS work_task_sla_notifications (
+  task_id     UUID NOT NULL REFERENCES work_tasks(id) ON DELETE CASCADE,
+  kind        VARCHAR(20) NOT NULL CHECK (kind IN ('due_soon','overdue')),
+  fired_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (task_id, kind)
+);
+CREATE INDEX IF NOT EXISTS idx_work_task_sla_notifications_fired
+  ON work_task_sla_notifications(fired_at DESC);
 `;
 
 export async function runMigrations() {
