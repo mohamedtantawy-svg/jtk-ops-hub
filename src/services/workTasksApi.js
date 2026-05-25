@@ -58,3 +58,27 @@ export async function createWorkTaskComment(taskId, { body, mentions }) {
     body: JSON.stringify({ body, mentions }),
   });
 }
+
+// ── Phase 3 — Projects ──────────────────────────────────────────────────
+export async function listWorkProjects({ includeArchived } = {}) {
+  const query = qs({ include_archived: includeArchived ? 1 : null });
+  return apiFetch(`/work-projects${query}`);
+}
+
+export async function createWorkProject(payload) {
+  return apiFetch('/work-projects', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function patchWorkProject(projectId, patch) {
+  return apiFetch(`/work-projects/${encodeURIComponent(projectId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function archiveWorkProject(projectId) {
+  return apiFetch(`/work-projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' });
+}

@@ -14,6 +14,7 @@
 
 import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useWorkTasks } from '../../hooks/useWorkTasks';
+import { useWorkProjects } from '../../hooks/useWorkProjects';
 import { useTeamMembers } from '../../hooks/useTeamMembers';
 import { useCurrentDept } from '../../hooks/useCurrentDept';
 import { useOrgNodes } from '../../hooks/useOrgNodes';
@@ -89,6 +90,7 @@ export default function WorkTasksView({ user, focusTaskId, onTaskFocused }) {
   const [scope, setScope] = useState('all');
   const [statusFilter, setStatusFilter] = useState(null);
   const [priorityFilter, setPriorityFilter] = useState(null);
+  const [projectFilter, setProjectFilter] = useState(null);
   const [search, setSearch] = useState('');
   const [composerExpanded, setComposerExpanded] = useState(false);
   const [detailTaskId, setDetailTaskId] = useState(null);
@@ -100,9 +102,11 @@ export default function WorkTasksView({ user, focusTaskId, onTaskFocused }) {
     filters: {
       status: statusFilter,
       priority: priorityFilter,
+      projectId: projectFilter,
       includeArchived: showArchived,
     },
   });
+  const { projects } = useWorkProjects(user?.email);
 
   // Focus a specific task on mount when arriving via notification deep-link.
   useEffect(() => {
@@ -339,6 +343,30 @@ export default function WorkTasksView({ user, focusTaskId, onTaskFocused }) {
                 );
               })}
             </div>
+            {projects && projects.filter(p => p.status !== 'archived').length > 0 && (
+              <select
+                value={projectFilter || ''}
+                onChange={e => setProjectFilter(e.target.value || null)}
+                style={{
+                  height: 32, padding: '0 10px',
+                  background: projectFilter ? 'var(--purple-light)' : 'var(--surface-2)',
+                  border: `1px solid ${projectFilter ? 'var(--purple)' : 'var(--border)'}`,
+                  borderRadius: 'var(--radius-lg)',
+                  fontSize: 12, color: projectFilter ? 'var(--purple)' : 'var(--text-secondary)',
+                  fontWeight: projectFilter ? 600 : 500,
+                  fontFamily: 'inherit',
+                  outline: 'none', cursor: 'pointer',
+                  maxWidth: 200,
+                }}
+              >
+                <option value="">All projects</option>
+                {projects
+                  .filter(p => p.status !== 'archived')
+                  .map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+              </select>
+            )}
             <div style={{ flex: 1, position: 'relative', minWidth: 200, maxWidth: 360 }}>
               <i className="bi bi-search" style={{
                 position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)',
@@ -371,6 +399,8 @@ export default function WorkTasksView({ user, focusTaskId, onTaskFocused }) {
               candidates={candidates}
               oooEmails={oooEmails}
               currentUserEmail={user?.email}
+              projects={projects}
+              defaultProjectId={projectFilter}
               busy={composerBusy}
               error={composerError}
               onCancel={() => setComposerExpanded(false)}
@@ -383,6 +413,8 @@ export default function WorkTasksView({ user, focusTaskId, onTaskFocused }) {
               candidates={candidates}
               oooEmails={oooEmails}
               currentUserEmail={user?.email}
+              projects={projects}
+              defaultProjectId={projectFilter}
               busy={composerBusy}
               error={composerError}
               onSubmit={handleCreate}

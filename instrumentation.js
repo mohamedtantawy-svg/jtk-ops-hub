@@ -277,6 +277,30 @@ export async function register() {
           console.warn('[zd-sla-sync] could not schedule:', err?.message);
         }
       }
+
+      // ── Work-tasks SLA sync (Phase 3, 2026-05-25) ──────────────────
+      // Hourly pass that fires task_due_soon (24h before due) +
+      // task_overdue notifications for open work_tasks. Idempotent via
+      // work_task_sla_notifications ledger; multi-pod safe via the
+      // app_settings soft-TTL gate. Priming run 90 s after boot.
+      if (!process.env.OPS_HUB_DISABLE_TASKS_SLA_SYNC) {
+        try {
+          const { runTasksSlaSync } = await import('./src/lib/work-tasks-sla-sync');
+          setTimeout(() => {
+            runTasksSlaSync().catch(err => {
+              console.warn('[tasks-sla-sync] priming run failed:', err?.message);
+            });
+          }, 90_000);
+          setInterval(() => {
+            runTasksSlaSync().catch(err => {
+              console.warn('[tasks-sla-sync] scheduled run failed:', err?.message);
+            });
+          }, 60 * 60 * 1000).unref?.();
+          console.log('[tasks-sla-sync] scheduled — priming in 90 s, then every 60 min');
+        } catch (err) {
+          console.warn('[tasks-sla-sync] could not schedule:', err?.message);
+        }
+      }
     } catch (err) {
       console.error('[db] Startup migration/seed error:', err.message);
       // Don't crash — app falls back to mock data

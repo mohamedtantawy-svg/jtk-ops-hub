@@ -2276,6 +2276,52 @@ CREATE TABLE IF NOT EXISTS work_task_activity (
 );
 CREATE INDEX IF NOT EXISTS idx_work_task_activity_task
   ON work_task_activity(task_id, created_at DESC);
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Work Projects (Phase 3, 2026-05-25)
+-- ────────────────────────────────────────────────────────────────────────────
+-- Optional container for grouping work_tasks. Dept-scoped via org_node_id
+-- like every other multi-tenant entity. Owners + members are stored as
+-- email[] arrays for cheap fan-out + linear-time membership tests.
+-- The work_tasks.project_id column already exists from Phase 1 with no
+-- FK constraint; Phase 3 adds the FK now that work_projects exists.
+CREATE TABLE IF NOT EXISTS work_projects (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_node_id     UUID REFERENCES org_nodes(id) ON DELETE SET NULL,
+  name            VARCHAR(255) NOT NULL,
+  description     TEXT,
+  status          VARCHAR(30) NOT NULL DEFAULT 'active'
+                    CHECK (status IN ('active','paused','completed','archived')),
+  color           VARCHAR(20),
+  icon            VARCHAR(60),
+  creator_email   VARCHAR(255) NOT NULL,
+  owner_emails    TEXT[] NOT NULL DEFAULT '{}',
+  member_emails   TEXT[] NOT NULL DEFAULT '{}',
+  due_date        TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_work_projects_dept
+  ON work_projects(org_node_id) WHERE status <> 'archived';
+CREATE INDEX IF NOT EXISTS idx_work_projects_owners
+  ON work_projects USING GIN (owner_emails);
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Work Task SLA notifications (Phase 3, 2026-05-25)
+-- ────────────────────────────────────────────────────────────────────────────
+-- Idempotency ledger for the tasks-sla-sync cron. One row per task per
+-- breach point ('due_soon' = 24h-before; 'overdue' = after due). The cron
+-- INSERTs (task_id, kind) before fanning out the notification, and skips
+-- on conflict, so a re-run within the hour never double-fires the bell.
+-- Cleared automatically when the parent task is deleted (CASCADE).
+CREATE TABLE IF NOT EXISTS work_task_sla_notifications (
+  task_id     UUID NOT NULL REFERENCES work_tasks(id) ON DELETE CASCADE,
+  kind        VARCHAR(20) NOT NULL CHECK (kind IN ('due_soon','overdue')),
+  fired_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (task_id, kind)
+);
+CREATE INDEX IF NOT EXISTS idx_work_task_sla_notifications_fired
+  ON work_task_sla_notifications(fired_at DESC);
 `;
 
 export async function runMigrations() {

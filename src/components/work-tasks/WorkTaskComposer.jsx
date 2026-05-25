@@ -22,6 +22,8 @@ const PRIORITY_ORDER = ['urgent', 'high', 'normal', 'low'];
 export default function WorkTaskComposer({
   variant = 'quick',
   candidates = [],
+  projects = [],
+  defaultProjectId = null,
   oooEmails,
   currentUserEmail,
   busy = false,
@@ -33,6 +35,7 @@ export default function WorkTaskComposer({
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState('normal');
   const [dueDate, setDueDate] = useState('');
+  const [projectId, setProjectId] = useState(defaultProjectId || '');
   const [assignees, setAssignees] = useState(() =>
     currentUserEmail ? [String(currentUserEmail).toLowerCase()] : [],
   );
@@ -50,10 +53,11 @@ export default function WorkTaskComposer({
     setDescription('');
     setPriority('normal');
     setDueDate('');
+    setProjectId(defaultProjectId || '');
     setAssignees(currentUserEmail ? [String(currentUserEmail).toLowerCase()] : []);
     setFollowers([]);
     setLocalError(null);
-  }, [currentUserEmail]);
+  }, [currentUserEmail, defaultProjectId]);
 
   const submit = useCallback(async () => {
     const cleanTitle = title.trim();
@@ -79,12 +83,13 @@ export default function WorkTaskComposer({
         assignees,
         followers,
         dueDate: dueDateISO,
+        projectId: projectId || null,
       });
       reset();
     } catch (err) {
       setLocalError(err?.message || 'Could not create task');
     }
-  }, [title, description, priority, dueDate, assignees, followers, onSubmit, reset]);
+  }, [title, description, priority, dueDate, projectId, assignees, followers, onSubmit, reset]);
 
   const isQuick = variant === 'quick';
   const displayError = error || localError;
@@ -177,6 +182,22 @@ export default function WorkTaskComposer({
               />
             </FieldLabel>
           </div>
+          {projects && projects.length > 0 && (
+            <FieldLabel label="Project (optional)">
+              <select
+                value={projectId}
+                onChange={e => setProjectId(e.target.value)}
+                style={inputStyle}
+              >
+                <option value="">— No project —</option>
+                {projects
+                  .filter(p => p.status !== 'archived')
+                  .map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+              </select>
+            </FieldLabel>
+          )}
         </>
       )}
 
