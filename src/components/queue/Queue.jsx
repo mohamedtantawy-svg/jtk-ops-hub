@@ -1660,6 +1660,20 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
             redlinesCount={redlineRows.length}
             workbenchCount={workbenchActiveRows.length}
             incentivePlansCount={incentivePlanRows.length}
+            // Paused (on-hold) sub-counts — fed to the breakdown line on each
+            // step card. Carolina Ferreira 2026-05-25 feedback: "25 open ZD
+            // tickets, when in fact I only 3 that are open, and 22 paused."
+            // Tickets pause via Zendesk status='hold' (normalised to 'waiting'
+            // in our pipeline). Deel sources carry an explicit isPaused flag
+            // per row.
+            zdPausedCount={baseVis.filter(t => t.source === 'zendesk' && t.status === 'waiting').length}
+            jiraPausedCount={baseVis.filter(t => t.source === 'jira' && t.status === 'waiting').length}
+            onboardingPausedCount={onboardingRows.filter(r => r.isPaused).length}
+            offboardingPausedCount={offboardingRows.filter(r => r.isPaused).length}
+            amendmentsPausedCount={amendmentRows.filter(r => r.isPaused).length}
+            redlinesPausedCount={redlineRows.filter(r => r.isPaused).length}
+            workbenchPausedCount={workbenchActiveRows.filter(r => r.isPaused).length}
+            incentivePlansPausedCount={incentivePlanRows.filter(r => r.isPaused).length}
             sourceRowsAll={allSourceRows}
             breachedCount={workspaceHomeSla.breachedCount}
           />
@@ -1668,7 +1682,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
 
       {/* ── Main ZD/JR table (when no work source is active) ── */}
       {!workSource && (fTool || hasActiveFilters) && (
-        <div ref={ticketScrollerRef} style={{ flex: 1, overflowY: 'auto', background: 'var(--surface-2)' }}>
+        <div ref={ticketScrollerRef} style={{ flex: 1, overflowY: 'auto', overflowX: 'auto', background: 'var(--surface-2)' }}>
 
           {/* Truncation hint — Sarah Suge 2026-05-11 feedback: when scrolling
               to the bottom the listing was cut off because Zendesk Search's
@@ -1840,14 +1854,14 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
             >
               <thead>
                 <tr style={{ background: 'var(--surface-2)', position: 'sticky', top: 0, zIndex: 2 }}>
-                  <SortableTh col="source"   label="Source"   width={80}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableTh col="source"   label="Source"   width={70}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <ResizableSubjectTh
                     sortCol={sortCol}
                     sortDir={sortDir}
                     onSort={toggleSort}
                     onResizeStart={handleSubjectResizeStart}
                   />
-                  <SortableTh col="function" label="Function" width={90}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableTh col="function" label="Function" width={78}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <SortableTh col="country"  label="Country"  width={50}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   {/* Requester — the employee/customer who raised the ticket.
                       Anne Sanmartin 2026-05-19 feedback "when going through
@@ -1856,16 +1870,16 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
                       the same topic". Source: `task.requesterName` (and
                       `requesterEmail` for the hover tooltip), both already
                       populated by /api/v1/queue for Zendesk + Jira. */}
-                  <SortableTh col="requester" label="Requester" width={120} align="left" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableTh col="assignee" label="Assignee" width={80}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
-                  <SortableTh col="received" label="Received" width={68}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableTh col="requester" label="Requester" width={104} align="left" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableTh col="assignee" label="Assignee" width={72}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <SortableTh col="received" label="Received" width={58}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   {settings.sla_enabled !== false && (
-                    <SortableTh col="sla" label="SLA" width={60} sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} tooltip="Sorted by triage tier first (Breached → At Risk → On Track), then oldest within each tier — not by raw SLA value. Hover any row's SLA pill for the exact remaining/over time." />
+                    <SortableTh col="sla" label="SLA" width={54} sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} tooltip="Sorted by triage tier first (Breached → At Risk → On Track), then oldest within each tier — not by raw SLA value. Hover any row's SLA pill for the exact remaining/over time." />
                   )}
-                  <SortableTh col="status"   label="Status"   width={90}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
-                  <th scope="col" style={{ ...thStyle, width: 60 }}>Link</th>
-                  <th scope="col" style={{ ...thStyle, width: 50 }} title="Personal notes — saved to your browser, keyed by the task's source+id">Note</th>
-                  <th scope="col" style={{ ...thStyle, width: 160 }}>Actions</th>
+                  <SortableTh col="status"   label="Status"   width={78}  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <th scope="col" style={{ ...thStyle, width: 56 }}>Link</th>
+                  <th scope="col" style={{ ...thStyle, width: 44 }} title="Personal notes — saved to your browser, keyed by the task's source+id">Note</th>
+                  <th scope="col" style={{ ...thStyle, width: 136 }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -2544,8 +2558,11 @@ const MultiFilterDropdown = memo(({ icon, label, selected = [], options, onChang
 MultiFilterDropdown.displayName = 'MultiFilterDropdown';
 
 // ── Styles ──
-const thStyle = { padding: '10px 12px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center', whiteSpace: 'nowrap', borderBottom: '1px solid #e8e8e8' };
-const tdStyle = { padding: '10px 12px', textAlign: 'center', verticalAlign: 'middle' };
+// Compressed paddings (2026-05-25) — matches SourceTable. Frees ~40-60px
+// of horizontal space per row so the Actions column stays visible on
+// common 1280-1440px viewports without a horizontal scrollbar.
+const thStyle = { padding: '8px 6px', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center', whiteSpace: 'nowrap', borderBottom: '1px solid #e8e8e8' };
+const tdStyle = { padding: '8px 6px', textAlign: 'center', verticalAlign: 'middle' };
 
 // ── Ticket note modal ─────────────────────────────────────────────────────
 // Same shape as SourceTable's NoteModal, but reads task.subject / task.source

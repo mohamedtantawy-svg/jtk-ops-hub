@@ -12,6 +12,8 @@ import {
   addFollower,
   writeLog,
 } from '../../../../../../src/lib/hr-hub-helpers';
+import { loadGroupsByHandle } from '../../../../../../src/lib/mention-groups';
+import { getCurrentDeptId } from '../../../../../../src/lib/dept-scope';
 
 const MAX_BODY_BYTES = 20000;
 
@@ -54,7 +56,12 @@ export async function PATCH(req, { params }) {
     return NextResponse.json({ error: 'Forbidden — only the author or an HR Hub Admin can edit' }, { status: 403 });
   }
 
-  const newMentions = parseMentions(text);
+  // Phase 12b (2026-05-25): expand group handles on edit too, otherwise
+  // adding @hrxtools via an edit silently failed to fan out to followers.
+  // Scoped to the caller's current dept so cross-dept handles can't leak.
+  const deptId = await getCurrentDeptId(user, req);
+  const groupsByHandle = await loadGroupsByHandle({ deptId });
+  const newMentions = parseMentions(text, groupsByHandle);
   const { rows } = await query(
     `UPDATE hr_hub_comment
         SET body = $1, mention_emails = $2::text[], edited_at = NOW()

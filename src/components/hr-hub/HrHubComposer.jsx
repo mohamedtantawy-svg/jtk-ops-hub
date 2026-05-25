@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MEMBERS } from '../../../src/data/members';
+import { listMentionGroups } from '../../services/mentionGroupsApi';
 
 const QUICK_EMOJIS = [
   '👍','👎','✅','❌','🎉','🙏','💡','🔥','⚠️','🚨',
@@ -75,6 +76,25 @@ export default function HrHubComposer({ onSubmit }) {
   const [error, setError] = useState(null);
   const [showEmoji, setShowEmoji] = useState(false);
   const [mentionState, setMentionState] = useState(null);   // { query, anchor, options, highlighted }
+  // Per-dept mention groups (Phase 12b, 2026-05-25). Fetched once on mount
+  // so the @ autocomplete can surface group handles (e.g. @hrxtools)
+  // alongside members. listMentionGroups is dept-scoped server-side, so
+  // an HRX user only sees HRX groups, GIX sees GIX, etc. Falls back to
+  // an empty array on failure — the member-only autocomplete still works.
+  const [mentionGroups, setMentionGroups] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    listMentionGroups()
+      .then(res => {
+        if (cancelled) return;
+        const list = Array.isArray(res?.groups) ? res.groups
+                   : Array.isArray(res?.items)  ? res.items
+                   : [];
+        setMentionGroups(list);
+      })
+      .catch(() => { /* swallow — member autocomplete still works */ });
+    return () => { cancelled = true; };
+  }, []);
   // Drag-drop visual state. Counter-based so nested dragenter/dragleave
   // events (which fire as the cursor moves between child elements) don't
   // flicker the overlay off/on. Duygu Cakalli 2026-05-15 ask — drop a
@@ -97,29 +117,59 @@ export default function HrHubComposer({ onSubmit }) {
     if (!m) { setMentionState(null); return; }
     const query = m[2].toLowerCase();
     const anchor = cursor - m[0].length + (m[1] ? m[1].length : 0);    // index of '@'
-    const options = MEMBERS
+
+    // Group handles first so a typed `@hrxt` highlights the @hrxtools
+    // fan-out before any individual whose name happens to contain "hrxt".
+    // Each group becomes an option object the popup renders with a distinct
+    // pill + member count, and insertMention writes the handle (not an
+    // email localpart). Phase 12b (2026-05-25).
+    const groupOptions = mentionGroups
+      .filter(g => {
+        if (!query) return true;
+        const handle = String(g.handle || '').toLowerCase();
+        const name = String(g.name || '').toLowerCase();
+        return handle.includes(query) || name.includes(query);
+      })
+      .slice(0, 4)
+      .map(g => ({
+        isGroup: true,
+        handle: g.handle,
+        name: g.name || g.handle,
+        memberCount: Array.isArray(g.members) ? g.members.length : 0,
+      }));
+
+    const memberOptions = MEMBERS
       .filter(mem => {
         if (!query) return true;
         const lc = mem.name.toLowerCase();
         const local = mem.email.split('@')[0];
         return lc.includes(query) || local.includes(query);
       })
-      .slice(0, 6);
+      .slice(0, 6)
+      .map(mem => ({ isGroup: false, name: mem.name, email: mem.email }));
+
+    const options = [...groupOptions, ...memberOptions];
+    if (options.length === 0) { setMentionState(null); return; }
     setMentionState({ query, anchor, options, highlighted: 0 });
-  }, [body]);
+  }, [body, mentionGroups]);
 
   useEffect(() => { updateMentionFromCursor(); }, [body, updateMentionFromCursor]);
 
-  const insertMention = useCallback((member) => {
-    if (!mentionState) return;
+  const insertMention = useCallback((option) => {
+    if (!mentionState || !option) return;
     const before = body.slice(0, mentionState.anchor);
     const after = body.slice(taRef.current?.selectionStart ?? body.length);
-    const localpart = (member.email || '').split('@')[0];
-    const next = `${before}@${localpart} ${after}`;
+    // Groups insert `@<handle>` so the server-side parseMentions resolves
+    // the handle via loadGroupsByHandle and fans out to every member.
+    // Members insert `@<localpart>` (existing behaviour).
+    const token = option.isGroup
+      ? `@${(option.handle || '').toLowerCase()}`
+      : `@${(option.email || '').split('@')[0]}`;
+    const next = `${before}${token} ${after}`;
     setBody(next);
     setMentionState(null);
     requestAnimationFrame(() => {
-      const newCursor = (before + '@' + localpart + ' ').length;
+      const newCursor = (before + token + ' ').length;
       taRef.current?.focus();
       taRef.current?.setSelectionRange(newCursor, newCursor);
     });
@@ -271,12 +321,12 @@ export default function HrHubComposer({ onSubmit }) {
           position: 'absolute', bottom: 'calc(100% + 4px)', left: 0,
           background: 'var(--surface)', border: '1px solid var(--border)',
           borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
-          minWidth: 240, padding: 4, zIndex: 50,
+          minWidth: 280, padding: 4, zIndex: 50,
         }}>
-          {mentionState.options.map((m, idx) => (
+          {mentionState.options.map((opt, idx) => (
             <button
-              key={m.email}
-              onMouseDown={e => { e.preventDefault(); insertMention(m); }}
+              key={opt.isGroup ? `g:${opt.handle}` : `m:${opt.email}`}
+              onMouseDown={e => { e.preventDefault(); insertMention(opt); }}
               style={{
                 display: 'flex', alignItems: 'center', gap: 8,
                 width: '100%', padding: '6px 8px',
@@ -284,13 +334,36 @@ export default function HrHubComposer({ onSubmit }) {
                 borderRadius: 6, textAlign: 'left', cursor: 'pointer', fontSize: 13,
               }}
             >
-              <span style={{
-                width: 22, height: 22, borderRadius: '50%',
-                background: '#6b3fa0', color: 'white', fontSize: 10, fontWeight: 700,
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              }}>{(m.name || '').split(/\s+/).map(s => s[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()}</span>
-              <span style={{ fontWeight: 600 }}>{m.name}</span>
-              <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{m.email}</span>
+              {opt.isGroup ? (
+                <>
+                  <span style={{
+                    width: 22, height: 22, borderRadius: 6,
+                    background: '#0ea5e9', color: 'white',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    flexShrink: 0,
+                  }}>
+                    <i className="bi bi-people-fill" style={{ fontSize: 12 }} />
+                  </span>
+                  <span style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>@{opt.handle}</span>
+                  {opt.name && opt.name.toLowerCase() !== String(opt.handle || '').toLowerCase() && (
+                    <span style={{ color: 'var(--text-secondary)' }}>{opt.name}</span>
+                  )}
+                  <span style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 'auto' }}>
+                    {opt.memberCount} {opt.memberCount === 1 ? 'member' : 'members'}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span style={{
+                    width: 22, height: 22, borderRadius: '50%',
+                    background: '#6b3fa0', color: 'white', fontSize: 10, fontWeight: 700,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    flexShrink: 0,
+                  }}>{(opt.name || '').split(/\s+/).map(s => s[0]).filter(Boolean).slice(0, 2).join('').toUpperCase()}</span>
+                  <span style={{ fontWeight: 600 }}>{opt.name}</span>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{opt.email}</span>
+                </>
+              )}
             </button>
           ))}
         </div>

@@ -38,14 +38,18 @@ const SLA_EXT_REASON_LABELS = {
 };
 
 const STATUS_OPTIONS = [
-  { id: 'new',         label: 'New',         color: '#0369a1', bg: '#e0f2fe' },
-  { id: 'in_progress', label: 'In Progress', color: '#92400e', bg: '#fff8e6' },
-  { id: 'on_hold',     label: 'On Hold',     color: 'var(--text-secondary)', bg: '#f3f3f3' },
-  { id: 'resolved',    label: 'Resolved',    color: '#166534', bg: '#e8f5e9' },
+  { id: 'new',               label: 'New',               color: '#0369a1', bg: '#e0f2fe' },
+  { id: 'in_progress',       label: 'In Progress',       color: '#92400e', bg: '#fff8e6' },
+  // Josephine Tuoyo 2026-05-25 — explicit state for "waiting on the
+  // requester to come back with info". Non-terminal: counts as open.
+  // Purple stays literal across themes (status semantics).
+  { id: 'pending_requester', label: 'Pending Requester', color: '#7c3aed', bg: '#f3eff8' },
+  { id: 'on_hold',           label: 'On Hold',           color: 'var(--text-secondary)', bg: '#f3f3f3' },
+  { id: 'resolved',          label: 'Resolved',          color: '#166534', bg: '#e8f5e9' },
   // Terminal "closed without resolving" — Megan's 2026-05-12 ask. Red
   // semantic stays literal across themes (status colours convey meaning
   // that must not shift with dark mode).
-  { id: 'rejected',    label: 'Rejected',    color: '#991b1b', bg: '#fee2e2' },
+  { id: 'rejected',          label: 'Rejected',          color: '#991b1b', bg: '#fee2e2' },
 ];
 const PRIORITY_OPTIONS = [
   { id: 'low',      label: 'Low' },
@@ -303,12 +307,14 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
                   request.status === 'resolved' ? '#e8f5e9' :
                   request.status === 'rejected' ? '#fee2e2' :
                   request.status === 'in_progress' ? '#fff8e6' :
+                  request.status === 'pending_requester' ? '#f3eff8' :
                   request.status === 'on_hold' ? '#f5f5f4' :
                   '#e0f2fe',
                 color:
                   request.status === 'resolved' ? '#15803d' :
                   request.status === 'rejected' ? '#991b1b' :
                   request.status === 'in_progress' ? '#d97706' :
+                  request.status === 'pending_requester' ? '#7c3aed' :
                   request.status === 'on_hold' ? '#737373' :
                   '#0369a1',
               }}>{(request.status || '').replace(/_/g, ' ')}</span>

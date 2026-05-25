@@ -191,9 +191,10 @@ export async function POST(req) {
   // log captures the intent.
   // Load group handles once so `@hrxtools` in title/body expands to
   // every member email (each becomes a follower + notified, mirroring
-  // the per-user mention path). Empty Map on DB error so a transient
-  // groups-table issue never blocks alert creation.
-  const groupsByHandle = await loadGroupsByHandle();
+  // the per-user mention path). Phase 12b (2026-05-25): scoped to the
+  // caller's current dept so cross-dept handles never fan out.
+  const callerDeptId = await getCurrentDeptId(user, req);
+  const groupsByHandle = await loadGroupsByHandle({ deptId: callerDeptId });
   const mentions = Array.from(new Set([
     ...parseMentions(title, groupsByHandle),
     ...parseMentions(body, groupsByHandle),

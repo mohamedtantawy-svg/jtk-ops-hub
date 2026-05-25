@@ -1043,8 +1043,16 @@ CREATE INDEX IF NOT EXISTS idx_hr_hub_request_team_lead  ON hr_hub_request(team_
 DO $$ BEGIN
   ALTER TABLE hr_hub_request DROP CONSTRAINT IF EXISTS hr_hub_request_status_check;
   ALTER TABLE hr_hub_request ADD CONSTRAINT hr_hub_request_status_check
-    CHECK (status IN ('new','in_progress','on_hold','resolved','rejected'));
+    CHECK (status IN ('new','in_progress','on_hold','pending_requester','resolved','rejected'));
 END $$;
+-- 'pending_requester' (2026-05-25) — Josephine Tuoyo asked for an explicit
+-- state covering "waiting on the requester to come back with info".
+-- Distinct from on_hold (paused by us) and from in_progress (we are
+-- actively working). Non-terminal: counts as open in the briefing tiles +
+-- HR Hub queue. Applies across every department because the lifecycle is
+-- a single canonical set; per-flow label overrides via HrHubSettingsPanel
+-- still work as before. Existing rows continue to satisfy the new
+-- constraint (additive enum extension).
 
 CREATE TABLE IF NOT EXISTS hr_hub_comment (
   id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -2121,6 +2129,40 @@ CREATE INDEX IF NOT EXISTS idx_tasks_org_node                   ON tasks(org_nod
 
 ALTER TABLE workspace_members      ADD COLUMN IF NOT EXISTS org_node_id UUID REFERENCES org_nodes(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_workspace_members_org_node       ON workspace_members(org_node_id);
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Phase 12b (2026-05-25) — per-dept mention groups
+--
+-- Mention groups gain org_node_id so each dept owns its own pool of
+-- @-handles. Josephine Tuoyo feedback "internal group tag on ops hub not
+-- working" — the underlying server fan-out was already correct, but:
+--   (a) every dept saw every other depts groups in the picker, polluting
+--       the namespace and making per-dept @-coordination impossible;
+--   (b) without per-dept tagging, an HRX user could accidentally @-ping a
+--       Payroll-only handle (or vice versa), surfacing notifications to
+--       the wrong tenant.
+--
+-- Nullable on ADD; the boot-time backfillHrExperienceTenancyIfNeeded
+-- (bumped to v2) stamps every legacy row with HR Experience. Two depts
+-- can now reuse the same handle (e.g. @leads in both HRX and GIX is two
+-- distinct fan-outs). The legacy global unique on LOWER(handle) is
+-- replaced with a partial (org_node_id, LOWER(handle)) unique so handle
+-- reuse across depts is allowed but stays unique within a dept.
+-- ────────────────────────────────────────────────────────────────────────────
+ALTER TABLE mention_group
+  ADD COLUMN IF NOT EXISTS org_node_id UUID REFERENCES org_nodes(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_mention_group_org_node ON mention_group(org_node_id);
+
+-- Swap the global handle unique for a per-dept unique. The DROP is
+-- defensive (IF EXISTS) since older instances will not have the old
+-- index after this runs once. The new index is partial on
+-- org_node_id IS NOT NULL so the brief boot-time window between this
+-- DDL and the v2 backfill (which stamps NULL rows with HRX) doesn't
+-- trip the constraint on legacy rows.
+DROP INDEX IF EXISTS uniq_mention_group_handle;
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_mention_group_dept_handle
+  ON mention_group(org_node_id, LOWER(handle))
+  WHERE org_node_id IS NOT NULL;
 
 -- ────────────────────────────────────────────────────────────────────────────
 -- Phase 11j (2026-05-20) — fix urgent_assist_schedule unique constraint

@@ -19,6 +19,7 @@ import {
   readAllSettings,
 } from '../../../../../../../src/lib/leader-alerts-helpers';
 import { loadGroupsByHandle } from '../../../../../../../src/lib/mention-groups';
+import { getCurrentDeptId } from '../../../../../../../src/lib/dept-scope';
 
 export async function GET(req, { params }) {
   const user = getAuthUser(req);
@@ -93,7 +94,10 @@ export async function POST(req, { params }) {
 
     const member = memberByEmail(user.email);
     const authorName = member?.name || user.name || user.email;
-    const groupsByHandle = await loadGroupsByHandle();
+    // Phase 12b: scope group expansion to the caller's current dept so
+    // cross-dept handles never fan out.
+    const deptId = await getCurrentDeptId(user, req);
+    const groupsByHandle = await loadGroupsByHandle({ deptId });
     const mentions = parseMentions(body, groupsByHandle);
 
     const created = await withTransaction(async (client) => {

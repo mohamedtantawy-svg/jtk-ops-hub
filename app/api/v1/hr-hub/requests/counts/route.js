@@ -31,7 +31,7 @@ import { memberByEmail } from '../../../../../../src/lib/hr-hub-helpers';
 
 const ALLOWED_FLOWS = new Set(['hr_request', 'hr_reporting', 'escalation_zero', 'feedback', 'hide_task_request', 'sla_extension_request']);
 const ALLOWED_SCOPES = new Set(['mine', 'team', 'all', 'assigned', 'mentioned']);
-const ALL_STATUSES = ['new', 'in_progress', 'on_hold', 'resolved', 'rejected'];
+const ALL_STATUSES = ['new', 'in_progress', 'on_hold', 'pending_requester', 'resolved', 'rejected'];
 
 export async function GET(req) {
   const user = getAuthUser(req);

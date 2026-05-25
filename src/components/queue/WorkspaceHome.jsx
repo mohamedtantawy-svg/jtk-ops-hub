@@ -70,6 +70,19 @@ export default function WorkspaceHome({
   redlinesCount = 0,
   workbenchCount = 0,
   incentivePlansCount = 0,
+  // Paused (on-hold) sub-counts per source. When > 0, each step card renders
+  // a small "(N open · M on hold)" line under the big total so users can see
+  // the active vs. waiting split without drilling in. Carolina Ferreira
+  // feedback 2026-05-25 — total "25 open" felt misleading when 22 were
+  // actually on hold.
+  zdPausedCount = 0,
+  jiraPausedCount = 0,
+  onboardingPausedCount = 0,
+  offboardingPausedCount = 0,
+  amendmentsPausedCount = 0,
+  redlinesPausedCount = 0,
+  workbenchPausedCount = 0,
+  incentivePlansPausedCount = 0,
   sourceRowsAll = [],   // all Deel-source rows (already scoped) for breach detection
   // Authoritative breach count from Queue.jsx — keeps the "Clear all
   // breaches" card aligned with the SLA pill on workspace home. When
@@ -133,6 +146,13 @@ export default function WorkspaceHome({
   const restOpen =
     onboardingCount + offboardingCount + amendmentsCount +
     redlinesCount + incentivePlansCount;
+
+  // Aggregate paused (on-hold) sub-counts for the Step 4 "Everything else"
+  // card. Jira is included here because Step 4's number is `restOpen +
+  // jiraCount` — keeps the breakdown line consistent with the big number.
+  const restPaused =
+    onboardingPausedCount + offboardingPausedCount + amendmentsPausedCount +
+    redlinesPausedCount + incentivePlansPausedCount + jiraPausedCount;
 
   const greeting = useMemo(() => {
     const h = new Date().getHours();
@@ -372,6 +392,7 @@ export default function WorkspaceHome({
           subtitle="Customer-facing tickets. Keep response times tight, escalate stale ones."
           count={zdCount}
           countLabel={zdCount === 1 ? 'ticket open' : 'tickets open'}
+          breakdown={zdPausedCount > 0 ? { open: zdCount - zdPausedCount, paused: zdPausedCount } : null}
           ctaLabel="Open Zendesk"
           onClick={() => onSelectTool?.('zendesk')}
         />
@@ -387,6 +408,7 @@ export default function WorkspaceHome({
           subtitle="Internal tasks routed by Deel admin. Drives onboarding, payroll, compliance."
           count={workbenchCount}
           countLabel={workbenchCount === 1 ? 'task open' : 'tasks open'}
+          breakdown={workbenchPausedCount > 0 ? { open: workbenchCount - workbenchPausedCount, paused: workbenchPausedCount } : null}
           ctaLabel="Open Workbench"
           onClick={() => onSelectSource?.('workbench')}
         />
@@ -402,6 +424,7 @@ export default function WorkspaceHome({
           subtitle="The slower-burn queues. Tackle them after the urgent three are clean."
           count={restOpen + jiraCount}
           countLabel="items open"
+          breakdown={restPaused > 0 ? { open: (restOpen + jiraCount) - restPaused, paused: restPaused } : null}
           ctaLabel="Pick a queue"
           chips={[
             { label: 'Onb', count: onboardingCount, color: '#7c3aed', bg: '#f3eff8', onClick: () => onSelectSource?.('onboarding') },
@@ -442,6 +465,11 @@ function StepCard({
   step, accent, accentSolid, accentBg,
   icon, eyebrow, title, subtitle,
   count, countLabel, countTone,
+  // Optional `{ open, paused }` split. When present + paused > 0, renders a
+  // small "(N open · M on hold)" line inline beside the big number so the
+  // raw total doesn't mislead when most rows are waiting (e.g. Zendesk
+  // tickets parked on hold).
+  breakdown = null,
   ctaLabel, onClick,
   disabled = false,
   emptyState = null,
@@ -523,8 +551,8 @@ function StepCard({
       {/* Spacer */}
       <div style={{ flex: 1 }} />
 
-      {/* Count + label */}
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 4 }}>
+      {/* Count + label + optional open/paused breakdown */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
         <span style={{
           fontSize: 32, fontWeight: 800, lineHeight: 1,
           color: showEmpty ? '#15803d' : (countTone === 'urgent' && count > 0 ? accentSolid : '#1b1b1b'),
@@ -532,6 +560,14 @@ function StepCard({
         }}>
           {showEmpty ? '✓' : count.toLocaleString()}
         </span>
+        {!showEmpty && breakdown && breakdown.paused > 0 && (
+          <span
+            style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}
+            title={`${breakdown.open.toLocaleString()} active · ${breakdown.paused.toLocaleString()} on hold`}
+          >
+            ({breakdown.open.toLocaleString()} open · {breakdown.paused.toLocaleString()} on hold)
+          </span>
+        )}
         <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500 }}>
           {showEmpty ? '' : countLabel}
         </span>

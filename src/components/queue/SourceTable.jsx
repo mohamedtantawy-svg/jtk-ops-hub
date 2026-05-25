@@ -746,7 +746,7 @@ export default function SourceTable({
 
       {/* ── Table ── */}
       {sorted.length > 0 && (
-        <div ref={scrollerRef} style={{ flex: 1, overflowY: 'auto' }}>
+        <div ref={scrollerRef} style={{ flex: 1, overflowY: 'auto', overflowX: 'auto' }}>
           <table
             ref={tableElRef}
             style={{
@@ -772,7 +772,7 @@ export default function SourceTable({
                     />
                   </th>
                 )}
-                {showSourceColumn && <th style={{ ...thStyle, width: 70 }}>Source</th>}
+                {showSourceColumn && <th style={{ ...thStyle, width: 64 }}>Source</th>}
                 <ResizableSubjectTh
                   sortCol={sortCol}
                   sortDir={sortDir}
@@ -780,18 +780,18 @@ export default function SourceTable({
                   onResizeStart={handleSubjectResizeStart}
                   subjectLabel={subjectLabel}
                 />
-                {showClient && <SortTh col="clientName" label={clientLabel} sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, textAlign: 'left', minWidth: 120, maxWidth: 150 }} />}
-                {showType && <SortTh col="typeLabel" label="Type" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 90 }} />}
-                <SortTh col="country"   label="Country"    sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 80 }} />
-                <SortTh col="assignee"  label="Assignee"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 90 }} />
-                <SortTh col={dateField} label={dateLabel} sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 80 }} />
-                <SortTh col="sla"       label="SLA"        sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 60 }} />
-                {!hideUpdated && <SortTh col="updatedAt" label="Updated"    sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 70 }} />}
-                <SortTh col="status"    label="Status"     sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 115 }} />
-                <th style={{ ...thStyle, width: 55 }}>Task</th>
-                {!hideContract && <th style={{ ...thStyle, width: 55 }}>Contract</th>}
-                {hasNotes && <th style={{ ...thStyle, width: 50 }} title="Personal notes — saved to your browser, keyed by the task's source+id">Note</th>}
-                {(onHide || onEscalate || onReassign || onSlaExtension) && <th style={{ ...thStyle, width: 260 }}>Actions</th>}
+                {showClient && <SortTh col="clientName" label={clientLabel} sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, textAlign: 'left', minWidth: 110, maxWidth: 140 }} />}
+                {showType && <SortTh col="typeLabel" label="Type" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 78 }} />}
+                <SortTh col="country"   label="Country"    sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 68 }} />
+                <SortTh col="assignee"  label="Assignee"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 80 }} />
+                <SortTh col={dateField} label={dateLabel} sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 72 }} />
+                <SortTh col="sla"       label="SLA"        sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 54 }} />
+                {!hideUpdated && <SortTh col="updatedAt" label="Updated"    sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 60 }} />}
+                <SortTh col="status"    label="Status"     sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} style={{ ...thStyle, width: 96 }} />
+                <th style={{ ...thStyle, width: 48 }}>Task</th>
+                {!hideContract && <th style={{ ...thStyle, width: 48 }}>Contract</th>}
+                {hasNotes && <th style={{ ...thStyle, width: 44 }} title="Personal notes — saved to your browser, keyed by the task's source+id">Note</th>}
+                {(onHide || onEscalate || onReassign || onSlaExtension) && <th style={{ ...thStyle, width: 212 }}>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -1237,17 +1237,21 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
               <i className="bi-box-arrow-up-right" style={{ fontSize: 9 }} />Open
             </a>
           )}
-          {row.jiraUrl && (
-            <a href={row.jiraUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6,
-                background: hov ? '#e0ecff' : '#f5f4f2', color: hov ? '#0052CC' : '#9e9e9e',
-                fontSize: 10, fontWeight: 600, textDecoration: 'none', transition: 'all .15s', whiteSpace: 'nowrap',
-                border: hov ? '1px solid #b3d4ff' : '1px solid transparent',
-              }}>
-              <i className="bi-kanban" style={{ fontSize: 9 }} />Jira
-            </a>
-          )}
+          {row.jiraUrl && (() => {
+            const jKey = jiraKeyFromUrl(row.jiraUrl);
+            return (
+              <a href={row.jiraUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+                title={jKey ? `Open ${jKey} in Jira` : 'Open in Jira'}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 6,
+                  background: hov ? '#e0ecff' : '#f5f4f2', color: hov ? '#0052CC' : '#9e9e9e',
+                  fontSize: 10, fontWeight: 600, textDecoration: 'none', transition: 'all .15s', whiteSpace: 'nowrap',
+                  border: hov ? '1px solid #b3d4ff' : '1px solid transparent',
+                }}>
+                <i className="bi-kanban" style={{ fontSize: 9 }} />{jKey || 'Jira'}
+              </a>
+            );
+          })()}
           {row.zendeskUrl && (
             <a href={row.zendeskUrl} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
               style={{
@@ -1681,5 +1685,24 @@ const bulkBtnStyle = (color) => ({
   borderRadius: 8, padding: '6px 12px',
   fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
 });
-const thStyle = { padding: '10px 12px', fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center', whiteSpace: 'nowrap', borderBottom: '1px solid #e8e8e8' };
-const tdStyle = { padding: '8px 12px', textAlign: 'center', verticalAlign: 'middle' };
+// Compressed paddings (2026-05-25) — frees ~40-60px of horizontal space
+// across the row so the Actions column stays visible without horizontal
+// scroll on common 1280-1440px viewports. Users keep the Subject column
+// resize handle when they want extra room.
+const thStyle = { padding: '8px 6px', fontSize: 10, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'center', whiteSpace: 'nowrap', borderBottom: '1px solid #e8e8e8' };
+const tdStyle = { padding: '7px 6px', textAlign: 'center', verticalAlign: 'middle' };
+
+// Pull the canonical Jira ticket key out of a Jira URL like
+//   https://deel.atlassian.net/browse/DEELR-12345
+// Mirrors the server-side extractor in app/api/v1/integrations/deel/
+// offboarding/route.js so the chip label matches what ops actually pastes
+// when referencing the ticket. Falls back to '' if nothing matches.
+const JIRA_KEY_FROM_URL = /\/browse\/([A-Z][A-Z0-9_]+-\d+)/i;
+const JIRA_KEY_ANYWHERE = /\b([A-Z][A-Z0-9_]+-\d+)\b/;
+function jiraKeyFromUrl(url) {
+  if (!url) return '';
+  const m1 = url.match(JIRA_KEY_FROM_URL);
+  if (m1) return m1[1].toUpperCase();
+  const m2 = url.match(JIRA_KEY_ANYWHERE);
+  return m2 ? m2[1].toUpperCase() : '';
+}
