@@ -38,9 +38,11 @@ const SLA_TIER_CHIPS = [
 
 const SOURCES = ['zendesk', 'jira', 'workbench'];
 
-const tdStyle = { padding: '10px 12px', textAlign: 'center', verticalAlign: 'middle' };
+// Compressed paddings (2026-05-25) — matches HR's Queue/SourceTable so
+// all queue surfaces fit their columns within standard viewport widths.
+const tdStyle = { padding: '8px 6px', textAlign: 'center', verticalAlign: 'middle' };
 const thStyle = {
-  padding: '10px 12px',
+  padding: '8px 6px',
   fontSize: 11,
   fontWeight: 700,
   color: '#6b6560',
@@ -283,7 +285,7 @@ export default function QueueShell() {
       )}
 
       {/* ── Table ─────────────────────────────────────────────────────────── */}
-      <div style={{ flex: 1, overflowY: 'auto', background: '#fafaf9' }}>
+      <div style={{ flex: 1, overflowY: 'auto', overflowX: 'auto', background: '#fafaf9' }}>
         {loading && !items.length ? (
           <div style={{ padding: '64px 32px', textAlign: 'center', color: '#9b928a' }}>
             <i className="bi-arrow-repeat" style={{ fontSize: 32, display: 'block', marginBottom: 12 }} />
@@ -305,17 +307,17 @@ export default function QueueShell() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }} role="grid" aria-label="Workspace queue">
             <thead>
               <tr style={{ background: '#f5f4f2', position: 'sticky', top: 0, zIndex: 2 }}>
-                <th scope="col" style={{ ...thStyle, width: 80 }}>Source</th>
-                <th scope="col" style={{ ...thStyle, textAlign: 'left', minWidth: 200 }}>Subject</th>
-                <th scope="col" style={{ ...thStyle, width: 90 }}>Function</th>
-                <th scope="col" style={{ ...thStyle, width: 60 }}>Country</th>
-                <th scope="col" style={{ ...thStyle, width: 90 }}>Assignee</th>
-                <th scope="col" style={{ ...thStyle, width: 68 }}>Received</th>
-                <th scope="col" style={{ ...thStyle, width: 80 }}>SLA</th>
-                <th scope="col" style={{ ...thStyle, width: 100 }}>Status</th>
-                <th scope="col" style={{ ...thStyle, width: 60 }}>Link</th>
-                <th scope="col" style={{ ...thStyle, width: 50 }} title="Personal notes — coming soon">Note</th>
-                <th scope="col" style={{ ...thStyle, width: 160 }}>Actions</th>
+                <th scope="col" style={{ ...thStyle, width: 70 }}>Source</th>
+                <th scope="col" style={{ ...thStyle, textAlign: 'left', minWidth: 180 }}>Subject</th>
+                <th scope="col" style={{ ...thStyle, width: 78 }}>Function</th>
+                <th scope="col" style={{ ...thStyle, width: 54 }}>Country</th>
+                <th scope="col" style={{ ...thStyle, width: 78 }}>Assignee</th>
+                <th scope="col" style={{ ...thStyle, width: 58 }}>Received</th>
+                <th scope="col" style={{ ...thStyle, width: 68 }}>SLA</th>
+                <th scope="col" style={{ ...thStyle, width: 86 }}>Status</th>
+                <th scope="col" style={{ ...thStyle, width: 56 }}>Link</th>
+                <th scope="col" style={{ ...thStyle, width: 44 }} title="Personal notes — coming soon">Note</th>
+                <th scope="col" style={{ ...thStyle, width: 136 }}>Actions</th>
               </tr>
             </thead>
             <tbody>
