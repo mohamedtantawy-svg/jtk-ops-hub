@@ -67,12 +67,12 @@ export const ALL_VIEWS = [
   // and per-node delegation rows in `org_node_admins`. Not in
   // MANAGERIAL_ONLY_VIEWS — agents see the chart but can't mutate it.
   'org',
-  // Tasks (Phase 1, 2026-05-25) — manual task + project management surface
-  // that replaces the home-page PersonalChecklist. Open to every signed-in
-  // user; each task is dept-scoped server-side so cross-tenancy data
-  // doesn't leak. Anyone can create their own; edit gated to creator /
-  // assignee / follower / dept admin.
-  'tasks',
+  // Tasks (Phase 1, 2026-05-25 → moved same-day): originally a top-level
+  // 'tasks' view; relocated under Workspace as a queue source tab
+  // (WORK_TASKS_TAB → TasksQueuePanel) and the standalone view + its
+  // ALL_VIEWS entry were retired. Visibility for individual tasks is
+  // now stakeholder-only (creator OR assignee OR follower) — enforced
+  // server-side at /api/v1/work-tasks. No ALL_VIEWS row is needed.
   'settings',
 ];
 
@@ -171,7 +171,7 @@ export const VIEW_LABELS = {
   'urgent-assist-schedule': 'Urgent Assist Schedule',
   'notifications': 'Notifications',
   'org':           'Org',
-  'tasks':         'Tasks',
+  // 'tasks' label retired 2026-05-25 — surface lives inside Workspace.
   'settings':      'Settings',
 };
 

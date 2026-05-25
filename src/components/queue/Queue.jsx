@@ -202,7 +202,7 @@ const SOURCE_TAB_TO_VISIBILITY_KEY = {
   immigration_tasks: 'immigrationTasks',
 };
 
-const Queue = ({ user, tasks, subFilter }) => {
+const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
   // Phase 14.1 (2026-05-20): per-dept Deel-source visibility. Tabs that
   // belong to a source the current dept has explicitly hidden don't render
   // at all (GIX hides 5; HRX keeps all 6). HRX preserves identical
@@ -300,11 +300,15 @@ const Queue = ({ user, tasks, subFilter }) => {
         return;
       }
       // Deel source panels — each has its own workSource id. Defensive
-      // allowlist (no setWorkSource for unknown ids).
+      // allowlist (no setWorkSource for unknown ids). 'work_tasks' added
+      // 2026-05-25 when Tasks was moved from a top-level tab into this
+      // shell, so the bell deep-link / WorkTasksTour final CTA / Home
+      // "My Tasks" card all land inside the Tasks queue tab.
       if (src === 'onboarding' || src === 'offboarding' ||
           src === 'amendments' || src === 'redlines' ||
           src === 'workbench' || src === 'incentive_plans' ||
-          src === 'immigration_tasks' || src === 'hidden') {
+          src === 'immigration_tasks' || src === 'work_tasks' ||
+          src === 'hidden') {
         setFTool(null);
         setWorkSource(src);
       }
@@ -312,6 +316,19 @@ const Queue = ({ user, tasks, subFilter }) => {
     window.addEventListener('queue:focusSource', handler);
     return () => window.removeEventListener('queue:focusSource', handler);
   }, []);
+
+  // 2026-05-25 — when a notification deep-link to a work_task arrives,
+  // App.jsx flips view to 'my-queue' and sets focusTaskId. Auto-activate
+  // the work_tasks source tab so TasksQueuePanel mounts and opens the
+  // detail drawer. The id is cleared by TasksQueuePanel via
+  // onTaskFocused once consumed so a subsequent tab switch doesn't keep
+  // forcing the user back onto Tasks.
+  useEffect(() => {
+    if (focusTaskId) {
+      setFTool(null);
+      setWorkSource('work_tasks');
+    }
+  }, [focusTaskId]);
   // ── Column sort for the ZD/Jira table ─────────────────────────────────────
   // Default = SLA tier (Breached → At-Risk → On Track), oldest-first within
   // each tier. Clicking a column header switches primary sort to that column;
@@ -1617,7 +1634,7 @@ const Queue = ({ user, tasks, subFilter }) => {
       )}
       {workSource === 'work_tasks' && (
         <ErrorBoundary>
-          <TasksQueuePanel user={user} />
+          <TasksQueuePanel user={user} focusTaskId={focusTaskId} onTaskFocused={onTaskFocused} />
         </ErrorBoundary>
       )}
 

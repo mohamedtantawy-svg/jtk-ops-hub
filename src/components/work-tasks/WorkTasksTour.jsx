@@ -22,9 +22,13 @@ const STEPS = [
     title: 'Meet Tasks',
     body: 'A new home for todos, manual work tracking, and team-wide assignments — built right into Ops Hub. Your old home-page checklist has been moved over automatically, so nothing is lost.',
     highlights: [
-      { icon: 'bi-arrow-up-right', label: 'Find it in the top nav as "Tasks"' },
+      // 2026-05-25 — Tasks lives under Workspace now (queue source tab),
+      // not the top nav. The final-step "Open Tasks" button routes
+      // through Queue's queue:focusSource event so users land directly
+      // on the tab.
+      { icon: 'bi-inbox', label: 'Find it as a "Tasks" tab inside Workspace, after Zendesk' },
       { icon: 'bi-house', label: 'A compact card lives on Home for quick add' },
-      { icon: 'bi-inbox', label: 'A "Tasks" tab is also in Workspace' },
+      { icon: 'bi-eye', label: 'You only see tasks you created, were assigned to, or are following' },
     ],
   },
   {

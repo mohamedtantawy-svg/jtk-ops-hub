@@ -46,11 +46,14 @@ const PRIMARY_TABS = [
   // / sub-teams / people. Visible to everyone (read-only for agents); edit
   // access gated by `can_manage_org` admin power inside the view itself.
   { id: 'org',           icon: 'bi-diagram-3',            label: 'Org' },
-  // Tasks (Phase 1, 2026-05-25) — manual task + project management. Open
-  // to every signed-in user; dept-scoped on the server. Anyone can create
-  // their own todos; assignment + comments + notifications all flow
-  // through the standard fan-out.
-  { id: 'tasks',         icon: 'bi-check2-square',        label: 'Tasks' },
+  // Tasks (Phase 1, 2026-05-25 → moved 2026-05-25 same-day): originally
+  // landed as a top-level primary tab, then relocated under Workspace as
+  // a queue source-tab after the first deploy. The Workspace shell owns
+  // the tab now (see WORK_TASKS_TAB in Queue.jsx); a deep-link or
+  // notification routes here via `setView('my-queue') + dispatch
+  // queue:focusSource{ source:'work_tasks' }`. The "New Task" Quick
+  // Create action below still works — it just lands on the Workspace
+  // Tasks tab with the composer expanded.
   { id: 'feedback',      icon: 'bi-lightbulb',            label: 'Feedback' },
   { id: 'announcements', icon: 'bi-megaphone',            label: 'Announcements' },
 ];

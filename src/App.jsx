@@ -134,7 +134,8 @@ import Alerts from './components/views/Alerts';
 import FeedbackView from './components/views/FeedbackView';
 import HrHubView from './components/views/HrHubView';
 import OrgView from './components/views/OrgView';
-import WorkTasksView from './components/views/WorkTasksView';
+// WorkTasksView retired 2026-05-25 — Tasks is now a Workspace queue
+// source tab (Queue.jsx → TasksQueuePanel) rather than a top-level view.
 import WorkTasksTour from './components/work-tasks/WorkTasksTour';
 import NotificationsView from './components/views/NotificationsView';
 import LeaderAlertsView from './components/views/LeaderAlertsView';
@@ -969,10 +970,11 @@ const App=()=>{
   // (Stage 7) will preselect a flow.
   const [hrHubCreate,setHrHubCreate]=useState(null);
   // Tasks deep-link target — read from `?task=<id>` on first paint so F5 /
-  // notification clicks / shared URLs land on the right task. WorkTasksView
-  // consumes this once and clears via onTaskFocused. Per skill mistake #31:
-  // URL params MUST be read in the useState initialiser, not a useEffect,
-  // so the first render of the Tasks view sees the right id.
+  // notification clicks / shared URLs land on the right task. Forwarded to
+  // Queue → TasksQueuePanel (the surface that owns Tasks since 2026-05-25);
+  // the panel consumes this once and clears it via onTaskFocused. Per
+  // skill mistake #31: URL params MUST be read in the useState initialiser,
+  // not a useEffect, so the first render sees the right id.
   const [focusTaskId,setFocusTaskId]=useState(() => {
     if (typeof window === 'undefined') return null;
     try {
@@ -1317,17 +1319,21 @@ const App=()=>{
           catch {}
         }, 60);
       } else if (n.linkView === 'tasks' && n.linkId) {
-        // Tasks deep-link (Phase 1, 2026-05-25): flip the view + stash the
-        // task id in focusTaskId so WorkTasksView opens the detail drawer
-        // on mount. URL stamp survives F5 / share-the-URL so a notification
-        // forwarded to a teammate still lands on the same task.
+        // Tasks deep-link (Phase 1 wiring, retargeted 2026-05-25 to the
+        // Workspace queue tab). Stash the task id in focusTaskId and flip
+        // the view to my-queue — Queue's focusTaskId effect then auto-
+        // activates the work_tasks source tab so TasksQueuePanel opens
+        // the detail drawer on mount. URL stamp survives F5 / share-the-
+        // URL so a notification forwarded to a teammate still lands on
+        // the same task. linkView stays 'tasks' for back-compat with any
+        // bell rows already written before this deploy.
         try {
           const url = new URL(window.location.href);
           url.searchParams.set('task', n.linkId);
           window.history.replaceState({}, '', url.toString());
         } catch {}
         setFocusTaskId(n.linkId);
-        setView('tasks');
+        setView('my-queue');
       }
       return;
     }
@@ -2147,7 +2153,10 @@ const App=()=>{
         onCreateLeaderAlert={()=>setLeaderAlertCreate(true)}
         onCreateUrgentAssist={()=>setUrgentAssistCreate({kind:'urgent_assist'})}
         onCreateCaseMonitoring={()=>setUrgentAssistCreate({kind:'case_monitoring'})}
-        onCreateWorkTask={()=>setView('tasks')}
+        onCreateWorkTask={()=>{
+          setView('my-queue');
+          try { window.dispatchEvent(new CustomEvent('queue:focusSource', { detail: { source: 'work_tasks' } })); } catch {}
+        }}
         onManageMentionGroups={()=>setMentionGroupsOpen(true)}
         leaderAlertsBadge={leaderAlertsBadge}
         urgentAssistBadge={urgentAssistBadge}
@@ -2180,7 +2189,7 @@ const App=()=>{
           {view==='briefing'      &&perms?.canView('briefing')!==false &&(perms?.raw?.dataScope==='all_tasks'||perms?.raw?.dataScope==='regional_tasks'||perms?.raw?.dataScope==='team_tasks') &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasksWithSlaExt,MEMBERS)||tasksWithSlaExt} setView={setView} setSelTask={()=>{}} comms={comms} escalations={[]} setSubFilter={setSubFilter} requests={[]} projects={[]} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall} teamLeadOnCall={teamLeadOnCall} onChangeTeamLeadOnCall={handleChangeTeamLeadOnCall} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
           {view==='lead-home' &&<div className="page-enter"><TeamLeadHome user={effectiveUser} tasks={tasksWithSlaExt} setView={setView} managerOnCall={managerOnCall}/></div>}
           {view==='agent-home' &&<div className="page-enter"><AgentHome user={effectiveUser} tasks={tasksWithSlaExt} setView={setView} comms={comms}/></div>}
-          {view==='my-queue'      &&perms?.canView('my-queue')!==false     &&<div className="page-enter"><Queue user={effectiveUser} tasks={tasksWithSlaExt} subFilter={subFilter}/></div>}
+          {view==='my-queue'      &&perms?.canView('my-queue')!==false     &&<div className="page-enter"><Queue user={effectiveUser} tasks={tasksWithSlaExt} subFilter={subFilter} focusTaskId={focusTaskId} onTaskFocused={()=>setFocusTaskId(null)}/></div>}
           {view==='announcements' &&perms?.canView('announcements')!==false&&<div className="page-enter"><AnnouncementsView user={effectiveUser} serverUserId={apiServerUserId} serverUserEmail={apiServerUserEmail} comms={comms} setComms={setComms} addToast={addToast} tasks={tasks} apiAcknowledge={apiAcknowledge} apiCreate={apiCreate} apiSend={apiSend} apiUpdate={apiUpdate} apiArchive={apiArchive} apiRemove={apiRemove} apiTogglePin={apiTogglePin} openCompose={announceCompose} onComposeOpened={()=>setAnnounceCompose(false)} apiUnarchive={apiUnarchive} apiComments={apiComments} apiSetComments={apiSetComments} apiLoadComments={apiLoadComments} apiAddComment={apiAddCommentFn} apiDeleteComment={apiDeleteCommentFn} apiLinks={apiLinks} apiLoadLinks={apiLoadLinks} apiLinkAnnouncement={apiLinkAnnouncementFn} apiUnlinkAnnouncement={apiUnlinkAnnouncementFn} apiReact={apiReactFn}/></div>}
           {view==='approval-queue' &&<div className="page-enter"><ApprovalQueueView user={effectiveUser} addToast={addToast}/></div>}
           {view==='settings'      &&perms?.canView('settings')!==false     &&<div className="page-enter"><SettingsView settings={settings} setSettings={setSettings} user={user} addToast={addToast} tasks={tasks} setTasks={setTasks} subFilter={subFilter} accessTypes={accessTypes} setAccessTypes={setAccessTypes} userAccessMap={userAccessMap} setUserAccessMap={setUserAccessMap} perms={perms}/></div>}
@@ -2189,7 +2198,9 @@ const App=()=>{
           {view==='feedback'      &&perms?.canView('feedback')!==false     &&<div className="page-enter"><FeedbackView user={effectiveUser} addToast={addToast} openCompose={feedbackCompose} onComposeOpened={()=>setFeedbackCompose(false)} openPicker={feedbackPickerOpen} onPickerOpened={()=>setFeedbackPickerOpen(false)}/></div>}
           {view==='hr-hub'        &&perms?.canView('hr-hub')!==false       &&<div className="page-enter"><HrHubView user={effectiveUser} onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}/></div>}
           {view==='org'           &&perms?.canView('org')!==false          &&<div className="page-enter"><OrgView user={effectiveUser} realUser={user} onImpersonate={handleImpersonate}/></div>}
-          {view==='tasks'         &&perms?.canView('tasks')!==false        &&<div className="page-enter"><WorkTasksView user={effectiveUser} focusTaskId={focusTaskId} onTaskFocused={()=>setFocusTaskId(null)}/></div>}
+          {/* Tasks view retired 2026-05-25 — Tasks moved under Workspace
+              as the WORK_TASKS_TAB queue source. Use openTasksTab()
+              below to navigate; focusTaskId is forwarded to Queue. */}
           {view==='notifications' &&<div className="page-enter"><NotificationsView notifs={mergedNotifs} unreadCount={mergedNotifs.filter(n=>!n.read).length} markAllRead={markAllRead} markRead={(serverId)=>serverNotifs.markRead(serverId)} markUnread={(serverId)=>serverNotifs.markUnread(serverId)} onNotifClick={handleNotifClick}/></div>}
           {view==='urgent-assist' &&perms?.canView('urgent-assist')!==false&&<div className="page-enter" key={urgentAssistRefreshNonce}><UrgentAssistView user={effectiveUser} onCreate={()=>setUrgentAssistCreate({kind:'urgent_assist'})} onCreateCaseMonitoring={()=>setUrgentAssistCreate({kind:'case_monitoring'})} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall} onOpenSchedule={() => setView('urgent-assist-schedule')}/></div>}
           {view==='urgent-assist-schedule' &&perms?.canView('urgent-assist-schedule')!==false&&<div className="page-enter"><UrgentAssistScheduleView/></div>}
@@ -2219,7 +2230,10 @@ const App=()=>{
         <WorkTasksTour
           user={effectiveUser}
           onClose={() => setShowWorkTasksTour(false)}
-          onGoToTasks={() => setView('tasks')}
+          onGoToTasks={() => {
+            setView('my-queue');
+            try { window.dispatchEvent(new CustomEvent('queue:focusSource', { detail: { source: 'work_tasks' } })); } catch {}
+          }}
         />
       )}
       {mentionGroupsOpen&&<ManageMentionGroupsModal onClose={()=>setMentionGroupsOpen(false)}/>}

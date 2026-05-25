@@ -293,8 +293,15 @@ export function taskStakeholders(task) {
 
 // ── Permission helpers ──────────────────────────────────────────────────
 // Edit semantics: creator, current assignees, current followers, OR a
-// dept admin (per canManageOrgNode) can edit a task. Anyone authed can
-// READ a task in their dept (matches the rest of the multi-tenant rule).
+// dept admin (per canManageOrgNode) can edit a task.
+// Read semantics (tightened 2026-05-25 per Mohamed Tantawy): same set —
+// stakeholders only (creator OR assignee OR follower) PLUS dept admins.
+// Previously this was dept-wide; the route handlers in
+// /api/v1/work-tasks (GET list + GET [taskId]) now enforce the
+// stakeholder gate so a non-stakeholder dept member can't see other
+// people's tasks. Updating this comment to match — the function below
+// is reused as the edit gate; the route handlers do their own read
+// check ahead of calling it.
 export function canEditWorkTask(user, task, { isDeptAdmin = false } = {}) {
   if (!user?.email || !task) return false;
   if (isDeptAdmin) return true;

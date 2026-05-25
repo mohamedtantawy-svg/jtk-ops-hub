@@ -2309,14 +2309,25 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 + full management lives in the Tasks tab. */}
             <BriefingMyTasks
               user={user}
-              onOpenTasks={() => setView?.('tasks')}
+              onOpenTasks={() => {
+                // 2026-05-25 — Tasks moved under Workspace; route through
+                // queue:focusSource so the user lands inside the Tasks tab
+                // rather than a now-defunct top-level 'tasks' view.
+                setView?.('my-queue');
+                try { window.dispatchEvent(new CustomEvent('queue:focusSource', { detail: { source: 'work_tasks' } })); } catch {}
+              }}
               onOpenTask={(taskId) => {
+                // Deep-link a specific task — URL stamp + my-queue view
+                // switch; the ?task=<id> initialiser in App.jsx hydrates
+                // focusTaskId, then Queue's effect routes into work_tasks
+                // and TasksQueuePanel opens the detail drawer.
                 try {
                   const url = new URL(window.location.href);
                   url.searchParams.set('task', taskId);
                   window.history.replaceState({}, '', url.toString());
                 } catch {}
-                setView?.('tasks');
+                setView?.('my-queue');
+                try { window.dispatchEvent(new CustomEvent('queue:focusSource', { detail: { source: 'work_tasks' } })); } catch {}
               }}
             />
 

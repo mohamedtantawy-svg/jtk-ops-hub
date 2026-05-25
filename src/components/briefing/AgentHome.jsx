@@ -772,14 +772,26 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
       <div>
         <BriefingMyTasks
           user={user}
-          onOpenTasks={() => setView?.('tasks')}
+          onOpenTasks={() => {
+            // 2026-05-25 — Tasks moved under Workspace as the
+            // WORK_TASKS_TAB source. Flip view, then dispatch
+            // queue:focusSource so Queue lands inside the Tasks tab.
+            setView?.('my-queue');
+            try { window.dispatchEvent(new CustomEvent('queue:focusSource', { detail: { source: 'work_tasks' } })); } catch {}
+          }}
           onOpenTask={(taskId) => {
+            // Deep-link a specific task. URL stamp keeps F5 / shared
+            // URLs working; the ?task=<id> initialiser in App.jsx
+            // rehydrates focusTaskId on cold paint, which then routes
+            // through Queue's focusTaskId effect into the work_tasks
+            // panel and opens the detail drawer.
             try {
               const url = new URL(window.location.href);
               url.searchParams.set('task', taskId);
               window.history.replaceState({}, '', url.toString());
             } catch {}
-            setView?.('tasks');
+            setView?.('my-queue');
+            try { window.dispatchEvent(new CustomEvent('queue:focusSource', { detail: { source: 'work_tasks' } })); } catch {}
           }}
         />
       </div>

@@ -77,6 +77,21 @@ export async function GET(req, { params }) {
 
   const task = rowToTask(existing);
 
+  // 2026-05-25 — stakeholder-only read scope. Caller must be the
+  // creator, an assignee, OR a follower. Dept admins (canManageOrgNode)
+  // retain access so manage-the-org workflows aren't blocked. 404
+  // instead of 403 so a non-stakeholder can't probe the existence of
+  // tasks they aren't on. Mirrors the GET list filter in route.js.
+  const lcEmail = user.email.toLowerCase();
+  const isStakeholder =
+    (task.creator?.email || '').toLowerCase() === lcEmail
+    || (task.assignees || []).some(e => String(e).toLowerCase() === lcEmail)
+    || (task.followers || []).some(e => String(e).toLowerCase() === lcEmail);
+  const isDeptAdminEarly = task.orgNodeId ? await canManageOrgNode(user, task.orgNodeId) : false;
+  if (!isStakeholder && !isDeptAdminEarly) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+
   // Hydrate comments + activity for the detail pane.
   try {
     const [commentsRes, activityRes] = await Promise.all([
@@ -105,8 +120,9 @@ export async function GET(req, { params }) {
       Array.from(new Set([...(task.assignees || []), ...(task.followers || [])])),
     );
 
-    const isDeptAdmin = task.orgNodeId ? await canManageOrgNode(user, task.orgNodeId) : false;
-    const canEdit = canEditWorkTask(user, task, { isDeptAdmin });
+    // Reuse the dept-admin check computed above for the stakeholder gate
+    // so we don't issue a duplicate canManageOrgNode lookup per GET.
+    const canEdit = canEditWorkTask(user, task, { isDeptAdmin: isDeptAdminEarly });
 
     return NextResponse.json({ task, comments, activity, oooEmails, canEdit });
   } catch (err) {
