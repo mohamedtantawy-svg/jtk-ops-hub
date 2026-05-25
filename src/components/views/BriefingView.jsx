@@ -1169,6 +1169,25 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     </svg>);
   };
 
+  // Deep-link click handler shared by ApproachingBreach / OOOAlert /
+  // MiniTicketList. Switches the view to my-queue and, after a 60 ms
+  // tick (so Queue has mounted + attached its listener — same delay
+  // App.jsx uses for the notification deep-link events), dispatches
+  // `queue:focusSource` so the user lands inside the source panel that
+  // contains the clicked task. Falls back to a plain setView if the
+  // source isn't recognised; never bubbles selTask (the App-level prop
+  // is a vestigial no-op).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const navigateToTaskInQueue = (task) => {
+    const src = task?.source;
+    setView('my-queue');
+    if (typeof window === 'undefined') return;
+    setTimeout(() => {
+      try { window.dispatchEvent(new CustomEvent('queue:focusSource', { detail: { source: src } })); }
+      catch (_) {}
+    }, 60);
+  };
+
   // ── Mini ticket list for expandable panels ──────────────────────────
   const MiniTicketList=({items,emptyMsg})=>(
     <div style={{background:'var(--surface-2)',border:'1px solid var(--border)',borderRadius:12,margin:'8px 0 4px',padding:'8px 12px',maxHeight:200,overflowY:'auto',animation:'fadeSlide .2s ease'}}>
@@ -1178,7 +1197,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
       items.map((t,i)=>{
         const sla=slaInfo(t);const tool=TOOLS[t.source];
         return(
-          <div key={t.id} onClick={(e)=>{e.stopPropagation();setSelTask(t);setView('my-queue');}}
+          <div key={t.id} onClick={(e)=>{e.stopPropagation();navigateToTaskInQueue(t);}}
             style={{display:'flex',alignItems:'center',gap:8,padding:'7px 4px',cursor:'pointer',borderBottom:i<items.length-1?'1px solid #f0f0f0':'none',borderRadius:6,transition:'background .15s'}}
             onMouseEnter={e=>e.currentTarget.style.background='#f0f0f0'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
             <div style={{width:22,height:22,borderRadius:6,background:tool?.bg||'#f7f5f2',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
@@ -2313,14 +2332,24 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               {isTeamScope && <DailySummary tasks={scopeWithResolved} escalations={escalations} scope="team" />}
               {isExec && <DailySummary tasks={allOrgTasks} escalations={escalations} scope="org" />}
 
-              {/* ── ApproachingBreach — all roles ────────────────────────────── */}
-              {isOwnScope && <ApproachingBreach tasks={personal} slaInfo={slaInfo} onViewTask={task => { setSelTask(task); setView('my-queue'); }} />}
-              {isTeamScope && <ApproachingBreach tasks={scope} slaInfo={slaInfo} onViewTask={task => { setSelTask(task); setView('my-queue'); }} />}
-              {isExec && <ApproachingBreach tasks={orgOpen} slaInfo={slaInfo} onViewTask={task => { setSelTask(task); setView('my-queue'); }} />}
+              {/* ── ApproachingBreach — all roles ──────────────────────────────
+                  2026-05-22 — Pablo Gonzalez "Pressing tasks in the daily
+                  summary bring me to as blank page". `setSelTask` is wired
+                  as a no-op at the App.jsx boundary (vestigial prop), so the
+                  old handler just landed on Queue's WorkspaceHome with no
+                  source filter — fine on HRX with lots of data, but on
+                  newer dept tenants (GIX / Payroll / Benefits) it reads as
+                  blank. Dispatch `queue:focusSource` after the view switch
+                  (60ms later — same pattern as the App.jsx notification
+                  deep-links) so Queue mounts, attaches its listener, then
+                  focuses the source panel the task lives in. */}
+              {isOwnScope && <ApproachingBreach tasks={personal} slaInfo={slaInfo} onViewTask={navigateToTaskInQueue} />}
+              {isTeamScope && <ApproachingBreach tasks={scope} slaInfo={slaInfo} onViewTask={navigateToTaskInQueue} />}
+              {isExec && <ApproachingBreach tasks={orgOpen} slaInfo={slaInfo} onViewTask={navigateToTaskInQueue} />}
 
               {/* ── OOOAlert in right column — team lead & admin ─────────────── */}
-              {isTeamScope && <OOOAlert tasks={scope} onLeaveEmails={onLeaveEmails} members={MEMBERS} onReassign={task => { setSelTask(task); setView('my-queue'); }} />}
-              {isExec && <OOOAlert tasks={allOrgTasks} onLeaveEmails={onLeaveEmails} members={MEMBERS} onReassign={task => { setSelTask(task); setView('my-queue'); }} />}
+              {isTeamScope && <OOOAlert tasks={scope} onLeaveEmails={onLeaveEmails} members={MEMBERS} onReassign={navigateToTaskInQueue} />}
+              {isExec && <OOOAlert tasks={allOrgTasks} onLeaveEmails={onLeaveEmails} members={MEMBERS} onReassign={navigateToTaskInQueue} />}
 
               {/* ── TeamRequestsToMe — team lead & admin ────────────────────── */}
               {isTeamScope && <TeamRequestsToMe requests={requests} currentUser={user} members={MEMBERS} />}
