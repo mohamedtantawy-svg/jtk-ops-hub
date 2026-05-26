@@ -1651,9 +1651,19 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
             onSelectTool={(t) => { setWorkSource(null); setFTool(t); }}
             onSelectSource={(s) => { setFTool(null); setWorkSource(s); }}
             onFilterBreached={() => { setFSla('breached'); }}
-            zdCount={baseVis.filter(t => t.source === 'zendesk').length}
-            jiraCount={baseVis.filter(t => t.source === 'jira').length}
-            ticketRows={baseVis.filter(t => t.source === 'zendesk' || t.source === 'jira')}
+            // Paulina Furmaniuk 2026-05-26 — the Zendesk step card on
+            // workspace home reported 70 while the Zendesk filter showed
+            // 28. Root cause: baseVis is the unfiltered scoped pool (per-
+            // user "Hide resolved" toggle is applied later), so a viewer
+            // with the toggle OFF carries resolved tickets through into
+            // the home count. The tile labels itself "tickets open" + the
+            // ticketRows prop contract already says "status !== 'resolved'"
+            // (WorkspaceHome.jsx:66), so both ticket sources must filter
+            // resolved out before counting — matches the Zendesk/Jira tab
+            // pills that use applyQueueFilter (Queue.jsx:1224).
+            zdCount={baseVis.filter(t => t.source === 'zendesk' && t.status !== 'resolved').length}
+            jiraCount={baseVis.filter(t => t.source === 'jira' && t.status !== 'resolved').length}
+            ticketRows={baseVis.filter(t => (t.source === 'zendesk' || t.source === 'jira') && t.status !== 'resolved')}
             onboardingCount={onboardingRows.length}
             offboardingCount={offboardingRows.length}
             amendmentsCount={amendmentRows.length}
