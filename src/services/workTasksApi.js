@@ -82,3 +82,17 @@ export async function patchWorkProject(projectId, patch) {
 export async function archiveWorkProject(projectId) {
   return apiFetch(`/work-projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' });
 }
+
+// ── Legacy-checklist recovery ──────────────────────────────────────────────
+// Posts the caller's still-present localStorage checklist items to the
+// server, which merges them into personal_checklist_snapshots, clears the
+// migration sentinel, and re-runs the migration helper. Returns
+// { snapshotItems, incomingItems, migrated, skipped }.
+// Celine Taruc 2026-05-26 — recovers PersonalChecklist items that never
+// made it through the PR #821 cutover.
+export async function recoverLegacyChecklist(items) {
+  return apiFetch('/work-tasks/recover-legacy-checklist', {
+    method: 'POST',
+    body: JSON.stringify({ items }),
+  });
+}

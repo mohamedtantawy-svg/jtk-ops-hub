@@ -256,12 +256,20 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
   const viewerLc = (user?.email || '').toLowerCase();
   const isSelf = request && (request.createdByEmail || '').toLowerCase() === viewerLc;
   const canDecide = isApprovalFlow && isUnresolved && !!isManager && (!isSelf || !!isAdmin);
-  // Disable the status picker on approval flows whose decision hasn't
-  // landed yet — the picker only PATCHes status, bypassing the
-  // approve/deny endpoints that actually grant the extension / hide the
-  // row. Picker stays interactive on every other flow + on already-
-  // resolved approval rows (rare admin reopen path).
-  const statusPickerLocked = isApprovalFlow && isUnresolved;
+  // Lock ONLY the terminal options (resolved / rejected) on approval
+  // flows whose decision hasn't landed yet — those bypass the
+  // approve/deny endpoints that actually grant the extension / hide
+  // the row. Non-terminal moves (on_hold / pending_requester / back to
+  // in_progress) stay open so a reviewer can pause an approval row
+  // while waiting on more info. Jose Ruales 2026-05-26: "Cannot move
+  // task to on hold, stuck on in progress status" — caused by the
+  // previous all-or-nothing lock that disabled the entire <select>.
+  const lockedTerminalStatuses = (isApprovalFlow && isUnresolved)
+    ? ['resolved', 'rejected']
+    : [];
+  const statusPickerHint = lockedTerminalStatuses.length > 0
+    ? 'Use the Approve / Deny buttons in the header to close — the picker can pause or re-open, but the final decision has to come through the workflow buttons.'
+    : undefined;
 
   return (
     <div
@@ -422,8 +430,9 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
                   <PickerStatus
                     value={request.status}
                     onChange={v => updateField({ status: v })}
-                    disabled={savingField === 'status' || statusPickerLocked}
-                    title={statusPickerLocked ? 'Status is driven by Approve / Deny on this flow — use the buttons in the header.' : undefined}
+                    disabled={savingField === 'status'}
+                    disabledOptions={lockedTerminalStatuses}
+                    title={statusPickerHint}
                   />
                 </LabeledPicker>
                 <LabeledPicker label="Priority">
@@ -705,16 +714,26 @@ function LabeledPicker({ label, children }) {
   );
 }
 
-function PickerStatus({ value, onChange, disabled, title }) {
+function PickerStatus({ value, onChange, disabled, disabledOptions, title }) {
+  const disabledSet = useMemo(() => new Set(disabledOptions || []), [disabledOptions]);
   return (
     <select
       value={value || ''}
-      onChange={e => onChange(e.target.value)}
+      onChange={e => {
+        // Belt-and-braces: a user pasting a value or scripting the
+        // <select> shouldn't be able to bypass the per-option disable.
+        if (disabledSet.has(e.target.value)) return;
+        onChange(e.target.value);
+      }}
       disabled={disabled}
       title={title}
       style={pickerStyle(STATUS_OPTIONS.find(s => s.id === value)?.bg, STATUS_OPTIONS.find(s => s.id === value)?.color)}
     >
-      {STATUS_OPTIONS.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+      {STATUS_OPTIONS.map(s => (
+        <option key={s.id} value={s.id} disabled={disabledSet.has(s.id)}>
+          {disabledSet.has(s.id) ? `${s.label} — use Approve / Deny` : s.label}
+        </option>
+      ))}
     </select>
   );
 }

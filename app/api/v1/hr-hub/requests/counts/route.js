@@ -43,6 +43,12 @@ export async function GET(req) {
   const flow = searchParams.get('flow');
   const scope = searchParams.get('scope') || 'mine';
   const search = searchParams.get('search');
+  // Josephine Tuoyo 2026-05-26 — assignee picker filter. Mirror of the
+  // list route's `assignee` param so the 6 status cards + 5 scope pills
+  // narrow with the picker selection. Applied to baseFilters so BOTH
+  // byStatus + byScope reflect the chosen assignee.
+  const assigneeRaw = searchParams.get('assignee');
+  const assigneeFilter = assigneeRaw ? String(assigneeRaw).trim().toLowerCase() : null;
   // 2026-05-22 — accept `flows=a,b` for multi-flow filters (briefing tile
   // for SLA Extension & Hide-Task needs both `hide_task_request` and
   // `sla_extension_request`). Single-value `flow=` stays back-compat.
@@ -91,6 +97,15 @@ export async function GET(req) {
     baseFilters.push(`(LOWER(summary) LIKE $${p} OR LOWER(COALESCE(title,'')) LIKE $${p})`);
     baseParams.push(`%${String(search).toLowerCase()}%`);
     p++;
+  }
+  // Assignee predicate sits in the shared base so byStatus + byScope both
+  // narrow when a picker selection is active. 'unassigned' = NULL/empty
+  // assignee_email; an email value = exact match (case-insensitive).
+  if (assigneeFilter === 'unassigned') {
+    baseFilters.push(`(assignee_email IS NULL OR assignee_email = '')`);
+  } else if (assigneeFilter) {
+    baseFilters.push(`LOWER(assignee_email) = $${p++}`);
+    baseParams.push(assigneeFilter);
   }
   const baseWhereSql = baseFilters.length ? `WHERE ${baseFilters.join(' AND ')}` : '';
 

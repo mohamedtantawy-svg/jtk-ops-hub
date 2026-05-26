@@ -32,6 +32,7 @@ import { TASK_SOURCE_DISPLAY } from '../../utils/applySlaExtensions';
 import { PermissionsContext, IntegrationsContext } from '../../App';
 import { useCurrentDept } from '../../hooks/useCurrentDept';
 import { getHubBrand } from '../../lib/hub-brand';
+import { MEMBERS, MEMBERS_BY_EMAIL } from '../../data/members';
 
 // Single source of truth for status visuals — same shape as Feedback's
 // STATUS_FILTERS so the four buttons feel identical across the two tabs.
@@ -178,6 +179,50 @@ export default function HrHubView({ user, onCreateHrHub }) {
   // still wins for tile-driven navigation.
   const [scope, setScope] = useState(() => (isManager ? 'all' : 'mine'));
   const [flowFilter, setFlowFilter] = useState('all');
+  // Josephine Tuoyo 2026-05-26 — assignee picker for All / Team / Mentioned.
+  // null = "All assignees" (no extra filter), 'unassigned' = rows with no
+  // assignee, or a lowercased email for an exact match. Server applies the
+  // predicate on both list + counts so the status cards stay accurate.
+  const [assigneeFilter, setAssigneeFilter] = useState(null);
+  // Scopes where the picker is meaningful — `mine` rows are mine-as-creator
+  // (assignee is independent and useful to filter) but the 2026-05-26 spec
+  // confined the picker to scopes where a manager triages others' work.
+  // `assigned` is excluded because the scope IS the filter (always self).
+  const ASSIGNEE_PICKER_SCOPES = useMemo(() => new Set(['all', 'team', 'mentioned']), []);
+  const assigneePickerVisible = ASSIGNEE_PICKER_SCOPES.has(scope);
+  // Auto-clear the picker the moment the user leaves a supported scope so
+  // the value can't strand and silently filter the next view's data.
+  useEffect(() => {
+    if (!assigneePickerVisible && assigneeFilter !== null) setAssigneeFilter(null);
+  }, [assigneePickerVisible, assigneeFilter]);
+  // Also clear when the super-admin switches dept — the previous dept's
+  // assignee email won't exist in the new dept's roster, so leaving it
+  // selected would silently filter the whole new view to zero rows. Effect
+  // is a no-op when filter is already null, so omitting it from deps is
+  // safe (the only meaningful trigger here is dept change).
+  useEffect(() => {
+    setAssigneeFilter(null);
+  }, [deptState.deptId]);
+  // Dept-scoped member list for the picker. Members carry `orgNodeId` that
+  // points at their team/sub-team node; `currentDeptNodeIds` is the Set
+  // of every node under the current top-level dept (root + descendants).
+  // Empty Set = cold paint, fall back to all members so the picker is
+  // never blank during boot.
+  const deptMembers = useMemo(() => {
+    const nodeIds = deptState.currentDeptNodeIds;
+    const pool = (nodeIds && nodeIds.size > 0)
+      ? MEMBERS.filter(m => m.orgNodeId && nodeIds.has(m.orgNodeId))
+      : MEMBERS;
+    return [...pool]
+      .filter(m => m && m.email && m.name)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [deptState.currentDeptNodeIds]);
+  // Selected-assignee label for the picker button.
+  const assigneeLabel = useMemo(() => {
+    if (!assigneeFilter) return 'All assignees';
+    if (assigneeFilter === 'unassigned') return 'Unassigned';
+    return MEMBERS_BY_EMAIL[assigneeFilter]?.name || assigneeFilter;
+  }, [assigneeFilter]);
   // Default to 'new' so the landing page shows actionable work, not
   // historical resolved tasks. Olga Pastuszak 2026-05-14 feedback:
   // "HR HUB - Potentially defaults to Resolved" — with statusFilter=null
@@ -220,6 +265,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
       scope,
       status: statusFilter || undefined,
       search: debouncedSearch || undefined,
+      assignee: assigneeFilter || undefined,
       limit: 25,
     });
     try {
@@ -253,7 +299,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
     } finally {
       if (seq === reqSeqRef.current) setLoading(false);
     }
-  }, [flowQuery, scope, statusFilter, debouncedSearch]);
+  }, [flowQuery, scope, statusFilter, debouncedSearch, assigneeFilter]);
 
   useEffect(() => { loadFirstPage(); }, [loadFirstPage]);
 
@@ -266,6 +312,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
         scope,
         status: statusFilter || undefined,
         search: debouncedSearch || undefined,
+        assignee: assigneeFilter || undefined,
         cursor,
         limit: 25,
       });
@@ -279,7 +326,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
     } finally {
       setLoadingMore(false);
     }
-  }, [cursor, flowQuery, scope, statusFilter, debouncedSearch, loadingMore]);
+  }, [cursor, flowQuery, scope, statusFilter, debouncedSearch, assigneeFilter, loadingMore]);
 
   // ── Counts for status cards + scope toggle ─────────────────────────────
   // Single round-trip to /hr-hub/requests/counts. The server runs real
@@ -303,6 +350,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
           flow: flowQuery,
           scope,
           search: debouncedSearch || undefined,
+          assignee: assigneeFilter || undefined,
         });
         if (cancelled) return;
         if (r?.byStatus) setStatusCounts(r.byStatus);
@@ -310,7 +358,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
       } catch { /* swallow */ }
     })();
     return () => { cancelled = true; };
-  }, [flowQuery, scope, debouncedSearch]);
+  }, [flowQuery, scope, debouncedSearch, assigneeFilter]);
 
   // Local sort — server returns newest-first by default; we re-sort client-side
   // for the small page (25 rows) so toggling sort doesn't refetch.
@@ -590,6 +638,18 @@ export default function HrHubView({ user, onCreateHrHub }) {
               </button>
             );
           })}
+          {/* Assignee picker — All / Team / Mentioned only. Lives next to the
+              flow chips so the two related "narrow the visible set" controls
+              share a row. Sits after the flow chips so it inherits the
+              filterBar's flex-wrap behaviour at narrow viewports. */}
+          {assigneePickerVisible && (
+            <AssigneePicker
+              value={assigneeFilter}
+              label={assigneeLabel}
+              members={deptMembers}
+              onChange={setAssigneeFilter}
+            />
+          )}
         </div>
         <div style={{ display: 'flex', gap: 8, marginLeft: 'auto', flexShrink: 0, alignItems: 'center' }}>
           <div style={{ position: 'relative' }}>
@@ -1023,6 +1083,199 @@ function RequestRow({ item, active, onClick, viewerEmail, isManager, isAdmin, on
           {relTime(item.updatedAt || item.createdAt)}
         </span>
       </span>
+    </button>
+  );
+}
+
+// ── AssigneePicker ─────────────────────────────────────────────────────────
+// Compact dropdown for the filter bar: button shows the current selection
+// label, click toggles a popover with a search input + "All assignees" /
+// "Unassigned" sentinels + the dept-scoped member list. Outside-click
+// closes (skill §3.3). Esc also closes. Selecting an item fires onChange
+// with one of: null (clear), 'unassigned', or a lowercased email.
+//
+// Source of truth for member list = parent (already filtered to the
+// caller's current dept via currentDeptNodeIds). This component is
+// dept-agnostic; it just renders + filters by the search term.
+function AssigneePicker({ value, label, members, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const rootRef = useRef(null);
+  const searchRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e) => {
+      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  // Reset the search each time the popover opens so the previous query
+  // doesn't strand on top of a different selection.
+  useEffect(() => {
+    if (open) {
+      setSearch('');
+      // Auto-focus the search after the popover mounts so keyboard users
+      // can type immediately.
+      setTimeout(() => { try { searchRef.current?.focus(); } catch {} }, 0);
+    }
+  }, [open]);
+
+  const lcSearch = search.trim().toLowerCase();
+  const filtered = useMemo(() => {
+    if (!lcSearch) return members;
+    return members.filter(m =>
+      (m.name && m.name.toLowerCase().includes(lcSearch))
+      || (m.email && m.email.toLowerCase().includes(lcSearch)),
+    );
+  }, [lcSearch, members]);
+
+  const isActive = value != null;
+  const select = (next) => {
+    onChange(next);
+    setOpen(false);
+  };
+
+  return (
+    <div ref={rootRef} style={{ position: 'relative', display: 'inline-flex' }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        title={isActive ? `Filtered by assignee: ${label}` : 'Filter by assignee'}
+        style={{
+          ...filterPill,
+          ...(isActive
+            ? { background: '#f3eff8', color: '#5b21b6', borderColor: '#a78bfa' }
+            : null),
+        }}
+      >
+        <i className="bi-person" style={{ fontSize: 11, color: isActive ? '#5b21b6' : 'var(--text-muted)' }} />
+        <span style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {isActive ? label : 'Assignee'}
+        </span>
+        {isActive && (
+          <span
+            role="button"
+            tabIndex={0}
+            aria-label="Clear assignee filter"
+            onClick={(e) => { e.stopPropagation(); select(null); }}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); select(null); } }}
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: 14, height: 14, borderRadius: 999,
+              background: 'rgba(91,33,182,0.12)', color: '#5b21b6',
+              fontSize: 9, cursor: 'pointer', marginLeft: 2,
+            }}
+          >
+            <i className="bi-x" style={{ fontSize: 11 }} />
+          </span>
+        )}
+        {!isActive && <i className="bi-chevron-down" style={{ fontSize: 9, color: 'var(--text-muted)' }} />}
+      </button>
+      {open && (
+        <div
+          role="listbox"
+          style={{
+            position: 'absolute', top: 'calc(100% + 6px)', left: 0,
+            minWidth: 240, maxWidth: 320,
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            borderRadius: 10, boxShadow: 'var(--shadow-lg)',
+            zIndex: 50,
+            display: 'flex', flexDirection: 'column',
+          }}
+        >
+          <div style={{ position: 'relative', padding: 8, borderBottom: '1px solid var(--border-light)' }}>
+            <i className="bi-search" style={{ position: 'absolute', left: 18, top: '50%', transform: 'translateY(-50%)', fontSize: 11, color: 'var(--text-muted)' }} />
+            <input
+              ref={searchRef}
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search members…"
+              style={{
+                width: '100%', height: 30, paddingLeft: 26, paddingRight: 8,
+                borderRadius: 8, border: '1px solid var(--border)', fontSize: 12,
+                background: 'var(--surface)', color: 'var(--text)', outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+          <div style={{ maxHeight: 280, overflowY: 'auto', padding: 4 }}>
+            <PickerOption
+              label="All assignees"
+              icon="bi-people"
+              selected={value == null}
+              onSelect={() => select(null)}
+            />
+            <PickerOption
+              label="Unassigned"
+              icon="bi-person-dash"
+              selected={value === 'unassigned'}
+              onSelect={() => select('unassigned')}
+            />
+            {filtered.length > 0 && (
+              <div style={{ borderTop: '1px solid var(--border-light)', margin: '4px 0' }} />
+            )}
+            {filtered.length === 0 && lcSearch && (
+              <div style={{ padding: '10px 12px', fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
+                No matches
+              </div>
+            )}
+            {filtered.map(m => {
+              const email = String(m.email).toLowerCase();
+              return (
+                <PickerOption
+                  key={email}
+                  label={m.name}
+                  sub={email}
+                  selected={value === email}
+                  onSelect={() => select(email)}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PickerOption({ label, sub, icon, selected, onSelect }) {
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={selected}
+      onClick={onSelect}
+      onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-2)'; }}
+      onMouseLeave={e => { e.currentTarget.style.background = selected ? 'var(--surface-3)' : 'transparent'; }}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        width: '100%', textAlign: 'left',
+        padding: '7px 10px', borderRadius: 6,
+        border: 'none', background: selected ? 'var(--surface-3)' : 'transparent',
+        color: 'var(--text)', fontSize: 12, fontWeight: selected ? 700 : 500,
+        cursor: 'pointer', minHeight: 30,
+      }}
+    >
+      {icon && <i className={icon} style={{ fontSize: 12, color: 'var(--text-muted)', flexShrink: 0 }} />}
+      <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
+        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+        {sub && (
+          <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 400, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {sub}
+          </span>
+        )}
+      </span>
+      {selected && <i className="bi-check2" style={{ fontSize: 13, color: '#7c3aed', flexShrink: 0 }} />}
     </button>
   );
 }

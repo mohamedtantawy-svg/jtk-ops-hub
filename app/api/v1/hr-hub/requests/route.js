@@ -143,6 +143,14 @@ export async function GET(req) {
   const search = searchParams.get('search');
   const cursor = searchParams.get('cursor');
   const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '25', 10)));
+  // Josephine Tuoyo 2026-05-26 — assignee filter under "All Requests"
+  // (and Team / Mentioned). Value is either a lowercased email, the
+  // sentinel `unassigned` (matches NULL or empty assignee_email), or
+  // null/empty (no extra predicate). Composes with every other scope
+  // predicate so a manager can intersect "team requests" + "assigned
+  // to Mauro" without re-querying.
+  const assigneeRaw = searchParams.get('assignee');
+  const assigneeFilter = assigneeRaw ? String(assigneeRaw).trim().toLowerCase() : null;
 
   if (!ALLOWED_SCOPES.has(scope)) {
     return NextResponse.json({ error: `Invalid scope: ${scope}` }, { status: 400 });
@@ -189,6 +197,17 @@ export async function GET(req) {
     where.push(`(LOWER(summary) LIKE $${p} OR LOWER(COALESCE(title,'')) LIKE $${p})`);
     params.push(`%${String(search).toLowerCase()}%`);
     p++;
+  }
+  // Assignee filter — applied BEFORE the scope branches so it stacks with
+  // scope=team / scope=all / scope=mentioned (per the 2026-05-26 spec, the
+  // FE only surfaces this picker on those three scopes — mine + assigned
+  // already implicitly filter by assignee, so a second filter would be
+  // redundant). NULL or empty assignee_email is the "Unassigned" cohort.
+  if (assigneeFilter === 'unassigned') {
+    where.push(`(assignee_email IS NULL OR assignee_email = '')`);
+  } else if (assigneeFilter) {
+    where.push(`LOWER(assignee_email) = $${p++}`);
+    params.push(assigneeFilter);
   }
 
   if (effectiveScope === 'mine') {
