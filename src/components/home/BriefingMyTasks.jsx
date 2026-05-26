@@ -10,9 +10,9 @@
 // migration of personal_checklist_snapshots that runs server-side on
 // the first /api/v1/work-tasks GET per user.
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useWorkTasks } from '../../hooks/useWorkTasks';
-import { patchWorkTask } from '../../services/workTasksApi';
+import { patchWorkTask, recoverLegacyChecklist } from '../../services/workTasksApi';
 
 const PRIORITY_META = {
   urgent: { label: 'Urgent', color: '#d42d35', dot: '#d42d35', bg: '#FEE2E2' },
@@ -22,6 +22,161 @@ const PRIORITY_META = {
 };
 const PRIORITY_ORDER = ['urgent', 'high', 'normal', 'low'];
 const VISIBLE_LIMIT = 12;
+
+// ── Legacy-checklist recovery ──────────────────────────────────────────────
+// Celine Taruc 2026-05-26: "all of my to do's have been deleted under My
+// Tasks." Root cause: the Phase 2 migration sentinel
+// (`checklist_migrated_for:<email>`) is stamped after the first
+// /work-tasks GET regardless of how many items migrated. Users whose
+// localStorage items never reached `personal_checklist_snapshots` (a
+// fresh device, a debounced PUT that never fired, an offline gap)
+// hit the cutover with an empty snapshot, the migration migrated zero
+// rows, the sentinel stamped — and the legacy items in localStorage
+// became unreachable.
+//
+// Recovery path (per-user, self-serve): read the LS key
+// `ops_hub_checklist_v2:<email>` directly, surface a banner counting
+// the live items, and POST them to `/work-tasks/recover-legacy-checklist`
+// which merges them into the snapshot + clears the sentinel + re-runs
+// the migration. The recovery endpoint dedups on
+// (creator_email, source_id) so a user who already had some items
+// migrated doesn't get duplicates.
+const RECOVERY_DISMISSED_PREFIX = 'ops_hub_legacy_checklist_recovery_handled_v1:';
+
+function legacyChecklistKey(email) {
+  const lc = (email || '').toLowerCase().trim();
+  return lc ? `ops_hub_checklist_v2:${lc}` : null;
+}
+function recoveryFlagKey(email) {
+  const lc = (email || '').toLowerCase().trim();
+  return lc ? `${RECOVERY_DISMISSED_PREFIX}${lc}` : null;
+}
+
+function readLegacyLiveItems(email) {
+  const key = legacyChecklistKey(email);
+  if (!key) return [];
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    const items = Array.isArray(parsed) ? parsed
+      : (parsed && Array.isArray(parsed.items)) ? parsed.items
+      : [];
+    // Drop tombstones + items without titles — match the server-side
+    // sanitiser's "live" filter so the count we show matches what
+    // the recovery endpoint will accept.
+    return items.filter(it =>
+      it && typeof it === 'object'
+      && !it.deleted
+      && typeof it.title === 'string'
+      && it.title.trim()
+    );
+  } catch {
+    return [];
+  }
+}
+
+function isRecoveryHandled(email) {
+  const key = recoveryFlagKey(email);
+  if (!key) return true;
+  try { return localStorage.getItem(key) === '1'; } catch { return true; }
+}
+function markRecoveryHandled(email) {
+  const key = recoveryFlagKey(email);
+  if (!key) return;
+  try { localStorage.setItem(key, '1'); } catch {}
+}
+
+function LegacyChecklistRecoveryBanner({ userEmail, onRecovered }) {
+  const [items, setItems] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [hidden, setHidden] = useState(false);
+
+  useEffect(() => {
+    if (!userEmail) return;
+    if (isRecoveryHandled(userEmail)) return;
+    const live = readLegacyLiveItems(userEmail);
+    if (live.length > 0) setItems(live);
+  }, [userEmail]);
+
+  const handleRestore = useCallback(async () => {
+    if (!items.length || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await recoverLegacyChecklist(items);
+      markRecoveryHandled(userEmail);
+      setHidden(true);
+      onRecovered?.({
+        recovered: Number(res?.migrated) || 0,
+        skipped: Number(res?.skipped) || 0,
+      });
+    } catch (err) {
+      setError(err?.message || 'Could not restore — please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }, [items, busy, userEmail, onRecovered]);
+
+  const handleDismiss = useCallback(() => {
+    markRecoveryHandled(userEmail);
+    setHidden(true);
+  }, [userEmail]);
+
+  if (hidden || items.length === 0) return null;
+
+  return (
+    <div
+      role="status"
+      style={{
+        display: 'flex', alignItems: 'flex-start', gap: 10,
+        padding: '10px 14px',
+        background: '#fff8e6', borderBottom: '1px solid #fde68a',
+        fontSize: 12, color: '#92400e',
+      }}
+    >
+      <i className="bi bi-info-circle-fill" style={{ fontSize: 14, marginTop: 1, flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 700, marginBottom: 2 }}>
+          We found {items.length} {items.length === 1 ? 'item' : 'items'} from your old to-do list
+        </div>
+        <div style={{ color: '#78350f' }}>
+          A recent update migrated your tasks into the new Tasks system. Some items may not have transferred — click Restore to bring them back. Duplicates are skipped automatically.
+        </div>
+        {error && (
+          <div style={{ marginTop: 4, color: '#991b1b' }}>{error}</div>
+        )}
+      </div>
+      <div style={{ display: 'inline-flex', gap: 6, flexShrink: 0 }}>
+        <button
+          type="button"
+          onClick={handleRestore}
+          disabled={busy}
+          style={{
+            padding: '6px 12px', borderRadius: 8,
+            border: '1px solid #b7791f', background: busy ? '#fcd34d' : '#f59e0b',
+            color: '#fff', fontSize: 12, fontWeight: 700,
+            cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit',
+          }}
+        >
+          {busy ? 'Restoring…' : 'Restore'}
+        </button>
+        <button
+          type="button"
+          onClick={handleDismiss}
+          disabled={busy}
+          style={{
+            padding: '6px 10px', borderRadius: 8,
+            border: '1px solid #e5d6a8', background: 'transparent',
+            color: '#92400e', fontSize: 12, fontWeight: 600,
+            cursor: busy ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
+          }}
+        >Dismiss</button>
+      </div>
+    </div>
+  );
+}
 
 function formatDue(iso) {
   if (!iso) return null;
@@ -148,6 +303,11 @@ export default function BriefingMyTasks({ user, onOpenTasks, onOpenTask }) {
           onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
         >View all <i className="bi bi-arrow-up-right" /></button>
       </header>
+
+      <LegacyChecklistRecoveryBanner
+        userEmail={user?.email}
+        onRecovered={() => { reload(); }}
+      />
 
       <div style={{ padding: '10px 12px', borderBottom: '1px solid var(--border-light)' }}>
         <div style={{
