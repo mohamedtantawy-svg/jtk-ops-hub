@@ -7,13 +7,16 @@ import { apiFetch } from './api';
 
 // ── Requests ───────────────────────────────────────────────────────────────
 
-export async function listHrHubRequests({ flow, scope = 'mine', status, functionArea, search, cursor, limit } = {}) {
+export async function listHrHubRequests({ flow, scope = 'mine', status, functionArea, search, assignee, cursor, limit } = {}) {
   const p = new URLSearchParams();
   if (flow) p.set('flow', flow);
   if (scope) p.set('scope', scope);
   if (status) p.set('status', status);
   if (functionArea) p.set('function', functionArea);
   if (search) p.set('search', search);
+  // 'unassigned' = NULL/empty assignee_email; an email = exact match.
+  // null/undefined = picker cleared → no extra predicate.
+  if (assignee) p.set('assignee', assignee);
   if (cursor) p.set('cursor', cursor);
   if (limit) p.set('limit', String(limit));
   const qs = p.toString();
@@ -31,11 +34,12 @@ export async function getHrHubRequest(id) {
 // two `listHrHubRequests({ limit: 100 })` calls HrHubView used to count
 // from — those counted a TRUNCATED list (the list route caps at 100), so
 // once a workspace crossed ~100 rows the totals stopped matching reality.
-export async function getHrHubRequestCounts({ flow, scope = 'mine', search } = {}) {
+export async function getHrHubRequestCounts({ flow, scope = 'mine', search, assignee } = {}) {
   const p = new URLSearchParams();
   if (flow) p.set('flow', flow);
   if (scope) p.set('scope', scope);
   if (search) p.set('search', search);
+  if (assignee) p.set('assignee', assignee);
   const qs = p.toString();
   return apiFetch(`/hr-hub/requests/counts${qs ? `?${qs}` : ''}`);
 }
