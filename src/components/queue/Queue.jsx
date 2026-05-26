@@ -705,7 +705,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
   ], [onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchActiveRows, incentivePlanRows]);
 
   // ── Memoized filter chain — only recomputes when inputs change ──
-  const { baseVis, visPreSla, active, snoozed, done, all } = useMemo(() => {
+  const { baseVis, visPreSla, active, eorSigning, snoozed, done, all } = useMemo(() => {
     let _vis = scopeTicketsByAssignee(ns, user).filter(passesJiraRoleFilter);
     const _baseVis = _vis.filter(t => !t.isCalendarBooking);
     if (fTool)          _vis = _vis.filter(t => t.source === fTool);
@@ -785,7 +785,28 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
         return compareTierThenAge(a, b);
       });
     };
-    const _sorted = sortArr(_vis.filter(t => t.status !== 'resolved' && t.status !== 'waiting'));
+    // Carolina Ferreira 2026-05-26 — Jira tickets in an "EOR signing"
+    // workflow state currently render in the main Active section because
+    // JIRA_STATUS_MAP['eor signing'] = 'in_progress'. That hides the
+    // tickets actually needing action behind 30-50 pending-signature rows
+    // that no agent can do anything about. Pull them into their own
+    // bucket (rendered below Active, above PAUSED + RESOLVED) so the
+    // section behaves like RESOLVED TODAY — visible if you scroll, but
+    // out of the way of the actionable queue.
+    //
+    // Match the Jira workflow status name (the raw human-readable label
+    // before it normalises to in_progress). Liberal regex so "EOR
+    // Signing", "Pending EOR Signature", "Awaiting EOR Signing", etc all
+    // route here. Zendesk has no equivalent state, so the source check
+    // also guards against accidental ZD matches.
+    const _isPendingEorSigning = (t) => (
+      t.source === 'jira'
+      && typeof t.jiraStatus === 'string'
+      && /eor.?sign(ing|ature)?/i.test(t.jiraStatus)
+    );
+    const _activePool = _vis.filter(t => t.status !== 'resolved' && t.status !== 'waiting');
+    const _eorSigning = sortArr(_activePool.filter(_isPendingEorSigning));
+    const _sorted = sortArr(_activePool.filter(t => !_isPendingEorSigning(t)));
     // 2026-05-22 — Pablo Gonzalez "you are showing the paused cases first,
     // you need to follow the same sorting as HR department". On HRX the
     // visible top of the queue is active rows (already SLA-tiered), so
@@ -797,8 +818,8 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
     // preserved inside the PAUSED section too.
     const _snoozed = sortArr(_vis.filter(t => t.status === 'waiting'));
     const _done = _vis.filter(t => t.status === 'resolved');
-    const _all = [..._sorted, ..._snoozed, ..._done];
-    return { baseVis: _baseVis, visPreSla: _visPreSla, active: _sorted, snoozed: _snoozed, done: _done, all: _all };
+    const _all = [..._sorted, ..._eorSigning, ..._snoozed, ..._done];
+    return { baseVis: _baseVis, visPreSla: _visPreSla, active: _sorted, eorSigning: _eorSigning, snoozed: _snoozed, done: _done, all: _all };
   }, [ns, user, fTool, fStatus, fUnassigned, fCountry, fSla, search, settings.sla_enabled, passesJiraRoleFilter, sortCol, sortDir]);
 
   const jiraRoleFilterActive = fJiraActionable !== true || fJiraRaised !== false;
@@ -1010,11 +1031,16 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
       + tblImmigrationTaskRows.length
     );
     return {
-      open: active.length + sourceOpen,
+      // EOR-signing tickets are visually separated below but they're
+      // still "open" (status=in_progress, not resolved/waiting) so they
+      // continue to count toward the header's open total — otherwise
+      // `hiddenByFilters` (rawCounts.open - headerCounts.open) would
+      // double-count them as filtered-out.
+      open: active.length + eorSigning.length + sourceOpen,
       paused: snoozed.length,
       resolved: done.length,
     };
-  }, [workSource, fTool, active, snoozed, done, tblOnboardingRows, tblOffboardingRows, tblAmendmentRows, tblRedlineRows, tblWorkbenchRows, tblIncentivePlanRows, tblImmigrationTaskRows, scopedHiddenItems]);
+  }, [workSource, fTool, active, eorSigning, snoozed, done, tblOnboardingRows, tblOffboardingRows, tblAmendmentRows, tblRedlineRows, tblWorkbenchRows, tblIncentivePlanRows, tblImmigrationTaskRows, scopedHiddenItems]);
 
   const rawCounts = useMemo(() => {
     if (workSource === 'onboarding')      return { open: onboardingRows.length };
@@ -1052,6 +1078,15 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
   // nodes to ~270 — repaint becomes O(viewport), not O(rows).
   const ticketVirtualItems = useMemo(() => {
     const out = active.map(t => ({ kind: 'row', row: t }));
+    // Carolina Ferreira 2026-05-26 — Jira "EOR signing" tickets land
+    // here. Mirrors RESOLVED TODAY / PAUSED visual treatment: own header
+    // band, own count, scrollable below the actionable queue but above
+    // the further-removed paused/resolved sections. Blue-ish purple
+    // accent so it reads distinct from amber-paused and green-resolved.
+    if (eorSigning.length > 0) {
+      out.push({ kind: 'header', label: 'PENDING EOR SIGNING', color: '#5b21b6', bg: '#f5f3ff', icon: 'bi-pen', count: eorSigning.length });
+      for (const t of eorSigning) out.push({ kind: 'row', row: t });
+    }
     if (snoozed.length > 0) {
       out.push({ kind: 'header', label: 'PAUSED', color: '#6b6560', bg: '#faf9f7', icon: 'bi-pause-circle-fill', count: snoozed.length });
       for (const t of snoozed) out.push({ kind: 'row', row: t });
@@ -1065,7 +1100,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
       for (const t of done) out.push({ kind: 'row', row: t });
     }
     return out;
-  }, [active, snoozed, done, hideResolved]);
+  }, [active, eorSigning, snoozed, done, hideResolved]);
   // Base ticket columns + Actions + Note (always rendered, since Queue
   // owns the notes hook unconditionally).
   const ticketColSpan = (settings.sla_enabled !== false ? 9 : 8) + 2;
