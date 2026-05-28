@@ -7,9 +7,13 @@ import { apiFetch } from './api';
 
 // ── Requests ───────────────────────────────────────────────────────────────
 
-export async function listHrHubRequests({ flow, scope = 'mine', status, functionArea, search, assignee, cursor, limit } = {}) {
+export async function listHrHubRequests({ flow, flows, scope = 'mine', status, functionArea, search, assignee, cursor, limit } = {}) {
   const p = new URLSearchParams();
-  if (flow) p.set('flow', flow);
+  // Megan Lawrence 2026-05-28 — `flows: ['hide_task_request', 'sla_extension_request']`
+  // powers the Approvals chip (combined Hide Task + SLA Extension view).
+  // Server accepts `flows=a,b`. Falls back to single `flow=` for back-compat.
+  if (Array.isArray(flows) && flows.length > 0) p.set('flows', flows.join(','));
+  else if (flow) p.set('flow', flow);
   if (scope) p.set('scope', scope);
   if (status) p.set('status', status);
   if (functionArea) p.set('function', functionArea);
@@ -34,9 +38,10 @@ export async function getHrHubRequest(id) {
 // two `listHrHubRequests({ limit: 100 })` calls HrHubView used to count
 // from — those counted a TRUNCATED list (the list route caps at 100), so
 // once a workspace crossed ~100 rows the totals stopped matching reality.
-export async function getHrHubRequestCounts({ flow, scope = 'mine', search, assignee } = {}) {
+export async function getHrHubRequestCounts({ flow, flows, scope = 'mine', search, assignee } = {}) {
   const p = new URLSearchParams();
-  if (flow) p.set('flow', flow);
+  if (Array.isArray(flows) && flows.length > 0) p.set('flows', flows.join(','));
+  else if (flow) p.set('flow', flow);
   if (scope) p.set('scope', scope);
   if (search) p.set('search', search);
   if (assignee) p.set('assignee', assignee);

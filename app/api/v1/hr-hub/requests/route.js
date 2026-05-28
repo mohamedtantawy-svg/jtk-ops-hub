@@ -137,6 +137,14 @@ export async function GET(req) {
 
   const { searchParams } = new URL(req.url);
   const flow = searchParams.get('flow');
+  // Megan Lawrence 2026-05-28 — accept `flows=a,b` for the Approvals chip
+  // (Hide Task + SLA Extension shortcut). Mirrors the counts route which
+  // has supported this since the Briefing tile combined-count work. Single
+  // `flow=` stays back-compat; both can't be set at the same time.
+  const flowsParam = searchParams.get('flows');
+  const flowList = flowsParam
+    ? flowsParam.split(',').map((s) => s.trim()).filter(Boolean)
+    : (flow ? [flow] : []);
   const scope = searchParams.get('scope') || 'mine';
   const status = searchParams.get('status');
   const functionArea = searchParams.get('function');
@@ -155,8 +163,10 @@ export async function GET(req) {
   if (!ALLOWED_SCOPES.has(scope)) {
     return NextResponse.json({ error: `Invalid scope: ${scope}` }, { status: 400 });
   }
-  if (flow && !ALLOWED_FLOWS.has(flow)) {
-    return NextResponse.json({ error: `Invalid flow: ${flow}` }, { status: 400 });
+  for (const f of flowList) {
+    if (!ALLOWED_FLOWS.has(f)) {
+      return NextResponse.json({ error: `Invalid flow: ${f}` }, { status: 400 });
+    }
   }
   if (status && !ALLOWED_STATUSES.has(status)) {
     return NextResponse.json({ error: `Invalid status: ${status}` }, { status: 400 });
@@ -190,7 +200,13 @@ export async function GET(req) {
     where.push(`FALSE`);
   }
 
-  if (flow) { where.push(`flow = $${p++}`); params.push(flow); }
+  if (flowList.length === 1) {
+    where.push(`flow = $${p++}`);
+    params.push(flowList[0]);
+  } else if (flowList.length > 1) {
+    where.push(`flow = ANY($${p++}::text[])`);
+    params.push(flowList);
+  }
   if (status) { where.push(`status = $${p++}`); params.push(status); }
   if (functionArea) { where.push(`function_area = $${p++}`); params.push(functionArea); }
   if (search) {

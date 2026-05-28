@@ -74,11 +74,21 @@ const FLOW_VISUALS = {
 };
 const FLOW_FILTERS = [
   { value: 'all',                    label: 'All flows',   icon: 'bi-grid-fill',         color: 'var(--text)' },
+  // Megan Lawrence 2026-05-28 — "Approvals" shortcut: combined view of the
+  // two approval flows (Hide Task + SLA Extension) so MOC backup can land
+  // straight on the escalation queue without toggling between two chips.
+  // Pinned right after "All flows" because it's the highest-value preset
+  // for managers; the per-flow chips that follow let you still narrow to
+  // a single flow when needed.
+  { value: 'approvals',              label: 'Approvals',   icon: 'bi-shield-check',       color: '#7c3aed', bg: '#f3eff8' },
   { value: 'hr_request',             label: 'Requests',    icon: 'bi-send-fill',          color: '#1f74b3' },
   { value: 'hr_reporting',           label: 'Reporting',   icon: 'bi-megaphone-fill',     color: '#dc2626' },
   { value: 'hide_task_request',      label: 'Hide Task',   icon: 'bi-eye-slash-fill',     color: '#d42d35' },
   { value: 'sla_extension_request',  label: 'SLA Extension', icon: 'bi-clock-history',   color: '#d97706' },
 ];
+// The two flows the "Approvals" chip unions over. Kept top-level so the
+// EmptyState helper and any future consumer reads from the same source.
+const APPROVAL_FLOWS = ['hide_task_request', 'sla_extension_request'];
 
 const PRIORITY_DOT = {
   low:      '#9b928a',
@@ -250,7 +260,14 @@ export default function HrHubView({ user, onCreateHrHub }) {
   const [lastSyncAt, setLastSyncAt] = useState(null);
 
   const reqSeqRef = useRef(0);
-  const flowQuery = flowFilter === 'all' ? null : flowFilter;
+  // Translate the chip's single-string state into the API's flow / flows
+  // shape. `approvals` unions the two approval flows server-side; every
+  // other value either narrows to a single flow or sends nothing (= all).
+  const flowApiArgs = useMemo(() => {
+    if (flowFilter === 'approvals') return { flows: APPROVAL_FLOWS };
+    if (flowFilter === 'all') return { flow: null };
+    return { flow: flowFilter };
+  }, [flowFilter]);
 
   const loadFirstPage = useCallback(async () => {
     const seq = ++reqSeqRef.current;
@@ -261,7 +278,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
     // tail-end (skill §6.6). One immediate retry gives the upstream pod
     // ~600ms to recover before we surface the error and clear cached items.
     const tryFetch = async () => listHrHubRequests({
-      flow: flowQuery,
+      ...flowApiArgs,
       scope,
       status: statusFilter || undefined,
       search: debouncedSearch || undefined,
@@ -299,7 +316,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
     } finally {
       if (seq === reqSeqRef.current) setLoading(false);
     }
-  }, [flowQuery, scope, statusFilter, debouncedSearch, assigneeFilter]);
+  }, [flowApiArgs, scope, statusFilter, debouncedSearch, assigneeFilter]);
 
   useEffect(() => { loadFirstPage(); }, [loadFirstPage]);
 
@@ -308,7 +325,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
     setLoadingMore(true);
     try {
       const res = await listHrHubRequests({
-        flow: flowQuery,
+        ...flowApiArgs,
         scope,
         status: statusFilter || undefined,
         search: debouncedSearch || undefined,
@@ -326,7 +343,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
     } finally {
       setLoadingMore(false);
     }
-  }, [cursor, flowQuery, scope, statusFilter, debouncedSearch, assigneeFilter, loadingMore]);
+  }, [cursor, flowApiArgs, scope, statusFilter, debouncedSearch, assigneeFilter, loadingMore]);
 
   // ── Counts for status cards + scope toggle ─────────────────────────────
   // Single round-trip to /hr-hub/requests/counts. The server runs real
@@ -347,7 +364,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
     (async () => {
       try {
         const r = await getHrHubRequestCounts({
-          flow: flowQuery,
+          ...flowApiArgs,
           scope,
           search: debouncedSearch || undefined,
           assignee: assigneeFilter || undefined,
@@ -358,7 +375,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
       } catch { /* swallow */ }
     })();
     return () => { cancelled = true; };
-  }, [flowQuery, scope, debouncedSearch, assigneeFilter]);
+  }, [flowApiArgs, scope, debouncedSearch, assigneeFilter]);
 
   // Local sort — server returns newest-first by default; we re-sort client-side
   // for the small page (25 rows) so toggling sort doesn't refetch.
@@ -629,7 +646,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
                 onClick={() => setFlowFilter(f.value)}
                 style={{
                   ...filterPill,
-                  ...(active ? { ...filterPillActive, background: f.value === 'all' ? 'var(--surface-3)' : (FLOW_VISUALS[f.value]?.bg || 'var(--surface-3)'), color: f.color, borderColor: f.color } : null),
+                  ...(active ? { ...filterPillActive, background: f.value === 'all' ? 'var(--surface-3)' : (f.bg || FLOW_VISUALS[f.value]?.bg || 'var(--surface-3)'), color: f.color, borderColor: f.color } : null),
                 }}
                 aria-pressed={active}
                 title={f.label}
@@ -1296,6 +1313,11 @@ function EmptyState({ scope, flowFilter, statusFilter }) {
     body = 'When someone tags you with @your.name in a comment, the request will appear here.';
     icon = 'bi-at';
     accent = '#7c3aed';
+  } else if (flowFilter === 'approvals') {
+    title = 'No approvals waiting';
+    body = 'When a Hide Task or SLA Extension is submitted, it lands here for review.';
+    icon = 'bi-shield-check';
+    accent = '#7c3aed';
   } else if (statusFilter === 'new' && scope === 'mine' && flowFilter === 'all') {
     title = "You're all caught up!";
     body = 'No new requests on your plate. Click "All" above to browse the rest.';
@@ -1303,7 +1325,7 @@ function EmptyState({ scope, flowFilter, statusFilter }) {
     accent = '#7c3aed';
   } else if (statusFilter === 'new' && scope === 'mine') {
     title = "You're all caught up!";
-    body = `No new ${flowVisuals[flowFilter]?.label || 'requests'} on your plate. Try widening the flow filter.`;
+    body = `No new ${FLOW_VISUALS[flowFilter]?.label || 'requests'} on your plate. Try widening the flow filter.`;
     icon = 'bi-emoji-smile';
     accent = '#7c3aed';
   } else if (statusFilter) {
@@ -1314,7 +1336,7 @@ function EmptyState({ scope, flowFilter, statusFilter }) {
     title = 'Nothing on your plate yet';
     body = 'Hit New request in the header to submit one.';
   } else if (flowFilter !== 'all') {
-    title = `No ${flowVisuals[flowFilter]?.label || flowFilter} yet`;
+    title = `No ${FLOW_VISUALS[flowFilter]?.label || flowFilter} yet`;
     body = 'Switch the flow filter or hit New request to add one.';
   }
   return (
