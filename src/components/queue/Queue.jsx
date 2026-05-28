@@ -226,6 +226,14 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
   const [fStatus, setFStatus] = useState([]);
   const [search, setSearch] = useState('');
   const [fSla, setFSla] = useState(null);
+  // 2026-05-28 (Pablo Gonzalez ask) — filter Zendesk tickets by which SLA
+  // metric they're ticking against. Values mirror the row.slaMetric set
+  // populated upstream: 'frt' (first reply time), 'nrt' (next reply time),
+  // 'rwt' (requester waiting time — pending customer reply), 'put'
+  // (periodic update time — pending agent update), or null = no filter.
+  // Jira + Deel sources don't carry slaMetric so they pass through when
+  // this filter is active.
+  const [fSlaMetric, setFSlaMetric] = useState(null);
   const [fJiraActionable, setFJiraActionable] = useState(true);
   const [fJiraRaised, setFJiraRaised] = useState(false);
   const [fUnassigned, setFUnassigned] = useState(false);
@@ -243,6 +251,10 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
     if (Array.isArray(saved.fStatus)) setFStatus(saved.fStatus);
     else if (saved.fStatus) setFStatus([saved.fStatus]);
     if (saved.fSla) setFSla(saved.fSla);
+    if (typeof saved.fSlaMetric === 'string'
+      && ['frt', 'nrt', 'rwt', 'put'].includes(saved.fSlaMetric)) {
+      setFSlaMetric(saved.fSlaMetric);
+    }
     if (typeof saved.fJiraActionable === 'boolean') setFJiraActionable(saved.fJiraActionable);
     if (typeof saved.fJiraRaised === 'boolean') setFJiraRaised(saved.fJiraRaised);
     if (saved.fUnassigned) setFUnassigned(true);
@@ -269,9 +281,12 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
       setFSla(sla);
       // Clear other filters so the user actually sees what they asked for.
       // Keep the source-tab choice (workSource) untouched — if they asked
-      // from inside a source view we honour the context.
+      // from inside a source view we honour the context. fSlaMetric also
+      // clears so a deep-link "show breaches" doesn't compose with a
+      // stale FRT/NRT narrowing the user forgot about.
       setFTool(null);
       setFStatus([]);
+      setFSlaMetric(null);
       setFUnassigned(false);
       setFCountry([]);
       setSearch('');
@@ -712,6 +727,13 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
     if (fStatus.length) _vis = _vis.filter(t => fStatus.includes(t.status));
     if (fUnassigned)    _vis = _vis.filter(t => !t.assigneeId && !t.assigneeEmail);
     if (fCountry.length) _vis = _vis.filter(t => fCountry.includes(canonicalCC(t.country)));
+    // 2026-05-28 (Pablo Gonzalez) — Zendesk SLA-metric filter. Applied to
+    // Zendesk rows only (Jira + Deel pass through untouched because they
+    // don't carry slaMetric). Combines naturally with fSla='breached' so
+    // selecting FRT + Breached yields "all FRT breaches" as asked.
+    if (fSlaMetric) {
+      _vis = _vis.filter(t => t.source !== 'zendesk' || t.slaMetric === fSlaMetric);
+    }
     const _visPreSla = _vis.filter(t => !t.isCalendarBooking);
     if (fSla === 'ok')       _vis = _vis.filter(t => { const s = slaInfo(t); return s && s.ok; });
     if (fSla === 'at_risk')  _vis = _vis.filter(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; });
@@ -820,10 +842,10 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
     const _done = _vis.filter(t => t.status === 'resolved');
     const _all = [..._sorted, ..._eorSigning, ..._snoozed, ..._done];
     return { baseVis: _baseVis, visPreSla: _visPreSla, active: _sorted, eorSigning: _eorSigning, snoozed: _snoozed, done: _done, all: _all };
-  }, [ns, user, fTool, fStatus, fUnassigned, fCountry, fSla, search, settings.sla_enabled, passesJiraRoleFilter, sortCol, sortDir]);
+  }, [ns, user, fTool, fStatus, fUnassigned, fCountry, fSla, fSlaMetric, search, settings.sla_enabled, passesJiraRoleFilter, sortCol, sortDir]);
 
   const jiraRoleFilterActive = fJiraActionable !== true || fJiraRaised !== false;
-  const hasActiveFilters = useMemo(() => !!(fTool || fStatus.length > 0 || fSla || fUnassigned || fCountry.length > 0 || search || jiraRoleFilterActive), [fTool, fStatus, fSla, fUnassigned, fCountry, search, jiraRoleFilterActive]);
+  const hasActiveFilters = useMemo(() => !!(fTool || fStatus.length > 0 || fSla || fSlaMetric || fUnassigned || fCountry.length > 0 || search || jiraRoleFilterActive), [fTool, fStatus, fSla, fSlaMetric, fUnassigned, fCountry, search, jiraRoleFilterActive]);
   // Same predicate minus `fSla`. Drives the SLA-pill count branch below so
   // that clicking the On Track / At Risk / Breached pill doesn't itself
   // switch the pill count from the cross-source aggregate (ZD + every Deel
@@ -1103,10 +1125,10 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
     try {
       localStorage.setItem(
         queueFiltersKey(user?.email),
-        JSON.stringify({ fTool, fStatus, fSla, fUnassigned, fCountry, fJiraActionable, fJiraRaised }),
+        JSON.stringify({ fTool, fStatus, fSla, fSlaMetric, fUnassigned, fCountry, fJiraActionable, fJiraRaised }),
       );
     } catch {}
-  }, [user?.email, fTool, fStatus, fSla, fUnassigned, fCountry, fJiraActionable, fJiraRaised]);
+  }, [user?.email, fTool, fStatus, fSla, fSlaMetric, fUnassigned, fCountry, fJiraActionable, fJiraRaised]);
 
   // Flatten Active → SNOOZED header → snoozed → DONE header → done into
   // one virtual list. Each item carries `kind: 'row' | 'header'`; both
@@ -1264,6 +1286,65 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
             </button>
           )}
 
+          {/* 2026-05-28 (Pablo Gonzalez ask) — Zendesk SLA-metric chips.
+              Lets the user narrow to "FRT" or "NRT" so combining with
+              the Breached pill yields "all FRT breaches" or "all NRT
+              breaches" in one click. Visible only when Zendesk is in
+              scope (Workspace home or the Zendesk source tab — hiding
+              on Jira / Deel source tabs avoids confusion since those
+              rows don't carry slaMetric). */}
+          {!workSource && fTool !== 'jira' && (() => {
+            const METRIC_CHIPS = [
+              { id: 'frt', label: 'FRT',  hint: 'First Reply Time — minutes until an agent has posted the first public reply on the ticket.' },
+              { id: 'nrt', label: 'NRT',  hint: 'Next Reply Time — minutes until the next agent reply on a ticket that already had at least one.' },
+              { id: 'rwt', label: 'RWT',  hint: 'Requester Wait Time — clock running while the ticket sits in a customer-pending state.' },
+              { id: 'put', label: 'PUT',  hint: 'Periodic Update Time — clock running while agents owe the customer a recurring update.' },
+            ];
+            return (
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                  ZD metric
+                </span>
+                {METRIC_CHIPS.map(opt => {
+                  const isActive = fSlaMetric === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setFSlaMetric(isActive ? null : opt.id)}
+                      title={opt.hint}
+                      style={{
+                        height: 28, padding: '0 10px', borderRadius: 128,
+                        border: '1px solid ' + (isActive ? '#0369a1' : 'var(--border)'),
+                        background: isActive ? '#e0f2fe' : 'var(--surface)',
+                        color: isActive ? '#0369a1' : 'var(--text-secondary)',
+                        fontSize: 11, fontWeight: 700, fontFamily: 'inherit',
+                        cursor: 'pointer', whiteSpace: 'nowrap',
+                      }}
+                    >{opt.label}</button>
+                  );
+                })}
+                {fSlaMetric && (
+                  <button
+                    type="button"
+                    onClick={() => setFSlaMetric(null)}
+                    title="Clear the Zendesk SLA-metric filter"
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 4,
+                      background: 'transparent', border: '1px solid var(--border)',
+                      borderRadius: 128, padding: '4px 10px', fontSize: 11,
+                      color: 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'inherit',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <i className="bi-x-lg" style={{ fontSize: 9 }} />
+                    Clear metric
+                  </button>
+                )}
+              </div>
+            );
+          })()}
+
           {(isAdmin || isLead) && (() => {
             const sourceLabels = { onboarding: 'Onboarding', offboarding: 'Offboarding', amendments: 'Amendments', redlines: 'Redlines', workbench: 'Workbench', incentive_plans: 'Incentive Plans', immigration_tasks: 'Immigration Tasks', hidden: 'Hidden' };
             const toolLabels = { zendesk: 'Zendesk', jira: 'Jira' };
@@ -1415,7 +1496,21 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
                   : ws.id === 'offboarding' ? visOffboardingRows.length
                   : ws.id === 'amendments' ? visAmendmentRows.length
                   : ws.id === 'redlines' ? visRedlineRows.length
-                  : ws.id === 'workbench' ? visWorkbenchRows.filter(r => !r.isResolved).length
+                  // 2026-05-28 (Raquel feedback) — Workbench badge counts
+                  // Mine only (active + paused assigned to the viewer), not
+                  // the country-fallback Others bucket. Other sources keep
+                  // the visible-rows count because their Others IS legitimate
+                  // country pipeline (Onb/Off/Amend/Redline owners triage
+                  // their country queues as part of normal work). Workbench
+                  // Others is unassigned-orphan fallback only; counting it
+                  // here misrepresents the viewer's actual personal load.
+                  : ws.id === 'workbench' ? (() => {
+                      const lc = (user?.email || '').toLowerCase();
+                      if (!lc) return visWorkbenchRows.filter(r => !r.isResolved).length;
+                      return visWorkbenchRows.filter(r =>
+                        !r.isResolved && (r.assigneeEmail || '').toLowerCase() === lc,
+                      ).length;
+                    })()
                   : ws.id === 'incentive_plans' ? visIncentivePlanRows.length
                   : ws.id === 'immigration_tasks' ? visImmigrationTaskRows.filter(r => !r.isResolved).length
                   : ws.id === 'jira' ? jiraCount
@@ -1516,7 +1611,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
               {hasActiveFilters && hiddenByFilters > 0 && (
                 <button
                   type="button"
-                  onClick={() => { setFTool(null); setFStatus([]); setFSla(null); setFUnassigned(false); setFCountry([]); setSearch(''); setFJiraActionable(true); setFJiraRaised(false); }}
+                  onClick={() => { setFTool(null); setFStatus([]); setFSla(null); setFSlaMetric(null); setFUnassigned(false); setFCountry([]); setSearch(''); setFJiraActionable(true); setFJiraRaised(false); }}
                   title={`Your active filters are hiding ${hiddenByFilters} ${hiddenByFilters === 1 ? 'task' : 'tasks'}. Click to clear all filters.`}
                   style={{ height: 32, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '0 10px', borderRadius: 8, background: '#fff7ed', border: '1px solid #fed7aa', color: '#b45309', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap', cursor: 'pointer', fontFamily: 'inherit' }}
                   onMouseEnter={e => { e.currentTarget.style.background = '#ffedd5'; }}
@@ -1528,7 +1623,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
               )}
 
               {hasActiveFilters && (
-                <button onClick={() => { setFTool(null); setFStatus([]); setFSla(null); setFUnassigned(false); setFCountry([]); setSearch(''); setFJiraActionable(true); setFJiraRaised(false); }} style={{ height: 32, display: 'inline-flex', alignItems: 'center', gap: 4, padding: '0 10px', borderRadius: 8, border: 'none', background: 'transparent', color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap', textDecoration: 'underline' }}>
+                <button onClick={() => { setFTool(null); setFStatus([]); setFSla(null); setFSlaMetric(null); setFUnassigned(false); setFCountry([]); setSearch(''); setFJiraActionable(true); setFJiraRaised(false); }} style={{ height: 32, display: 'inline-flex', alignItems: 'center', gap: 4, padding: '0 10px', borderRadius: 8, border: 'none', background: 'transparent', color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap', textDecoration: 'underline' }}>
                   Clear all
                 </button>
               )}
@@ -1663,6 +1758,9 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
             hideStatusPills
             dateField="createdAt"
             dateLabel="Created"
+            sourceKey="workbench"
+            othersCollapsible
+            othersDefaultCollapsed
             onHide={(row) => setHideModalTask({ source: 'workbench', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onSlaExtension={(row) => setSlaExtensionModalTask({ source: 'workbench', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'workbench', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
@@ -1937,7 +2035,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
                               </div>
                               <button
                                 type="button"
-                                onClick={() => { setFTool(null); setFStatus([]); setFSla(null); setFUnassigned(false); setFCountry([]); setSearch(''); setFJiraActionable(true); setFJiraRaised(false); }}
+                                onClick={() => { setFTool(null); setFStatus([]); setFSla(null); setFSlaMetric(null); setFUnassigned(false); setFCountry([]); setSearch(''); setFJiraActionable(true); setFJiraRaised(false); }}
                                 style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 8, border: '1px solid #1f74b3', background: '#1f74b3', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
                               >
                                 <i className="bi-x-circle" style={{ fontSize: 12 }}></i>

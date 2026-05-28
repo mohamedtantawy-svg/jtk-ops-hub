@@ -26,7 +26,7 @@ import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { query } from '../../../../../../src/lib/db';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
 import { getVisibleEmailsForAccess } from '../../../../../../src/data/members';
-import { getCurrentDeptId } from '../../../../../../src/lib/dept-scope';
+import { getEffectiveDeptIdsForUser } from '../../../../../../src/lib/dept-scope';
 import { memberByEmail } from '../../../../../../src/lib/hr-hub-helpers';
 
 const ALLOWED_FLOWS = new Set(['hr_request', 'hr_reporting', 'escalation_zero', 'feedback', 'hide_task_request', 'sla_extension_request']);
@@ -73,16 +73,18 @@ export async function GET(req) {
 
   // Same dept-isolation gate as the list endpoint — missing dept fails
   // closed (zero counts) instead of leaking another dept's rows.
-  const currentDeptId = await getCurrentDeptId(user, req);
+  // 2026-05-28: widened to effective dept ids so the chip counts include
+  // the covered TL's queue when the caller has an active OOO coverage.
+  const effectiveDeptIds = await getEffectiveDeptIdsForUser(user, req);
 
   // Shared base filters: dept + flow + search. Applied to BOTH queries
   // verbatim so the two responses share the same row universe.
   const baseFilters = [];
   const baseParams = [];
   let p = 1;
-  if (currentDeptId) {
-    baseFilters.push(`org_node_id = $${p++}`);
-    baseParams.push(currentDeptId);
+  if (effectiveDeptIds.length > 0) {
+    baseFilters.push(`org_node_id = ANY($${p++}::uuid[])`);
+    baseParams.push(effectiveDeptIds);
   } else {
     baseFilters.push(`FALSE`);
   }

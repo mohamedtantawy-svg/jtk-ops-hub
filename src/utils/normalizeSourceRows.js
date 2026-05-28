@@ -886,17 +886,39 @@ export function normalizeImmigrationTasks(items = []) {
       typeLabel: prettifyImmigrationTaskName(t),
       function: prettifyImmigrationTaskName(t),
       country: caseData.country || '',
-      // 2026-05-22 — assignee fallback chain. The upstream sometimes
-      // populates `t.assignee` and sometimes only `caseData.activeAgent`
-      // (string name) + `caseData.activeAgentId` (profile id). Without
-      // the fallback the column read "Unassigned" for rows where the
-      // case had an active agent but the task wasn't directly
-      // assignee-stamped. assigneeEmail can't be derived from the case
-      // activeAgent (no email is exposed there) so it stays empty in
-      // that branch — TL/RM scope falls through to country-fallback
-      // visibility per _scopeByAssignedOrUnassigned.
-      assignee: t?.assignee?.name || caseData.activeAgent || '',
-      assigneeEmail: (t?.assignee?.email || '').toLowerCase(),
+      // 2026-05-28 (Pablo Gonzalez bug): on /admin/mobility/actions the
+      // task-level `t.assignee` is the VISA APPLICANT — the person who
+      // has to take the action (upload a doc, sign a form, etc.). That's
+      // the same human surfaced by the `clientName` column, so writing
+      // it into the Assignee column was double-rendering the client.
+      //
+      // The actual HRX team member coordinating the case is on
+      // `caseData.activeAgent` (string name) + `caseData.activeAgentId`
+      // (profile id). Prefer that. Fall back to `t.assignee.name` ONLY
+      // when activeAgent is missing AND the task assignee is clearly
+      // NOT the applicant (different name) — otherwise we'd still leak
+      // the client into the column on cases without an active agent.
+      //
+      // assigneeEmail follows the same logic: blank when the task
+      // assignee is the applicant, otherwise the upstream value. The
+      // case-active-agent has no email exposed, so the email stays
+      // empty in that branch; scoping falls through to country-fallback
+      // visibility per _scopeByAssignedOrUnassigned — same as today.
+      assignee: (() => {
+        const activeAgent = (typeof caseData.activeAgent === 'string') ? caseData.activeAgent.trim() : '';
+        if (activeAgent) return activeAgent;
+        const taskName = (typeof t?.assignee?.name === 'string') ? t.assignee.name.trim() : '';
+        if (!taskName) return '';
+        if (applicantName && taskName === applicantName) return '';
+        return taskName;
+      })(),
+      assigneeEmail: (() => {
+        const taskEmail = (typeof t?.assignee?.email === 'string') ? t.assignee.email.toLowerCase() : '';
+        if (!taskEmail) return '';
+        const taskName = (typeof t?.assignee?.name === 'string') ? t.assignee.name.trim() : '';
+        if (applicantName && taskName === applicantName) return '';
+        return taskEmail;
+      })(),
       // 2026-05-22 — `clientName` populates the panel's secondary cell
       // (rendered as ORGANIZATION). Triage needs the applicant + case
       // before the customer org, so prefer that combo and fall back to

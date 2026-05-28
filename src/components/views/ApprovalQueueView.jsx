@@ -680,7 +680,18 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
                   {detail.comments.map(c => (
                     <div key={c.id} style={{ padding: '6px 10px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 8, marginBottom: 6 }}>
                       <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.authorName || c.authorEmail} · {formatTime(c.createdAt)}</div>
-                      <div style={{ fontSize: 13, color: 'var(--text)', whiteSpace: 'pre-wrap' }}>{c.body}</div>
+                      <div style={{ fontSize: 13, color: 'var(--text)', whiteSpace: 'pre-wrap' }}>
+                        {/* 2026-05-28 — autolink URLs in approval-queue
+                            comments too. Reuses the same renderRichText
+                            utility the body field above (line 386) uses
+                            so a comment with a pasted link reads
+                            identically to the parent body. */}
+                        {(c.body || '').split('\n').map((ln, i) => (
+                          <div key={i}>
+                            {ln === '' ? ' ' : renderRichText(ln, { color: 'var(--accent)', keyPrefix: `aqc-${c.id}-${i}` })}
+                          </div>
+                        ))}
+                      </div>
                       <CommentReactions
                         commentType="announcement_request"
                         commentId={c.id}

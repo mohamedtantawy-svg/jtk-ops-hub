@@ -247,6 +247,24 @@ export default function SourceTable({
                               // because the column now carries triage
                               // info ("Pearce Dolan · Right to Work")
                               // instead of the customer org name.
+  sourceKey = '',            // 2026-05-28 — identifier (e.g. 'workbench')
+                              // used as a localStorage namespace for the
+                              // OTHERS-collapse preference. Empty key
+                              // disables persistence (in-session state
+                              // only, no surface change for callers that
+                              // don't supply it).
+  othersCollapsible = false, // when true, the OTHERS section header
+                              // becomes a click-target that toggles
+                              // visibility of its row body. Keep this
+                              // off for sources where the Others bucket
+                              // IS the country pipeline (Onb/Off/Amend/
+                              // Redline) — those managers triage Others
+                              // as primary work and shouldn't have to
+                              // expand it every time.
+  othersDefaultCollapsed = false, // initial collapse state when the user
+                              // has no stored preference. Set true for
+                              // Workbench so country-fallback orphans
+                              // don't dominate the personal queue view.
 }) {
   // 2026-05-22 — dept-branded escalation button. The "Escalate to HR Hub"
   // tooltip becomes "Escalate to GIX Hub" / "Escalate to Benefits Hub" / …
@@ -470,6 +488,37 @@ export default function SourceTable({
 
   const hasMineSection = mineActive.length + minePaused.length + mineResolved.length > 0;
 
+  // ── OTHERS collapse state (2026-05-28 — Raquel feedback) ─────────────────
+  // Workbench's Others bucket is country-fallback orphan rows that inflate
+  // the visible row count without representing personal work. Collapsing
+  // the section by default keeps the orphans discoverable (header + count
+  // still render, expand-on-click) but lets the personal queue read clean.
+  // Persisted per-user-per-source so a manager who DOES want to triage
+  // Others all the time can expand it once and have it stick.
+  const othersCollapseKey = useMemo(() => {
+    if (!othersCollapsible || !sourceKey || !viewerEmail) return null;
+    return `ops_hub_source_others_collapsed:${String(viewerEmail).toLowerCase()}:${sourceKey}`;
+  }, [othersCollapsible, sourceKey, viewerEmail]);
+  const [othersCollapsed, setOthersCollapsed] = useState(() => {
+    if (!othersCollapsible) return false;
+    if (!othersCollapseKey) return othersDefaultCollapsed;
+    try {
+      const stored = localStorage.getItem(othersCollapseKey);
+      if (stored === '0') return false;
+      if (stored === '1') return true;
+    } catch { /* private mode / quota — silent */ }
+    return othersDefaultCollapsed;
+  });
+  const toggleOthersCollapsed = useCallback(() => {
+    setOthersCollapsed(prev => {
+      const next = !prev;
+      if (othersCollapseKey) {
+        try { localStorage.setItem(othersCollapseKey, next ? '1' : '0'); } catch { /* silent */ }
+      }
+      return next;
+    });
+  }, [othersCollapseKey]);
+
   // Selection bookkeeping derived from the filtered+sorted view. Selecting
   // "All" only affects rows the user can currently see (respects search +
   // status filter). Drop selection of rows that disappear from the view
@@ -542,13 +591,24 @@ export default function SourceTable({
       out.push({ kind: 'header', tone: 'paused', label: hasMineSection ? 'MINE — PAUSED' : 'PAUSED', count: minePaused.length });
       for (const r of minePaused) out.push({ kind: 'row', row: r });
     }
+    // 2026-05-28: the OTHERS header is collapsible when the caller opted
+    // in. When collapsed, the header still renders with the row count +
+    // chevron, but the OTHERS rows + the "OTHERS — PAUSED" sub-band are
+    // omitted from the virtual list so they don't take any space.
     if (othersActive.length > 0) {
       if (hasMineSection) {
-        out.push({ kind: 'header', tone: 'others', label: 'OTHERS', count: othersActive.length + othersPaused.length });
+        out.push({
+          kind: 'header', tone: 'others', label: 'OTHERS',
+          count: othersActive.length + othersPaused.length,
+          collapsible: othersCollapsible,
+          collapsed: othersCollapsible && othersCollapsed,
+        });
       }
-      for (const r of othersActive) out.push({ kind: 'row', row: r });
+      if (!(othersCollapsible && othersCollapsed)) {
+        for (const r of othersActive) out.push({ kind: 'row', row: r });
+      }
     }
-    if (othersPaused.length > 0) {
+    if (othersPaused.length > 0 && !(othersCollapsible && othersCollapsed)) {
       out.push({ kind: 'header', tone: 'paused', label: hasMineSection ? 'OTHERS — PAUSED' : 'PAUSED', count: othersPaused.length });
       for (const r of othersPaused) out.push({ kind: 'row', row: r });
     }
@@ -566,7 +626,7 @@ export default function SourceTable({
       for (const r of othersResolved) out.push({ kind: 'row', row: r });
     }
     return out;
-  }, [mineActive, minePaused, mineResolved, othersActive, othersPaused, othersResolved, hasMineSection, hideResolved]);
+  }, [mineActive, minePaused, mineResolved, othersActive, othersPaused, othersResolved, hasMineSection, hideResolved, othersCollapsible, othersCollapsed]);
 
   const scrollerRef = useRef(null);
   const { startIdx, endIdx, topPad, bottomPad } = useVirtualRows({
@@ -825,11 +885,42 @@ export default function SourceTable({
                       : isMineHeader
                         ? { color: '#1d4ed8', background: '#eff6ff', icon: 'bi-person-check-fill' }
                         : { color: '#6b6560', background: 'var(--surface-2)', icon: 'bi-people' };
+                  const isCollapsible = !!it.collapsible;
+                  const isCollapsed = !!it.collapsed;
                   return (
                     <tr key={`section-band-${startIdx + i}`} style={{ height: ROW_HEIGHT }}>
-                      <td colSpan={sectionColSpan} style={{ padding: '12px 16px', fontSize: 11, fontWeight: 700, color: headerStyle.color, letterSpacing: '.04em', background: headerStyle.background, borderTop: '1px solid #e8e8e8', borderBottom: '1px solid #e8e8e8' }}>
+                      <td
+                        colSpan={sectionColSpan}
+                        onClick={isCollapsible ? toggleOthersCollapsed : undefined}
+                        role={isCollapsible ? 'button' : undefined}
+                        tabIndex={isCollapsible ? 0 : undefined}
+                        onKeyDown={isCollapsible ? (e) => {
+                          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleOthersCollapsed(); }
+                        } : undefined}
+                        title={isCollapsible ? (isCollapsed ? 'Click to show others' : 'Click to hide others') : undefined}
+                        style={{
+                          padding: '12px 16px', fontSize: 11, fontWeight: 700,
+                          color: headerStyle.color, letterSpacing: '.04em',
+                          background: headerStyle.background,
+                          borderTop: '1px solid #e8e8e8', borderBottom: '1px solid #e8e8e8',
+                          cursor: isCollapsible ? 'pointer' : undefined,
+                          userSelect: isCollapsible ? 'none' : undefined,
+                        }}
+                      >
                         <i className={headerStyle.icon} style={{ fontSize: 11, marginRight: 6 }} />
                         {it.label} ({it.count})
+                        {isCollapsible && (
+                          <i
+                            className={`bi ${isCollapsed ? 'bi-chevron-down' : 'bi-chevron-up'}`}
+                            aria-hidden="true"
+                            style={{ fontSize: 11, marginLeft: 8, opacity: 0.8 }}
+                          />
+                        )}
+                        {isCollapsible && isCollapsed && (
+                          <span style={{ marginLeft: 8, fontWeight: 500, color: 'var(--text-muted)', textTransform: 'none', letterSpacing: 0 }}>
+                            — hidden, click to show
+                          </span>
+                        )}
                       </td>
                     </tr>
                   );

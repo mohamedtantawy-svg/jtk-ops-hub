@@ -20,6 +20,7 @@
 // after team-members PATCH (existing invalidateRosterCache path).
 
 import { query } from './db';
+import { getActiveHandoverDelegationsSync } from './handover-scope-cache';
 
 export const GLOBAL_SUPER_ADMIN_EMAIL = 'mohamed.tantawy@deel.com';
 export const SUPER_ADMIN_DEPT_COOKIE = 'ops_hub_super_admin_dept';
@@ -141,6 +142,51 @@ export async function listTopLevelDepts() {
     console.warn('[dept-scope] listTopLevelDepts failed:', err.message);
     return [];
   }
+}
+
+// 2026-05-28 — top-level dept lookup keyed by email, used by the
+// effective-dept resolver below to translate handover-coverage requester
+// emails into their tenancy bucket.
+async function _getTopLevelDeptIdForEmail(email) {
+  const top = await getTopLevelDeptForMember(email);
+  return top?.deptId || null;
+}
+
+// 2026-05-28 (Ewa feedback — TLs covering each other across depts) ─────
+// Returns the array of top-level dept IDs the caller can read from, which
+// is normally just their own dept BUT widens to include each active
+// coverage requester's top-level dept during the OOO window. This is the
+// piece that lets a GIX TL covering an HRX TL see HR Hub requests stamped
+// `org_node_id = HRX_UUID`.
+//
+// The cap is intentional — adding ONLY the requester's dept (not the
+// whole org tree) means a TL covering one specific person doesn't
+// suddenly see every dept's data, just their own + the dept they're
+// actively covering for.
+//
+// Returns an array suitable for `WHERE org_node_id = ANY($1::uuid[])`.
+// Empty when the caller has no current dept AND no active coverage —
+// existing fail-closed semantics preserved.
+export async function getEffectiveDeptIdsForUser(user, req) {
+  const out = [];
+  const seen = new Set();
+  const baseDeptId = await getCurrentDeptId(user, req);
+  if (baseDeptId) {
+    out.push(baseDeptId);
+    seen.add(baseDeptId);
+  }
+  if (!user?.email) return out;
+  const delegations = getActiveHandoverDelegationsSync(user.email);
+  if (delegations.length === 0) return out;
+  for (const d of delegations) {
+    if (!d?.requesterEmail) continue;
+    const did = await _getTopLevelDeptIdForEmail(d.requesterEmail);
+    if (did && !seen.has(did)) {
+      seen.add(did);
+      out.push(did);
+    }
+  }
+  return out;
 }
 
 // 2026-05-21 — fix for the Team Summary / ack-tracker dept-filter that

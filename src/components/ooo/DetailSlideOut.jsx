@@ -14,6 +14,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Avatar from '../ui/Avatar';
+import RichTextBody from '../ui/RichTextBody';
 import {
   acceptHandover,
   cancelHandover,
@@ -775,7 +776,7 @@ function DetailSlideOut({
                           <strong>{c.actor_name || c.actor_email}</strong>
                           <span style={{ color: 'var(--text-secondary)', fontSize: 11 }}>{relTime(c.created_at)}</span>
                         </div>
-                        <div style={{ whiteSpace: 'pre-wrap' }}>{c.text}</div>
+                        <RichTextBody body={c.text} />
                       </div>
                     );
                   })}

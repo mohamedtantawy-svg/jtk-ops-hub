@@ -14,7 +14,7 @@ import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { query, withTransaction } from '../../../../../../src/lib/db';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
-import { getCurrentDeptId } from '../../../../../../src/lib/dept-scope';
+import { getEffectiveDeptIdsForUser } from '../../../../../../src/lib/dept-scope';
 import {
   memberByEmail,
   isHrHubAdmin,
@@ -54,8 +54,10 @@ export async function GET(req, { params }) {
   await ensureRosterHydrated();
 
   // Phase 11c (2026-05-20): refuse cross-dept reads. 404 instead of leaking.
-  const currentDeptId = await getCurrentDeptId(user, req);
-  if (!currentDeptId) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  // 2026-05-28: widened to effective dept ids so a TL covering another TL
+  // across departments can open the requests in the covered queue.
+  const effectiveDeptIds = await getEffectiveDeptIdsForUser(user, req);
+  if (effectiveDeptIds.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const [reqRes, commentsRes, followersRes, logRes] = await Promise.all([
     query(
@@ -68,8 +70,8 @@ export async function GET(req, { params }) {
               task_source, task_id, task_url, task_subject,
               sla_ext_requested_days, sla_ext_reason_code, sla_ext_acknowledged,
               sla_ext_approved_days
-         FROM hr_hub_request WHERE id = $1 AND org_node_id = $2`,
-      [id, currentDeptId],
+         FROM hr_hub_request WHERE id = $1 AND org_node_id = ANY($2::uuid[])`,
+      [id, effectiveDeptIds],
     ),
     query(
       `SELECT id, request_id, parent_comment_id, author_email, author_name,
@@ -184,11 +186,13 @@ export async function PATCH(req, { params }) {
 
   // Phase 11c (2026-05-20): refuse cross-dept edits. SELECT scoped to dept
   // so a request in another tenant looks the same as a non-existent one.
-  const currentDeptId = await getCurrentDeptId(user, req);
-  if (!currentDeptId) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  // 2026-05-28: widened to effective dept ids so an active coverer can
+  // edit the covered TL's requests across departments.
+  const effectiveDeptIds = await getEffectiveDeptIdsForUser(user, req);
+  if (effectiveDeptIds.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   const { rows: existingRows } = await query(
-    `SELECT * FROM hr_hub_request WHERE id = $1 AND org_node_id = $2`,
-    [id, currentDeptId],
+    `SELECT * FROM hr_hub_request WHERE id = $1 AND org_node_id = ANY($2::uuid[])`,
+    [id, effectiveDeptIds],
   );
   if (existingRows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   const existing = existingRows[0];
@@ -207,8 +211,36 @@ export async function PATCH(req, { params }) {
   const isManagerCaller = callerAccess === 'admin'
     || callerAccess === 'regional_manager'
     || callerAccess === 'team_lead';
-  if (!isOwner && !isAssignee && !admin && !isManagerCaller) {
-    return NextResponse.json({ error: 'Forbidden — not creator, assignee, manager, or HR Hub Admin' }, { status: 403 });
+  const isPrivilegedCaller = isOwner || isAssignee || admin || isManagerCaller;
+
+  // 2026-05-28 (Mohamed spec): status changes on HR Request / HR Reporting
+  // (and the other non-approval flows) should be doable by ANYONE with
+  // read access — covering teammates, peer agents, anyone helping move a
+  // ticket along. Only the approval flows (SLA extension + Hide request)
+  // keep the manager-only gate because their workflow IS the manager
+  // review. Priority, assignee, and free-text edits stay gated to the
+  // existing privileged cohort on every flow.
+  const APPROVAL_FLOWS = new Set(['sla_extension_request', 'hide_task_request']);
+  const isApprovalFlow = APPROVAL_FLOWS.has(existing.flow);
+  // The non-status patch surface — anything in this set still requires
+  // owner/assignee/manager/admin. Keep aligned with the patch fields
+  // handled below so a new field added there doesn't accidentally leak
+  // through the status-only carve-out.
+  const NON_STATUS_PATCH_FIELDS = [
+    'priority', 'assigneeEmail',
+    'title', 'summary', 'idealSolution', 'resolutionNote',
+    'functionArea', 'requestType', 'reportType',
+  ];
+  const touchesNonStatus = NON_STATUS_PATCH_FIELDS.some(f => patch[f] !== undefined);
+
+  if (!isPrivilegedCaller) {
+    if (isApprovalFlow) {
+      return NextResponse.json({ error: 'Forbidden — approval flows can only be edited by the creator, assignee, manager, or HR Hub Admin' }, { status: 403 });
+    }
+    if (touchesNonStatus) {
+      return NextResponse.json({ error: 'Forbidden — only the creator, assignee, manager, or HR Hub Admin can edit fields other than status' }, { status: 403 });
+    }
+    // Else: status-only patch on a non-approval flow → allow.
   }
 
   const updates = [];
@@ -223,12 +255,16 @@ export async function PATCH(req, { params }) {
     }
     if (patch.status !== existing.status) {
       // Status direction guard: only HR Hub Admin / assignee / any manager
-      // (TL/RM/Admin) can move a status backwards. Owners (creators who
-      // aren't also managers) can still move forward but not back —
-      // matches the original intent.
-      if (!admin && !isAssignee && !isManagerCaller) {
+      // (TL/RM/Admin) can move a status backwards on APPROVAL flows
+      // (SLA extension + Hide request) because their workflow has a
+      // formal review step. Non-approval flows (hr_request, hr_reporting,
+      // escalation_zero, feedback) accept either direction per Mohamed
+      // 2026-05-28: "the rest of the task types can have a status
+      // changed by anyone if needed" — including reverting a wrongly-
+      // resolved ticket without manager intervention.
+      if (isApprovalFlow && !admin && !isAssignee && !isManagerCaller) {
         if (STATUS_ORDER[patch.status] < STATUS_ORDER[existing.status]) {
-          return NextResponse.json({ error: 'Only HR Hub Admin, assignee, or a manager can move a status backwards' }, { status: 403 });
+          return NextResponse.json({ error: 'Only HR Hub Admin, assignee, or a manager can move an approval flow backwards' }, { status: 403 });
         }
       }
       updates.push(`status = $${p++}`); values.push(patch.status);
@@ -345,8 +381,10 @@ export async function PATCH(req, { params }) {
   updates.push(`updated_at = NOW()`);
   // Phase 11c: UPDATE also dept-scoped so a concurrent dept-move between
   // the SELECT above and the UPDATE here can't widen the blast radius.
-  const sql = `UPDATE hr_hub_request SET ${updates.join(', ')} WHERE id = $${p} AND org_node_id = $${p + 1} RETURNING *`;
-  values.push(id, currentDeptId);
+  // 2026-05-28: same effective-dept widening as the SELECT — coverers can
+  // PATCH rows in the covered TL's dept during active OOO.
+  const sql = `UPDATE hr_hub_request SET ${updates.join(', ')} WHERE id = $${p} AND org_node_id = ANY($${p + 1}::uuid[]) RETURNING *`;
+  values.push(id, effectiveDeptIds);
   const { rows } = await query(sql, values);
   const updated = rows[0];
 

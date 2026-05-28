@@ -27,6 +27,7 @@ import { TASK_SOURCE_DISPLAY } from '../../../src/utils/applySlaExtensions';
 import HrHubComposer from './HrHubComposer';
 import ImageLightbox from '../ui/ImageLightbox';
 import CommentReactions from '../ui/CommentReactions';
+import RichTextBody from '../ui/RichTextBody';
 import { useCurrentDept } from '../../../src/hooks/useCurrentDept';
 import { getHubBrand } from '../../../src/lib/hub-brand';
 
@@ -587,6 +588,8 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
         {request && (
           <div style={{ borderTop: '1px solid var(--border)', padding: 14, flexShrink: 0, background: 'var(--surface)' }}>
             <HrHubComposer
+              requestId={requestId}
+              userEmail={user?.email}
               onSubmit={async (payload) => {
                 const created = await postHrHubComment(requestId, payload);
                 // Optimistic local append so the author sees their comment
@@ -1260,29 +1263,12 @@ function Avatar({ name }) {
 
 // Render @firstname.lastname tokens as inline chips. Linked names look
 // distinct without a heavy formatter (no markdown lib needed for Stage 4).
+// 2026-05-28 — autolink URLs in addition to the existing @-mention
+// chip rendering. Insiya pasted a deep-link URL into a comment and it
+// rendered as plain text; the shared RichTextBody handles both tokens
+// consistently across every surface that uses it.
 function CommentBody({ body }) {
-  const parts = useMemo(() => {
-    const out = [];
-    const re = /(^|\s)@([a-z][a-z0-9._-]{1,80})/gi;
-    let last = 0;
-    let m;
-    while ((m = re.exec(body)) != null) {
-      const start = m.index + m[1].length;   // index of '@'
-      if (start > last) out.push({ text: body.slice(last, start) });
-      out.push({ mention: m[2] });
-      last = start + 1 + m[2].length;
-    }
-    if (last < body.length) out.push({ text: body.slice(last) });
-    return out;
-  }, [body]);
-  return (
-    <div style={{ marginTop: 4, fontSize: 14, color: 'var(--text)', lineHeight: 1.55, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-      {parts.map((p, i) => p.mention
-        ? <span key={i} style={{ background: '#f3eff8', color: '#5b21b6', borderRadius: 4, padding: '0 4px', fontWeight: 600 }}>@{p.mention}</span>
-        : <span key={i}>{p.text}</span>
-      )}
-    </div>
-  );
+  return <RichTextBody body={body} style={{ marginTop: 4, fontSize: 14, color: 'var(--text)', lineHeight: 1.55 }} />;
 }
 
 function LogSection({ log }) {
