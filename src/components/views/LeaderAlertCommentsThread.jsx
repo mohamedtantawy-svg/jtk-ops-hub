@@ -23,6 +23,7 @@ import {
 } from '../../services/leaderAlertsApi';
 import { MEMBERS } from '../../data/members';
 import ImageLightbox from '../ui/ImageLightbox';
+import RichTextBody from '../ui/RichTextBody';
 
 // ── Constants ─────────────────────────────────────────────────────────────
 
@@ -113,22 +114,13 @@ function avatarFor(name, email) {
   return { initials, color: palette[seed % palette.length] };
 }
 
-// Highlight @first.last tokens in body text.
+// 2026-05-28 — autolink URLs in addition to highlighting @first.last
+// tokens. Delegates to the shared RichTextBody so every comment
+// surface in the app renders the same way (Mohamed's "must show as a
+// proper hyperlink" directive).
 function renderBody(body) {
   if (!body) return null;
-  const parts = String(body).split(/(@[a-z][a-z0-9._-]{1,80})/gi);
-  return parts.map((p, i) => {
-    if (p.startsWith('@')) {
-      return (
-        <span key={i} style={{
-          padding: '0 4px', borderRadius: 4,
-          background: '#ede9fe', color: '#5b21b6',
-          fontWeight: 600,
-        }}>{p}</span>
-      );
-    }
-    return <span key={i}>{p}</span>;
-  });
+  return <RichTextBody body={String(body)} style={{ display: 'inline' }} />;
 }
 
 // Aggregate raw reactions [{emoji,email}] into [{emoji,count,emails,iReacted}].

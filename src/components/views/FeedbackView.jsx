@@ -18,6 +18,7 @@ import { useFeedback } from '../../hooks/useFeedback';
 import Avatar from '../ui/Avatar';
 import EmptyState from '../ui/EmptyState';
 import ImageLightbox from '../ui/ImageLightbox';
+import RichTextBody from '../ui/RichTextBody';
 import MentionTextarea from '../ui/MentionTextarea';
 import CreateFeedbackModal from '../modals/CreateFeedbackModal';
 import CreateEscalationZeroModal from '../modals/CreateEscalationZeroModal';
@@ -1280,14 +1281,14 @@ function ExpandedDetail({ item, isPriv, onStatusChange, onPriorityChange, onAssi
       {/* Left: long-form text + screenshot */}
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>Issue</div>
-        <div style={prose}>{item.issue}</div>
+        <RichTextBody body={item.issue} style={prose} />
 
         {item.proposedResolution && (
           <>
             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 14, marginBottom: 6 }}>
               {item.kind === 'escalation_zero' ? 'Ideal solution' : 'Proposed resolution'}
             </div>
-            <div style={prose}>{item.proposedResolution}</div>
+            <RichTextBody body={item.proposedResolution} style={prose} />
           </>
         )}
 
@@ -1332,7 +1333,7 @@ function ExpandedDetail({ item, isPriv, onStatusChange, onPriorityChange, onAssi
         {item.resolutionNote && (
           <>
             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 14, marginBottom: 6 }}>Resolution note</div>
-            <div style={prose}>{item.resolutionNote}</div>
+            <RichTextBody body={item.resolutionNote} style={prose} />
           </>
         )}
 

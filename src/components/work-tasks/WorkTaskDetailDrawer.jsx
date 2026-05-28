@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Avatar from '../ui/Avatar';
+import RichTextBody from '../ui/RichTextBody';
 import MemberMultiPicker from '../org/MemberMultiPicker';
 import { getWorkTask, patchWorkTask, archiveWorkTask, listWorkTaskComments, createWorkTaskComment } from '../../services/workTasksApi';
 
@@ -466,11 +467,12 @@ function DrawerBody({
               fontSize: 13,
               lineHeight: 1.5,
               color: task.description ? 'var(--text)' : 'var(--text-muted)',
-              whiteSpace: 'pre-wrap',
               cursor: canEdit ? 'text' : 'default',
             }}
           >
-            {task.description || (canEdit ? 'Add a description…' : '—')}
+            {task.description
+              ? <RichTextBody body={task.description} />
+              : <div style={{ whiteSpace: 'pre-wrap' }}>{canEdit ? 'Add a description…' : '—'}</div>}
           </div>
         )}
       </FieldLabel>
@@ -637,10 +639,10 @@ function CommentRow({ comment, memberByEmail }) {
           <strong>{author?.name || comment.author.email}</strong>
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{formatDateTime(comment.createdAt)}</span>
         </div>
-        <div style={{
-          marginTop: 4, fontSize: 13, color: 'var(--text)',
-          whiteSpace: 'pre-wrap', lineHeight: 1.5,
-        }}>{comment.body}</div>
+        <RichTextBody
+          body={comment.body}
+          style={{ marginTop: 4, fontSize: 13, color: 'var(--text)', lineHeight: 1.5 }}
+        />
         {comment.mentions?.length > 0 && (
           <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-muted)' }}>
             Mentioned: {comment.mentions.map(e => memberByEmail.get(e)?.name || e).join(', ')}
