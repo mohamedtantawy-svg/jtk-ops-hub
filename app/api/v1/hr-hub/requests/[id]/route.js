@@ -211,8 +211,36 @@ export async function PATCH(req, { params }) {
   const isManagerCaller = callerAccess === 'admin'
     || callerAccess === 'regional_manager'
     || callerAccess === 'team_lead';
-  if (!isOwner && !isAssignee && !admin && !isManagerCaller) {
-    return NextResponse.json({ error: 'Forbidden — not creator, assignee, manager, or HR Hub Admin' }, { status: 403 });
+  const isPrivilegedCaller = isOwner || isAssignee || admin || isManagerCaller;
+
+  // 2026-05-28 (Mohamed spec): status changes on HR Request / HR Reporting
+  // (and the other non-approval flows) should be doable by ANYONE with
+  // read access — covering teammates, peer agents, anyone helping move a
+  // ticket along. Only the approval flows (SLA extension + Hide request)
+  // keep the manager-only gate because their workflow IS the manager
+  // review. Priority, assignee, and free-text edits stay gated to the
+  // existing privileged cohort on every flow.
+  const APPROVAL_FLOWS = new Set(['sla_extension_request', 'hide_task_request']);
+  const isApprovalFlow = APPROVAL_FLOWS.has(existing.flow);
+  // The non-status patch surface — anything in this set still requires
+  // owner/assignee/manager/admin. Keep aligned with the patch fields
+  // handled below so a new field added there doesn't accidentally leak
+  // through the status-only carve-out.
+  const NON_STATUS_PATCH_FIELDS = [
+    'priority', 'assigneeEmail',
+    'title', 'summary', 'idealSolution', 'resolutionNote',
+    'functionArea', 'requestType', 'reportType',
+  ];
+  const touchesNonStatus = NON_STATUS_PATCH_FIELDS.some(f => patch[f] !== undefined);
+
+  if (!isPrivilegedCaller) {
+    if (isApprovalFlow) {
+      return NextResponse.json({ error: 'Forbidden — approval flows can only be edited by the creator, assignee, manager, or HR Hub Admin' }, { status: 403 });
+    }
+    if (touchesNonStatus) {
+      return NextResponse.json({ error: 'Forbidden — only the creator, assignee, manager, or HR Hub Admin can edit fields other than status' }, { status: 403 });
+    }
+    // Else: status-only patch on a non-approval flow → allow.
   }
 
   const updates = [];
@@ -227,12 +255,16 @@ export async function PATCH(req, { params }) {
     }
     if (patch.status !== existing.status) {
       // Status direction guard: only HR Hub Admin / assignee / any manager
-      // (TL/RM/Admin) can move a status backwards. Owners (creators who
-      // aren't also managers) can still move forward but not back —
-      // matches the original intent.
-      if (!admin && !isAssignee && !isManagerCaller) {
+      // (TL/RM/Admin) can move a status backwards on APPROVAL flows
+      // (SLA extension + Hide request) because their workflow has a
+      // formal review step. Non-approval flows (hr_request, hr_reporting,
+      // escalation_zero, feedback) accept either direction per Mohamed
+      // 2026-05-28: "the rest of the task types can have a status
+      // changed by anyone if needed" — including reverting a wrongly-
+      // resolved ticket without manager intervention.
+      if (isApprovalFlow && !admin && !isAssignee && !isManagerCaller) {
         if (STATUS_ORDER[patch.status] < STATUS_ORDER[existing.status]) {
-          return NextResponse.json({ error: 'Only HR Hub Admin, assignee, or a manager can move a status backwards' }, { status: 403 });
+          return NextResponse.json({ error: 'Only HR Hub Admin, assignee, or a manager can move an approval flow backwards' }, { status: 403 });
         }
       }
       updates.push(`status = $${p++}`); values.push(patch.status);
