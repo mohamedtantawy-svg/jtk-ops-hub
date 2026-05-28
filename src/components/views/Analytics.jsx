@@ -6,6 +6,7 @@ import { SettingsContext, PermissionsContext, IntegrationsContext } from '../../
 import { slaInfo } from '../../utils/helpers';
 // Queue data hooks are mounted in App.jsx — read via IntegrationsContext.
 import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
+import { useCurrentDept } from '../../hooks/useCurrentDept';
 import {
   normalizeOnboarding,
   normalizePausedOnboarding,
@@ -166,12 +167,15 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
   const workbenchDataA = queueUnifiedA?.workbenchData || { tasks: [] };
   const incentivePlansDataA = queueUnifiedA?.incentivePlansData || { items: [] };
   const { sla: queueSlaA } = useQueueSlaSettings();
+  // 2026-05-28 — capture dept slug so the workbench normaliser can use
+  // the GIX 60-day default in dept-scoped Analytics view too.
+  const analyticsDeptSlug = useCurrentDept().dept?.slug;
   const onbRowsA = useMemo(() => normalizeOnboarding(onboardingDataA.items, queueSlaA), [onboardingDataA.items, queueSlaA]);
   const pausedOnbRowsA = useMemo(() => normalizePausedOnboarding(pausedOnboardingDataA.items, queueSlaA), [pausedOnboardingDataA.items, queueSlaA]);
   const offRowsA = useMemo(() => normalizeOffboarding(offboardingDataA.items, queueSlaA), [offboardingDataA.items, queueSlaA]);
   const amendRowsA = useMemo(() => normalizeAmendments(changeRequestDataA.amendments, queueSlaA), [changeRequestDataA.amendments, queueSlaA]);
   const redlineRowsA = useMemo(() => normalizeRedlines(changeRequestDataA.redlines, queueSlaA), [changeRequestDataA.redlines, queueSlaA]);
-  const wbRowsA = useMemo(() => normalizeWorkbench(workbenchDataA.tasks, queueSlaA), [workbenchDataA.tasks, queueSlaA]);
+  const wbRowsA = useMemo(() => normalizeWorkbench(workbenchDataA.tasks, queueSlaA, { deptSlug: analyticsDeptSlug }), [workbenchDataA.tasks, queueSlaA, analyticsDeptSlug]);
   const ipRowsA = useMemo(() => normalizeIncentivePlans(incentivePlansDataA.items, queueSlaA), [incentivePlansDataA.items, queueSlaA]);
 
   const slaCompliance = useMemo(() => {

@@ -440,12 +440,17 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // tallies below all see extended rows as "in SLA" while the timer is
   // running. See SLA_EXTENSIONS_PLAN.md.
   const slaExtensionMap = slaExtensions?.map || null;
+  // 2026-05-28 — capture dept slug early so the workbench normaliser
+  // can swap in the GIX 60-day default below. useCurrentDept is module-
+  // level memoised; this second-call (we destructure again at L802 for
+  // Team Summary) is effectively free.
+  const briefingDeptSlug = useCurrentDept().dept?.slug;
   const onboardingRowsAll = useMemo(() => applySlaExtensionsToRows(normalizeOnboarding(onboardingData.items, queueSla).filter(r => !isHiddenKey('onboarding', r.id)), slaExtensionMap, 'onboarding'), [onboardingData.items, queueSla, isHiddenKey, slaExtensionMap]);
   const pausedOnboardingRowsAll = useMemo(() => applySlaExtensionsToRows(normalizePausedOnboarding(pausedOnboardingData.items, queueSla).filter(r => !isHiddenKey('paused_onboarding', r.id) && !isHiddenKey('onboarding', r.id)), slaExtensionMap, 'onboarding'), [pausedOnboardingData.items, queueSla, isHiddenKey, slaExtensionMap]);
   const offboardingRowsAll = useMemo(() => applySlaExtensionsToRows(normalizeOffboarding(offboardingData.items, queueSla).filter(r => !isHiddenKey('offboarding', r.id)), slaExtensionMap, 'offboarding'), [offboardingData.items, queueSla, isHiddenKey, slaExtensionMap]);
   const amendmentRowsAll = useMemo(() => applySlaExtensionsToRows(normalizeAmendments(changeRequestData.amendments, queueSla).filter(r => !isHiddenKey('amendments', r.id)), slaExtensionMap, 'amendments'), [changeRequestData.amendments, queueSla, isHiddenKey, slaExtensionMap]);
   const redlineRowsAll = useMemo(() => applySlaExtensionsToRows(normalizeRedlines(changeRequestData.redlines, queueSla).filter(r => !isHiddenKey('redlines', r.id)), slaExtensionMap, 'redlines'), [changeRequestData.redlines, queueSla, isHiddenKey, slaExtensionMap]);
-  const workbenchRowsAll = useMemo(() => applySlaExtensionsToRows(normalizeWorkbench(workbenchData.tasks, queueSla).filter(r => !isHiddenKey('workbench', r.id)), slaExtensionMap, 'workbench'), [workbenchData.tasks, queueSla, isHiddenKey, slaExtensionMap]);
+  const workbenchRowsAll = useMemo(() => applySlaExtensionsToRows(normalizeWorkbench(workbenchData.tasks, queueSla, { deptSlug: briefingDeptSlug }).filter(r => !isHiddenKey('workbench', r.id)), slaExtensionMap, 'workbench'), [workbenchData.tasks, queueSla, isHiddenKey, slaExtensionMap, briefingDeptSlug]);
   const incentivePlanRowsAll = useMemo(() => applySlaExtensionsToRows(normalizeIncentivePlans(incentivePlansData.items, queueSla).filter(r => !isHiddenKey('incentive_plans', r.id)), slaExtensionMap, 'incentive_plans'), [incentivePlansData.items, queueSla, isHiddenKey, slaExtensionMap]);
 
   // Source-row scoping — delegate to the Queue's single source of truth so

@@ -146,6 +146,20 @@ const OFFBOARDING_RESIG_ACTIVE_MS = 5  * DAY_MS;
 const OFFBOARDING_SLA_PAUSED_MS   = PAUSED_SLA_MS;
 const WORKBENCH_SLA_ACTIVE_MS  = 48 * HOUR_MS;
 const WORKBENCH_SLA_PAUSED_MS  = PAUSED_SLA_MS;
+// 2026-05-28 (Pablo Gonzalez — Adapt SLA timers to Immigration):
+// Global Immigration workbench tasks legitimately run multi-month
+// because visa cases stretch across embassy timelines. The HRX 48h
+// window misrepresents them as Breached the moment they're picked up.
+// Pablo spec: 2 months TRT. Applied via the `deptSlug` opt on
+// normalizeWorkbench so HRX (and every other future dept) keeps the
+// 48h default until they explicitly request an override.
+const WORKBENCH_SLA_ACTIVE_MS_GIX = 60 * DAY_MS;
+// Pablo spec: Immigration Tasks track on a 1-day TRT regardless of the
+// upstream `dueDate` Deel admin happens to set. Replaces the previous
+// `Math.max(1d, dueMs - createdMs)` window — that surfaced rows with
+// arbitrarily-long Deel-side targets as "not at risk" for weeks, even
+// when they were the same kind of work as a 1-day case.
+const IMMIGRATION_TASK_SLA_ACTIVE_MS = 1 * DAY_MS;
 
 // Resolve the active/paused window for a given queue. Reads slaConfig
 // (the per-queue { activeMins, pausedMins? } object delivered by
@@ -742,8 +756,17 @@ export function normalizeIncentivePlans(items = [], slaConfig = null) {
 }
 
 // ── Workbench → normalized rows ──
-export function normalizeWorkbench(items = [], slaConfig = null) {
-  const { activeMs, pausedMs } = slaMsFor(slaConfig, 'workbench', WORKBENCH_SLA_ACTIVE_MS, WORKBENCH_SLA_PAUSED_MS);
+export function normalizeWorkbench(items = [], slaConfig = null, opts = {}) {
+  // 2026-05-28 — Per-dept SLA override. GIX workbench rows are
+  // multi-month immigration cases; 48h breaches them on day-one. When
+  // `opts.deptSlug === 'gix'` we swap the active-window default for the
+  // 60-day constant before slaMsFor runs, so a global admin
+  // queue_sla_thresholds row (if one ever lands for workbench) still
+  // wins, but the bare-default reflects what GIX actually operates on.
+  const fallbackActiveMs = opts?.deptSlug === 'gix'
+    ? WORKBENCH_SLA_ACTIVE_MS_GIX
+    : WORKBENCH_SLA_ACTIVE_MS;
+  const { activeMs, pausedMs } = slaMsFor(slaConfig, 'workbench', fallbackActiveMs, WORKBENCH_SLA_PAUSED_MS);
   return dropTestRows(items, t => [t?.name]).map(t => {
     // `listWorkbenchTasks` returns both the active backlog (TO_DO /
     // IN_PROGRESS / ON_HOLD / ESCALATED) AND a rolling 24h of recently-
@@ -847,20 +870,17 @@ export function normalizeImmigrationTasks(items = []) {
     const taskName = prettifyImmigrationTaskName(t);
     const subject = taskName;
 
-    // Per-row SLA window: createdAt → dueDate. Min 1d so a degenerate
-    // zero-window row doesn't make every task look "at risk" by
-    // proportional band.
-    const ONE_DAY_MS = 86_400_000;
-    const createdMs = t?.createdAt ? new Date(t.createdAt).getTime() : NaN;
-    const dueMs     = t?.dueDate   ? new Date(t.dueDate).getTime()   : NaN;
-    const now       = Date.now();
-    const slaWindowMs = Number.isFinite(createdMs) && Number.isFinite(dueMs) && dueMs > createdMs
-      ? Math.max(ONE_DAY_MS, dueMs - createdMs)
-      : ONE_DAY_MS;
-    const slaRemaining = Number.isFinite(dueMs)
-      ? Math.round((dueMs - now) / 1000) // seconds, matches other queues
-      : 0;
-    const slaBreachStatus = slaRemaining <= 0 ? 'SLA_BREACHED' : 'SLA_NOT_BREACHED';
+    // 2026-05-28 (Pablo spec — Adapt SLA timers to Immigration):
+    // Switched from per-row `dueDate - createdAt` to a flat 1-day TRT
+    // computed via the shared computeSlaWindow (business-day clock —
+    // weekend ms don't elapse). The previous Deel-admin dueDate model
+    // varied arbitrarily per case template and let multi-week rows
+    // read "not at risk" indefinitely. A flat 1d window matches the
+    // operating rhythm Pablo's team actually races against.
+    const sla = computeSlaWindow(IMMIGRATION_TASK_SLA_ACTIVE_MS, t?.createdAt);
+    const slaWindowMs = sla.slaWindowMs;
+    const slaRemaining = sla.slaRemaining;
+    const slaBreachStatus = sla.slaBreachStatus;
 
     // Status mapping. Upstream `ONGOING` → "Active" pill — matches
     // Mohamed's "Active only" filter. Terminal states map to resolved

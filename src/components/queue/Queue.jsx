@@ -553,7 +553,10 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
     () => (workbenchData.tasks || []).filter(t => !isUrgentAssistTaskType(t?.taskType) && !isUrgentAssistTaskType(t?.sourceType)),
     [workbenchData.tasks],
   );
-  const workbenchRowsAll        = useMemo(() => normalizeWorkbench(workbenchTasksFiltered, queueSla).filter(r => !isHiddenKey('workbench', r.id)), [workbenchTasksFiltered, queueSla, isHiddenKey]);
+  // 2026-05-28 — pass deptSlug so normalizeWorkbench can swap the 48h
+  // HRX default for the 60-day GIX default. Other depts continue to
+  // fall through to the global queue_sla_thresholds config.
+  const workbenchRowsAll        = useMemo(() => normalizeWorkbench(workbenchTasksFiltered, queueSla, { deptSlug: deptState?.dept?.slug }).filter(r => !isHiddenKey('workbench', r.id)), [workbenchTasksFiltered, queueSla, isHiddenKey, deptState?.dept?.slug]);
   const incentivePlanRowsAll    = useMemo(() => normalizeIncentivePlans(incentivePlansData.items, queueSla).filter(r => !isHiddenKey('incentive_plans', r.id)), [incentivePlansData.items, queueSla, isHiddenKey]);
   // 2026-05-22: GIX-only Immigration Tasks rows. `normalizeImmigrationTasks`
   // already derives per-row SLA from (dueDate - createdAt), so the

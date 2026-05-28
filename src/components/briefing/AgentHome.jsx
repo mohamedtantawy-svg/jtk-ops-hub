@@ -149,14 +149,15 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
     // COMPLETED + CLOSED workbench tail so finished work doesn't re-inflate
     // today's active count. The dedicated `wbResolved` block below already
     // surfaces the agent's resolved-today contribution for the KPI tile.
+    // 2026-05-28 — pass deptSlug so GIX gets the 60-day workbench SLA.
     const f = applySlaExtensionsToRows(
-      normalizeWorkbench(wb.tasks, queueSla).filter(r => !isHidden('workbench', r.id) && matches(r) && !r.isResolved),
+      normalizeWorkbench(wb.tasks, queueSla, { deptSlug: deptState?.dept?.slug }).filter(r => !isHidden('workbench', r.id) && matches(r) && !r.isResolved),
       slaExtensionMap, 'workbench');
     const g = applySlaExtensionsToRows(
       normalizeIncentivePlans(ip.items, queueSla).filter(r => !isHidden('incentive_plans', r.id) && matches(r)),
       slaExtensionMap, 'incentive_plans');
     return [...a, ...b, ...c, ...d, ...e, ...f, ...g];
-  }, [onb.items, pob.items, off.items, cr.amendments, cr.redlines, wb.tasks, ip.items, queueSla, isHidden, myEmail, slaExtensionMap]);
+  }, [onb.items, pob.items, off.items, cr.amendments, cr.redlines, wb.tasks, ip.items, queueSla, isHidden, myEmail, slaExtensionMap, deptState?.dept?.slug]);
 
   const myTickets = useMemo(() => (tasks || [])
     .filter(t => (t.source === 'zendesk' || t.source === 'jira'))
