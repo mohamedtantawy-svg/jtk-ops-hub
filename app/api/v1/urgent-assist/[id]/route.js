@@ -10,7 +10,7 @@ import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { query } from '../../../../../src/lib/db';
 import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
-import { memberByEmail, teamLeadEmailFor, writeLog, canEdit, getCurrentMocEmail } from '../../../../../src/lib/urgent-assist-helpers';
+import { memberByEmail, teamLeadEmailFor, writeLog, canEdit, getCurrentMocEmail, parseMentions, writeNotifications } from '../../../../../src/lib/urgent-assist-helpers';
 import { getCurrentDeptId } from '../../../../../src/lib/dept-scope';
 
 const ALLOWED_STATUSES = new Set(['new', 'in_progress', 'on_hold', 'resolved']);
@@ -215,6 +215,74 @@ export async function PATCH(req, { params }) {
       afterDiff[k] = updated[dbKey];
     }
     await writeLog(id, actor, 'field_edit', beforeDiff, afterDiff);
+  }
+
+  // Raquel Sanchez 2026-05-28 — bell-notification fan-out for the two
+  // tag-shaped edits MOC cares about: assignee change and new
+  // @-mentions in description/action_required. Failures here are
+  // non-fatal — the row is already updated and the PATCH returns 200
+  // regardless. See app/api/v1/urgent-assist/route.js (POST) for the
+  // mirror at create-time.
+  const kindLabel = updated.kind === 'case_monitoring' ? 'Case Monitoring' : 'Urgent Assist';
+  const subjectSnippet = (updated.subject || '').slice(0, 80);
+  // 1. Assignment change — notify the new assignee when it transitions
+  //    to a different email (or from null → email). Skip when the new
+  //    assignee is the caller (don't ping yourself for self-assigns).
+  const beforeAssignee = (before.assignee_email || '').toLowerCase();
+  const afterAssignee = (updated.assignee_email || '').toLowerCase();
+  if (afterAssignee && afterAssignee !== beforeAssignee && afterAssignee !== callerEmail) {
+    try {
+      await writeNotifications({
+        recipients: [afterAssignee],
+        excludeEmail: callerEmail,
+        type: 'assignment',
+        title: `${kindLabel} assigned: ${subjectSnippet}`,
+        body: `${callerName} assigned this ${kindLabel.toLowerCase()} to you.`,
+        requestId: id,
+        sourceType: 'urgent_assist_assignment',
+        // Use the row id + a per-event suffix so a re-assign later
+        // de-dupes against itself but not against the original create-
+        // time notification (which used just the row id).
+        sourceId: `${id}:patch:${Date.now()}`,
+        actor,
+      });
+    } catch (err) {
+      console.warn('[urgent-assist] PATCH assignment notification failed:', err.message);
+    }
+  }
+  // 2. New mentions — diff the parsed sets so a no-op edit on
+  //    description (or any unrelated field edit on a row whose body
+  //    already contained @-tokens) doesn't re-fire the same
+  //    notification. Only people newly appearing in the after-set get
+  //    pinged. Skip the actor and the current assignee (assignment
+  //    notification covers them).
+  try {
+    const beforeSet = new Set([
+      ...parseMentions(before.description),
+      ...parseMentions(before.action_required),
+    ]);
+    const afterMentions = [
+      ...parseMentions(updated.description),
+      ...parseMentions(updated.action_required),
+    ];
+    const skip = new Set([callerEmail]);
+    if (afterAssignee) skip.add(afterAssignee);
+    const newRecipients = Array.from(new Set(afterMentions)).filter(e => !beforeSet.has(e) && !skip.has(e));
+    if (newRecipients.length > 0) {
+      await writeNotifications({
+        recipients: newRecipients,
+        excludeEmail: callerEmail,
+        type: 'mention',
+        title: `${callerName} mentioned you in ${kindLabel.toLowerCase()}`,
+        body: subjectSnippet,
+        requestId: id,
+        sourceType: 'urgent_assist_mention',
+        sourceId: `${id}:patch:${Date.now()}`,
+        actor,
+      });
+    }
+  } catch (err) {
+    console.warn('[urgent-assist] PATCH mention notification failed:', err.message);
   }
 
   return NextResponse.json(rowToJson(updated));

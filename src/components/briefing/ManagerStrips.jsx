@@ -387,7 +387,11 @@ export function DecisionsStrip({ onNavigate }) {
         hint: 'approvals from your reports',
         count: approvalsCount,
         color: '#d42d35',
-        onClick: () => handleTileClick('hr-hub', 'hr-hub:setFilters', { scope: 'team', flow: 'hide_task_request', status: null }),
+        // Megan Lawrence 2026-05-28 — land on the new "Approvals" chip which
+        // unions Hide Task + SLA Extension, so the tile's combined count and
+        // the HR Hub destination show the same set of rows. Previously this
+        // landed on the Hide Task chip only, splitting the count from the view.
+        onClick: () => handleTileClick('hr-hub', 'hr-hub:setFilters', { scope: 'team', flow: 'approvals', status: null }),
       })}
     </div>
   );

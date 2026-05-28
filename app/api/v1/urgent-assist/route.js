@@ -16,9 +16,10 @@ import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../src/lib/auth-helpers';
 import { query } from '../../../../src/lib/db';
 import { ensureRosterHydrated } from '../../../../src/lib/roster-server';
-import { memberByEmail, teamLeadEmailFor, writeLog } from '../../../../src/lib/urgent-assist-helpers';
+import { memberByEmail, teamLeadEmailFor, writeLog, parseMentions, writeNotifications } from '../../../../src/lib/urgent-assist-helpers';
 import { MEMBERS_BY_EMAIL, getDirectReports, getAllReports } from '../../../../src/data/members';
 import { getCurrentDeptId } from '../../../../src/lib/dept-scope';
+import { reconcileUrgentAssistFromUpstream } from '../../../../src/lib/urgent-assist-reconciler';
 
 const ALLOWED_STATUSES = new Set(['new', 'in_progress', 'on_hold', 'resolved']);
 const ALLOWED_PRIORITIES = new Set(['low', 'medium', 'high', 'critical']);
@@ -76,6 +77,15 @@ export async function GET(req) {
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   await ensureRosterHydrated();
+
+  // Oludolapo Akindutire 2026-05-28 — auto-resolve manual rows whose
+  // workbench-linked upstream task has closed. Throttled at the module
+  // level to one run per minute regardless of caller concurrency, so
+  // hot endpoints (this list, scope-counts) don't fan out repeated
+  // scans. Reads the canonical workbench cache via cacheGet — no
+  // upstream fetch from this code path, so the list GET stays fast
+  // when the cache is cold or already-recently-reconciled.
+  await reconcileUrgentAssistFromUpstream();
 
   const { searchParams } = new URL(req.url);
   const scope = searchParams.get('scope') || 'mine';
@@ -314,6 +324,70 @@ export async function POST(req) {
       hasActionRequired: !!created.action_required,
     },
   );
+
+  // Raquel Sanchez 2026-05-28 — fan-out bell notifications so the
+  // MOC/assignee gets a visible cue (and the chime, if enabled) when
+  // they're tagged. The existing useNotificationSound hook in App.jsx
+  // listens on the merged unread count and is feature-agnostic — once
+  // these rows hit user_notifications, the chime fires automatically.
+  //
+  // Failures here are non-fatal: the row is already created and the
+  // POST should still succeed. Wrap each fan-out in its own try/catch
+  // so a single fan-out path failing doesn't poison the others.
+  const kindLabel = created.kind === 'case_monitoring' ? 'Case Monitoring' : 'Urgent Assist';
+  const subjectSnippet = (created.subject || '').slice(0, 80);
+  const actor = { email: callerEmail, name: callerName };
+  // 1. Assignment notification — when an assignee is set on creation
+  //    AND they're not the actor. The most common "tag" semantic for UA.
+  if (created.assignee_email && created.assignee_email !== callerEmail) {
+    try {
+      await writeNotifications({
+        recipients: [created.assignee_email],
+        excludeEmail: callerEmail,
+        type: 'assignment',
+        title: `${kindLabel} assigned: ${subjectSnippet}`,
+        body: `${callerName} assigned this ${kindLabel.toLowerCase()} to you.`,
+        requestId: created.id,
+        sourceType: 'urgent_assist_assignment',
+        sourceId: created.id,
+        actor,
+      });
+    } catch (err) {
+      console.warn('[urgent-assist] assignment notification failed:', err.message);
+    }
+  }
+  // 2. Mention notifications — parse @-tokens in description and
+  //    action_required. Drop the actor + the assignee (they were
+  //    already notified via assignment) so a single creation can't
+  //    double-notify the same person. No UI for @-autocomplete in the
+  //    UA modal today, but the parser still picks up manually-typed
+  //    @firstname.lastname tokens.
+  try {
+    const mentionPool = [
+      ...parseMentions(created.description),
+      ...parseMentions(created.action_required),
+    ];
+    if (mentionPool.length > 0) {
+      const skip = new Set([callerEmail]);
+      if (created.assignee_email) skip.add(created.assignee_email);
+      const recipients = mentionPool.filter(e => !skip.has(e));
+      if (recipients.length > 0) {
+        await writeNotifications({
+          recipients,
+          excludeEmail: callerEmail,
+          type: 'mention',
+          title: `${callerName} mentioned you in ${kindLabel.toLowerCase()}`,
+          body: subjectSnippet,
+          requestId: created.id,
+          sourceType: 'urgent_assist_mention',
+          sourceId: created.id,
+          actor,
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('[urgent-assist] mention notification failed:', err.message);
+  }
 
   return NextResponse.json(rowToJson(created), { status: 201 });
 }

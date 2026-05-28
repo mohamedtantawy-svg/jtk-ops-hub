@@ -14,7 +14,6 @@ import { NextResponse } from 'next/server';
 import { query } from '../../../../src/lib/db';
 import { getAuthUser } from '../../../../src/lib/auth-helpers';
 import { mergeTeamMembers } from '../../../../src/lib/team-members-merge';
-import { TEAM_MEMBERS } from '../../../../src/data/members';
 import { invalidateRosterCache, ensureRosterHydrated } from '../../../../src/lib/roster-server';
 import { canManageRoster } from '../../../../src/lib/access-admin';
 
@@ -176,10 +175,23 @@ export async function POST(req) {
     // Otherwise admins hit a dead-end: the row exists but the Team UI
     // can't see it (merge filters !is_new and is_deleted), so the user
     // can neither edit nor re-add the member.
-    const baseline = TEAM_MEMBERS.find(m => m.email.toLowerCase() === email);
-    if (baseline) {
-      return NextResponse.json({ error: 'A baseline team member already exists with that email. Use edit-allocation instead.' }, { status: 409 });
-    }
+    //
+    // Mohamed Tantawy 2026-05-28 — baseline-only membership is NOT a
+    // genuine duplicate either. Previously this branch ran:
+    //   `if (TEAM_MEMBERS.find(email)) return 409 "Use edit-allocation"`
+    // which blocked the Org-tab "Add member" flow whenever the email
+    // existed in the static baseline roster (`src/data/members.js`).
+    // Repro: delete a baseline member from Settings (soft-delete sets
+    // is_deleted=true on the override), then re-add via Org tab → the
+    // baseline match fired BEFORE the override check, so the soft-
+    // delete promotion path never ran and the user was permanently
+    // locked out of re-adding the member.
+    // Fix: drop the standalone baseline reject. The UPSERT below
+    // creates an override on top of the baseline (which is the
+    // correct mental model — the baseline is read-only static data
+    // and the override is the source of truth at runtime), so the
+    // Org-tab "Add member" flow now works for baseline members the
+    // same as for net-new ones.
     const existingRes = await query(
       `SELECT email, name, access, manager_email, is_deleted
          FROM team_member_overrides WHERE email = $1`,

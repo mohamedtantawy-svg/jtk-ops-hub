@@ -328,6 +328,26 @@ export default function UrgentAssistView({ user, onCreate, onCreateCaseMonitorin
     return () => window.removeEventListener('keydown', onKey);
   }, [onCreate]);
 
+  // Raquel Sanchez 2026-05-28 — bell deep-link handler. App.jsx dispatches
+  // `urgent-assist:openDetail` when the user clicks an assignment or
+  // mention notification. UA doesn't have a row-level detail drawer
+  // today, so the deep-link's value is "land the user on their own
+  // queue so the tagged row is visible without scrolling." Flip scope
+  // to 'mine' (which on UA already means "assigned to me" per the
+  // 2026-05-03 spec — see the GET route comment in route.js) and
+  // clear status/search filters so an old filter from a previous
+  // session doesn't hide the just-tagged row.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = () => {
+      setScope('mine');
+      setStatusFilter(null);
+      setSearch('');
+    };
+    window.addEventListener('urgent-assist:openDetail', handler);
+    return () => window.removeEventListener('urgent-assist:openDetail', handler);
+  }, []);
+
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--surface-2)' }}>
       {/* Hero */}

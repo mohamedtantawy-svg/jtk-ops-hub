@@ -148,3 +148,100 @@ export async function writeLog(requestId, actor, eventType, beforeJson = null, a
     ],
   );
 }
+
+// ── @mention parsing — same shape as HR Hub + Leader Alerts ───────────────
+// Local copy (not imported from another helper) so the two surfaces stay
+// independently versionable. Resolution order: group handle → exact email
+// match → localpart match → dotted-name match against MEMBERS_BY_EMAIL
+// keys.
+
+const MENTION_TOKEN = /(?:^|[^\w])@([a-z][a-z0-9._-]{1,80})/gi;
+
+export function parseMentions(body, groupsByHandle = null) {
+  if (!body) return [];
+  const found = new Set();
+  for (const m of String(body).matchAll(MENTION_TOKEN)) {
+    const token = m[1].toLowerCase();
+    if (groupsByHandle && groupsByHandle.has(token)) {
+      for (const e of groupsByHandle.get(token) || []) {
+        if (e) found.add(String(e).toLowerCase());
+      }
+      continue;
+    }
+    let hit = null;
+    if (MEMBERS_BY_EMAIL[token]) hit = token;
+    else if (MEMBERS_BY_EMAIL[`${token}@deel.com`]) hit = `${token}@deel.com`;
+    else {
+      for (const email of Object.keys(MEMBERS_BY_EMAIL)) {
+        if (email.startsWith(`${token}@`)) { hit = email; break; }
+      }
+    }
+    if (hit) found.add(hit);
+  }
+  return Array.from(found);
+}
+
+// ── Bell-notification fan-out ──────────────────────────────────────────────
+// Raquel Sanchez 2026-05-28 feedback: MOC misses Urgent Assist tags
+// because no bell notification fires today. Insert into the shared
+// user_notifications table with link_view='urgent-assist' so the bell
+// counts them, the dropdown lists them, and the existing
+// useNotificationSound chime (App.jsx) plays automatically when the
+// user has the opt-in toggle on (the chime listens on the merged unread
+// count and is feature-agnostic).
+//
+// De-dupes on (recipient, source_type, source_id) so a single mutation
+// can't produce a double-notification for the same person.
+//
+// `sourceType` is one of:
+//   urgent_assist_assignment | urgent_assist_mention |
+//   urgent_assist_status_change.
+// `link_view = 'urgent-assist'` matches the view name used by
+// `setView('urgent-assist')` in App.jsx; the bell click handler reads
+// the same key.
+
+export async function writeNotifications({
+  recipients = [],
+  excludeEmail,             // typically the actor — don't notify yourself
+  type,                     // 'mention' | 'assignment' | 'status_change'
+  title,
+  body = '',
+  requestId,
+  sourceType,
+  sourceId,                 // distinct per event so each notification de-dupes correctly
+  actor,
+}) {
+  const exclude = excludeEmail ? String(excludeEmail).toLowerCase() : null;
+  const dedupedRecipients = Array.from(new Set(
+    recipients.map(e => String(e || '').toLowerCase()).filter(Boolean),
+  )).filter(e => e !== exclude);
+  if (dedupedRecipients.length === 0) return 0;
+
+  const values = [];
+  const placeholders = [];
+  let p = 1;
+  for (const r of dedupedRecipients) {
+    placeholders.push(
+      `($${p++}, $${p++}, $${p++}, $${p++}, 'urgent-assist', $${p++}, $${p++}, $${p++}, $${p++}, $${p++})`,
+    );
+    values.push(
+      r,
+      type,
+      title,
+      body,
+      String(requestId),
+      sourceType,
+      String(sourceId || requestId),
+      actor?.email || null,
+      actor?.name || null,
+    );
+  }
+  const result = await query(
+    `INSERT INTO user_notifications
+       (recipient_email, type, title, body, link_view, link_id, source_type, source_id, actor_email, actor_name)
+     VALUES ${placeholders.join(', ')}
+     ON CONFLICT DO NOTHING`,
+    values,
+  );
+  return result.rowCount;
+}

@@ -1189,10 +1189,20 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
       {/* SLA — prefer the row's computed slaRemaining (honours dynamic
           Team-tab SLA settings) over the hardcoded-48h PausedSlaBadge.
           PausedSlaBadge only fires as a fallback when slaRemaining is
-          missing (rare — happens when the row has no createdAt). */}
+          missing (rare — happens when the row has no createdAt).
+          Pablo Gonzalez 2026-05-28 — Immigration Tasks SLA windows are
+          measured in hours (some only minutes) so the default days/hours
+          rounding silently rounded a 10-min task to "0h" and a 90-min
+          task to "1h". For that source we flip the formatter into
+          minutes-up-to-24h, hours-past-that mode so the urgency reads
+          truthfully. Every other source keeps the days/hours format. */}
       <td style={tdStyle}>
         {row.slaRemaining != null ? (
-          <WorkbenchSlaBadge slaRemaining={row.slaRemaining} slaBreachStatus={row.slaBreachStatus} />
+          <WorkbenchSlaBadge
+            slaRemaining={row.slaRemaining}
+            slaBreachStatus={row.slaBreachStatus}
+            granularity={row.source === 'immigration_tasks' ? 'minutes' : 'days'}
+          />
         ) : showPausedSla && row.pausedAt ? (
           <PausedSlaBadge pausedAt={row.pausedAt} />
         ) : sla ? (
@@ -1458,7 +1468,20 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
 SourceRow.displayName='SourceRow';
 
 // ── Workbench SLA badge ──
-function WorkbenchSlaBadge({ slaRemaining, slaBreachStatus }) {
+// `granularity` controls the time formatter:
+//   • 'days' (default) — days when ≥24h, hours when 1-23h, minutes <1h.
+//     Used by Workbench / Onb / Off / Amend / Redline / IP — sources
+//     whose SLA windows are measured in business DAYS so days-as-headline
+//     is the right unit.
+//   • 'minutes' — minutes when <24h, hours when ≥24h. Days never surface.
+//     Used by Immigration Tasks per Pablo Gonzalez's 2026-05-28 feedback:
+//     the upstream task SLAs there are measured in hours (some only
+//     minutes), so the days/hours rounding rounded a 10-min task to "0h"
+//     and lost the urgency signal entirely.
+// `Math.abs(slaRemaining)` so the same math applies symmetrically on
+// either side of zero — breach state is conveyed by the pill color, not
+// by adding an "over" suffix to the text.
+function WorkbenchSlaBadge({ slaRemaining, slaBreachStatus, granularity = 'days' }) {
   const SLA_MAP = {
     SLA_BREACHED:     { label: 'Breached', color: '#d42d35', bg: '#fef2f2' },
     SLA_NOT_BREACHED: { label: 'On Track', color: '#29811e', bg: '#e8f5e9' },
@@ -1471,10 +1494,19 @@ function WorkbenchSlaBadge({ slaRemaining, slaBreachStatus }) {
   // Format remaining time
   let timeStr = '';
   if (slaRemaining != null) {
-    const hrs = Math.floor(Math.abs(slaRemaining) / 3600);
-    if (hrs >= 24) timeStr = `${Math.floor(hrs / 24)}d`;
-    else if (hrs > 0) timeStr = `${hrs}h`;
-    else timeStr = `${Math.floor(Math.abs(slaRemaining) / 60)}m`;
+    const absSecs = Math.abs(slaRemaining);
+    const mins = Math.floor(absSecs / 60);
+    const hrs  = Math.floor(absSecs / 3600);
+    if (granularity === 'minutes') {
+      // < 24h → minutes; ≥ 24h → hours. Days never surfaces.
+      if (mins < 1440) timeStr = `${mins}m`;
+      else timeStr = `${hrs}h`;
+    } else {
+      // Default 'days' bucketing.
+      if (hrs >= 24) timeStr = `${Math.floor(hrs / 24)}d`;
+      else if (hrs > 0) timeStr = `${hrs}h`;
+      else timeStr = `${mins}m`;
+    }
   }
 
   return (

@@ -998,6 +998,43 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
     return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: slaBase.length - atRisk - breached };
   }, [workSource, fTool, hasNonSlaActiveFilters, workspaceHomeSla, visPreSla, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows, visIncentivePlanRows, visImmigrationTaskRows, tallyDeelSla, mineOnlyForSla]);
 
+  // Trish Lee 2026-05-28 — "the numbers aren't adding up": for Workbench
+  // the tab badge said 9 but the SLA pills summed to 5; for Jira the
+  // badge said 49 while the pills summed to 10. The gap has two distinct
+  // causes today and neither is visible to the user:
+  //   1. Tickets (Jira/Zendesk): pills' `slaBase` excludes paused rows
+  //      (status='waiting') by design — 2026-05-21 audit F24 documented
+  //      this and promised an inline "(excludes paused)" caption that
+  //      never landed.
+  //   2. Deel sources (Workbench/Onboarding/etc.) for AGENT users:
+  //      `mineOnlyForSla` narrows the pill base to rows assigned to the
+  //      agent (2026-05-11 fix — Trish reported teammate breaches showing
+  //      in her tier counts). The tab badge keeps the country-OR-assignee
+  //      union so it stays useful for "what's in my visibility scope".
+  // Surface the residual as a muted `+N other` indicator alongside the
+  // three SLA pills so the math reconciles at a glance. The tooltip
+  // explains both reasons. Workspace-home (no workSource / no fTool)
+  // returns 0 because the pills there are an aggregate that mixes
+  // ticket-paused-exclusion with Deel-source-paused-inclusion — too
+  // ambiguous to label cleanly. The user there can drill into a tab to
+  // see the per-source residual.
+  const slaOther = useMemo(() => {
+    const pillSum = onTrackCount + atRiskCount + breachedCount;
+    let expected;
+    if (workSource === 'onboarding')              expected = visOnboardingRows.length;
+    else if (workSource === 'offboarding')        expected = visOffboardingRows.length;
+    else if (workSource === 'amendments')         expected = visAmendmentRows.length;
+    else if (workSource === 'redlines')           expected = visRedlineRows.length;
+    else if (workSource === 'workbench')          expected = visWorkbenchRows.filter(r => !r.isResolved).length;
+    else if (workSource === 'incentive_plans')    expected = visIncentivePlanRows.length;
+    else if (workSource === 'immigration_tasks')  expected = visImmigrationTaskRows.filter(r => !r.isResolved).length;
+    else if (workSource === 'hidden' || workSource === 'work_tasks') return 0;
+    else if (fTool === 'jira')                    expected = baseVis.filter(t => t.source === 'jira' && t.status !== 'resolved').length;
+    else if (fTool === 'zendesk')                 expected = baseVis.filter(t => t.source === 'zendesk' && t.status !== 'resolved').length;
+    else return 0;
+    return Math.max(0, expected - pillSum);
+  }, [onTrackCount, atRiskCount, breachedCount, workSource, fTool, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows, visIncentivePlanRows, visImmigrationTaskRows, baseVis]);
+
   // ── View-aware header counts ──
   // For each Deel source we read the SLA-filtered row set so the "N open"
   // badge tracks what the user actually sees in the table, and the existing
@@ -1143,18 +1180,21 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
               unmistakable. Inactive state stays the existing light
               pastel so the row still reads as three semantic statuses.
               Tooltips now explicitly explain what each filter does. */}
-          {/* 2026-05-21 audit F24: the three SLA tier counts don't sum to
-              the "Open" total because paused tasks are excluded from the
-              tier calculation. Surfaced as inline `(excludes paused)`
-              caption on the tier triplet so users don't try to reconcile
-              On Track + At Risk + Breached against Open + Paused. */}
+          {/* 2026-05-21 audit F24 + Trish Lee 2026-05-28: the three SLA
+              tier counts don't always sum to the tab badge / inline "Open"
+              total. Two reasons (see the `slaOther` useMemo above):
+              ticket-source paused exclusion (F24) and agent mine-only
+              narrowing on Deel sources. The trailing "+N other" indicator
+              below this triplet surfaces the residual so the math reads
+              cleanly at a glance — replaces the never-rendered
+              "(excludes paused)" caption F24 originally specified. */}
           <SlaPill
             active={fSla === 'ok'}
             onClick={() => setFSla(fSla === 'ok' ? null : 'ok')}
             tone="ok"
             count={onTrackCount}
             label="On Track"
-            hint="Tasks well inside their SLA window — at least 25% of the time budget still remaining. (Paused tasks are excluded from the SLA tier counts.)"
+            hint="Tasks well inside their SLA window — at least 25% of the time budget still remaining."
           />
           <SlaPill
             active={fSla === 'at_risk'}
@@ -1162,7 +1202,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
             tone="atRisk"
             count={atRiskCount}
             label="At Risk"
-            hint="Tasks inside SLA but with less than 25% of the time budget left — handle next to avoid a breach. (Paused tasks are excluded from the SLA tier counts.)"
+            hint="Tasks inside SLA but with less than 25% of the time budget left — handle next to avoid a breach."
           />
           <SlaPill
             active={fSla === 'breached'}
@@ -1170,8 +1210,42 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
             tone="breached"
             count={breachedCount}
             label="Breached"
-            hint="Tasks past their SLA window — handle these first. (Paused tasks are excluded from the SLA tier counts.)"
+            hint="Tasks past their SLA window — handle these first."
           />
+          {/* Trish Lee 2026-05-28 — residual "other" indicator. Surfaces the
+              count of rows visible in the active tab/source but excluded
+              from the SLA tier classification. The two known reasons:
+                • Tickets (Jira/Zendesk): pills exclude paused rows by
+                  design (2026-05-21 audit F24).
+                • Deel sources for agents: pills are narrowed to the
+                  agent's own rows (2026-05-11 fix), the tab badge keeps
+                  the country-OR-assignee union.
+              Without this, On Track + At Risk + Breached + N = tab badge
+              wasn't visible at a glance — Trish's "the numbers aren't
+              adding up" feedback. Muted treatment so it reads as
+              secondary to the three actionable tier pills. */}
+          {slaOther > 0 && (
+            <span
+              role="note"
+              title={(
+                'Rows in the active view but excluded from the SLA tier counts. '
+                + 'For Jira/Zendesk tabs this is paused tickets (status = waiting); '
+                + 'for agents on Deel-source tabs this also covers rows visible in your country that are assigned to teammates. '
+                + 'These appear in the table below but don\'t count toward On Track / At Risk / Breached.'
+              )}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '5px 12px', borderRadius: 128,
+                background: 'var(--surface-3)', border: '1px solid var(--border)',
+                color: 'var(--text-muted)', fontSize: 11, fontWeight: 600,
+                cursor: 'help', flexShrink: 0,
+              }}
+            >
+              <i className="bi-three-dots" style={{ fontSize: 12 }} aria-hidden="true" />
+              <span style={{ fontVariantNumeric: 'tabular-nums', fontSize: 13, fontWeight: 700 }}>+{slaOther}</span>
+              <span>other</span>
+            </span>
+          )}
           {fSla && (
             <button
               type="button"
