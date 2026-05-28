@@ -1415,7 +1415,21 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
                   : ws.id === 'offboarding' ? visOffboardingRows.length
                   : ws.id === 'amendments' ? visAmendmentRows.length
                   : ws.id === 'redlines' ? visRedlineRows.length
-                  : ws.id === 'workbench' ? visWorkbenchRows.filter(r => !r.isResolved).length
+                  // 2026-05-28 (Raquel feedback) — Workbench badge counts
+                  // Mine only (active + paused assigned to the viewer), not
+                  // the country-fallback Others bucket. Other sources keep
+                  // the visible-rows count because their Others IS legitimate
+                  // country pipeline (Onb/Off/Amend/Redline owners triage
+                  // their country queues as part of normal work). Workbench
+                  // Others is unassigned-orphan fallback only; counting it
+                  // here misrepresents the viewer's actual personal load.
+                  : ws.id === 'workbench' ? (() => {
+                      const lc = (user?.email || '').toLowerCase();
+                      if (!lc) return visWorkbenchRows.filter(r => !r.isResolved).length;
+                      return visWorkbenchRows.filter(r =>
+                        !r.isResolved && (r.assigneeEmail || '').toLowerCase() === lc,
+                      ).length;
+                    })()
                   : ws.id === 'incentive_plans' ? visIncentivePlanRows.length
                   : ws.id === 'immigration_tasks' ? visImmigrationTaskRows.filter(r => !r.isResolved).length
                   : ws.id === 'jira' ? jiraCount
@@ -1663,6 +1677,9 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
             hideStatusPills
             dateField="createdAt"
             dateLabel="Created"
+            sourceKey="workbench"
+            othersCollapsible
+            othersDefaultCollapsed
             onHide={(row) => setHideModalTask({ source: 'workbench', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onSlaExtension={(row) => setSlaExtensionModalTask({ source: 'workbench', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'workbench', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
