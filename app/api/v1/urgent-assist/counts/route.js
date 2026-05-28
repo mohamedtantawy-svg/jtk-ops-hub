@@ -28,12 +28,21 @@ import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
 import { memberByEmail } from '../../../../../src/lib/urgent-assist-helpers';
 import { MEMBERS_BY_EMAIL, getDirectReports, getAllReports } from '../../../../../src/data/members';
 import { getCurrentDeptId } from '../../../../../src/lib/dept-scope';
+import { reconcileUrgentAssistFromUpstream } from '../../../../../src/lib/urgent-assist-reconciler';
 
 export async function GET(req) {
   const user = getAuthUser(req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   await ensureRosterHydrated();
+
+  // Briefing's DecisionsStrip Urgent Assist tile reads these counts; if
+  // the list GET (which runs the reconciler) hasn't fired in the last
+  // minute, the tile would still report rows whose workbench-linked
+  // upstream task has already closed. Module-level throttle in the
+  // reconciler keeps the cost effectively-zero when the list GET ran
+  // recently (single shared in-flight Promise, no double-scan).
+  await reconcileUrgentAssistFromUpstream();
 
   const callerEmail = String(user.email).toLowerCase();
   const me = MEMBERS_BY_EMAIL[callerEmail];

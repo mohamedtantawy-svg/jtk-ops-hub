@@ -19,6 +19,7 @@ import { ensureRosterHydrated } from '../../../../src/lib/roster-server';
 import { memberByEmail, teamLeadEmailFor, writeLog } from '../../../../src/lib/urgent-assist-helpers';
 import { MEMBERS_BY_EMAIL, getDirectReports, getAllReports } from '../../../../src/data/members';
 import { getCurrentDeptId } from '../../../../src/lib/dept-scope';
+import { reconcileUrgentAssistFromUpstream } from '../../../../src/lib/urgent-assist-reconciler';
 
 const ALLOWED_STATUSES = new Set(['new', 'in_progress', 'on_hold', 'resolved']);
 const ALLOWED_PRIORITIES = new Set(['low', 'medium', 'high', 'critical']);
@@ -76,6 +77,15 @@ export async function GET(req) {
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   await ensureRosterHydrated();
+
+  // Oludolapo Akindutire 2026-05-28 — auto-resolve manual rows whose
+  // workbench-linked upstream task has closed. Throttled at the module
+  // level to one run per minute regardless of caller concurrency, so
+  // hot endpoints (this list, scope-counts) don't fan out repeated
+  // scans. Reads the canonical workbench cache via cacheGet — no
+  // upstream fetch from this code path, so the list GET stays fast
+  // when the cache is cold or already-recently-reconciled.
+  await reconcileUrgentAssistFromUpstream();
 
   const { searchParams } = new URL(req.url);
   const scope = searchParams.get('scope') || 'mine';
