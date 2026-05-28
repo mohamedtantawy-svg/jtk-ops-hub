@@ -19,7 +19,7 @@ import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { query } from '../../../../../src/lib/db';
 import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
 import { getVisibleEmailsForAccess } from '../../../../../src/data/members';
-import { getCurrentDeptId } from '../../../../../src/lib/dept-scope';
+import { getCurrentDeptId, getEffectiveDeptIdsForUser } from '../../../../../src/lib/dept-scope';
 import {
   memberByEmail,
   managerEmailFor,
@@ -185,7 +185,15 @@ export async function GET(req) {
   // dept-scope's recursive CTE; Phase 11a backfill stamped every existing
   // hr_hub_request with HR Experience, so HRX agents see identical data
   // to today. Fail-closed when no dept is resolvable (deny rather than leak).
-  const currentDeptId = await getCurrentDeptId(user, req);
+  //
+  // 2026-05-28 (Ewa feedback — global cross-dept OOO coverage policy):
+  // `getEffectiveDeptIdsForUser` returns the caller's own dept PLUS the
+  // top-level dept of each requester whose handover the caller is
+  // currently covering. A GIX TL covering an HRX TL now sees HRX-stamped
+  // requests for the duration of the OOO window — exactly the "global
+  // policy across departments" Mohamed asked for. The widening is
+  // automatic and time-bounded (delegations clear when end_date passes).
+  const effectiveDeptIds = await getEffectiveDeptIdsForUser(user, req);
 
   const where = [];
   const params = [];
@@ -193,9 +201,9 @@ export async function GET(req) {
 
   // Phase 11c: dept-isolation gate — must be the first clause so a missing
   // dept (caller has no org placement) fails closed to zero rows.
-  if (currentDeptId) {
-    where.push(`org_node_id = $${p++}`);
-    params.push(currentDeptId);
+  if (effectiveDeptIds.length > 0) {
+    where.push(`org_node_id = ANY($${p++}::uuid[])`);
+    params.push(effectiveDeptIds);
   } else {
     where.push(`FALSE`);
   }

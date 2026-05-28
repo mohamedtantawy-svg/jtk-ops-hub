@@ -14,7 +14,7 @@ import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../../src/lib/auth-helpers';
 import { query, withTransaction } from '../../../../../../src/lib/db';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
-import { getCurrentDeptId } from '../../../../../../src/lib/dept-scope';
+import { getEffectiveDeptIdsForUser } from '../../../../../../src/lib/dept-scope';
 import {
   memberByEmail,
   isHrHubAdmin,
@@ -54,8 +54,10 @@ export async function GET(req, { params }) {
   await ensureRosterHydrated();
 
   // Phase 11c (2026-05-20): refuse cross-dept reads. 404 instead of leaking.
-  const currentDeptId = await getCurrentDeptId(user, req);
-  if (!currentDeptId) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  // 2026-05-28: widened to effective dept ids so a TL covering another TL
+  // across departments can open the requests in the covered queue.
+  const effectiveDeptIds = await getEffectiveDeptIdsForUser(user, req);
+  if (effectiveDeptIds.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const [reqRes, commentsRes, followersRes, logRes] = await Promise.all([
     query(
@@ -68,8 +70,8 @@ export async function GET(req, { params }) {
               task_source, task_id, task_url, task_subject,
               sla_ext_requested_days, sla_ext_reason_code, sla_ext_acknowledged,
               sla_ext_approved_days
-         FROM hr_hub_request WHERE id = $1 AND org_node_id = $2`,
-      [id, currentDeptId],
+         FROM hr_hub_request WHERE id = $1 AND org_node_id = ANY($2::uuid[])`,
+      [id, effectiveDeptIds],
     ),
     query(
       `SELECT id, request_id, parent_comment_id, author_email, author_name,
@@ -184,11 +186,13 @@ export async function PATCH(req, { params }) {
 
   // Phase 11c (2026-05-20): refuse cross-dept edits. SELECT scoped to dept
   // so a request in another tenant looks the same as a non-existent one.
-  const currentDeptId = await getCurrentDeptId(user, req);
-  if (!currentDeptId) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  // 2026-05-28: widened to effective dept ids so an active coverer can
+  // edit the covered TL's requests across departments.
+  const effectiveDeptIds = await getEffectiveDeptIdsForUser(user, req);
+  if (effectiveDeptIds.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   const { rows: existingRows } = await query(
-    `SELECT * FROM hr_hub_request WHERE id = $1 AND org_node_id = $2`,
-    [id, currentDeptId],
+    `SELECT * FROM hr_hub_request WHERE id = $1 AND org_node_id = ANY($2::uuid[])`,
+    [id, effectiveDeptIds],
   );
   if (existingRows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
   const existing = existingRows[0];
@@ -345,8 +349,10 @@ export async function PATCH(req, { params }) {
   updates.push(`updated_at = NOW()`);
   // Phase 11c: UPDATE also dept-scoped so a concurrent dept-move between
   // the SELECT above and the UPDATE here can't widen the blast radius.
-  const sql = `UPDATE hr_hub_request SET ${updates.join(', ')} WHERE id = $${p} AND org_node_id = $${p + 1} RETURNING *`;
-  values.push(id, currentDeptId);
+  // 2026-05-28: same effective-dept widening as the SELECT — coverers can
+  // PATCH rows in the covered TL's dept during active OOO.
+  const sql = `UPDATE hr_hub_request SET ${updates.join(', ')} WHERE id = $${p} AND org_node_id = ANY($${p + 1}::uuid[]) RETURNING *`;
+  values.push(id, effectiveDeptIds);
   const { rows } = await query(sql, values);
   const updated = rows[0];
 

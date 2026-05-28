@@ -44,6 +44,7 @@ import { ToolBadge, FnBadge } from '../ui/Badges';
 import BriefingMyTasks from '../home/BriefingMyTasks';
 import CoverageBanner from '../ooo/CoverageBanner';
 import CoverageCard from '../ooo/CoverageCard';
+import { useMyActiveCoverages } from '../../hooks/useMyActiveCoverages';
 import OOOAlert from '../home/OOOAlert';
 import TeamRequestsToMe from '../home/TeamRequestsToMe';
 import DailySummary from '../home/DailySummary';
@@ -349,8 +350,58 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const isAllScope=ds==='all_tasks';
   const isManager=!isOwnScope;
   const isExec=isAllScope;
+
+  // ── Active OOO coverage delegation (2026-05-28, Ewa feedback) ──────────
+  // When a manager accepts an OOO handover, they step into the covered
+  // person's seat for the duration of the OOO window. The Team Summary
+  // card therefore needs to render the union of the manager's own team
+  // AND every covered person's subtree (peer TL → peer TL's reports,
+  // peer RM → peer RM's full subtree). This pattern is the FE mirror of
+  // queue-scoping.js's `_coverageEmailsForRequester` and intentionally
+  // caps admin-requester coverage at direct reports so accepting a
+  // single handover never grants global visibility.
+  const { items: activeCoverages } = useMyActiveCoverages();
+  const delegatedScope = useMemo(() => {
+    const emails = new Set();
+    const ids = new Set();
+    if (!Array.isArray(activeCoverages) || activeCoverages.length === 0) {
+      return { emails, ids };
+    }
+    const pushMember = (email) => {
+      const lc = String(email || '').toLowerCase();
+      if (!lc) return;
+      if (emails.has(lc)) return;
+      emails.add(lc);
+      const m = MEMBERS_BY_EMAIL[lc];
+      if (m?.id != null) ids.add(m.id);
+    };
+    for (const c of activeCoverages) {
+      const requester = (c.requester_email || '').toLowerCase();
+      if (!requester) continue;
+      const m = MEMBERS_BY_EMAIL[requester];
+      const access = String(m?.access || '').toLowerCase();
+      pushMember(requester);
+      if (access === 'regional_manager') {
+        for (const r of getAllReports(requester)) pushMember(r);
+      } else if (access === 'team_lead') {
+        for (const r of getDirectReports(requester)) pushMember(r.email);
+      } else if (access === 'admin') {
+        for (const r of getDirectReports(requester)) pushMember(r.email);
+      }
+    }
+    return { emails, ids };
+  }, [activeCoverages]);
+
   const scopeMembers=perms?.scopeMembers(MEMBERS)||[user];
-  const scopeIds=scopeMembers.map(m=>m.id);
+  // 2026-05-28: scopeIds widens to include the covered subtree so a TL
+  // covering a peer TL sees the peer's reports in Team Summary + every
+  // assignee-keyed aggregation derived from scopeIds.
+  const scopeIds = useMemo(() => {
+    if (delegatedScope.ids.size === 0) return scopeMembers.map(m => m.id);
+    const out = new Set(scopeMembers.map(m => m.id));
+    for (const id of delegatedScope.ids) out.add(id);
+    return [...out];
+  }, [scopeMembers, delegatedScope]);
   const scopeLabel=isOwnScope?'My Queue':isTeamScope?(user.team+' Team'):'Organization';
   const roleLabel=perms?.accessTypeName||'Agent';
 
@@ -360,7 +411,16 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const orgResolved=allOrgTasks.filter(t=>t.status==='resolved');
 
   // ── Scoped metrics (hierarchical: own + direct/indirect reports) ────
-  const visibleEmails = useMemo(() => getVisibleEmails(user?.email), [user?.email]);
+  const visibleEmails = useMemo(() => {
+    const base = getVisibleEmails(user?.email);
+    if (delegatedScope.emails.size === 0) return base;
+    // 2026-05-28: widen FE visibleEmails to match the server-side queue-
+    // scoping widening so the manager's ticket aggregations include the
+    // covered TL's subtree during active OOO.
+    const out = new Set(base);
+    for (const e of delegatedScope.emails) out.add(e);
+    return out;
+  }, [user?.email, delegatedScope]);
 
   // ── Deel API normalized rows (same pattern as Queue.jsx) ─────────────
   // Pass the team-tunable SLA thresholds so per-row pills + Briefing
@@ -742,13 +802,19 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const { deptId: currentDeptId, currentDeptNodeIds, dept: currentDept } = useCurrentDept();
   // 2026-05-22 — dept-branded "HR Hub" quick-link tile.
   const hubBrand = useMemo(() => getHubBrand(currentDept), [currentDept]);
+  // 2026-05-28: cross-dept OOO coverage bypass. When the caller is
+  // actively covering a TL/RM in another tenancy (global policy), members
+  // in the delegated subtree are emitted regardless of their orgNodeId.
+  // This keeps the Team Summary aggregator consistent with the server-side
+  // `getEffectiveDeptIdsForUser` widening on the HR Hub list path.
   const inCurrentDept = useCallback((m) => {
+    if (delegatedScope.emails.has((m.email || '').toLowerCase())) return true;
     if (!currentDeptId) return true;
     if (!currentDeptNodeIds || currentDeptNodeIds.size === 0) return true;
     const memberOrgNodeId = MEMBERS_BY_EMAIL[(m.email || '').toLowerCase()]?.orgNodeId;
     if (!memberOrgNodeId) return true;
     return currentDeptNodeIds.has(memberOrgNodeId);
-  }, [currentDeptId, currentDeptNodeIds]);
+  }, [currentDeptId, currentDeptNodeIds, delegatedScope]);
 
   const allAgents = MEMBERS.filter(m => m.role === 'agent' && scopeIds.includes(m.id) && inCurrentDept(m)).map(m => {
     const memEmail = (m.email || '').toLowerCase();
@@ -1125,12 +1191,40 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     const directAgents = topDirectAgentMembers
       .map(m => allAgentsByEmail.get(m.email.toLowerCase()))
       .filter(Boolean);
-    const agentEmails = new Set([
+
+    // 2026-05-28 (Ewa feedback) — append each actively-covered TL/RM as
+    // an additional top-level group so the manager sees the covered
+    // team as its own section in Team Summary. Skipped when the covered
+    // person is already in the manager's own subtree (avoids double
+    // counting for in-team coverage). Agent-level coverage doesn't add
+    // a separate group — the agent's tickets flow into the existing
+    // `scopeIds` widening.
+    const ownAgentEmails = new Set([
       ...groups.flatMap(g => g.allAgentsBelow.map(a => (a.email || '').toLowerCase())),
       ...directAgents.map(a => (a.email || '').toLowerCase()),
     ]);
-    return { groups, directAgents, allAgentCount: agentEmails.size };
-  }, [isManager, user?.email, allAgentsWL]);
+    const ownManagerEmails = new Set(groups.map(g => (g.manager.email || '').toLowerCase()));
+    const coveredGroups = [];
+    if (Array.isArray(activeCoverages)) {
+      for (const c of activeCoverages) {
+        const reqEmail = (c.requester_email || '').toLowerCase();
+        if (!reqEmail) continue;
+        if (ownManagerEmails.has(reqEmail)) continue;
+        if (ownAgentEmails.has(reqEmail)) continue;
+        const member = MEMBERS_BY_EMAIL[reqEmail];
+        if (!member) continue;
+        const access = String(member.access || '').toLowerCase();
+        if (access !== 'team_lead' && access !== 'regional_manager') continue;
+        coveredGroups.push({ ...buildGroup(member), _isCoverage: true });
+      }
+    }
+    const allGroups = [...groups, ...coveredGroups];
+    const agentEmails = new Set([
+      ...allGroups.flatMap(g => g.allAgentsBelow.map(a => (a.email || '').toLowerCase())),
+      ...directAgents.map(a => (a.email || '').toLowerCase()),
+    ]);
+    return { groups: allGroups, directAgents, allAgentCount: agentEmails.size };
+  }, [isManager, user?.email, allAgentsWL, activeCoverages]);
 
   // Expansion state — Set of manager emails whose groups are expanded.
   // Default is collapsed so an admin sees only RMs at first (per the

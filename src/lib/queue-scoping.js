@@ -71,6 +71,30 @@ import {
 import { OWNER_COUNTRIES, COUNTRY_OWNERS } from '../data/countryOwners.js';
 import { getActiveHandoverDelegationsSync } from './handover-scope-cache.js';
 
+// ── Coverage subtree expansion (2026-05-28 — Ewa feedback) ─────────────
+// When a coverer accepts an OOO handover from a TL/RM, the spec is "the
+// coverer sees the OOO person's team under their Team Summary" — i.e. they
+// step into the requester's seat for the duration of coverage. So the
+// delegated visible set is whatever the REQUESTER would normally see.
+//
+// Admin requesters are deliberately CAPPED at their direct reports rather
+// than the global ALL_EMAILS_SET — accepting one handover should never
+// promote the coverer to global admin scope. Anyone else (RM / TL / agent)
+// gets their natural visible-emails set.
+function _coverageEmailsForRequester(requesterEmail) {
+  if (!requesterEmail) return new Set();
+  const lc = String(requesterEmail).toLowerCase();
+  const member = MEMBERS_BY_EMAIL[lc];
+  const access = String(member?.access || '').toLowerCase();
+  if (access === 'admin') {
+    // Don't escalate the coverer to admin via a single handover.
+    const out = new Set([lc]);
+    for (const r of getDirectReports(lc)) out.add(r.email);
+    return out;
+  }
+  return getVisibleEmailsForAccess(lc);
+}
+
 // Every country anyone owns — admin baseline + fallback when data is sparse.
 // Computed lazily so a hydrateOwnerCountries() update from
 // roster-server.js or useTeamCountryOwnership is reflected on the next
@@ -117,6 +141,13 @@ export function isAdminUser(user) {
 // data lives in the in-memory handover-scope-cache, populated at boot
 // and refreshed on every handover write + every 60 s. Admins are
 // short-circuited; they already see everything.
+//
+// 2026-05-28 (Ewa feedback) — the original delegation just added the
+// requester's own email. Covering a TL therefore showed only the TL's
+// own tickets in the coverer's queue, not the TL's reports' tickets.
+// Per spec "we should see their team under the team summary", we now
+// expand to the requester's full visible-emails set (self + reports).
+// `_coverageEmailsForRequester` handles the admin-cap edge case.
 export function getVisibleEmails(user) {
   if (!user || !user.email) return new Set();
   if (isAdminUser(user)) return ALL_EMAILS_SET;
@@ -124,7 +155,8 @@ export function getVisibleEmails(user) {
   const delegations = getActiveHandoverDelegationsSync(user.email);
   if (delegations.length === 0) return base;
   for (const d of delegations) {
-    if (d?.requesterEmail) base.add(d.requesterEmail);
+    if (!d?.requesterEmail) continue;
+    for (const e of _coverageEmailsForRequester(d.requesterEmail)) base.add(e);
   }
   return base;
 }
@@ -164,7 +196,8 @@ export function getVisibleOOOEmails(user) {
     // Unknown directory member — fall back to self-only.
     const fallback = new Set([callerEmail]);
     for (const d of getActiveHandoverDelegationsSync(callerEmail)) {
-      if (d?.requesterEmail) fallback.add(d.requesterEmail);
+      if (!d?.requesterEmail) continue;
+      for (const e of _coverageEmailsForRequester(d.requesterEmail)) fallback.add(e);
     }
     return fallback;
   }
@@ -202,9 +235,12 @@ export function getVisibleOOOEmails(user) {
   }
 
   // Active-coverage delegations broaden visibility further so the Covering
-  // me lens never underflows.
+  // me lens never underflows. 2026-05-28 — also fold in the requester's
+  // own subtree so a TL covering another TL sees that TL's reports' leave
+  // (matches the Team Summary scope expansion).
   for (const d of getActiveHandoverDelegationsSync(callerEmail)) {
-    if (d?.requesterEmail) visible.add(d.requesterEmail);
+    if (!d?.requesterEmail) continue;
+    for (const e of _coverageEmailsForRequester(d.requesterEmail)) visible.add(e);
   }
 
   return visible;
@@ -273,13 +309,19 @@ export function getVisibleCountries(user) {
   }
 
   // Phase 3 — fold in delegated countries.
+  // 2026-05-28 — when the delegation is a full coverage (no explicit
+  // country subset), add countries owned by the requester AND every
+  // member in their subtree. A TL_A covered by TL_B should yield every
+  // country owned by TL_A or TL_A's reports, not just TL_A's personal
+  // countries.
   const delegations = getActiveHandoverDelegationsSync(email);
   for (const d of delegations) {
     if (!d?.requesterEmail) continue;
     if (!d.countries || d.countries.size === 0) {
-      // Full coverage — add every country the requester owns.
-      const owned = OWNER_COUNTRIES.get(d.requesterEmail);
-      if (owned) for (const c of owned) countries.add(c);
+      for (const e of _coverageEmailsForRequester(d.requesterEmail)) {
+        const owned = OWNER_COUNTRIES.get(e);
+        if (owned) for (const c of owned) countries.add(c);
+      }
     } else {
       for (const c of d.countries) countries.add(c);
     }
