@@ -1334,6 +1334,19 @@ const App=()=>{
         } catch {}
         setFocusTaskId(n.linkId);
         setView('my-queue');
+      } else if (n.linkView === 'urgent-assist' && n.linkId) {
+        // Raquel Sanchez 2026-05-28 — Urgent Assist deep-link. The route
+        // handlers write link_view='urgent-assist' on assignment +
+        // mention notifications; the view doesn't yet have a row-level
+        // detail drawer, so we flip the scope toggle to "Assigned to
+        // me" via the openDetail event listener in UrgentAssistView so
+        // the user lands directly on the row they were tagged on.
+        setView('urgent-assist');
+        const detail = { id: n.linkId, sourceType: n.sourceType || null };
+        setTimeout(() => {
+          try { window.dispatchEvent(new CustomEvent('urgent-assist:openDetail', { detail })); }
+          catch {}
+        }, 60);
       }
       return;
     }
