@@ -216,15 +216,34 @@ export default function HrHubView({ user, onCreateHrHub }) {
   // Dept-scoped member list for the picker. Members carry `orgNodeId` that
   // points at their team/sub-team node; `currentDeptNodeIds` is the Set
   // of every node under the current top-level dept (root + descendants).
-  // Empty Set = cold paint, fall back to all members so the picker is
-  // never blank during boot.
+  //
+  // Duygu Cakalli 2026-05-28 feedback ("Not able to filter hr requests by
+  // assignee"): the previous predicate `m.orgNodeId && nodeIds.has(...)`
+  // strictly required the member to carry an `orgNodeId` that's resolved
+  // into the dept set. Any member added before the Phase 11 backfill
+  // ran on their record — or whose org placement just hasn't propagated
+  // to the FE roster yet — silently dropped out of the picker, so a
+  // search for "Josephine" returned "No matches" even though she owned
+  // visible rows in the dept.
+  //
+  // Mirror BriefingView's `inCurrentDept` lenient pattern (PR #745):
+  //   • Empty Set (cold paint, pre-/dept-scope/current) → include all.
+  //   • Member without `orgNodeId` → include (treat as "not yet placed",
+  //     not as "outside this dept").
+  //   • Member with `orgNodeId` set → only include when it's in nodeIds.
+  // The server-side hr_hub_request read still dept-isolates by
+  // org_node_id, so filtering by a member who isn't actually in this
+  // dept just returns 0 rows — no data leak.
   const deptMembers = useMemo(() => {
     const nodeIds = deptState.currentDeptNodeIds;
-    const pool = (nodeIds && nodeIds.size > 0)
-      ? MEMBERS.filter(m => m.orgNodeId && nodeIds.has(m.orgNodeId))
-      : MEMBERS;
-    return [...pool]
-      .filter(m => m && m.email && m.name)
+    const hasNodeIds = nodeIds && nodeIds.size > 0;
+    return MEMBERS
+      .filter(m => {
+        if (!m || !m.email || !m.name) return false;
+        if (!hasNodeIds) return true;          // cold paint — include all
+        if (!m.orgNodeId) return true;         // not yet placed — include
+        return nodeIds.has(m.orgNodeId);       // placed elsewhere → exclude
+      })
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [deptState.currentDeptNodeIds]);
   // Selected-assignee label for the picker button.
