@@ -69,13 +69,78 @@ function compressImage(file) {
   });
 }
 
-export default function HrHubComposer({ onSubmit }) {
-  const [body, setBody] = useState('');
+// ── Draft persistence (2026-05-28 — Trish bug) ──────────────────────────
+// The detail-panel drawer closes on backdrop click. Before this, any
+// unsent typing was lost on accidental close, refresh, or navigation
+// away. Drafts now persist to localStorage keyed by user + request, so
+// reopening the panel restores exactly what was typed. Cleared on
+// successful submit + on explicit Esc-clear inside the textarea.
+//
+// User-scoped per skill §1.5 — without the email suffix, switching
+// accounts on the same machine would leak drafts.
+const DRAFT_KEY_BASE = 'ops_hub_hr_hub_comment_draft';
+function draftKeyFor(userEmail, requestId) {
+  if (!userEmail || !requestId) return null;
+  return `${DRAFT_KEY_BASE}:${String(userEmail).toLowerCase()}:${requestId}`;
+}
+function loadDraft(userEmail, requestId) {
+  const key = draftKeyFor(userEmail, requestId);
+  if (!key || typeof localStorage === 'undefined') return '';
+  try { return localStorage.getItem(key) || ''; } catch { return ''; }
+}
+function saveDraft(userEmail, requestId, body) {
+  const key = draftKeyFor(userEmail, requestId);
+  if (!key || typeof localStorage === 'undefined') return;
+  try {
+    if (body && body.length > 0) localStorage.setItem(key, body);
+    else localStorage.removeItem(key);
+  } catch { /* quota / private-mode — silent */ }
+}
+function clearDraft(userEmail, requestId) {
+  const key = draftKeyFor(userEmail, requestId);
+  if (!key || typeof localStorage === 'undefined') return;
+  try { localStorage.removeItem(key); } catch { /* silent */ }
+}
+
+export default function HrHubComposer({ onSubmit, requestId, userEmail }) {
+  // Seed body from localStorage on FIRST RENDER so the textarea paints
+  // with the restored draft on the very first frame — no flash-empty
+  // before the draft loads. URL-param-in-useState pattern (skill #31).
+  const [body, setBody] = useState(() => loadDraft(userEmail, requestId));
+  const [draftRestored, setDraftRestored] = useState(() => loadDraft(userEmail, requestId).length > 0);
   const [attachments, setAttachments] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [showEmoji, setShowEmoji] = useState(false);
   const [mentionState, setMentionState] = useState(null);   // { query, anchor, options, highlighted }
+
+  // Re-seed body when the panel switches to a different request. Without
+  // this, navigating from request A → B would keep A's draft visible
+  // until the user starts typing. The `requestId` change also resets
+  // attachments — those are in-memory only because the dataUris are too
+  // heavy for localStorage (~12 MB per file × 5).
+  useEffect(() => {
+    const next = loadDraft(userEmail, requestId);
+    setBody(next);
+    setAttachments([]);
+    setDraftRestored(next.length > 0);
+  }, [userEmail, requestId]);
+
+  // Persist on every keystroke. Synchronous localStorage write — quick
+  // enough for typing speed and avoids any debounce-window risk that
+  // closes the panel before the last keystroke flushes.
+  useEffect(() => {
+    saveDraft(userEmail, requestId, body);
+  }, [body, userEmail, requestId]);
+
+  // The "Draft restored" indicator auto-dismisses after first edit OR
+  // after 4 s, whichever comes first. We don't want it to linger and
+  // imply the draft is still pending restore.
+  useEffect(() => {
+    if (!draftRestored) return undefined;
+    const t = setTimeout(() => setDraftRestored(false), 4000);
+    return () => clearTimeout(t);
+  }, [draftRestored, requestId]);
   // Per-dept mention groups (Phase 12b, 2026-05-25). Fetched once on mount
   // so the @ autocomplete can surface group handles (e.g. @hrxtools)
   // alongside members. listMentionGroups is dept-scoped server-side, so
@@ -235,12 +300,14 @@ export default function HrHubComposer({ onSubmit }) {
       setBody('');
       setAttachments([]);
       setShowEmoji(false);
+      // Posted successfully — the persisted draft can go.
+      clearDraft(userEmail, requestId);
     } catch (err) {
       setError(err?.message || 'Could not post comment');
     } finally {
       setSubmitting(false);
     }
-  }, [body, attachments, onSubmit]);
+  }, [body, attachments, onSubmit, userEmail, requestId]);
 
   const onKey = (e) => {
     if (mentionState && mentionState.options.length > 0) {
@@ -250,7 +317,14 @@ export default function HrHubComposer({ onSubmit }) {
       if (e.key === 'Escape')   { e.preventDefault(); setMentionState(null); return; }
     }
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); submit(); return; }
-    if (e.key === 'Escape') { setBody(''); setAttachments([]); }
+    if (e.key === 'Escape') {
+      setBody('');
+      setAttachments([]);
+      // Esc inside the textarea is the explicit "discard this draft"
+      // signal — wipe the persisted copy too, otherwise it would
+      // immediately re-seed on the next render via loadDraft().
+      clearDraft(userEmail, requestId);
+    }
   };
 
   // Drop handlers — wired to the root wrapper so the whole composer area
@@ -299,6 +373,20 @@ export default function HrHubComposer({ onSubmit }) {
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
+      {draftRestored && (
+        <div
+          role="status"
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            marginBottom: 6, padding: '4px 10px',
+            background: '#f3eff8', color: '#7c3aed',
+            borderRadius: 999, fontSize: 11, fontWeight: 600,
+          }}
+        >
+          <i className="bi bi-arrow-counterclockwise" style={{ fontSize: 12 }} />
+          Draft restored — keep typing or press Esc to discard.
+        </div>
+      )}
       <textarea
         ref={taRef}
         value={body}

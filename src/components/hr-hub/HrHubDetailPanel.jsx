@@ -587,6 +587,8 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
         {request && (
           <div style={{ borderTop: '1px solid var(--border)', padding: 14, flexShrink: 0, background: 'var(--surface)' }}>
             <HrHubComposer
+              requestId={requestId}
+              userEmail={user?.email}
               onSubmit={async (payload) => {
                 const created = await postHrHubComment(requestId, payload);
                 // Optimistic local append so the author sees their comment
