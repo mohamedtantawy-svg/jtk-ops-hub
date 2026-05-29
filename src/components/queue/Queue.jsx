@@ -1507,12 +1507,21 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
                   // their country queues as part of normal work). Workbench
                   // Others is unassigned-orphan fallback only; counting it
                   // here misrepresents the viewer's actual personal load.
+                  //
+                  // 2026-05-29 — fall back to the total open count when the
+                  // viewer has zero rows personally assigned. Without this,
+                  // RM/Admin (and TLs with an empty personal queue) saw the
+                  // badge stuck at 0 even when the dept queue had hundreds
+                  // of open rows — they have no MINE so the personal-load
+                  // signal collapses to the whole queue.
                   : ws.id === 'workbench' ? (() => {
                       const lc = (user?.email || '').toLowerCase();
-                      if (!lc) return visWorkbenchRows.filter(r => !r.isResolved).length;
-                      return visWorkbenchRows.filter(r =>
+                      const totalOpen = visWorkbenchRows.filter(r => !r.isResolved).length;
+                      if (!lc) return totalOpen;
+                      const mineOpen = visWorkbenchRows.filter(r =>
                         !r.isResolved && (r.assigneeEmail || '').toLowerCase() === lc,
                       ).length;
+                      return mineOpen > 0 ? mineOpen : totalOpen;
                     })()
                   : ws.id === 'incentive_plans' ? visIncentivePlanRows.length
                   : ws.id === 'immigration_tasks' ? visImmigrationTaskRows.filter(r => !r.isResolved).length
