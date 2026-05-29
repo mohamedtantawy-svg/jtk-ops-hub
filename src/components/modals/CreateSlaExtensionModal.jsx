@@ -19,6 +19,13 @@ import { getCountryName } from '../../data/constants';
 
 const DURATION_OPTIONS = [1, 2, 3, 4, 5, 6, 7];
 
+// 2026-05-29 — Jose feedback: agents were skipping the optional note,
+// leaving managers without context. The note is now required with a
+// minimum of 20 characters; "Send to manager" stays disabled until met.
+// The same minimum is enforced server-side in /api/v1/hr-hub/requests so
+// it can't be bypassed by a direct API call.
+const NOTE_MIN_CHARS = 20;
+
 const REASON_OPTIONS = [
   {
     value: 'immigration',
@@ -80,7 +87,10 @@ export default function CreateSlaExtensionModal({ task, onClose, onSubmitted }) 
     return () => document.removeEventListener('keydown', h);
   }, [onClose]);
 
-  const canSubmit = !!duration && !!reasonCode && acknowledged && !submitting && !!task?.source && !!task?.id;
+  const trimmedNote = note.trim();
+  const noteLen = trimmedNote.length;
+  const noteMeetsMin = noteLen >= NOTE_MIN_CHARS;
+  const canSubmit = !!duration && !!reasonCode && acknowledged && noteMeetsMin && !submitting && !!task?.source && !!task?.id;
 
   const handleSubmit = async (e) => {
     e?.preventDefault?.();
@@ -89,13 +99,15 @@ export default function CreateSlaExtensionModal({ task, onClose, onSubmitted }) 
     setError(null);
     try {
       const reasonLabel = REASON_OPTIONS.find(r => r.value === reasonCode)?.label || 'reason not specified';
-      const summary = note.trim()
-        ? `${reasonLabel} — requesting ${duration} business day${duration === 1 ? '' : 's'}. ${note.trim()}`
-        : `${reasonLabel} — requesting ${duration} business day${duration === 1 ? '' : 's'}.`;
+      const summary = `${reasonLabel} — requesting ${duration} business day${duration === 1 ? '' : 's'}. ${trimmedNote}`;
       const result = await createHrHubRequest({
         flow: 'sla_extension_request',
         title: `SLA Extension — ${reasonLabel}${task?.subject ? `: ${task.subject}` : ''}`.slice(0, 300),
         summary,
+        // The server requires `note` to be ≥ NOTE_MIN_CHARS on this flow.
+        // Sending the raw note alongside the composed `summary` lets the
+        // server validate length without parsing the prefix back out.
+        note: trimmedNote,
         priority: 'medium',
         links: task?.url ? [task.url] : [],
         taskSource: task.source,
@@ -242,18 +254,41 @@ export default function CreateSlaExtensionModal({ task, onClose, onSubmitted }) 
               </div>
             </div>
 
-            {/* Optional note */}
+            {/* Required note */}
             <div>
-              <label htmlFor="sla-ext-note" style={labelStyle}>Note (optional)</label>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 6 }}>
+                <label htmlFor="sla-ext-note" style={{ ...labelStyle, marginBottom: 0 }}>Note *</label>
+                <span style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: noteMeetsMin ? '#15803d' : (noteLen > 0 ? '#b45309' : 'var(--text-muted)'),
+                  fontVariantNumeric: 'tabular-nums',
+                }}>
+                  {noteMeetsMin
+                    ? `${noteLen} characters`
+                    : `${noteLen} / ${NOTE_MIN_CHARS} minimum`}
+                </span>
+              </div>
               <textarea
                 id="sla-ext-note"
                 value={note}
                 onChange={e => setNote(e.target.value)}
-                rows={2}
+                rows={3}
                 maxLength={1000}
-                placeholder="Anything else the manager needs to know?"
-                style={{ ...inputStyle, resize: 'vertical' }}
+                required
+                aria-required="true"
+                aria-invalid={!noteMeetsMin && noteLen > 0}
+                placeholder="Explain what's blocking, what's already been tried, and the next step. The manager uses this to approve."
+                style={{
+                  ...inputStyle,
+                  resize: 'vertical',
+                  borderColor: (!noteMeetsMin && noteLen > 0) ? '#b45309' : 'var(--border)',
+                }}
               />
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.4 }}>
+                Required — managers approve based on this. Aim for the
+                blocker + what you&apos;ve tried + next step.
+              </div>
             </div>
 
             {/* Acknowledgement */}

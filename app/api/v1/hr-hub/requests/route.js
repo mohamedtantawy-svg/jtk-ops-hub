@@ -482,6 +482,16 @@ export async function POST(req) {
       return NextResponse.json({ error: 'acknowledged must be true — confirm the employee/client has been informed about the hold' }, { status: 400 });
     }
     slaExtAcknowledged = true;
+    // 2026-05-29 (Jose feedback): the agent-facing note is required with
+    // a 20-char minimum so managers always get operational context. Mirror
+    // of the FE NOTE_MIN_CHARS gate in CreateSlaExtensionModal — keep
+    // them in lockstep; if you tune one tune both.
+    const noteRaw = typeof body.note === 'string' ? body.note.trim() : '';
+    if (noteRaw.length < 20) {
+      return NextResponse.json({
+        error: `note must be at least 20 characters — explain the blocker, what was tried, and the next step (got ${noteRaw.length})`,
+      }, { status: 400 });
+    }
     const existing = await findActiveExtension(taskSource, taskId);
     if (existing) {
       return NextResponse.json(
