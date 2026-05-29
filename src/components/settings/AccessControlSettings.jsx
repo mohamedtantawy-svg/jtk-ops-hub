@@ -1,9 +1,10 @@
 import { useState, useMemo } from 'react';
 import { ALL_VIEWS, ALL_ACTIONS, ALL_ADMIN_POWERS, DATA_SCOPES, VIEW_LABELS, ACTION_LABELS, ADMIN_POWER_LABELS, DATA_SCOPE_LABELS } from '../../data/accessControl';
 import { MEMBERS } from '../../data/members';
-import { TITLES, REGIONS, TEAMS, DEPARTMENTS } from '../../data/orgConfig';
+import { TITLES, REGIONS, TEAMS } from '../../data/orgConfig';
 import { FLAGS } from '../../data/constants';
 import { useTeamMembers } from '../../hooks/useTeamMembers';
+import { useOrgNodes } from '../../hooks/useOrgNodes';
 
 // Map a Settings access-type pick to the canonical base role persisted in
 // team_member_overrides.access. Custom IDs (at_hr_hub_admin, at_<custom>)
@@ -47,7 +48,7 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
   const [searchTerm,setSearchTerm]=useState('');
   const [editingUser,setEditingUser]=useState(null); // email string or null
   const [addingUser,setAddingUser]=useState(false);
-  const [newUser,setNewUser]=useState({email:'',name:'',accessTypeId:'at_agent',title:'',startDate:'',managerEmail:'',region:'',team:'',department:'HR Experience',country:'',status:'active'});
+  const [newUser,setNewUser]=useState({email:'',name:'',accessTypeId:'at_agent',title:'',startDate:'',managerEmail:'',region:'',team:'',department:'HR Experience',orgNodeId:'',country:'',status:'active'});
   const [dirFilter,setDirFilter]=useState({region:'all',team:'all',accessType:'all',status:'all'});
   const [dirSort,setDirSort]=useState('name');
   const [savingUser,setSavingUser]=useState(false);
@@ -61,6 +62,38 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
   // tab uses so additions/edits/removals land in the DB and ripple to all
   // surfaces via roster hydration.
   const { addMember, updateMember, removeMember } = useTeamMembers();
+
+  // ── Live department list from the Org tab ────────────────────────────────
+  // The Department dropdown reads + writes against real org_nodes placement.
+  // Top-level depts = `kind='department' AND parent_id IS NULL`. The dropdown
+  // stores the dept's UUID under `orgNodeId`, which the PATCH/POST forwards
+  // to team_member_overrides.org_node_id. Without this the panel showed a
+  // hardcoded ['HR Experience','HR Operations'] list that never matched the
+  // real depts (HRX / Global Immigration / Payroll Operations / Benefits).
+  const orgNodes = useOrgNodes();
+  const rootDepts = useMemo(
+    () => (orgNodes.rootNodes || []).filter(n => n.kind === 'department' && !n.isArchived),
+    [orgNodes.rootNodes],
+  );
+  const rootDeptById = useMemo(
+    () => Object.fromEntries(rootDepts.map(d => [d.id, d])),
+    [rootDepts],
+  );
+  const rootDeptByName = useMemo(
+    () => Object.fromEntries(rootDepts.map(d => [d.name, d])),
+    [rootDepts],
+  );
+  // Resolve which option to highlight in the dropdown for a given member.
+  // Members placed under a sub-team have orgNodeId = sub-team UUID, NOT the
+  // root dept UUID — so a direct id match misses them. The server already
+  // walks the parent chain and ships `department` (the top-level dept name),
+  // so we match by name to find the right root dept id for display.
+  const pickRootDeptIdForMember = (u) => {
+    if (!u) return '';
+    if (u.orgNodeId && rootDeptById[u.orgNodeId]) return u.orgNodeId;
+    if (u.department && rootDeptByName[u.department]) return rootDeptByName[u.department].id;
+    return '';
+  };
 
   // --- helpers ---
   const userCountByType=useMemo(()=>{
@@ -147,13 +180,15 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
       region:newUser.region||newUser.team||null,
       country:newUser.country||null,
       service:'EOR',
+      orgNodeId:newUser.orgNodeId||null,
     });
     setSavingUser(false);
     if(!result.ok){addToast('error','Failed to add user',result.error||'Please try again.');return;}
     const initials=newUser.name.trim().split(' ').map(p=>p.charAt(0).toUpperCase()).slice(0,2).join('');
-    setUserAccessMap(prev=>({...prev,[email]:{...newUser,email:undefined,initials}}));
+    const deptName=newUser.orgNodeId?(rootDeptById[newUser.orgNodeId]?.name||newUser.department):newUser.department;
+    setUserAccessMap(prev=>({...prev,[email]:{...newUser,email:undefined,initials,department:deptName}}));
     addToast('success','User Added',`${newUser.name} added to the directory`);
-    setNewUser({email:'',name:'',accessTypeId:'at_agent',title:'',startDate:'',managerEmail:'',region:'',team:'',department:'HR Experience',country:'',status:'active'});
+    setNewUser({email:'',name:'',accessTypeId:'at_agent',title:'',startDate:'',managerEmail:'',region:'',team:'',department:'HR Experience',orgNodeId:'',country:'',status:'active'});
     setAddingUser(false);
   };
 
@@ -173,10 +208,22 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
       team:existing.team||null,
       region:existing.region||existing.team||null,
       country:existing.country||null,
+      // 2026-05-29 — Department change now persists. The dropdown stores
+      // the org_node UUID under `orgNodeId`; PATCH writes it through to
+      // team_member_overrides.org_node_id so the next roster hydration
+      // reflects the new dept everywhere (Org tab, Team Summary, dept-
+      // scoped reads, dept-branded surfaces).
+      orgNodeId:existing.orgNodeId||null,
     });
     setSavingUser(false);
     if(!result.ok){addToast('error','Failed to save',result.error||'Please try again.');return;}
-    setUserAccessMap(prev=>({...prev,[email]:{...existing}}));
+    // Mirror the dept name from the picked node so other panels reading
+    // userAccessMap.department see the up-to-date label without waiting
+    // on the roster rehydrate.
+    const deptName=existing.orgNodeId
+      ?(rootDeptById[existing.orgNodeId]?.name||existing.department||'HR Experience')
+      :(existing.department||'HR Experience');
+    setUserAccessMap(prev=>({...prev,[email]:{...existing,department:deptName}}));
     addToast('success','Updated',`${existing.name||email} updated`);
     setEditingUser(null);
   };
@@ -437,8 +484,12 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
             </div>
             <div style={fieldRow}>
               <div><label style={labelStyle}>Department</label>
-                <select style={selectStyle} value={newUser.department} onChange={e=>setNewUser(p=>({...p,department:e.target.value}))}>
-                  {DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
+                <select style={selectStyle} value={pickRootDeptIdForMember(newUser)} onChange={e=>{
+                  const id=e.target.value||'';
+                  setNewUser(p=>({...p,orgNodeId:id,department:id?(rootDeptById[id]?.name||p.department):''}));
+                }}>
+                  <option value="">— Select department —</option>
+                  {rootDepts.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
                 </select>
               </div>
               <div><label style={labelStyle}>Country Code</label><input style={inputStyle} value={newUser.country} onChange={e=>setNewUser(p=>({...p,country:e.target.value.toUpperCase()}))} placeholder="e.g. UK, US, DE" maxLength={3}/></div>
@@ -537,8 +588,13 @@ const AccessControlSettings=({accessTypes,setAccessTypes,userAccessMap,setUserAc
                         </div>
                         <div style={fieldRow}>
                           <div><label style={labelStyle}>Department</label>
-                            <select style={selectStyle} value={u.department||''} onChange={e=>updateUserField(u.email,'department',e.target.value)}>
-                              {DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}
+                            <select style={selectStyle} value={pickRootDeptIdForMember(u)} onChange={e=>{
+                              const id=e.target.value||'';
+                              updateUserField(u.email,'orgNodeId',id||null);
+                              updateUserField(u.email,'department',id?(rootDeptById[id]?.name||''):'');
+                            }}>
+                              <option value="">— Select department —</option>
+                              {rootDepts.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}
                             </select>
                           </div>
                           <div><label style={labelStyle}>Status</label>

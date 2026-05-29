@@ -55,7 +55,7 @@ export async function GET(req) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const [overridesRes, countriesRes, loginsRes] = await Promise.all([
+    const [overridesRes, countriesRes, loginsRes, orgNodesRes] = await Promise.all([
       query(
         `SELECT email, name, initials, title, access, manager_email, team, region,
                 service, country, avatar_url, start_date, is_new, is_deleted,
@@ -86,9 +86,19 @@ export async function GET(req) {
         console.warn('[team-members GET] member_logins query failed:', err?.message);
         return { rows: [] };
       }),
+      // org_nodes powers the per-member `department` derivation in
+      // mergeTeamMembers (parent_id walk → top-level dept name). Without
+      // this, Access Control's Department field falls back to the
+      // hardcoded literal and never reflects real placement.
+      query(
+        `SELECT id, parent_id, kind, name FROM org_nodes WHERE is_archived = false`,
+      ).catch(err => {
+        console.warn('[team-members GET] org_nodes query failed:', err?.message);
+        return { rows: [] };
+      }),
     ]);
 
-    const merged = mergeTeamMembers(overridesRes.rows, loginsRes.rows);
+    const merged = mergeTeamMembers(overridesRes.rows, loginsRes.rows, orgNodesRes.rows);
 
     // Group countries by lowercase email so the UI can render every member
     // with their owned set inline. Junction rows that don't match a current
