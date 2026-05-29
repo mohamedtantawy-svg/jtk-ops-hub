@@ -120,6 +120,45 @@ function applyOverride(base, override, loginsByEmail) {
   return merged;
 }
 
+// Build the top-level "department" name for every member by walking the
+// org_nodes parent_id chain up from their orgNodeId. Top-level depts are
+// rows with `kind='department' AND parent_id IS NULL`. A member placed
+// under a sub-team still resolves to the dept at the head of the chain.
+// Capped at 16 hops as a defence against accidental cycles (the schema
+// doesn't enforce a DAG).
+//
+// 2026-05-29 (Beata Sroda incident): the Access Control panel had its
+// Department dropdown read from a hardcoded literal in _buildAccessMap,
+// so it never reflected real placement and never persisted. This helper
+// gives that panel the truth so its dropdown can default to the live
+// dept the member is actually placed under.
+function buildOrgNodeLookup(orgNodes = []) {
+  const map = new Map();
+  for (const n of orgNodes) {
+    if (!n || !n.id) continue;
+    map.set(String(n.id), {
+      parentId: n.parent_id || n.parentId || null,
+      name: n.name,
+      kind: n.kind,
+    });
+  }
+  return map;
+}
+
+function resolveTopDept(nodeId, nodeMap) {
+  if (!nodeId || !nodeMap || nodeMap.size === 0) return null;
+  let cur = nodeMap.get(String(nodeId));
+  let depth = 0;
+  while (cur && cur.parentId && depth < 16) {
+    const parent = nodeMap.get(String(cur.parentId));
+    if (!parent) break;
+    cur = parent;
+    depth += 1;
+  }
+  if (cur && cur.kind === 'department' && !cur.parentId) return cur.name;
+  return null;
+}
+
 /**
  * Merge baseline TEAM_MEMBERS with override rows + member_logins activity.
  *
@@ -130,9 +169,14 @@ function applyOverride(base, override, loginsByEmail) {
  *                                (used to mean "Never seen"). Migrated callers
  *                                pass the SELECT result so the merge has the
  *                                authoritative activity timestamps.
+ * @param {Array} [orgNodes]   — rows from org_nodes (id, parent_id, kind, name);
+ *                                used to derive a member's top-level dept via
+ *                                parent walk on their orgNodeId. Omit / pass []
+ *                                and every member ships with department=null
+ *                                (callers can still fall back at the FE layer).
  * @returns {Array} merged member list (camelCase), deleted entries filtered out
  */
-export function mergeTeamMembers(overrideRows = [], loginRows = []) {
+export function mergeTeamMembers(overrideRows = [], loginRows = [], orgNodes = []) {
   // Build override lookup keyed by email
   const byEmail = new Map();
   for (const row of overrideRows) {
@@ -140,6 +184,7 @@ export function mergeTeamMembers(overrideRows = [], loginRows = []) {
     if (normalised) byEmail.set(normalised.email.toLowerCase(), normalised);
   }
   const loginsByEmail = buildLoginsMap(loginRows);
+  const orgNodeLookup = buildOrgNodeLookup(orgNodes);
 
   const merged = [];
   const seenEmails = new Set();
@@ -150,7 +195,9 @@ export function mergeTeamMembers(overrideRows = [], loginRows = []) {
     seenEmails.add(emailLc);
     const override = byEmail.get(emailLc);
     if (override?.isDeleted) continue;          // soft-deleted → hide
-    merged.push(applyOverride(base, override, loginsByEmail));
+    const row = applyOverride(base, override, loginsByEmail);
+    row.department = resolveTopDept(row.orgNodeId, orgNodeLookup);
+    merged.push(row);
   }
 
   // 2. Brand-new members pass — emails not in baseline
@@ -185,6 +232,7 @@ export function mergeTeamMembers(overrideRows = [], loginRows = []) {
       isHrHubAdmin: override.isHrHubAdmin === true,
       isLeaderAlertsAdmin: override.isLeaderAlertsAdmin === true,
       orgNodeId: override.orgNodeId || null,
+      department: resolveTopDept(override.orgNodeId || null, orgNodeLookup),
     });
   }
 

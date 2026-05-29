@@ -56,6 +56,78 @@ export function metaFor(type) {
   return TYPE_META[type] || TYPE_META.info;
 }
 
+// ── Category segregation (Ayushi feedback, 2026-05-29) ─────────────────────
+// Notifications are bucketed into stable categories so a 45-row list stays
+// scannable. Order matters: mentions take precedence over the contextual
+// surface (an @-mention on an HR Hub request lands in Mentions, not HR Hub)
+// because "someone tagged me" is the most urgent signal. SLA Extensions get
+// their own section ahead of HR Hub since they require a manager decision.
+export const CATEGORIES = [
+  { id: 'mentions',        label: '@ Mentions',        icon: 'bi-at',                        color: '#7c3aed' },
+  { id: 'sla_extensions',  label: 'SLA Extensions',    icon: 'bi-clock-history',             color: '#d97706' },
+  { id: 'hr_hub',          label: 'HR Hub',            icon: 'bi-briefcase-fill',            color: '#1f74b3' },
+  { id: 'leader_alerts',   label: 'Leaders Hub',       icon: 'bi-megaphone-fill',            color: '#0369a1' },
+  { id: 'urgent_assist',   label: 'Urgent Assist',     icon: 'bi-exclamation-triangle-fill', color: '#d42d35' },
+  { id: 'workspace_tasks', label: 'Tasks & Workspace', icon: 'bi-inbox-fill',                color: '#0a5a99' },
+  { id: 'announcements',   label: 'Announcements',     icon: 'bi-megaphone',                 color: '#15803d' },
+  { id: 'ooo',             label: 'OOO & Handovers',   icon: 'bi-airplane',                  color: '#ed8d00' },
+  { id: 'feedback',        label: 'Feedback',          icon: 'bi-lightbulb-fill',            color: '#7c3aed' },
+  { id: 'other',           label: 'Other',             icon: 'bi-bell',                      color: '#616161' },
+];
+
+const CATEGORY_BY_ID = Object.fromEntries(CATEGORIES.map(c => [c.id, c]));
+
+export function categorizeNotificationGroup(group) {
+  if (!group || !Array.isArray(group.items) || group.items.length === 0) return 'other';
+  // An @-mention anywhere in the group routes the whole task here — beats
+  // the contextual surface.
+  if (group.items.some(i => (i.type || '') === 'mention')) return 'mentions';
+
+  const head = group.items[0] || {};
+  const linkView = group.linkView || head.linkView || '';
+  const sourceType = head.sourceType || '';
+  const hrHubFlow = group.items.find(i => i.hrHubFlow)?.hrHubFlow || '';
+
+  if (linkView === 'hr_hub') {
+    return hrHubFlow === 'sla_extension_request' ? 'sla_extensions' : 'hr_hub';
+  }
+  if (linkView === 'leader-alerts' || linkView === 'leader_alerts') return 'leader_alerts';
+  if (sourceType.startsWith('urgent_assist')) return 'urgent_assist';
+  if (sourceType.startsWith('work_task') || linkView === 'my-queue' || linkView === 'work-tasks') {
+    return 'workspace_tasks';
+  }
+  if (linkView === 'announcements') return 'announcements';
+  if (sourceType === 'handover' || sourceType === 'time_off_event' || linkView === 'ooo') return 'ooo';
+  if (linkView === 'feedback') return 'feedback';
+  return 'other';
+}
+
+// Build [{ ...category, groups, unreadCount, totalCount }] in CATEGORIES order.
+// Categories with no groups are dropped so the list doesn't show empty headers.
+export function sectionizeGroups(groups, { hrHubLabel } = {}) {
+  const byCat = new Map();
+  for (const g of groups) {
+    const id = categorizeNotificationGroup(g);
+    if (!byCat.has(id)) byCat.set(id, []);
+    byCat.get(id).push(g);
+  }
+  const out = [];
+  for (const c of CATEGORIES) {
+    const list = byCat.get(c.id);
+    if (!list || list.length === 0) continue;
+    const unread = list.reduce((s, g) => s + (g.unreadCount || 0), 0);
+    const total = list.reduce((s, g) => s + (g.items?.length || 0), 0);
+    out.push({
+      ...c,
+      label: c.id === 'hr_hub' && hrHubLabel ? hrHubLabel : c.label,
+      groups: list,
+      unreadCount: unread,
+      totalCount: total,
+    });
+  }
+  return out;
+}
+
 // Group notifications by (linkView, linkId) so the same task collapses to
 // one card. Notifications without link metadata get their own group keyed
 // on id (legacy in-memory items + ungrouped one-offs).
@@ -137,6 +209,8 @@ export default function NotificationPanel({
   soundPref,
 }) {
   const [filter, setFilter] = useState('all'); // 'all' | 'unread' | 'mentions'
+  const deptState = useCurrentDept();
+  const hubBrand = useMemo(() => getHubBrand(deptState.dept), [deptState.dept]);
 
   // Normalize each notif so grouping has consistent timestamps / shape.
   const normalized = useMemo(() => notifs.map(n => ({
@@ -153,6 +227,11 @@ export default function NotificationPanel({
   }, [normalized, filter]);
 
   const groups = useMemo(() => groupNotifications(filtered), [filtered]);
+
+  const sections = useMemo(
+    () => sectionizeGroups(groups, { hrHubLabel: hubBrand.hubLabel }),
+    [groups, hubBrand.hubLabel],
+  );
 
   const counts = useMemo(() => ({
     all: normalized.length,
@@ -299,13 +378,17 @@ export default function NotificationPanel({
                 : 'Updates on tasks you raise or follow will appear here.'}
             </div>
           </div>
-        ) : groups.map(g => <NotificationGroupCard key={g.key} group={g}
-          onClick={() => handleGroupClick(g)}
-          onMarkRead={(e) => handleMarkGroupRead(e, g)}
-          onMarkUnread={(e) => handleMarkGroupUnread(e, g)}
-          canMarkRead={!!markRead && g.unreadCount > 0}
-          canMarkUnread={!!markUnread && g.unreadCount === 0 && g.items.length > 0}
-        />)}
+        ) : sections.map(section => (
+          <CategorySection
+            key={section.id}
+            section={section}
+            onGroupClick={handleGroupClick}
+            onMarkGroupRead={handleMarkGroupRead}
+            onMarkGroupUnread={handleMarkGroupUnread}
+            canMarkRead={!!markRead}
+            canMarkUnread={!!markUnread}
+          />
+        ))}
       </div>
 
       {/* Footer — opens the dedicated full-page notifications view */}
@@ -330,6 +413,69 @@ export default function NotificationPanel({
           <i className="bi-arrow-right" style={{ fontSize: 12 }} />
         </button>
       )}
+    </div>
+  );
+}
+
+// Collapsible category band. Default open if there's anything unread in the
+// section; default closed when the section is entirely read so the panel
+// stays scannable for users with long histories. The user can re-toggle.
+export function CategorySection({ section, onGroupClick, onMarkGroupRead, onMarkGroupUnread, canMarkRead, canMarkUnread }) {
+  const [open, setOpen] = useState(section.unreadCount > 0);
+  return (
+    <div style={{ borderBottom: '1px solid var(--border-light, #f0efed)' }}>
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        aria-expanded={open}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+          padding: '8px 18px', background: 'var(--surface-2, #fafaf9)',
+          border: 'none', borderBottom: open ? '1px solid var(--border-light, #f0efed)' : 'none',
+          cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
+          color: 'var(--text)',
+        }}
+      >
+        <i
+          className={open ? 'bi-chevron-down' : 'bi-chevron-right'}
+          style={{ fontSize: 10, color: 'var(--text-muted)', width: 10, flexShrink: 0 }}
+        />
+        <span style={{
+          width: 22, height: 22, borderRadius: 6,
+          background: `${section.color}15`, color: section.color,
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          flexShrink: 0,
+        }}>
+          <i className={section.icon} style={{ fontSize: 12 }} />
+        </span>
+        <span style={{
+          flex: 1, fontSize: 11.5, fontWeight: 700, color: 'var(--text)',
+          letterSpacing: '.02em', textTransform: 'uppercase',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{section.label}</span>
+        {section.unreadCount > 0 && (
+          <span style={{
+            fontSize: 10, fontWeight: 700, color: 'white',
+            background: section.color, padding: '1px 7px', borderRadius: 999,
+            minWidth: 18, textAlign: 'center', lineHeight: '14px',
+          }}>{section.unreadCount}</span>
+        )}
+        <span style={{
+          fontSize: 10.5, color: 'var(--text-muted)', fontWeight: 600,
+          minWidth: 18, textAlign: 'right',
+        }}>{section.totalCount}</span>
+      </button>
+      {open && section.groups.map(g => (
+        <NotificationGroupCard
+          key={g.key}
+          group={g}
+          onClick={() => onGroupClick(g)}
+          onMarkRead={(e) => onMarkGroupRead(e, g)}
+          onMarkUnread={(e) => onMarkGroupUnread(e, g)}
+          canMarkRead={canMarkRead && g.unreadCount > 0}
+          canMarkUnread={canMarkUnread && g.unreadCount === 0 && g.items.length > 0}
+        />
+      ))}
     </div>
   );
 }

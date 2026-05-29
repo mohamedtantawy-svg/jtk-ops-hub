@@ -1,7 +1,17 @@
 // ── /api/v1/notifications — per-user notification feed ───────────────────────
-// GET: returns the caller's most recent notifications + unread count. Server
-// is the source of truth so unread state is consistent across tabs/devices
-// and the bell stays accurate across reloads.
+// GET: returns the caller's notifications + total unread count. Server is the
+// source of truth so unread state is consistent across tabs/devices and the
+// bell stays accurate across reloads.
+//
+// Two-pass shape (2026-05-29): ALL unread come first (capped at UNREAD_CAP),
+// then recent read top up the rest of `limit`. A plain `ORDER BY created_at
+// DESC LIMIT 50` was hiding older unread behind newer reads — Ayushi had 45
+// unread but only a handful surfaced in the bell. Both indexes
+// (idx_user_notifications_unread, idx_user_notifications_recipient_created)
+// keep this fast.
+//
+// `flow` is joined in from hr_hub_request for HR Hub rows so the client can
+// segregate SLA Extension notifications from regular HR Hub ones.
 //
 // Recipient is locked to the JWT email — there is no way for a caller to
 // fetch someone else's notifications. This is enforced in SQL by filtering
@@ -12,6 +22,22 @@ import { NextResponse } from 'next/server';
 import { query } from '../../../../src/lib/db';
 import { getAuthUser } from '../../../../src/lib/auth-helpers';
 
+const UNREAD_CAP = 500; // safety upper bound on a single response
+
+const SELECT_COLUMNS = `
+  n.id, n.recipient_email, n.type, n.title, n.body,
+  n.link_view, n.link_id, n.source_type, n.source_id,
+  n.actor_email, n.actor_name, n.created_at, n.read_at,
+  CASE WHEN n.link_view = 'hr_hub' THEN hr.flow ELSE NULL END AS hr_hub_flow
+`;
+
+const HR_HUB_JOIN = `
+  LEFT JOIN hr_hub_request hr
+    ON n.link_view = 'hr_hub'
+   AND n.link_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+   AND hr.id = n.link_id::uuid
+`;
+
 export async function GET(req) {
   try {
     const user = getAuthUser(req);
@@ -21,29 +47,47 @@ export async function GET(req) {
     const recipient = String(user.email).toLowerCase();
 
     const { searchParams } = new URL(req.url);
-    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '50')));
+    const limit = Math.min(500, Math.max(1, parseInt(searchParams.get('limit') || '100')));
 
-    const [{ rows }, unreadResult] = await Promise.all([
+    // Three queries in parallel: every unread row up to UNREAD_CAP, the most
+    // recent reads up to `limit`, and the total unread count (which can
+    // exceed UNREAD_CAP — we still want the true number for the badge).
+    const [unreadRes, readRes, unreadCountRes] = await Promise.all([
       query(
-        `SELECT id, recipient_email, type, title, body,
-                link_view, link_id, source_type, source_id,
-                actor_email, actor_name, created_at, read_at
-           FROM user_notifications
-          WHERE LOWER(recipient_email) = $1
-          ORDER BY created_at DESC
+        `SELECT ${SELECT_COLUMNS}
+           FROM user_notifications n
+           ${HR_HUB_JOIN}
+          WHERE LOWER(n.recipient_email) = $1
+            AND n.read_at IS NULL
+          ORDER BY n.created_at DESC
           LIMIT $2`,
-        [recipient, limit]
+        [recipient, UNREAD_CAP],
+      ),
+      query(
+        `SELECT ${SELECT_COLUMNS}
+           FROM user_notifications n
+           ${HR_HUB_JOIN}
+          WHERE LOWER(n.recipient_email) = $1
+            AND n.read_at IS NOT NULL
+          ORDER BY n.created_at DESC
+          LIMIT $2`,
+        [recipient, limit],
       ),
       query(
         `SELECT COUNT(*)::int AS n
            FROM user_notifications
           WHERE LOWER(recipient_email) = $1
             AND read_at IS NULL`,
-        [recipient]
+        [recipient],
       ),
     ]);
 
-    const items = rows.map(r => ({
+    // Concat unread + reads, then trim. If unread already exceeds `limit`
+    // we still ship the full unread set so the bell never under-reports.
+    const readBudget = Math.max(0, limit - unreadRes.rows.length);
+    const merged = [...unreadRes.rows, ...readRes.rows.slice(0, readBudget)];
+
+    const items = merged.map(r => ({
       id: r.id,
       recipientEmail: r.recipient_email,
       type: r.type,
@@ -57,11 +101,12 @@ export async function GET(req) {
       actorName: r.actor_name || null,
       createdAt: r.created_at,
       readAt: r.read_at || null,
+      hrHubFlow: r.hr_hub_flow || null,
     }));
 
     return NextResponse.json({
       items,
-      unreadCount: unreadResult.rows[0]?.n || 0,
+      unreadCount: unreadCountRes.rows[0]?.n || 0,
     });
   } catch (err) {
     console.error('[notifications GET]', err.message);

@@ -198,7 +198,12 @@ function _buildAccessMap(roster) {
         managerEmail: m.managerEmail,
         region: m.team,
         team: m.team,
-        department: 'HR Experience',
+        // 2026-05-29 — department + orgNodeId now derive from real org
+        // placement (server walks org_nodes parent_id chain). Falls back
+        // to 'HR Experience' for unplaced members so the Access Control
+        // dropdown still shows a sensible default rather than blank.
+        department: m.department || 'HR Experience',
+        orgNodeId: m.orgNodeId || null,
         country: m.country || null,
         status: m.isDeleted ? 'inactive' : 'active',
         access: m.access,

@@ -12,12 +12,13 @@
 //   2. Segmented scope — All / Unread / @Mentions
 //   3. Surface filter  — pill chips: HR Hub, Feedback, Leaders, Announcements
 //   4. Search row      — text filter on title + body
-//   5. Row list        — wider rendering of NotificationGroupCard
+//   5. Row list        — CategorySection sections + grouped task cards
 
 import { useMemo, useState } from 'react';
 import {
   groupNotifications,
-  NotificationGroupCard,
+  CategorySection,
+  sectionizeGroups,
   pluralize,
 } from '../nav/NotificationPanel';
 import { useCurrentDept } from '../../hooks/useCurrentDept';
@@ -80,6 +81,14 @@ export default function NotificationsView({
   }, [normalized, scope, surface, search]);
 
   const groups = useMemo(() => groupNotifications(filtered), [filtered]);
+
+  // Same category sectioning as the bell dropdown so the full-page and the
+  // popover stay visually consistent. HR Hub section label honours the
+  // dept brand (e.g. "GIX Hub" when GIX is active).
+  const sections = useMemo(
+    () => sectionizeGroups(groups, { hrHubLabel: hubBrand.hubLabel }),
+    [groups, hubBrand.hubLabel],
+  );
 
   const counts = useMemo(() => ({
     all:      normalized.length,
@@ -275,15 +284,15 @@ export default function NotificationsView({
           </div>
         ) : (
           <div style={{ overflowY: 'auto', flex: 1, minHeight: 0 }}>
-            {groups.map(g => (
-              <NotificationGroupCard
-                key={g.key}
-                group={g}
-                onClick={() => handleClick(g)}
-                onMarkRead={(e) => handleMarkGroupRead(e, g)}
-                onMarkUnread={(e) => handleMarkGroupUnread(e, g)}
-                canMarkRead={!!markRead && g.unreadCount > 0}
-                canMarkUnread={!!markUnread && g.unreadCount === 0 && g.items.length > 0}
+            {sections.map(section => (
+              <CategorySection
+                key={section.id}
+                section={section}
+                onGroupClick={handleClick}
+                onMarkGroupRead={handleMarkGroupRead}
+                onMarkGroupUnread={handleMarkGroupUnread}
+                canMarkRead={!!markRead}
+                canMarkUnread={!!markUnread}
               />
             ))}
           </div>
