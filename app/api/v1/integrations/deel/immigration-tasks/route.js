@@ -103,7 +103,26 @@ export async function GET(req) {
           // Normalise to the standard queue row shape so SourceTable can
           // render the rows without per-source rendering forks.
           const items = normalizeImmigrationTasks(result.items || []);
-          return { items, total: items.length };
+          // 2026-05-29 — preserve the upstream telemetry on the cached
+          // payload so we can audit filter coverage from the response
+          // even on a stale-cache hit. Per skill §3.6 the raw status
+          // distribution is the only post-deploy signal for "did the
+          // upstream return everything we expected".
+          console.info(
+            '[immigration-tasks] upstream scan: items=%d pages=%d total=%s statuses=%s',
+            result.items?.length ?? 0,
+            result.upstreamPages,
+            result.upstreamTotal == null ? 'n/a' : String(result.upstreamTotal),
+            JSON.stringify(result.upstreamStatusCounts || {}),
+          );
+          return {
+            items,
+            total: items.length,
+            upstreamStatusCounts: result.upstreamStatusCounts || {},
+            upstreamTotal: result.upstreamTotal ?? null,
+            upstreamPages: result.upstreamPages ?? 0,
+            upstreamScanned: result.upstreamScanned ?? items.length,
+          };
         },
         { timeoutMs: SCAN_TIMEOUT_MS, staleTtl: STALE_TTL },
       );

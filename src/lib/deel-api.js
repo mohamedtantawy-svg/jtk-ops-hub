@@ -2082,10 +2082,24 @@ export async function listWorkbenchTasks(params = {}) {
  * true for the GIX dept.
  *
  * Pagination via `take` + `skip` (Deel's standard offset-style for the
- * /admin/mobility namespace). Defaults to take=100 — well above the ~40
- * actionable items the GIX page surfaces today, with headroom for growth.
- * Returns the raw `items` array; the route handler normalises to the
- * standard queue row shape before serving.
+ * /admin/mobility namespace). Defaults to take=100 with 10 pages × 200 =
+ * 2000 max — pessimistic backlog ceiling for the GIX dept (40-200 is
+ * steady-state, but PRs that broaden the upstream filter can briefly
+ * surface every actionable historical row).
+ *
+ * 2026-05-29 — upstream filter changed from `caseStatus[]=OPEN
+ * &status[]=ONGOING` to `caseStatus[]=OPEN` only. The ONGOING constraint
+ * silently dropped every PENDING / AWAITING_CLIENT / AWAITING_AGENT /
+ * AWAITING_REVIEW / NOT_STARTED / READY / BLOCKED / ON_HOLD row — i.e.
+ * the majority of Pablo's team's day-to-day work — so GIX TLs saw a
+ * vanishingly small slice of the queue. The normaliser already marks
+ * COMPLETED / ARCHIVED / CANCELLED as resolved so terminal states are
+ * safely partitioned client-side.
+ *
+ * Returns the raw `items` array plus diagnostic counters so the route
+ * layer can surface them (per skill §3.6 — "Track raw status counts as
+ * you scan and surface them in the route response"). The status-count
+ * map is the only post-deploy signal we have for upstream filter gaps.
  */
 export async function listImmigrationActions(params = {}) {
   const take = Math.min(200, Math.max(1, params.take || 100));
@@ -2093,26 +2107,40 @@ export async function listImmigrationActions(params = {}) {
   const fetchOpts = adminTokenOverride ? { adminTokenOverride } : {};
 
   const all = [];
+  const upstreamStatusCounts = {}; // tally `t.status` raw values, debug.
   let skip = 0;
-  // Safety cap so a runaway upstream can't paginate forever. 5 pages × 200 =
-  // 1000 max — far above expected steady-state.
+  let upstreamTotal = null;
+  // Safety cap so a runaway upstream can't paginate forever.
+  // 10 pages × take=200 = 2000 max — far above steady-state but enough
+  // headroom for an initial broadened-filter sweep.
+  const MAX_PAGES = 10;
   let pages = 0;
-  while (pages < 5) {
+  while (pages < MAX_PAGES) {
     pages++;
     const qs = new URLSearchParams();
     qs.append('caseStatus[]', 'OPEN');
-    qs.append('status[]', 'ONGOING');
     qs.set('take', String(take));
     if (skip > 0) qs.set('skip', String(skip));
     const res = await deelFetch(`/admin/mobility/actions?${qs.toString()}`, fetchOpts);
     const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
     if (items.length === 0) break;
     all.push(...items);
+    for (const t of items) {
+      const s = (t?.status || '_UNKNOWN').toUpperCase();
+      upstreamStatusCounts[s] = (upstreamStatusCounts[s] || 0) + 1;
+    }
     // Upstream may surface `total` or `count`; if present + fully covered, stop.
-    const upstreamTotal = res?.total ?? res?.count ?? null;
+    upstreamTotal = res?.total ?? res?.count ?? upstreamTotal;
     if (upstreamTotal != null && all.length >= upstreamTotal) break;
     if (items.length < take) break;
     skip += items.length;
   }
-  return { items: all, total: all.length };
+  return {
+    items: all,
+    total: all.length,
+    upstreamStatusCounts,
+    upstreamTotal,
+    upstreamPages: pages,
+    upstreamScanned: all.length,
+  };
 }

@@ -19,6 +19,7 @@ import { query } from './db';
 import { mergeTeamMembers } from './team-members-merge';
 import { hydrateRoster } from '../data/members';
 import { hydrateOwnerCountries } from '../data/countryOwners';
+import { hydrateNameToEmail } from '../utils/normalizeSourceRows';
 
 // Fresh for 5 seconds — long enough to collapse a burst of scoped API calls,
 // short enough that a Team-tab edit propagates to the next queue fetch.
@@ -116,6 +117,14 @@ export async function ensureRosterHydrated({ force = false } = {}) {
       ]);
       const merged = mergeTeamMembers(overridesRes.rows, loginsRes.rows);
       hydrateRoster(merged);
+      // 2026-05-29 — rebuild the name→email lookup with the live roster
+      // so name-only Deel admin upstreams (mobility activeAgent,
+      // terminations_v3 exAssignee) can resolve override-added members
+      // (e.g. Phase 14 GIX seed). Without this, `resolveEmailByName`
+      // only sees the static TEAM_MEMBERS baseline; every GIX agent is
+      // invisible and their tasks fall through to country-fallback
+      // scoping → TL/RM Beata-style blind spot.
+      hydrateNameToEmail(merged);
       if (countriesRes) {
         rebuildCountriesMap(countriesRes.rows);
         // Push the live junction-table rows into countryOwners.js so

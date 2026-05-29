@@ -248,26 +248,69 @@ function _noteCollision(mapName, key, existingEmail, incomingEmail) {
   return false;
 }
 
-for (const m of TEAM_MEMBERS) {
+function _ingestMemberIntoNameMaps(m, { warnOnCollision = true } = {}) {
+  if (!m || !m.name || !m.email) return;
   const lower = m.name.toLowerCase();
   const stripped = stripAccents(lower);
   const collapsed = stripped.replace(/\s+/g, '');
-  if (!_noteCollision('exact', lower, _nameToEmail.get(lower), m.email)) {
-    _nameToEmail.set(lower, m.email);
-  }
-  if (!_noteCollision('stripped', stripped, _nameToEmailNorm.get(stripped), m.email)) {
-    _nameToEmailNorm.set(stripped, m.email);
-  }
-  if (!_noteCollision('collapsed', collapsed, _nameNoSpace.get(collapsed), m.email)) {
-    _nameNoSpace.set(collapsed, m.email);
+  const existingExact = _nameToEmail.get(lower);
+  if (existingExact === m.email) return; // already ingested (cheap idempotency)
+  if (warnOnCollision) {
+    if (!_noteCollision('exact', lower, existingExact, m.email)) _nameToEmail.set(lower, m.email);
+    if (!_noteCollision('stripped', stripped, _nameToEmailNorm.get(stripped), m.email)) {
+      _nameToEmailNorm.set(stripped, m.email);
+    }
+    if (!_noteCollision('collapsed', collapsed, _nameNoSpace.get(collapsed), m.email)) {
+      _nameNoSpace.set(collapsed, m.email);
+    }
+  } else {
+    // Silent set-if-absent (used by the hydration callback so a refresh
+    // doesn't re-warn for collisions already noted at module init).
+    if (!existingExact) _nameToEmail.set(lower, m.email);
+    if (!_nameToEmailNorm.has(stripped)) _nameToEmailNorm.set(stripped, m.email);
+    if (!_nameNoSpace.has(collapsed)) _nameNoSpace.set(collapsed, m.email);
   }
   const tokens = tokenize(m.name);
   if (tokens.length >= 2) {
     const flKey = `${tokens[0]}|${tokens[tokens.length - 1]}`;
-    if (!_noteCollision('first|last', flKey, _firstLastToEmail.get(flKey), m.email)) {
+    if (warnOnCollision) {
+      if (!_noteCollision('first|last', flKey, _firstLastToEmail.get(flKey), m.email)) {
+        _firstLastToEmail.set(flKey, m.email);
+      }
+    } else if (!_firstLastToEmail.has(flKey)) {
       _firstLastToEmail.set(flKey, m.email);
     }
   }
+}
+
+for (const m of TEAM_MEMBERS) {
+  _ingestMemberIntoNameMaps(m, { warnOnCollision: true });
+}
+
+/**
+ * Re-populate the name→email lookup with the runtime roster (overrides + Phase
+ * 14 GIX seed + future per-dept rosters). Without this, `resolveEmailByName`
+ * only sees the static `TEAM_MEMBERS` baseline — every member added via
+ * `team_member_overrides` is invisible, so name-only upstreams (mobility
+ * activeAgent, terminations_v3 exAssignee) can't resolve to an email and the
+ * row falls through to country-fallback scoping. The 2026-05-29 GIX TL fix
+ * (Beata) depends on this.
+ *
+ * Called by `roster-server.ensureRosterHydrated` after `hydrateRoster(merged)`
+ * lands. Safe to call repeatedly — the per-member ingest is idempotent on
+ * already-known (name, email) pairs and silent on collisions to avoid log
+ * spam on every TTL refresh.
+ */
+export function hydrateNameToEmail(members) {
+  if (!Array.isArray(members) || members.length === 0) return false;
+  let added = 0;
+  for (const m of members) {
+    if (!m?.email || !m?.name) continue;
+    if (_nameToEmail.get(m.name.toLowerCase()) === m.email) continue;
+    _ingestMemberIntoNameMaps(m, { warnOnCollision: false });
+    added++;
+  }
+  return added > 0;
 }
 
 export function resolveEmailByName(name) {
@@ -912,18 +955,26 @@ export function normalizeImmigrationTasks(items = []) {
       // the same human surfaced by the `clientName` column, so writing
       // it into the Assignee column was double-rendering the client.
       //
-      // The actual HRX team member coordinating the case is on
+      // The actual HRX/GIX team member coordinating the case is on
       // `caseData.activeAgent` (string name) + `caseData.activeAgentId`
       // (profile id). Prefer that. Fall back to `t.assignee.name` ONLY
       // when activeAgent is missing AND the task assignee is clearly
       // NOT the applicant (different name) — otherwise we'd still leak
       // the client into the column on cases without an active agent.
       //
-      // assigneeEmail follows the same logic: blank when the task
-      // assignee is the applicant, otherwise the upstream value. The
-      // case-active-agent has no email exposed, so the email stays
-      // empty in that branch; scoping falls through to country-fallback
-      // visibility per _scopeByAssignedOrUnassigned — same as today.
+      // 2026-05-29 (Beata Sroda — GIX TL blind spot): the previous
+      // version left `assigneeEmail` blank whenever the task assignee
+      // was the applicant. That made every row fall through to
+      // `_scopeByAssignedOrUnassigned`'s country-fallback — empty for
+      // GIX TLs (GIX is a global team without per-country ownership in
+      // `team_member_countries`), so TLs/RMs saw zero rows. Fix is to
+      // resolve `caseData.activeAgent` (display name) → member email
+      // via the existing `resolveEmailByName` helper, exactly how
+      // terminations_v3 handles its name-only upstream (skill §3.6 /
+      // mistake #23). When the name resolves, the row carries a real
+      // assigneeEmail and the assignee-chain visibility works.
+      // Unresolvable names (typos, ex-employees, embassy contacts)
+      // still fall back to country visibility as before.
       assignee: (() => {
         const activeAgent = (typeof caseData.activeAgent === 'string') ? caseData.activeAgent.trim() : '';
         if (activeAgent) return activeAgent;
@@ -933,6 +984,17 @@ export function normalizeImmigrationTasks(items = []) {
         return taskName;
       })(),
       assigneeEmail: (() => {
+        // 1. Prefer the resolved activeAgent email (the actual GIX/HRX
+        //    coordinator). This is the only branch that produces a real
+        //    assignee chain for TL/RM scoping.
+        const activeAgent = (typeof caseData.activeAgent === 'string') ? caseData.activeAgent.trim() : '';
+        if (activeAgent) {
+          const resolved = resolveEmailByName(activeAgent);
+          if (resolved) return resolved;
+        }
+        // 2. Otherwise honour the task-level assignee email — but skip
+        //    it when the upstream name matches the applicant (applicant
+        //    is the human acting, not the case owner).
         const taskEmail = (typeof t?.assignee?.email === 'string') ? t.assignee.email.toLowerCase() : '';
         if (!taskEmail) return '';
         const taskName = (typeof t?.assignee?.name === 'string') ? t.assignee.name.trim() : '';
