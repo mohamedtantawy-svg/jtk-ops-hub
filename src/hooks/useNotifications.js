@@ -111,7 +111,9 @@ export function useNotifications(userEmail) {
     if (inFlightRef.current) return inFlightRef.current;
     const run = (async () => {
       try {
-        const res = await listNotifications({ limit: 50 });
+        // limit controls READ top-up; server always returns ALL unread up
+        // to its UNREAD_CAP, regardless of this param.
+        const res = await listNotifications({ limit: 200 });
         if (!mountedRef.current) return null;
         const nextItems = Array.isArray(res?.items) ? res.items : [];
         const nextUnread = Number.isFinite(res?.unreadCount) ? res.unreadCount : 0;

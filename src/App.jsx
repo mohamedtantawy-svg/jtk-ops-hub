@@ -1158,7 +1158,9 @@ const App=()=>{
 
   // Combine the in-memory popup feed (announcements arrival, toasts) with
   // the server feed for a single bell. Server rows go first so a fresh
-  // mention is at the top of the list. Capped at 50 to match addNotif().
+  // mention is at the top of the list. Cap at 250 so the full unread set
+  // from the API (which now returns all unread up to 500) survives — a
+  // 50-cap was hiding older unread behind newer reads in Ayushi's report.
   const mergedNotifs = React.useMemo(() => {
     const fromServer = (serverNotifs.items || []).map(n => {
       const ts = n.createdAt ? new Date(n.createdAt) : null;
@@ -1186,9 +1188,10 @@ const App=()=>{
         sourceId: n.sourceId,
         actorEmail: n.actorEmail,
         actorName: n.actorName,
+        hrHubFlow: n.hrHubFlow || null,
       };
     });
-    return [...fromServer, ...notifs].slice(0, 50);
+    return [...fromServer, ...notifs].slice(0, 250);
   }, [serverNotifs.items, notifs]);
 
   // Per-user "play a chime on new notification" preference. Drives off the
