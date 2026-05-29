@@ -595,20 +595,31 @@ export default function SourceTable({
     // in. When collapsed, the header still renders with the row count +
     // chevron, but the OTHERS rows + the "OTHERS — PAUSED" sub-band are
     // omitted from the virtual list so they don't take any space.
+    //
+    // 2026-05-29 — the collapse only takes effect when there's a MINE
+    // section to protect. RM/Admin (and TLs with an empty personal
+    // queue) have `hasMineSection=false`; without this guard the OTHERS
+    // header was suppressed by the existing `if (hasMineSection)` block
+    // AND the rows stayed hidden by `othersCollapsed`, leaving the
+    // viewer with only the Resolved band and no way to reveal the open
+    // queue. When there's nothing personal to protect, OTHERS is the
+    // viewer's whole queue and must render uncollapsed exactly like it
+    // did pre-#857.
+    const effectiveOthersCollapsed = othersCollapsible && othersCollapsed && hasMineSection;
     if (othersActive.length > 0) {
       if (hasMineSection) {
         out.push({
           kind: 'header', tone: 'others', label: 'OTHERS',
           count: othersActive.length + othersPaused.length,
           collapsible: othersCollapsible,
-          collapsed: othersCollapsible && othersCollapsed,
+          collapsed: effectiveOthersCollapsed,
         });
       }
-      if (!(othersCollapsible && othersCollapsed)) {
+      if (!effectiveOthersCollapsed) {
         for (const r of othersActive) out.push({ kind: 'row', row: r });
       }
     }
-    if (othersPaused.length > 0 && !(othersCollapsible && othersCollapsed)) {
+    if (othersPaused.length > 0 && !effectiveOthersCollapsed) {
       out.push({ kind: 'header', tone: 'paused', label: hasMineSection ? 'OTHERS — PAUSED' : 'PAUSED', count: othersPaused.length });
       for (const r of othersPaused) out.push({ kind: 'row', row: r });
     }
