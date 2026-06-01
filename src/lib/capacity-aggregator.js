@@ -469,3 +469,73 @@ export async function aggregateMemberLoad({ deptId, countryWorkload = [], settin
 
   return { members: rows, leads };
 }
+
+// ── Phase 3: per-Team-Lead summary roll-up ────────────────────────────────
+// One row per Team Lead. Mirrors Kristina's sheet 4 ("Team Summary"):
+//   teamLeadEmail / teamLeadName / teamLeadRole / memberCount /
+//   countriesCovered (unique, sorted) / numCountriesCovered /
+//   totalHc / totalTasksPerMonth / totalCallsPerMonth / totalWlPerMonth /
+//   avgWlPerPersonPerMonth / avgTaskHrsPerDay / avgCallHrsPerDay /
+//   avgTotalHrsPerDay / signal (banded on avgTotalHrsPerDay)
+//
+// Derives entirely from `aggregateMemberLoad`'s output so the math is
+// guaranteed to match the per-member view (a stat the Team Summary
+// drift would be the easiest thing for a manager to spot otherwise).
+
+export function aggregateTeamSummary({ members = [], leads = {}, settings }) {
+  if (!Array.isArray(members) || members.length === 0) return { teams: [] };
+  const t = { ...FALLBACK_SETTINGS, ...(settings || {}) };
+
+  // Bucket members by their teamLeadEmail. Members with no lead bucket
+  // under the empty string key — surfaced as "Unassigned" in the FE.
+  const byLead = new Map();
+  for (const m of members) {
+    const k = m.teamLeadEmail || '';
+    if (!byLead.has(k)) byLead.set(k, []);
+    byLead.get(k).push(m);
+  }
+
+  const teams = [];
+  for (const [leadEmail, group] of byLead.entries()) {
+    const lead = leads[leadEmail] || { email: leadEmail, name: leadEmail || 'Unassigned', role: 'unassigned' };
+    const countriesSet = new Set();
+    let totalHc = 0, totalTasks = 0, totalCalls = 0, totalWl = 0;
+    let sumTaskHrs = 0, sumCallHrs = 0, sumTotalHrs = 0;
+    for (const m of group) {
+      for (const cc of (m.countries || [])) countriesSet.add(cc);
+      totalHc      += Number(m.hc) || 0;
+      totalTasks   += Number(m.tasksPerMonth) || 0;
+      totalCalls   += Number(m.callsPerMonth) || 0;
+      totalWl      += Number(m.totalWlPerMonth) || 0;
+      sumTaskHrs   += Number(m.taskHrsPerDay) || 0;
+      sumCallHrs   += Number(m.callHrsPerDay) || 0;
+      sumTotalHrs  += Number(m.totalHrsPerDay) || 0;
+    }
+    const n = group.length;
+    const avgWl       = n > 0 ? totalWl / n      : 0;
+    const avgTaskHrs  = n > 0 ? sumTaskHrs / n   : 0;
+    const avgCallHrs  = n > 0 ? sumCallHrs / n   : 0;
+    const avgTotalHrs = n > 0 ? sumTotalHrs / n  : 0;
+    const countriesCovered = Array.from(countriesSet).sort();
+    teams.push({
+      teamLeadEmail: leadEmail,
+      teamLeadName: lead.name,
+      teamLeadRole: lead.role,
+      memberCount: n,
+      countriesCovered,
+      numCountriesCovered: countriesCovered.length,
+      totalHc,
+      totalTasksPerMonth: +totalTasks.toFixed(1),
+      totalCallsPerMonth: +totalCalls.toFixed(1),
+      totalWlPerMonth:    +totalWl.toFixed(1),
+      avgWlPerPersonPerMonth: +avgWl.toFixed(1),
+      avgTaskHrsPerDay: +avgTaskHrs.toFixed(2),
+      avgCallHrsPerDay: +avgCallHrs.toFixed(2),
+      avgTotalHrsPerDay: +avgTotalHrs.toFixed(2),
+      signal: bandSignal(avgTotalHrs, t),
+    });
+  }
+  // Sort by member count desc (largest team first), then by lead name.
+  teams.sort((a, b) => (b.memberCount - a.memberCount) || a.teamLeadName.localeCompare(b.teamLeadName));
+  return { teams };
+}

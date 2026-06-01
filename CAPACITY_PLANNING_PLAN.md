@@ -124,8 +124,8 @@ The super-admin's dept picker (`useCurrentDept().setDept`) flips the cookie; thi
 |---|---|---|---|
 | 0. Schema + sub-tab shell + skeleton API | ✅ shipped | [#885](https://github.com/Deel-Playground/jtk-ops-hub-v2/pull/885) | 4 per-dept tables, "Capacity" sub-tab in Leaders Hub, skeleton GET. Live on dev awaiting Deploy Now. |
 | 1. Country Workload table | ✅ shipped | [#886](https://github.com/Deel-Playground/jtk-ops-hub-v2/pull/886) | Demand aggregator over 8 visible Deel sources + sortable table with totals row + owner derivation from `team_member_countries`. Zendesk/Jira/EVL columns ship as "soon" placeholders (Phase 1B extracts them from the queue route). |
-| 2. Capacity Current (per-member) | 🔜 in progress | — | `aggregateMemberLoad` + `CapacityMembersCurrentTable` — agents grouped by Team Lead in collapsible sections with section-level totals + signal banding + load bar. |
-| 3. Team Summary roll-up | ⏳ pending | — | Per-Team-Lead aggregation. |
+| 2. Capacity Current (per-member) | ✅ shipped | [#887](https://github.com/Deel-Playground/jtk-ops-hub-v2/pull/887) | `aggregateMemberLoad` + `CapacityMembersCurrentTable` — agents grouped by Team Lead in collapsible sections with section-level totals + signal banding + load bar. |
+| 3. Team Summary roll-up | 🔜 in progress | — | `aggregateTeamSummary` derives entirely from the member roll-up (no extra DB hit) + `CapacityTeamSummaryTable` with a dept-wide totals row. Adds an Avg-Total-hrs/day column + Signal pill that the audit doesn't expose — same compute, more glanceable. |
 | 4. Settings panel | ⏳ pending | — | Gear icon → drawer with formula tuning, signal thresholds, HC, member calls. |
 | 5. Proposed scenarios (what-if) | ⏳ pending | — | Drag-and-drop rebalancing, save, apply. |
 | 6. CSV export | ⏳ pending | — | Multi-section export matching Kristina's audit. |
@@ -150,6 +150,14 @@ Per skill §3.10:
 - **`Promise.all` + `.catch` on each source.** The aggregator runs 8 sources in parallel and swallows per-source failures inside `safe()` (returns `{ items: [] }`). One failed source can't take the whole table to a 500 — matches skill mistake #22 (optional secondary queries).
 - **Country resolution defensive.** Rows from older queue paths sometimes carry `country` (mapped to ISO from `employmentCountry`), others carry `countryCode`. The aggregator reads either, uppercase-normalises, and falls back to `'UNKNOWN'` so a row with no country tag still surfaces (as an "Unknown country" group) rather than silently dropping out.
 - **15-minute in-process cache per dept.** Keyed by `deptId` so HRX and GIX refreshes don't trample each other. The refresh button sends `?bustCache=1` to force a fresh pull; the regular refetch on tab open uses the cache.
+
+### Phase 3 — Team Summary (2026-06-01)
+
+- **Derive, don't re-aggregate.** The Team Summary is a pure function of the per-member rows + the lead lookup. Computing it from `membersCurrent` (rather than a fresh DB pass) guarantees the team numbers and the per-member numbers can't drift — a manager spotting `Team A WL/mo = 3,500` in the summary, then drilling into the Current view and seeing the agents only add to 3,200, would erode trust in the whole surface fast.
+- **Members at TL+ tier are EXCLUDED from rows AND aggregated totals.** Mirrors the audit: leads aren't counted as part of their own team's WL. If a TL also handles tasks directly, Phase 4 will add an opt-in toggle (same one as Capacity Current).
+- **Countries Covered is the UNION of every team member's assigned countries, deduped.** Two agents both assigned to Spain count Spain once. Surfaced via flag chips with a `+N more` toggle to collapse long lists.
+- **Avg hrs/day = mean of per-member hrs/day, NOT total hrs / total members.** Subtle but matters when members have wildly different loads: averaging the per-member ratios avoids the totals row pulling the mean toward the heaviest member.
+- **Dept-wide totals row** is the sum/avg across all teams. Useful as the single-line answer to "how loaded is the whole dept right now?" Per Kristina's feedback ask the audit was originally for: this is the number she actually reports up.
 
 ### Phase 2 — Capacity Current (2026-06-01)
 

@@ -18,6 +18,7 @@ import { apiFetch } from '../../services/api';
 import { useCurrentDept } from '../../hooks/useCurrentDept';
 import CapacityCountryWorkloadTable from './CapacityCountryWorkloadTable';
 import CapacityMembersCurrentTable from './CapacityMembersCurrentTable';
+import CapacityTeamSummaryTable from './CapacityTeamSummaryTable';
 
 const VIEWS = [
   { id: 'workload', label: 'Country Workload',  icon: 'bi-globe-europe-africa' },
@@ -186,15 +187,16 @@ export default function CapacityPlanningView({ onBack }) {
           />
         )}
 
-        {!loading && !error && data && (view === 'proposed' || view === 'summary') && (
+        {!loading && !error && data && view === 'summary' && (
+          <CapacityTeamSummaryTable teams={data.teamSummary || []} />
+        )}
+
+        {!loading && !error && data && view === 'proposed' && (
           <div className="cap-empty-card">
-            <i className={VIEWS.find(v => v.id === view)?.icon || 'bi-info-circle'} style={{ fontSize: 28, marginBottom: 12, color: 'var(--text-disabled)' }} />
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>
-              {VIEWS.find(v => v.id === view)?.label}
-            </div>
+            <i className="bi-lightning-charge-fill" style={{ fontSize: 28, marginBottom: 12, color: 'var(--text-disabled)' }} />
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>Proposed Scenario</div>
             <div style={{ fontSize: 12, marginTop: 6, maxWidth: 460 }}>
-              {view === 'proposed' && 'Phase 5 ships the drag-and-drop what-if scenarios — rebalance countries between members and watch the signals update live.'}
-              {view === 'summary'  && 'Phase 3 ships the per-Team-Lead roll-up — total HC, total tasks/mo, avg WL per person.'}
+              Phase 5 ships the drag-and-drop what-if scenarios — rebalance countries between members and watch the signals update live.
             </div>
             {data?.settings && (
               <div style={{ fontSize: 11, marginTop: 16, color: 'var(--text-muted)' }}>

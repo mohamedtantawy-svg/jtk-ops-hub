@@ -21,7 +21,7 @@
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { getCurrentDeptSlugAndId } from '../../../../../src/lib/dept-scope';
-import { aggregateCountryWorkload, aggregateMemberLoad } from '../../../../../src/lib/capacity-aggregator';
+import { aggregateCountryWorkload, aggregateMemberLoad, aggregateTeamSummary } from '../../../../../src/lib/capacity-aggregator';
 
 const DEFAULT_SETTINGS = Object.freeze({
   workingDays: 22,
@@ -110,6 +110,20 @@ export async function GET(req) {
     console.warn('[capacity GET] member aggregator failed:', err?.message);
   }
 
+  // Phase 3: derive Team Summary entirely from the member roll-up. Single
+  // synchronous pass — no extra DB round-trips, guarantees the team
+  // numbers and the per-member numbers can't drift apart.
+  let teamSummary = { teams: [] };
+  try {
+    teamSummary = aggregateTeamSummary({
+      members: memberLoad.members,
+      leads: memberLoad.leads,
+      settings,
+    });
+  } catch (err) {
+    console.warn('[capacity GET] team summary failed:', err?.message);
+  }
+
   return NextResponse.json({
     deptId,
     deptSlug,
@@ -118,6 +132,6 @@ export async function GET(req) {
     workloadCachedAt: workload.cachedAt,
     membersCurrent: memberLoad.members,
     membersLeads: memberLoad.leads,
-    teamSummary: [],
+    teamSummary: teamSummary.teams,
   });
 }
