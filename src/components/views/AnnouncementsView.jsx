@@ -213,27 +213,45 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
   });
   // Optional comment to scroll into view once the detail opens — used by
   // notification deep-links so a tagged user lands on the exact comment.
-  const [detailCommentId,setDetailCommentId]=useState(null);
+  // Read from URL in the initialiser (skill mistake #31) so a hard refresh
+  // on a notification deep-link still restores the scroll target. The URL
+  // is cleared via the effect below once the detail has consumed it.
+  const [detailCommentId,setDetailCommentId]=useState(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const v = new URL(window.location.href).searchParams.get('announcementComment');
+      return v && /^[0-9a-f-]{8,}$/i.test(v) ? v : null;
+    } catch { return null; }
+  });
 
   // Mirror the open detail into `?announcement=<id>` so the URL is always
   // shareable. replaceState (not pushState) keeps detail clicks out of the
   // back/forward history — opening + closing an announcement shouldn't
-  // create five history entries.
+  // create five history entries. `?announcementComment` is cleared as
+  // soon as the comment id is consumed (the scroll-to-comment is one-shot
+  // — leaving the param stamped would scroll back on every later re-open
+  // of the same announcement).
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
       const url = new URL(window.location.href);
+      let mutated = false;
       if (detailId) {
         if (url.searchParams.get('announcement') !== String(detailId)) {
           url.searchParams.set('announcement', String(detailId));
-          window.history.replaceState({}, '', url.toString());
+          mutated = true;
         }
       } else if (url.searchParams.has('announcement')) {
         url.searchParams.delete('announcement');
-        window.history.replaceState({}, '', url.toString());
+        mutated = true;
       }
+      if (!detailCommentId && url.searchParams.has('announcementComment')) {
+        url.searchParams.delete('announcementComment');
+        mutated = true;
+      }
+      if (mutated) window.history.replaceState({}, '', url.toString());
     } catch {}
-  }, [detailId]);
+  }, [detailId, detailCommentId]);
 
   // Copy a deep-link URL for an announcement to the user's clipboard.
   // Built from window.location so it works on any host (local dev, the

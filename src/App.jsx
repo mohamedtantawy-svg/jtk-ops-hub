@@ -1257,13 +1257,35 @@ const App=()=>{
     if (n && n._source === 'server') {
       if (n.serverId && !n.read) serverNotifs.markRead(n.serverId);
       if (n.linkView === 'announcements' && n.linkId) {
+        // Stamp the URL BEFORE setView so AnnouncementsView's useState
+        // initialiser reads ?announcement=<id> on first paint. Without
+        // this, mount races the 60 ms event dispatch and the detail
+        // silently doesn't open — Carolina Ferreira 2026-05-30 feedback:
+        // "when we click on the announcement from the notification
+        // section, we are not directed to the announcement." Same
+        // global pattern the HR Hub / Feedback / Tasks branches below
+        // already use. Dept-agnostic — the routing doesn't care which
+        // dept the announcement was published from.
+        const isCommentMention = n.sourceType === 'announcement_comment';
+        try {
+          const url = new URL(window.location.href);
+          url.searchParams.set('announcement', n.linkId);
+          if (isCommentMention && n.sourceId) {
+            url.searchParams.set('announcementComment', n.sourceId);
+          } else {
+            url.searchParams.delete('announcementComment');
+          }
+          window.history.replaceState({}, '', url.toString());
+        } catch {}
         setView('announcements');
         const detail = {
           id: n.linkId,
-          commentId: n.sourceType === 'announcement_comment' ? n.sourceId : null,
+          commentId: isCommentMention ? n.sourceId : null,
         };
-        // Defer one tick so the announcements view has mounted before the
-        // openDetail listener fires.
+        // The event dispatch still covers the in-place case (user already
+        // on announcements; setView is a no-op then, so AnnouncementsView
+        // wouldn't re-read the URL on its own). URL stamp + event are
+        // layered so neither path can silently miss.
         setTimeout(() => {
           try { window.dispatchEvent(new CustomEvent('announcements:openDetail', { detail })); }
           catch {}
