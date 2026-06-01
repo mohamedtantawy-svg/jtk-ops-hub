@@ -1,11 +1,13 @@
-// ── CapacityPlanningView (Phase 0 — 2026-06-01) ──────────────────────────
-// Leaders Hub → Capacity sub-tab. Phase 0 ships the shell only — header,
-// view-switch (Workload / Current / Proposed / Summary), and an empty
-// state. The four views fill in across Phases 1-5; settings drawer is
-// Phase 4; CSV export is Phase 6.
+// ── CapacityPlanningView (Phase 0/1 — 2026-06-01) ────────────────────────
+// Leaders Hub → Capacity sub-tab. Phase 0 shipped the shell + skeleton
+// API. Phase 1 lights up the Country Workload view with live demand from
+// the connected Deel sources, sortable on every column. Phases 2-3 wire
+// the Capacity (Current) + Team Summary views; Phase 4 adds the settings
+// drawer (gear icon); Phase 5 adds the proposed scenarios surface; Phase
+// 6 the CSV export.
 //
 // Per CAPACITY_PLANNING_PLAN.md: every read is dept-scoped via the
-// /leader-reports/capacity route, which uses getCurrentDeptId so
+// /leader-reports/capacity route, which uses getCurrentDeptSlugAndId so
 // HRX/GIX/Payroll/Benefits each get their own capacity surface.
 //
 // Mirror layout tokens from FeedbackView / HrHubView (skill §3.13 — the
@@ -14,6 +16,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch } from '../../services/api';
 import { useCurrentDept } from '../../hooks/useCurrentDept';
+import CapacityCountryWorkloadTable from './CapacityCountryWorkloadTable';
 
 const VIEWS = [
   { id: 'workload', label: 'Country Workload',  icon: 'bi-globe-europe-africa' },
@@ -24,25 +27,38 @@ const VIEWS = [
 
 export default function CapacityPlanningView({ onBack }) {
   const { dept: currentDept } = useCurrentDept();
+  const currentDeptSlug = currentDept?.slug || null;
   const [view, setView] = useState('workload');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // bustCache=true forces the aggregator to refetch every source (skips
+  // the 15-min in-process cache on the server). Used by the refresh
+  // button; the initial mount goes through the cache.
+  const load = useCallback(async (opts = {}) => {
+    const { bustCache = false } = opts;
+    if (bustCache) setRefreshing(true); else setLoading(true);
     setError(null);
     try {
-      const res = await apiFetch('/leader-reports/capacity');
+      const url = bustCache ? '/leader-reports/capacity?bustCache=1' : '/leader-reports/capacity';
+      const res = await apiFetch(url);
       setData(res);
     } catch (err) {
       setError(err?.message || 'Could not load capacity data');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // GIX-only: the aggregator returns the `immig` bucket for the GIX dept
+  // only; for HRX/Payroll/Benefits the column is hidden so the table
+  // doesn't grow a column of zeros.
+  const showImmigColumn = currentDeptSlug === 'gix';
 
   return (
     <div style={page}>
@@ -89,8 +105,18 @@ export default function CapacityPlanningView({ onBack }) {
             Live demand by country, per-member load, and what-if scenarios — modelled on Kristina Fomina's audit framework.
           </div>
         </div>
-        <button type="button" onClick={load} style={iconBtn} aria-label="Refresh" title="Refresh">
-          <i className="bi-arrow-clockwise" style={{ fontSize: 14 }} />
+        <button
+          type="button"
+          onClick={() => load({ bustCache: true })}
+          style={iconBtn}
+          aria-label="Refresh"
+          title="Refresh — bypasses the 15-min cache"
+          disabled={refreshing || loading}
+        >
+          <i
+            className="bi-arrow-clockwise"
+            style={{ fontSize: 14, animation: refreshing ? 'spin 1s linear infinite' : 'none' }}
+          />
         </button>
       </div>
 
@@ -125,7 +151,7 @@ export default function CapacityPlanningView({ onBack }) {
         </div>
       </div>
 
-      {/* Body — Phase 0 shows the empty placeholder for each view */}
+      {/* Body */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '20px 28px 40px' }}>
         {loading && (
           <div className="cap-empty-card">
@@ -139,20 +165,28 @@ export default function CapacityPlanningView({ onBack }) {
             <i className="bi-exclamation-triangle-fill" style={{ fontSize: 24, marginBottom: 12 }} />
             <div style={{ fontSize: 13, fontWeight: 600 }}>Could not load capacity</div>
             <div style={{ fontSize: 12, marginTop: 6 }}>{error}</div>
-            <button type="button" onClick={load} style={{ ...primaryBtn, marginTop: 14 }}>Try again</button>
+            <button type="button" onClick={() => load()} style={{ ...primaryBtn, marginTop: 14 }}>Try again</button>
           </div>
         )}
 
-        {!loading && !error && data && (
+        {!loading && !error && data && view === 'workload' && (
+          <CapacityCountryWorkloadTable
+            rows={data.countryWorkload || []}
+            showImmigColumn={showImmigColumn}
+            cachedAt={data.workloadCachedAt}
+          />
+        )}
+
+        {!loading && !error && data && view !== 'workload' && (
           <div className="cap-empty-card">
             <i className={VIEWS.find(v => v.id === view)?.icon || 'bi-info-circle'} style={{ fontSize: 28, marginBottom: 12, color: 'var(--text-disabled)' }} />
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>
               {VIEWS.find(v => v.id === view)?.label}
             </div>
             <div style={{ fontSize: 12, marginTop: 6, maxWidth: 460 }}>
-              Phase 0 shell shipped — schema, sub-tab, and skeleton API are live.
-              This view fills in over the next phases (Country Workload → Phase 1,
-              Capacity Current → Phase 2, Team Summary → Phase 3, Proposed → Phase 5).
+              {view === 'current'  && 'Phase 2 ships the per-member load table — grouped by Team Lead, signal-banded by Total hrs/day.'}
+              {view === 'proposed' && 'Phase 5 ships the drag-and-drop what-if scenarios — rebalance countries between members and watch the signals update live.'}
+              {view === 'summary'  && 'Phase 3 ships the per-Team-Lead roll-up — total HC, total tasks/mo, avg WL per person.'}
             </div>
             {data?.settings && (
               <div style={{ fontSize: 11, marginTop: 16, color: 'var(--text-muted)' }}>

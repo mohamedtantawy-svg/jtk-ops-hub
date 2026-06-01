@@ -122,14 +122,15 @@ The super-admin's dept picker (`useCurrentDept().setDept`) flips the cookie; thi
 
 | Phase | Status | PR | Notes |
 |---|---|---|---|
-| 0. Schema + sub-tab shell + skeleton API | 🔜 in progress | — | This PR. Creates the 4 tables, adds "Capacity" sub-tab, renders an empty CapacityPlanningView with header + skeleton, GET endpoint returns `{}`. |
-| 1. Country Workload table | ⏳ pending | — | Demand aggregator + table view. |
+| 0. Schema + sub-tab shell + skeleton API | ✅ shipped | [#885](https://github.com/Deel-Playground/jtk-ops-hub-v2/pull/885) | 4 per-dept tables, "Capacity" sub-tab in Leaders Hub, skeleton GET. Live on dev awaiting Deploy Now. |
+| 1. Country Workload table | 🔜 in progress | — | Demand aggregator over 8 visible Deel sources + sortable table with totals row + owner derivation from `team_member_countries`. Zendesk/Jira/EVL columns ship as "soon" placeholders (Phase 1B extracts them from the queue route). |
 | 2. Capacity Current (per-member) | ⏳ pending | — | Per-member load, grouped by Team Lead. |
 | 3. Team Summary roll-up | ⏳ pending | — | Per-Team-Lead aggregation. |
 | 4. Settings panel | ⏳ pending | — | Gear icon → drawer with formula tuning, signal thresholds, HC, member calls. |
 | 5. Proposed scenarios (what-if) | ⏳ pending | — | Drag-and-drop rebalancing, save, apply. |
 | 6. CSV export | ⏳ pending | — | Multi-section export matching Kristina's audit. |
 | 7. Polish + cross-feature audit | ⏳ pending | — | Responsive / dark mode / empty states / 4-role matrix walk / final pass. |
+| 1B. Zendesk + Jira per-country (deferred) | ⏳ later | — | Extract `fetchZendeskQueueForDept` + `fetchJiraQueueForDept` from `/api/v1/queue/route.js` into a shared module so the capacity aggregator can fan them out by country without re-implementing the per-dept dispatch. Columns ship in Phase 1 as "soon" placeholders. |
 
 ## Maintenance protocol
 
@@ -141,7 +142,14 @@ Per skill §3.10:
 
 ## Audit log
 
-(Filled in pre-launch by the read-through pass at the end of each phase. Empty until Phase 0 lands.)
+### Phase 1 — Country Workload table (2026-06-01)
+
+- **Snapshot ≠ monthly average.** The audit's "/mo" columns are 3-6 month rolling averages computed manually by Kristina. Ops Hub doesn't persist historical per-country counts anywhere yet — so Phase 1 ships the **live actionable snapshot** as the closest proxy, surfaced through the table with the same "/mo" label so the column headers stay 1:1 with the audit. A Phase 7 follow-up adds a daily `capacity_country_snapshot` table + cron so the 30-day rolling avg becomes available without changing the FE.
+- **Per-dept dispatch via existing `deel-api` exports.** `listWorkbenchTasks` and `listImmigrationActions` accept `adminTokenOverride` (Phase 13b plumbing); the other Deel source list functions don't — but they only run for HRX where the env-var DEEL_ADMIN_TOKEN is correct. The aggregator wires both styles by looking up `resolveWorkbenchConfig(deptSlug)` and conditionally passing the override. Skill mistake #50 (slug constant must match `org_nodes.slug` in prod) avoided — we read the slug from `getCurrentDeptSlugAndId()`, not a hardcoded constant.
+- **`useCurrentDept()` exposes `dept: { id, name, slug }`** — not a flat `deptSlug` field. Caught while wiring the GIX-only Immigration column gate; if you destructure `deptSlug` directly you get `undefined` and the column never shows for GIX. Pattern: `const currentDeptSlug = useCurrentDept().dept?.slug || null;`
+- **`Promise.all` + `.catch` on each source.** The aggregator runs 8 sources in parallel and swallows per-source failures inside `safe()` (returns `{ items: [] }`). One failed source can't take the whole table to a 500 — matches skill mistake #22 (optional secondary queries).
+- **Country resolution defensive.** Rows from older queue paths sometimes carry `country` (mapped to ISO from `employmentCountry`), others carry `countryCode`. The aggregator reads either, uppercase-normalises, and falls back to `'UNKNOWN'` so a row with no country tag still surfaces (as an "Unknown country" group) rather than silently dropping out.
+- **15-minute in-process cache per dept.** Keyed by `deptId` so HRX and GIX refreshes don't trample each other. The refresh button sends `?bustCache=1` to force a fresh pull; the regular refetch on tab open uses the cache.
 
 ## Open questions (resolved during build)
 

@@ -1,19 +1,27 @@
-// ── /api/v1/leader-reports/capacity (Phase 0 — 2026-06-01) ────────────────
-// Skeleton endpoint that backs the Leaders Hub → Capacity sub-tab. Returns
-// the per-dept settings row (creating defaults on first read) and a
-// placeholder empty payload for countryWorkload / membersCurrent /
-// teamSummary — those land in Phases 1/2/3.
+// ── /api/v1/leader-reports/capacity (Phase 1 — 2026-06-01) ────────────────
+// Backs the Leaders Hub → Capacity sub-tab. Phase 1 lights up the
+// Country Workload table — per-country counts from every visible Deel
+// source for the caller's current dept, plus the owner-set derived from
+// team_member_countries. membersCurrent and teamSummary stay empty until
+// Phases 2 and 3 respectively.
 //
 // Auth: manager+ tier (team_lead, regional_manager, manager, admin).
 // Agents get 403 — matches the Leaders Hub Reports sub-tab gate.
 //
-// Tenancy: every read scopes to getCurrentDeptId(user, req). Super-admin
-// dept switch via the topnav cookie picker re-targets this route without
-// a reload (useCurrentDept's instant-switch refactor).
+// Tenancy: every read scopes to getCurrentDeptSlugAndId(user, req) — both
+// fields are needed (dept id for DB filters, dept slug for the per-dept
+// integration profile that decides which Deel sources to fan out to).
+// Super-admin dept switch via the topnav cookie picker re-targets this
+// route without a reload (useCurrentDept's instant-switch refactor).
+//
+// ?bustCache=1 — manual refresh button bypasses the aggregator's 15-min
+// in-process cache for one call. Cache is per dept so HRX and GIX
+// refreshes don't trample each other.
 
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
-import { getCurrentDeptId } from '../../../../../src/lib/dept-scope';
+import { getCurrentDeptSlugAndId } from '../../../../../src/lib/dept-scope';
+import { aggregateCountryWorkload } from '../../../../../src/lib/capacity-aggregator';
 
 const DEFAULT_SETTINGS = Object.freeze({
   workingDays: 22,
@@ -66,10 +74,14 @@ export async function GET(req) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  const deptId = await getCurrentDeptId(user, req);
-  if (!deptId) {
+  const deptInfo = await getCurrentDeptSlugAndId(user, req);
+  if (!deptInfo?.deptId) {
     return NextResponse.json({ error: 'No active department for caller' }, { status: 400 });
   }
+  const { deptId, deptSlug } = deptInfo;
+
+  const { searchParams } = new URL(req.url);
+  const bustCache = searchParams.get('bustCache') === '1';
 
   const db = await getDb();
   let settings = { ...DEFAULT_SETTINGS, updatedAt: null, updatedBy: null };
@@ -78,11 +90,24 @@ export async function GET(req) {
     catch (err) { console.warn('[capacity GET] settings load failed:', err?.message); }
   }
 
-  // Phase 0 returns the shell. Phases 1/2/3 populate these arrays.
+  // Phase 1: country workload table. membersCurrent + teamSummary
+  // intentionally still empty (Phases 2 + 3 wire them).
+  let workload = { rows: [], cachedAt: null };
+  try {
+    workload = await aggregateCountryWorkload({ deptId, deptSlug, bustCache });
+  } catch (err) {
+    // Aggregator already swallows per-source errors; this catch covers
+    // the rare DB-side helper failures (HC + owner queries). Surface an
+    // empty list rather than 500ing the whole capacity endpoint.
+    console.warn('[capacity GET] aggregator failed:', err?.message);
+  }
+
   return NextResponse.json({
     deptId,
+    deptSlug,
     settings,
-    countryWorkload: [],
+    countryWorkload: workload.rows,
+    workloadCachedAt: workload.cachedAt,
     membersCurrent: [],
     teamSummary: [],
   });
