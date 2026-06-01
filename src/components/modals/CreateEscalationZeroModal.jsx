@@ -48,6 +48,17 @@ export default function CreateEscalationZeroModal({ onClose, onSubmit, currentUs
   const [countryQuery, setCountryQuery] = useState('');
   const [linkedZdUrl, setLinkedZdUrl] = useState('');
   const [linkedJiraUrl, setLinkedJiraUrl] = useState('');
+  // 2026-06-01 — historical-xlsx fields lifted into the composer so new
+  // escalations can carry the same operational metadata the legacy
+  // Slack-spreadsheet workflow tracked. All optional.
+  const [reporter, setReporter] = useState('');
+  const [escalationCount6mo, setEscalationCount6mo] = useState('');
+  const [resolutionTrack, setResolutionTrack] = useState('');
+  const [slackLink, setSlackLink] = useState('');
+  const [etaToResolution, setEtaToResolution] = useState('');
+  const [productName, setProductName] = useState('');
+  const [productOwner, setProductOwner] = useState('');
+  const [hrxPoc, setHrxPoc] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const titleInputRef = useRef(null);
@@ -107,17 +118,19 @@ export default function CreateEscalationZeroModal({ onClose, onSubmit, currentUs
   const urlLooksValid = (url) => !url || /^https?:\/\//i.test(url.trim());
   const zdValid = urlLooksValid(linkedZdUrl);
   const jiraValid = urlLooksValid(linkedJiraUrl);
+  const slackValid = urlLooksValid(slackLink);
 
   const handleSubmit = async (e) => {
     e?.preventDefault?.();
     if (!canSubmit) return;
-    if (!zdValid || !jiraValid) {
+    if (!zdValid || !jiraValid || !slackValid) {
       setError('Linked URLs must start with http:// or https://');
       return;
     }
     setSubmitting(true);
     setError(null);
     try {
+      const escCount = escalationCount6mo.trim();
       await onSubmit?.({
         kind: 'escalation_zero',
         title: title.trim().slice(0, ESCALATION_FIELD_LIMITS.summaryMax),
@@ -139,6 +152,15 @@ export default function CreateEscalationZeroModal({ onClose, onSubmit, currentUs
           linkedZdUrl: linkedZdUrl.trim(),
           linkedJiraUrl: linkedJiraUrl.trim(),
           escalationStatus: 'new',
+          // Optional operational metadata — server validator drops empties.
+          reporter: reporter.trim() || null,
+          slackLink: slackLink.trim() || null,
+          etaToResolution: etaToResolution.trim() || null,
+          escalationCount6mo: escCount ? Number(escCount) : null,
+          resolutionTrack: resolutionTrack || null,
+          productName: productName.trim() || null,
+          productOwner: productOwner.trim() || null,
+          hrxPoc: hrxPoc.trim() || null,
         },
       });
       onClose?.();
@@ -379,6 +401,128 @@ export default function CreateEscalationZeroModal({ onClose, onSubmit, currentUs
                 placeholder="https://…atlassian.net/browse/…"
                 style={{ ...input, borderColor: jiraValid ? 'var(--border)' : '#dc2626' }}
                 maxLength={ESCALATION_FIELD_LIMITS.linkUrlMax}
+                disabled={submitting}
+              />
+            </div>
+          </div>
+
+          {/* ── Operational details ─────────────────────────────────────
+              2026-06-01 — fields lifted from the legacy xlsx workflow so
+              new escalations carry the same metadata the historical
+              import contains. All optional; report-quality fields the
+              team has used for two-plus years of triage. */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+            <div style={fieldGroup}>
+              <label htmlFor="ez-reporter" style={fieldLabel}>Reporter</label>
+              <input
+                id="ez-reporter"
+                className="ez-input"
+                value={reporter}
+                onChange={(e) => setReporter(e.target.value)}
+                placeholder="@firstname.lastname"
+                style={input}
+                maxLength={ESCALATION_FIELD_LIMITS.shortTextMax}
+                disabled={submitting}
+              />
+            </div>
+            <div style={fieldGroup}>
+              <label htmlFor="ez-count6mo" style={fieldLabel}># Escalations (last 6mo)</label>
+              <input
+                id="ez-count6mo"
+                className="ez-input"
+                type="number"
+                min="0"
+                value={escalationCount6mo}
+                onChange={(e) => setEscalationCount6mo(e.target.value)}
+                placeholder="0"
+                style={input}
+                disabled={submitting}
+              />
+            </div>
+            <div style={fieldGroup}>
+              <label htmlFor="ez-track" style={fieldLabel}>Resolution track</label>
+              <select
+                id="ez-track"
+                className="ez-input"
+                value={resolutionTrack}
+                onChange={(e) => setResolutionTrack(e.target.value)}
+                style={input}
+                disabled={submitting}
+              >
+                <option value="">—</option>
+                <option value="product">Product</option>
+                <option value="operations">Operations</option>
+              </select>
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+            <div style={fieldGroup}>
+              <label htmlFor="ez-slack" style={fieldLabel}>Slack thread link</label>
+              <input
+                id="ez-slack"
+                className="ez-input"
+                type="url"
+                value={slackLink}
+                onChange={(e) => setSlackLink(e.target.value)}
+                placeholder="https://letsdeel.slack.com/…"
+                style={{ ...input, borderColor: slackValid ? 'var(--border)' : '#dc2626' }}
+                maxLength={ESCALATION_FIELD_LIMITS.linkUrlMax}
+                disabled={submitting}
+              />
+            </div>
+            <div style={fieldGroup}>
+              <label htmlFor="ez-eta" style={fieldLabel}>ETA to resolution</label>
+              <input
+                id="ez-eta"
+                className="ez-input"
+                value={etaToResolution}
+                onChange={(e) => setEtaToResolution(e.target.value)}
+                placeholder="Q3, End of Q2, 2026-10-31, TBC"
+                style={input}
+                maxLength={ESCALATION_FIELD_LIMITS.shortTextMax}
+                disabled={submitting}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+            <div style={fieldGroup}>
+              <label htmlFor="ez-product-name" style={fieldLabel}>Product name</label>
+              <input
+                id="ez-product-name"
+                className="ez-input"
+                value={productName}
+                onChange={(e) => setProductName(e.target.value)}
+                placeholder="Payroll, Benefits, …"
+                style={input}
+                maxLength={ESCALATION_FIELD_LIMITS.shortTextMax}
+                disabled={submitting}
+              />
+            </div>
+            <div style={fieldGroup}>
+              <label htmlFor="ez-product-owner" style={fieldLabel}>Product owner</label>
+              <input
+                id="ez-product-owner"
+                className="ez-input"
+                value={productOwner}
+                onChange={(e) => setProductOwner(e.target.value)}
+                placeholder="Product team contact"
+                style={input}
+                maxLength={ESCALATION_FIELD_LIMITS.shortTextMax}
+                disabled={submitting}
+              />
+            </div>
+            <div style={fieldGroup}>
+              <label htmlFor="ez-hrx-poc" style={fieldLabel}>HRX POC</label>
+              <input
+                id="ez-hrx-poc"
+                className="ez-input"
+                value={hrxPoc}
+                onChange={(e) => setHrxPoc(e.target.value)}
+                placeholder="HRX point-of-contact"
+                style={input}
+                maxLength={ESCALATION_FIELD_LIMITS.shortTextMax}
                 disabled={submitting}
               />
             </div>

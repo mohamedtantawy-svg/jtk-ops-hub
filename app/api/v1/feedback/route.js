@@ -17,9 +17,14 @@ import { ensureRosterHydrated } from '../../../../src/lib/roster-server';
 import {
   isValidEscalationFunctionKey,
   isValidEscalationStatus,
+  isValidResolutionTrack,
+  isValidIsoDate,
   escalationPriorityToDb,
   normaliseEscalationCountries,
   normaliseEscalationUrl,
+  normaliseEscalationShortText,
+  normaliseEscalationLongText,
+  normaliseEscalationCount,
   ESCALATION_FIELD_LIMITS,
 } from '../../../../src/lib/escalation-zero-constants';
 
@@ -61,7 +66,42 @@ function validateEscalationZeroExtras(rawExtras) {
   // kind list filters (e.g. "All escalation_zero where status=on_hold")
   // can use either column interchangeably. Init to 'new'.
   const escalationStatus = isValidEscalationStatus(e.escalationStatus) ? e.escalationStatus : 'new';
-  return { functionKey, countries, linkedZdUrl, linkedJiraUrl, priorityKey, escalationStatus };
+
+  // 2026-06-01 — historical xlsx-imported fields. The full surface lives
+  // in the detail panel; only a subset shows in the list table. Every
+  // field is OPTIONAL — null/empty when not supplied by the caller.
+  const reporter         = normaliseEscalationShortText(e.reporter);
+  const hrxOwnerName     = normaliseEscalationShortText(e.hrxOwnerName);
+  const slackLink        = normaliseEscalationUrl(e.slackLink);
+  const etaToResolution  = normaliseEscalationShortText(e.etaToResolution);
+  const actionTaken      = normaliseEscalationLongText(e.actionTaken);
+  const productName      = normaliseEscalationShortText(e.productName);
+  const productOwner     = normaliseEscalationShortText(e.productOwner);
+  const hrxPoc           = normaliseEscalationShortText(e.hrxPoc);
+  const productComment   = normaliseEscalationLongText(e.productComment);
+  const escalationCount6mo = normaliseEscalationCount(e.escalationCount6mo);
+  const resolutionTrack    = isValidResolutionTrack(e.resolutionTrack) ? e.resolutionTrack : null;
+  const mergedAt           = isValidIsoDate(e.mergedAt) ? e.mergedAt : null;
+  // Import provenance — written by the boot-time seeder, retained on
+  // round-trip edits so a re-seed can match the existing row. Never
+  // user-editable; if the FE accidentally sends it on a new request, we
+  // ignore it.
+  const importSource     = (typeof e.importSource === 'string' && e.importSource.length <= 40) ? e.importSource : null;
+  const importExternalId = (typeof e.importExternalId === 'string' && e.importExternalId.length <= 80) ? e.importExternalId : null;
+
+  const out = {
+    functionKey, countries, linkedZdUrl, linkedJiraUrl, priorityKey, escalationStatus,
+    reporter, hrxOwnerName, slackLink, etaToResolution, actionTaken,
+    productName, productOwner, hrxPoc, productComment,
+    escalationCount6mo, resolutionTrack, mergedAt,
+    importSource, importExternalId,
+  };
+  // Strip nulls so the JSONB payload stays compact and FE conditionals
+  // can use plain truthy checks.
+  for (const k of Object.keys(out)) {
+    if (out[k] == null || out[k] === '') delete out[k];
+  }
+  return out;
 }
 // Audience scope (Sarah Suge 2026-05-07 ask): submitters can restrict who
 // sees a feedback request. 'global' = everyone; the regional values

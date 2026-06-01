@@ -2,6 +2,7 @@ import { query } from './db';
 import { seedCountryOwnersIfEmpty } from './country-owners-seed';
 import { seedHrHubSettingsIfNeeded } from './hr-hub-seed';
 import { seedLeaderAlertsSettingsIfNeeded } from './leader-alerts-seed';
+import { seedEscalationZeroHistoricalIfNeeded } from './escalation-zero-seed';
 import { seedTimeOffEventsIfNeeded } from './time-off-seed';
 import { seedGixTimeOffEventsIfNeeded } from './dept-time-off-seed';
 import { seedHandoverDefaultsIfNeeded } from './handover-defaults-seed';
@@ -2416,6 +2417,21 @@ export async function runMigrations() {
     }
   } catch (err) {
     console.warn('[db] Leaders Alerts settings seed failed:', err?.message);
+  }
+
+  // Escalation Zero historical import (2026-06-01) — lifts the 527-row
+  // legacy spreadsheet into feedback_requests so the HRX team can stop
+  // dual-maintaining it against the Slack channel. Idempotent via the
+  // `escalation_zero_seed_version` app_settings sentinel + per-row
+  // deterministic externalId; FE edits are NEVER overwritten by a
+  // re-seed. See escalation-zero-seed.js for the full re-seed protocol.
+  try {
+    const seedResult = await seedEscalationZeroHistoricalIfNeeded();
+    if (seedResult?.reseeded) {
+      console.log(`[db] Escalation Zero historical seeded to v${seedResult.version}: ${seedResult.inserted} inserted, ${seedResult.skipped} already present, ${seedResult.errors} errors (of ${seedResult.total})`);
+    }
+  } catch (err) {
+    console.warn('[db] Escalation Zero historical seed failed:', err?.message);
   }
 
   // OOO: bootstrap time_off_events from the bundled HRX snapshot

@@ -915,6 +915,42 @@ function FeedbackRow({ item, expanded, onToggle, onVote, onStatusChange, onPrior
                 {item.extras.countries.length > 3 && ` +${item.extras.countries.length - 3}`}
               </span>
             )}
+            {/* Escalation Zero operational chips (2026-06-01 — historical
+                xlsx fields lifted into the table view). Only the at-a-
+                glance signals here; reporter / slack / product info /
+                action log live in the expanded detail card. */}
+            {item.kind === 'escalation_zero' && Number.isFinite(item.extras?.escalationCount6mo) && item.extras.escalationCount6mo > 0 && (
+              <span
+                style={{ ...mutedPill, gap: 4, background: '#fff8e6', color: '#92400e', borderColor: '#fcd34d' }}
+                title={`${item.extras.escalationCount6mo} escalation${item.extras.escalationCount6mo === 1 ? '' : 's'} in the last 6 months`}
+              >
+                <i className="bi-graph-up" style={{ fontSize: 10 }} />
+                {item.extras.escalationCount6mo} in 6mo
+              </span>
+            )}
+            {item.kind === 'escalation_zero' && item.extras?.resolutionTrack && (
+              <span
+                style={{
+                  ...mutedPill, gap: 4,
+                  background: item.extras.resolutionTrack === 'product' ? '#f3eff8' : '#e0f2fe',
+                  color: item.extras.resolutionTrack === 'product' ? '#7c3aed' : '#0369a1',
+                  borderColor: item.extras.resolutionTrack === 'product' ? '#c4b1f9' : '#7dd3fc',
+                }}
+                title={`Resolution track: ${item.extras.resolutionTrack === 'product' ? 'Product team' : 'Operations'}`}
+              >
+                <i className={item.extras.resolutionTrack === 'product' ? 'bi-box-seam' : 'bi-gear'} style={{ fontSize: 10 }} />
+                {item.extras.resolutionTrack === 'product' ? 'Product' : 'Operations'}
+              </span>
+            )}
+            {item.kind === 'escalation_zero' && item.extras?.etaToResolution && (
+              <span
+                style={{ ...mutedPill, gap: 4 }}
+                title={`ETA to resolution: ${item.extras.etaToResolution}`}
+              >
+                <i className="bi-calendar-event" style={{ fontSize: 10 }} />
+                ETA: {item.extras.etaToResolution}
+              </span>
+            )}
             {item.audience && item.audience !== 'global' && (
               <span
                 style={{ ...mutedPill, gap: 4, background: '#f3eff8', color: '#7c3aed', borderColor: '#c4b1f9' }}
@@ -1292,6 +1328,82 @@ function ExpandedDetail({ item, isPriv, onStatusChange, onPriorityChange, onAssi
           </>
         )}
 
+        {/* Escalation Zero operational details — the rest of the
+            historical-xlsx fields. Each block is conditional on its own
+            data so an old escalation without (say) a Product Name just
+            doesn't show that block. This is the "card" half of the
+            user's spec — table shows function/status/track/ETA/6mo;
+            everything else lives here. */}
+        {item.kind === 'escalation_zero' && (item.extras?.reporter || item.extras?.slackLink || item.extras?.actionTaken) && (
+          <>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 14, marginBottom: 6 }}>
+              Operational details
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12.5, color: 'var(--text)' }}>
+              {item.extras?.reporter && (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <span style={{ fontWeight: 600, color: 'var(--text-secondary)', minWidth: 96 }}>Reporter</span>
+                  <span>{item.extras.reporter}</span>
+                </div>
+              )}
+              {item.extras?.slackLink && (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <span style={{ fontWeight: 600, color: 'var(--text-secondary)', minWidth: 96 }}>Slack thread</span>
+                  <a
+                    href={item.extras.slackLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: '#7c3aed', textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}
+                  >
+                    <i className="bi-slack" style={{ fontSize: 12, marginRight: 5 }} />
+                    {item.extras.slackLink}
+                  </a>
+                </div>
+              )}
+              {item.extras?.actionTaken && (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                  <span style={{ fontWeight: 600, color: 'var(--text-secondary)', minWidth: 96, flexShrink: 0 }}>Action taken</span>
+                  <span style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{item.extras.actionTaken}</span>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {item.kind === 'escalation_zero' && (item.extras?.productName || item.extras?.productOwner || item.extras?.productComment || item.extras?.hrxPoc) && (
+          <>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginTop: 14, marginBottom: 6 }}>
+              Product team
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 12.5, color: 'var(--text)' }}>
+              {item.extras?.productName && (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <span style={{ fontWeight: 600, color: 'var(--text-secondary)', minWidth: 96 }}>Product</span>
+                  <span>{item.extras.productName}</span>
+                </div>
+              )}
+              {item.extras?.productOwner && (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <span style={{ fontWeight: 600, color: 'var(--text-secondary)', minWidth: 96 }}>Product owner</span>
+                  <span>{item.extras.productOwner}</span>
+                </div>
+              )}
+              {item.extras?.hrxPoc && (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <span style={{ fontWeight: 600, color: 'var(--text-secondary)', minWidth: 96 }}>HRX POC</span>
+                  <span>{item.extras.hrxPoc}</span>
+                </div>
+              )}
+              {item.extras?.productComment && (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                  <span style={{ fontWeight: 600, color: 'var(--text-secondary)', minWidth: 96, flexShrink: 0 }}>Product comment</span>
+                  <span style={{ whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>{item.extras.productComment}</span>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
         {/* Escalation Zero linked items — clickable Zendesk + Jira links
             beneath the long-form fields so the reviewer can hop straight
             to the source ticket. Each URL was server-validated to be
@@ -1509,6 +1621,25 @@ function ExpandedDetail({ item, isPriv, onStatusChange, onPriorityChange, onAssi
         {item.resolvedAt && (
           <ActionRow label="Resolved">
             <span style={{ fontSize: 12, color: 'var(--text)' }}>{relTime(item.resolvedAt)}</span>
+          </ActionRow>
+        )}
+        {item.kind === 'escalation_zero' && item.extras?.mergedAt && (
+          <ActionRow label="Merged">
+            <span style={{ fontSize: 12, color: 'var(--text)' }} title={item.extras.mergedAt}>
+              {relTime(item.extras.mergedAt + 'T00:00:00Z')}
+            </span>
+          </ActionRow>
+        )}
+        {item.kind === 'escalation_zero' && Number.isFinite(item.extras?.escalationCount6mo) && (
+          <ActionRow label="Volume (6mo)">
+            <span style={{ fontSize: 12, color: 'var(--text)', fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
+              {item.extras.escalationCount6mo}
+            </span>
+          </ActionRow>
+        )}
+        {item.kind === 'escalation_zero' && item.extras?.hrxOwnerName && !assignee && (
+          <ActionRow label="HRX owner">
+            <span style={{ fontSize: 12, color: 'var(--text)' }}>{item.extras.hrxOwnerName}</span>
           </ActionRow>
         )}
         <ActionRow label="Votes">

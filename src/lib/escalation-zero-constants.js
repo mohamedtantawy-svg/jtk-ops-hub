@@ -111,7 +111,62 @@ export const ESCALATION_FIELD_LIMITS = Object.freeze({
                         // genuinely affects every country gets a Global
                         // banner manually.
   linkUrlMax: 2048,     // standard URL cap.
+  shortTextMax: 200,    // single-line fields (reporter, ETA, product name,
+                        // product owner, HRX POC).
+  textBlockMax: 10_000, // multi-line fields (actionTaken, productComment).
+  escalationCount6moMax: 100_000,
 });
+
+// ── Resolution track (Product team vs Operations) ──────────────────────────
+// Mirrors the xlsx "Reslution on Product / Ops" column — every historical
+// escalation was triaged to one of these two. Stored canonical so reports
+// can group by it; FE renders the human label.
+export const ESCALATION_RESOLUTION_TRACKS = [
+  { key: 'product',    label: 'Product',    color: '#7c3aed', bg: '#f3eff8' },
+  { key: 'operations', label: 'Operations', color: '#0369a1', bg: '#e0f2fe' },
+];
+
+const _TRACK_KEYS = new Set(ESCALATION_RESOLUTION_TRACKS.map(t => t.key));
+export function isValidResolutionTrack(key) {
+  return typeof key === 'string' && _TRACK_KEYS.has(key);
+}
+export function resolutionTrackMeta(key) {
+  return ESCALATION_RESOLUTION_TRACKS.find(t => t.key === key) || null;
+}
+
+// Lightweight ISO date validator — only YYYY-MM-DD is accepted for the
+// historical xlsx-imported merged_at column.
+const _ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+export function isValidIsoDate(v) {
+  if (typeof v !== 'string') return false;
+  if (!_ISO_DATE_RE.test(v)) return false;
+  const d = new Date(v + 'T00:00:00Z');
+  return Number.isFinite(d.getTime());
+}
+
+// Trim + cap a short text field, returning null if empty post-trim. Used
+// by the route validator for reporter / ETA / productName etc. so the
+// FE never has to think about "empty string vs missing".
+export function normaliseEscalationShortText(input, lim = ESCALATION_FIELD_LIMITS.shortTextMax) {
+  if (typeof input !== 'string') return null;
+  const s = input.trim();
+  if (!s) return null;
+  return s.slice(0, lim);
+}
+export function normaliseEscalationLongText(input, lim = ESCALATION_FIELD_LIMITS.textBlockMax) {
+  if (typeof input !== 'string') return null;
+  const s = input.trim();
+  if (!s) return null;
+  return s.slice(0, lim);
+}
+export function normaliseEscalationCount(input) {
+  if (input == null || input === '') return null;
+  const n = Number(input);
+  if (!Number.isFinite(n)) return null;
+  const i = Math.floor(n);
+  if (i < 0) return null;
+  return Math.min(i, ESCALATION_FIELD_LIMITS.escalationCount6moMax);
+}
 
 // ── Extras shape (stored in feedback_requests.extras JSONB) ────────────────
 // Reference / documentation only — Postgres doesn't enforce JSONB shape, so
@@ -140,6 +195,24 @@ export function defaultEscalationExtras() {
     linkedJiraUrl: '',
     escalationStatus: 'new',
     priorityKey: 'standard',
+    // ── Historical-xlsx fields (added 2026-06-01 with the 527-row
+    // import from the legacy Slack-channel spreadsheet) ────────────
+    reporter: null,            // who flagged it on Slack — display name / handle
+    hrxOwnerName: null,        // fallback display name for the HRX owner when
+                               // assignee_id doesn't resolve to a live member
+    escalationCount6mo: null,  // # of escalations in the prior 6 months
+    resolutionTrack: null,     // 'product' | 'operations'
+    slackLink: '',             // canonical Slack thread URL
+    etaToResolution: null,     // free-text ETA ("Q3", "End of Q2", "2026-10-31")
+    actionTaken: null,         // running log of triage actions
+    productName: null,         // e.g. "Payroll", "Benefits"
+    productOwner: null,        // product team owner (Lucas Faraht, etc)
+    hrxPoc: null,              // HRX point-of-contact handling the loop
+    productComment: null,      // product team's update / response
+    mergedAt: null,            // ISO date when this escalation was merged into another
+    importSource: null,        // 'xlsx_v1' for historical imports — used as
+                               // a stable conflict key on re-seed
+    importExternalId: null,    // deterministic id per source row
   };
 }
 
