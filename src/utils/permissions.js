@@ -50,12 +50,21 @@ export const hasAdminPower = (accessType, powerId) =>
 //   Team Lead       → own + direct reports
 //   Regional Manager→ own + all reports (TLs + their agents)
 //   Admin           → all tasks
-export const scopeTasks = (tasks, user, accessType, _allMembers) => {
+//
+// `extraVisibleEmails` (optional) — additional emails to include in the
+// visible set, e.g. active handover coverage subtrees. Lets a coverer
+// see the OOO person's team's tasks without escalating their base scope.
+export const scopeTasks = (tasks, user, accessType, _allMembers, extraVisibleEmails = null) => {
   const scope = getDataScope(accessType);
   if (scope === 'all_tasks') return tasks;
 
   // Build the set of visible emails based on the user's position in the hierarchy
-  const visibleEmails = getVisibleEmailsForAccess(user?.email);
+  const visibleEmails = new Set(getVisibleEmailsForAccess(user?.email));
+  if (extraVisibleEmails) {
+    for (const e of extraVisibleEmails) {
+      if (e) visibleEmails.add(String(e).toLowerCase());
+    }
+  }
 
   return tasks.filter(t => {
     // Match by email (primary — live data from Zendesk/Jira)
@@ -74,11 +83,16 @@ export const scopeTasks = (tasks, user, accessType, _allMembers) => {
 };
 
 // ── Scope members for team views ──────────────────────────────────────────
-export const scopeMembers = (allMembers, user, accessType) => {
+export const scopeMembers = (allMembers, user, accessType, extraVisibleEmails = null) => {
   const scope = getDataScope(accessType);
   if (scope === 'all_tasks') return allMembers;
 
-  const visibleEmails = getVisibleEmailsForAccess(user?.email);
+  const visibleEmails = new Set(getVisibleEmailsForAccess(user?.email));
+  if (extraVisibleEmails) {
+    for (const e of extraVisibleEmails) {
+      if (e) visibleEmails.add(String(e).toLowerCase());
+    }
+  }
   return allMembers.filter(m => visibleEmails.has(m.email?.toLowerCase()));
 };
 

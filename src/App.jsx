@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback, createContext } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, createContext } from 'react';
 
 import { TOOLS, STATUSES, FUNCTIONS, FLAGS } from './data/constants';
 import { INITIAL_PROJECTS } from './data/projects';
 import { INITIAL_REQUESTS } from './data/requests';
 import { MEMBERS, MEMBERS_BY_EMAIL, DEFAULT_USER_ACCESS_MAP, TEAM_MEMBERS, getAllReports, subscribeRoster, getRosterVersion, getLiveRosterFetched } from './data/members';
 import { useTeamMembers } from './hooks/useTeamMembers';
+import { useMyActiveCoverages, expandCoverageScope } from './hooks/useMyActiveCoverages';
 import { useCurrentDeptId, getCurrentDeptIdSync } from './lib/current-dept-storage';
 import { INITIAL_ACTIVITY, INITIAL_NOTES } from './data/tasks';
 import { FEED_EVENTS } from './data/feed';
@@ -250,7 +251,24 @@ const App=()=>{
   // impersonated AND see the right Home view when impersonated. Previously
   // this code short-circuited on `MEMBERS_BY_EMAIL[email]` which only knew
   // about the 104-person baseline → "Login as Olga" silently did nothing.
-  const { membersByEmail: liveMembersByEmail, getAllReports: liveGetAllReports } = useTeamMembers();
+  const { membersByEmail: liveMembersByEmail, getAllReports: liveGetAllReports, getDirectReports: liveGetDirectReports } = useTeamMembers();
+
+  // Active OOO handover coverages for the caller. When the caller is
+  // listed as an accepted coverer on a currently-active handover, every
+  // email in the requester's subtree becomes part of the caller's
+  // effective visible-emails set: their tasks land in scopeTasks, their
+  // members render in Team Summary aggregates, and the impersonation
+  // gate (handleImpersonate) accepts them as Login-as targets. Mirrors
+  // the server-side widening in queue-scoping._coverageEmailsForRequester.
+  // Applies across every department's handovers — the underlying API
+  // doesn't dept-filter (coverer takes the requester's seat regardless).
+  const { items: activeCoverages } = useMyActiveCoverages();
+  const coverageScope = useMemo(() => expandCoverageScope(activeCoverages, {
+    membersByEmail: liveMembersByEmail,
+    getDirectReports: liveGetDirectReports,
+    getAllReports: liveGetAllReports,
+  }), [activeCoverages, liveMembersByEmail, liveGetDirectReports, liveGetAllReports]);
+  const coverageEmails = coverageScope.emails;
 
   // Shape-adapter: the useTeamMembers hook returns entries with `access`
   // (team-tab vocabulary), but the rest of the app reads `role` off the
@@ -898,8 +916,19 @@ const App=()=>{
     if (reportsLc.includes(emailLc)) {
       setImpersonating(email);
       setView('briefing');
+      return;
     }
-  }, [user, liveMembersByEmail, liveGetAllReports]);
+    // Active handover coverage — if this TL/RM is currently covering someone
+    // (cross-team or cross-department manager-to-manager handover), Login-as
+    // is allowed for the covered manager AND every member of their subtree.
+    // Without this, a covering manager can SEE the covered team in Team
+    // Summary but can't Login-as any of them to triage their queue, which
+    // defeats the point of accepting the handover.
+    if (coverageEmails && coverageEmails.has(emailLc)) {
+      setImpersonating(email);
+      setView('briefing');
+    }
+  }, [user, liveMembersByEmail, liveGetAllReports, coverageEmails]);
 
   // "Login as Admin" — for regional managers. Picks the canonical owner
   // admin (mohamed.tantawy@deel.com) if they exist in the roster, else the
@@ -2202,7 +2231,7 @@ const App=()=>{
         </div>
       )}
       <div className="deel-content" data-region="main-content" aria-label="Main content" style={{display:'flex',overflowX:'hidden',overflowY:'auto',position:'relative',flex:1}}>
-          {view==='briefing'      &&perms?.canView('briefing')!==false &&(perms?.raw?.dataScope==='all_tasks'||perms?.raw?.dataScope==='regional_tasks'||perms?.raw?.dataScope==='team_tasks') &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasksWithSlaExt,MEMBERS)||tasksWithSlaExt} setView={setView} setSelTask={()=>{}} comms={comms} escalations={[]} setSubFilter={setSubFilter} requests={[]} projects={[]} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall} teamLeadOnCall={teamLeadOnCall} onChangeTeamLeadOnCall={handleChangeTeamLeadOnCall} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
+          {view==='briefing'      &&perms?.canView('briefing')!==false &&(perms?.raw?.dataScope==='all_tasks'||perms?.raw?.dataScope==='regional_tasks'||perms?.raw?.dataScope==='team_tasks') &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasksWithSlaExt,MEMBERS,coverageEmails)||tasksWithSlaExt} setView={setView} setSelTask={()=>{}} comms={comms} escalations={[]} setSubFilter={setSubFilter} requests={[]} projects={[]} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall} teamLeadOnCall={teamLeadOnCall} onChangeTeamLeadOnCall={handleChangeTeamLeadOnCall} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
           {view==='lead-home' &&<div className="page-enter"><TeamLeadHome user={effectiveUser} tasks={tasksWithSlaExt} setView={setView} managerOnCall={managerOnCall}/></div>}
           {view==='agent-home' &&<div className="page-enter"><AgentHome user={effectiveUser} tasks={tasksWithSlaExt} setView={setView} comms={comms}/></div>}
           {view==='my-queue'      &&perms?.canView('my-queue')!==false     &&<div className="page-enter"><Queue user={effectiveUser} tasks={tasksWithSlaExt} subFilter={subFilter} focusTaskId={focusTaskId} onTaskFocused={()=>setFocusTaskId(null)}/></div>}
@@ -2210,7 +2239,7 @@ const App=()=>{
           {view==='approval-queue' &&<div className="page-enter"><ApprovalQueueView user={effectiveUser} addToast={addToast}/></div>}
           {view==='settings'      &&perms?.canView('settings')!==false     &&<div className="page-enter"><SettingsView settings={settings} setSettings={setSettings} user={user} addToast={addToast} tasks={tasks} setTasks={setTasks} subFilter={subFilter} accessTypes={accessTypes} setAccessTypes={setAccessTypes} userAccessMap={userAccessMap} setUserAccessMap={setUserAccessMap} perms={perms}/></div>}
           {view==='slack'         &&perms?.canView('slack')!==false        &&<div className="page-enter"><Slack tasks={tasks.filter(t=>t.source==='slack')} setTasks={setTasks} onEscalMgr={()=>{}} addToast={addToast} user={effectiveUser}/></div>}
-          {view==='alerts'        &&perms?.canView('alerts')!==false       &&<div className="page-enter"><Alerts tasks={perms?.scopeTasks?.(tasksWithSlaExt,MEMBERS)||tasksWithSlaExt} setTasks={setTasks}/></div>}
+          {view==='alerts'        &&perms?.canView('alerts')!==false       &&<div className="page-enter"><Alerts tasks={perms?.scopeTasks?.(tasksWithSlaExt,MEMBERS,coverageEmails)||tasksWithSlaExt} setTasks={setTasks}/></div>}
           {view==='feedback'      &&perms?.canView('feedback')!==false     &&<div className="page-enter"><FeedbackView user={effectiveUser} addToast={addToast} openCompose={feedbackCompose} onComposeOpened={()=>setFeedbackCompose(false)} openPicker={feedbackPickerOpen} onPickerOpened={()=>setFeedbackPickerOpen(false)}/></div>}
           {view==='hr-hub'        &&perms?.canView('hr-hub')!==false       &&<div className="page-enter"><HrHubView user={effectiveUser} onCreateHrHub={()=>setHrHubCreate({initialFlow:null})}/></div>}
           {view==='org'           &&perms?.canView('org')!==false          &&<div className="page-enter"><OrgView user={effectiveUser} realUser={user} onImpersonate={handleImpersonate}/></div>}
@@ -2227,14 +2256,14 @@ const App=()=>{
               evaluates to undefined / null (e.g. mid-impersonation
               hand-off) get an empty render instead of leaking the view
               while perms re-hydrate (audit 2026-05-04 hardening). */}
-          {view==='leader-alerts' && perms?.canView('leader-alerts') === true &&<div className="page-enter"><LeadersHubView user={effectiveUser} perms={perms} refreshNonce={leaderAlertsRefreshNonce} tasks={perms?.scopeTasks?.(tasksWithSlaExt,MEMBERS)||tasksWithSlaExt} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
+          {view==='leader-alerts' && perms?.canView('leader-alerts') === true &&<div className="page-enter"><LeadersHubView user={effectiveUser} perms={perms} refreshNonce={leaderAlertsRefreshNonce} tasks={perms?.scopeTasks?.(tasksWithSlaExt,MEMBERS,coverageEmails)||tasksWithSlaExt} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
           {view==='ooo' && perms?.canView('ooo')!==false &&<div className="page-enter"><OOOView user={effectiveUser} setView={setView} addToast={addToast}/></div>}
           {/* Legacy direct route — keeps deep-links to ?view=team working
               by sending the user to Leaders Hub (which contains the Team
               sub-view). Avoids 404s on bookmarks/notifications from the
               pre-2026-05-03 nav. Same strict canView gate as Leaders Hub
               above; agents never get past this even via legacy URL. */}
-          {view==='team'          && perms?.canView('team') === true       &&<div className="page-enter"><LeadersHubView user={effectiveUser} perms={perms} refreshNonce={leaderAlertsRefreshNonce} tasks={perms?.scopeTasks?.(tasksWithSlaExt,MEMBERS)||tasksWithSlaExt} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
+          {view==='team'          && perms?.canView('team') === true       &&<div className="page-enter"><LeadersHubView user={effectiveUser} perms={perms} refreshNonce={leaderAlertsRefreshNonce} tasks={perms?.scopeTasks?.(tasksWithSlaExt,MEMBERS,coverageEmails)||tasksWithSlaExt} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
       </div>
       {createModal   &&<CreateTaskModal onConfirm={confirmCreate} onClose={()=>setCreateModal(false)} currentUser={effectiveUser}/>}
       {hrHubCreate   &&<CreateHrHubRequestModal initialFlow={hrHubCreate.initialFlow||null} onClose={()=>setHrHubCreate(null)} onCreated={(id,flow)=>{setHrHubCreate(null);setView('hr-hub');addToast?.({kind:'success',message:`Submitted to HR Hub${flow?` (${flow.replace('_',' ')})`:''}.`});}}/>}
@@ -2258,9 +2287,9 @@ const App=()=>{
       {leaderAlertCreate&&<CreateLeaderAlertModal onClose={()=>setLeaderAlertCreate(false)} onCreated={(alert)=>{setLeaderAlertCreate(false);setView('leader-alerts');setLeaderAlertsRefreshNonce(n=>n+1);addToast?.({kind:'success',message:`Posted${alert?.title?`: "${alert.title.slice(0,60)}${alert.title.length>60?'…':''}"`:' alert'}.`});}}/>}
       {urgentAssistCreate&&<CreateUrgentAssistModal currentUser={effectiveUser} initialKind={urgentAssistCreate.kind} onClose={()=>setUrgentAssistCreate(null)} onCreated={(row)=>{const isMon=urgentAssistCreate.kind==='case_monitoring';setUrgentAssistCreate(null);setView('urgent-assist');setUrgentAssistRefreshNonce(n=>n+1);addToast?.({kind:'success',message:`${isMon?'Case Monitoring':'Urgent Assist'} created${row?.subject?`: "${row.subject.slice(0,60)}${row.subject.length>60?'…':''}"`:''}.`});}}/>}
       {projectModal  &&<CreateProjectModal onConfirm={confirmProject} onClose={()=>setProjectModal(null)} project={typeof projectModal==='object'?projectModal:null} currentUser={effectiveUser}/>}
-      {requestModal  &&<CreateRequestModal onConfirm={confirmRequest} onClose={()=>setRequestModal(false)} currentUser={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks}/>}
-      {createEscalModal&&<CreateEscalationModal onConfirm={confirmManualEscal} onClose={()=>setCreateEscalModal(false)} currentUser={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks}/>}
-      {showSearch    &&<GlobalSearch tasks={perms?.scopeTasks?.(tasks,MEMBERS)||tasks} setView={setView} setSelTask={()=>{}} onClose={()=>setShowSearch(false)}/>}
+      {requestModal  &&<CreateRequestModal onConfirm={confirmRequest} onClose={()=>setRequestModal(false)} currentUser={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS,coverageEmails)||tasks}/>}
+      {createEscalModal&&<CreateEscalationModal onConfirm={confirmManualEscal} onClose={()=>setCreateEscalModal(false)} currentUser={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS,coverageEmails)||tasks}/>}
+      {showSearch    &&<GlobalSearch tasks={perms?.scopeTasks?.(tasks,MEMBERS,coverageEmails)||tasks} setView={setView} setSelTask={()=>{}} onClose={()=>setShowSearch(false)}/>}
       {showOnboard   &&<Onboarding onDismiss={(dontShow)=>{setShowOnboard(false);if(dontShow){try{localStorage.setItem('ops_hub_onboarded','1');}catch(e){}}}}/>}
       {/* What's-new tour — only renders once Onboarding is dismissed so
           we never stack two modals. The tour itself writes its seen-flag

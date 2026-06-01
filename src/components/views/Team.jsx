@@ -4,6 +4,7 @@ import { PermissionsContext, IntegrationsContext } from '../../App';
 import { FLAGS, getFlag, getCountryName } from '../../data/constants';
 import { slaInfo } from '../../utils/helpers';
 import { useTeamMembers } from '../../hooks/useTeamMembers';
+import { useMyActiveCoverages, expandCoverageScope } from '../../hooks/useMyActiveCoverages';
 import MultiCountryPicker from '../team/MultiCountryPicker';
 import { useQueueSlaSettings, broadcastQueueSlaUpdate } from '../../hooks/useQueueSlaSettings';
 import { putQueueSlaSettings } from '../../services/queueSlaSettingsApi';
@@ -152,6 +153,18 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
   // table is empty pre-seed) the legacy `On Leave` manual toggle still
   // renders, so the row never loses its OOO indicator.
   const { eventsByEmail: oooEventsByEmail } = useTimeOffEvents();
+
+  // Active handover coverages — when the viewer is covering peer manager(s)
+  // (cross-team or cross-department), the covered subtree must appear in
+  // this tree so the viewer can see the team they're triaging during the
+  // OOO window AND can click Login-as on the covered manager + every
+  // member of their subtree. Mirrors BriefingView Team-Summary widening.
+  const { items: activeCoverages } = useMyActiveCoverages();
+  const delegatedScope = useMemo(() => expandCoverageScope(activeCoverages, {
+    membersByEmail: localMembersByEmail,
+    getDirectReports: localGetDirectReports,
+    getAllReports: localGetAllReports,
+  }), [activeCoverages, localMembersByEmail, localGetDirectReports, localGetAllReports]);
 
   // ── Deel-source breach inputs for the per-agent SLA dot ──────────────────
   // Mounting these hooks here lets `slaHealth(email)` cover Onboarding,
@@ -452,10 +465,17 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
   const realUserAllReports = useMemo(() => {
     if (!realUserMember) return new Set();
     if (['admin', 'regional_manager', 'team_lead'].includes(realUserMember.access)) {
-      return new Set(localGetAllReports(realUserEmail));
+      const set = new Set(localGetAllReports(realUserEmail));
+      // Widen with active coverage subtree so the Login-as pill renders
+      // on covered manager + their reports. Mirrors App.jsx handleImpersonate's
+      // coverageEmails check so the click actually impersonates instead of
+      // no-op-ing past the gate. Without this, the covering manager sees
+      // the covered team in the tree but every row's Login-as is hidden.
+      for (const e of delegatedScope.emails) set.add(e);
+      return set;
     }
     return new Set();
-  }, [realUserEmail, realUserMember, localGetAllReports]);
+  }, [realUserEmail, realUserMember, localGetAllReports, delegatedScope]);
 
   const canLoginAs = (targetEmail) => {
     if (!realUserMember) return false;
@@ -481,8 +501,47 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
         return m.team === regionFilter;
       });
     }
+
+    // Append covered TL/RM rows so a covering manager sees the OOO
+    // manager's team alongside their own. Dedup against the user's own
+    // subtree (when the covered person is already a direct/indirect
+    // report, no extra row — they're rendered inside the existing tree).
+    if (Array.isArray(activeCoverages) && activeCoverages.length > 0) {
+      const ownSubtree = new Set([
+        userEmail,
+        ...localGetAllReports(userEmail).map(e => (typeof e === 'string' ? e : e?.email || '').toLowerCase()),
+      ]);
+      const directEmails = new Set(directReports.map(m => (m.email || '').toLowerCase()));
+      const extras = [];
+      const seen = new Set();
+      for (const c of activeCoverages) {
+        const reqLc = String(c?.requester_email || '').toLowerCase();
+        if (!reqLc || seen.has(reqLc)) continue;
+        seen.add(reqLc);
+        if (ownSubtree.has(reqLc)) continue; // already rendered inside the natural tree
+        if (directEmails.has(reqLc)) continue;
+        const m = localMembersByEmail[reqLc];
+        if (!m || m.isDeleted) continue;
+        const access = String(m.access || '').toLowerCase();
+        // Only RMs/TLs add a row — covering an agent doesn't introduce
+        // a new top-level manager group. (Agent-level coverage still
+        // flows through realUserAllReports for the Login-as gate.)
+        if (access !== 'team_lead' && access !== 'regional_manager') continue;
+        // Honour the active region filter so an EMEA covering an APAC
+        // peer doesn't suddenly clutter their EMEA-only view.
+        if (regionFilter !== 'all') {
+          const t = m.team || '';
+          const inRegion = regionFilter === 'LATAM + NAM'
+            ? (t === 'LATAM + NAM' || t === 'LATAM' || t === 'NAM')
+            : t === regionFilter;
+          if (!inRegion) continue;
+        }
+        extras.push(m);
+      }
+      if (extras.length > 0) return [...directReports, ...extras];
+    }
     return directReports;
-  }, [userEmail, userMember, regionFilter, localGetDirectReports]);
+  }, [userEmail, userMember, regionFilter, localGetDirectReports, localGetAllReports, localMembersByEmail, activeCoverages]);
 
   // Compute overall stats for KPI cards — user + all emails under them
   const allReportEmails = useMemo(() => [userEmail, ...localGetAllReports(userEmail)], [userEmail, localGetAllReports]);

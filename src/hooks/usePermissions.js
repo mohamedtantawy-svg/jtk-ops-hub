@@ -66,8 +66,11 @@ export const usePermissions = (user, accessTypes, userAccessMap) => {
       canManageLeaderAlerts,
       accessTypeName: accessType?.name || 'Agent',
       accessTypeId: accessType?.id || 'at_agent',
-      scopeTasks: (tasks, allMembers) => scopeTasks(tasks, user, accessType, allMembers),
-      scopeMembers: (allMembers) => scopeMembers(allMembers, user, accessType),
+      // `extraEmails` lets callers widen the visible set with active
+      // handover coverage subtrees so a coverer sees the OOO person's
+      // team's tasks/members without changing their base scope.
+      scopeTasks: (tasks, allMembers, extraEmails) => scopeTasks(tasks, user, accessType, allMembers, extraEmails),
+      scopeMembers: (allMembers, extraEmails) => scopeMembers(allMembers, user, accessType, extraEmails),
       scopeEscalations: (escalations, allMembers) => scopeEscalations(escalations, user, accessType, allMembers),
     };
   }, [user, accessTypes, userAccessMap]);
