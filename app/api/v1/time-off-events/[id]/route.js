@@ -12,19 +12,34 @@
 //   • Regional Mgrs — own + full subtree
 //   • Admin       — anyone
 //
-// Safety on DELETE: if a non-terminal handover is attached we 409 — the
-// user must cancel/complete the handover first via the existing flow.
-// Letting a delete cascade through an active handover would silently
-// un-notify coverers + leave the activity log claiming the OOO existed.
+// Safety on DELETE:
+//   • Self-delete (caller IS the requester) — auto-cancels any non-terminal
+//     handovers attached to the event with reason "Time-off entry deleted
+//     by requester" before removing the row. Coverers + manager receive
+//     a Cancelled notification. Without this cascade the requester sees
+//     "delete button non-functional" (Olga Pastuszak 2026-05-29 feedback:
+//     "the delete button is non-functional on my end" — the 409 surfaced
+//     as a brief error toast that's easy to miss, and forced 4 separate
+//     cancel-then-delete cycles per vacation).
+//   • Non-self delete (manager → report) — still 409s. Forcing the manager
+//     to explicitly cancel preserves the "I see what I'm un-notifying"
+//     safety net for cross-person deletes.
 // PATCH allows date edits with a non-terminal handover but emits a
 // `dates_drifted` log entry on the handover when start/end shifts, so the
 // timeline shows the change.
 import { NextResponse } from 'next/server';
-import { query } from '../../../../../src/lib/db';
+import { query, withTransaction } from '../../../../../src/lib/db';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { canManageTimeOffFor } from '../../../../../src/lib/queue-scoping';
 import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
 import { getCurrentDeptId } from '../../../../../src/lib/dept-scope';
+import { loadHandoverWithDetails, transitionStatus, notifyMany } from '../../../../../src/lib/handover-server';
+import {
+  HANDOVER_STATUSES,
+  HANDOVER_EVENT_TYPES,
+  HANDOVER_NOTIFICATION_TYPES,
+  TERMINAL_STATUSES,
+} from '../../../../../src/lib/handover-helpers';
 
 function isUuid(s) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s || ''));
@@ -156,25 +171,79 @@ export async function DELETE(req, { params }) {
       );
     }
 
+    // Find non-terminal handovers attached. For self-delete we cascade-cancel
+    // them inside one transaction (next branch). For cross-person delete we
+    // still 409 so the manager sees what they're un-notifying first.
     const { rows: hRows } = await query(
       `SELECT id FROM handovers
         WHERE time_off_event_id = $1
-          AND status NOT IN ('cancelled','rejected','expired','completed')
-        LIMIT 1`,
+          AND status NOT IN ('cancelled','rejected','expired','completed')`,
       [id],
     );
-    if (hRows.length > 0) {
+
+    const callerLc = String(user.email || '').toLowerCase();
+    const isSelfDelete = String(workEmail || '').toLowerCase() === callerLc;
+
+    if (hRows.length > 0 && !isSelfDelete) {
       return NextResponse.json(
         { error: 'Cancel the attached handover first before deleting this OOO entry.' },
         { status: 409 },
       );
     }
 
-    await query(
-      `DELETE FROM time_off_events WHERE id = $1 AND org_node_id = $2`,
-      [id, currentDeptId],
-    );
-    return NextResponse.json({ ok: true });
+    if (hRows.length === 0) {
+      // No handovers to cascade — straight delete.
+      await query(
+        `DELETE FROM time_off_events WHERE id = $1 AND org_node_id = $2`,
+        [id, currentDeptId],
+      );
+      return NextResponse.json({ ok: true });
+    }
+
+    // Self-delete WITH attached non-terminal handovers — cascade-cancel
+    // inside a single transaction so we can't end up with orphan
+    // handovers if the row delete fails partway through. Each cancel
+    // mirrors POST /handovers/:id/cancel so the log + coverer/manager
+    // notifications are identical to the manual path.
+    const cascadeReason = 'Time-off entry deleted by requester';
+    const cancelledIds = await withTransaction(async (client) => {
+      const ids = [];
+      for (const h of hRows) {
+        const handover = await loadHandoverWithDetails(h.id, { client });
+        if (TERMINAL_STATUSES.has(handover.status)) continue;
+        const after = await transitionStatus(client, handover, HANDOVER_STATUSES.CANCELLED, {
+          actor: user,
+          logEventType: HANDOVER_EVENT_TYPES.CANCELLED,
+          logDetail: { reason: cascadeReason, source: 'time_off_event_delete' },
+          extraColumns: {
+            cancelled_at: new Date(),
+            cancelled_by: callerLc,
+            cancel_reason: cascadeReason,
+          },
+        });
+        const recipients = [
+          after.requester_email,
+          after.manager_email,
+          ...handover.coverers.map(c => c.coverer_email),
+        ];
+        await notifyMany(client, recipients, HANDOVER_NOTIFICATION_TYPES.CANCELLED, after.id, {
+          title: 'Handover cancelled',
+          body: cascadeReason,
+          actor: user,
+        });
+        ids.push(handover.id);
+      }
+      await client.query(
+        `DELETE FROM time_off_events WHERE id = $1 AND org_node_id = $2`,
+        [id, currentDeptId],
+      );
+      return ids;
+    });
+    return NextResponse.json({
+      ok: true,
+      cascadedHandovers: cancelledIds.length,
+      cancelledHandoverIds: cancelledIds,
+    });
   } catch (err) {
     console.error('[time-off-events DELETE]', err.message);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

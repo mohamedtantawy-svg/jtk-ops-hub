@@ -29,8 +29,7 @@ import { useTeamMembers } from '../../hooks/useTeamMembers';
 import { listTimeOffEvents } from '../../services/timeOffApi';
 import {
   fetchHandoverLensCounts,
-  bulkApproveHandovers,
-  bulkRejectHandovers,
+  bulkAcceptHandovers,
 } from '../../services/handoversApi';
 import { LENS_IDS, autoLens, isoDate } from '../../lib/handover-helpers';
 
@@ -630,35 +629,32 @@ function OOOView({ user, setView, addToast }) {
             onEditEvent={(ev) => setEditTimeOffEvent(ev)}
             onUpdated={refreshAll}
             onToast={addToast}
-            onBulkApprove={async (eventIds) => {
-              // Convert event ids → handover ids using the events array.
+            onBulkAccept={async (eventIds) => {
+              // Coverer bulk-accept — converts event ids → handover ids
+              // and POSTs to /handovers/bulk/accept (Olga Pastuszak
+              // 2026-05-29 feedback: the upstream Deel split makes a
+              // single vacation arrive as N sibling handovers; this lets
+              // the coverer clear them all in one click).
               const ids = events
                 .filter(e => eventIds.includes(e.id) && e.handover?.id)
                 .map(e => e.handover.id);
               if (ids.length === 0) return;
               try {
-                await bulkApproveHandovers(ids);
-                addToast?.({ kind: 'success', message: `Approved ${ids.length} handover${ids.length === 1 ? '' : 's'}.` });
+                const res = await bulkAcceptHandovers(ids);
+                const accepted = Number(res?.accepted) || 0;
+                const failed = Number(res?.failed) || 0;
+                if (failed === 0) {
+                  addToast?.({ kind: 'success', message: `Accepted ${accepted} handover${accepted === 1 ? '' : 's'}.` });
+                } else if (accepted === 0) {
+                  // Surface the first concrete error so the user can act.
+                  const firstErr = (res?.results || []).find(r => r?.error)?.error;
+                  addToast?.({ kind: 'error', message: firstErr || `Failed to accept ${failed} handover${failed === 1 ? '' : 's'}.` });
+                } else {
+                  addToast?.({ kind: 'warning', message: `Accepted ${accepted}, ${failed} failed — check the row(s) that didn't update.` });
+                }
                 refreshAll();
               } catch (err) {
-                addToast?.({ kind: 'error', message: err?.message || 'Bulk approve failed' });
-              }
-            }}
-            onBulkReject={async (eventIds) => {
-              const ids = events
-                .filter(e => eventIds.includes(e.id) && e.handover?.id)
-                .map(e => e.handover.id);
-              if (ids.length === 0) return;
-              const reason = typeof window !== 'undefined'
-                ? window.prompt('Reason for rejection (required, shared across all selected):')
-                : null;
-              if (!reason) return;
-              try {
-                await bulkRejectHandovers(ids, reason);
-                addToast?.({ kind: 'success', message: `Rejected ${ids.length} handover${ids.length === 1 ? '' : 's'}.` });
-                refreshAll();
-              } catch (err) {
-                addToast?.({ kind: 'error', message: err?.message || 'Bulk reject failed' });
+                addToast?.({ kind: 'error', message: err?.message || 'Bulk accept failed' });
               }
             }}
           />

@@ -78,7 +78,7 @@ function statusLabel(ev, today) {
 
 function TableMode({
   events, membersByEmail, todayIso, onSelectEvent,
-  currentUserEmail, currentUserRole, onBulkApprove, onBulkReject,
+  currentUserEmail, currentUserRole, onBulkAccept,
   // Per-row edit/delete affordances. Megan Lawrence 2026-05-15 ask: surface
   // inline pencil + trash on rows the caller can manage, so users don't have
   // to dig into the slide-out to update or remove an entry.
@@ -119,11 +119,28 @@ function TableMode({
       setDeletingId(null);
     }
   };
+  // Bulk eligibility = "this row is a pending coverage invitation that I
+  // can accept". Lets a coverer clear N sibling invitations from the same
+  // requester in one click — fixes the "Belu locked, can only approve 1
+  // of these individual requests" pain Olga Pastuszak reported 2026-05-29
+  // when Deel upstream splits a vacation into per-day events and each
+  // becomes a separate handover.
+  //
+  // Pre-2026-05-18 this checked `pending_manager_approval` for the
+  // manager-bulk-approve flow, but the TL approval step was removed by
+  // HANDOVER_TEMPLATE_REVAMP_PLAN.md §4.2 and that path is now dead
+  // (no handover ever reaches pending_manager_approval). Repurposing the
+  // existing checkbox + sticky banner primitives to bulk-accept.
   function eligibleForBulk(ev) {
-    if (!ev?.handover) return false;
-    if (ev.handover.status !== 'pending_manager_approval') return false;
-    if (isAdminish) return true;
-    return (ev.handover.manager_email || '').toLowerCase() === callerLc;
+    const h = ev?.handover;
+    if (!h) return false;
+    if (h.status !== 'pending_coverage_acceptance') return false;
+    const coverers = Array.isArray(h.coverers) ? h.coverers : [];
+    return coverers.some(c =>
+      String(c.coverer_email || '').toLowerCase() === callerLc
+      && c.acceptance_status !== 'accepted'
+      && c.acceptance_status !== 'declined'
+    );
   }
 
   const rows = useMemo(() => {
@@ -218,24 +235,15 @@ function TableMode({
           <strong>{selectedCount} selected</strong>
           <span style={{ color: 'var(--text-secondary)' }}>·</span>
           <button type="button" disabled={busy}
-            onClick={() => runBulk(onBulkApprove, 'approve')}
+            onClick={() => runBulk(onBulkAccept, 'accept')}
             style={{
               padding: '5px 12px', borderRadius: 6,
               background: 'var(--purple, #7c3aed)', color: 'white',
               border: 'none', fontSize: 11, fontWeight: 700, cursor: 'pointer',
               fontFamily: 'inherit', opacity: busy ? 0.55 : 1,
             }}>
-            Approve all
-          </button>
-          <button type="button" disabled={busy}
-            onClick={() => runBulk(onBulkReject, 'reject')}
-            style={{
-              padding: '5px 12px', borderRadius: 6,
-              background: 'var(--surface)', color: '#B91C1C',
-              border: '1px solid #B91C1C', fontSize: 11, fontWeight: 700, cursor: 'pointer',
-              fontFamily: 'inherit', opacity: busy ? 0.55 : 1,
-            }}>
-            Reject all
+            <i className="bi-check2-all" style={{ fontSize: 11, marginRight: 4 }} />
+            Accept all
           </button>
           <div style={{ flex: 1 }} />
           <button type="button" onClick={() => setSelectedIds(new Set())}

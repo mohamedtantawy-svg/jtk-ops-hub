@@ -267,14 +267,36 @@ function DetailSlideOut({
   const canDelete  = canCallerManageTarget(currentUserEmail, currentUserRole, event.work_email, membersByEmail);
   const handleDelete = async () => {
     if (!canDelete || deleteBusy) return;
-    const confirmed = typeof window !== 'undefined'
-      ? window.confirm(`Delete this time-off entry?\n\n${event.work_email} · ${event.start_date} → ${event.end_date}\n\nThis can't be undone.`)
-      : false;
+    // Surface attached non-terminal handovers in the confirm so the user
+    // sees what will be cancelled. The server cascades these on self-delete
+    // (Olga Pastuszak 2026-05-29 feedback: "the delete button is
+    // non-functional on my end" — previously the route 409'd with a
+    // generic toast that was easy to miss).
+    const attachedHandover = handover && !TERMINAL_STATUSES.has(handover.status)
+      ? handover
+      : (event.handover && !TERMINAL_STATUSES.has(event.handover.status) ? event.handover : null);
+    const isSelfDelete = (event.work_email || '').toLowerCase() === callerLc;
+    let confirmMsg = `Delete this time-off entry?\n\n${event.work_email} · ${event.start_date} → ${event.end_date}`;
+    if (attachedHandover) {
+      if (isSelfDelete) {
+        confirmMsg += `\n\nYour attached handover (status: ${humanStatus(attachedHandover.status)}) will be automatically cancelled and your coverer(s) notified.`;
+      } else {
+        confirmMsg += `\n\nThis row has an active handover — cancel it first or the delete will fail.`;
+      }
+    }
+    confirmMsg += `\n\nThis can't be undone.`;
+    const confirmed = typeof window !== 'undefined' ? window.confirm(confirmMsg) : false;
     if (!confirmed) return;
     setDeleteBusy(true);
     try {
-      await deleteTimeOffEvent(event.id);
-      onToast?.({ kind: 'success', message: 'Time-off entry removed.' });
+      const res = await deleteTimeOffEvent(event.id);
+      const cascaded = Number(res?.cascadedHandovers) || 0;
+      onToast?.({
+        kind: 'success',
+        message: cascaded > 0
+          ? `Time-off entry removed and ${cascaded} attached handover${cascaded === 1 ? '' : 's'} cancelled.`
+          : 'Time-off entry removed.',
+      });
       onUpdated?.();
       onClose?.();
     } catch (err) {

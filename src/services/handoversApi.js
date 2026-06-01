@@ -136,6 +136,19 @@ export async function bulkApproveHandovers(ids, note) {
   });
 }
 
+/**
+ * Bulk-accept N coverage invitations as the listed coverer. Each id runs
+ * in its own transaction (per-id atomicity); the response returns per-id
+ * results so the caller can surface partial success. Origin: Olga
+ * Pastuszak feedback 2026-05-29 — "Belu was only able to approve 1 of
+ * these individual requests."
+ */
+export async function bulkAcceptHandovers(ids) {
+  return apiFetch('/handovers/bulk/accept', {
+    method: 'POST', body: JSON.stringify({ ids }),
+  });
+}
+
 /** Bulk-reject N pending handovers as a manager (reason required). */
 export async function bulkRejectHandovers(ids, reason) {
   return apiFetch('/handovers/bulk/reject', {

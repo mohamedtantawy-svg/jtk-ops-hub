@@ -187,6 +187,36 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
     const head = selectedEventIds[0];
     return groupedEvents.find(g => g.events.some(e => e.id === head)) || null;
   }, [groupedEvents, selectedEventIds]);
+
+  // Auto-expand a per-row "Submit handover" deep-link to the whole
+  // weekend-adjacent group on first load. Without this, a caller who
+  // clicks "Submit handover" from a single event row would only
+  // pre-select that single id and have to manually click the group in
+  // Step 1 to cover the whole vacation — Olga Pastuszak 2026-05-29
+  // feedback symptom: "My overall holiday request was split into several
+  // individual requests within Deel app." Detection: when only the
+  // initialEventId is selected AND its enclosing group has more
+  // (uncovered) events, swap in the full uncovered set. Guarded by a
+  // ref so the user's later manual narrowing isn't fought against.
+  const autoExpandedRef = useRef(false);
+  useEffect(() => {
+    if (autoExpandedRef.current) return;
+    if (!initialEventId) return;
+    if (groupedEvents.length === 0) return;
+    if (selectedEventIds.length !== 1 || selectedEventIds[0] !== initialEventId) return;
+    const g = groupedEvents.find(grp => grp.events.some(e => e.id === initialEventId));
+    if (!g || g.events.length <= 1) {
+      autoExpandedRef.current = true;
+      return;
+    }
+    const uncovered = g.events.filter(e => !e.handover).map(e => e.id);
+    if (uncovered.length > 1) {
+      setSelectedEventIds(uncovered);
+    } else if (uncovered.length === 1 && uncovered[0] !== initialEventId) {
+      setSelectedEventIds(uncovered);
+    }
+    autoExpandedRef.current = true;
+  }, [initialEventId, groupedEvents, selectedEventIds]);
   const selectedEvents = useMemo(
     () => myEvents.filter(e => selectedEventIds.includes(e.id)),
     [myEvents, selectedEventIds],
