@@ -89,6 +89,17 @@ function fmtDuration(secs) {
   return `${Math.floor(h / 24)}d`;
 }
 
+// Paused-onboarding rows ship from a separate ingestion stream
+// (queueUnified.pausedOnboardingData → normalizePausedOnboarding, which is
+// the only normaliser that sets source='onboarding' AND isPaused=true).
+// They live in a dedicated "waiting" lane in the Queue and the Queue's
+// merged workspace-home tally excludes them from breach detection. The
+// dashboard tile must match — see the comment on `tally` below for the
+// Erwin Javier 2026-05-31 repro.
+function isPausedOnboarding(r) {
+  return r?.source === 'onboarding' && r?.isPaused === true;
+}
+
 export default function AgentHome({ user, tasks = [], setView, comms = [], ackEmails = null, isAckedByMe: isAckedByMeProp = null }) {
   const { queueUnified, hiddenTasks, slaExtensions } = useContext(IntegrationsContext);
   // 2026-05-22 — dept-branded "HR Hub" tile label.
@@ -221,9 +232,26 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
   // SLA isn't tracked here, so for this view it's "fine for now").
   // Net effect: agent sees "24 open · 2 breached · 4 at risk · 18 on
   // track (incl. 5 Jira)" and the math adds up.
+  // Paused-onboarding rows arrive from a separate ingestion stream
+  // (queueUnified.pausedOnboardingData) and the Queue's workspace-home
+  // merged view excludes them from its SLA tally via `allSourceRows` —
+  // they live in a dedicated "waiting" lane in the Onboarding tab and
+  // aren't actionable until the upstream pause clears. The dashboard
+  // tile must agree or the user sees N Breached here but 0 Breached in
+  // the queue, with no row to click through to (Erwin Javier feedback
+  // 2026-05-31: "Dashboard says I have 9 breached but per checking the
+  // Workspace queue, I don't have any"). Active onboarding rows are
+  // unaffected because normalizeOnboarding never sets isPaused.
   const tally = useMemo(() => {
     let breached = 0, atRisk = 0, ok = 0;
     for (const r of myRows) {
+      if (isPausedOnboarding(r)) {
+        // Paused — not actionable. Bucket as ok so total reconciles
+        // and the "Pick the oldest first" CTA doesn't surface work
+        // the user can't move forward.
+        ok++;
+        continue;
+      }
       const s = rowSlaSeverity(r);
       if (s === 'breached') breached++;
       else if (s === 'at_risk') atRisk++;
@@ -248,9 +276,13 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
   }, [myRows, myTickets]);
 
   // ── Focus list — 5 most-urgent items (breached oldest first, then at-risk)
+  // Paused-onboarding rows are excluded for the same reason as the tally
+  // above: they aren't actionable until the upstream pause clears, so
+  // surfacing them under "ACTION NOW" sends the user to a row they can't
+  // move forward.
   const focusList = useMemo(() => {
     const breached = [
-      ...myRows.filter(r => rowSlaSeverity(r) === 'breached').map(r => ({
+      ...myRows.filter(r => !isPausedOnboarding(r) && rowSlaSeverity(r) === 'breached').map(r => ({
         kind: 'source', id: `${r.source}:${r.id}`, source: r.source,
         subject: r.subject || '(no subject)',
         country: r.country, taskUrl: r.taskUrl,
@@ -268,7 +300,7 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
       })),
     ].sort((a, b) => b.overdueSecs - a.overdueSecs);
     const atRisk = [
-      ...myRows.filter(r => rowSlaSeverity(r) === 'at_risk').map(r => ({
+      ...myRows.filter(r => !isPausedOnboarding(r) && rowSlaSeverity(r) === 'at_risk').map(r => ({
         kind: 'source', id: `${r.source}:${r.id}`, source: r.source,
         subject: r.subject || '(no subject)',
         country: r.country, taskUrl: r.taskUrl,
