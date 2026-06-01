@@ -1,9 +1,16 @@
-// ── /api/v1/leader-reports/capacity (Phase 1 — 2026-06-01) ────────────────
-// Backs the Leaders Hub → Capacity sub-tab. Phase 1 lights up the
-// Country Workload table — per-country counts from every visible Deel
-// source for the caller's current dept, plus the owner-set derived from
-// team_member_countries. membersCurrent and teamSummary stay empty until
-// Phases 2 and 3 respectively.
+// ── /api/v1/leader-reports/capacity (Phases 0-3 — 2026-06-01) ─────────────
+// Backs the Leaders Hub → Capacity sub-tab. Single GET response carries:
+//   • settings — per-dept formula tuning (defaults synthesized when no
+//     row exists in capacity_settings).
+//   • countryWorkload — Phase 1: per-country live demand counts from
+//     every visible Deel source for the caller's dept + owners derived
+//     from team_member_countries.
+//   • membersCurrent + membersLeads — Phase 2: per-member load + the
+//     team-lead lookup table for FE section headers.
+//   • teamSummary — Phase 3: per-Team-Lead roll-up derived from the
+//     member rows so the two views can't drift apart.
+//   • workloadCachedAt — when the in-process aggregator cache last
+//     hydrated (FE surfaces "Snapshot from HH:MM").
 //
 // Auth: manager+ tier (team_lead, regional_manager, manager, admin).
 // Agents get 403 — matches the Leaders Hub Reports sub-tab gate.
