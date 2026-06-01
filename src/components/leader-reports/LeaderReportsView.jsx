@@ -9,15 +9,27 @@
 // mistake #31).
 //
 // First report: SLA Extension (Jose Ruales feedback 2026-05-30).
+// Second report: Productivity (Sarah Suge feedback 2026-05) — tasks
+// resolved per team per category over a selected time period.
 
 import { useCallback, useEffect, useState } from 'react';
 import SlaExtensionReport from './SlaExtensionReport';
+import ProductivityReport from './ProductivityReport';
 
 // Each entry is a self-describing card. To add a report:
 //   1. Drop the component file next to this one.
 //   2. Add a row here with id / title / description / icon / accent / Component.
 // The landing grid + the deep-link router both pick it up automatically.
 const REPORTS = [
+  {
+    id: 'productivity',
+    title: 'Productivity Report',
+    description: 'Tasks resolved per team per category over a chosen time period. KPIs, stacked-bar team breakdown, daily trend, and a top-performers leaderboard — dept-scoped + CSV exportable.',
+    icon: 'bi-trophy-fill',
+    accent: '#0d9488',
+    accentBg: '#ecfdf5',
+    Component: ProductivityReport,
+  },
   {
     id: 'sla-extension',
     title: 'SLA Extension Report',
