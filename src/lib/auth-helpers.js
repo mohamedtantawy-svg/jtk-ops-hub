@@ -1,11 +1,30 @@
 // Helper to extract authenticated user info from request headers
 // These headers are set by middleware.js after JWT verification
 
+// `x-user-name` is URL-encoded by the middleware because HTTP header
+// values are ByteStrings (Latin-1 only), and a display name with a
+// non-Latin-1 character (e.g. Polish `Ś`) would otherwise throw
+// `TypeError: Cannot convert argument to a ByteString…` and lock the
+// user out of every API call. Decode defensively — if the value
+// doesn't round-trip (e.g. a JWT issued by an older build still has
+// the raw name in some odd path), fall back to the raw string so the
+// request keeps working. The header is best-effort context only; the
+// canonical identity is x-user-email (skill rule #4).
+function _safeDecodeName(raw) {
+  if (raw == null) return null;
+  if (typeof raw !== 'string' || raw.length === 0) return raw;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
 export function getAuthUser(req) {
   const id = req.headers.get('x-user-id');
   const email = req.headers.get('x-user-email');
   const role = req.headers.get('x-user-role');
-  const name = req.headers.get('x-user-name');
+  const name = _safeDecodeName(req.headers.get('x-user-name'));
   return { id: id ? Number(id) : null, email, role, name };
 }
 

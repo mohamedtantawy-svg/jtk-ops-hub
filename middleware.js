@@ -227,7 +227,16 @@ export async function middleware(request) {
   requestHeaders.set('x-user-id', payload.sub != null ? String(payload.sub) : '');
   requestHeaders.set('x-user-email', payload.email || '');
   requestHeaders.set('x-user-role', payload.role || '');
-  requestHeaders.set('x-user-name', payload.name || '');
+  // HTTP header values are ByteStrings (Latin-1 only, codepoints 0-255).
+  // A display name with a non-Latin-1 character — e.g. Polish `Ś`
+  // (U+015A, decimal 346) — throws `TypeError: Cannot convert argument
+  // to a ByteString…` and locks the user out of every API call. URL-
+  // encode the name here; auth-helpers.js#getAuthUser decodes it on
+  // the route side. Encoding is a no-op for ASCII-only names so existing
+  // users see no change. (Caught 2026-06-01: prod logs showed the error
+  // every few seconds — every HRX member with a Polish / Czech / other
+  // non-Latin-1 surname was effectively offline.)
+  requestHeaders.set('x-user-name', encodeURIComponent(payload.name || ''));
 
   // Impersonation propagation. The FE Login-as feature lets admins / RMs
   // view the app as another user — but until 2026-05-03 the swap was
