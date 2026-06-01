@@ -21,7 +21,7 @@
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { getCurrentDeptSlugAndId } from '../../../../../src/lib/dept-scope';
-import { aggregateCountryWorkload } from '../../../../../src/lib/capacity-aggregator';
+import { aggregateCountryWorkload, aggregateMemberLoad } from '../../../../../src/lib/capacity-aggregator';
 
 const DEFAULT_SETTINGS = Object.freeze({
   workingDays: 22,
@@ -90,16 +90,24 @@ export async function GET(req) {
     catch (err) { console.warn('[capacity GET] settings load failed:', err?.message); }
   }
 
-  // Phase 1: country workload table. membersCurrent + teamSummary
-  // intentionally still empty (Phases 2 + 3 wire them).
+  // Phase 1 (country workload) + Phase 2 (per-member load). Team summary
+  // (Phase 3) intentionally still empty.
   let workload = { rows: [], cachedAt: null };
   try {
     workload = await aggregateCountryWorkload({ deptId, deptSlug, bustCache });
   } catch (err) {
-    // Aggregator already swallows per-source errors; this catch covers
-    // the rare DB-side helper failures (HC + owner queries). Surface an
-    // empty list rather than 500ing the whole capacity endpoint.
-    console.warn('[capacity GET] aggregator failed:', err?.message);
+    console.warn('[capacity GET] country aggregator failed:', err?.message);
+  }
+
+  let memberLoad = { members: [], leads: {} };
+  try {
+    memberLoad = await aggregateMemberLoad({
+      deptId,
+      countryWorkload: workload.rows,
+      settings,
+    });
+  } catch (err) {
+    console.warn('[capacity GET] member aggregator failed:', err?.message);
   }
 
   return NextResponse.json({
@@ -108,7 +116,8 @@ export async function GET(req) {
     settings,
     countryWorkload: workload.rows,
     workloadCachedAt: workload.cachedAt,
-    membersCurrent: [],
+    membersCurrent: memberLoad.members,
+    membersLeads: memberLoad.leads,
     teamSummary: [],
   });
 }

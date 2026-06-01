@@ -123,8 +123,8 @@ The super-admin's dept picker (`useCurrentDept().setDept`) flips the cookie; thi
 | Phase | Status | PR | Notes |
 |---|---|---|---|
 | 0. Schema + sub-tab shell + skeleton API | ✅ shipped | [#885](https://github.com/Deel-Playground/jtk-ops-hub-v2/pull/885) | 4 per-dept tables, "Capacity" sub-tab in Leaders Hub, skeleton GET. Live on dev awaiting Deploy Now. |
-| 1. Country Workload table | 🔜 in progress | — | Demand aggregator over 8 visible Deel sources + sortable table with totals row + owner derivation from `team_member_countries`. Zendesk/Jira/EVL columns ship as "soon" placeholders (Phase 1B extracts them from the queue route). |
-| 2. Capacity Current (per-member) | ⏳ pending | — | Per-member load, grouped by Team Lead. |
+| 1. Country Workload table | ✅ shipped | [#886](https://github.com/Deel-Playground/jtk-ops-hub-v2/pull/886) | Demand aggregator over 8 visible Deel sources + sortable table with totals row + owner derivation from `team_member_countries`. Zendesk/Jira/EVL columns ship as "soon" placeholders (Phase 1B extracts them from the queue route). |
+| 2. Capacity Current (per-member) | 🔜 in progress | — | `aggregateMemberLoad` + `CapacityMembersCurrentTable` — agents grouped by Team Lead in collapsible sections with section-level totals + signal banding + load bar. |
 | 3. Team Summary roll-up | ⏳ pending | — | Per-Team-Lead aggregation. |
 | 4. Settings panel | ⏳ pending | — | Gear icon → drawer with formula tuning, signal thresholds, HC, member calls. |
 | 5. Proposed scenarios (what-if) | ⏳ pending | — | Drag-and-drop rebalancing, save, apply. |
@@ -150,6 +150,15 @@ Per skill §3.10:
 - **`Promise.all` + `.catch` on each source.** The aggregator runs 8 sources in parallel and swallows per-source failures inside `safe()` (returns `{ items: [] }`). One failed source can't take the whole table to a 500 — matches skill mistake #22 (optional secondary queries).
 - **Country resolution defensive.** Rows from older queue paths sometimes carry `country` (mapped to ISO from `employmentCountry`), others carry `countryCode`. The aggregator reads either, uppercase-normalises, and falls back to `'UNKNOWN'` so a row with no country tag still surfaces (as an "Unknown country" group) rather than silently dropping out.
 - **15-minute in-process cache per dept.** Keyed by `deptId` so HRX and GIX refreshes don't trample each other. The refresh button sends `?bustCache=1` to force a fresh pull; the regular refetch on tab open uses the cache.
+
+### Phase 2 — Capacity Current (2026-06-01)
+
+- **Tasks/mo is a SHARE, not a per-country sum.** When a country has 3 co-owners in the dept, each owner gets `country.totalTasks / 3` — verified against Alexandra Apsychou's audit row (Greece 185 alone + Cyprus 113 alone + Portugal 456.8 / 3 = 450.3 ≈ Kristina's 450.2). The aggregator's `loadCountryOwners` already returns dept-scoped owner sets, so the share denominator is the *dept's* count, not a global one.
+- **Team Lead grouping uses the same chain-walker as `teamLeadEmailFor`.** Capped at 6 hops to defend against malformed cycles. Walked in-memory using a member-by-email map built once per request (no per-member DB roundtrip). Members at TL+ tier (team_lead / regional_manager / admin / manager) don't appear as rows — they're section headers. If a TL also handles tasks directly, Phase 4 will add an opt-in toggle.
+- **`on_leave` rows still render with counts.** A member on leave IS the workload that's currently uncovered, so showing their numbers helps the lead spot the gap. Their row gets an "On leave" badge so the lead doesn't mis-read the signal as "alive load."
+- **`numCountries === 0` overrides the signal to ⚪ Inactive.** Aleksa Apostolov's row in the audit's Current sheet shows this — zero countries = zero tasks = no meaningful signal. The aggregator still emits the underlying `signal: 'ok'` so the FE can recompute if needed; the table forces 'inactive' for display.
+- **Section-level rollup on the Lead row** — HC sum, WL/mo sum, average hrs/day, count of 🔴 and 🟠 members. Lets a manager scan dept health without expanding every section. Lifted straight from Kristina's "Team Summary" sheet's row shape so Phase 3 mostly reuses the math.
+- **Load bar capped at the Elevated threshold** — anything red maxes out the bar visually (100%). Calibrating against the *configurable* threshold means it auto-adapts when Phase 4 lets a dept widen its bands.
 
 ## Open questions (resolved during build)
 

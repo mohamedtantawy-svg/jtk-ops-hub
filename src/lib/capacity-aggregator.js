@@ -39,6 +39,19 @@ import {
 } from './deel-api';
 import { visibleDeelSourcesFor, resolveWorkbenchConfig } from './dept-integrations';
 
+// Settings shape mirrors the per-dept defaults synthesized by the route's
+// loadSettings — keeping a fallback here lets the member-load function
+// run safely even if the caller forgets to pass settings.
+const FALLBACK_SETTINGS = Object.freeze({
+  workingDays: 22,
+  minutesPerTask: 15,
+  minutesPerCall: 15,
+  baselineCallHrs: 2.47,
+  thresholdOk: 5.5,
+  thresholdModerate: 7.0,
+  thresholdElevated: 8.0,
+});
+
 const CACHE_TTL_MS = 15 * 60 * 1000;
 const _cache = new Map(); // deptId -> { ts, value }
 
@@ -223,4 +236,236 @@ export async function aggregateCountryWorkload({ deptId, deptSlug, bustCache = f
 export function clearCapacityAggregatorCache(deptId) {
   if (deptId) _cache.delete(deptId);
   else _cache.clear();
+}
+
+// ── Phase 2: per-member load roll-up ──────────────────────────────────────
+// Takes the per-country workload + the dept's settings + manual member-
+// call overrides, and produces one row per member shaped exactly like
+// Kristina's sheet 2 (HRX Capacity Current):
+//   email / name / title / role / teamLeadEmail / countries / hc /
+//   numCountries / tasksPerMonth / callsPerMonth / tasksPerDay /
+//   taskHrsPerDay / callHrsPerDay / totalWlPerMonth / totalHrsPerDay /
+//   signal ('ok' | 'moderate' | 'elevated' | 'high')
+//
+// Tasks are SHARED across co-owners — a country with 3 owners contributes
+// `country.totalTasks / 3` to each owner's roll-up. This matches the
+// audit (Alexandra Apsychou's 450.2 vs Greece+Cyprus+Portugal individual
+// totals confirmed the formula).
+//
+// Members included: every non-archived member in the dept's sub-tree.
+// Team Lead grouping: walks `manager_email` chain to the first ancestor
+// whose `access` IN ('team_lead','regional_manager','manager','admin').
+// Returns the lead's email + name so the FE doesn't need a second JOIN.
+
+function bandSignal(totalHrsPerDay, settings) {
+  const t = settings || FALLBACK_SETTINGS;
+  if (totalHrsPerDay >= (t.thresholdElevated ?? 8.0)) return 'high';
+  if (totalHrsPerDay >= (t.thresholdModerate ?? 7.0)) return 'elevated';
+  if (totalHrsPerDay >= (t.thresholdOk        ?? 5.5)) return 'moderate';
+  return 'ok';
+}
+
+async function loadDeptMembers(deptId) {
+  // Members in the dept's sub-tree, with the bits we need for the row.
+  // Joins org_nodes via the recursive CTE pattern used elsewhere; excludes
+  // archived nodes + soft-deleted members.
+  const { rows } = await query(
+    `WITH RECURSIVE subtree AS (
+       SELECT id FROM org_nodes WHERE id = $1 AND is_archived = false
+       UNION ALL
+       SELECT n.id FROM org_nodes n
+         JOIN subtree s ON n.parent_id = s.id
+        WHERE n.is_archived = false
+     )
+     SELECT LOWER(tmo.email) AS email,
+            tmo.name,
+            COALESCE(tmo.title, '') AS title,
+            COALESCE(tmo.access, 'agent') AS access,
+            LOWER(COALESCE(tmo.manager_email, '')) AS manager_email,
+            COALESCE(tmo.on_leave, false) AS on_leave
+       FROM team_member_overrides tmo
+      WHERE tmo.org_node_id IN (SELECT id FROM subtree)
+        AND tmo.is_deleted = false
+      ORDER BY tmo.name`,
+    [deptId],
+  );
+  return rows;
+}
+
+async function loadMemberCountries(deptId) {
+  // email -> [country_code] for every dept member, mirroring Phase 1's
+  // dept-scoped subtree filter.
+  const out = new Map();
+  try {
+    const { rows } = await query(
+      `WITH RECURSIVE subtree AS (
+         SELECT id FROM org_nodes WHERE id = $1 AND is_archived = false
+         UNION ALL
+         SELECT n.id FROM org_nodes n
+           JOIN subtree s ON n.parent_id = s.id
+          WHERE n.is_archived = false
+       )
+       SELECT LOWER(tmc.email) AS email,
+              UPPER(tmc.country_code) AS cc
+         FROM team_member_countries tmc
+         JOIN team_member_overrides tmo
+           ON LOWER(tmo.email) = LOWER(tmc.email)
+        WHERE tmo.org_node_id IN (SELECT id FROM subtree)
+        ORDER BY tmc.country_code`,
+      [deptId],
+    );
+    for (const r of rows) {
+      if (!out.has(r.email)) out.set(r.email, []);
+      out.get(r.email).push(r.cc);
+    }
+  } catch (err) {
+    console.warn('[capacity] member-countries load failed:', err?.message);
+  }
+  return out;
+}
+
+async function loadMemberCalls(deptId) {
+  const out = new Map();
+  try {
+    const { rows } = await query(
+      `SELECT LOWER(email) AS email, calls_per_mo
+         FROM capacity_member_calls
+        WHERE org_node_id = $1`,
+      [deptId],
+    );
+    for (const r of rows) out.set(r.email, Number(r.calls_per_mo) || 0);
+  } catch (err) {
+    console.warn('[capacity] member-calls override load failed:', err?.message);
+  }
+  return out;
+}
+
+/**
+ * Build the per-member load roll-up. Returns
+ * `{ members: [...], leads: { email: { name, role, count } } }` where
+ * `members` is one row per dept member sorted by teamLead then by
+ * totalHrsPerDay desc, and `leads` is a lookup of every Team Lead that
+ * appears as a grouping anchor so the FE can render section headers
+ * without re-walking the chain.
+ */
+export async function aggregateMemberLoad({ deptId, countryWorkload = [], settings }) {
+  if (!deptId) return { members: [], leads: {} };
+  const t = { ...FALLBACK_SETTINGS, ...(settings || {}) };
+
+  const [members, countriesByEmail, callsByEmail] = await Promise.all([
+    loadDeptMembers(deptId),
+    loadMemberCountries(deptId),
+    loadMemberCalls(deptId),
+  ]);
+
+  const countryLookup = new Map();
+  for (const c of countryWorkload) countryLookup.set(String(c.country).toUpperCase(), c);
+
+  // Build a quick (email -> member) map so we can walk manager chain
+  // without re-querying.
+  const memberByEmail = new Map();
+  for (const m of members) memberByEmail.set(m.email, m);
+
+  // Resolve the first manager-tier ancestor for a given member email.
+  // Capped at 6 hops to defend against malformed cycles (mirrors
+  // teamLeadEmailFor in src/lib/hr-hub-helpers.js).
+  function findLead(startEmail) {
+    let cursor = startEmail;
+    const seen = new Set();
+    for (let i = 0; i < 6; i++) {
+      if (!cursor || seen.has(cursor)) break;
+      seen.add(cursor);
+      const m = memberByEmail.get(cursor);
+      if (!m) return '';
+      if (m.access === 'team_lead' || m.access === 'regional_manager'
+          || m.access === 'manager' || m.access === 'admin') {
+        return cursor;
+      }
+      cursor = m.manager_email || '';
+    }
+    return '';
+  }
+
+  const rows = [];
+  for (const m of members) {
+    // Skip Team Leads / RMs / Directors as row entries — the audit
+    // surfaces them as section headers only. They still appear in the
+    // `leads` lookup below for grouping. (If a TL also handles tasks
+    // directly, Phase 4 will add an opt-in toggle to include them.)
+    if (m.access !== 'agent') continue;
+
+    const countries = countriesByEmail.get(m.email) || [];
+    let tasksPerMonth = 0;
+    let hc = 0;
+    for (const cc of countries) {
+      const c = countryLookup.get(cc);
+      if (!c) continue;
+      const share = c.numOwners > 0 ? c.totalTasks / c.numOwners : c.totalTasks;
+      tasksPerMonth += share;
+      hc += Number(c.eorHc) || 0;
+    }
+    const callsPerMonth = callsByEmail.get(m.email) || 0;
+
+    const workingDays = Math.max(1, t.workingDays || 22);
+    const tasksPerDay      = tasksPerMonth / workingDays;
+    const taskHrsPerDay    = (tasksPerDay * (t.minutesPerTask || 15)) / 60;
+    const callHrsPerDay    = (t.baselineCallHrs ?? 2.47) + ((callsPerMonth * (t.minutesPerCall || 15)) / 60) / workingDays;
+    const totalWlPerMonth  = tasksPerMonth + callsPerMonth;
+    const totalHrsPerDay   = taskHrsPerDay + callHrsPerDay;
+
+    const leadEmail = findLead(m.manager_email);
+
+    rows.push({
+      email: m.email,
+      name: m.name,
+      title: m.title,
+      role: m.access,
+      onLeave: m.on_leave === true,
+      teamLeadEmail: leadEmail,
+      countries,
+      numCountries: countries.length,
+      hc,
+      tasksPerMonth: +tasksPerMonth.toFixed(1),
+      callsPerMonth: +callsPerMonth.toFixed(1),
+      tasksPerDay:   +tasksPerDay.toFixed(1),
+      taskHrsPerDay: +taskHrsPerDay.toFixed(2),
+      callHrsPerDay: +callHrsPerDay.toFixed(2),
+      totalWlPerMonth: +totalWlPerMonth.toFixed(1),
+      totalHrsPerDay:  +totalHrsPerDay.toFixed(2),
+      signal: bandSignal(totalHrsPerDay, t),
+    });
+  }
+
+  // Sort: by Team Lead name (alphabetical), then by total hrs/day desc
+  // within each lead's group. Unlinked rows (no lead) bucket to the end.
+  const leadName = (email) => memberByEmail.get(email)?.name || 'Unassigned';
+  rows.sort((a, b) => {
+    const an = leadName(a.teamLeadEmail);
+    const bn = leadName(b.teamLeadEmail);
+    if (an !== bn) {
+      if (a.teamLeadEmail && !b.teamLeadEmail) return -1;
+      if (!a.teamLeadEmail && b.teamLeadEmail) return 1;
+      return an.localeCompare(bn);
+    }
+    return (b.totalHrsPerDay || 0) - (a.totalHrsPerDay || 0);
+  });
+
+  // Build the leads lookup so the FE can render section headers with
+  // the lead's name + count without re-walking.
+  const leads = {};
+  for (const r of rows) {
+    const k = r.teamLeadEmail || '';
+    if (!leads[k]) {
+      const m = memberByEmail.get(k);
+      leads[k] = {
+        email: k,
+        name: m?.name || (k ? k : 'Unassigned'),
+        role: m?.access || 'unassigned',
+        memberCount: 0,
+      };
+    }
+    leads[k].memberCount += 1;
+  }
+
+  return { members: rows, leads };
 }
