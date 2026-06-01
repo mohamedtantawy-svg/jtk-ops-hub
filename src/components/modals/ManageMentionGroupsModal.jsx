@@ -14,13 +14,14 @@
 // checkbox list) so muscle memory is preserved.
 
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { MEMBERS } from '../../data/members';
+import { MEMBERS, MEMBERS_BY_EMAIL } from '../../data/members';
 import {
   listMentionGroups,
   createMentionGroup,
   updateMentionGroup,
   deleteMentionGroup,
 } from '../../services/mentionGroupsApi';
+import { useCurrentDept } from '../../hooks/useCurrentDept';
 import Avatar from '../ui/Avatar';
 
 const HANDLE_RX = /^[a-z][a-z0-9._-]{0,79}$/;
@@ -32,6 +33,22 @@ export default function ManageMentionGroupsModal({ onClose }) {
   const [editing, setEditing] = useState(null);   // null | { id?, handle, name, description, members }
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
+
+  // Per the multi-tenant locked rules (hard isolation across all surfaces),
+  // mention-group members must live in the same dept as the group itself.
+  // The picker is scoped to members whose resolved org_node_id is in the
+  // caller's current-dept sub-tree (matches AnnouncementsView's pattern).
+  // Cold paint (empty Set) fails open so the picker isn't blank while
+  // /dept-scope/current is in flight; the server still drops cross-dept
+  // emails on save as defence in depth.
+  const { deptId: currentDeptId, currentDeptNodeIds } = useCurrentDept();
+  const inCurrentDept = useCallback((email) => {
+    if (!currentDeptId) return true;
+    if (!currentDeptNodeIds || currentDeptNodeIds.size === 0) return true;
+    const orgNodeId = MEMBERS_BY_EMAIL[(email || '').toLowerCase()]?.orgNodeId;
+    if (!orgNodeId) return true;
+    return currentDeptNodeIds.has(orgNodeId);
+  }, [currentDeptId, currentDeptNodeIds]);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -63,7 +80,10 @@ export default function ManageMentionGroupsModal({ onClose }) {
     handle: g.handle,
     name: g.name || '',
     description: g.description || '',
-    members: Array.isArray(g.members) ? g.members.slice() : [],
+    // Drop any cross-dept member emails persisted on legacy groups so the
+    // edit form's member count matches the picker checkbox list. On save,
+    // the server also enforces this — Save here cleans up the stored row.
+    members: Array.isArray(g.members) ? g.members.filter(inCurrentDept) : [],
   });
   const cancelEdit = () => setEditing(null);
 
@@ -114,7 +134,7 @@ export default function ManageMentionGroupsModal({ onClose }) {
 
   return (
     <div
-      onClick={onClose}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.(); }}
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
         display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
@@ -122,7 +142,6 @@ export default function ManageMentionGroupsModal({ onClose }) {
       }}
     >
       <div
-        onClick={e => e.stopPropagation()}
         style={{
           width: 'min(640px, 92vw)', maxHeight: 'calc(100vh - 100px)',
           background: 'var(--surface)', borderRadius: 14,
@@ -191,6 +210,7 @@ export default function ManageMentionGroupsModal({ onClose }) {
               onCancel={cancelEdit}
               saving={saving}
               isEdit={!!editing.id}
+              inCurrentDept={inCurrentDept}
             />
           )}
         </div>
@@ -290,11 +310,18 @@ function ListView({ groups, loading, search, onSearchChange, onCreate, onEdit, o
   );
 }
 
-function EditView({ draft, onChange, onSave, onCancel, saving, isEdit }) {
+function EditView({ draft, onChange, onSave, onCancel, saving, isEdit, inCurrentDept }) {
   const [memberSearch, setMemberSearch] = useState('');
+  // Only show members whose resolved org_node_id is in the caller's current
+  // dept sub-tree. Groups are tenanted, so a cross-dept member would never
+  // see comments/announcements that target them — the dept filter on those
+  // list endpoints excludes them. Scoping the picker prevents the user from
+  // creating a "looks ok but half the members can't see it" group.
   const sortedMembers = useMemo(
-    () => [...MEMBERS].sort((a, b) => (a.name || '').localeCompare(b.name || '')),
-    [],
+    () => [...MEMBERS]
+      .filter(m => inCurrentDept(m.email))
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '')),
+    [inCurrentDept],
   );
   const memberSet = useMemo(() => new Set((draft.members || []).map(e => e.toLowerCase())), [draft.members]);
   const q = memberSearch.trim().toLowerCase();

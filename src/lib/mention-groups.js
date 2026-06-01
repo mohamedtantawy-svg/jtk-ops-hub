@@ -49,6 +49,51 @@ function clean(s, max) {
 }
 
 /**
+ * Filter a list of member emails to only those whose
+ * `team_member_overrides.org_node_id` sits inside the given dept's
+ * descendant sub-tree. Used for write-time validation (createGroup /
+ * updateGroup) and read-time filtering (listGroups / getGroupById /
+ * loadGroupsByHandle) so a group always reflects the members who can
+ * actually see content tenanted to its dept.
+ *
+ * Returns the lowercased subset; emails with no override row (rare —
+ * static-baseline-only members that haven't been hydrated) are dropped
+ * defensively rather than admitted, matching the locked
+ * hard-isolation rule (no NULL org_node_id semantics post-Phase 11a).
+ *
+ * Cheap enough for the comment hot-path (single ARRAY query with a
+ * recursive CTE over org_nodes; the table is ~25 rows in prod).
+ */
+async function _filterEmailsToDept(emails, deptId) {
+  if (!Array.isArray(emails) || emails.length === 0) return [];
+  if (!deptId) return [];
+  const lc = Array.from(new Set(emails.map(e => String(e || '').toLowerCase()).filter(Boolean)));
+  if (lc.length === 0) return [];
+  try {
+    const { rows } = await query(
+      `WITH RECURSIVE subtree AS (
+         SELECT id FROM org_nodes WHERE id = $1 AND is_archived = false
+         UNION ALL
+         SELECT n.id FROM org_nodes n
+           JOIN subtree s ON n.parent_id = s.id
+          WHERE n.is_archived = false
+       )
+       SELECT LOWER(tmo.email) AS email
+         FROM team_member_overrides tmo
+        WHERE LOWER(tmo.email) = ANY($2::text[])
+          AND tmo.org_node_id IN (SELECT id FROM subtree)`,
+      [deptId, lc],
+    );
+    return rows.map(r => r.email);
+  } catch (err) {
+    // Fail-closed on DB error so we never silently widen the audience
+    // for a tagged group when dept resolution misbehaves.
+    console.warn('[mention-groups] _filterEmailsToDept failed:', err?.message);
+    return [];
+  }
+}
+
+/**
  * Load every group's handle + member-email list for ONE dept. Returns
  * `Map<handle, string[]>` for cheap O(1) lookup inside `parseMentions`.
  * Empty Map on DB error so a comment POST never fails because the group
@@ -62,10 +107,29 @@ function clean(s, max) {
 export async function loadGroupsByHandle({ deptId } = {}) {
   if (!deptId) return new Map();
   try {
+    // Cross-dept membership cleanup (2026-06-01): legacy groups had no
+    // server-side dept gate on their member list, so HRX groups could
+    // accumulate GIX/Payroll/Benefits emails. Those members can't view
+    // the comments/announcements the expansion would notify them about
+    // (every list endpoint is dept-isolated), so we drop them at the
+    // JOIN. Verified subtree match against team_member_overrides.
     const { rows } = await query(
-      `SELECT g.handle, COALESCE(array_agg(m.member_email) FILTER (WHERE m.member_email IS NOT NULL), '{}') AS members
+      `WITH RECURSIVE subtree AS (
+         SELECT id FROM org_nodes WHERE id = $1 AND is_archived = false
+         UNION ALL
+         SELECT n.id FROM org_nodes n
+           JOIN subtree s ON n.parent_id = s.id
+          WHERE n.is_archived = false
+       )
+       SELECT g.handle,
+              COALESCE(array_agg(m.member_email) FILTER (
+                WHERE m.member_email IS NOT NULL
+                  AND tmo.org_node_id IN (SELECT id FROM subtree)
+              ), '{}') AS members
          FROM mention_group g
          LEFT JOIN mention_group_member m ON m.group_id = g.id
+         LEFT JOIN team_member_overrides tmo
+                ON LOWER(tmo.email) = LOWER(m.member_email)
         WHERE g.org_node_id = $1
         GROUP BY g.handle`,
       [deptId],
@@ -90,13 +154,25 @@ export async function loadGroupsByHandle({ deptId } = {}) {
 export async function listGroups({ deptId } = {}) {
   if (!deptId) return [];
   const { rows } = await query(
-    `SELECT g.id, g.handle, g.name, g.description, g.org_node_id,
+    `WITH RECURSIVE subtree AS (
+       SELECT id FROM org_nodes WHERE id = $1 AND is_archived = false
+       UNION ALL
+       SELECT n.id FROM org_nodes n
+         JOIN subtree s ON n.parent_id = s.id
+        WHERE n.is_archived = false
+     )
+     SELECT g.id, g.handle, g.name, g.description, g.org_node_id,
             g.created_by_email, g.created_by_name,
             g.created_at, g.updated_at,
             COALESCE(array_agg(m.member_email ORDER BY m.member_email)
-                     FILTER (WHERE m.member_email IS NOT NULL), '{}') AS members
+                     FILTER (
+                       WHERE m.member_email IS NOT NULL
+                         AND tmo.org_node_id IN (SELECT id FROM subtree)
+                     ), '{}') AS members
        FROM mention_group g
        LEFT JOIN mention_group_member m ON m.group_id = g.id
+       LEFT JOIN team_member_overrides tmo
+              ON LOWER(tmo.email) = LOWER(m.member_email)
       WHERE g.org_node_id = $1
       GROUP BY g.id
       ORDER BY g.handle ASC`,
@@ -123,21 +199,42 @@ export async function listGroups({ deptId } = {}) {
  * reach across tenants.
  */
 export async function getGroupById(id, { deptId } = {}) {
-  const { rows } = await query(
-    `SELECT g.id, g.handle, g.name, g.description, g.org_node_id,
-            g.created_by_email, g.created_by_name,
-            g.created_at, g.updated_at,
-            COALESCE(array_agg(m.member_email ORDER BY m.member_email)
-                     FILTER (WHERE m.member_email IS NOT NULL), '{}') AS members
-       FROM mention_group g
-       LEFT JOIN mention_group_member m ON m.group_id = g.id
-      WHERE g.id = $1
-      GROUP BY g.id`,
+  // Resolve the group's own dept first so we can project members against
+  // its sub-tree (callers may pass a deptId we'll cross-check, or omit it
+  // for the rare internal lookup where tenancy is enforced elsewhere).
+  const head = await query(
+    `SELECT id, handle, name, description, org_node_id,
+            created_by_email, created_by_name, created_at, updated_at
+       FROM mention_group WHERE id = $1`,
     [id],
   );
-  if (rows.length === 0) return null;
-  const r = rows[0];
+  if (head.rows.length === 0) return null;
+  const r = head.rows[0];
   if (deptId && r.org_node_id && String(r.org_node_id) !== String(deptId)) return null;
+
+  const projectionDept = r.org_node_id || deptId || null;
+  let members = [];
+  if (projectionDept) {
+    const { rows: memberRows } = await query(
+      `WITH RECURSIVE subtree AS (
+         SELECT id FROM org_nodes WHERE id = $1 AND is_archived = false
+         UNION ALL
+         SELECT n.id FROM org_nodes n
+           JOIN subtree s ON n.parent_id = s.id
+          WHERE n.is_archived = false
+       )
+       SELECT LOWER(m.member_email) AS email
+         FROM mention_group_member m
+         JOIN team_member_overrides tmo
+           ON LOWER(tmo.email) = LOWER(m.member_email)
+        WHERE m.group_id = $2
+          AND tmo.org_node_id IN (SELECT id FROM subtree)
+        ORDER BY email`,
+      [projectionDept, id],
+    );
+    members = memberRows.map(row => row.email);
+  }
+
   return {
     id: r.id,
     handle: r.handle,
@@ -148,7 +245,7 @@ export async function getGroupById(id, { deptId } = {}) {
     createdByName: r.created_by_name,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
-    members: r.members || [],
+    members,
   };
 }
 
@@ -167,6 +264,11 @@ export async function createGroup({ handle, name, description, members, creatorE
     throw Object.assign(new Error('Handle must start with a letter and use only a-z, 0-9, dot, hyphen, or underscore'), { status: 400 });
   }
   const memberEmails = cleanEmails(members);
+  // Drop cross-dept emails before they hit the join table. The FE picker
+  // already filters to current-dept members; this is defence in depth for
+  // tampered payloads or stale caches. Silent rather than 400 so a single
+  // out-of-dept email doesn't block the whole create.
+  const scopedMembers = await _filterEmailsToDept(memberEmails, deptId);
   // Per-dept handle uniqueness — two depts can each own @leads as
   // independent fan-outs (Phase 12b). ON CONFLICT targets the partial
   // unique index uniq_mention_group_dept_handle.
@@ -181,7 +283,7 @@ export async function createGroup({ handle, name, description, members, creatorE
     throw Object.assign(new Error(`Handle "${h}" is already taken in this department`), { status: 409 });
   }
   const id = ins.rows[0].id;
-  for (const email of memberEmails) {
+  for (const email of scopedMembers) {
     await query(
       `INSERT INTO mention_group_member (group_id, member_email) VALUES ($1, $2)
        ON CONFLICT (group_id, member_email) DO NOTHING`,
@@ -216,7 +318,15 @@ export async function updateGroup(id, { name, description, members }, { deptId }
     );
   }
   if (Array.isArray(members)) {
-    const next = new Set(cleanEmails(members));
+    // Filter the incoming set to current-dept members so a tampered or
+    // stale payload can't reintroduce cross-dept memberships. `existing`
+    // already only carries dept members (getGroupById filters), so the
+    // diff against it works correctly. Any legacy cross-dept rows in the
+    // join table that weren't surfaced to `existing.members` are left
+    // alone here — loadGroupsByHandle drops them on read so they're
+    // already inert.
+    const incoming = await _filterEmailsToDept(cleanEmails(members), existing.orgNodeId || deptId);
+    const next = new Set(incoming);
     const prev = new Set((existing.members || []).map(e => e.toLowerCase()));
     const toRemove = [...prev].filter(e => !next.has(e));
     const toAdd    = [...next].filter(e => !prev.has(e));
