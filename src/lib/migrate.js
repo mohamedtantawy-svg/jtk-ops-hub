@@ -2365,6 +2365,67 @@ CREATE TABLE IF NOT EXISTS work_task_sla_notifications (
 );
 CREATE INDEX IF NOT EXISTS idx_work_task_sla_notifications_fired
   ON work_task_sla_notifications(fired_at DESC);
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Capacity Planning (Leaders Hub sub-tab, Phase 0 2026-06-01)
+-- ────────────────────────────────────────────────────────────────────────────
+-- Four per-dept tables backing the capacity sub-tab. Every row carries
+-- org_node_id so a GIX/Payroll/Benefits dept can build their own model
+-- without touching HRX's data. The formula model is reverse-engineered
+-- from Kristina Fomina's spreadsheet audit (see CAPACITY_PLANNING_PLAN.md
+-- at the repo root for the derivation).
+--
+-- Defaults match the audit exactly: 22 working days, 15 min/task,
+-- 15 min/call, 2.47 baseline call hrs/day. Signal thresholds run on
+-- Total hrs/day: < 5.5 OK, 5.5–7 Moderate, 7–8 Elevated, ≥ 8 High.
+
+CREATE TABLE IF NOT EXISTS capacity_settings (
+  org_node_id          UUID PRIMARY KEY REFERENCES org_nodes(id) ON DELETE CASCADE,
+  working_days         SMALLINT     NOT NULL DEFAULT 22,
+  minutes_per_task     SMALLINT     NOT NULL DEFAULT 15,
+  minutes_per_call     SMALLINT     NOT NULL DEFAULT 15,
+  baseline_call_hrs    NUMERIC(4,2) NOT NULL DEFAULT 2.47,
+  threshold_ok         NUMERIC(4,2) NOT NULL DEFAULT 5.5,
+  threshold_moderate   NUMERIC(4,2) NOT NULL DEFAULT 7.0,
+  threshold_elevated   NUMERIC(4,2) NOT NULL DEFAULT 8.0,
+  updated_at           TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_by           TEXT
+);
+
+CREATE TABLE IF NOT EXISTS capacity_country_hc (
+  org_node_id   UUID    NOT NULL REFERENCES org_nodes(id) ON DELETE CASCADE,
+  country_code  VARCHAR(10) NOT NULL,
+  eor_hc        INTEGER NOT NULL DEFAULT 0,
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_by    TEXT,
+  PRIMARY KEY (org_node_id, country_code)
+);
+
+CREATE TABLE IF NOT EXISTS capacity_member_calls (
+  org_node_id   UUID    NOT NULL REFERENCES org_nodes(id) ON DELETE CASCADE,
+  email         TEXT    NOT NULL,
+  calls_per_mo  NUMERIC(6,2) NOT NULL DEFAULT 0,
+  updated_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+  updated_by    TEXT,
+  PRIMARY KEY (org_node_id, email)
+);
+
+CREATE TABLE IF NOT EXISTS capacity_proposals (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_node_id   UUID    NOT NULL REFERENCES org_nodes(id) ON DELETE CASCADE,
+  title         TEXT    NOT NULL,
+  description   TEXT,
+  snapshot      JSONB   NOT NULL,
+  proposed      JSONB   NOT NULL,
+  status        TEXT    NOT NULL DEFAULT 'draft'
+                  CHECK (status IN ('draft','applied','discarded')),
+  applied_at    TIMESTAMPTZ,
+  applied_by    TEXT,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_by    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_capacity_proposals_dept_status
+  ON capacity_proposals(org_node_id, status, created_at DESC);
 `;
 
 export async function runMigrations() {

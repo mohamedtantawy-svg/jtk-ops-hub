@@ -21,12 +21,14 @@
 import { useEffect, useState } from 'react';
 import LeaderAlertsView from './LeaderAlertsView';
 import LeaderReportsView from '../leader-reports/LeaderReportsView';
+import CapacityPlanningView from '../leader-reports/CapacityPlanningView';
 
 const SUB_TAB_KEY = 'ops_hub_leaders_hub_sub_tab';
 
 const ALL_TABS = [
-  { id: 'alerts',  label: 'Alerts',  icon: 'bi-broadcast-pin', requiresManager: false },
-  { id: 'reports', label: 'Reports', icon: 'bi-bar-chart-line', requiresManager: true },
+  { id: 'alerts',   label: 'Alerts',   icon: 'bi-broadcast-pin',    requiresManager: false },
+  { id: 'reports',  label: 'Reports',  icon: 'bi-bar-chart-line',   requiresManager: true  },
+  { id: 'capacity', label: 'Capacity', icon: 'bi-speedometer2',     requiresManager: true  },
 ];
 
 function readSubTabFromUrl() {
@@ -126,8 +128,9 @@ export default function LeadersHubView({
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {tabs.length > 1 && <SubTabBar tabs={tabs} active={subTab} onChange={setSubTab} />}
-      {subTab === 'alerts'  && <LeaderAlertsView  user={user} perms={perms} refreshNonce={refreshNonce} />}
-      {subTab === 'reports' && isManager && <LeaderReportsView />}
+      {subTab === 'alerts'   && <LeaderAlertsView  user={user} perms={perms} refreshNonce={refreshNonce} />}
+      {subTab === 'reports'  && isManager && <LeaderReportsView />}
+      {subTab === 'capacity' && isManager && <CapacityPlanningView />}
     </div>
   );
 }
