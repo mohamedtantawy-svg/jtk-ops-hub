@@ -43,3 +43,30 @@ export async function getCommandCenterPeople() {
 export async function getCommandCenterCapacity() {
   return apiFetch('/command-center/capacity');
 }
+
+// Combined per-department summary (every domain in one row) for the comparison table.
+export async function getCommandCenterSummary() {
+  return apiFetch('/command-center/summary');
+}
+
+// Trigger the executive CSV export. apiFetch parses JSON, so this does a raw
+// fetch (with the bearer token) and downloads the text/csv body as a file.
+export async function downloadCommandCenterCsv() {
+  let token = null;
+  try { token = localStorage.getItem('ops_hub_token'); } catch { /* ignore */ }
+  const res = await fetch('/api/v1/command-center/export', {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    credentials: 'same-origin',
+  });
+  if (!res.ok) { const e = new Error(`HTTP ${res.status}`); e.status = res.status; throw e; }
+  const text = await res.text();
+  const blob = new Blob([text], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'command-center-summary.csv';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

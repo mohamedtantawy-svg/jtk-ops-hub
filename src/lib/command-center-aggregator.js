@@ -448,3 +448,63 @@ export async function getCapacity() {
   const tHead = departments.reduce((t, d) => t + d.headcount, 0);
   return { departments, totals: { open: tOpen, headcount: tHead, loadPerPerson: tHead > 0 ? Math.round((tOpen / tHead) * 10) / 10 : 0 } };
 }
+
+// Summary tab (Controls): one combined per-department row across every domain —
+// powers the side-by-side comparison table + the executive CSV export.
+export async function getSummary() {
+  const empty = { departments: [] };
+  if (!process.env.DATABASE_URL) return empty;
+  let tree;
+  try { tree = await loadNodeTree(); } catch (e) { console.warn('[cc-agg getSummary]', e.message); return empty; }
+  const { resolveRoot, roots } = tree;
+  if (!roots.length) return empty;
+
+  const hh = await hrHubStatsByRoot(resolveRoot);
+  const { head, vac } = await headcountVacancyByRoot(resolveRoot);
+  const outToday = await foldByRoot(
+    `SELECT tmo.org_node_id, COUNT(DISTINCT LOWER(t.work_email))::int AS c
+       FROM time_off_events t JOIN team_member_overrides tmo ON LOWER(tmo.email) = LOWER(t.work_email)
+      WHERE t.status = 'approved' AND t.start_date <= CURRENT_DATE AND t.end_date >= CURRENT_DATE
+        AND tmo.org_node_id IS NOT NULL AND (tmo.is_deleted IS NULL OR tmo.is_deleted = false)
+      GROUP BY tmo.org_node_id`,
+    resolveRoot, r => ({ nodeId: r.org_node_id, values: { c: r.c } }),
+  );
+  const alerts = await foldByRoot(
+    `SELECT org_node_id, COUNT(*) FILTER (WHERE status <> 'resolved')::int AS open_c,
+            COUNT(*) FILTER (WHERE status <> 'resolved' AND severity IN ('critical','high'))::int AS crit_c
+       FROM leader_alert WHERE org_node_id IS NOT NULL GROUP BY org_node_id`,
+    resolveRoot, r => ({ nodeId: r.org_node_id, values: { open: r.open_c, crit: r.crit_c } }),
+  );
+  const urgent = await foldByRoot(
+    `SELECT org_node_id, COUNT(*) FILTER (WHERE status <> 'resolved')::int AS open_c,
+            COUNT(*) FILTER (WHERE status <> 'resolved' AND priority IN ('critical','high'))::int AS crit_c
+       FROM urgent_assist_request WHERE org_node_id IS NOT NULL GROUP BY org_node_id`,
+    resolveRoot, r => ({ nodeId: r.org_node_id, values: { open: r.open_c, crit: r.crit_c } }),
+  );
+
+  const departments = roots.map(d => {
+    const s = { ...(hh.get(d.id) || {}), headcount: (head.get(d.id) || {}).headcount || 0, vacancies: (vac.get(d.id) || {}).vacancies || 0 };
+    const h = healthFromStats(s);
+    const a = alerts.get(d.id) || {}, u = urgent.get(d.id) || {};
+    return {
+      id: d.id, name: d.name, slug: d.slug, health: h.score,
+      open: s.open || 0, breached: s.breached || 0, urgent: s.urgent || 0,
+      headcount: s.headcount, vacancies: s.vacancies, outToday: (outToday.get(d.id) || {}).c || 0,
+      riskOpen: (a.open || 0) + (u.open || 0), riskCritical: (a.crit || 0) + (u.crit || 0),
+    };
+  }).sort((a, b) => a.health - b.health);
+  return { departments };
+}
+
+// Executive CSV export of the summary. RFC-4180 hardened (skill §3.15): UTF-8
+// BOM so Excel reads accents, CRLF line endings, every field quoted.
+export function summaryToCsv(summary) {
+  const departments = summary?.departments || [];
+  const headers = ['Department', 'Health', 'Open HR Hub', 'Breached (>7d)', 'Urgent', 'Headcount', 'Vacancies', 'Out today', 'Risk open', 'Risk critical'];
+  const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const lines = [headers.map(q).join(',')];
+  for (const d of departments) {
+    lines.push([d.name, d.health, d.open, d.breached, d.urgent, d.headcount, d.vacancies, d.outToday, d.riskOpen, d.riskCritical].map(q).join(','));
+  }
+  return '﻿' + lines.join('\r\n') + '\r\n';
+}

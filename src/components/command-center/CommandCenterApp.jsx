@@ -19,7 +19,7 @@ import VolumePage from './pages/VolumePage';
 import CapacityPage from './pages/CapacityPage';
 import PeoplePage from './pages/PeoplePage';
 import RiskPage from './pages/RiskPage';
-import ComingSoonPage from './pages/ComingSoonPage';
+import ControlsPage from './pages/ControlsPage';
 
 const TABS = [
   { id: 'home',     label: 'Home',     icon: 'bi-house' },
@@ -32,12 +32,6 @@ const TABS = [
   { id: 'controls', label: 'Controls', icon: 'bi-sliders' },
 ];
 const TAB_IDS = new Set(TABS.map(t => t.id));
-
-// Placeholder copy for tabs still being wired (replaced by real sections as the
-// build lands — see COMMAND_CENTER_PLAN.md §4).
-const COMING = {
-  controls: { title: 'Controls', icon: 'bi-sliders', description: 'Department comparison, executive export, and threshold tuning.', sections: ['Department compare', 'Export', 'Thresholds'] },
-};
 
 function initialsOf(nameOrEmail) {
   const n = (nameOrEmail || '').trim();
@@ -108,10 +102,8 @@ export default function CommandCenterApp({ user, deptState }) {
       case 'capacity': return <CapacityPage />;
       case 'people':   return <PeoplePage />;
       case 'risk':     return <RiskPage />;
-      default: {
-        const c = COMING[activeTab];
-        return c ? <ComingSoonPage {...c} /> : <HomePage />;
-      }
+      case 'controls': return <ControlsPage />;
+      default:         return <HomePage />;
     }
   };
 
