@@ -18,6 +18,7 @@
 // run one flat GROUP BY per source instead of a recursive CTE per source.
 
 import { query } from './db';
+import { COMMAND_CENTER_DEPT_SLUG } from './command-center-dept-seed';
 
 const ROOT_WALK_CAP = 16; // defence against accidental org_nodes cycles
 
@@ -49,7 +50,9 @@ async function loadNodeTree() {
   };
 
   const roots = rows
-    .filter(n => !n.parent_id)
+    // Exclude the Command Center department itself — it is the OBSERVER (its
+    // members are execs; it has no operational data to roll up).
+    .filter(n => !n.parent_id && n.slug !== COMMAND_CENTER_DEPT_SLUG)
     .map(n => ({
       id: n.id, name: n.name, slug: n.slug,
       color: n.color || null, icon: n.icon || null,

@@ -1,29 +1,24 @@
 // ── Command Center access helper ───────────────────────────────────────────
-// Server-side only. Answers "can this user open the executive Command Center
-// (cross-department oversight)?" The Command Center INVERTS the multi-tenant
-// dept-scope isolation — it aggregates EVERY department in one view — so this
-// gate is the single chokepoint every /api/v1/command-center/* route MUST call
-// first. It is kept in exact lockstep with the FE `perms.canViewCommandCenter`
-// (src/hooks/usePermissions.js) so the nav tab can never show a surface whose
-// data endpoints would 403, and a 403 can never hide a tab the user can see.
+// Server-side only. Answers "can this caller read the executive Command Center
+// (cross-department oversight)?" The Command Center is a DEPARTMENT; access =
+// being in that department (a CC member's effective dept resolves to it) OR the
+// global super-admin (who can switch into any dept via the picker). The CC
+// endpoints aggregate EVERY department — the inverse of the per-dept isolation —
+// so this gate is the single chokepoint every /api/v1/command-center/* route
+// MUST call first, and it stays in lockstep with the FE (which only renders the
+// CommandCenterApp when useCurrentDept().dept.slug === 'command-center').
 //
-// Access = ANY of (all server-verifiable, so FE + server agree):
-//   • global super-admin (mohamed)            — isGlobalSuperAdmin
-//   • seeded leadership roster                — COMMAND_CENTER_SEED_VIEWERS
-//   • full system admin (role / baseline)     — role === 'admin'
-//   • per-user grant (Team-tab toggle)        — team_member_overrides
-//                                                .is_command_center_viewer
+// Allowed when ANY of:
+//   • global super-admin (mohamed)                          — isGlobalSuperAdmin
+//   • caller's effective dept IS the Command Center dept     — getCurrentDeptSlugAndId
+//   • per-user escape-hatch grant (Team-tab toggle)          — is_command_center_viewer
+//     (lets a delegate read the CC without moving their home dept; rarely needed
+//      now that membership is the primary path, but retained from Phase 0.)
 //
-// Regional Managers are DELIBERATELY EXCLUDED — they are operational
-// leadership, not C-suite / VP-Ops, and the Command Center is cross-company.
-//
-// 30 s in-memory cache on the DB flag mirrors hr-hub-admin.js / access-admin.js
-// so a freshly-revoked viewer loses access within half a minute without a DB
-// hit on every request. bustCommandCenterAccessCache(email) invalidates on flip.
+// 30 s in-memory cache on the DB flag mirrors hr-hub-admin.js / access-admin.js.
 
-import { TEAM_MEMBERS } from '../data/members';
-import { COMMAND_CENTER_SEED_VIEWERS } from '../data/accessControl';
-import { isGlobalSuperAdmin } from './dept-scope';
+import { isGlobalSuperAdmin, getCurrentDeptSlugAndId } from './dept-scope';
+import { COMMAND_CENTER_DEPT_SLUG } from './command-center-dept-seed';
 
 const _cache = new Map(); // email-lowercased → { value, ts }
 const TTL_MS = 30_000;
@@ -55,16 +50,18 @@ export function bustCommandCenterAccessCache(email) {
 }
 
 /**
- * Authoritative server gate. Returns true when the caller may read the
- * executive Command Center. Mirrors FE perms.canViewCommandCenter exactly.
+ * Authoritative server gate for every /api/v1/command-center/* route. Requires
+ * the request so the caller's effective department can be resolved (super-admin
+ * cookie-override aware). Mirrors the FE render condition (dept.slug === CC).
  */
-export async function canViewCommandCenter(user) {
+export async function canViewCommandCenter(user, req) {
   if (!user?.email) return false;
-  const lc = String(user.email).toLowerCase();
   if (isGlobalSuperAdmin(user)) return true;
-  if (COMMAND_CENTER_SEED_VIEWERS.has(lc)) return true;
-  if (String(user.role || '').toLowerCase() === 'admin') return true;
-  const baseline = TEAM_MEMBERS.find(m => m.email.toLowerCase() === lc);
-  if (baseline && baseline.access === 'admin') return true;
+  try {
+    const info = await getCurrentDeptSlugAndId(user, req);
+    if (info?.deptSlug === COMMAND_CENTER_DEPT_SLUG) return true;
+  } catch (err) {
+    console.warn('[command-center-access] dept resolve failed:', err.message);
+  }
   return await isCommandCenterViewerEmail(user.email);
 }

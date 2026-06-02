@@ -11,6 +11,7 @@ import { seedCountryHandoverDocsIfNeeded } from './country-handover-docs-seed';
 import { seedOrgDefaultIfNeeded } from './org-default-seed';
 import { backfillHrExperienceTenancyIfNeeded } from './dept-backfill';
 import { seedGlobalImmigrationRosterIfNeeded } from './global-immigration-roster-seed';
+import { seedCommandCenterDeptIfNeeded } from './command-center-dept-seed';
 
 const SCHEMA_SQL = `
 -- Members
@@ -2683,6 +2684,19 @@ export async function runMigrations() {
     }
   } catch (err) {
     console.warn('[db] GIX time-off seed failed:', err?.message);
+  }
+
+  // Command Center department (2026-06-03): seed the top-level 'command-center'
+  // org node + its leadership members so the executive Command Center app has a
+  // department to render under. Idempotent via command_center_dept_seed_version.
+  // Runs after the org-default seed + dept backfill so org_nodes is populated.
+  try {
+    const ccDeptResult = await seedCommandCenterDeptIfNeeded();
+    if (!ccDeptResult?.skipped) {
+      console.log(`[db] Command Center dept seeded to v${ccDeptResult.version}: deptId=${ccDeptResult.deptId?.slice(0, 8)} membersSeeded=${ccDeptResult.membersSeeded}`);
+    }
+  } catch (err) {
+    console.warn('[db] Command Center dept seed failed:', err?.message);
   }
 
   // Phase C 2026-05-18: when HANDOVER_DEFAULTS_VERSION bumps, refresh the

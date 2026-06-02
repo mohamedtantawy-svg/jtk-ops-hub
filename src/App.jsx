@@ -7,6 +7,7 @@ import { MEMBERS, MEMBERS_BY_EMAIL, DEFAULT_USER_ACCESS_MAP, TEAM_MEMBERS, getAl
 import { useTeamMembers } from './hooks/useTeamMembers';
 import { useMyActiveCoverages, expandCoverageScope } from './hooks/useMyActiveCoverages';
 import { useCurrentDeptId, getCurrentDeptIdSync } from './lib/current-dept-storage';
+import { useCurrentDept } from './hooks/useCurrentDept';
 import { INITIAL_ACTIVITY, INITIAL_NOTES } from './data/tasks';
 import { FEED_EVENTS } from './data/feed';
 import { ALL_AGENT_IDS, matchesAudience } from './data/comms';
@@ -135,7 +136,7 @@ import Alerts from './components/views/Alerts';
 import FeedbackView from './components/views/FeedbackView';
 import HrHubView from './components/views/HrHubView';
 import OrgView from './components/views/OrgView';
-import CommandCenterView from './components/views/CommandCenterView';
+import CommandCenterApp from './components/command-center/CommandCenterApp';
 // WorkTasksView retired 2026-05-25 — Tasks is now a Workspace queue
 // source tab (Queue.jsx → TasksQueuePanel) rather than a top-level view.
 import WorkTasksTour from './components/work-tasks/WorkTasksTour';
@@ -1485,16 +1486,6 @@ const App=()=>{
   // one is for not-yet-shipped views; this one is for role-based access).
   React.useEffect(() => {
     if (!perms || typeof perms.canView !== 'function') return;
-    // Command Center is exec-only and gated by a dedicated runtime check
-    // (super-admin / seed roster / full admin / per-user grant), not the
-    // base-tier views list — canView('command-center') is true only for
-    // at_admin / at_command_center, so a per-user-granted or seeded exec on an
-    // agent base type would otherwise be bounced. Use canViewCommandCenter
-    // (kept in lockstep with the server gate) for this one view.
-    if (view === 'command-center') {
-      if (perms.canViewCommandCenter !== true) setView('briefing');
-      return;
-    }
     if (perms.canView(view) === false) setView('briefing');
   }, [view, perms]);
 
@@ -2173,6 +2164,14 @@ const App=()=>{
     [escalations,perms]
   );
   const pendingEscal=scopedEscalations.filter(e=>e.status==='pending').length;
+  // ── Command Center department context ───────────────────────────────────
+  // When the effective department is the Command Center, App renders the
+  // dedicated executive app (its own nav + report tabs) instead of the standard
+  // ops nav/views — see the takeover early-return below. dept.slug is resolved
+  // by useCurrentDept (super-admin cookie-override aware). Hook sits above every
+  // early return (skill §4.7 / mistake #43).
+  const ccDeptState = useCurrentDept();
+  const isCommandCenterDept = ccDeptState?.dept?.slug === 'command-center';
   // ── Local dev: auto-login bypass (never deployed — checked at runtime) ─────
   const isLocalDev = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
   if(!user && isLocalDev) {
@@ -2193,6 +2192,18 @@ const App=()=>{
       />
     </>
   );
+
+  // ── Command Center department takeover ──────────────────────────────────
+  // A CC member (home dept = Command Center) or the super-admin who switched
+  // into it gets the executive app full-screen. Access is enforced by dept
+  // context here + by canViewCommandCenter on every /api/v1/command-center/* route.
+  if (isCommandCenterDept) {
+    return (
+      <ErrorBoundary>
+        <CommandCenterApp user={effectiveUser} realUser={user} deptState={ccDeptState} />
+      </ErrorBoundary>
+    );
+  }
 
   return(
     <ErrorBoundary>
@@ -2299,7 +2310,6 @@ const App=()=>{
               pre-2026-05-03 nav. Same strict canView gate as Leaders Hub
               above; agents never get past this even via legacy URL. */}
           {view==='team'          && perms?.canView('team') === true       &&<div className="page-enter"><LeadersHubView user={effectiveUser} perms={perms} refreshNonce={leaderAlertsRefreshNonce} tasks={perms?.scopeTasks?.(tasksWithSlaExt,MEMBERS,coverageEmails)||tasksWithSlaExt} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
-          {view==='command-center' && perms?.canViewCommandCenter === true  &&<div className="page-enter"><CommandCenterView user={effectiveUser} perms={perms} setView={setView}/></div>}
       </div>
       {createModal   &&<CreateTaskModal onConfirm={confirmCreate} onClose={()=>setCreateModal(false)} currentUser={effectiveUser}/>}
       {hrHubCreate   &&<CreateHrHubRequestModal initialFlow={hrHubCreate.initialFlow||null} onClose={()=>setHrHubCreate(null)} onCreated={(id,flow)=>{setHrHubCreate(null);setView('hr-hub');addToast?.({kind:'success',message:`Submitted to HR Hub${flow?` (${flow.replace('_',' ')})`:''}.`});}}/>}

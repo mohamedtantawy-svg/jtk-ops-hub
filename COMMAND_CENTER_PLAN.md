@@ -94,10 +94,18 @@ These shaped every decision below. Recorded so we don't relitigate them mid-buil
 
 ## 3. Architecture decisions
 
-### 3.1 Host: a new top-level view
-- View id **`command-center`**, label **"Command Center"**, icon `bi-speedometer2`,
-  accent purple `#7c3aed`. Mounted in `App.jsx` alongside the other views; nav tab in
-  `DeelTopNav.jsx`, far right, **exec-gated**.
+### 3.1 Host: a dedicated DEPARTMENT with its own app shell  ⟵ REVISED 2026-06-03 (user direction)
+The Command Center is **NOT** a global nav tab. It is a **top-level department** in the
+Org tab (a seeded `org_nodes` row, slug `command-center`, sitting alongside HR Experience
+/ GIX / Payroll / Benefits / G&A People) with **its own members + access**. When the
+effective department is the Command Center — a CC member's home dept, or the super-admin
+switching into it via the existing dept picker — `App.jsx` renders a full
+**`CommandCenterApp`** takeover: its own top nav with its own **tabs** (Home, Health, SLA,
+Volume, Capacity, People, Risk, Controls), each a page of sections per §4 — instead of the
+standard ops nav/views. Icon `bi-speedometer2`, accent purple `#7c3aed`. This **supersedes**
+the Phase-0/1 "top-level view + Executive-role tab" approach; the aggregator, endpoints,
+Source Registry, and scorecards are REUSED as the Home tab. Each numbered phase below is
+realized as a **tab/page** inside this department app.
 
 ### 3.2 Cross-department aggregation — the inverse of dept-scope (SECURITY-CRITICAL)
 - Every other route scopes reads to `getCurrentDeptId(user, req)` (one dept). The
@@ -138,7 +146,20 @@ These shaped every decision below. Recorded so we don't relitigate them mid-buil
    registry against live `org_nodes` + `dept-integrations` and **flags anything not yet
    represented** — so nothing silently goes missing or stale.
 
-### 3.5 Access & security model (CONFIRMED 2026-06-03 — "New Executive role")
+### 3.5 Access & security model  ⟵ REVISED 2026-06-03: department membership
+Access to the Command Center = **membership in the CC department** (the exec users — the
+seeded leadership roster) **OR the global super-admin** (who can switch into any dept):
+- CC members are placed in the CC dept (`team_member_overrides.org_node_id` = CC node) and
+  carry the read-only **`at_command_center` "Executive"** access type.
+- The FE renders `CommandCenterApp` when `useCurrentDept().dept.slug === 'command-center'`.
+- Every `/api/v1/command-center/*` endpoint (cross-dept aggregation — inverts the per-dept
+  isolation) is gated server-side by `canViewCommandCenter(user, req)` = super-admin OR the
+  caller's effective dept slug === `command-center`. Retained from Phase 0: the
+  `can_view_command_center` power, the `at_command_center` type, `COMMAND_CENTER_SEED_VIEWERS`,
+  the `is_command_center_viewer` column. **Removed:** the standalone `command-center` *view*
+  + its `PRIMARY_TABS` nav tab + `EXEC_ONLY_VIEWS` exclusions (reverted — no global tab).
+
+#### 3.5-OLD (superseded) — "New Executive role" tab gate
 - New admin power **`can_view_command_center`** + new default access type
   **`at_command_center`** ("Executive / Leadership", read-only, global). Stackable,
   assignable from the Team tab via the existing per-user grant pattern.
@@ -155,7 +176,31 @@ These shaped every decision below. Recorded so we don't relitigate them mid-buil
 
 Each phase is independently shippable to `dev`, passes the full audit gate (§5), and
 ticks its checklist here. **Nothing deploys to prod until ALL phases are done and you
-give the word** (per your instruction).
+give the word** (per your instruction). Each numbered phase is realized as a **tab/page**
+inside the Command Center department app (§3.1).
+
+### Phase R — Department model (re-architecture)  ✅ shipped (landing → dev)
+Pivot from the Phase-0/1 global tab to a **department with its own app shell** (user
+direction 2026-06-03):
+- [x] **CC department seed** — `src/lib/command-center-dept-seed.js`: idempotent top-level
+      `org_nodes` row (slug `command-center`, purple, `bi-speedometer2`, sorted on top) +
+      leadership members (carlos@, kento.arrue@). Wired into `runMigrations`.
+- [x] **Department takeover** — `App.jsx` renders `CommandCenterApp` (full-screen) when
+      `useCurrentDept().dept.slug === 'command-center'`; super-admin reaches it via the
+      existing dept picker, CC members land there by default.
+- [x] **`CommandCenterApp` shell** — `src/components/command-center/`: own top nav (logo +
+      Command Center brand + tabs Home/Health/SLA/Volume/Capacity/People/Risk/Controls +
+      super-admin dept-switcher + user menu) + `ccUi.jsx` primitives + `pages/HomePage.jsx`
+      (live scorecards) + `pages/ComingSoonPage.jsx` (the not-yet-built tabs).
+- [x] **Access redefined** — `canViewCommandCenter(user, req)` = super-admin OR effective
+      dept slug === `command-center` (OR the `is_command_center_viewer` escape hatch);
+      aggregator excludes the CC dept itself from the rollup.
+- [x] **Removed the global tab** — `command-center` dropped from `PRIMARY_TABS`, `ALL_VIEWS`,
+      `VIEW_LABELS`; `EXEC_ONLY_VIEWS` emptied; old `CommandCenterView.jsx` deleted.
+- **Verify:** `next build` green; normal app unbroken (9 tabs, no Command Center global tab,
+  0 console errors); takeover + scorecards confirmed live post-deploy (preview is unauth).
+- **NEXT:** fill the report tabs (Health → SLA → Volume → Capacity → People → Risk → Controls)
+  with real cross-dept sections, one PR each.
 
 ### Phase 0 — Foundation, governance & gated shell  ✅ implemented (on `feat/command-center-phase-0`, landing → dev)
 **Goal:** exec gating, the view scaffold, the aggregation foundation, and the

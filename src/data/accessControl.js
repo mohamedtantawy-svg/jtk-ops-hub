@@ -67,13 +67,10 @@ export const ALL_VIEWS = [
   // and per-node delegation rows in `org_node_admins`. Not in
   // MANAGERIAL_ONLY_VIEWS — agents see the chart but can't mutate it.
   'org',
-  // Command Center (Phase 0, 2026-06-03) — executive cross-department
-  // oversight for CEO / VP Ops / COO. EXEC-ONLY: excluded from the Regional /
-  // TL / Agent view tiers via EXEC_ONLY_VIEWS below. The authoritative runtime
-  // gate is perms.canViewCommandCenter (FE) / canViewCommandCenter() in
-  // src/lib/command-center-access.js (server) — kept in lockstep so the tab's
-  // visibility and the data endpoints' 403 can never disagree.
-  'command-center',
+  // NOTE: the Command Center is a DEPARTMENT (its own app shell rendered on dept
+  // context), NOT a standalone top-level view — so it is intentionally absent
+  // from ALL_VIEWS. Access = CC dept membership / super-admin (see
+  // src/lib/command-center-access.js). (2026-06-03)
   // Tasks (Phase 1, 2026-05-25 → moved same-day): originally a top-level
   // 'tasks' view; relocated under Workspace as a queue source tab
   // (WORK_TASKS_TAB → TasksQueuePanel) and the standalone view + its
@@ -106,14 +103,11 @@ export const ALL_VIEWS = [
 // "MOC Schedule" button — the symptom reported in the bug.
 const MANAGERIAL_ONLY_VIEWS = new Set(['leader-alerts', 'team', 'lead-home']);
 
-// Exec-only surfaces — visible to full Admins, the global super-admin, the
-// seeded leadership roster, and per-user Command Center grantees ONLY. These
-// are filtered OUT of the Regional / Team-Lead / Agent view tiers below so a
-// Regional Manager (who otherwise sees every non-settings view) can't reach
-// the cross-company executive rollup. The authoritative runtime gate is
-// perms.canViewCommandCenter (FE) / canViewCommandCenter() in
-// src/lib/command-center-access.js (server) — kept in lockstep.
-const EXEC_ONLY_VIEWS = new Set(['command-center']);
+// The Command Center is now a DEPARTMENT (its own app shell rendered on dept
+// context), not a global view — so there are no exec-only top-level views. Kept
+// as an empty set so the tier-derivation filters below stay structurally intact
+// (and a future exec-only view can be added here without reworking them).
+const EXEC_ONLY_VIEWS = new Set();
 
 // Leadership roster auto-granted Command Center access without a per-user DB
 // flag. Mirrors the (now-retired) workspace registry's COMMAND_CENTER_EMAILS.
@@ -208,7 +202,6 @@ export const VIEW_LABELS = {
   'urgent-assist-schedule': 'Urgent Assist Schedule',
   'notifications': 'Notifications',
   'org':           'Org',
-  'command-center':'Command Center',
   // 'tasks' label retired 2026-05-25 — surface lives inside Workspace.
   'settings':      'Settings',
 };
@@ -359,7 +352,7 @@ export const DEFAULT_ACCESS_TYPES = [
     id: 'at_command_center',
     name: 'Executive',
     description: 'Read-only executive Command Center: cross-department health, SLA, volume, capacity, people, and risk. No operational queues, settings, or write actions. For CEO / VP Ops / COO.',
-    views: ['briefing', 'command-center', 'notifications'],
+    views: ['briefing', 'notifications'],
     actions: [],
     adminPowers: ['can_view_command_center'],
     dataScope: 'all_tasks',

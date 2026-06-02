@@ -18,7 +18,7 @@ import { getOverview } from '../../../../../src/lib/command-center-aggregator';
 export async function GET(req) {
   const user = getAuthUser(req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  if (!(await canViewCommandCenter(user))) {
+  if (!(await canViewCommandCenter(user, req))) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
   try {
