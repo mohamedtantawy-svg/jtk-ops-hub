@@ -50,6 +50,7 @@ export default function MemberDetailDrawer({
     isAccessAdmin: member.isAccessAdmin === true,
     isHrHubAdmin: member.isHrHubAdmin === true,
     isLeaderAlertsAdmin: member.isLeaderAlertsAdmin === true,
+    isCommandCenterViewer: member.isCommandCenterViewer === true,
     onLeave: member.onLeave === true,
     countries: Array.isArray(member.countries) ? member.countries : [],
   } : null, [member]);
@@ -90,6 +91,7 @@ export default function MemberDetailDrawer({
         orgNodeId: 'orgNodeId',
         isAnnouncementsAdmin: 'isAnnouncementsAdmin',
         isAccessAdmin: 'isAccessAdmin',
+        isCommandCenterViewer: 'isCommandCenterViewer',
       };
       for (const [src, dst] of Object.entries(map)) {
         if (form[src] !== baseline[src]) patch[dst] = form[src] === '' ? null : form[src];
@@ -310,6 +312,14 @@ export default function MemberDetailDrawer({
               icon="bi-shield-lock"
               checked={form.isAccessAdmin}
               onChange={v => set('isAccessAdmin', v)}
+              disabled={!canEdit}
+            />
+            <ToggleRow
+              label="Command Center (Executive)"
+              hint="Read-only access to the executive cross-department Command Center."
+              icon="bi-speedometer2"
+              checked={form.isCommandCenterViewer}
+              onChange={v => set('isCommandCenterViewer', v)}
               disabled={!canEdit}
             />
           </Section>
