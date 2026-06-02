@@ -148,15 +148,25 @@ export function isAdminUser(user) {
 // Per spec "we should see their team under the team summary", we now
 // expand to the requester's full visible-emails set (self + reports).
 // `_coverageEmailsForRequester` handles the admin-cap edge case.
-export function getVisibleEmails(user) {
+//
+// 2026-06-02 (Belu feedback) — `extraEmails` lets FE callers thread the
+// coverage subtree through without depending on the server-only
+// delegation cache (which is empty client-side by design — see
+// handover-scope-cache.js). Server callers don't pass it; their
+// delegations come from the cache and behave exactly as before.
+export function getVisibleEmails(user, extraEmails = null) {
   if (!user || !user.email) return new Set();
   if (isAdminUser(user)) return ALL_EMAILS_SET;
   const base = getVisibleEmailsForAccess(user.email);
   const delegations = getActiveHandoverDelegationsSync(user.email);
-  if (delegations.length === 0) return base;
   for (const d of delegations) {
     if (!d?.requesterEmail) continue;
     for (const e of _coverageEmailsForRequester(d.requesterEmail)) base.add(e);
+  }
+  if (extraEmails) {
+    for (const e of extraEmails) {
+      if (e) base.add(String(e).toLowerCase());
+    }
   }
   return base;
 }
@@ -287,7 +297,7 @@ export function canManageTimeOffFor(user, targetEmail) {
 // of the requester's owned countries; if it carries an explicit subset
 // we add ONLY those codes. Either way the merge is additive: the
 // coverer's pre-existing country set is never narrowed.
-export function getVisibleCountries(user) {
+export function getVisibleCountries(user, extraEmails = null) {
   if (!user || !user.email) return new Set();
   const role = normalizeRole(user);
   if (role === 'admin') return getAllCountries();
@@ -327,6 +337,19 @@ export function getVisibleCountries(user) {
     }
   }
 
+  // 2026-06-02 (Belu feedback) — symmetrical FE-side widening with
+  // `getVisibleEmails`: when the FE provides a coverage subtree via
+  // `extraEmails`, fan out into the countries those people own so a
+  // coverer's country-OR-assignee filter on Onb / Off / Amend / Redline /
+  // Incentive Plans accepts rows in the covered TL's country set even
+  // when the server-only delegation cache is empty.
+  if (extraEmails) {
+    for (const e of extraEmails) {
+      const owned = OWNER_COUNTRIES.get(String(e || '').toLowerCase());
+      if (owned) for (const c of owned) countries.add(c);
+    }
+  }
+
   return countries;
 }
 
@@ -349,13 +372,13 @@ export function getVisibleCountries(user) {
  * that resolve in MEMBERS_BY_EMAIL count as "assigned to a real
  * member".
  */
-function _scopeByAssignedOrUnassigned(items, user) {
+function _scopeByAssignedOrUnassigned(items, user, extraEmails = null) {
   if (!Array.isArray(items)) return [];
   if (!user) return [];
   if (isAdminUser(user)) return items;
 
-  const visibleEmails = getVisibleEmails(user);
-  const visibleCountries = getVisibleCountries(user);
+  const visibleEmails = getVisibleEmails(user, extraEmails);
+  const visibleCountries = getVisibleCountries(user, extraEmails);
 
   return items.filter(item => {
     const primary = (item.assigneeEmail || '').toLowerCase();
@@ -394,13 +417,13 @@ function _scopeByAssignedOrUnassigned(items, user) {
  * picks up everything in their country, even if it's already been routed to
  * a specific person.
  */
-function _scopeCountryOrAssignee(items, user) {
+function _scopeCountryOrAssignee(items, user, extraEmails = null) {
   if (!Array.isArray(items)) return [];
   if (!user) return [];
   if (isAdminUser(user)) return items;
 
-  const visibleEmails = getVisibleEmails(user);
-  const visibleCountries = getVisibleCountries(user);
+  const visibleEmails = getVisibleEmails(user, extraEmails);
+  const visibleCountries = getVisibleCountries(user, extraEmails);
 
   return items.filter(item => {
     const cc = (item.country || item.countryCode || '').toUpperCase();
@@ -425,8 +448,8 @@ function _scopeCountryOrAssignee(items, user) {
  * primary assignee is empty or an orphan (so unowned tickets aren't
  * stranded).
  */
-export function filterByAssignee(items, user) {
-  return _scopeByAssignedOrUnassigned(items, user);
+export function filterByAssignee(items, user, extraEmails = null) {
+  return _scopeByAssignedOrUnassigned(items, user, extraEmails);
 }
 
 /**
@@ -459,8 +482,8 @@ export function filterByCountry(items, user) {
  * OR is in the row's assignee chain. Country owners see their region's
  * queue regardless of who's currently assigned.
  */
-export function filterByCountryOrAssignee(items, user) {
-  return _scopeCountryOrAssignee(items, user);
+export function filterByCountryOrAssignee(items, user, extraEmails = null) {
+  return _scopeCountryOrAssignee(items, user, extraEmails);
 }
 
 // ── Named wrappers so call sites read like the spec ────────────────────────
@@ -471,14 +494,14 @@ export function filterByCountryOrAssignee(items, user) {
 //   • Country-OR-assignee union — Onb / Paused Onb / Off / Amend / Redline.
 //     Show to country owners (plus their lead chain) AND the assignee chain.
 //     Country owners see their region's queue even when rows are pre-routed.
-export const scopeZendeskTickets   = (items, user) => filterByAssignee(items, user);
-export const scopeJiraIssues       = (items, user) => filterByAssignee(items, user);
-export const scopeWorkbenchTasks   = (items, user) => filterByAssignee(items, user);
+export const scopeZendeskTickets   = (items, user, extraEmails) => filterByAssignee(items, user, extraEmails);
+export const scopeJiraIssues       = (items, user, extraEmails) => filterByAssignee(items, user, extraEmails);
+export const scopeWorkbenchTasks   = (items, user, extraEmails) => filterByAssignee(items, user, extraEmails);
 // 2026-05-22: GIX-only Immigration Tasks. Every row from
 // /admin/mobility/actions has a real `assignee.email`, so the same
 // pure-assignee scope as Zendesk/Jira/Workbench applies — agent sees
 // own, TL sees direct reports, RM sees subtree, admin sees all.
-export const scopeImmigrationTasks = (items, user) => filterByAssignee(items, user);
+export const scopeImmigrationTasks = (items, user, extraEmails) => filterByAssignee(items, user, extraEmails);
 
 // Agents see ASSIGNEE-only (with country fallback only for orphan rows),
 // while TL / Regional / Admin keep the broader country-OR-assignee union so
@@ -498,9 +521,9 @@ export const scopeImmigrationTasks = (items, user) => filterByAssignee(items, us
 // COUNTRY_OWNERS (hash-balanced round-robin) for queues without an
 // upstream assignee (Amendments, Redlines, Incentive Plans). So the
 // strict assignee filter is meaningful on every queue here.
-const scopeAgentOrUnion = (items, user) => {
-  if (normalizeRole(user) === 'agent') return filterByAssignee(items, user);
-  return filterByCountryOrAssignee(items, user);
+const scopeAgentOrUnion = (items, user, extraEmails = null) => {
+  if (normalizeRole(user) === 'agent') return filterByAssignee(items, user, extraEmails);
+  return filterByCountryOrAssignee(items, user, extraEmails);
 };
 
 // Hidden-task list visibility (2026-05-12). The Hidden tab was admin-only;
@@ -536,9 +559,9 @@ export function scopeHiddenTasks(items, user) {
   });
 }
 
-export const scopeOnboardingPeople      = (items, user) => scopeAgentOrUnion(items, user);
-export const scopePausedOnboarding      = (items, user) => scopeAgentOrUnion(items, user);
-export const scopeOffboardingCases      = (items, user) => scopeAgentOrUnion(items, user);
-export const scopeAmendmentRequests     = (items, user) => scopeAgentOrUnion(items, user);
-export const scopeRedlineRequests       = (items, user) => scopeAgentOrUnion(items, user);
-export const scopeIncentivePlans        = (items, user) => scopeAgentOrUnion(items, user);
+export const scopeOnboardingPeople      = (items, user, extraEmails) => scopeAgentOrUnion(items, user, extraEmails);
+export const scopePausedOnboarding      = (items, user, extraEmails) => scopeAgentOrUnion(items, user, extraEmails);
+export const scopeOffboardingCases      = (items, user, extraEmails) => scopeAgentOrUnion(items, user, extraEmails);
+export const scopeAmendmentRequests     = (items, user, extraEmails) => scopeAgentOrUnion(items, user, extraEmails);
+export const scopeRedlineRequests       = (items, user, extraEmails) => scopeAgentOrUnion(items, user, extraEmails);
+export const scopeIncentivePlans        = (items, user, extraEmails) => scopeAgentOrUnion(items, user, extraEmails);

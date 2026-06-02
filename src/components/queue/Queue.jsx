@@ -7,6 +7,8 @@ import { useVirtualRows } from '../../hooks/useVirtualRows';
 // 3,000+ rows are in the dataset.
 const TICKET_ROW_HEIGHT = 44;
 import { MEMBERS_BY_EMAIL } from '../../data/members';
+import { useTeamMembers } from '../../hooks/useTeamMembers';
+import { useMyActiveCoverages, expandCoverageScope } from '../../hooks/useMyActiveCoverages';
 import { slaInfo, getUrl } from '../../utils/helpers';
 import { applySlaExtensionsToRows, isSlaExtensionLocked } from '../../utils/applySlaExtensions';
 import {
@@ -614,10 +616,34 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
       return { ...t, slaExtension: ext };
     });
 
+  // ── Active OOO coverage subtree (2026-06-02 — Belu feedback) ────────────
+  // When the viewer is covering a peer manager, the server-side queue
+  // routes already widen via queue-scoping._coverageEmailsForRequester,
+  // but the FE re-scope below calls getVisibleEmails (which on the client
+  // has an empty delegation cache) and re-narrows back to the natural
+  // subtree. Compute the covered subtree once here so the Jira
+  // Actionable/Raised filters AND every Deel-source scope call agree on
+  // who's in scope. Tickets already get this treatment via App.jsx's
+  // perms.scopeTasks(tasks, MEMBERS, coverageEmails).
+  const {
+    membersByEmail: queueLiveMembersByEmail,
+    getDirectReports: queueLiveGetDirectReports,
+    getAllReports: queueLiveGetAllReports,
+  } = useTeamMembers();
+  const { items: queueActiveCoverages } = useMyActiveCoverages();
+  const queueCoverageScope = useMemo(() => expandCoverageScope(queueActiveCoverages, {
+    membersByEmail: queueLiveMembersByEmail,
+    getDirectReports: queueLiveGetDirectReports,
+    getAllReports: queueLiveGetAllReports,
+  }), [queueActiveCoverages, queueLiveMembersByEmail, queueLiveGetDirectReports, queueLiveGetAllReports]);
+  const queueCoverageEmails = queueCoverageScope.emails;
+
   // Emails the current viewer "owns" — their email + every teammate below
   // them in the hierarchy (used to classify each Jira ticket as Actionable
-  // vs Raised by You for the filter chips and counts).
-  const visibleEmails = useMemo(() => getVisibleEmails(user), [user]);
+  // vs Raised by You for the filter chips and counts). Threads coverage
+  // through `extraEmails` so a covered TL's reports' Jira tickets count
+  // as Actionable for the coverer.
+  const visibleEmails = useMemo(() => getVisibleEmails(user, queueCoverageEmails), [user, queueCoverageEmails]);
 
   const jiraIsActionable = useCallback((t) => {
     if (t?.source !== 'jira') return false;
@@ -665,8 +691,8 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
   // live bindings, so the value itself doesn't go INTO the memo body —
   // it only triggers re-derive.
   const teamDataVersion = useTeamDataVersion();
-  const onboardingActionRowsScoped = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user), [onboardingRowsAll, user, teamDataVersion]);
-  const pausedOnboardingRowsScoped = useMemo(() => scopePausedOnboarding(pausedOnboardingRowsAll, user), [pausedOnboardingRowsAll, user, teamDataVersion]);
+  const onboardingActionRowsScoped = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user, queueCoverageEmails), [onboardingRowsAll, user, teamDataVersion, queueCoverageEmails]);
+  const pausedOnboardingRowsScoped = useMemo(() => scopePausedOnboarding(pausedOnboardingRowsAll, user, queueCoverageEmails), [pausedOnboardingRowsAll, user, teamDataVersion, queueCoverageEmails]);
   const onboardingActionRows = useMemo(() => applySlaExtensionsToRows(onboardingActionRowsScoped, slaExtensionMap, 'onboarding', slaExtensionPendingMap), [onboardingActionRowsScoped, slaExtensionMap, slaExtensionPendingMap]);
   const pausedOnboardingRows = useMemo(() => applySlaExtensionsToRows(pausedOnboardingRowsScoped, slaExtensionMap, 'onboarding', slaExtensionPendingMap), [pausedOnboardingRowsScoped, slaExtensionMap, slaExtensionPendingMap]);
   const onboardingRows = useMemo(() => {
@@ -679,15 +705,15 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
     }
     return merged;
   }, [onboardingActionRows, pausedOnboardingRows]);
-  const offboardingRows = useMemo(() => applySlaExtensionsToRows(scopeOffboardingCases(offboardingRowsAll, user), slaExtensionMap, 'offboarding', slaExtensionPendingMap), [offboardingRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion]);
-  const amendmentRows   = useMemo(() => applySlaExtensionsToRows(scopeAmendmentRequests(amendmentRowsAll, user), slaExtensionMap, 'amendments', slaExtensionPendingMap), [amendmentRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion]);
-  const redlineRows     = useMemo(() => applySlaExtensionsToRows(scopeRedlineRequests(redlineRowsAll, user), slaExtensionMap, 'redlines', slaExtensionPendingMap), [redlineRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion]);
-  const workbenchRows   = useMemo(() => applySlaExtensionsToRows(scopeWorkbenchTasks(workbenchRowsAll, user), slaExtensionMap, 'workbench', slaExtensionPendingMap), [workbenchRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion]);
-  const incentivePlanRows = useMemo(() => applySlaExtensionsToRows(scopeIncentivePlans(incentivePlanRowsAll, user), slaExtensionMap, 'incentive_plans', slaExtensionPendingMap), [incentivePlanRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion]);
+  const offboardingRows = useMemo(() => applySlaExtensionsToRows(scopeOffboardingCases(offboardingRowsAll, user, queueCoverageEmails), slaExtensionMap, 'offboarding', slaExtensionPendingMap), [offboardingRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion, queueCoverageEmails]);
+  const amendmentRows   = useMemo(() => applySlaExtensionsToRows(scopeAmendmentRequests(amendmentRowsAll, user, queueCoverageEmails), slaExtensionMap, 'amendments', slaExtensionPendingMap), [amendmentRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion, queueCoverageEmails]);
+  const redlineRows     = useMemo(() => applySlaExtensionsToRows(scopeRedlineRequests(redlineRowsAll, user, queueCoverageEmails), slaExtensionMap, 'redlines', slaExtensionPendingMap), [redlineRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion, queueCoverageEmails]);
+  const workbenchRows   = useMemo(() => applySlaExtensionsToRows(scopeWorkbenchTasks(workbenchRowsAll, user, queueCoverageEmails), slaExtensionMap, 'workbench', slaExtensionPendingMap), [workbenchRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion, queueCoverageEmails]);
+  const incentivePlanRows = useMemo(() => applySlaExtensionsToRows(scopeIncentivePlans(incentivePlanRowsAll, user, queueCoverageEmails), slaExtensionMap, 'incentive_plans', slaExtensionPendingMap), [incentivePlanRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion, queueCoverageEmails]);
   // Immigration tasks share the standard SLA-extension keyed map (source +
   // id), so a future per-row SLA-extension request flow can apply here
   // identically to the other Deel sources.
-  const immigrationTaskRows = useMemo(() => applySlaExtensionsToRows(scopeImmigrationTasks(immigrationTaskRowsAll, user), slaExtensionMap, 'immigration_tasks', slaExtensionPendingMap), [immigrationTaskRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion]);
+  const immigrationTaskRows = useMemo(() => applySlaExtensionsToRows(scopeImmigrationTasks(immigrationTaskRowsAll, user, queueCoverageEmails), slaExtensionMap, 'immigration_tasks', slaExtensionPendingMap), [immigrationTaskRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion, queueCoverageEmails]);
   // Workbench is the only Deel source that intentionally surfaces resolved
   // rows (24h of COMPLETED + CLOSED) so the "RESOLVED TODAY" section can
   // render. Strip them from the cross-source "All" aggregates so the

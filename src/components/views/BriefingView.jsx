@@ -83,9 +83,38 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // table here on the home Overview surface). One-shot fetch via the
   // shared hook so we don't refetch per-row.
   const { eventsByEmail: oooEventsByEmail } = useTimeOffEvents();
+  // ── Active OOO coverage delegation (2026-05-28, 2026-06-02) ─────────────
+  // Hoisted ABOVE canLoginAs so the Login-as gate can include the covered
+  // subtree (peer TL + their reports) when deciding whether the button
+  // renders. Previously the coverage memo lived further down next to the
+  // Team-Summary tree builder, which made canLoginAs blind to coverage —
+  // the button was hidden on the covered manager's row in Team Summary
+  // and on every covered agent row even though App.jsx's
+  // handleImpersonate accepts them as valid targets. The full memo
+  // (with the position-id mapping fix) is consumed below; this block
+  // only needs the email set for the gate.
+  const { items: activeCoverages } = useMyActiveCoverages();
+  const coverageEmailsForLogin = useMemo(() => {
+    const out = new Set();
+    if (!Array.isArray(activeCoverages) || activeCoverages.length === 0) return out;
+    for (const c of activeCoverages) {
+      const requester = (c.requester_email || '').toLowerCase();
+      if (!requester) continue;
+      out.add(requester);
+      const m = MEMBERS_BY_EMAIL[requester];
+      const access = String(m?.access || '').toLowerCase();
+      if (access === 'regional_manager') {
+        for (const r of getAllReports(requester)) out.add(String(r).toLowerCase());
+      } else if (access === 'team_lead' || access === 'admin') {
+        for (const r of getDirectReports(requester)) out.add(String(r.email).toLowerCase());
+      }
+    }
+    return out;
+  }, [activeCoverages]);
   // ── Login-as gate (mirrors Team.jsx::canLoginAs) ─────────────────────────
   // Only TL/RM/admin can impersonate. Target must be in the caller's
-  // reporting subtree, not deactivated, and not currently impersonated.
+  // reporting subtree OR an active coverage subtree, not deactivated,
+  // not currently impersonated.
   const canLoginAs = useCallback((targetEmail) => {
     if (!onImpersonate || !realUser?.email) return false;
     const realEmail = realUser.email.toLowerCase();
@@ -99,8 +128,15 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     const target = (liveMembersByEmail && liveMembersByEmail[te]) || MEMBERS_BY_EMAIL[te];
     if (!target || target.isDeleted) return false;
     const reports = liveGetAllReports ? liveGetAllReports(realEmail) : (getAllReports(realEmail) || []);
-    return new Set(reports).has(te);
-  }, [onImpersonate, realUser?.email, impersonating, liveMembersByEmail, liveGetAllReports]);
+    if (new Set(reports).has(te)) return true;
+    // 2026-06-02 (Belu feedback) — surface Login-as on every covered
+    // manager + their reports so the coverer can step into the OOO
+    // person's seat during the handover window. App.jsx's
+    // handleImpersonate already accepts coverageEmails as valid; this
+    // closes the gap so the button is visible to match.
+    if (coverageEmailsForLogin.has(te)) return true;
+    return false;
+  }, [onImpersonate, realUser?.email, impersonating, liveMembersByEmail, liveGetAllReports, coverageEmailsForLogin]);
   // Country edit gate — admin / RM / per-user Access Admin / TL editing only
   // their direct reports' countries. Mirrors the server-side check at
   // app/api/v1/team-members/[email]/countries/route.js so the inline picker
@@ -360,20 +396,39 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // queue-scoping.js's `_coverageEmailsForRequester` and intentionally
   // caps admin-requester coverage at direct reports so accepting a
   // single handover never grants global visibility.
-  const { items: activeCoverages } = useMyActiveCoverages();
+  // 2026-06-02 — `activeCoverages` is now sourced from the hook hoisted
+  // above canLoginAs (see top-of-component block); the delegatedScope
+  // memo below consumes that same value and additionally maps each
+  // email through MEMBERS to record the position-based id used by
+  // `scopeIds.includes`.
   const delegatedScope = useMemo(() => {
     const emails = new Set();
     const ids = new Set();
     if (!Array.isArray(activeCoverages) || activeCoverages.length === 0) {
       return { emails, ids };
     }
+    // 2026-06-02 (Belu feedback) — pre-build an email → MEMBERS-position-id
+    // map so the ids we collect match the position-based id used by
+    // `allAgents`'s `scopeIds.includes(m.id)` filter. MEMBERS_BY_EMAIL
+    // stores the RAW roster row whose `id` (when present) is the DB pk —
+    // a different namespace from `MEMBERS[i].id = i + 1`. Using DB ids
+    // here caused `scopeIds.includes(m.id)` to never match the covered
+    // subtree, leaving Olga's group's `allAgentsBelow` empty and her
+    // aggregated tc / open / paused / breaches all reading 0 even though
+    // her direct reports rendered with non-zero stats elsewhere on the
+    // page.
+    const positionIdByEmail = new Map();
+    for (let i = 0; i < MEMBERS.length; i++) {
+      const e = String(MEMBERS[i].email || '').toLowerCase();
+      if (e) positionIdByEmail.set(e, MEMBERS[i].id);
+    }
     const pushMember = (email) => {
       const lc = String(email || '').toLowerCase();
       if (!lc) return;
       if (emails.has(lc)) return;
       emails.add(lc);
-      const m = MEMBERS_BY_EMAIL[lc];
-      if (m?.id != null) ids.add(m.id);
+      const pid = positionIdByEmail.get(lc);
+      if (pid != null) ids.add(pid);
     };
     for (const c of activeCoverages) {
       const requester = (c.requester_email || '').toLowerCase();
@@ -472,8 +527,17 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // change — fixes Insiya + Mohamed 2026-05-18 "manager change / country
   // removal stays visible until a hard refresh".
   const teamDataVersion = useTeamDataVersion();
-  const onboardingActionRows = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user), [onboardingRowsAll, user, teamDataVersion]);
-  const pausedOnboardingRows = useMemo(() => scopePausedOnboarding(pausedOnboardingRowsAll, user), [pausedOnboardingRowsAll, user, teamDataVersion]);
+  // 2026-06-02 (Belu feedback) — thread the covered subtree through every
+  // FE Deel-source scope call. Server already widens via the queue-route
+  // delegation cache, but the FE re-scope here calls `getVisibleEmails`
+  // (FE-side delegation cache is empty by design — see
+  // handover-scope-cache.js) and re-narrows the server's widened result
+  // back to the natural subtree. Without this the Home + Workspace
+  // counts for the covered TL's team's Onb/Off/Amend/Redline/Workbench/
+  // Incentive Plans go to 0 even though the server returned them.
+  const briefingCoverageEmails = delegatedScope.emails;
+  const onboardingActionRows = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user, briefingCoverageEmails), [onboardingRowsAll, user, teamDataVersion, briefingCoverageEmails]);
+  const pausedOnboardingRows = useMemo(() => scopePausedOnboarding(pausedOnboardingRowsAll, user, briefingCoverageEmails), [pausedOnboardingRowsAll, user, teamDataVersion, briefingCoverageEmails]);
   const onboardingRows = useMemo(() => {
     const seen = new Set();
     const merged = [];
@@ -484,10 +548,10 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     }
     return merged;
   }, [onboardingActionRows, pausedOnboardingRows]);
-  const offboardingRows = useMemo(() => scopeOffboardingCases(offboardingRowsAll, user), [offboardingRowsAll, user, teamDataVersion]);
-  const amendmentRows = useMemo(() => scopeAmendmentRequests(amendmentRowsAll, user), [amendmentRowsAll, user, teamDataVersion]);
-  const redlineRows = useMemo(() => scopeRedlineRequests(redlineRowsAll, user), [redlineRowsAll, user, teamDataVersion]);
-  const workbenchRows = useMemo(() => scopeWorkbenchTasks(workbenchRowsAll, user), [workbenchRowsAll, user, teamDataVersion]);
+  const offboardingRows = useMemo(() => scopeOffboardingCases(offboardingRowsAll, user, briefingCoverageEmails), [offboardingRowsAll, user, teamDataVersion, briefingCoverageEmails]);
+  const amendmentRows = useMemo(() => scopeAmendmentRequests(amendmentRowsAll, user, briefingCoverageEmails), [amendmentRowsAll, user, teamDataVersion, briefingCoverageEmails]);
+  const redlineRows = useMemo(() => scopeRedlineRequests(redlineRowsAll, user, briefingCoverageEmails), [redlineRowsAll, user, teamDataVersion, briefingCoverageEmails]);
+  const workbenchRows = useMemo(() => scopeWorkbenchTasks(workbenchRowsAll, user, briefingCoverageEmails), [workbenchRowsAll, user, teamDataVersion, briefingCoverageEmails]);
   // Workbench is the only Deel source that intentionally surfaces a 24h
   // window of COMPLETED + CLOSED rows (so the home "Resolved Today" KPI
   // can include workbench). Active aggregates — capacity bands, SLA
@@ -496,7 +560,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // work re-inflates the very backlog the user just cleared.
   const workbenchActiveRows    = useMemo(() => workbenchRows.filter(r => !r.isResolved),    [workbenchRows]);
   const workbenchActiveRowsAll = useMemo(() => workbenchRowsAll.filter(r => !r.isResolved), [workbenchRowsAll]);
-  const incentivePlanRows = useMemo(() => scopeIncentivePlans(incentivePlanRowsAll, user), [incentivePlanRowsAll, user]);
+  const incentivePlanRows = useMemo(() => scopeIncentivePlans(incentivePlanRowsAll, user, briefingCoverageEmails), [incentivePlanRowsAll, user, briefingCoverageEmails]);
 
   const inScope = useCallback(t => {
     if (scopeIds.includes(t.assigneeId)) return true;
