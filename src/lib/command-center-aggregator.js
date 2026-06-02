@@ -336,3 +336,115 @@ export async function getVolume() {
   };
   return { series, departments, totals };
 }
+
+// Risk tab: open Leader Alerts / Urgent Assists / Escalations per dept (+ critical).
+export async function getRisk() {
+  const empty = { departments: [], totals: { alertsOpen: 0, alertsCritical: 0, urgentOpen: 0, urgentCritical: 0, escalationsOpen: 0, total: 0, critical: 0 } };
+  if (!process.env.DATABASE_URL) return empty;
+  let tree;
+  try { tree = await loadNodeTree(); } catch (e) { console.warn('[cc-agg getRisk]', e.message); return empty; }
+  const { resolveRoot, roots } = tree;
+  if (!roots.length) return empty;
+
+  const alerts = await foldByRoot(
+    `SELECT org_node_id,
+            COUNT(*) FILTER (WHERE status <> 'resolved')::int AS open_c,
+            COUNT(*) FILTER (WHERE status <> 'resolved' AND severity IN ('critical','high'))::int AS crit_c
+       FROM leader_alert WHERE org_node_id IS NOT NULL GROUP BY org_node_id`,
+    resolveRoot, r => ({ nodeId: r.org_node_id, values: { alertsOpen: r.open_c, alertsCritical: r.crit_c } }),
+  );
+  const urgent = await foldByRoot(
+    `SELECT org_node_id,
+            COUNT(*) FILTER (WHERE status <> 'resolved')::int AS open_c,
+            COUNT(*) FILTER (WHERE status <> 'resolved' AND priority IN ('critical','high'))::int AS crit_c
+       FROM urgent_assist_request WHERE org_node_id IS NOT NULL GROUP BY org_node_id`,
+    resolveRoot, r => ({ nodeId: r.org_node_id, values: { urgentOpen: r.open_c, urgentCritical: r.crit_c } }),
+  );
+  const escal = await foldByRoot(
+    `SELECT org_node_id, COUNT(*) FILTER (WHERE status IN ('pending','in_progress'))::int AS open_c
+       FROM escalations WHERE org_node_id IS NOT NULL GROUP BY org_node_id`,
+    resolveRoot, r => ({ nodeId: r.org_node_id, values: { escalationsOpen: r.open_c } }),
+  );
+
+  const departments = roots.map(d => {
+    const a = alerts.get(d.id) || {}, u = urgent.get(d.id) || {}, e = escal.get(d.id) || {};
+    const alertsOpen = a.alertsOpen || 0, alertsCritical = a.alertsCritical || 0;
+    const urgentOpen = u.urgentOpen || 0, urgentCritical = u.urgentCritical || 0;
+    const escalationsOpen = e.escalationsOpen || 0;
+    return { id: d.id, name: d.name, slug: d.slug, color: d.color, alertsOpen, alertsCritical, urgentOpen, urgentCritical, escalationsOpen,
+      total: alertsOpen + urgentOpen + escalationsOpen, critical: alertsCritical + urgentCritical };
+  }).sort((a, b) => b.critical - a.critical || b.total - a.total);
+
+  const totals = departments.reduce((t, d) => ({
+    alertsOpen: t.alertsOpen + d.alertsOpen, alertsCritical: t.alertsCritical + d.alertsCritical,
+    urgentOpen: t.urgentOpen + d.urgentOpen, urgentCritical: t.urgentCritical + d.urgentCritical,
+    escalationsOpen: t.escalationsOpen + d.escalationsOpen, total: t.total + d.total, critical: t.critical + d.critical,
+  }), empty.totals);
+  return { departments, totals };
+}
+
+// People tab: headcount, vacancies, coverage (out today / upcoming 7d), throughput.
+export async function getPeople() {
+  const empty = { departments: [], totals: { headcount: 0, vacancies: 0, outToday: 0, upcoming: 0, resolved30: 0 } };
+  if (!process.env.DATABASE_URL) return empty;
+  let tree;
+  try { tree = await loadNodeTree(); } catch (e) { console.warn('[cc-agg getPeople]', e.message); return empty; }
+  const { resolveRoot, roots } = tree;
+  if (!roots.length) return empty;
+
+  const { head, vac } = await headcountVacancyByRoot(resolveRoot);
+  const hh = await hrHubStatsByRoot(resolveRoot);
+  const leaveFold = (clause) => foldByRoot(
+    `SELECT tmo.org_node_id, COUNT(DISTINCT LOWER(t.work_email))::int AS c
+       FROM time_off_events t JOIN team_member_overrides tmo ON LOWER(tmo.email) = LOWER(t.work_email)
+      WHERE t.status = 'approved' AND ${clause}
+        AND tmo.org_node_id IS NOT NULL AND (tmo.is_deleted IS NULL OR tmo.is_deleted = false)
+      GROUP BY tmo.org_node_id`,
+    resolveRoot, r => ({ nodeId: r.org_node_id, values: { c: r.c } }),
+  );
+  const outToday = await leaveFold(`t.start_date <= CURRENT_DATE AND t.end_date >= CURRENT_DATE`);
+  const upcoming = await leaveFold(`t.start_date > CURRENT_DATE AND t.start_date <= CURRENT_DATE + INTERVAL '7 days'`);
+
+  const departments = roots.map(d => {
+    const headcount = (head.get(d.id) || {}).headcount || 0;
+    const vacancies = (vac.get(d.id) || {}).vacancies || 0;
+    const out = (outToday.get(d.id) || {}).c || 0;
+    const up = (upcoming.get(d.id) || {}).c || 0;
+    const resolved30 = (hh.get(d.id) || {}).resolved30 || 0;
+    return { id: d.id, name: d.name, slug: d.slug, color: d.color, headcount, vacancies, outToday: out, upcoming: up, resolved30,
+      coverage: headcount > 0 ? Math.round((1 - out / headcount) * 100) : 100 };
+  }).sort((a, b) => b.headcount - a.headcount);
+
+  const totals = departments.reduce((t, d) => ({
+    headcount: t.headcount + d.headcount, vacancies: t.vacancies + d.vacancies,
+    outToday: t.outToday + d.outToday, upcoming: t.upcoming + d.upcoming, resolved30: t.resolved30 + d.resolved30,
+  }), empty.totals);
+  return { departments, totals };
+}
+
+// Capacity tab: internal load proxy = open HR Hub work per person, banded. The
+// detailed capacity model (Kristina's) lives in each dept's Leaders Hub; the CC
+// shows the cross-dept load signal WITHOUT triggering N live external scans.
+export async function getCapacity() {
+  const empty = { departments: [], totals: { open: 0, headcount: 0, loadPerPerson: 0 } };
+  if (!process.env.DATABASE_URL) return empty;
+  let tree;
+  try { tree = await loadNodeTree(); } catch (e) { console.warn('[cc-agg getCapacity]', e.message); return empty; }
+  const { resolveRoot, roots } = tree;
+  if (!roots.length) return empty;
+
+  const hh = await hrHubStatsByRoot(resolveRoot);
+  const { head } = await headcountVacancyByRoot(resolveRoot);
+  const bandOf = (lpp) => (lpp >= 5 ? 'high' : lpp >= 2 ? 'good' : 'low');
+
+  const departments = roots.map(d => {
+    const open = (hh.get(d.id) || {}).open || 0;
+    const headcount = (head.get(d.id) || {}).headcount || 0;
+    const lpp = headcount > 0 ? Math.round((open / headcount) * 10) / 10 : 0;
+    return { id: d.id, name: d.name, slug: d.slug, color: d.color, open, headcount, loadPerPerson: lpp, band: bandOf(lpp) };
+  }).sort((a, b) => b.loadPerPerson - a.loadPerPerson);
+
+  const tOpen = departments.reduce((t, d) => t + d.open, 0);
+  const tHead = departments.reduce((t, d) => t + d.headcount, 0);
+  return { departments, totals: { open: tOpen, headcount: tHead, loadPerPerson: tHead > 0 ? Math.round((tOpen / tHead) * 10) / 10 : 0 } };
+}

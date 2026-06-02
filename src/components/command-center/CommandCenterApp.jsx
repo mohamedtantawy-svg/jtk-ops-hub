@@ -16,6 +16,9 @@ import HomePage from './pages/HomePage';
 import HealthPage from './pages/HealthPage';
 import SlaPage from './pages/SlaPage';
 import VolumePage from './pages/VolumePage';
+import CapacityPage from './pages/CapacityPage';
+import PeoplePage from './pages/PeoplePage';
+import RiskPage from './pages/RiskPage';
 import ComingSoonPage from './pages/ComingSoonPage';
 
 const TABS = [
@@ -33,10 +36,7 @@ const TAB_IDS = new Set(TABS.map(t => t.id));
 // Placeholder copy for tabs still being wired (replaced by real sections as the
 // build lands — see COMMAND_CENTER_PLAN.md §4).
 const COMING = {
-  capacity: { title: 'Capacity & Load', icon: 'bi-people', description: 'Per-department workload, capacity signals, and headcount vs demand.', sections: ['Load heatmap', 'Over-capacity alerts', 'Hotspots'] },
-  people:   { title: 'People & Coverage', icon: 'bi-person-badge', description: 'Headcount, vacancies, OOO coverage risk, and productivity across departments.', sections: ['Headcount & vacancy', 'Coverage risk', 'Productivity'] },
-  risk:     { title: 'Risk & Escalations', icon: 'bi-shield-exclamation', description: 'Critical alerts, urgent assists, and aging escalations needing executive attention.', sections: ['Critical alerts', 'Urgent assists', 'Aging escalations'] },
-  controls: { title: 'Controls', icon: 'bi-sliders', description: 'Date range, department comparison, executive export, and threshold tuning.', sections: ['Date range', 'Department compare', 'Export', 'Thresholds'] },
+  controls: { title: 'Controls', icon: 'bi-sliders', description: 'Department comparison, executive export, and threshold tuning.', sections: ['Department compare', 'Export', 'Thresholds'] },
 };
 
 function initialsOf(nameOrEmail) {
@@ -101,10 +101,13 @@ export default function CommandCenterApp({ user, deptState }) {
 
   const renderPage = () => {
     switch (activeTab) {
-      case 'home':   return <HomePage />;
-      case 'health': return <HealthPage />;
-      case 'sla':    return <SlaPage />;
-      case 'volume': return <VolumePage />;
+      case 'home':     return <HomePage />;
+      case 'health':   return <HealthPage />;
+      case 'sla':      return <SlaPage />;
+      case 'volume':   return <VolumePage />;
+      case 'capacity': return <CapacityPage />;
+      case 'people':   return <PeoplePage />;
+      case 'risk':     return <RiskPage />;
       default: {
         const c = COMING[activeTab];
         return c ? <ComingSoonPage {...c} /> : <HomePage />;
