@@ -20,6 +20,7 @@ import {
   isValidEscalationFunctionKey,
   isValidEscalationStatus,
   escalationPriorityToDb,
+  escalationStatusToDbBucket,
   normaliseEscalationCountries,
   normaliseEscalationUrl,
 } from '../../../../../src/lib/escalation-zero-constants';
@@ -217,12 +218,47 @@ export async function GET(req, { params }) {
 }
 
 export async function PATCH(req, { params }) {
-  const { authorized, user, status: rs, error } = requireRole(req, 'admin', 'regional_manager');
-  if (!authorized) return NextResponse.json({ error }, { status: rs });
+  // Permission model (Maylis Pourtau 2026-06-02):
+  //   • Managers (admin / regional_manager) — full board mutation, as before.
+  //   • Any other authenticated team member — may change ONLY the status,
+  //     and ONLY on an Escalation Zero row. The E0 workflow is team-self-
+  //     managed (mirrors the old spreadsheet where anyone moved a row
+  //     along); Ops Hub Feedback stays manager-only, and priority / assignee
+  //     / type / category / extras / etc. stay manager-only on BOTH kinds.
+  const user = getAuthUser(req);
+  if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const role = String(user.role || '').toLowerCase();
+  const isManager = role === 'admin' || role === 'regional_manager';
 
   const { id } = await params;
   let body;
   try { body = await req.json(); } catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }); }
+
+  // Fetch the row's kind up front so we can apply the Escalation Zero
+  // status carve-out. Reused below for the status-change notification's
+  // "(was X)" so this isn't an extra round-trip.
+  const pre = await query(`SELECT kind, status, title FROM feedback_requests WHERE id = $1`, [id]);
+  if (pre.rows.length === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  const rowKind = pre.rows[0].kind || 'ops_hub_feedback';
+  const prevStatus = pre.rows[0].status || null;
+  const prevTitle = pre.rows[0].title || null;
+
+  if (!isManager) {
+    // The only non-manager-permitted edit is a STATUS change on an
+    // Escalation Zero row. The E0 status is the canonical 6-state value
+    // carried in extras.escalationStatus (the row pill renders from it),
+    // so accept EITHER a bare top-level `status` OR an `extras` payload
+    // whose only key is `escalationStatus`. Anything else → 403.
+    const touchedKeys = Object.keys(body).filter(k => body[k] !== undefined);
+    const extrasKeys = (body.extras && typeof body.extras === 'object')
+      ? Object.keys(body.extras).filter(k => body.extras[k] !== undefined)
+      : [];
+    const onlyStatusEdit = touchedKeys.length > 0 && touchedKeys.every(k => k === 'status' || k === 'extras')
+      && (extrasKeys.length === 0 || extrasKeys.every(k => k === 'escalationStatus'));
+    if (!(onlyStatusEdit && rowKind === 'escalation_zero')) {
+      return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
+    }
+  }
 
   // Build the SET clause from a strict whitelist — no string interpolation
   // of column names from the request body.
@@ -295,6 +331,17 @@ export async function PATCH(req, { params }) {
         return NextResponse.json({ error: 'invalid extras.escalationStatus' }, { status: 400 });
       }
       patch.escalationStatus = e.escalationStatus;
+      // Mirror the canonical 6-state escalation status onto the 5-bucket
+      // `status` column so the status index, list filter cards, and
+      // count queries stay consistent (same pattern as priorityKey above).
+      // Skip if the caller also sent an explicit top-level `status` — that
+      // wins. Stamp/clear resolved_at on the terminal transition.
+      if (body.status === undefined) {
+        const bucket = escalationStatusToDbBucket(e.escalationStatus);
+        push('status', bucket);
+        if (TERMINAL_STATUS.has(bucket)) push('resolved_at', new Date().toISOString());
+        else push('resolved_at', null);
+      }
     }
     if (Object.keys(patch).length > 0) {
       // jsonb concat (||) merges keys; null values would clear them but we
@@ -313,18 +360,10 @@ export async function PATCH(req, { params }) {
   const sql = `UPDATE feedback_requests SET ${sets.join(', ')} WHERE id = $${values.length} RETURNING id`;
 
   try {
-    // Capture the prior status before the UPDATE so the status-change
-    // notification can include "(was X)" without an extra round-trip.
-    let prevStatus = null;
-    let prevTitle = null;
-    if (body.status !== undefined) {
-      const prior = await query(
-        `SELECT status, title FROM feedback_requests WHERE id = $1`,
-        [id],
-      );
-      prevStatus = prior.rows[0]?.status || null;
-      prevTitle = prior.rows[0]?.title || null;
-    }
+    // prevStatus / prevTitle were captured in the up-front `pre` fetch
+    // above (the same query the permission carve-out needed), so the
+    // status-change notification can include "(was X)" with no extra
+    // round-trip here.
     const result = await query(sql, values);
     if (result.rowCount === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     const { rows } = await query(SELECT_WITH_AGGS, [id, user.id || -1]);

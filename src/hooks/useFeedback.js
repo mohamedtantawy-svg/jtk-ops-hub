@@ -148,8 +148,19 @@ export function useFeedback({ enabled = true, userEmail = null, sort = 'top' } =
   const patch = useCallback(async (id, body) => {
     // Optimistic — apply locally first so the UI reacts instantly even on
     // slow connections, then reconcile with the server response.
+    // `extras` is deep-merged (not shallow-replaced): an escalation-status
+    // patch sends only { extras: { escalationStatus } }, so a plain spread
+    // would wipe the row's other extras (functionKey, countries, …) until
+    // the server response lands, flickering the function/country pills off.
     const prevItems = items;
-    setItems(prev => prev.map(i => i.id === id ? { ...i, ...body } : i));
+    setItems(prev => prev.map(i => {
+      if (i.id !== id) return i;
+      const merged = { ...i, ...body };
+      if (body.extras && typeof body.extras === 'object') {
+        merged.extras = { ...(i.extras || {}), ...body.extras };
+      }
+      return merged;
+    }));
     try {
       const res = await updateFeedback(id, body);
       const item = res?.item;

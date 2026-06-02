@@ -72,6 +72,29 @@ export function escalationStatusMeta(key) {
   return ESCALATION_STATUSES.find(s => s.key === key) || ESCALATION_STATUSES[0];
 }
 
+// Mirror a canonical 6-state escalation status onto the 5-bucket
+// feedback_requests.status column so the shared status index, the list
+// status-filter cards, and cross-kind count queries stay consistent. The
+// row pill itself always renders from extras.escalationStatus (the true
+// 6-state value); this mapping only feeds the DB column.
+//   new          → new
+//   in_review    → in_progress   (actively being triaged)
+//   hrx_execute  → in_progress   (HRX is working it)
+//   on_hold      → paused
+//   resolved     → done          (shipped / completed)
+//   closed       → done          (archived complete; both terminal-success)
+const _ESCALATION_STATUS_TO_BUCKET = {
+  new: 'new',
+  in_review: 'in_progress',
+  hrx_execute: 'in_progress',
+  on_hold: 'paused',
+  resolved: 'done',
+  closed: 'done',
+};
+export function escalationStatusToDbBucket(key) {
+  return _ESCALATION_STATUS_TO_BUCKET[key] || 'new';
+}
+
 // ── Priority ───────────────────────────────────────────────────────────────
 // Standard vs Urgent — the only two values the scoping doc calls out.
 // Mapped onto the feedback_requests.priority column (low/medium/high/critical)

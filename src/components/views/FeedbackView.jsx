@@ -409,10 +409,21 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const searching = q.length > 0;
     return scopedItems.filter(item => {
       if (matchesDeepLink(item)) return true;
-      if (bucketForStatus(item.status) !== statusFilter) return false;
-      if (typeFilter && item.type !== typeFilter) return false;
+      // When the user is searching, ignore the status-bucket + type
+      // secondary filters so a request surfaces regardless of where it
+      // sits in the lifecycle — matching the old spreadsheet's "type the
+      // first few words to find it" behaviour (Maylis Pourtau 2026-06-02:
+      // search only looked inside the active status bucket, so a request
+      // that had moved past New was invisible). The kind subtab + scope
+      // partition still apply, so search never crosses Escalation Zero ↔
+      // Ops Hub Feedback.
+      if (!searching) {
+        if (bucketForStatus(item.status) !== statusFilter) return false;
+        if (typeFilter && item.type !== typeFilter) return false;
+      }
       if (q) {
         const hay = `${item.title} ${item.issue} ${item.proposedResolution || ''} ${item.category || ''} ${item.submitterName || ''} ${item.submitterEmail || ''}`.toLowerCase();
         if (!hay.includes(q)) return false;
@@ -458,6 +469,18 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
   const handleStatusChange = (item, status) => {
     patch(item.id, { status }).then(updated => {
       if (updated) addToast?.('success', 'Status updated', `"${updated.title}" → ${STATUS_CONFIG[status]?.label || status}`);
+    }).catch(err => addToast?.('error', 'Update failed', err?.message || 'Please try again.'));
+  };
+
+  // Escalation Zero rows carry the canonical 6-state status in
+  // extras.escalationStatus (the row pill renders from it; the server
+  // mirrors the 5-bucket `status` column). Editing it patches extras —
+  // open to any team member by server policy (E0 is team-self-managed,
+  // Maylis Pourtau 2026-06-02), unlike the manager-only ops_hub_feedback
+  // status which still flows through handleStatusChange above.
+  const handleEscalationStatusChange = (item, escalationStatus) => {
+    patch(item.id, { extras: { escalationStatus } }).then(updated => {
+      if (updated) addToast?.('success', 'Status updated', `"${updated.title}" → ${escalationStatusMeta(escalationStatus).label}`);
     }).catch(err => addToast?.('error', 'Update failed', err?.message || 'Please try again.'));
   };
 
@@ -675,6 +698,16 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
         </div>
       </div>
 
+      {/* Search clarifier — the status filter cards stop constraining the
+          list while a query is active, so spell that out (otherwise the
+          highlighted status card reads as if it's still filtering). */}
+      {search.trim() && (
+        <div style={{ margin: '0 0 10px', fontSize: 11.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <i className="bi-info-circle" style={{ fontSize: 12 }} />
+          Searching all statuses in {kindFilter === 'escalation_zero' ? 'Escalation Zero' : 'Ops Hub Feedback'} — the status filter is ignored while you search.
+        </div>
+      )}
+
       {/* Body */}
       <div style={listWrap}>
         {error && (
@@ -714,6 +747,7 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
                 onToggle={() => setExpandedId(prev => prev === item.id ? null : item.id)}
                 onVote={handleVote}
                 onStatusChange={handleStatusChange}
+                onEscalationStatusChange={handleEscalationStatusChange}
                 onPriorityChange={handlePriorityChange}
                 onAssigneeChange={handleAssigneeChange}
                 onDelete={handleDelete}
@@ -770,7 +804,7 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
 }
 
 // ── Row ─────────────────────────────────────────────────────────────────
-function FeedbackRow({ item, expanded, onToggle, onVote, onStatusChange, onPriorityChange, onAssigneeChange, onDelete, onCopy, isPriv, isAdmin, user, fetchComments, submitComment, addToast }) {
+function FeedbackRow({ item, expanded, onToggle, onVote, onStatusChange, onEscalationStatusChange, onPriorityChange, onAssigneeChange, onDelete, onCopy, isPriv, isAdmin, user, fetchComments, submitComment, addToast }) {
   // For escalation_zero rows, the canonical workflow has 6 statuses
   // (New, In Review, HRX Execute, On Hold, Resolved, Closed) stored on
   // extras.escalationStatus. The DB column carries the mirrored
@@ -879,6 +913,18 @@ function FeedbackRow({ item, expanded, onToggle, onVote, onStatusChange, onPrior
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {/* Pill row */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            {/* Kind badge — leads the row so Escalation Zero is never
+                mistaken for a standard Ops Hub Feedback request, even in a
+                deep-linked or search context that surfaces a single row
+                outside its subtab (Maylis Pourtau 2026-06-02). Standard
+                feedback rows carry no badge — the absence is the signal,
+                and the bug/improvement type pill below already reads as
+                "feedback". */}
+            {isEscalation && (
+              <span style={{ ...pill, background: '#f3eff8', color: '#7c3aed', borderColor: '#c4b1f9' }} title="Escalation Zero request">
+                <i className="bi-stars" style={{ fontSize: 10 }} /> Escalation Zero
+              </span>
+            )}
             <span style={{ ...pill, background: type.bg, color: type.color, borderColor: type.color + '40' }}>
               <i className={type.icon} style={{ fontSize: 10 }} /> {type.label}
             </span>
@@ -1105,6 +1151,7 @@ function FeedbackRow({ item, expanded, onToggle, onVote, onStatusChange, onPrior
             item={item}
             isPriv={isPriv}
             onStatusChange={onStatusChange}
+            onEscalationStatusChange={onEscalationStatusChange}
             onPriorityChange={onPriorityChange}
             onAssigneeChange={onAssigneeChange}
             user={user}
@@ -1310,7 +1357,7 @@ function CommentsSection({ item, fetchComments, submitComment, user, addToast })
 }
 
 // ── Expanded detail (description, screenshot full-size, status changer) ──
-function ExpandedDetail({ item, isPriv, onStatusChange, onPriorityChange, onAssigneeChange, user, fetchComments, submitComment, addToast }) {
+function ExpandedDetail({ item, isPriv, onStatusChange, onEscalationStatusChange, onPriorityChange, onAssigneeChange, user, fetchComments, submitComment, addToast }) {
   const [lightbox, setLightbox] = useState(null);
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 240px', gap: 16 }}>
@@ -1575,7 +1622,19 @@ function ExpandedDetail({ item, isPriv, onStatusChange, onPriorityChange, onAssi
       {/* Right: action panel */}
       <aside style={{ borderLeft: '1px solid var(--border-light)', paddingLeft: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <ActionRow label="Status">
-          {isPriv ? (
+          {item.kind === 'escalation_zero' ? (
+            // Escalation Zero — canonical 6-state workflow, editable by ANY
+            // team member (E0 is team-self-managed; server mirrors the
+            // 5-bucket column). The select binds to extras.escalationStatus
+            // so the change is reflected on the row pill immediately.
+            <select
+              value={item.extras?.escalationStatus || 'new'}
+              onChange={e => onEscalationStatusChange(item, e.target.value)}
+              style={miniSelect}
+            >
+              {ESCALATION_STATUSES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+            </select>
+          ) : isPriv ? (
             <select value={item.status} onChange={e => onStatusChange(item, e.target.value)} style={miniSelect}>
               {STATUS_ORDER.map(s => <option key={s} value={s}>{STATUS_CONFIG[s].label}</option>)}
             </select>
