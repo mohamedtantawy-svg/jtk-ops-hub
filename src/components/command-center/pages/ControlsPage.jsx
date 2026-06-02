@@ -5,11 +5,54 @@
 // (Custom date ranges + threshold tuning are the next iteration.)
 
 import React from 'react';
-import { getCommandCenterSummary, downloadCommandCenterCsv } from '../../../services/commandCenterApi';
+import { getCommandCenterSummary, getCommandCenterCoverage, downloadCommandCenterCsv } from '../../../services/commandCenterApi';
 import {
   CC_ACCENT, Card, SectionTitle, healthTone,
   LoadingState, ErrorState, EmptyState, useCcResource,
 } from '../ccUi';
+
+const chipStyle = (color) => ({ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 500, color, background: 'var(--surface-2)', border: '1px solid var(--border)', padding: '4px 9px', borderRadius: 999 });
+
+// Self-audit — its own data hook so the main comparison table never blocks on it.
+function CoverageSection() {
+  const { data, loading, error } = useCcResource(getCommandCenterCoverage);
+  if ((loading && !data) || error) return null; // secondary panel — stay quiet if it can't load
+  const departments = data?.departments || [];
+  const sources = data?.sources || [];
+  const s = data?.summary || {};
+  const rolledUp = sources.filter(x => x.rolledUp);
+  const perDeptOnly = sources.filter(x => !x.rolledUp);
+  const flagged = departments.filter(d => d.noMembers || (d.perDeptSources || []).length > 0);
+
+  return (
+    <div style={{ marginTop: 28 }}>
+      <SectionTitle title="Command Center coverage" hint="Self-audit — what's rolled up cross-department vs tracked per-department" />
+      <Card style={{ marginBottom: flagged.length ? 14 : 0 }}>
+        <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+          <strong style={{ color: 'var(--text)' }}>{s.departmentsRepresented ?? departments.length}/{s.departmentCount ?? departments.length}</strong> departments represented ·{' '}
+          <strong style={{ color: 'var(--text)' }}>{rolledUp.length}</strong> domains rolled up cross-department ·{' '}
+          <strong style={{ color: 'var(--text)' }}>{perDeptOnly.length}</strong> sources tracked per-department.
+          {s.departmentsNeedingSetup > 0 && <span style={{ color: '#d97706' }}> · {s.departmentsNeedingSetup} need members.</span>}
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
+          {rolledUp.map(x => <span key={x.key} style={chipStyle('#15803d')}><i className="bi bi-check-circle-fill" /> {x.label}</span>)}
+          {perDeptOnly.map(x => <span key={x.key} style={chipStyle('var(--text-muted)')}><i className="bi bi-diagram-2" /> {x.label}</span>)}
+        </div>
+      </Card>
+      {flagged.length > 0 && (
+        <Card style={{ padding: 0 }}>
+          {flagged.map((d, i) => (
+            <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderTop: i ? '1px solid var(--border)' : 'none', flexWrap: 'wrap' }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', flex: '1 1 160px', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={d.name}>{d.name}</div>
+              {d.noMembers && <span style={chipStyle('#d97706')}><i className="bi bi-exclamation-triangle" /> Needs members</span>}
+              {(d.perDeptSources || []).map(src => <span key={src} style={chipStyle('var(--text-muted)')}>{src}</span>)}
+            </div>
+          ))}
+        </Card>
+      )}
+    </div>
+  );
+}
 
 const TH = { textAlign: 'right', padding: '8px 10px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4, color: 'var(--text-muted)', whiteSpace: 'nowrap' };
 const TD = { textAlign: 'right', padding: '10px', fontSize: 13, color: 'var(--text)', fontVariantNumeric: 'tabular-nums', borderTop: '1px solid var(--border)' };
@@ -73,6 +116,8 @@ export default function ControlsPage() {
             </table>
           </Card>
         )}
+      <CoverageSection />
+
       <div style={{ marginTop: 18, fontSize: 11, color: 'var(--text-muted)' }}>
         <i className="bi bi-info-circle" style={{ marginRight: 6 }} />
         Custom date ranges and threshold tuning are the next iteration. Reports currently use a 30-day window + live snapshots.

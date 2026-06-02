@@ -19,6 +19,8 @@
 
 import { query } from './db';
 import { COMMAND_CENTER_DEPT_SLUG } from './command-center-dept-seed';
+import { COMMAND_CENTER_SOURCES } from '../data/commandCenterSources';
+import { visibleDeelSourcesFor } from './dept-integrations';
 
 const ROOT_WALK_CAP = 16; // defence against accidental org_nodes cycles
 
@@ -494,6 +496,47 @@ export async function getSummary() {
     };
   }).sort((a, b) => a.health - b.health);
   return { departments };
+}
+
+// Self-audit / coverage (adaptability): reconciles the live departments + their
+// enabled per-dept sources (dept-integrations) + the Source Registry against
+// what the Command Center actually rolls up — so a super-admin can see, at a
+// glance, that nothing has gone missing or stale as departments / sources change.
+//   • Every live top-level dept is enumerated (so all are "represented").
+//   • A dept's enabled Deel/queue sources are surfaced as "tracked per-dept"
+//     (the CC shows the internal-data rollup; queue SLA stays in each queue).
+//   • Depts with no members are flagged as "needs setup".
+export async function getCoverage() {
+  const empty = { departments: [], sources: [], summary: {} };
+  if (!process.env.DATABASE_URL) return empty;
+  let tree;
+  try { tree = await loadNodeTree(); } catch (e) { console.warn('[cc-agg getCoverage]', e.message); return empty; }
+  const { resolveRoot, roots } = tree;
+  if (!roots.length) return empty;
+
+  const { head } = await headcountVacancyByRoot(resolveRoot);
+  const departments = roots.map(d => {
+    const headcount = (head.get(d.id) || {}).headcount || 0;
+    let enabled = {};
+    try { enabled = visibleDeelSourcesFor(d.slug) || {}; } catch { enabled = {}; }
+    const perDeptSources = Object.entries(enabled).filter(([, v]) => v === true).map(([k]) => k);
+    return { id: d.id, name: d.name, slug: d.slug, headcount, perDeptSources, noMembers: headcount === 0 };
+  });
+
+  // Registry: domains rolled up cross-dept (internal) vs per-dept-only (external/queue).
+  const sources = COMMAND_CENTER_SOURCES.map(s => ({
+    key: s.key, label: s.label, deptDimension: s.deptDimension,
+    rolledUp: s.deptDimension !== 'dept-integrations',
+  }));
+
+  const summary = {
+    departmentCount: departments.length,
+    departmentsRepresented: departments.length, // all live depts are enumerated live
+    departmentsNeedingSetup: departments.filter(d => d.noMembers).length,
+    rolledUpSourceCount: sources.filter(s => s.rolledUp).length,
+    perDeptOnlySourceCount: sources.filter(s => !s.rolledUp).length,
+  };
+  return { departments, sources, summary };
 }
 
 // Executive CSV export of the summary. RFC-4180 hardened (skill §3.15): UTF-8

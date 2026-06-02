@@ -49,6 +49,11 @@ export async function getCommandCenterSummary() {
   return apiFetch('/command-center/summary');
 }
 
+// Self-audit / coverage reconciliation (live depts + sources vs what the CC rolls up).
+export async function getCommandCenterCoverage() {
+  return apiFetch('/command-center/coverage');
+}
+
 // Trigger the executive CSV export. apiFetch parses JSON, so this does a raw
 // fetch (with the bearer token) and downloads the text/csv body as a file.
 export async function downloadCommandCenterCsv() {
