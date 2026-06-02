@@ -44,6 +44,16 @@ export default function HrHubSettingsPanel({ onClose }) {
   const [savingKey, setSavingKey] = useState(null);
   const [toast, setToast] = useState(null);
 
+  // I2: lock background page scroll while the settings drawer is open (mirrors
+  // the detail drawer, PR #902) so the list behind it can't scroll under the
+  // user and closing leaves the page where it was.
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
   const loadFlow = useCallback(async (flow) => {
     setBundles(prev => ({ ...prev, [flow]: { ...(prev[flow] || {}), loading: true, error: null } }));
     try {

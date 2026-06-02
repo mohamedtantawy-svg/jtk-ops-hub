@@ -782,7 +782,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
       </div>
 
       {/* List */}
-      <div style={{ marginTop: 4 }}>
+      <div style={{ marginTop: 0 }}>
         {loading && items.length === 0 && (
           <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 13 }}>
             Loading…
@@ -936,8 +936,12 @@ function RequestRow({ item, active, onClick, viewerEmail, isManager, isAdmin, on
           : null,
       ].filter(Boolean).join(' · ')
     : '';
+  // A14/Q25: the hide-task title is already "Request to hide task — <reason>:
+  // <subject>", so repeating the subject in the meta line duplicated the
+  // person's name on the same row. Keep only the short reason label here; the
+  // title carries the subject.
   const hideMeta = isHide
-    ? [HIDE_REASON_LABELS[item.requestType] || item.requestType, item.taskSubject].filter(Boolean).join(' · ')
+    ? (HIDE_REASON_LABELS[item.requestType] || item.requestType || '')
     : '';
   // SLA extension meta: reason label + days requested + task subject.
   const slaExtReasonLabel = isSlaExt
