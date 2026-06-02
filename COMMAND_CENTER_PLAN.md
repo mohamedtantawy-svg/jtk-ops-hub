@@ -217,11 +217,31 @@ re-architecture · #914 Health/SLA/Volume · #915 Risk/People/Capacity · #916 C
 9 exec-gated endpoints under `/api/v1/command-center/*`; all internal-data rollups (no
 live external scans); dark-mode-safe; loading/error/empty states throughout.
 
-**Next iteration (enhancements, not blockers):** Team-tab "Executive" grant toggle UI
-(column + plumbing already shipped; settable via DB today) · Phase-8 self-audit panel
-(adaptability is already live via org_nodes + Source Registry; this surfaces gaps
-visually) · custom date-range + health-weight/threshold tuning in Controls. Verify the
-live experience in the post-deploy audit (super-admin → switch to Command Center dept).
+**Phases 7-9 also COMPLETE:** Team-tab "Executive" grant toggle (#917), Phase-8 coverage
+self-audit panel (#918), Phase-7 threshold/weight tuning + volume date-range (#919).
+11 exec-gated endpoints total under `/api/v1/command-center/*`.
+
+### ✅ Deep audit (2026-06-03) — PASSED
+- Final integration build green; **no** conflict markers / `apiFetch`-contract misuse
+  (#49) / `SELECT *` (#45) / hook-order bugs (#43 — the one awk flag was a confirmed
+  cross-function-scope false positive); no leftover placeholders.
+- **Security:** all 11 CC routes gate via `canViewCommandCenter(user, req)`; settings
+  PUT additionally admin/super-admin only. Cross-dept aggregation never reachable by
+  non-exec.
+- **No regression:** `EXEC_ONLY_VIEWS` is empty → the four base tiers' views + dataScopes
+  are unchanged; the Org/Team roster edits are additive.
+- **Correctness:** aggregator core verified — `resolveRoot` cycle-capped + orphan-safe,
+  `foldByRoot` fail-soft + sum-folds per root without double-count, CC dept excluded from
+  its own rollup; all rollups internal-data (no live external scans).
+- **Boot regression:** normal app unbroken (9 tabs, no global CC tab, 0 console errors).
+- **Finding fixed (#920):** the Executive grant now opens the app — the FE takeover fires
+  on dept===CC **or** `is_command_center_viewer`, matching the server gate's three paths.
+- Live data path (auth + DB) confirms on deploy; the dev preview is unauthenticated
+  (mistake #48), so live numbers + the takeover render are verified there.
+
+**READY FOR DEPLOY.** `main` is clean; `dev` carries the full Command Center (PRs
+#911–#920). Live check after deploy: sign in as super-admin → dept picker → "Command
+Center" (or assign a member's department to Command Center / toggle them Executive).
 
 ### Phase 0 — Foundation, governance & gated shell  ✅ implemented (on `feat/command-center-phase-0`, landing → dev)
 **Goal:** exec gating, the view scaffold, the aggregation foundation, and the
