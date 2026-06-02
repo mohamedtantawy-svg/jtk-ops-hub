@@ -202,6 +202,27 @@ direction 2026-06-03):
 - **NEXT:** fill the report tabs (Health → SLA → Volume → Capacity → People → Risk → Controls)
   with real cross-dept sections, one PR each.
 
+### ✅ COMPLETE — all 8 tabs shipped to `nexus/dev` (2026-06-03)
+The Command Center department is functionally complete on `dev` (NOT deployed — `main` is
+clean; user deploys after review). PRs: #911 foundation · #912 scorecards · #913 dept
+re-architecture · #914 Health/SLA/Volume · #915 Risk/People/Capacity · #916 Controls.
+- **Home** — org-wide totals + per-dept scorecards (live from org_nodes).
+- **Health** — composite score (backlog/resolution/urgent/staffing) per dept + org ring.
+- **SLA** — HR Hub ageing (fresh/at-risk/breached) + compliance per dept.
+- **Volume** — 30-day created-vs-resolved trend + per-dept totals.
+- **Capacity** — open-work-per-person load band per dept.
+- **People** — headcount / vacancies / coverage (out today + next 7d) per dept.
+- **Risk** — open Leader Alerts / Urgent Assists / Escalations (+critical) per dept.
+- **Controls** — department comparison table + executive CSV export (BOM/CRLF/quoted).
+9 exec-gated endpoints under `/api/v1/command-center/*`; all internal-data rollups (no
+live external scans); dark-mode-safe; loading/error/empty states throughout.
+
+**Next iteration (enhancements, not blockers):** Team-tab "Executive" grant toggle UI
+(column + plumbing already shipped; settable via DB today) · Phase-8 self-audit panel
+(adaptability is already live via org_nodes + Source Registry; this surfaces gaps
+visually) · custom date-range + health-weight/threshold tuning in Controls. Verify the
+live experience in the post-deploy audit (super-admin → switch to Command Center dept).
+
 ### Phase 0 — Foundation, governance & gated shell  ✅ implemented (on `feat/command-center-phase-0`, landing → dev)
 **Goal:** exec gating, the view scaffold, the aggregation foundation, and the
 governance artifacts — all proven end-to-end with *no metrics yet*.
