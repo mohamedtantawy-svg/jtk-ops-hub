@@ -205,3 +205,82 @@ export function layoutOrgChart({ tree, rootNodes, members, expansion }) {
 
   return { items: out, width, height };
 }
+
+// ── People org chart (2026-06-02) ──────────────────────────────────────────
+// A pure manager → reports hierarchy of MEMBERS, rendered with the same
+// canvas (pan/zoom/connectors) but ONLY member cards — no department/team
+// structure cards. This is the "People" half of the Chart toggle Mohamed
+// asked for: the structure chart (layoutOrgChart) and the people chart never
+// mix, so the awkward "team card with member cards crammed underneath" view
+// is gone.
+//
+// Roots = members whose managerEmail is empty OR points at someone not in the
+// set (top of the org). Depth-0 nodes always show their direct reports;
+// deeper levels are opt-in via `expansion.peopleExpanded` (a Set of
+// lowercased emails) so a 170-person org isn't dumped on screen at once.
+export function layoutPeopleChart({ members, expansion }) {
+  const expanded = expansion?.peopleExpanded || null;   // Set<emailLc> | null
+
+  const byEmail = new Map();
+  for (const m of members || []) {
+    if (m?.email) byEmail.set(String(m.email).toLowerCase(), m);
+  }
+  // Group reports under their manager; anyone whose manager is missing /
+  // external / self lands under the synthetic '__root__' bucket.
+  const byManager = new Map();
+  for (const m of members || []) {
+    if (!m?.email) continue;
+    const self = String(m.email).toLowerCase();
+    const mgr = String(m.managerEmail || '').toLowerCase();
+    const key = (mgr && mgr !== self && byEmail.has(mgr)) ? mgr : '__root__';
+    if (!byManager.has(key)) byManager.set(key, []);
+    byManager.get(key).push(m);
+  }
+  for (const list of byManager.values()) {
+    list.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }
+  const roots = byManager.get('__root__') || [];
+
+  // depth 0 always expanded so the first paint shows top leaders + their
+  // direct reports; deeper nodes follow the explicit expansion set.
+  const isOpen = (emailLc, depth) =>
+    depth === 0 ? true : (expanded ? expanded.has(emailLc) : false);
+
+  function build(m, depth, seen) {
+    const emailLc = String(m.email).toLowerCase();
+    const reports = byManager.get(emailLc) || [];
+    // Cycle guard — bad managerEmail data (A→B→A) must not infinite-loop.
+    const cyclic = seen.has(emailLc);
+    const open = !cyclic && reports.length > 0 && isOpen(emailLc, depth);
+    const nextSeen = cyclic ? seen : new Set(seen).add(emailLc);
+    const children = open ? reports.map(r => build(r, depth + 1, nextSeen)) : [];
+    const childrenWidth = children.reduce((s, c, i) => s + c.width + (i > 0 ? COL_GAP : 0), 0);
+    return {
+      id: `p:${emailLc}`,
+      kind: 'member',
+      width: Math.max(MEMBER_W, childrenWidth),
+      height: MEMBER_H,
+      depth,
+      parentId: depth === 0 ? null : `p:${String(m.managerEmail || '').toLowerCase()}`,
+      children,
+      // _reportCount + _expanded drive the card's expand chevron in people
+      // mode; _people flags the card so MemberCard renders the chevron only
+      // here (not for structure-mode inline member chips).
+      data: { ...m, _reportCount: reports.length, _expanded: open, _people: true },
+    };
+  }
+
+  const subtrees = roots.map(r => build(r, 0, new Set()));
+  const out = [];
+  let cursor = PADDING;
+  let maxDepth = 0;
+  for (const root of subtrees) {
+    place(root, cursor, PADDING, out);
+    cursor += root.width + COL_GAP * 2;
+    (function walk(it) { maxDepth = Math.max(maxDepth, it.depth); for (const c of it.children) walk(c); })(root);
+  }
+
+  const width = Math.max(cursor + PADDING - COL_GAP * 2, 600);
+  const height = (maxDepth + 1) * MEMBER_ROW_HEIGHT + PADDING * 2;
+  return { items: out, width, height };
+}

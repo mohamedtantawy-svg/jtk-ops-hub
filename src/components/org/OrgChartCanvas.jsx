@@ -18,10 +18,12 @@
 // per-card action menu (edit / add / archive).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Avatar from '../ui/Avatar';
 import EmptyState from '../ui/EmptyState';
 import {
   layoutOrgChart,
+  layoutPeopleChart,
   CARD_W, CARD_H, MEMBER_W, MEMBER_H,
   ROW_HEIGHT, PADDING,
 } from '../../utils/orgChartLayout';
@@ -47,9 +49,14 @@ export default function OrgChartCanvas({
   // chips are rendered. Comes from OrgView so the state survives across
   // mode switches (chart ↔ list ↔ table) and so the audit drawer / form
   // drawer can drive expansion as well (future).
-  expansion,                  // { expandedTeamId, expandedSubTeamId, showMembers: Set<string> }
+  expansion,                  // { expandedTeamId, expandedSubTeamId, showMembers, peopleExpanded }
   onToggleTeamExpansion,      // (nodeId, kind: 'team' | 'subTeam') => void
   onToggleShowMembers,        // (nodeId) => void
+  // 2026-06-02 — chart mode toggle. 'structure' = departments + teams +
+  // sub-teams (no member cards). 'people' = a manager→reports member org
+  // chart (no dept/team cards). The two never mix.
+  chartMode = 'structure',
+  onTogglePersonExpand,       // (emailLc) => void — expand/collapse a person's reports
 }) {
   const wrapRef = useRef(null);
   const stageRef = useRef(null);
@@ -112,8 +119,10 @@ export default function OrgChartCanvas({
   }, [tree]);
 
   const layout = useMemo(
-    () => layoutOrgChart({ tree, rootNodes, members, expansion }),
-    [tree, rootNodes, members, expansion],
+    () => (chartMode === 'people'
+      ? layoutPeopleChart({ members, expansion })
+      : layoutOrgChart({ tree, rootNodes, members, expansion })),
+    [chartMode, tree, rootNodes, members, expansion],
   );
 
   // ── Pan handling ────────────────────────────────────────────────────────
@@ -344,6 +353,7 @@ export default function OrgChartCanvas({
           }
           if (it.kind === 'member') {
             const isSelected = selectedEmails.has(it.data.email);
+            const peopleMode = chartMode === 'people';
             return (
               <MemberCard
                 key={it.id}
@@ -351,6 +361,8 @@ export default function OrgChartCanvas({
                 highlight={highlight}
                 isSelected={isSelected}
                 canEdit={canEdit}
+                peopleMode={peopleMode}
+                onTogglePersonExpand={onTogglePersonExpand}
                 onSelect={onSelectMember}
                 onToggleSelect={onToggleSelect}
                 onDragStart={(e) => {
@@ -432,13 +444,40 @@ function NodeCard({
   const accent = node.color || (node.kind === 'department' ? '#7c3aed' : '#1f74b3');
   const icon = node.icon || (node.kind === 'department' ? 'bi-building' : 'bi-people');
   const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef(null);
+  const [menuPos, setMenuPos] = useState(null);   // {top, right} in viewport px
+  const menuBtnRef = useRef(null);
+  const menuPanelRef = useRef(null);
+
+  // The card has overflow:hidden and lives inside a scaled/transformed,
+  // overflow-hidden stage — an absolutely-positioned dropdown was clipped
+  // to the 140px card (Mohamed's "clicking the 3 dots, options are
+  // hidden"). Render the menu in a portal to <body> with fixed positioning
+  // computed from the button's on-screen rect so it escapes both the card
+  // clip and the stage transform.
+  const openMenu = useCallback(() => {
+    const r = menuBtnRef.current?.getBoundingClientRect();
+    if (r) setMenuPos({ top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right) });
+    setMenuOpen(true);
+  }, []);
 
   useEffect(() => {
-    if (!menuOpen) return;
-    const h = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
+    if (!menuOpen) return undefined;
+    const onDown = (e) => {
+      if (menuBtnRef.current?.contains(e.target)) return;
+      if (menuPanelRef.current?.contains(e.target)) return;
+      setMenuOpen(false);
+    };
+    // Any pan/scroll/resize detaches the menu from its button → close it
+    // rather than let it float at a stale position.
+    const onDismiss = () => setMenuOpen(false);
+    document.addEventListener('mousedown', onDown);
+    window.addEventListener('scroll', onDismiss, true);
+    window.addEventListener('resize', onDismiss);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      window.removeEventListener('scroll', onDismiss, true);
+      window.removeEventListener('resize', onDismiss);
+    };
   }, [menuOpen]);
 
   const borderColor = isDropTarget ? accent : (highlight ? accent : 'var(--border)');
@@ -604,18 +643,12 @@ function NodeCard({
             {isExpanded ? 'Hide' : 'Expand'}
           </button>
         )}
-        {memberCount > 0 && (
-          <button
-            type="button" data-org-control
-            onClick={onToggleShowMembers}
-            aria-pressed={isShowingMembers}
-            aria-label={isShowingMembers ? 'Hide team members' : 'Show team members'}
-            style={pillBtnStyle(isShowingMembers ? accent : 'var(--text-secondary)', isShowingMembers ? `${accent}22` : 'var(--surface-2)', isShowingMembers ? accent : 'var(--border)')}
-          >
-            <i className={`bi ${isShowingMembers ? 'bi-eye-slash' : 'bi-eye'}`} style={{ fontSize: 9 }} />
-            {isShowingMembers ? 'Hide members' : 'Show members'}
-          </button>
-        )}
+        {/* 2026-06-02 — the inline "Show members" toggle was removed: it
+            crammed member cards under the team card and overlapped sibling
+            teams (Mohamed's "members showing weird" report). Members now
+            live in the dedicated People chart mode (the Structure/People
+            toggle), so the Structure chart stays purely departments +
+            teams and the two never mix. */}
         {/* Phase 10a Login-as-admin — top-level departments only, super-admin only */}
         {isGlobalSuperAdmin
           && node.kind === 'department'
@@ -633,11 +666,15 @@ function NodeCard({
           </button>
         )}
         {canEdit && (
-          <div ref={menuRef} style={{ marginLeft: 'auto', position: 'relative' }}>
+          <div style={{ marginLeft: 'auto' }}>
             <button
+              ref={menuBtnRef}
               type="button"
+              data-org-control
               aria-label="Actions"
-              onClick={() => setMenuOpen(p => !p)}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => (menuOpen ? setMenuOpen(false) : openMenu())}
               style={{
                 width: 24, height: 24,
                 background: menuOpen ? 'var(--surface-3)' : 'transparent',
@@ -650,15 +687,21 @@ function NodeCard({
             >
               <i className="bi bi-three-dots" style={{ fontSize: 11 }} />
             </button>
-            {menuOpen && (
-              <div style={{
-                position: 'absolute', top: 'calc(100% + 4px)', right: 0,
-                background: 'var(--surface)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-lg)',
-                boxShadow: '0 12px 30px rgba(0,0,0,0.14)',
-                minWidth: 180, overflow: 'hidden', zIndex: 5,
-              }}>
+            {menuOpen && menuPos && typeof document !== 'undefined' && createPortal(
+              <div
+                ref={menuPanelRef}
+                role="menu"
+                data-org-control
+                style={{
+                  position: 'fixed', top: menuPos.top, right: menuPos.right,
+                  background: 'var(--surface)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 'var(--radius-lg)',
+                  boxShadow: '0 12px 30px rgba(0,0,0,0.14)',
+                  minWidth: 188, overflow: 'hidden', zIndex: 2000,
+                  padding: '4px 0',
+                }}
+              >
                 <CardMenuItem icon="bi-pencil"      label="Edit"               onClick={() => { setMenuOpen(false); onEdit?.(node); }} />
                 <CardMenuItem icon="bi-person-plus" label="Add member"         onClick={() => { setMenuOpen(false); onAddMember?.(node); }} />
                 <CardMenuItem icon="bi-plus-lg"     label="Add team"           onClick={() => { setMenuOpen(false); onAddChild?.(node, 'team'); }} />
@@ -667,7 +710,8 @@ function NodeCard({
                 )}
                 <div style={{ height: 1, background: 'var(--border-light)', margin: '4px 0' }} />
                 <CardMenuItem icon="bi-archive" label="Archive" danger onClick={() => { setMenuOpen(false); onArchive?.(node); }} />
-              </div>
+              </div>,
+              document.body,
             )}
           </div>
         )}
@@ -695,7 +739,7 @@ function pillBtnStyle(color, bg, border) {
   };
 }
 
-function MemberCard({ item, highlight, isSelected, canEdit,
+function MemberCard({ item, highlight, isSelected, canEdit, peopleMode, onTogglePersonExpand,
   onSelect, onToggleSelect, onDragStart, onDragEnd }) {
   const m = item.data;
   // Selection takes precedence over search-highlight visually because a
@@ -703,12 +747,20 @@ function MemberCard({ item, highlight, isSelected, canEdit,
   const ring = isSelected
     ? '0 0 0 3px var(--purple)'
     : (highlight ? '0 0 0 3px var(--purple-light)' : '0 1px 3px rgba(0,0,0,0.04)');
+  // People mode: this card is a node in the manager→reports tree. It gets
+  // an expand chevron when the person has reports, and drag-to-reassign is
+  // disabled (the people chart is read-only navigation; member moves happen
+  // in Structure mode). Structure-mode inline chips keep their drag.
+  const reportCount = peopleMode ? (m._reportCount || 0) : 0;
+  const hasReports = reportCount > 0;
+  const isExpanded = !!m._expanded;
+  const draggable = !!canEdit && !peopleMode;
   return (
     <div
       data-org-card
-      draggable={!!canEdit}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
+      draggable={draggable}
+      onDragStart={draggable ? onDragStart : undefined}
+      onDragEnd={draggable ? onDragEnd : undefined}
       style={{
         position: 'absolute',
         left: item.x, top: item.y,
@@ -719,14 +771,14 @@ function MemberCard({ item, highlight, isSelected, canEdit,
         boxShadow: ring,
         padding: '10px 12px',
         display: 'flex', alignItems: 'center', gap: 10,
-        cursor: canEdit ? 'grab' : 'pointer',
+        cursor: draggable ? 'grab' : 'pointer',
         transition: 'border-color .12s, box-shadow .12s, transform .12s, background .12s',
       }}
       onClick={(e) => {
         // Cmd/ctrl/shift-click toggles selection without opening the
         // detail drawer; plain click opens the drawer for inspection /
-        // edit.
-        if ((e.metaKey || e.ctrlKey || e.shiftKey) && canEdit) {
+        // edit. (Selection is a Structure-mode affordance.)
+        if ((e.metaKey || e.ctrlKey || e.shiftKey) && canEdit && !peopleMode) {
           e.stopPropagation();
           onToggleSelect?.(m.email);
           return;
@@ -748,8 +800,30 @@ function MemberCard({ item, highlight, isSelected, canEdit,
           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
         }}>{m.title || '—'}</div>
       </div>
-      {isSelected && (
+      {isSelected && !peopleMode && (
         <i className="bi bi-check-circle-fill" style={{ fontSize: 14, color: 'var(--purple)' }} />
+      )}
+      {hasReports && (
+        <button
+          type="button"
+          data-org-control
+          aria-label={isExpanded ? `Collapse ${reportCount} reports` : `Expand ${reportCount} reports`}
+          aria-expanded={isExpanded}
+          title={`${reportCount} direct report${reportCount === 1 ? '' : 's'}`}
+          onClick={(e) => { e.stopPropagation(); onTogglePersonExpand?.(String(m.email).toLowerCase()); }}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 3,
+            height: 22, padding: '0 7px', flexShrink: 0,
+            background: isExpanded ? 'var(--purple-light)' : 'var(--surface-2)',
+            color: isExpanded ? 'var(--purple)' : 'var(--text-secondary)',
+            border: `1px solid ${isExpanded ? 'var(--purple)' : 'var(--border)'}`,
+            borderRadius: 'var(--radius-pill)',
+            fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+          }}
+        >
+          <i className={`bi ${isExpanded ? 'bi-chevron-up' : 'bi-chevron-down'}`} style={{ fontSize: 9 }} />
+          {reportCount}
+        </button>
       )}
     </div>
   );

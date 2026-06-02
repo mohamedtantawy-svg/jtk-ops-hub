@@ -81,7 +81,16 @@ export default function OrgView({ user, realUser, onImpersonate }) {
     expandedTeamId: null,
     expandedSubTeamId: null,
     showMembers: new Set(),
+    // 2026-06-02 — People-chart expansion: Set of lowercased emails whose
+    // direct reports are shown. Depth-0 (top leaders) always show their
+    // reports; deeper levels are opt-in via this set.
+    peopleExpanded: new Set(),
   });
+  // 2026-06-02 — Chart sub-mode: 'structure' (departments + teams) vs
+  // 'people' (manager→reports member org chart). Kept separate from
+  // viewMode so switching Chart↔List↔Table preserves the chosen chart mode.
+  // Mohamed's ask: a toggle so the two never mix on one canvas.
+  const [chartMode, setChartMode] = useState('structure');
   const toggleTeamExpansion = useCallback((nodeId, kind) => {
     setChartExpansion(prev => {
       if (kind === 'team') {
@@ -102,6 +111,14 @@ export default function OrgView({ user, realUser, onImpersonate }) {
       const next = new Set(prev.showMembers);
       if (next.has(nodeId)) next.delete(nodeId); else next.add(nodeId);
       return { ...prev, showMembers: next };
+    });
+  }, []);
+  const togglePersonExpand = useCallback((emailLc) => {
+    if (!emailLc) return;
+    setChartExpansion(prev => {
+      const next = new Set(prev.peopleExpanded);
+      if (next.has(emailLc)) next.delete(emailLc); else next.add(emailLc);
+      return { ...prev, peopleExpanded: next };
     });
   }, []);
   // ── Phase 7: audit drawer + CSV export menu ─────────────────────────────
@@ -423,6 +440,52 @@ export default function OrgView({ user, realUser, onImpersonate }) {
             })}
           </div>
 
+          {/* Chart sub-mode: Structure (depts + teams) vs People (member
+              org chart). Only meaningful in Chart view — hidden otherwise.
+              Keeps the two from ever rendering on the same canvas. */}
+          {viewMode === 'chart' && (
+            <div role="tablist" aria-label="Chart mode" style={{
+              display: 'inline-flex',
+              background: 'var(--surface-2)',
+              borderRadius: 'var(--radius-lg)',
+              padding: 3, gap: 2,
+            }}>
+              {[
+                { id: 'structure', label: 'Structure', icon: 'bi-diagram-3' },
+                { id: 'people',    label: 'People',    icon: 'bi-people-fill' },
+              ].map(m => {
+                const active = chartMode === m.id;
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setChartMode(m.id)}
+                    title={m.id === 'structure' ? 'Departments, teams & sub-teams' : 'Manager → reports org chart'}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      height: 30, padding: '0 12px',
+                      border: 'none',
+                      borderRadius: 'var(--radius-md)',
+                      background: active ? 'var(--surface)' : 'transparent',
+                      color: active ? 'var(--text)' : 'var(--text-secondary)',
+                      boxShadow: active ? '0 1px 2px rgba(0,0,0,.06)' : 'none',
+                      fontSize: 12,
+                      fontWeight: active ? 600 : 500,
+                      fontFamily: 'inherit',
+                      cursor: 'pointer',
+                      transition: 'all .12s',
+                    }}
+                  >
+                    <i className={`bi ${m.icon}`} style={{ fontSize: 12 }} />
+                    {m.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           <div style={{ position: 'relative', flex: 1, maxWidth: 360, minWidth: 200 }}>
             <i className="bi bi-search" style={{
               position: 'absolute', left: 12, top: '50%',
@@ -542,6 +605,8 @@ export default function OrgView({ user, realUser, onImpersonate }) {
             expansion={chartExpansion}
             onToggleTeamExpansion={toggleTeamExpansion}
             onToggleShowMembers={toggleShowMembers}
+            chartMode={chartMode}
+            onTogglePersonExpand={togglePersonExpand}
           />
         ) : viewMode === 'list' ? (
           <OrgTreeView
