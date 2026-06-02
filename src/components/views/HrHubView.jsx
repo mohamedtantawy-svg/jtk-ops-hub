@@ -608,7 +608,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
           <div style={{ minWidth: 0 }}>
             <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: 'var(--text)' }}>{hubBrand.hubLabel}</h1>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-              {hubBrand.short} Requests, Reporting, Hide Task and SLA Extension flows in one place.
+              {hubBrand.short} Requests, Reporting, Payment Refund, Hide Task and SLA Extension flows in one place.
               {lastSyncAt && <> · synced {relTime(new Date(lastSyncAt).toISOString())}</>}
             </div>
           </div>
@@ -936,6 +936,7 @@ function RequestRow({ item, active, onClick, viewerEmail, isManager, isAdmin, on
         immigration: 'Immigration',
         client_unresponsive: 'Client unresponsive',
         employee_unresponsive: 'Employee unresponsive',
+        long_process: 'Long process',
       }[item.slaExtReasonCode] || item.slaExtReasonCode)
     : null;
   const slaExtMeta = isSlaExt

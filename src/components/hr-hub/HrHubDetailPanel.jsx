@@ -65,9 +65,24 @@ const PRIORITY_OPTIONS = [
 const FLOW_LABELS = {
   hr_request: 'HR Request',
   hr_reporting: 'HR Reporting',
+  // hide_task_request + sla_extension_request were missing here, so the
+  // drawer's top-bar type label (rendered uppercase at the header) fell
+  // through to the raw enum → "HIDE_TASK_REQUEST" / "SLA_EXTENSION_REQUEST"
+  // while hr_request correctly read "HR REQUEST" (live-test finding G2).
+  hide_task_request: 'Hide Task',
+  sla_extension_request: 'SLA Extension',
   escalation_zero: 'Escalation Zero',
   feedback: 'Ops Hub Feedback',
   payment_refund: 'Payment Refund',
+};
+
+// Hide-task reason codes → friendly labels (mirrors HrHubView's
+// HIDE_REASON_LABELS). The drawer's "Request Type" field on a hide_task row
+// would otherwise show the raw code, e.g. "other" (live-test finding G4).
+const HIDE_REASON_LABELS = {
+  internal_deel_employee: 'Internal Deel Employee',
+  test_task: 'Test Task',
+  other: 'Other',
 };
 
 // Payment Refund root-cause taxonomy — mirrors the server enum
@@ -570,7 +585,7 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
               {/* Fields */}
               <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
                 {request.functionArea && <FieldRow label="Function" value={request.functionArea} />}
-                {request.requestType && <FieldRow label="Request Type" value={request.requestType} />}
+                {request.requestType && <FieldRow label="Request Type" value={request.flow === 'hide_task_request' ? (HIDE_REASON_LABELS[request.requestType] || request.requestType) : request.requestType} />}
                 {request.reportType && <FieldRow label="Report Type" value={request.reportType} />}
                 {/* Payment Refund reuses `summary` as the refund reason — relabel it. */}
                 {request.summary && <FieldRow label={request.flow === 'payment_refund' ? 'Reason for the Refund' : 'Summary'} value={request.summary} multiline />}
@@ -846,7 +861,7 @@ function PickerPriority({ value, onChange, disabled }) {
       disabled={disabled}
       style={pickerStyle('#f3f3f3', '#1b1b1b')}
     >
-      {PRIORITY_OPTIONS.map(p => <option key={p.id} value={p.id}>{`Priority: ${p.label}`}</option>)}
+      {PRIORITY_OPTIONS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
     </select>
   );
 }

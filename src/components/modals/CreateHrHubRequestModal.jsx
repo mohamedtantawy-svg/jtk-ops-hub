@@ -443,7 +443,7 @@ function AttachmentField({ attachments, setAttachments, error, setError }) {
   return (
     <div style={{ marginBottom: 16 }}>
       <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 6 }}>
-        Attachments <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional, max {MAX_ATTACHMENTS})</span>
+        Attachments <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional, max {MAX_ATTACHMENTS} files · {Math.round(MAX_TOTAL_PAYLOAD_BYTES / 1024 / 1024)} MB total)</span>
       </label>
       <div
         onDragOver={e => { e.preventDefault(); setDropActive(true); }}
@@ -793,7 +793,7 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
             </div>
             {!flow && (
               <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
-                Choose what you'd like to raise.
+                Pick a request type to get started.
               </div>
             )}
           </div>
