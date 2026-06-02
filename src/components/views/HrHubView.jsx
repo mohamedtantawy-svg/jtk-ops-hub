@@ -667,7 +667,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
       </div>
 
       {/* 4 large status cards */}
-      <div className="hrhub-status-grid" style={{ marginBottom: 12 }}>
+      <div className="hrhub-status-grid" style={{ marginBottom: 10 }}>
         {STATUS_FILTERS.map(f => {
           const active = statusFilter === f.value;
           const cnt = statusCounts[f.value] || 0;
@@ -700,11 +700,14 @@ export default function HrHubView({ user, onCreateHrHub }) {
               }}>
                 <i className={f.icon} style={{ fontSize: 13 }} />
               </span>
-              <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0, flex: 1 }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: active ? (isDark ? 'var(--text)' : f.color) : 'var(--text)', whiteSpace: 'nowrap' }}>{f.label}</span>
-                <span style={{ fontSize: 10.5, fontWeight: 500, color: 'var(--text-muted)' }}>
-                  {cnt} {cnt === 1 ? 'request' : 'requests'}
-                </span>
+              {/* Q24/A8/D2: the "N requests" sub-line duplicated the big
+                  tabular count on the right, so it was dropped — the label +
+                  the big number read clearly on their own and the card is
+                  shorter, reclaiming the above-the-fold space the user flagged
+                  as too chrome-heavy. Label ellipsizes so "Pending Requester"
+                  doesn't clip at narrow widths / high zoom. */}
+              <span style={{ display: 'flex', minWidth: 0, flex: 1 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: active ? (isDark ? 'var(--text)' : f.color) : 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.label}</span>
               </span>
               <span style={{
                 fontSize: 16, fontWeight: 800,
@@ -1465,14 +1468,14 @@ function EmptyState({ scope, flowFilter, statusFilter }) {
 
 // ── Style tokens (copy of Feedback's so the two surfaces stay in sync) ────
 const page = { flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, padding: '0 24px 24px', background: 'var(--bg)' };
-const pageHead = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, padding: '20px 0 12px' };
-const scopeRow = { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 };
+const pageHead = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, padding: '14px 0 10px' };
+const scopeRow = { display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 };
 const segmentedControl = { display: 'inline-flex', padding: 3, borderRadius: 128, background: 'var(--surface-2)', border: '1px solid var(--border-light)', gap: 2 };
 const segmentBtn = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 16px', borderRadius: 128, border: 'none', background: 'transparent', color: 'var(--text-muted)', fontSize: 13, fontWeight: 600, cursor: 'pointer', transition: 'all .12s' };
 const segmentBtnActive = { background: 'var(--surface)', color: 'var(--text)', boxShadow: '0 1px 3px rgba(15,23,42,0.08)', fontWeight: 700 };
 const segmentCount = { padding: '0 7px', borderRadius: 128, fontSize: 10, fontWeight: 700, background: 'rgba(15,23,42,0.06)', color: 'var(--text-muted)', minWidth: 18, textAlign: 'center', lineHeight: '16px' };
 const segmentCountActive = { background: '#7c3aed', color: 'white' };
-const statusFilterBtn = { display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 14, border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer', transition: 'all .15s', textAlign: 'left', minWidth: 0 };
+const statusFilterBtn = { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 14, border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer', transition: 'all .15s', textAlign: 'left', minWidth: 0 };
 const filterBar = { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 12, background: 'var(--surface)', border: '1px solid var(--border-light)', marginBottom: 10, flexWrap: 'wrap' };
 const filterPill = { display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 128, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)', fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all .12s' };
 const filterPillActive = { background: 'var(--surface-3)', color: 'var(--text)', borderColor: 'var(--text)' };
