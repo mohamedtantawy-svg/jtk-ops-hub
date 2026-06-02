@@ -15,8 +15,13 @@
 // edits to keys we *don't* touch are preserved.
 
 import { query, withTransaction } from './db';
+import { HR_HUB_STATUSES, HR_HUB_STATUS_BY_ID } from '../data/hrHubStatus';
 
-export const HR_HUB_SEED_VERSION = 3;
+// Bump to 4 (2026-06-02): reconcile the seeded statuses row — append the two
+// statuses the original seed omitted (pending_requester + rejected) and
+// recolour any status still carrying a legacy machine-seeded colour to the
+// canonical semantic palette in src/data/hrHubStatus.js (live-test D4/D5/I8/I10).
+export const HR_HUB_SEED_VERSION = 4;
 
 // Per-version deltas — applied additively on each version bump so live
 // envs pick up new dropdown options without clobbering admin edits.
@@ -51,15 +56,18 @@ const SEED_DELTAS = {
   },
 };
 
-// Status lifecycle is uniform across all 4 flows (decision 2026-05-02
-// — see HR_HUB_PLAN.md). Adding a status here also requires a
-// matching update to the CHECK constraint on hr_hub_request.status.
-const DEFAULT_STATUSES = [
-  { id: 'new',         label: 'New',         color: '#1d4ed8' },
-  { id: 'in_progress', label: 'In Progress', color: '#ed8d00' },
-  { id: 'on_hold',     label: 'On Hold',     color: '#9e9e9e' },
-  { id: 'resolved',    label: 'Resolved',    color: '#29811e' },
-];
+// Status lifecycle is uniform across all flows (decision 2026-05-02 — see
+// HR_HUB_PLAN.md). Derived from the canonical list in src/data/hrHubStatus.js
+// so the Settings panel, the list, and the drawer all seed/render the same
+// six statuses + colours. The Settings panel only needs id/label/colour.
+// Adding a status to the canonical list also requires extending the CHECK
+// constraint on hr_hub_request.status (src/lib/migrate.js).
+const DEFAULT_STATUSES = HR_HUB_STATUSES.map(s => ({ id: s.id, label: s.label, color: s.color }));
+
+// Colours the original 4-status seed shipped (v1–v3). The v4 reconcile only
+// recolours a status still carrying one of these — any other value is treated
+// as a deliberate admin edit and left untouched.
+const LEGACY_SEED_COLORS = new Set(['#1d4ed8', '#ed8d00', '#9e9e9e', '#29811e']);
 
 // Per-flow field map. `id` is the DB column on hr_hub_request (or a
 // JSON-key inside extra_json if we extend later); `kind` drives the
@@ -317,6 +325,76 @@ async function applyDropdownDelta(client, flow, delta, version) {
 }
 
 /**
+ * v4 statuses reconcile. Brings an existing `statuses` row up to the
+ * canonical six-status lifecycle WITHOUT clobbering admin edits:
+ *   • append any canonical status missing from the row (e.g. the
+ *     pending_requester + rejected the original seed never shipped), in
+ *     canonical order;
+ *   • recolour a status still carrying a known legacy machine-seeded colour
+ *     to the canonical semantic colour. A colour that isn't in
+ *     LEGACY_SEED_COLORS is treated as a deliberate admin edit and left as-is.
+ * Labels are never touched (admins may have renamed e.g. Resolved → Done).
+ * Returns 1 if the row changed, 0 otherwise (idempotent on re-run / fresh DB).
+ */
+async function applyStatusesReconcile(client, flow, version) {
+  const { rows } = await client.query(
+    `SELECT value_json FROM hr_hub_settings WHERE flow = $1 AND key = 'statuses'`,
+    [flow],
+  );
+  // No row yet — the cold-boot INSERT pass already lands the full canonical
+  // six (DEFAULT_STATUSES), so nothing to reconcile.
+  if (rows.length === 0) return 0;
+
+  const before = Array.isArray(rows[0].value_json) ? rows[0].value_json : [];
+  let changed = false;
+
+  // Copy + recolour legacy-seeded colours → canonical (pristine `before` kept
+  // for the audit diff).
+  const after = before.map((s) => {
+    const canon = HR_HUB_STATUS_BY_ID[s.id];
+    if (canon && typeof s.color === 'string'
+        && LEGACY_SEED_COLORS.has(s.color.toLowerCase())
+        && s.color.toLowerCase() !== canon.color.toLowerCase()) {
+      changed = true;
+      return { ...s, color: canon.color };
+    }
+    return { ...s };
+  });
+
+  // Append any canonical status missing from the row, in canonical order.
+  const present = new Set(after.map((s) => s.id));
+  for (const canon of HR_HUB_STATUSES) {
+    if (!present.has(canon.id)) {
+      after.push({ id: canon.id, label: canon.label, color: canon.color });
+      changed = true;
+    }
+  }
+
+  if (!changed) return 0;
+
+  await client.query(
+    `UPDATE hr_hub_settings
+        SET value_json = $1::jsonb,
+            updated_at = NOW()
+      WHERE flow = $2 AND key = 'statuses'`,
+    [JSON.stringify(after), flow],
+  );
+  await client.query(
+    `INSERT INTO hr_hub_settings_history
+       (flow, key, before_json, after_json, actor_email, actor_name)
+     VALUES ($1, 'statuses', $2::jsonb, $3::jsonb, $4, $5)`,
+    [
+      flow,
+      JSON.stringify(before),
+      JSON.stringify(after),
+      `system:seed-v${version}`,
+      'HR Hub Seed',
+    ],
+  );
+  return 1;
+}
+
+/**
  * Insert default settings rows (statuses / fields / dropdowns / auto_assign)
  * for every flow. Existing rows are preserved — admin edits never get
  * clobbered. A version marker in app_settings prevents repeat work across
@@ -362,6 +440,16 @@ export async function seedHrHubSettingsIfNeeded() {
       if (!delta) continue;
       for (const [flow, flowDelta] of Object.entries(delta)) {
         updated += await applyDropdownDelta(client, flow, flowDelta, v);
+      }
+    }
+
+    // Pass 3 — v4 statuses reconcile: append the two statuses the original
+    // seed omitted (pending_requester + rejected) and recolour any legacy
+    // machine-seeded colours to canonical, preserving genuine admin edits.
+    // Guarded so it runs exactly once, when an env crosses from < 4 to 4.
+    if (installedVersion < 4) {
+      for (const flow of Object.keys(FLOWS)) {
+        updated += await applyStatusesReconcile(client, flow, 4);
       }
     }
   });

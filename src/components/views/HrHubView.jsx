@@ -33,25 +33,18 @@ import { PermissionsContext, IntegrationsContext } from '../../App';
 import { useCurrentDept } from '../../hooks/useCurrentDept';
 import { getHubBrand } from '../../lib/hub-brand';
 import { MEMBERS, MEMBERS_BY_EMAIL } from '../../data/members';
+import { HR_HUB_STATUSES } from '../../data/hrHubStatus';
 
-// Single source of truth for status visuals — same shape as Feedback's
-// STATUS_FILTERS so the four buttons feel identical across the two tabs.
-const STATUS_FILTERS = [
-  { value: 'new',               label: 'New',               icon: 'bi-circle-fill',          color: '#0369a1', bg: '#e0f2fe', tint: '#bae6fd' },
-  { value: 'in_progress',       label: 'In Progress',       icon: 'bi-arrow-repeat',         color: '#d97706', bg: '#fff8e6', tint: '#fde68a' },
-  // Josephine Tuoyo 2026-05-25 — explicit state for "waiting on the
-  // requester to come back with info". Distinct from on_hold (we paused)
-  // and from in_progress (we are actively working). Non-terminal: still
-  // counted as open everywhere. Purple semantic to read distinct from
-  // in_progress amber + on_hold grey.
-  { value: 'pending_requester', label: 'Pending Requester', icon: 'bi-hourglass-split',      color: '#7c3aed', bg: '#f3eff8', tint: '#e9d5ff' },
-  { value: 'on_hold',           label: 'On Hold',           icon: 'bi-pause-circle-fill',    color: '#737373', bg: '#f5f5f4', tint: '#e7e5e4' },
-  { value: 'resolved',          label: 'Resolved',          icon: 'bi-check-circle-fill',    color: '#15803d', bg: '#e8f5e9', tint: '#bbf7d0' },
-  // Terminal "closed without resolving" (2026-05-12) — Megan reported HR
-  // requests sometimes get declined, not resolved. Red literal stays
-  // semantic across light/dark themes.
-  { value: 'rejected',          label: 'Rejected',          icon: 'bi-x-circle-fill',        color: '#991b1b', bg: '#fee2e2', tint: '#fecaca' },
-];
+// Status visuals are derived from the canonical lifecycle in
+// src/data/hrHubStatus.js — the single source of truth shared with the detail
+// drawer (STATUS_OPTIONS) and the Settings seed (DEFAULT_STATUSES). Before
+// 2026-06-02 the palette was hand-maintained in all three places and drifted
+// (live-test D5/I10). The list keys statuses by `value`; the canonical module
+// keys by `id`, so we map id → value here. Colours/icons are unchanged; they
+// stay literal because status colour is semantic (skill rule #30).
+const STATUS_FILTERS = HR_HUB_STATUSES.map(s => ({
+  value: s.id, label: s.label, icon: s.icon, color: s.color, bg: s.bg, tint: s.tint,
+}));
 const STATUS_BY_VALUE = Object.fromEntries(STATUS_FILTERS.map(s => [s.value, s]));
 
 // Per-flow visuals mirror the create-modal cards so the surface feels

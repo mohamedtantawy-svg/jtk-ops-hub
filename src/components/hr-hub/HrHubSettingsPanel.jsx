@@ -358,21 +358,25 @@ function StatusesEditor({ flow, settings, saving, onSave }) {
           padding: 10, marginBottom: 8,
           border: '1px solid var(--border)', borderRadius: 10,
         }}>
-          <span style={{
-            width: 12, height: 12, borderRadius: 999,
-            background: s.color || '#9e9e9e',
-          }} />
+          <input
+            type="color"
+            aria-label={`Colour for ${s.label || s.id}`}
+            title="Pick a colour"
+            value={/^#[0-9a-fA-F]{6}$/.test(s.color || '') ? s.color : '#9e9e9e'}
+            onChange={e => updateField(idx, 'color', e.target.value)}
+            style={{ width: 28, height: 28, padding: 0, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer', flexShrink: 0 }}
+          />
           <input
             value={s.label || ''}
             onChange={e => updateField(idx, 'label', e.target.value)}
             placeholder="Label"
-            style={{ flex: 1, padding: '6px 10px', fontSize: 13, border: '1px solid var(--border)', borderRadius: 6, outline: 'none' }}
+            style={{ flex: 1, padding: '6px 10px', fontSize: 13, border: '1px solid var(--border)', borderRadius: 6, outline: 'none', background: 'var(--surface)', color: 'var(--text)' }}
           />
           <input
             value={s.color || ''}
             onChange={e => updateField(idx, 'color', e.target.value)}
-            placeholder="#color"
-            style={{ width: 110, padding: '6px 10px', fontSize: 12, border: '1px solid var(--border)', borderRadius: 6, outline: 'none' }}
+            placeholder="#rrggbb"
+            style={{ width: 96, padding: '6px 10px', fontSize: 12, border: '1px solid var(--border)', borderRadius: 6, outline: 'none', background: 'var(--surface)', color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}
           />
           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.id}</span>
         </div>
