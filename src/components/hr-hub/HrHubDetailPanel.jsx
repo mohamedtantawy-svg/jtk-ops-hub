@@ -117,6 +117,12 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
   // identity changes (e.g. detail re-fetch from refresh) so we don't
   // clobber polling-fetched comments on every render.
   const [comments, setComments] = useState(initialComments);
+  // G3: the sticky header repeats the request title. To avoid showing the
+  // title twice at the top (it's also the body H2), the sticky copy only
+  // appears once the body is scrolled — which also covers the F12 case where
+  // the drawer auto-scrolls to the comment thread on open and the body H2
+  // scrolls out of view. Toggled by handleCommentsScroll below.
+  const [bodyScrolled, setBodyScrolled] = useState(false);
   useEffect(() => { setComments(initialComments); }, [initialComments]);
 
   // ── Close on ESC (a11y / power-user shortcut) ──────────────────────────
@@ -205,7 +211,19 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
   useEffect(() => {
     initialScrollDoneRef.current = false;
     userIsAtBottomRef.current = true;
+    setBodyScrolled(false);
   }, [requestId]);
+
+  // G12/G14: lock the background page scroll while the drawer is open so the
+  // list behind it can't scroll under the user, and so closing the drawer
+  // leaves the page exactly where it was. The parent only mounts this panel
+  // when a request is open, so a mount/unmount effect maps 1:1 to open/close.
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prevOverflow; };
+  }, []);
 
   const handleCommentsScroll = useCallback(() => {
     const el = scrollBodyRef.current;
@@ -213,6 +231,8 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
     // 80px tolerance — in-flight image loads / padding rounding
     // shouldn't flip "follow mode" off when the user hasn't moved.
     userIsAtBottomRef.current = (el.scrollHeight - el.scrollTop - el.clientHeight) < 80;
+    // G3: reveal the sticky-header subject once the body H2 has scrolled away.
+    setBodyScrolled(el.scrollTop > 40);
   }, []);
 
   useLayoutEffect(() => {
@@ -385,7 +405,7 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
           display: 'flex', flexDirection: 'column', gap: 6,
           flexShrink: 0,
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', rowGap: 8 }}>
             <div style={{
               fontSize: 11, fontWeight: 700, letterSpacing: '0.04em',
               textTransform: 'uppercase', color: 'var(--text-muted)',
@@ -467,8 +487,11 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
           ><i className="bi bi-x-lg" style={{ fontSize: 14 }} /></button>
           </div>
           {/* Sticky subject — single-line ellipsis so a long title doesn't
-              steal vertical space from the scrollable body. */}
-          {request && (
+              steal vertical space from the scrollable body. Shown only once
+              the body is scrolled (G3) so it doesn't duplicate the body H2
+              at the top; still provides context when the drawer auto-scrolls
+              to the comment thread on open (F12). */}
+          {request && bodyScrolled && (
             <div style={{
               fontSize: 13, fontWeight: 600, color: 'var(--text)',
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
@@ -590,7 +613,7 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
                     <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6 }}>Links</div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                       {request.links.map((u, i) => (
-                        <a key={i} href={u} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: '#1f74b3', textDecoration: 'none' }}>
+                        <a key={i} href={u} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: '#1f74b3', textDecoration: 'none', wordBreak: 'break-all', overflowWrap: 'anywhere' }}>
                           <i className="bi bi-link-45deg" /> {u}
                         </a>
                       ))}
@@ -1054,10 +1077,17 @@ function FieldRow({ label, value, multiline }) {
   return (
     <div>
       <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6 }}>{label}</div>
-      <div style={{
-        fontSize: 14, color: 'var(--text)', lineHeight: 1.55,
-        whiteSpace: multiline ? 'pre-wrap' : 'normal',
-      }}>{value}</div>
+      {/* G9: multiline fields (Summary / Reason for the Refund / Ideal
+          Solution / Resolution Note) render through RichTextBody so pasted
+          URLs become clickable links + @mentions render as chips — the
+          PR #861 "auto-link everywhere" contract. RichTextBody's container is
+          already pre-wrap, so typed newlines survive. Single-line values stay
+          plain text. */}
+      {multiline ? (
+        <RichTextBody body={String(value ?? '')} style={{ fontSize: 14, color: 'var(--text)', lineHeight: 1.55 }} />
+      ) : (
+        <div style={{ fontSize: 14, color: 'var(--text)', lineHeight: 1.55 }}>{value}</div>
+      )}
     </div>
   );
 }
@@ -1123,14 +1153,14 @@ function TaskContextBlock({ taskSource, taskUrl, taskSubject, taskId, slaExtRequ
       {isSlaExt && (reasonLabel || slaExtRequestedDays || slaExtApprovedDays) && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, fontSize: 12, color: 'var(--text-secondary)' }}>
           {reasonLabel && (
-            <div><strong style={{ color: 'var(--text)', fontWeight: 600 }}>Reason</strong> · {reasonLabel}</div>
+            <div><strong style={{ color: 'var(--text)', fontWeight: 600 }}>Reason:</strong> {reasonLabel}</div>
           )}
           {slaExtRequestedDays && (
-            <div><strong style={{ color: 'var(--text)', fontWeight: 600 }}>Requested</strong> · {slaExtRequestedDays} business day{slaExtRequestedDays === 1 ? '' : 's'}</div>
+            <div><strong style={{ color: 'var(--text)', fontWeight: 600 }}>Requested:</strong> {slaExtRequestedDays} business day{slaExtRequestedDays === 1 ? '' : 's'}</div>
           )}
           {slaExtApprovedDays && (
             <div>
-              <strong style={{ color: 'var(--text)', fontWeight: 600 }}>Approved</strong> ·{' '}
+              <strong style={{ color: 'var(--text)', fontWeight: 600 }}>Approved:</strong>{' '}
               <span style={{ color: '#15803d', fontWeight: 600 }}>
                 {slaExtApprovedDays} business day{slaExtApprovedDays === 1 ? '' : 's'}
               </span>
@@ -1562,7 +1592,8 @@ function LogSection({ log }) {
         style={{
           background: 'transparent', border: 'none',
           padding: 0, cursor: 'pointer',
-          fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)',
+          fontSize: 11, fontWeight: 600, color: 'var(--text-muted)',
+          textTransform: 'uppercase', letterSpacing: '.04em',
           display: 'inline-flex', alignItems: 'center', gap: 6,
         }}
       >
