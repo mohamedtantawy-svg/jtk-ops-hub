@@ -16,17 +16,29 @@ import { getCommandCenterOverview } from '../../services/commandCenterApi';
 
 const ACCENT = 'var(--purple, #7c3aed)';
 
-// Metric panels that land in later phases — shown as an honest roadmap on each
-// department card + the section header so the Phase 0 shell never pretends to
-// have numbers it doesn't yet compute.
+// Metric panels still to land — shown as an honest roadmap so the view never
+// pretends to have numbers it doesn't yet compute. Phase 1 (operational
+// scorecards) is live below; SLA / volume / capacity / risk follow.
 const UPCOMING_PANELS = [
-  { phase: 1, label: 'Health & scorecards' },
   { phase: 2, label: 'SLA & breaches' },
   { phase: 3, label: 'Volume & throughput' },
   { phase: 4, label: 'Capacity & load' },
   { phase: 5, label: 'People & coverage' },
   { phase: 6, label: 'Risk & escalations' },
 ];
+
+// Compact metric cell inside a department scorecard.
+function MiniStat({ label, value, tone }) {
+  const color = tone === 'urgent' && value > 0 ? '#dc2626'
+    : tone === 'warn' && value > 0 ? '#d97706'
+    : 'var(--text)';
+  return (
+    <div style={{ flex: '1 1 0', minWidth: 0, textAlign: 'center' }}>
+      <div style={{ fontSize: 18, fontWeight: 700, color, lineHeight: 1.1, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+      <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: 0.3, textTransform: 'uppercase', color: 'var(--text-muted)', marginTop: 3 }}>{label}</div>
+    </div>
+  );
+}
 
 function StatTile({ label, value, icon }) {
   return (
@@ -55,7 +67,7 @@ function DeptCard({ dept }) {
   return (
     <div style={{
       background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14,
-      padding: 18, display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0,
+      padding: 18, display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
         <div style={{
@@ -70,15 +82,17 @@ function DeptCard({ dept }) {
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
             {dept.headcount} {dept.headcount === 1 ? 'person' : 'people'}
             {dept.teamCount > 0 ? ` · ${dept.teamCount} ${dept.teamCount === 1 ? 'team' : 'teams'}` : ''}
+            {dept.vacancies > 0 ? ` · ${dept.vacancies} open ${dept.vacancies === 1 ? 'role' : 'roles'}` : ''}
           </div>
         </div>
       </div>
       <div style={{
-        fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.5,
-        borderTop: '1px solid var(--border-light, var(--border))', paddingTop: 10,
+        display: 'flex', gap: 8, paddingTop: 12,
+        borderTop: '1px solid var(--border-light, var(--border))',
       }}>
-        <i className="bi bi-hourglass-split" style={{ marginRight: 6, opacity: 0.7 }} />
-        Health · SLA · volume · capacity — wiring in upcoming phases
+        <MiniStat label="Open" value={dept.hrHubOpen} />
+        <MiniStat label="Urgent" value={dept.hrHubUrgent} tone="urgent" />
+        <MiniStat label="Out today" value={dept.outToday} tone="warn" />
       </div>
     </div>
   );
@@ -210,8 +224,10 @@ export default function CommandCenterView({ user }) {
         <>
           <div className="cc-stat-row" style={{ marginBottom: 22 }}>
             <StatTile label="Departments" value={totals.departmentCount ?? departments.length} icon="bi-diagram-3" />
-            <StatTile label="Teams" value={totals.teamCount ?? 0} icon="bi-people" />
             <StatTile label="People" value={totals.headcount ?? 0} icon="bi-person-badge" />
+            <StatTile label="Open HR Hub" value={totals.hrHubOpen ?? 0} icon="bi-broadcast-pin" />
+            <StatTile label="Urgent" value={totals.hrHubUrgent ?? 0} icon="bi-exclamation-octagon" />
+            <StatTile label="Out today" value={totals.outToday ?? 0} icon="bi-airplane" />
           </div>
 
           <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12, gap: 12, flexWrap: 'wrap' }}>
@@ -243,9 +259,9 @@ export default function CommandCenterView({ user }) {
               Executive reports — rolling out
             </div>
             <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: 14 }}>
-              The Command Center is connected to every department above. Cross-department
-              performance panels are being added phase by phase — each aggregates the same
-              data each team already runs on, rolled up for leadership.
+              Scorecards above currently reflect each department's HR Hub workload, open roles,
+              and people on leave. Deeper cross-department panels are being added phase by phase —
+              each aggregates the same data the team already runs on, rolled up for leadership:
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {UPCOMING_PANELS.map(p => (

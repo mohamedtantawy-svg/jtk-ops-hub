@@ -193,17 +193,25 @@ governance artifacts — all proven end-to-end with *no metrics yet*.
   CC tab and `?view=command-center` bounces to briefing; `/command-center/overview`
   returns 403 for non-exec. `next build` clean; dark mode + responsive on the shell.
 
-### Phase 1 — Org-wide Health & per-department Scorecards (hero overview)
-**Goal:** the landing screen leadership opens to.
-- [ ] Port the Health Score composite **server-side** into the aggregator; compute it
-      **per dept** + an org-wide weighted roll-up.
-- [ ] Per-dept rollup: open volume, SLA compliance %, breach count, at-risk, capacity
-      band, headcount/vacancy (`org_vacant_roles`), Δ vs prior snapshot.
-- [ ] UI: org-wide health ring + headline totals; responsive grid of **per-dept
-      scorecards** (generated from the live dept list); click → dept drill-in.
-- **Verify:** numbers reconcile against each dept's own BriefingView when impersonating
-  into that dept; cards adapt when a dept is archived; trend deltas render once ≥2
-  snapshots exist.
+### Phase 1 — Org-wide + per-department Scorecards (hero overview)  ✅ scorecards shipped (landing → dev)
+**Goal:** the landing screen leadership opens to — live, accurate, fast.
+- [x] Per-dept operational scorecards from INTERNAL dept-scoped tables (fast indexed
+      GROUP BYs folded to the root dept in JS — no external scans): headcount, teams,
+      open HR Hub requests, urgent (high/critical) HR Hub, open roles (`org_vacant_roles`),
+      people out today (approved leave overlapping today, attributed via the member's dept).
+- [x] Org-wide totals strip (Departments / People / Open HR Hub / Urgent / Out today) +
+      responsive per-dept scorecard grid generated from the LIVE dept list (adapts when a
+      dept is added/renamed/archived). `getOverview()` now returns per-dept metrics + totals.
+- [→] **Composite Health Score + health ring** — RESEQUENCED to Phase 2: the Health Score
+      is 50% SLA-compliance, which needs the queue/Deel SLA pool rolled up cross-dept.
+      Building it in Phase 2 keeps the number faithful rather than shipping a half-weighted
+      score now.
+- [→] **SLA % / breach / at-risk** → Phase 2; **capacity band** → Phase 4; **Δ vs prior
+      snapshot** → Phase 3 (needs the snapshot store); **per-dept drill-in** → Phase 2
+      (when there's per-source detail to drill into).
+- **Verify:** `next build` green; scorecards generated from live `org_nodes` (adapts to dept
+  changes); internal-only queries (no external scans); numbers reconcile vs each dept's own
+  surfaces — confirm live in the post-deploy audit (dev preview is unauthenticated).
 
 ### Phase 2 — SLA & Breach Command (cross-dept)
 - [ ] Per-dept × per-source SLA compliance, breaches, at-risk, oldest-breach age
