@@ -794,7 +794,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
           </div>
         )}
         {!loading && !error && sortedItems.length === 0 && (
-          <EmptyState scope={scope} flowFilter={flowFilter} statusFilter={statusFilter} />
+          <EmptyState scope={scope} flowFilter={flowFilter} statusFilter={statusFilter} assigneeFilter={assigneeFilter} assigneeLabel={assigneeLabel} />
         )}
         {decisionError && (
           <div role="alert" style={{ padding: '8px 12px', marginBottom: 8, background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, color: '#991b1b', fontSize: 12 }}>
@@ -1330,20 +1330,28 @@ function AssigneePicker({ value, label, members, onChange }) {
             />
           </div>
           <div style={{ maxHeight: 280, overflowY: 'auto', padding: 4 }}>
-            <PickerOption
-              label="All assignees"
-              icon="bi-people"
-              selected={value == null}
-              onSelect={() => select(null)}
-            />
-            <PickerOption
-              label="Unassigned"
-              icon="bi-person-dash"
-              selected={value === 'unassigned'}
-              onSelect={() => select('unassigned')}
-            />
-            {filtered.length > 0 && (
-              <div style={{ borderTop: '1px solid var(--border-light)', margin: '4px 0' }} />
+            {/* E8: hide the All-assignees / Unassigned sentinels while a
+                search is active — they never match the query and made the
+                list read as "3 results" when only one member matched. They
+                reappear once the search box is cleared. */}
+            {!lcSearch && (
+              <>
+                <PickerOption
+                  label="All assignees"
+                  icon="bi-people"
+                  selected={value == null}
+                  onSelect={() => select(null)}
+                />
+                <PickerOption
+                  label="Unassigned"
+                  icon="bi-person-dash"
+                  selected={value === 'unassigned'}
+                  onSelect={() => select('unassigned')}
+                />
+                {filtered.length > 0 && (
+                  <div style={{ borderTop: '1px solid var(--border-light)', margin: '4px 0' }} />
+                )}
+              </>
             )}
             {filtered.length === 0 && lcSearch && (
               <div style={{ padding: '10px 12px', fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
@@ -1401,25 +1409,48 @@ function PickerOption({ label, sub, icon, selected, onSelect }) {
   );
 }
 
-function EmptyState({ scope, flowFilter, statusFilter }) {
+function EmptyState({ scope, flowFilter, statusFilter, assigneeFilter, assigneeLabel }) {
   let title = 'No requests yet';
   let body = 'Hit the New request button in the header to submit one.';
   let icon = 'bi-inbox';
   let accent = null;          // celebratory accent for the "caught up" case
-  // Olga 2026-05-14 — the default landing is `status=new`, so an empty
-  // landing is the "caught up" celebration, not a stark "no results".
-  // We branch on the common cases first so each gets bespoke copy
-  // instead of the generic "No X requests" fallback.
-  if (scope === 'mentioned') {
-    // Dedicated copy for the Mentions segment — generic "No new requests"
-    // would mislead since the segment is cross-status by intent.
-    title = 'No mentions yet';
-    body = 'When someone tags you with @your.name in a comment, the request will appear here.';
+
+  const flowLabel = FLOW_VISUALS[flowFilter]?.label;
+  const statusLabel = statusFilter ? (STATUS_BY_VALUE[statusFilter]?.label?.toLowerCase() || statusFilter) : null;
+
+  // Precedence is narrowest-filter-first (live-test Q16/N3): an assignee
+  // filter zeroes a view most often, so it's named first; then the Mentioned
+  // scope; then the flow; then status. Every branch names the filter that's
+  // actually responsible AND how to clear it (N5) — the old copy often said
+  // "widen the scope" when the real culprit was the assignee or status filter.
+  if (assigneeFilter) {
+    const extra = [
+      statusFilter ? `status ${statusLabel}` : null,
+      flowFilter !== 'all' ? (flowFilter === 'approvals' ? 'Approvals' : flowLabel) : null,
+    ].filter(Boolean);
+    title = `No requests for ${assigneeLabel}`;
+    body = extra.length
+      ? `Nothing matches ${assigneeLabel} with ${extra.join(' + ')}. Clear the assignee filter, or widen the others.`
+      : `${assigneeLabel} has no requests in this scope. Clear the assignee filter or switch scope.`;
+    icon = 'bi-person-x';
+  } else if (scope === 'mentioned') {
+    if (flowFilter === 'approvals') {
+      title = 'No approvals mention you';
+      body = 'When you are @-tagged on a Hide Task or SLA Extension, it shows up here.';
+    } else if (statusFilter) {
+      title = `No ${statusLabel} mentions`;
+      body = 'Clear the status filter to see mentions in other states.';
+    } else {
+      title = 'No mentions yet';
+      body = 'When someone tags you with @your.name in a comment, the request will appear here.';
+    }
     icon = 'bi-at';
     accent = '#7c3aed';
   } else if (flowFilter === 'approvals') {
     title = 'No approvals waiting';
-    body = 'When a Hide Task or SLA Extension is submitted, it lands here for review.';
+    body = statusFilter
+      ? `No ${statusLabel} approvals. Clear the status filter to see the rest.`
+      : 'When a Hide Task or SLA Extension is submitted, it lands here for review.';
     icon = 'bi-shield-check';
     accent = '#7c3aed';
   } else if (statusFilter === 'new' && scope === 'mine' && flowFilter === 'all') {
@@ -1429,18 +1460,19 @@ function EmptyState({ scope, flowFilter, statusFilter }) {
     accent = '#7c3aed';
   } else if (statusFilter === 'new' && scope === 'mine') {
     title = "You're all caught up!";
-    body = `No new ${FLOW_VISUALS[flowFilter]?.label || 'requests'} on your plate. Try widening the flow filter.`;
+    body = `No new ${flowLabel || 'requests'} on your plate. Try widening the flow filter.`;
     icon = 'bi-emoji-smile';
     accent = '#7c3aed';
   } else if (statusFilter) {
-    const s = STATUS_BY_VALUE[statusFilter];
-    title = `No ${s?.label?.toLowerCase() || statusFilter} requests`;
-    body = 'Try clearing the status filter or widening the scope.';
+    title = `No ${statusLabel} requests`;
+    body = flowFilter !== 'all'
+      ? `No ${statusLabel} ${flowLabel || flowFilter}. Clear the status filter or switch flow.`
+      : 'Try clearing the status filter or widening the scope.';
   } else if (scope === 'mine') {
     title = 'Nothing on your plate yet';
     body = 'Hit New request in the header to submit one.';
   } else if (flowFilter !== 'all') {
-    title = `No ${FLOW_VISUALS[flowFilter]?.label || flowFilter} yet`;
+    title = `No ${flowLabel || flowFilter} yet`;
     body = 'Switch the flow filter or hit New request to add one.';
   }
   return (
