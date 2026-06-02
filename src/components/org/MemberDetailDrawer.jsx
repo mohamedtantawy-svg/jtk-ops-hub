@@ -37,6 +37,7 @@ function fmtNodePath(nodeId, tree) {
 export default function MemberDetailDrawer({
   open, member, tree, rootNodes,
   canEdit, onClose, onUpdate, onRemove, onToggleLeave, onSetCountries,
+  isGlobalSuperAdmin = false, onImpersonate,
 }) {
   const baseline = useMemo(() => member ? {
     name: member.name || '',
@@ -417,8 +418,23 @@ export default function MemberDetailDrawer({
         <div style={{
           padding: '12px 22px', borderTop: '1px solid var(--border)',
           background: 'var(--surface-2)',
-          display: 'flex', justifyContent: 'flex-end', gap: 8, flexShrink: 0,
+          display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, flexShrink: 0,
         }}>
+          {/* Q12/K1: the global super-admin can Log in as ANY member (TL /
+              agent / RM), not just dept leads — handleImpersonate already
+              accepts any roster email for an admin actor, so this just
+              surfaces it where you'd reach for it. Lets roles actually be
+              tested without an env per role. Sits left of Cancel/Save. */}
+          {isGlobalSuperAdmin && onImpersonate && member?.email && (
+            <button
+              type="button"
+              onClick={() => { onImpersonate(String(member.email).toLowerCase()); onClose?.(); }}
+              style={{ ...secondaryBtn(), marginRight: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              title={`View Ops Hub as ${member.name || member.email}`}
+            >
+              <i className="bi bi-box-arrow-in-right" /> Log in as
+            </button>
+          )}
           <button type="button" onClick={onClose} disabled={saving} style={secondaryBtn()}>Cancel</button>
           {canEdit && (
             <button

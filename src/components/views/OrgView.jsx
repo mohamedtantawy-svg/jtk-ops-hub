@@ -653,6 +653,8 @@ export default function OrgView({ user, realUser, onImpersonate }) {
         tree={org.tree}
         rootNodes={org.rootNodes}
         canEdit={canEdit}
+        isGlobalSuperAdmin={isGlobalSuperAdmin}
+        onImpersonate={onImpersonate}
         onClose={() => setSelectedMember(null)}
         onUpdate={tm.updateMember}
         onRemove={tm.removeMember}
