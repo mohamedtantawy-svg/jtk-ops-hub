@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { resolveUserPermissions, canAccessView, canPerformAction, getDataScope, hasAdminPower, scopeTasks, scopeMembers, scopeEscalations } from '../utils/permissions';
+import { COMMAND_CENTER_SEED_VIEWERS } from '../data/accessControl';
 
 export const usePermissions = (user, accessTypes, userAccessMap) => {
   return useMemo(() => {
@@ -39,6 +40,24 @@ export const usePermissions = (user, accessTypes, userAccessMap) => {
       || hasAdminPower(accessType, 'can_manage_leader_alerts')
       || hasAdminPower(accessType, 'can_manage_settings');
 
+    // Command Center viewer — read-only access to the executive cross-
+    // department oversight surface. Kept in EXACT lockstep with the server
+    // gate canViewCommandCenter() in src/lib/command-center-access.js:
+    // super-admin / seeded leadership roster (both in COMMAND_CENTER_SEED_VIEWERS)
+    // OR full admin OR the per-user is_command_center_viewer grant. We
+    // deliberately do NOT key off can_manage_settings (Regional Managers hold
+    // it) nor the access-type power alone (the server can't see the FE type
+    // map, so relying on it would let the tab render while the data endpoints
+    // 403). Regional Managers are excluded by design.
+    const emailLc = String(user?.email || '').toLowerCase();
+    const isFullAdmin = String(user?.access || user?.role || '').toLowerCase() === 'admin'
+      || accessType?.id === 'at_admin';
+    const canViewCommandCenter = !!emailLc && (
+      COMMAND_CENTER_SEED_VIEWERS.has(emailLc)
+      || isFullAdmin
+      || user?.isCommandCenterViewer === true
+    );
+
     return {
       raw: accessType,
       canView: (viewId) => canAccessView(accessType, viewId),
@@ -64,6 +83,10 @@ export const usePermissions = (user, accessTypes, userAccessMap) => {
       // editing in the Settings panel; edit/soft-delete any alert or
       // comment regardless of authorship.
       canManageLeaderAlerts,
+      // Read-only executive Command Center gate (cross-department oversight).
+      // Used for the nav tab, the App.jsx mount, and the URL-gate; mirrors the
+      // server-side canViewCommandCenter() so visibility and data agree.
+      canViewCommandCenter,
       accessTypeName: accessType?.name || 'Agent',
       accessTypeId: accessType?.id || 'at_agent',
       // `extraEmails` lets callers widen the visible set with active

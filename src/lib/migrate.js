@@ -705,6 +705,18 @@ ALTER TABLE team_member_overrides ADD COLUMN IF NOT EXISTS is_hr_hub_admin BOOLE
 CREATE INDEX IF NOT EXISTS idx_tmo_is_hr_hub_admin
   ON team_member_overrides(is_hr_hub_admin) WHERE is_hr_hub_admin = true;
 
+-- ── Command Center viewer grant (2026-06-03, Command Center Phase 0) ────────
+-- Read-only access to the executive Command Center (cross-department
+-- oversight for CEO / VP Ops / COO). Stackable on any base access type;
+-- a Director assigns it from the Team-tab access modal. Server-side helper
+-- src/lib/command-center-access.js reads it with a 30 s in-memory cache.
+-- Full admins, the global super-admin, and a seeded leadership roster also
+-- pass the gate without this flag (see COMMAND_CENTER_SEED_VIEWERS) — the
+-- flag is the path for granting a non-admin VP exec-only visibility.
+ALTER TABLE team_member_overrides ADD COLUMN IF NOT EXISTS is_command_center_viewer BOOLEAN DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS idx_tmo_is_command_center_viewer
+  ON team_member_overrides(is_command_center_viewer) WHERE is_command_center_viewer = true;
+
 -- ── Personal Checklist (My To-Do) snapshots (2026-04-27) ───────────────────
 -- The My To-Do list lives in PersonalChecklist.jsx and historically stored
 -- items only in localStorage + IndexedDB on the client. That covers refresh

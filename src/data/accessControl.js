@@ -67,6 +67,13 @@ export const ALL_VIEWS = [
   // and per-node delegation rows in `org_node_admins`. Not in
   // MANAGERIAL_ONLY_VIEWS — agents see the chart but can't mutate it.
   'org',
+  // Command Center (Phase 0, 2026-06-03) — executive cross-department
+  // oversight for CEO / VP Ops / COO. EXEC-ONLY: excluded from the Regional /
+  // TL / Agent view tiers via EXEC_ONLY_VIEWS below. The authoritative runtime
+  // gate is perms.canViewCommandCenter (FE) / canViewCommandCenter() in
+  // src/lib/command-center-access.js (server) — kept in lockstep so the tab's
+  // visibility and the data endpoints' 403 can never disagree.
+  'command-center',
   // Tasks (Phase 1, 2026-05-25 → moved same-day): originally a top-level
   // 'tasks' view; relocated under Workspace as a queue source tab
   // (WORK_TASKS_TAB → TasksQueuePanel) and the standalone view + its
@@ -98,6 +105,25 @@ export const ALL_VIEWS = [
 // (Sao's role) bounced back to the homepage when they click the
 // "MOC Schedule" button — the symptom reported in the bug.
 const MANAGERIAL_ONLY_VIEWS = new Set(['leader-alerts', 'team', 'lead-home']);
+
+// Exec-only surfaces — visible to full Admins, the global super-admin, the
+// seeded leadership roster, and per-user Command Center grantees ONLY. These
+// are filtered OUT of the Regional / Team-Lead / Agent view tiers below so a
+// Regional Manager (who otherwise sees every non-settings view) can't reach
+// the cross-company executive rollup. The authoritative runtime gate is
+// perms.canViewCommandCenter (FE) / canViewCommandCenter() in
+// src/lib/command-center-access.js (server) — kept in lockstep.
+const EXEC_ONLY_VIEWS = new Set(['command-center']);
+
+// Leadership roster auto-granted Command Center access without a per-user DB
+// flag. Mirrors the (now-retired) workspace registry's COMMAND_CENTER_EMAILS.
+// Imported identically by the FE permissions hook and the server access helper
+// so the tab's visibility and the data endpoints' 403 can never disagree.
+export const COMMAND_CENTER_SEED_VIEWERS = new Set([
+  'mohamed.tantawy@deel.com',
+  'carlos@deel.com',
+  'kento.arrue@deel.com',
+]);
 
 export const ALL_ACTIONS = [
   // Task actions
@@ -142,7 +168,18 @@ export const ALL_ADMIN_POWERS = [
   // comment regardless of authorship. Bundled into `at_leader_alerts_admin`
   // and stackable on top of any other access type.
   'can_manage_leader_alerts',
+  // Command Center (Phase 0): read-only access to the executive cross-
+  // department oversight surface. EXEC-ONLY — deliberately NOT inherited by
+  // Regional Managers (see ADMIN_POWERS_NO_EXEC); bundled into at_command_center
+  // and granted to at_admin.
+  'can_view_command_center',
 ];
+
+// can_view_command_center is EXEC-ONLY. Regional Managers otherwise hold every
+// admin power (they spread ALL_ADMIN_POWERS), so we strip just this one from
+// their set — without it the cross-company Command Center would leak to
+// non-exec leadership. at_admin keeps the full ALL_ADMIN_POWERS (incl. this).
+const ADMIN_POWERS_NO_EXEC = ALL_ADMIN_POWERS.filter(p => p !== 'can_view_command_center');
 
 export const DATA_SCOPES = [
   'own_tasks_only',
@@ -171,6 +208,7 @@ export const VIEW_LABELS = {
   'urgent-assist-schedule': 'Urgent Assist Schedule',
   'notifications': 'Notifications',
   'org':           'Org',
+  'command-center':'Command Center',
   // 'tasks' label retired 2026-05-25 — surface lives inside Workspace.
   'settings':      'Settings',
 };
@@ -202,6 +240,7 @@ export const ADMIN_POWER_LABELS = {
   'can_manage_org':            'Manage Org Structure',
   'can_manage_hr_hub':         'Manage HR Hub',
   'can_manage_leader_alerts':  'Manage Leaders Alerts',
+  'can_view_command_center':   'View Command Center',
 };
 
 export const DATA_SCOPE_LABELS = {
@@ -215,11 +254,16 @@ export const DATA_SCOPE_LABELS = {
 // Views available to each tier
 // ---------------------------------------------------------------------------
 const VIEWS_ALL = [...ALL_VIEWS];
-const VIEWS_NO_SETTINGS = ALL_VIEWS.filter(v => v !== 'settings');
+// Regional Managers see every view EXCEPT exec-only surfaces (Command Center
+// is C-suite / VP-Ops only — see EXEC_ONLY_VIEWS).
+const VIEWS_NO_EXEC = ALL_VIEWS.filter(v => !EXEC_ONLY_VIEWS.has(v));
+// Team Leads: no settings, no exec-only.
+const VIEWS_NO_SETTINGS = ALL_VIEWS.filter(v => v !== 'settings' && !EXEC_ONLY_VIEWS.has(v));
 // Agent baseline + per-feature admin grants strip managerial-only tabs so
 // a Director-granted HR Hub Admin who's an agent doesn't accidentally see
 // Leaders Alerts (or future managerial surfaces). Promotion to TL or
-// above restores the full no-settings list.
+// above restores the full no-settings list. (Exec-only already stripped from
+// VIEWS_NO_SETTINGS above, so it never leaks here either.)
 const VIEWS_NO_SETTINGS_NO_MANAGERIAL = VIEWS_NO_SETTINGS.filter(v => !MANAGERIAL_ONLY_VIEWS.has(v));
 
 // ---------------------------------------------------------------------------
@@ -240,10 +284,10 @@ export const DEFAULT_ACCESS_TYPES = [
   {
     id: 'at_regional_mgr',
     name: 'Regional Manager',
-    description: 'Full access including settings. Sees own work + TL summaries + all team members under TLs.',
-    views: VIEWS_ALL,
+    description: 'Full access including settings. Sees own work + TL summaries + all team members under TLs. Excludes the exec-only Command Center.',
+    views: VIEWS_NO_EXEC,
     actions: [...ALL_ACTIONS],
-    adminPowers: [...ALL_ADMIN_POWERS],
+    adminPowers: [...ADMIN_POWERS_NO_EXEC],
     dataScope: 'regional_tasks',
     isDefault: true,
   },
@@ -298,6 +342,27 @@ export const DEFAULT_ACCESS_TYPES = [
     actions: [...ALL_ACTIONS],
     adminPowers: ['can_manage_leader_alerts'],
     dataScope: 'own_tasks_only',
+    isDefault: true,
+  },
+  {
+    // Executive (Command Center) — read-only, cross-department oversight for
+    // CEO / VP Ops / COO. Grants the Command Center view + a focused exec
+    // surface set (Home + Notifications) and the can_view_command_center
+    // power, WITHOUT any operational queues, settings, or write actions.
+    // dataScope is all_tasks so the exec sees global figures on shared
+    // surfaces. Assignable as a base type from the Team-tab access modal, or
+    // stack the per-user is_command_center_viewer grant on an existing type.
+    // NOTE: the authoritative runtime gate is perms.canViewCommandCenter /
+    // command-center-access.js (super-admin OR seed roster OR full admin OR
+    // the is_command_center_viewer flag) — all server-verifiable, so the tab's
+    // visibility and the data endpoints stay in lockstep regardless of type.
+    id: 'at_command_center',
+    name: 'Executive',
+    description: 'Read-only executive Command Center: cross-department health, SLA, volume, capacity, people, and risk. No operational queues, settings, or write actions. For CEO / VP Ops / COO.',
+    views: ['briefing', 'command-center', 'notifications'],
+    actions: [],
+    adminPowers: ['can_view_command_center'],
+    dataScope: 'all_tasks',
     isDefault: true,
   },
 ];

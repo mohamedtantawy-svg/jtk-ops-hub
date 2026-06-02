@@ -77,7 +77,8 @@ export async function GET(req) {
             `SELECT email, name, initials, title, access, manager_email, team, region,
                     service, country, avatar_url, start_date, is_new, is_deleted,
                     on_leave, is_announcements_admin,
-                    is_access_admin, is_hr_hub_admin, is_leader_alerts_admin
+                    is_access_admin, is_hr_hub_admin, is_leader_alerts_admin,
+                    is_command_center_viewer
                FROM team_member_overrides`
           );
           // /me only consumes profile fields (role/team/region/etc.), never
@@ -172,6 +173,7 @@ export async function GET(req) {
         isAccessAdmin: mergedEntry.isAccessAdmin === true,
         isHrHubAdmin: mergedEntry.isHrHubAdmin === true,
         isLeaderAlertsAdmin: mergedEntry.isLeaderAlertsAdmin === true,
+        isCommandCenterViewer: mergedEntry.isCommandCenterViewer === true,
       });
     }
 

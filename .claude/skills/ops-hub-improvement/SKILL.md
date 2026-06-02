@@ -1,6 +1,6 @@
 ---
 name: ops-hub-improvement
-description: Use this skill whenever the user asks for ANY improvement, fix, feature, bug fix, refactor, or UI change in the ops-hub project. It enforces the full workflow — deep cross-feature audit, multi-role consideration (Agent/TL/Regional/Director), tree-view preservation, UI polish verification, implementation, commit, push, PR, CI wait, merge to dev — so the user only has to "go to Nexus and deploy". Includes the live post-deploy audit playbook (§6.7) for "I deployed, audit live by the book" requests, the in-app board layout reference (§3.13) anchored on Feedback's pattern, and every mistake-avoidance rule learned from prior sessions. Triggers: any ops-hub code change request, anything touching /Users/mohamed.tantawy/Desktop/ops-hub/, any mention of Queue/Briefing/Announcements/Escalations/HR Hub/Feedback/Offboarding/Onboarding/Workbench/ACK/cache/sync/TL/Regional/Agent/Team/hierarchy/tree view, any "audit live" / "test live" request, any new tab or list-of-items surface.
+description: Use this skill whenever the user asks for ANY improvement, fix, feature, bug fix, refactor, or UI change in the ops-hub project. It enforces the full workflow — deep cross-feature audit, multi-role consideration (Agent/TL/Regional/Director), tree-view preservation, UI polish verification, implementation, commit, push, PR, CI wait, merge to dev — so the user only has to "go to Nexus and deploy". Includes the live post-deploy audit playbook (§6.7) for "I deployed, audit live by the book" requests, the in-app board layout reference (§3.13) anchored on Feedback's pattern, and every mistake-avoidance rule learned from prior sessions. Triggers: any ops-hub code change request, anything touching /Users/mohamed.tantawy/Desktop/ops-hub/, any mention of Queue/Briefing/Announcements/Escalations/HR Hub/Command Center/Feedback/Offboarding/Onboarding/Workbench/ACK/cache/sync/TL/Regional/Agent/Team/hierarchy/tree view, any cross-department or executive/leadership rollup, any "audit live" / "test live" request, any new tab or list-of-items surface.
 ---
 
 # Ops Hub Improvement Workflow
@@ -580,6 +580,43 @@ Cache shape mirror: the LS-side SWR cache stores the lite shape (so
 the cold-load cache stays small). Detail-fetched dataUris live in
 in-memory state only — they go away on the next poll cycle by design,
 and the lazy-fetch refires on the next expand.
+
+### 3.18 Command Center cross-impact — check on EVERY change (mandatory)
+
+The executive **Command Center** (`src/components/views/CommandCenterView.jsx`,
+`src/lib/command-center-aggregator.js`, `app/api/v1/command-center/*`, view id
+`command-center`, Source Registry `src/data/commandCenterSources.js`) is a
+read-only cross-DEPARTMENT rollup for the CEO / VP Ops / COO. It aggregates
+EVERY department — the inverse of the per-dept isolation the rest of the app
+enforces. Because it sits on top of every department and every dept-scoped data
+source, almost any change can silently make it stale or wrong.
+
+**On every change, ask these and act on the answer:**
+
+1. **Did I touch a department-scoped data source?** (any table with `org_node_id`,
+   any per-dept Deel/queue source in `dept-integrations.js`, any metric/report).
+   → Update the Source Registry `src/data/commandCenterSources.js` in the SAME
+   change, AND extend the matching Command Center rollup so the exec view reflects it.
+2. **Did I change what a "department" is?** (org_nodes shape, dept create/rename/
+   archive, slug, headcount, the dept→team→member nesting). → The CC enumerates
+   depts live from `org_nodes`, so most dept changes flow through automatically —
+   but verify the rollup queries + FE cards still hold, and that nothing hardcodes
+   a dept/slug (mistake #50).
+3. **Did I change a metric formula or SLA/capacity math?** (Health Score, `bizTime`,
+   `slaInfo`, capacity bands, the aggregators). → The CC reuses these; update the CC
+   rollup so per-dept numbers don't drift from each dept's own view.
+4. **Did I add/rename/retire a permission or role?** → Re-check the exec gate
+   (`can_view_command_center`, `at_command_center`, `is_command_center_viewer`,
+   `COMMAND_CENTER_SEED_VIEWERS`) and that FE `perms.canViewCommandCenter` stays in
+   lockstep with server `canViewCommandCenter()` — a divergence either leaks the
+   cross-company rollup or 403s a tab that's visible.
+5. **Did I retire a feature?** → Remove its Source Registry entry + its CC rollup,
+   the same way you walk the audit-before-delete list (mistake #27).
+
+If a change has Command Center impact and you can't trace it through the registry
++ the relevant rollup, the change is NOT done. Bet on this surface being affected
+by anything dept-scoped — when in doubt, open `commandCenterSources.js` and check.
+The full build plan + phase status lives in `COMMAND_CENTER_PLAN.md`.
 
 ---
 
@@ -1168,6 +1205,8 @@ Compile report
     ```
 
     Run via `mcp__Claude_in_Chrome__javascript_tool` after navigating to `https://jtk.dp.com`. The dept-scope payload reveals slugs, `isGlobalSuperAdmin`, `visibleSources`, dept list — catching slug-mismatch (#50), hook-contract-fail (#49), and seed-skip (#51) in one call. The team-members breakdown by `org_node_id` immediately flags an unrun seed (expected count vs actual per dept UUID). **Rule**: post-deploy for any tenancy or integration-config change, run this IIFE before reporting "shipped." Two minutes of diagnostic beats a round of "i deployed but…" messages. See PR #734.
+
+54. **The executive Command Center aggregates EVERY department — treat it as a downstream consumer of everything dept-scoped.** Built in the 2026-06-03 Command Center initiative (view id `command-center`, `src/lib/command-center-aggregator.js`, `app/api/v1/command-center/*`, Source Registry `src/data/commandCenterSources.js`, exec gate `src/lib/command-center-access.js`). It INVERTS dept-scope isolation (loops all `org_nodes` instead of filtering to one), so two standing rules: (a) gate it server-side ONLY to exec viewers via `canViewCommandCenter()` (super-admin / `COMMAND_CENTER_SEED_VIEWERS` roster / full admin / `is_command_center_viewer` grant), kept in EXACT lockstep with FE `perms.canViewCommandCenter`; NEVER gate on `can_manage_settings` (Regional Managers hold it) and NEVER on the access-type power alone (the server can't see the FE access-type map, so the tab would show while data 403s — a UX + trust bug). (b) On ANY change to a dept-scoped source, metric, permission, or the dept model, run the §3.18 Command Center cross-impact check and update `commandCenterSources.js` + the matching rollup — or the exec view silently goes stale. See COMMAND_CENTER_PLAN.md.
 
 ---
 

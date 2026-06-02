@@ -46,6 +46,12 @@ const PRIMARY_TABS = [
   // / sub-teams / people. Visible to everyone (read-only for agents); edit
   // access gated by `can_manage_org` admin power inside the view itself.
   { id: 'org',           icon: 'bi-diagram-3',            label: 'Org' },
+  // Command Center (Phase 0, 2026-06-03) — executive cross-department
+  // oversight (CEO / VP Ops / COO). EXEC-ONLY: gated by
+  // perms.canViewCommandCenter (super-admin / seed roster / full admin /
+  // per-user grant) via the commandCenterOnly branch in tabAllowed below —
+  // NOT canView, so the tab stays in lockstep with the server endpoints.
+  { id: 'command-center', icon: 'bi-speedometer2',         label: 'Command Center', commandCenterOnly: true },
   // Tasks (Phase 1, 2026-05-25 → moved 2026-05-25 same-day): originally
   // landed as a top-level primary tab, then relocated under Workspace as
   // a queue source-tab after the first deploy. The Workspace shell owns
@@ -212,6 +218,11 @@ const DeelTopNav = ({
     if (t.restrictToEmail) return emailLc === t.restrictToEmail.toLowerCase();
     if (t.approverOnly && !isApprover(user?.email)) return false;
     if (t.managerialOnly && isAgentTier) return false;
+    // Command Center is exec-only — gate on the dedicated runtime perm
+    // (mirrors the server gate canViewCommandCenter) rather than canView,
+    // since canView keys off the base-tier views list which excludes seeded /
+    // per-user-granted execs sitting on an agent base type.
+    if (t.commandCenterOnly) return perms?.canViewCommandCenter === true;
     // Strict gate: only allow when canView returns truthy. The previous
     // `!== false` was lax — undefined / null slipped through and surfaced
     // managerial views in stale-perms windows.

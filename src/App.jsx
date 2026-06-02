@@ -135,6 +135,7 @@ import Alerts from './components/views/Alerts';
 import FeedbackView from './components/views/FeedbackView';
 import HrHubView from './components/views/HrHubView';
 import OrgView from './components/views/OrgView';
+import CommandCenterView from './components/views/CommandCenterView';
 // WorkTasksView retired 2026-05-25 — Tasks is now a Workspace queue
 // source tab (Queue.jsx → TasksQueuePanel) rather than a top-level view.
 import WorkTasksTour from './components/work-tasks/WorkTasksTour';
@@ -211,6 +212,7 @@ const App=()=>{
               isAccessAdmin: stored.isAccessAdmin === true,
               isHrHubAdmin: stored.isHrHubAdmin === true,
               isLeaderAlertsAdmin: stored.isLeaderAlertsAdmin === true,
+              isCommandCenterViewer: stored.isCommandCenterViewer === true,
             };
           }
         }
@@ -776,6 +778,7 @@ const App=()=>{
                   isAccessAdmin: serverUser.isAccessAdmin === true,
                   isHrHubAdmin: serverUser.isHrHubAdmin === true,
                   isLeaderAlertsAdmin: serverUser.isLeaderAlertsAdmin === true,
+                  isCommandCenterViewer: serverUser.isCommandCenterViewer === true,
                 }
               : serverUser;
             // Persist the freshest snapshot so the next mount's useState
@@ -1482,6 +1485,16 @@ const App=()=>{
   // one is for not-yet-shipped views; this one is for role-based access).
   React.useEffect(() => {
     if (!perms || typeof perms.canView !== 'function') return;
+    // Command Center is exec-only and gated by a dedicated runtime check
+    // (super-admin / seed roster / full admin / per-user grant), not the
+    // base-tier views list — canView('command-center') is true only for
+    // at_admin / at_command_center, so a per-user-granted or seeded exec on an
+    // agent base type would otherwise be bounced. Use canViewCommandCenter
+    // (kept in lockstep with the server gate) for this one view.
+    if (view === 'command-center') {
+      if (perms.canViewCommandCenter !== true) setView('briefing');
+      return;
+    }
     if (perms.canView(view) === false) setView('briefing');
   }, [view, perms]);
 
@@ -2286,6 +2299,7 @@ const App=()=>{
               pre-2026-05-03 nav. Same strict canView gate as Leaders Hub
               above; agents never get past this even via legacy URL. */}
           {view==='team'          && perms?.canView('team') === true       &&<div className="page-enter"><LeadersHubView user={effectiveUser} perms={perms} refreshNonce={leaderAlertsRefreshNonce} tasks={perms?.scopeTasks?.(tasksWithSlaExt,MEMBERS,coverageEmails)||tasksWithSlaExt} setView={setView} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
+          {view==='command-center' && perms?.canViewCommandCenter === true  &&<div className="page-enter"><CommandCenterView user={effectiveUser} perms={perms} setView={setView}/></div>}
       </div>
       {createModal   &&<CreateTaskModal onConfirm={confirmCreate} onClose={()=>setCreateModal(false)} currentUser={effectiveUser}/>}
       {hrHubCreate   &&<CreateHrHubRequestModal initialFlow={hrHubCreate.initialFlow||null} onClose={()=>setHrHubCreate(null)} onCreated={(id,flow)=>{setHrHubCreate(null);setView('hr-hub');addToast?.({kind:'success',message:`Submitted to HR Hub${flow?` (${flow.replace('_',' ')})`:''}.`});}}/>}
