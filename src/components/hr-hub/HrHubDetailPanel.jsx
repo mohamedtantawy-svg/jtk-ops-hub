@@ -760,9 +760,9 @@ function FollowButton({ isFollowing, onToggle }) {
       onClick={onToggle}
       style={{
         padding: '6px 12px', borderRadius: 999,
-        border: '1px solid ' + (isFollowing ? '#29811e' : '#e8e8e8'),
-        background: isFollowing ? '#e8f5e9' : 'white',
-        color: isFollowing ? '#166534' : '#1b1b1b',
+        border: '1px solid ' + (isFollowing ? '#29811e' : 'var(--border)'),
+        background: isFollowing ? '#e8f5e9' : 'var(--surface)',
+        color: isFollowing ? '#166534' : 'var(--text)',
         fontSize: 12, fontWeight: 600, cursor: 'pointer',
         display: 'inline-flex', alignItems: 'center', gap: 6,
       }}
@@ -812,7 +812,7 @@ function CopyLinkButton({ requestId }) {
     ? { bg: '#fef2f2', color: '#991b1b', border: '#fca5a5' }
     : (copied
         ? { bg: '#e8f5e9', color: '#166534', border: '#86efac' }
-        : { bg: 'white', color: 'var(--text)', border: '#e8e8e8' });
+        : { bg: 'var(--surface)', color: 'var(--text)', border: 'var(--border)' });
   return (
     <button
       type="button"

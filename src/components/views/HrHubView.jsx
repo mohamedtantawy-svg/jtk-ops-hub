@@ -31,6 +31,7 @@ import DenySlaExtensionModal from '../modals/DenySlaExtensionModal';
 import { TASK_SOURCE_DISPLAY } from '../../utils/applySlaExtensions';
 import { PermissionsContext, IntegrationsContext } from '../../App';
 import { useCurrentDept } from '../../hooks/useCurrentDept';
+import { useTheme } from '../../hooks/useTheme';
 import { getHubBrand } from '../../lib/hub-brand';
 import { MEMBERS, MEMBERS_BY_EMAIL } from '../../data/members';
 import { HR_HUB_STATUSES } from '../../data/hrHubStatus';
@@ -143,6 +144,11 @@ export default function HrHubView({ user, onCreateHrHub }) {
   // keeps "HR Hub". See src/lib/hub-brand.js.
   const deptState = useCurrentDept();
   const hubBrand = useMemo(() => getHubBrand(deptState.dept), [deptState.dept]);
+  // Dark mode needs branch logic the inline status-card styles can't express
+  // with a CSS var (the active-card fill is a per-status light literal). isDark
+  // lets us swap to an elevated dark surface + accent border in dark while
+  // leaving light mode byte-for-byte unchanged (live-test L2/L3).
+  const isDark = useTheme() === 'dark';
   // Brand-aware copy of FLOW_VISUALS — overrides the long-form label for
   // the two live HR-ops flows so row tooltips + empty-state strings carry
   // the dept's short name. The retired entries (escalation_zero, feedback)
@@ -593,14 +599,15 @@ export default function HrHubView({ user, onCreateHrHub }) {
         <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{
             width: 40, height: 40, borderRadius: 12,
-            background: '#f3eff8', color: '#7c3aed',
+            background: isDark ? 'rgba(124,58,237,0.18)' : '#f3eff8',
+            color: isDark ? '#a78bfa' : '#7c3aed',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
             <i className="bi-broadcast-pin" style={{ fontSize: 20 }} />
           </div>
           <div style={{ minWidth: 0 }}>
             <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: 'var(--text)' }}>{hubBrand.hubLabel}</h1>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+            <div style={{ fontSize: 12, color: isDark ? 'var(--text-secondary)' : 'var(--text-muted)', marginTop: 2 }}>
               {hubBrand.short} Requests, Reporting, Payment Refund, Hide Task and SLA Extension flows in one place.
               {lastSyncAt && <> · synced {relTime(new Date(lastSyncAt).toISOString())}</>}
             </div>
@@ -671,11 +678,17 @@ export default function HrHubView({ user, onCreateHrHub }) {
               aria-pressed={active}
               style={{
                 ...statusFilterBtn,
-                background: active ? f.bg : 'var(--surface)',
-                borderColor: active ? f.tint : 'var(--border)',
-                boxShadow: active ? `0 0 0 1px ${f.tint} inset, 0 1px 0 rgba(15,23,42,0.02)` : '0 1px 0 rgba(15,23,42,0.02)',
+                // Dark mode: don't flood the wide card with a light status
+                // literal (f.bg) — use the elevated dark surface + an accent
+                // border; the icon tile + bold count carry the colour. Light
+                // mode is unchanged (live-test L2).
+                background: active ? (isDark ? 'var(--surface-2)' : f.bg) : 'var(--surface)',
+                borderColor: active ? (isDark ? f.color : f.tint) : 'var(--border)',
+                boxShadow: active
+                  ? (isDark ? `0 0 0 1px ${f.color} inset` : `0 0 0 1px ${f.tint} inset, 0 1px 0 rgba(15,23,42,0.02)`)
+                  : '0 1px 0 rgba(15,23,42,0.02)',
               }}
-              onMouseEnter={e => { if (!active) { e.currentTarget.style.background = f.bg; e.currentTarget.style.borderColor = f.tint; } }}
+              onMouseEnter={e => { if (!active) { e.currentTarget.style.background = isDark ? 'var(--surface-2)' : f.bg; e.currentTarget.style.borderColor = isDark ? f.color : f.tint; } }}
               onMouseLeave={e => { if (!active) { e.currentTarget.style.background = 'var(--surface)'; e.currentTarget.style.borderColor = 'var(--border)'; } }}
             >
               <span style={{
@@ -688,14 +701,14 @@ export default function HrHubView({ user, onCreateHrHub }) {
                 <i className={f.icon} style={{ fontSize: 13 }} />
               </span>
               <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0, flex: 1 }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: active ? f.color : 'var(--text)', whiteSpace: 'nowrap' }}>{f.label}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: active ? (isDark ? 'var(--text)' : f.color) : 'var(--text)', whiteSpace: 'nowrap' }}>{f.label}</span>
                 <span style={{ fontSize: 10.5, fontWeight: 500, color: 'var(--text-muted)' }}>
                   {cnt} {cnt === 1 ? 'request' : 'requests'}
                 </span>
               </span>
               <span style={{
                 fontSize: 16, fontWeight: 800,
-                color: active ? f.color : 'var(--text-muted)',
+                color: active ? (isDark ? 'var(--text)' : f.color) : 'var(--text-muted)',
                 fontVariantNumeric: 'tabular-nums',
                 marginLeft: 'auto',
               }}>{cnt}</span>
@@ -1461,7 +1474,7 @@ const segmentCount = { padding: '0 7px', borderRadius: 128, fontSize: 10, fontWe
 const segmentCountActive = { background: '#7c3aed', color: 'white' };
 const statusFilterBtn = { display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', borderRadius: 14, border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer', transition: 'all .15s', textAlign: 'left', minWidth: 0 };
 const filterBar = { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 12, background: 'var(--surface)', border: '1px solid var(--border-light)', marginBottom: 10, flexWrap: 'wrap' };
-const filterPill = { display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 128, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-muted)', fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all .12s' };
+const filterPill = { display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 128, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)', fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all .12s' };
 const filterPillActive = { background: 'var(--surface-3)', color: 'var(--text)', borderColor: 'var(--text)' };
 const primaryBtn = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 16px', borderRadius: 10, border: 'none', background: '#7c3aed', color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 8px rgba(124,58,237,0.25)' };
 const iconBtn = { width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
