@@ -168,11 +168,35 @@ export default function HrHubView({ user, onCreateHrHub }) {
   const [slaApproveModalReq, setSlaApproveModalReq] = useState(null);
   const [slaDenyModalReq, setSlaDenyModalReq] = useState(null);
   const [decisionError, setDecisionError] = useState(null);
-  const initialReqId = (() => {
+  // Read all view-state params from the URL ONCE at mount. Read in this
+  // initialiser (NOT a useEffect) so a hard refresh on a shared / deep-link
+  // URL paints the right filters on the first render instead of flashing the
+  // defaults (skill mistake #31). flow / scope / status are validated against
+  // their known sets so a stale or hand-crafted param can't wedge the view
+  // into an impossible filter. These feed the useState initialisers for
+  // scope / flowFilter / statusFilter / detailId below and are written back
+  // to the URL by the sync effect further down (live-test finding E4 — flow
+  // changes weren't shareable and didn't survive a refresh).
+  const initialUrlState = (() => {
     try {
-      const url = typeof window !== 'undefined' ? new URL(window.location.href) : null;
-      return url?.searchParams.get('req') || null;
-    } catch { return null; }
+      const sp = typeof window !== 'undefined' ? new URL(window.location.href).searchParams : null;
+      if (!sp) return {};
+      const VALID_FLOWS = new Set(FLOW_FILTERS.map(f => f.value));       // all / approvals / hr_request / ...
+      const VALID_SCOPES = new Set(['all', 'team', 'assigned', 'mentioned', 'mine']);
+      const VALID_STATUSES = new Set(STATUS_FILTERS.map(s => s.value));  // new / in_progress / on_hold / ...
+      const rawFlow = sp.get('flow');
+      const rawScope = sp.get('scope');
+      const rawStatus = sp.get('status');
+      return {
+        req: sp.get('req') || null,
+        flow: rawFlow && VALID_FLOWS.has(rawFlow) ? rawFlow : null,
+        scope: rawScope && VALID_SCOPES.has(rawScope) ? rawScope : null,
+        // status=all is the explicit "show every status" sentinel → null
+        // statusFilter. A real status maps through. Anything else (or absent)
+        // → null here, which the initialiser turns into the default 'new'.
+        status: rawStatus === 'all' ? '__ALL__' : (rawStatus && VALID_STATUSES.has(rawStatus) ? rawStatus : null),
+      };
+    } catch { return {}; }
   })();
 
   // ── Filters & toggles ─────────────────────────────────────────────────────
@@ -192,8 +216,8 @@ export default function HrHubView({ user, onCreateHrHub }) {
   // visit. Note: `isManager` is captured at mount; the deep-link handler
   // below (line ~365 `if (typeof d.scope === 'string') setScope(d.scope)`)
   // still wins for tile-driven navigation.
-  const [scope, setScope] = useState(() => (isManager ? 'all' : 'mine'));
-  const [flowFilter, setFlowFilter] = useState('all');
+  const [scope, setScope] = useState(() => initialUrlState.scope || (isManager ? 'all' : 'mine'));
+  const [flowFilter, setFlowFilter] = useState(() => initialUrlState.flow || 'all');
   // Josephine Tuoyo 2026-05-26 — assignee picker for All / Team / Mentioned.
   // null = "All assignees" (no extra filter), 'unassigned' = rows with no
   // assignee, or a lowercased email for an exact match. Server applies the
@@ -266,7 +290,11 @@ export default function HrHubView({ user, onCreateHrHub }) {
   // ("You're all caught up!") instead of an old resolved-tasks list.
   // Click "All" anytime to switch — the filter is just a default, not a
   // lock.
-  const [statusFilter, setStatusFilter] = useState('new');
+  const [statusFilter, setStatusFilter] = useState(() => {
+    if (initialUrlState.status === '__ALL__') return null;   // URL ?status=all → show every status
+    if (initialUrlState.status) return initialUrlState.status;
+    return 'new';
+  });
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [sort, setSort] = useState('updated');
@@ -293,6 +321,16 @@ export default function HrHubView({ user, onCreateHrHub }) {
     return { flow: flowFilter };
   }, [flowFilter]);
 
+  // ── Dept-switch refetch contract ───────────────────────────────────────
+  // Both loadFirstPage (list) and the counts effect below list
+  // deptState.deptId in their dependency arrays even though neither passes a
+  // dept to the API. Dept scoping is a server-side cookie that
+  // useCurrentDept.setDept() sets + awaits BEFORE publishing the new deptId,
+  // so by the time deptId changes here the cookie is already correct and a
+  // plain refetch lands the new dept's data. Listing deptId as a dep is what
+  // triggers that refetch. Without it, a super-admin dept switch left the
+  // previous dept's rows + counts on screen until a manual page reload
+  // (live-test finding J4, 2026-06-02).
   const loadFirstPage = useCallback(async () => {
     const seq = ++reqSeqRef.current;
     setLoading(true);
@@ -340,7 +378,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
     } finally {
       if (seq === reqSeqRef.current) setLoading(false);
     }
-  }, [flowApiArgs, scope, statusFilter, debouncedSearch, assigneeFilter]);
+  }, [flowApiArgs, scope, statusFilter, debouncedSearch, assigneeFilter, deptState.deptId]);
 
   useEffect(() => { loadFirstPage(); }, [loadFirstPage]);
 
@@ -399,7 +437,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
       } catch { /* swallow */ }
     })();
     return () => { cancelled = true; };
-  }, [flowApiArgs, scope, debouncedSearch, assigneeFilter]);
+  }, [flowApiArgs, scope, debouncedSearch, assigneeFilter, deptState.deptId]);
 
   // Local sort — server returns newest-first by default; we re-sort client-side
   // for the small page (25 rows) so toggling sort doesn't refetch.
@@ -412,7 +450,7 @@ export default function HrHubView({ user, onCreateHrHub }) {
   }, [items, sort]);
 
   // ── Detail drawer state ──────────────────────────────────────────────────
-  const [detailId, setDetailId] = useState(initialReqId);
+  const [detailId, setDetailId] = useState(initialUrlState.req);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detail, setDetail] = useState(null);
   const [detailError, setDetailError] = useState(null);
@@ -432,15 +470,29 @@ export default function HrHubView({ user, onCreateHrHub }) {
     }
   }, []);
 
+  useEffect(() => { loadDetail(detailId); }, [detailId, loadDetail]);
+
+  // Persist view state (detail id + flow / scope / status) to the URL so the
+  // view is shareable and survives a hard refresh (read back in the useState
+  // initialisers above). Uses replaceState (not pushState) so changing a
+  // filter doesn't pile up back-button history. Params are omitted at their
+  // default so a clean visit keeps a clean URL: flow only when not "all",
+  // scope only when it differs from the role default, status only when not
+  // the default 'new' (null statusFilter → the status=all sentinel).
   useEffect(() => {
-    loadDetail(detailId);
     try {
       const url = new URL(window.location.href);
-      if (detailId) url.searchParams.set('req', detailId);
-      else url.searchParams.delete('req');
+      const sp = url.searchParams;
+      if (detailId) sp.set('req', detailId); else sp.delete('req');
+      if (flowFilter && flowFilter !== 'all') sp.set('flow', flowFilter); else sp.delete('flow');
+      const defaultScope = isManager ? 'all' : 'mine';
+      if (scope && scope !== defaultScope) sp.set('scope', scope); else sp.delete('scope');
+      if (statusFilter === null) sp.set('status', 'all');
+      else if (statusFilter && statusFilter !== 'new') sp.set('status', statusFilter);
+      else sp.delete('status');
       window.history.replaceState({}, '', url.toString());
     } catch {}
-  }, [detailId, loadDetail]);
+  }, [detailId, flowFilter, scope, statusFilter, isManager]);
 
   // Bell deep-link handler. App.jsx fires `hr-hub:openDetail` with the
   // request id when the user clicks a notification linked here. Without
