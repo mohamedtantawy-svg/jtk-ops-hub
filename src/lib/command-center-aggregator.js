@@ -21,6 +21,7 @@ import { query } from './db';
 import { COMMAND_CENTER_DEPT_SLUG } from './command-center-dept-seed';
 import { COMMAND_CENTER_SOURCES } from '../data/commandCenterSources';
 import { visibleDeelSourcesFor } from './dept-integrations';
+import { getCommandCenterSettings, CC_SETTINGS_DEFAULTS } from './command-center-settings';
 
 const ROOT_WALK_CAP = 16; // defence against accidental org_nodes cycles
 
@@ -74,11 +75,11 @@ async function loadNodeTree() {
 
 // Run a per-node-id GROUP BY and fold the integer tallies up to the root dept.
 // `pick(row)` returns { nodeId, values: {k: int, …} }. Returns Map<rootId, {k:int}>.
-async function foldByRoot(sql, resolveRoot, pick) {
+async function foldByRoot(sql, resolveRoot, pick, params = []) {
   const out = new Map();
   let rows = [];
   try {
-    ({ rows } = await query(sql));
+    ({ rows } = await query(sql, params));
   } catch (err) {
     console.warn('[command-center-aggregator] rollup query failed:', err.message);
     return out; // fail-soft: this metric reads 0 everywhere, board still renders
@@ -199,13 +200,13 @@ function emptyTotals() {
 //    proxy for the internal HR Hub queue: breached > 7d open, at-risk 2–7d.
 //    (Queue/Deel SLA is per-dept + external — surfaced in each dept's own
 //    queue; the CC rolls up the internal HR Hub signal here.)
-async function hrHubStatsByRoot(resolveRoot) {
+async function hrHubStatsByRoot(resolveRoot, { breachDays = 7, atRiskDays = 2 } = {}) {
   return foldByRoot(
     `SELECT org_node_id,
             COUNT(*) FILTER (WHERE status NOT IN ('resolved','rejected'))::int AS open_c,
             COUNT(*) FILTER (WHERE status NOT IN ('resolved','rejected') AND priority IN ('high','critical'))::int AS urgent_c,
-            COUNT(*) FILTER (WHERE status NOT IN ('resolved','rejected') AND created_at <  NOW() - INTERVAL '7 days')::int AS breached_c,
-            COUNT(*) FILTER (WHERE status NOT IN ('resolved','rejected') AND created_at <  NOW() - INTERVAL '2 days' AND created_at >= NOW() - INTERVAL '7 days')::int AS atrisk_c,
+            COUNT(*) FILTER (WHERE status NOT IN ('resolved','rejected') AND created_at <  NOW() - ($1 * INTERVAL '1 day'))::int AS breached_c,
+            COUNT(*) FILTER (WHERE status NOT IN ('resolved','rejected') AND created_at <  NOW() - ($2 * INTERVAL '1 day') AND created_at >= NOW() - ($1 * INTERVAL '1 day'))::int AS atrisk_c,
             COUNT(*) FILTER (WHERE created_at  >= NOW() - INTERVAL '30 days')::int AS created30_c,
             COUNT(*) FILTER (WHERE resolved_at >= NOW() - INTERVAL '30 days')::int AS resolved30_c
        FROM hr_hub_request
@@ -216,6 +217,7 @@ async function hrHubStatsByRoot(resolveRoot) {
       open: r.open_c, urgent: r.urgent_c, breached: r.breached_c,
       atRisk: r.atrisk_c, created30: r.created30_c, resolved30: r.resolved30_c,
     } }),
+    [breachDays, atRiskDays],
   );
 }
 
@@ -239,7 +241,7 @@ async function headcountVacancyByRoot(resolveRoot) {
 //   resolved/created throughput) · Urgent 15 (share of open NOT high/critical) ·
 //   Staffing 15 (filled share of headcount+vacancies). Transparent components
 //   returned so the UI can show the breakdown. Bands: ≥80 / ≥60 / <60.
-function healthFromStats(s) {
+function healthFromStats(s, weights = CC_SETTINGS_DEFAULTS.healthWeights) {
   const open = s.open || 0, breached = s.breached || 0, urgent = s.urgent || 0;
   const created30 = s.created30 || 0, resolved30 = s.resolved30 || 0;
   const headcount = s.headcount || 0, vacancies = s.vacancies || 0;
@@ -247,7 +249,9 @@ function healthFromStats(s) {
   const resolution = created30 > 0 ? Math.min(100, Math.round((resolved30 / created30) * 100)) : 100;
   const urgentScore = open > 0 ? Math.round((1 - urgent / open) * 100) : 100;
   const staffing   = (headcount + vacancies) > 0 ? Math.round((headcount / (headcount + vacancies)) * 100) : 100;
-  const score = Math.round(backlog * 0.4 + resolution * 0.3 + urgentScore * 0.15 + staffing * 0.15);
+  const w = weights || CC_SETTINGS_DEFAULTS.healthWeights;
+  const wSum = (w.backlog + w.resolution + w.urgent + w.staffing) || 100;
+  const score = Math.round((backlog * w.backlog + resolution * w.resolution + urgentScore * w.urgent + staffing * w.staffing) / wSum);
   return { score, components: { backlog, resolution, urgent: urgentScore, staffing } };
 }
 
@@ -268,17 +272,18 @@ export async function getHealth() {
   try { tree = await loadNodeTree(); } catch (err) { console.warn('[cc-agg getHealth]', err.message); return empty; }
   const { resolveRoot, roots } = tree;
   if (!roots.length) return empty;
-  const hh = await hrHubStatsByRoot(resolveRoot);
+  const settings = await getCommandCenterSettings();
+  const hh = await hrHubStatsByRoot(resolveRoot, { breachDays: settings.slaBreachDays, atRiskDays: settings.slaAtRiskDays });
   const { head, vac } = await headcountVacancyByRoot(resolveRoot);
   const departments = roots.map(d => {
     const s = { ...(hh.get(d.id) || {}), headcount: (head.get(d.id) || {}).headcount || 0, vacancies: (vac.get(d.id) || {}).vacancies || 0 };
-    const h = healthFromStats(s);
+    const h = healthFromStats(s, settings.healthWeights);
     return { id: d.id, name: d.name, slug: d.slug, color: d.color, score: h.score, components: h.components,
       open: s.open || 0, breached: s.breached || 0, urgent: s.urgent || 0,
       created30: s.created30 || 0, resolved30: s.resolved30 || 0, headcount: s.headcount, vacancies: s.vacancies };
   }).sort((a, b) => a.score - b.score); // worst-first so execs see attention items up top
   const agg = sumStats(departments);
-  return { departments, org: { ...healthFromStats(agg), ...agg } };
+  return { departments, org: { ...healthFromStats(agg, settings.healthWeights), ...agg } };
 }
 
 // SLA tab: internal HR Hub ageing — fresh / at-risk / breached + urgent, per dept.
@@ -289,7 +294,8 @@ export async function getSla() {
   try { tree = await loadNodeTree(); } catch (err) { console.warn('[cc-agg getSla]', err.message); return empty; }
   const { resolveRoot, roots } = tree;
   if (!roots.length) return empty;
-  const hh = await hrHubStatsByRoot(resolveRoot);
+  const settings = await getCommandCenterSettings();
+  const hh = await hrHubStatsByRoot(resolveRoot, { breachDays: settings.slaBreachDays, atRiskDays: settings.slaAtRiskDays });
   const departments = roots.map(d => {
     const s = hh.get(d.id) || {};
     const open = s.open || 0, breached = s.breached || 0, atRisk = s.atRisk || 0, urgent = s.urgent || 0;
@@ -304,9 +310,12 @@ export async function getSla() {
   return { departments, totals };
 }
 
-// Volume tab: org-wide 30-day created-vs-resolved daily series + per-dept totals.
-export async function getVolume() {
-  const empty = { series: [], departments: [], totals: { created30: 0, resolved30: 0, openNow: 0 } };
+// Volume tab: org-wide created-vs-resolved daily series + per-dept totals over a
+// configurable window (7 / 30 / 90 days — default from settings, override via opts).
+export async function getVolume({ days } = {}) {
+  const settings = await getCommandCenterSettings();
+  const win = [7, 30, 90].includes(Number(days)) ? Number(days) : settings.volumeDays;
+  const empty = { series: [], departments: [], totals: { created: 0, resolved: 0, openNow: 0 }, windowDays: win };
   if (!process.env.DATABASE_URL) return empty;
   let tree;
   try { tree = await loadNodeTree(); } catch (err) { console.warn('[cc-agg getVolume]', err.message); return empty; }
@@ -314,29 +323,38 @@ export async function getVolume() {
   if (!roots.length) return empty;
 
   let createdRows = [], resolvedRows = [];
-  try { ({ rows: createdRows } = await query(`SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS d, COUNT(*)::int AS c FROM hr_hub_request WHERE created_at >= NOW() - INTERVAL '30 days' GROUP BY 1`)); } catch (e) { console.warn('[cc-agg getVolume created]', e.message); }
-  try { ({ rows: resolvedRows } = await query(`SELECT to_char(date_trunc('day', resolved_at), 'YYYY-MM-DD') AS d, COUNT(*)::int AS c FROM hr_hub_request WHERE resolved_at >= NOW() - INTERVAL '30 days' GROUP BY 1`)); } catch (e) { console.warn('[cc-agg getVolume resolved]', e.message); }
+  try { ({ rows: createdRows } = await query(`SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS d, COUNT(*)::int AS c FROM hr_hub_request WHERE created_at >= NOW() - ($1 * INTERVAL '1 day') GROUP BY 1`, [win])); } catch (e) { console.warn('[cc-agg getVolume created]', e.message); }
+  try { ({ rows: resolvedRows } = await query(`SELECT to_char(date_trunc('day', resolved_at), 'YYYY-MM-DD') AS d, COUNT(*)::int AS c FROM hr_hub_request WHERE resolved_at >= NOW() - ($1 * INTERVAL '1 day') GROUP BY 1`, [win])); } catch (e) { console.warn('[cc-agg getVolume resolved]', e.message); }
   const cBy = Object.fromEntries(createdRows.map(r => [r.d, r.c]));
   const rBy = Object.fromEntries(resolvedRows.map(r => [r.d, r.c]));
   const series = [];
   const today = new Date(); today.setUTCHours(0, 0, 0, 0);
-  for (let i = 29; i >= 0; i--) {
+  for (let i = win - 1; i >= 0; i--) {
     const dt = new Date(today); dt.setUTCDate(dt.getUTCDate() - i);
     const key = dt.toISOString().slice(0, 10);
     series.push({ date: key, created: cBy[key] || 0, resolved: rBy[key] || 0 });
   }
 
-  const hh = await hrHubStatsByRoot(resolveRoot);
+  const byDept = await foldByRoot(
+    `SELECT org_node_id,
+            COUNT(*) FILTER (WHERE created_at  >= NOW() - ($1 * INTERVAL '1 day'))::int AS created_c,
+            COUNT(*) FILTER (WHERE resolved_at >= NOW() - ($1 * INTERVAL '1 day'))::int AS resolved_c,
+            COUNT(*) FILTER (WHERE status NOT IN ('resolved','rejected'))::int AS open_c
+       FROM hr_hub_request WHERE org_node_id IS NOT NULL GROUP BY org_node_id`,
+    resolveRoot,
+    r => ({ nodeId: r.org_node_id, values: { created: r.created_c, resolved: r.resolved_c, openNow: r.open_c } }),
+    [win],
+  );
   const departments = roots.map(d => {
-    const s = hh.get(d.id) || {};
-    return { id: d.id, name: d.name, slug: d.slug, color: d.color, created30: s.created30 || 0, resolved30: s.resolved30 || 0, openNow: s.open || 0 };
-  }).sort((a, b) => b.created30 - a.created30);
+    const s = byDept.get(d.id) || {};
+    return { id: d.id, name: d.name, slug: d.slug, color: d.color, created: s.created || 0, resolved: s.resolved || 0, openNow: s.openNow || 0 };
+  }).sort((a, b) => b.created - a.created);
   const totals = {
-    created30: departments.reduce((t, d) => t + d.created30, 0),
-    resolved30: departments.reduce((t, d) => t + d.resolved30, 0),
+    created: series.reduce((t, x) => t + x.created, 0),
+    resolved: series.reduce((t, x) => t + x.resolved, 0),
     openNow: departments.reduce((t, d) => t + d.openNow, 0),
   };
-  return { series, departments, totals };
+  return { series, departments, totals, windowDays: win };
 }
 
 // Risk tab: open Leader Alerts / Urgent Assists / Escalations per dept (+ critical).
@@ -435,9 +453,10 @@ export async function getCapacity() {
   const { resolveRoot, roots } = tree;
   if (!roots.length) return empty;
 
-  const hh = await hrHubStatsByRoot(resolveRoot);
+  const settings = await getCommandCenterSettings();
+  const hh = await hrHubStatsByRoot(resolveRoot, { breachDays: settings.slaBreachDays, atRiskDays: settings.slaAtRiskDays });
   const { head } = await headcountVacancyByRoot(resolveRoot);
-  const bandOf = (lpp) => (lpp >= 5 ? 'high' : lpp >= 2 ? 'good' : 'low');
+  const bandOf = (lpp) => (lpp >= settings.capacityHigh ? 'high' : lpp >= settings.capacityGood ? 'good' : 'low');
 
   const departments = roots.map(d => {
     const open = (hh.get(d.id) || {}).open || 0;
@@ -461,7 +480,8 @@ export async function getSummary() {
   const { resolveRoot, roots } = tree;
   if (!roots.length) return empty;
 
-  const hh = await hrHubStatsByRoot(resolveRoot);
+  const settings = await getCommandCenterSettings();
+  const hh = await hrHubStatsByRoot(resolveRoot, { breachDays: settings.slaBreachDays, atRiskDays: settings.slaAtRiskDays });
   const { head, vac } = await headcountVacancyByRoot(resolveRoot);
   const outToday = await foldByRoot(
     `SELECT tmo.org_node_id, COUNT(DISTINCT LOWER(t.work_email))::int AS c
@@ -486,7 +506,7 @@ export async function getSummary() {
 
   const departments = roots.map(d => {
     const s = { ...(hh.get(d.id) || {}), headcount: (head.get(d.id) || {}).headcount || 0, vacancies: (vac.get(d.id) || {}).vacancies || 0 };
-    const h = healthFromStats(s);
+    const h = healthFromStats(s, settings.healthWeights);
     const a = alerts.get(d.id) || {}, u = urgent.get(d.id) || {};
     return {
       id: d.id, name: d.name, slug: d.slug, health: h.score,

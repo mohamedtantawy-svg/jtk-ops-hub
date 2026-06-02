@@ -24,9 +24,11 @@ export async function getCommandCenterSla() {
   return apiFetch('/command-center/sla');
 }
 
-// Org-wide 30-day created-vs-resolved daily series + per-dept totals.
-export async function getCommandCenterVolume() {
-  return apiFetch('/command-center/volume');
+// Org-wide created-vs-resolved daily series + per-dept totals over `days`
+// (7 / 30 / 90; omitted → server default from settings).
+export async function getCommandCenterVolume(days) {
+  const qs = [7, 30, 90].includes(Number(days)) ? `?days=${Number(days)}` : '';
+  return apiFetch(`/command-center/volume${qs}`);
 }
 
 // Open Leader Alerts / Urgent Assists / Escalations per dept (+ critical).
@@ -52,6 +54,14 @@ export async function getCommandCenterSummary() {
 // Self-audit / coverage reconciliation (live depts + sources vs what the CC rolls up).
 export async function getCommandCenterCoverage() {
   return apiFetch('/command-center/coverage');
+}
+
+// Exec-tunable settings (health weights, SLA ageing days, capacity bands, volume window).
+export async function fetchCommandCenterSettings() {
+  return apiFetch('/command-center/settings');
+}
+export async function saveCommandCenterSettings(patch) {
+  return apiFetch('/command-center/settings', { method: 'PUT', body: JSON.stringify(patch) });
 }
 
 // Trigger the executive CSV export. apiFetch parses JSON, so this does a raw

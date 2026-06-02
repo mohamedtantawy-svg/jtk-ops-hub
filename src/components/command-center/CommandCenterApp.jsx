@@ -84,6 +84,9 @@ export default function CommandCenterApp({ user, deptState }) {
   }, []);
 
   const isSuperAdmin = deptState?.isGlobalSuperAdmin === true;
+  // Tuning the global exec thresholds is admin / super-admin only (the server
+  // enforces this too; this just hides the editable inputs for other viewers).
+  const canEditSettings = isSuperAdmin || ['admin'].includes(String(user?.access || user?.role || '').toLowerCase());
   const depts = Array.isArray(deptState?.depts) ? deptState.depts : [];
   const email = user?.email || '';
   const name = user?.name || email;
@@ -102,7 +105,7 @@ export default function CommandCenterApp({ user, deptState }) {
       case 'capacity': return <CapacityPage />;
       case 'people':   return <PeoplePage />;
       case 'risk':     return <RiskPage />;
-      case 'controls': return <ControlsPage />;
+      case 'controls': return <ControlsPage canEditSettings={canEditSettings} />;
       default:         return <HomePage />;
     }
   };

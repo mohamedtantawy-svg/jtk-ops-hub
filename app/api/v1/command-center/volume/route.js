@@ -12,7 +12,8 @@ export async function GET(req) {
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   if (!(await canViewCommandCenter(user, req))) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   try {
-    return NextResponse.json(await getVolume());
+    const days = Number(new URL(req.url).searchParams.get('days')) || undefined;
+    return NextResponse.json(await getVolume({ days }));
   } catch (err) {
     console.error('[command-center/volume]', err.message);
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
