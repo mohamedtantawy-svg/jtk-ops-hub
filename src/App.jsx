@@ -2171,7 +2171,14 @@ const App=()=>{
   // by useCurrentDept (super-admin cookie-override aware). Hook sits above every
   // early return (skill §4.7 / mistake #43).
   const ccDeptState = useCurrentDept();
-  const isCommandCenterDept = ccDeptState?.dept?.slug === 'command-center';
+  // Renders when the effective dept IS the Command Center (a CC member's home
+  // dept, or the super-admin switched into it) OR the user carries the per-user
+  // Executive grant (is_command_center_viewer) — the grant gives a non-member
+  // exec a working entry point without a dept switch (which is super-admin only).
+  // The server gate (canViewCommandCenter) honours the same three paths, so FE
+  // visibility and the data endpoints stay in lockstep.
+  const isCommandCenterDept = ccDeptState?.dept?.slug === 'command-center'
+    || user?.isCommandCenterViewer === true;
   // ── Local dev: auto-login bypass (never deployed — checked at runtime) ─────
   const isLocalDev = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
   if(!user && isLocalDev) {
