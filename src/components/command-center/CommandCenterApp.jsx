@@ -13,6 +13,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { CC_ACCENT } from './ccUi';
 import HomePage from './pages/HomePage';
+import HealthPage from './pages/HealthPage';
+import SlaPage from './pages/SlaPage';
+import VolumePage from './pages/VolumePage';
 import ComingSoonPage from './pages/ComingSoonPage';
 
 const TABS = [
@@ -30,9 +33,6 @@ const TAB_IDS = new Set(TABS.map(t => t.id));
 // Placeholder copy for tabs still being wired (replaced by real sections as the
 // build lands — see COMMAND_CENTER_PLAN.md §4).
 const COMING = {
-  health:   { title: 'Health', icon: 'bi-heart-pulse', description: 'Composite Health Score per department and org-wide, with the SLA / response / resolution / capacity breakdown.', sections: ['Org health ring', 'Per-department health', 'Component breakdown'] },
-  sla:      { title: 'SLA & Breaches', icon: 'bi-stopwatch', description: 'Cross-department SLA compliance, breaches, and at-risk items by department and source.', sections: ['SLA matrix', 'Breach leaderboard', 'At-risk watchlist'] },
-  volume:   { title: 'Volume & Throughput', icon: 'bi-bar-chart-line', description: 'Inbound vs resolved volume and throughput trends per department.', sections: ['Volume trend', 'Throughput / day', 'Backlog trajectory'] },
   capacity: { title: 'Capacity & Load', icon: 'bi-people', description: 'Per-department workload, capacity signals, and headcount vs demand.', sections: ['Load heatmap', 'Over-capacity alerts', 'Hotspots'] },
   people:   { title: 'People & Coverage', icon: 'bi-person-badge', description: 'Headcount, vacancies, OOO coverage risk, and productivity across departments.', sections: ['Headcount & vacancy', 'Coverage risk', 'Productivity'] },
   risk:     { title: 'Risk & Escalations', icon: 'bi-shield-exclamation', description: 'Critical alerts, urgent assists, and aging escalations needing executive attention.', sections: ['Critical alerts', 'Urgent assists', 'Aging escalations'] },
@@ -100,9 +100,16 @@ export default function CommandCenterApp({ user, deptState }) {
   }, [deptState]);
 
   const renderPage = () => {
-    if (activeTab === 'home') return <HomePage />;
-    const c = COMING[activeTab];
-    return c ? <ComingSoonPage {...c} /> : <HomePage />;
+    switch (activeTab) {
+      case 'home':   return <HomePage />;
+      case 'health': return <HealthPage />;
+      case 'sla':    return <SlaPage />;
+      case 'volume': return <VolumePage />;
+      default: {
+        const c = COMING[activeTab];
+        return c ? <ComingSoonPage {...c} /> : <HomePage />;
+      }
+    }
   };
 
   return (

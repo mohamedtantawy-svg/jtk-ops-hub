@@ -13,3 +13,18 @@ import { apiFetch } from './api';
 export async function getCommandCenterOverview() {
   return apiFetch('/command-center/overview');
 }
+
+// Per-department composite Health Score + components + org roll-up.
+export async function getCommandCenterHealth() {
+  return apiFetch('/command-center/health');
+}
+
+// Cross-department HR Hub ageing (fresh / at-risk / breached) + urgent.
+export async function getCommandCenterSla() {
+  return apiFetch('/command-center/sla');
+}
+
+// Org-wide 30-day created-vs-resolved daily series + per-dept totals.
+export async function getCommandCenterVolume() {
+  return apiFetch('/command-center/volume');
+}
