@@ -11,7 +11,7 @@ import { query, withTransaction } from '../../../../../../src/lib/db';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
 import { memberByEmail, isHrHubAdmin } from '../../../../../../src/lib/hr-hub-helpers';
 
-const ALLOWED_FLOWS = new Set(['hr_request', 'hr_reporting', 'escalation_zero', 'feedback']);
+const ALLOWED_FLOWS = new Set(['hr_request', 'hr_reporting', 'escalation_zero', 'feedback', 'payment_refund']);
 const EDITABLE_KEYS = new Set(['statuses', 'fields', 'dropdowns', 'auto_assign']);
 
 export async function GET(req, { params }) {

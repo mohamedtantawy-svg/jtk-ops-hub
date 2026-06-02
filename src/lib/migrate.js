@@ -1387,6 +1387,65 @@ CREATE INDEX IF NOT EXISTS idx_hr_hub_request_cover_for
   ON hr_hub_request(LOWER(cover_for_assignee_email))
   WHERE cover_for_assignee_email IS NOT NULL;
 
+-- Payment Refund flow (2026-06-02, Laura Llopis request). A brand-new
+-- top-level HR Hub flow for logging client payment refunds. It REUSES
+-- the existing status lifecycle (new -> in_progress -> ...) so no status
+-- CHECK change is needed: the workflow is "New on submit, In Progress
+-- once assessed". The assessment captured at the New -> In Progress
+-- transition records the root cause + the team member responsible for
+-- the loss. Intake fields land at create; assessment fields land on the
+-- PATCH that moves the row to in_progress.
+--
+-- Extend the flow CHECK to a new _v4 constraint. We CANNOT edit the v3
+-- value list in place: v3 is added only-if-not-exists (pg_constraint
+-- guard above), so an env that already has v3 would never pick up an
+-- in-place edit. Mirror the v2 -> v3 step: drop v3, add v4 with the
+-- wider enum. (Single-quote every SQL identifier in comments — the whole
+-- SCHEMA_SQL is a JS template literal and a stray backtick closes it.
+-- Skill mistake #6 / PR #809.)
+ALTER TABLE hr_hub_request DROP CONSTRAINT IF EXISTS hr_hub_request_flow_check_v3;
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conrelid = 'hr_hub_request'::regclass
+       AND conname  = 'hr_hub_request_flow_check_v4'
+  ) THEN
+    ALTER TABLE hr_hub_request
+      ADD CONSTRAINT hr_hub_request_flow_check_v4
+      CHECK (flow IN ('hr_request','hr_reporting','escalation_zero','feedback','hide_task_request','sla_extension_request','payment_refund'));
+  END IF;
+END $$;
+
+-- Intake columns — populated at create when flow='payment_refund', NULL
+-- on every other flow. Money is NUMERIC(14,2) to avoid float drift; the
+-- refund reason reuses the existing summary column (NOT NULL), so it is
+-- intentionally NOT duplicated here.
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS pr_contract_link  TEXT;
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS pr_client_name    VARCHAR(255);
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS pr_amount_usd     NUMERIC(14,2);
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS pr_amount_local   NUMERIC(14,2);
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS pr_local_currency VARCHAR(8);
+
+-- Assessment columns — populated at the New -> In Progress transition.
+-- pr_cause is the root-cause bucket; pr_cause_detail is the free-text
+-- 'specify' shown only when cause='other'; pr_responsible_email/name is
+-- the team member who caused the loss (resolved against the roster).
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS pr_cause            VARCHAR(40);
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS pr_cause_detail     TEXT;
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS pr_responsible_email VARCHAR(255);
+ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS pr_responsible_name  VARCHAR(255);
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conrelid = 'hr_hub_request'::regclass
+       AND conname  = 'hr_hub_request_pr_cause_check'
+  ) THEN
+    ALTER TABLE hr_hub_request
+      ADD CONSTRAINT hr_hub_request_pr_cause_check
+      CHECK (pr_cause IS NULL OR pr_cause IN ('manual_error','system_error','other'));
+  END IF;
+END $$;
+
 -- Phase 2 — the active hide list. Manager-approved entries land here and
 -- every queue's render path checks (task_source, task_id) against this
 -- table. UNIQUE so a duplicate approval can't double-insert.

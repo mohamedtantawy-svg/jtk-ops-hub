@@ -128,7 +128,7 @@ export async function POST(req, { params }) {
   // post-insert FK error). `status` is read so we can auto-advance new →
   // in_progress when a manager comments (see end of this handler).
   const reqCheck = await query(
-    `SELECT id, title, summary, status FROM hr_hub_request WHERE id = $1`, [id],
+    `SELECT id, title, summary, status, flow FROM hr_hub_request WHERE id = $1`, [id],
   );
   if (reqCheck.rows.length === 0) {
     return NextResponse.json({ error: 'Request not found' }, { status: 404 });
@@ -217,8 +217,14 @@ export async function POST(req, { params }) {
     callerMember.access === 'regional_manager' ||
     callerMember.access === 'team_lead'
   );
+  // Payment Refund is deliberately EXCLUDED from comment auto-advance:
+  // the New -> In Progress move on that flow must capture the cause +
+  // responsible-member assessment (enforced in the PATCH handler), so a
+  // bare manager comment must not silently skip it. The only path out of
+  // 'new' for payment_refund is the assessment sub-form in the detail
+  // panel (which PATCHes status + assessment together).
   let autoAdvancedStatus = null;
-  if (isManager && reqRow.status === 'new') {
+  if (isManager && reqRow.status === 'new' && reqRow.flow !== 'payment_refund') {
     try {
       const upd = await query(
         `UPDATE hr_hub_request

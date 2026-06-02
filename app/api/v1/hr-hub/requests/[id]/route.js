@@ -69,7 +69,9 @@ export async function GET(req, { params }) {
               team_lead_email, cc_email, created_at, updated_at, resolved_at,
               task_source, task_id, task_url, task_subject,
               sla_ext_requested_days, sla_ext_reason_code, sla_ext_acknowledged,
-              sla_ext_approved_days
+              sla_ext_approved_days,
+              pr_contract_link, pr_client_name, pr_amount_usd, pr_amount_local, pr_local_currency,
+              pr_cause, pr_cause_detail, pr_responsible_email, pr_responsible_name
          FROM hr_hub_request WHERE id = $1 AND org_node_id = ANY($2::uuid[])`,
       [id, effectiveDeptIds],
     ),
@@ -145,6 +147,16 @@ export async function GET(req, { params }) {
       slaExtReasonCode: r.sla_ext_reason_code,
       slaExtAcknowledged: r.sla_ext_acknowledged,
       slaExtApprovedDays: r.sla_ext_approved_days,
+      // Payment Refund flow — intake + assessment. Null on every other flow.
+      prContractLink: r.pr_contract_link,
+      prClientName: r.pr_client_name,
+      prAmountUsd: r.pr_amount_usd,
+      prAmountLocal: r.pr_amount_local,
+      prLocalCurrency: r.pr_local_currency,
+      prCause: r.pr_cause,
+      prCauseDetail: r.pr_cause_detail,
+      prResponsibleEmail: r.pr_responsible_email,
+      prResponsibleName: r.pr_responsible_name,
     },
     comments: commentsRes.rows.map(c => ({
       id: c.id,
@@ -230,8 +242,17 @@ export async function PATCH(req, { params }) {
     'priority', 'assigneeEmail',
     'title', 'summary', 'idealSolution', 'resolutionNote',
     'functionArea', 'requestType', 'reportType',
+    // Payment Refund assessment — captured at the New -> In Progress
+    // transition. Listed here so it stays gated to owner/assignee/
+    // manager/admin and never leaks through the status-only carve-out
+    // that lets any reader move a non-approval flow's status.
+    'cause', 'causeDetail', 'responsibleEmail',
   ];
   const touchesNonStatus = NON_STATUS_PATCH_FIELDS.some(f => patch[f] !== undefined);
+
+  // Payment Refund cause taxonomy — mirrors the DB CHECK
+  // (hr_hub_request_pr_cause_check). 'other' requires a free-text detail.
+  const ALLOWED_PR_CAUSES = new Set(['manual_error', 'system_error', 'other']);
 
   if (!isPrivilegedCaller) {
     if (isApprovalFlow) {
@@ -241,6 +262,29 @@ export async function PATCH(req, { params }) {
       return NextResponse.json({ error: 'Forbidden — only the creator, assignee, manager, or HR Hub Admin can edit fields other than status' }, { status: 403 });
     }
     // Else: status-only patch on a non-approval flow → allow.
+  }
+
+  // Payment Refund assessment gate. Moving the row out of 'new' into
+  // 'in_progress' is the "assessed" moment — the cause + the responsible
+  // team member MUST be recorded then, so the data is never lost to a
+  // bare status flip. Enforced server-side (FE-only gating isn't
+  // enforcement) and at BOTH transition paths: the comment-driven
+  // auto-advance is suppressed for this flow (see the comments route), so
+  // the only way to in_progress is this PATCH carrying the assessment.
+  const isPrAssessmentTransition = existing.flow === 'payment_refund'
+    && existing.status === 'new'
+    && patch.status === 'in_progress';
+  if (isPrAssessmentTransition) {
+    const cause = typeof patch.cause === 'string' ? patch.cause : null;
+    if (!ALLOWED_PR_CAUSES.has(cause)) {
+      return NextResponse.json({ error: `cause is required to move a Payment Refund to In Progress — one of: ${[...ALLOWED_PR_CAUSES].join(', ')}` }, { status: 400 });
+    }
+    if (cause === 'other' && !(typeof patch.causeDetail === 'string' && patch.causeDetail.trim())) {
+      return NextResponse.json({ error: 'causeDetail is required when cause is "other" — specify what caused the refund' }, { status: 400 });
+    }
+    if (!(typeof patch.responsibleEmail === 'string' && patch.responsibleEmail.trim())) {
+      return NextResponse.json({ error: 'responsibleEmail is required — indicate the team member responsible for the loss' }, { status: 400 });
+    }
   }
 
   const updates = [];
@@ -371,6 +415,44 @@ export async function PATCH(req, { params }) {
         logs.push({ event: 'field_edit', before: { [field]: prev }, after: { [field]: next } });
         after[field] = next;
       }
+    }
+  }
+
+  // Payment Refund assessment — persist cause / cause detail / responsible
+  // member. Resolves the responsible member's display name from the roster
+  // (same pattern as the assignee handler). Each change writes a
+  // field_edit log row so the assessment is auditable in hr_hub_log.
+  if (patch.cause !== undefined) {
+    const nextCause = patch.cause == null ? null : String(patch.cause);
+    if (nextCause !== null && !ALLOWED_PR_CAUSES.has(nextCause)) {
+      return NextResponse.json({ error: `Invalid cause: ${nextCause}` }, { status: 400 });
+    }
+    if ((nextCause || null) !== (existing.pr_cause || null)) {
+      updates.push(`pr_cause = $${p++}`); values.push(nextCause);
+      logs.push({ event: 'field_edit', before: { cause: existing.pr_cause }, after: { cause: nextCause } });
+      after.cause = nextCause;
+    }
+  }
+  if (patch.causeDetail !== undefined) {
+    // Only meaningful when cause is 'other'; clear it otherwise so a
+    // later re-classification to manual/system doesn't leave a stale note.
+    const causeNow = patch.cause !== undefined ? patch.cause : existing.pr_cause;
+    const nextDetail = causeNow === 'other'
+      ? (patch.causeDetail == null ? null : String(patch.causeDetail).slice(0, 20000))
+      : null;
+    if ((nextDetail || null) !== (existing.pr_cause_detail || null)) {
+      updates.push(`pr_cause_detail = $${p++}`); values.push(nextDetail);
+      after.causeDetail = nextDetail;
+    }
+  }
+  if (patch.responsibleEmail !== undefined) {
+    const respEmail = patch.responsibleEmail ? String(patch.responsibleEmail).toLowerCase() : null;
+    const respName = respEmail ? (memberByEmail(respEmail)?.name || patch.responsibleName || null) : null;
+    if ((respEmail || null) !== (existing.pr_responsible_email || null)) {
+      updates.push(`pr_responsible_email = $${p++}`); values.push(respEmail);
+      updates.push(`pr_responsible_name  = $${p++}`); values.push(respName);
+      logs.push({ event: 'field_edit', before: { responsibleEmail: existing.pr_responsible_email }, after: { responsibleEmail: respEmail } });
+      after.responsibleEmail = respEmail;
     }
   }
 

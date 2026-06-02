@@ -35,7 +35,7 @@ import {
   findActiveExtension,
 } from '../../../../../src/lib/sla-extension-helpers';
 
-const ALLOWED_FLOWS = new Set(['hr_request', 'hr_reporting', 'escalation_zero', 'feedback', 'hide_task_request', 'sla_extension_request']);
+const ALLOWED_FLOWS = new Set(['hr_request', 'hr_reporting', 'escalation_zero', 'feedback', 'hide_task_request', 'sla_extension_request', 'payment_refund']);
 const ALLOWED_HIDE_REASON_CODES = new Set(['internal_deel_employee', 'test_task', 'other']);
 const ALLOWED_STATUSES = new Set(['new', 'in_progress', 'on_hold', 'pending_requester', 'resolved', 'rejected']);
 const ALLOWED_PRIORITIES = new Set(['low', 'medium', 'high', 'critical']);
@@ -326,6 +326,7 @@ export async function GET(req) {
            task_source, task_id, task_url, task_subject,
            sla_ext_requested_days, sla_ext_reason_code, sla_ext_acknowledged,
            sla_ext_approved_days,
+           pr_client_name, pr_amount_usd, pr_amount_local, pr_local_currency,
            COALESCE(jsonb_array_length(COALESCE(attachments, '[]'::jsonb)), 0) AS attachment_count,
            EXISTS (
              SELECT 1 FROM hr_hub_comment c
@@ -378,6 +379,12 @@ export async function GET(req) {
     slaExtReasonCode: row.sla_ext_reason_code,
     slaExtAcknowledged: row.sla_ext_acknowledged,
     slaExtApprovedDays: row.sla_ext_approved_days,
+    // Payment Refund flow only — null on every other flow. Drives the
+    // row meta line (client · $amount) on the HR Hub list.
+    prClientName: row.pr_client_name,
+    prAmountUsd: row.pr_amount_usd,
+    prAmountLocal: row.pr_amount_local,
+    prLocalCurrency: row.pr_local_currency,
     // True iff the caller is @-mentioned in any live comment. FE uses this
     // to render the "@you" pill on rows in every scope, not just under the
     // dedicated `mentioned` segment.
@@ -518,6 +525,40 @@ export async function POST(req) {
     }
   }
 
+  // Payment Refund flow — validate + parse the structured intake fields.
+  // The refund reason rides in `summary` (already required above), so we
+  // only handle the contract link, client, and the two money amounts +
+  // local currency code here. Amounts are parsed to a finite, non-negative
+  // number (NUMERIC(14,2) in the DB); the contract link must be http(s)
+  // like every other link in the app.
+  let prContractLink = null, prClientName = null, prAmountUsd = null,
+      prAmountLocal = null, prLocalCurrency = null;
+  if (flow === 'payment_refund') {
+    prClientName = clean(body.clientName, 255);
+    prContractLink = clean(body.contractLink, 2000);
+    prLocalCurrency = clean(body.localCurrency, 8);
+    const usd = Number.parseFloat(body.amountUsd);
+    const local = Number.parseFloat(body.amountLocal);
+    if (!prClientName) {
+      return NextResponse.json({ error: 'clientName is required for payment_refund' }, { status: 400 });
+    }
+    if (!prContractLink || !/^https?:\/\//i.test(prContractLink)) {
+      return NextResponse.json({ error: 'contractLink is required and must be an http(s) URL' }, { status: 400 });
+    }
+    if (!Number.isFinite(usd) || usd < 0) {
+      return NextResponse.json({ error: 'amountUsd must be a non-negative number' }, { status: 400 });
+    }
+    if (!Number.isFinite(local) || local < 0) {
+      return NextResponse.json({ error: 'amountLocal must be a non-negative number' }, { status: 400 });
+    }
+    if (!prLocalCurrency) {
+      return NextResponse.json({ error: 'localCurrency is required for payment_refund' }, { status: 400 });
+    }
+    prAmountUsd = usd;
+    prAmountLocal = local;
+    prLocalCurrency = prLocalCurrency.toUpperCase();
+  }
+
   // Optional create-time assignee — used by the Queue → HR Hub escalation
   // flow which auto-routes to the requester's direct manager. We resolve
   // the display name from the roster so the FE doesn't need to ship one.
@@ -602,6 +643,13 @@ export async function POST(req) {
     coverForName = resolved.coverForName;
   }
 
+  // Payment Refund rows have no free-text title field on the intake form
+  // (the client name is the natural headline). Derive one so the row +
+  // detail header read meaningfully instead of showing an empty title.
+  const titleValue = flow === 'payment_refund'
+    ? `Refund — ${prClientName}`.slice(0, 300)
+    : clean(body.title, 300);
+
   const insert = await query(
     `INSERT INTO hr_hub_request
        (flow, priority,
@@ -615,7 +663,8 @@ export async function POST(req) {
         sla_ext_requested_days, sla_ext_reason_code, sla_ext_acknowledged,
         assignee_manually_set,
         org_node_id,
-        cover_for_assignee_email, cover_for_assignee_name)
+        cover_for_assignee_email, cover_for_assignee_name,
+        pr_contract_link, pr_client_name, pr_amount_usd, pr_amount_local, pr_local_currency)
      VALUES ($1, $2,
              $3, $4, $5,
              $6, $7, $8,
@@ -627,12 +676,13 @@ export async function POST(req) {
              $21, $22, $23,
              $24,
              $25,
-             $26, $27)
+             $26, $27,
+             $28, $29, $30, $31, $32)
      RETURNING id, status, created_at`,
     [
       flow, priority,
       clean(body.functionArea, 80), clean(body.requestType, 80), clean(body.reportType, 80),
-      clean(body.title, 300), summary, clean(body.idealSolution, 20000),
+      titleValue, summary, clean(body.idealSolution, 20000),
       JSON.stringify(links), JSON.stringify(attachments),
       callerEmail, callerName,
       assigneeEmail, assigneeName,
@@ -642,6 +692,7 @@ export async function POST(req) {
       assigneeManuallySet,
       submitterDeptId,
       coverForEmail, coverForName,
+      prContractLink, prClientName, prAmountUsd, prAmountLocal, prLocalCurrency,
     ],
   );
 

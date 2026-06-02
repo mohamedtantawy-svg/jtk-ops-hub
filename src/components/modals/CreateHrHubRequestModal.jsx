@@ -54,6 +54,14 @@ const FLOW_CARDS = [
     accent: '#dc2626',
     bg: '#fef2f2',
   },
+  {
+    id: 'payment_refund',
+    label: 'Payment Refund',
+    desc: 'Log a client payment refund — contract, client, amounts, and reason. Cause is assessed on triage.',
+    icon: 'bi-cash-coin',
+    accent: '#0d9488',
+    bg: '#ccfbf1',
+  },
 ];
 
 // Flow ids that used to open here but now live on the Feedback board.
@@ -204,6 +212,59 @@ function FieldInput({ field, settings, value, onChange, autofocus }) {
             <option key={opt} value={opt}>{opt}</option>
           ))}
         </select>
+      </div>
+    );
+  }
+
+  // Single-URL input (e.g. Payment Refund's Contract Link). Distinct from
+  // url_list (a multi-URL editor) — this is one canonical link, stored as
+  // a plain string. type=url gives mobile keyboards the right layout; the
+  // server re-validates the http(s) scheme.
+  if (field.kind === 'url') {
+    return (
+      <div style={{ marginBottom: 16 }}>
+        {labelEl}
+        <input
+          ref={ref}
+          type="url"
+          value={value || ''}
+          onChange={e => onChange(e.target.value)}
+          style={inputStyle}
+          placeholder={field.placeholder || 'https://…'}
+          inputMode="url"
+        />
+      </div>
+    );
+  }
+
+  // Numeric money input. `field.symbol` (e.g. '$') renders a fixed
+  // adornment so a USD amount reads unambiguously; amounts without a fixed
+  // symbol (local currency) pair with a separate currency-code text field
+  // in the same flow. Value is kept as the raw input string — the server
+  // parses + range-checks it into NUMERIC(14,2).
+  if (field.kind === 'currency') {
+    return (
+      <div style={{ marginBottom: 16 }}>
+        {labelEl}
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+          {field.symbol && (
+            <span style={{
+              position: 'absolute', left: 12, fontSize: 14, fontWeight: 600,
+              color: 'var(--text-secondary)', pointerEvents: 'none',
+            }}>{field.symbol}</span>
+          )}
+          <input
+            ref={ref}
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="0.01"
+            value={value ?? ''}
+            onChange={e => onChange(e.target.value)}
+            style={{ ...inputStyle, paddingLeft: field.symbol ? 26 : 12 }}
+            placeholder={field.placeholder || '0.00'}
+          />
+        </div>
       </div>
     );
   }
@@ -501,6 +562,10 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
   const FLOW_LABEL_OVERRIDES = useMemo(() => ({
     hr_request:   hubBrand.requestLabel,
     hr_reporting: hubBrand.reportingLabel,
+    // Payment Refund is not dept-branded — it reads the same across every
+    // department's hub. Listed here so the card label is explicit rather
+    // than falling through to the static FLOW_CARDS label.
+    payment_refund: 'Payment Refund',
   }), [hubBrand]);
 
   // 2026-05-21: legacy callers may still pass `escalation_zero` or
@@ -649,6 +714,15 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
         // ignores when null.
         assigneeEmail: assigneeEmail || null,
         assigneeName: assigneeName || null,
+        // Payment Refund structured intake. The submit() payload is
+        // hand-written (it does NOT iterate the field list), so these keys
+        // MUST be forwarded explicitly or the values never leave the
+        // browser. The server only reads them when flow==='payment_refund'.
+        clientName: values.client_name || null,
+        contractLink: values.contract_link || null,
+        amountUsd: values.amount_usd ?? null,
+        amountLocal: values.amount_local ?? null,
+        localCurrency: values.local_currency || null,
       };
       const res = await createHrHubRequest(payload);
       onCreated?.(res?.id || null, flow);
@@ -770,7 +844,10 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
           {!flow && (
             <div style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(2, 1fr)',
+              // auto-fit so the 3 cards sit on one row on a wide modal and
+              // reflow to 2/1 as the viewport narrows — no media query
+              // needed (inline styles can't carry one).
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
               gap: 12,
             }}>
               {FLOW_CARDS.map(c => (

@@ -26,6 +26,7 @@ import { getHubBrand } from '../../../src/lib/hub-brand';
 const FLOWS = [
   { id: 'hr_request',      label: 'HR Request' },
   { id: 'hr_reporting',    label: 'HR Reporting' },
+  { id: 'payment_refund',  label: 'Payment Refund' },
 ];
 
 export default function HrHubSettingsPanel({ onClose }) {
@@ -34,6 +35,8 @@ export default function HrHubSettingsPanel({ onClose }) {
   const flows = useMemo(() => ([
     { id: 'hr_request',   label: hubBrand.requestLabel },
     { id: 'hr_reporting', label: hubBrand.reportingLabel },
+    // Payment Refund is not dept-branded — same label across every hub.
+    { id: 'payment_refund', label: 'Payment Refund' },
   ]), [hubBrand]);
   const [activeFlow, setActiveFlow] = useState('hr_request');
   const [tab, setTab] = useState('dropdowns');     // statuses | fields | dropdowns | auto_assign

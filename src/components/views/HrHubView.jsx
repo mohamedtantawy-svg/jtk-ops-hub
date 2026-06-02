@@ -71,6 +71,10 @@ const FLOW_VISUALS = {
   feedback:          { label: 'Ops Hub Feedback', short: 'Feedback',    icon: 'bi-lightbulb-fill',    color: '#d97706', bg: '#fff8e6' },
   hide_task_request: { label: 'Hide Task',        short: 'Hide Task',   icon: 'bi-eye-slash-fill',    color: '#d42d35', bg: '#fef2f2' },
   sla_extension_request: { label: 'SLA Extension', short: 'SLA Ext',     icon: 'bi-clock-history',     color: '#d97706', bg: '#fff7ed' },
+  // Payment Refund (2026-06-02) — teal, distinct from the existing six
+  // palettes (Request blue / Reporting+Hide red / SLA+Feedback amber /
+  // Approvals purple).
+  payment_refund:    { label: 'Payment Refund',   short: 'Refund',      icon: 'bi-cash-coin',         color: '#0d9488', bg: '#ccfbf1' },
 };
 const FLOW_FILTERS = [
   { value: 'all',                    label: 'All flows',   icon: 'bi-grid-fill',         color: 'var(--text)' },
@@ -83,6 +87,7 @@ const FLOW_FILTERS = [
   { value: 'approvals',              label: 'Approvals',   icon: 'bi-shield-check',       color: '#7c3aed', bg: '#f3eff8' },
   { value: 'hr_request',             label: 'Requests',    icon: 'bi-send-fill',          color: '#1f74b3' },
   { value: 'hr_reporting',           label: 'Reporting',   icon: 'bi-megaphone-fill',     color: '#dc2626' },
+  { value: 'payment_refund',         label: 'Payment Refund', icon: 'bi-cash-coin',       color: '#0d9488' },
   { value: 'hide_task_request',      label: 'Hide Task',   icon: 'bi-eye-slash-fill',     color: '#d42d35' },
   { value: 'sla_extension_request',  label: 'SLA Extension', icon: 'bi-clock-history',   color: '#d97706' },
 ];
@@ -853,7 +858,23 @@ function RequestRow({ item, active, onClick, viewerEmail, isManager, isAdmin, on
   const priColor = PRIORITY_DOT[item.priority] || PRIORITY_DOT.medium;
   const isHide = item.flow === 'hide_task_request';
   const isSlaExt = item.flow === 'sla_extension_request';
+  const isPaymentRefund = item.flow === 'payment_refund';
   const isDecidable = isHide || isSlaExt;
+  // Payment Refund meta: client · $USD (+ local amount/currency when set).
+  // Amounts arrive as NUMERIC strings from the lite list projection.
+  const fmtAmount = (n) => {
+    const v = Number(n);
+    return Number.isFinite(v) ? v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }) : null;
+  };
+  const refundMeta = isPaymentRefund
+    ? [
+        item.prClientName,
+        item.prAmountUsd != null ? `$${fmtAmount(item.prAmountUsd)}` : null,
+        (item.prAmountLocal != null && item.prLocalCurrency)
+          ? `${fmtAmount(item.prAmountLocal)} ${item.prLocalCurrency}`
+          : null,
+      ].filter(Boolean).join(' · ')
+    : '';
   const hideMeta = isHide
     ? [HIDE_REASON_LABELS[item.requestType] || item.requestType, item.taskSubject].filter(Boolean).join(' · ')
     : '';
@@ -876,7 +897,9 @@ function RequestRow({ item, active, onClick, viewerEmail, isManager, isAdmin, on
     ? hideMeta
     : isSlaExt
       ? slaExtMeta
-      : [item.functionArea, item.requestType || item.reportType].filter(Boolean).join(' · ');
+      : isPaymentRefund
+        ? refundMeta
+        : [item.functionArea, item.requestType || item.reportType].filter(Boolean).join(' · ');
   // Manager-side decision affordance: visible on every pending hide
   // request to ANY manager (TL / RM / admin). The denormalised
   // `team_lead_email` is the routing target, but live audit 2026-05-04

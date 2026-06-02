@@ -67,7 +67,17 @@ const FLOW_LABELS = {
   hr_reporting: 'HR Reporting',
   escalation_zero: 'Escalation Zero',
   feedback: 'Ops Hub Feedback',
+  payment_refund: 'Payment Refund',
 };
+
+// Payment Refund root-cause taxonomy — mirrors the server enum
+// (hr_hub_request_pr_cause_check). 'other' opens a free-text specify box.
+const PR_CAUSE_OPTIONS = [
+  { id: 'manual_error',  label: 'Manual error' },
+  { id: 'system_error',  label: 'System error' },
+  { id: 'other',         label: 'Other (specify)' },
+];
+const PR_CAUSE_LABELS = Object.fromEntries(PR_CAUSE_OPTIONS.map(o => [o.id, o.label]));
 
 function formatRelative(iso) {
   if (!iso) return '';
@@ -236,6 +246,69 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
       setSavingField(null);
     }
   }, [requestId, onItemUpdated, onRefresh]);
+
+  // ── Payment Refund assessment sub-form ───────────────────────────────────
+  // The New -> In Progress move on a payment_refund request is the
+  // "assessed" moment: the assignee must record the root cause + the team
+  // member responsible for the loss. Rather than let the status dropdown
+  // PATCH a bare {status:'in_progress'} (which the server now rejects for
+  // this flow), selecting In Progress opens this sub-form and only its
+  // valid submit commits status + assessment together in one PATCH.
+  // ALL hooks sit above the `if (!requestId) return null` guard below so
+  // the hook order stays stable across renders (skill mistake #43).
+  const [assessOpen, setAssessOpen] = useState(false);
+  const [assessCause, setAssessCause] = useState('');
+  const [assessCauseDetail, setAssessCauseDetail] = useState('');
+  const [assessResp, setAssessResp] = useState({ email: null, name: null });
+  const [assessSaving, setAssessSaving] = useState(false);
+  const [assessError, setAssessError] = useState(null);
+
+  const openAssessment = useCallback(() => {
+    setAssessCause('');
+    setAssessCauseDetail('');
+    setAssessResp({ email: null, name: null });
+    setAssessError(null);
+    setAssessOpen(true);
+  }, []);
+
+  const submitAssessment = useCallback(async () => {
+    if (!requestId) return;
+    if (!assessCause) { setAssessError('Select what caused this refund.'); return; }
+    if (assessCause === 'other' && !assessCauseDetail.trim()) {
+      setAssessError('Specify the cause when choosing Other.'); return;
+    }
+    if (!assessResp.email) { setAssessError('Select the team member responsible for the loss.'); return; }
+    setAssessSaving(true);
+    setAssessError(null);
+    try {
+      await patchHrHubRequest(requestId, {
+        status: 'in_progress',
+        cause: assessCause,
+        causeDetail: assessCause === 'other' ? assessCauseDetail.trim() : null,
+        responsibleEmail: assessResp.email,
+        responsibleName: assessResp.name,
+      });
+      onItemUpdated?.({ id: requestId, status: 'in_progress' });
+      onRefresh?.();
+      setAssessOpen(false);
+    } catch (err) {
+      setAssessError(err?.message || 'Could not record the assessment.');
+    } finally {
+      setAssessSaving(false);
+    }
+  }, [requestId, assessCause, assessCauseDetail, assessResp, onItemUpdated, onRefresh]);
+
+  // Status-change handler. For a payment_refund still in 'new', choosing
+  // In Progress routes through the assessment sub-form instead of an
+  // immediate PATCH. Every other (flow, transition) keeps the direct
+  // optimistic updateField path.
+  const handleStatusChange = useCallback((v) => {
+    if (request?.flow === 'payment_refund' && request?.status === 'new' && v === 'in_progress') {
+      openAssessment();
+      return;
+    }
+    updateField({ status: v });
+  }, [request?.flow, request?.status, openAssessment, updateField]);
 
   if (!requestId) return null;
   const flowLabelOverrides = {
@@ -430,7 +503,7 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
                 <LabeledPicker label="Status">
                   <PickerStatus
                     value={request.status}
-                    onChange={v => updateField({ status: v })}
+                    onChange={handleStatusChange}
                     disabled={savingField === 'status'}
                     disabledOptions={lockedTerminalStatuses}
                     title={statusPickerHint}
@@ -488,12 +561,19 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
                 />
               )}
 
+              {/* Payment Refund — structured intake + the root-cause /
+                  responsible-member assessment captured on triage. */}
+              {request.flow === 'payment_refund' && (
+                <PaymentRefundBlock request={request} />
+              )}
+
               {/* Fields */}
               <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 14 }}>
                 {request.functionArea && <FieldRow label="Function" value={request.functionArea} />}
                 {request.requestType && <FieldRow label="Request Type" value={request.requestType} />}
                 {request.reportType && <FieldRow label="Report Type" value={request.reportType} />}
-                {request.summary && <FieldRow label="Summary" value={request.summary} multiline />}
+                {/* Payment Refund reuses `summary` as the refund reason — relabel it. */}
+                {request.summary && <FieldRow label={request.flow === 'payment_refund' ? 'Reason for the Refund' : 'Summary'} value={request.summary} multiline />}
                 {request.idealSolution && <FieldRow label="Ideal Solution" value={request.idealSolution} multiline />}
                 {request.resolutionNote && <FieldRow label="Resolution Note" value={request.resolutionNote} multiline />}
                 {Array.isArray(request.links) && request.links.length > 0 && (
@@ -617,6 +697,23 @@ export default function HrHubDetailPanel({ requestId, detail, loading, error, us
               }}
             />
           </div>
+        )}
+
+        {/* Payment Refund assessment — overlays the drawer when the
+            assignee moves a refund from New to In Progress. */}
+        {assessOpen && (
+          <PaymentRefundAssessmentModal
+            cause={assessCause}
+            setCause={setAssessCause}
+            causeDetail={assessCauseDetail}
+            setCauseDetail={setAssessCauseDetail}
+            responsible={assessResp}
+            setResponsible={setAssessResp}
+            saving={assessSaving}
+            error={assessError}
+            onCancel={() => { if (!assessSaving) setAssessOpen(false); }}
+            onSubmit={submitAssessment}
+          />
         )}
       </div>
     </div>
@@ -1032,6 +1129,181 @@ function TaskContextBlock({ taskSource, taskUrl, taskSubject, taskId, slaExtRequ
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// Payment Refund read-back — the structured intake (client / contract /
+// amounts) plus, once triaged, the root-cause + responsible-member
+// assessment card. Mirrors TaskContextBlock's bordered-card styling.
+function PaymentRefundBlock({ request }) {
+  const fmt = (n) => {
+    const v = Number(n);
+    return Number.isFinite(v) ? v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 }) : null;
+  };
+  const usd = request.prAmountUsd != null ? fmt(request.prAmountUsd) : null;
+  const local = request.prAmountLocal != null ? fmt(request.prAmountLocal) : null;
+  const cause = request.prCause || null;
+  const responsible = request.prResponsibleName || request.prResponsibleEmail || null;
+  const captionStyle = { fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em', marginBottom: 6 };
+  return (
+    <div style={{
+      marginTop: 18, padding: '12px 14px', borderRadius: 12,
+      border: '1px solid var(--border-light)', background: 'var(--surface-2)',
+      display: 'flex', flexDirection: 'column', gap: 12,
+    }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
+        {request.prClientName && <FieldRow label="Client" value={request.prClientName} />}
+        {usd != null && <FieldRow label="Amount (USD)" value={`$${usd}`} />}
+        {local != null && (
+          <FieldRow label="Amount (Local)" value={`${local}${request.prLocalCurrency ? ` ${request.prLocalCurrency}` : ''}`} />
+        )}
+      </div>
+      {request.prContractLink && (
+        <div>
+          <div style={captionStyle}>Contract</div>
+          <a
+            href={request.prContractLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '4px 10px', borderRadius: 8,
+              border: '1px solid var(--border)', background: 'var(--surface)',
+              color: '#1f74b3', textDecoration: 'none', fontSize: 12, fontWeight: 600,
+              maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}
+            title={request.prContractLink}
+          >
+            <i className="bi-box-arrow-up-right" style={{ fontSize: 11 }} />
+            Open contract
+          </a>
+        </div>
+      )}
+      {/* Assessment — only after triage records it. */}
+      {cause ? (
+        <div style={{
+          paddingTop: 10, borderTop: '1px solid var(--border-light)',
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12,
+        }}>
+          <FieldRow
+            label="Cause of loss"
+            value={
+              cause === 'other'
+                ? `Other — ${request.prCauseDetail || '(unspecified)'}`
+                : (PR_CAUSE_LABELS[cause] || cause)
+            }
+            multiline={cause === 'other'}
+          />
+          {responsible && <FieldRow label="Responsible" value={responsible} />}
+        </div>
+      ) : (
+        <div style={{
+          paddingTop: 10, borderTop: '1px solid var(--border-light)',
+          fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6,
+        }}>
+          <i className="bi-hourglass-split" style={{ fontSize: 12 }} />
+          Not yet assessed — move to In Progress to record the cause and the responsible team member.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Modal sub-form gating the New -> In Progress transition on a payment
+// refund. Reuses PickerAssignee for the responsible-member control.
+function PaymentRefundAssessmentModal({
+  cause, setCause, causeDetail, setCauseDetail, responsible, setResponsible,
+  saving, error, onCancel, onSubmit,
+}) {
+  return (
+    <div
+      onClick={onCancel}
+      style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: 'min(460px, 100%)', background: 'var(--surface)', borderRadius: 14,
+          boxShadow: '0 12px 40px rgba(0,0,0,0.2)', padding: 20,
+          display: 'flex', flexDirection: 'column', gap: 14, maxHeight: '90%', overflowY: 'auto',
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>Assess this refund</div>
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4, lineHeight: 1.5 }}>
+            Moving to <strong>In Progress</strong> records what caused the refund and who is responsible for the loss. Both are required.
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>
+            What caused this refund?
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {PR_CAUSE_OPTIONS.map(o => (
+              <label key={o.id} style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
+                border: '1px solid ' + (cause === o.id ? '#0d9488' : 'var(--border)'),
+                borderRadius: 10, cursor: 'pointer', fontSize: 13, color: 'var(--text)',
+                background: cause === o.id ? '#f0fdfa' : 'var(--surface)',
+              }}>
+                <input
+                  type="radio"
+                  name="pr-cause"
+                  checked={cause === o.id}
+                  onChange={() => setCause(o.id)}
+                  style={{ accentColor: '#0d9488' }}
+                />
+                {o.label}
+              </label>
+            ))}
+          </div>
+          {cause === 'other' && (
+            <textarea
+              value={causeDetail}
+              onChange={e => setCauseDetail(e.target.value)}
+              rows={3}
+              placeholder="Specify what caused the refund…"
+              style={{
+                marginTop: 8, width: '100%', padding: '9px 12px', fontSize: 14, lineHeight: 1.45,
+                border: '1px solid var(--border)', borderRadius: 10, background: 'var(--surface)',
+                color: 'var(--text)', outline: 'none', fontFamily: 'inherit', resize: 'vertical',
+                boxSizing: 'border-box',
+              }}
+            />
+          )}
+        </div>
+
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6 }}>
+            Team member responsible for the loss
+          </div>
+          <PickerAssignee
+            value={responsible.email}
+            valueName={responsible.name}
+            onChange={(email, name) => setResponsible({ email, name })}
+            disabled={saving}
+          />
+        </div>
+
+        {error && (
+          <div style={{ padding: '8px 12px', background: '#fef2f2', color: '#991b1b', borderRadius: 8, fontSize: 12 }}>{error}</div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <button
+            onClick={onCancel}
+            disabled={saving}
+            style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)', fontSize: 13, fontWeight: 500, cursor: saving ? 'wait' : 'pointer' }}
+          >Cancel</button>
+          <button
+            onClick={onSubmit}
+            disabled={saving}
+            style={{ padding: '8px 18px', borderRadius: 10, border: 'none', background: saving ? '#9e9e9e' : '#0d9488', color: 'white', fontSize: 13, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer' }}
+          >{saving ? 'Saving…' : 'Record & move to In Progress'}</button>
+        </div>
+      </div>
     </div>
   );
 }

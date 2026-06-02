@@ -16,7 +16,7 @@
 
 import { query, withTransaction } from './db';
 
-export const HR_HUB_SEED_VERSION = 2;
+export const HR_HUB_SEED_VERSION = 3;
 
 // Per-version deltas — applied additively on each version bump so live
 // envs pick up new dropdown options without clobbering admin edits.
@@ -164,6 +164,32 @@ const FLOWS = {
         'Project Management (MHR)',
       ],
     },
+    auto_assign: [],
+  },
+
+  // Payment Refund (2026-06-02, Laura Llopis request) — a distinct
+  // top-level flow for client payment refunds. Intake captures the
+  // contract + client + both amounts + reason; the reason reuses the
+  // canonical `summary` field id so it maps straight to the NOT NULL
+  // summary column with no extra plumbing. The structured money/link
+  // fields use the new `url` and `currency` field kinds (rendered by
+  // CreateHrHubRequestModal's FieldInput) and persist to dedicated pr_*
+  // columns. The root-cause + responsible-member assessment is captured
+  // at the New -> In Progress transition in HrHubDetailPanel (not at
+  // intake), so it has no field entry here.
+  payment_refund: {
+    label: 'Payment Refund',
+    description: 'Log a client payment refund — contract, client, amounts, and reason; cause is assessed on triage.',
+    fields: [
+      { id: 'client_name',    label: 'Client Name',             kind: 'text',        required: true },
+      { id: 'contract_link',  label: 'Contract Link',           kind: 'url',         required: true },
+      { id: 'amount_usd',     label: 'Amount (USD)',            kind: 'currency',    required: true, symbol: '$' },
+      { id: 'amount_local',   label: 'Amount (Local Currency)', kind: 'currency',    required: true },
+      { id: 'local_currency', label: 'Local Currency Code',     kind: 'text',        required: true, placeholder: 'e.g. EUR' },
+      { id: 'summary',        label: 'Reason for the Refund',   kind: 'rich_text',   required: true },
+      { id: 'attachments',    label: 'Attachments',             kind: 'attachments', required: false },
+    ],
+    dropdowns: {},
     auto_assign: [],
   },
 
