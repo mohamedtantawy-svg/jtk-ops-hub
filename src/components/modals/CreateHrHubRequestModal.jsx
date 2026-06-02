@@ -142,14 +142,21 @@ function FieldInput({ field, settings, value, onChange, autofocus }) {
       <div style={{ marginBottom: 16 }}>
         {labelEl}
         {isMulti ? (
-          <textarea
-            ref={ref}
-            value={value || ''}
-            onChange={e => onChange(e.target.value)}
-            rows={field.id === 'summary' || field.id === 'idealSolution' ? 5 : 3}
-            style={{ ...inputStyle, resize: 'vertical', minHeight: 90 }}
-            placeholder={`Add the ${field.label.toLowerCase()}…`}
-          />
+          <>
+            <textarea
+              ref={ref}
+              value={value || ''}
+              onChange={e => onChange(e.target.value)}
+              rows={field.id === 'summary' || field.id === 'idealSolution' ? 5 : 3}
+              style={{ ...inputStyle, resize: 'vertical', minHeight: 90 }}
+              placeholder={`Add the ${field.label.toLowerCase()}…`}
+            />
+            {/* H11: lightweight character counter — the multiline fields had
+                no length affordance at all. */}
+            <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text-muted)', textAlign: 'right' }}>
+              {(value || '').length.toLocaleString()} characters
+            </div>
+          </>
         ) : (
           <input
             ref={ref}
@@ -221,6 +228,11 @@ function FieldInput({ field, settings, value, onChange, autofocus }) {
   // a plain string. type=url gives mobile keyboards the right layout; the
   // server re-validates the http(s) scheme.
   if (field.kind === 'url') {
+    // H12: inline validity feedback. The native type=url only surfaces an
+    // error on form submit; show a red border + hint as soon as the user has
+    // typed something that isn't a full http(s) URL (empty isn't nagged).
+    const urlVal = (value || '').trim();
+    const urlInvalid = urlVal.length > 0 && !/^https?:\/\/\S+$/i.test(urlVal);
     return (
       <div style={{ marginBottom: 16 }}>
         {labelEl}
@@ -229,10 +241,16 @@ function FieldInput({ field, settings, value, onChange, autofocus }) {
           type="url"
           value={value || ''}
           onChange={e => onChange(e.target.value)}
-          style={inputStyle}
+          style={{ ...inputStyle, borderColor: urlInvalid ? '#d42d35' : 'var(--border)' }}
           placeholder={field.placeholder || 'https://…'}
           inputMode="url"
+          aria-invalid={urlInvalid}
         />
+        {urlInvalid && (
+          <div style={{ marginTop: 4, fontSize: 11, color: '#d42d35' }}>
+            Enter a full URL starting with http:// or https://
+          </div>
+        )}
       </div>
     );
   }
@@ -935,45 +953,38 @@ export default function CreateHrHubRequestModal({ initialFlow = null, prefill = 
           )}
         </div>
 
-        {/* Footer */}
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-          gap: 10, padding: '14px 20px', borderTop: '1px solid var(--border)',
-          background: 'var(--surface-2)', flexShrink: 0,
-        }}>
-          {flow && (
-            <>
-              <button
-                onClick={closeIfClean}
-                disabled={submitting}
-                style={{
-                  padding: '8px 16px', borderRadius: 10, border: '1px solid var(--border)',
-                  background: 'var(--surface)', color: 'var(--text)', fontSize: 13, fontWeight: 500,
-                  cursor: submitting ? 'wait' : 'pointer',
-                }}
-              >Cancel</button>
-              <button
-                onClick={submit}
-                disabled={submitting || !allRequiredSatisfied}
-                style={{
-                  padding: '8px 18px', borderRadius: 10, border: 'none',
-                  background: (submitting || !allRequiredSatisfied) ? '#9e9e9e' : '#1b1b1b',
-                  color: 'white', fontSize: 13, fontWeight: 600,
-                  cursor: (submitting || !allRequiredSatisfied) ? 'not-allowed' : 'pointer',
-                }}
-              >{submitting ? 'Submitting…' : 'Submit'}</button>
-            </>
-          )}
-          {!flow && (
+        {/* Footer — form screen only. The picker screen needs no footer: the
+            top-right ✕ closes it and clicking a flow tile advances, so the old
+            bottom "Close" duplicated the ✕ (H4). Submit uses the brand purple
+            (matches the "New request" CTA + reads on dark, unlike the old
+            near-black #1b1b1b) for a clearer primary (H14). */}
+        {flow && (
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+            gap: 10, padding: '14px 20px', borderTop: '1px solid var(--border)',
+            background: 'var(--surface-2)', flexShrink: 0,
+          }}>
             <button
               onClick={closeIfClean}
+              disabled={submitting}
               style={{
                 padding: '8px 16px', borderRadius: 10, border: '1px solid var(--border)',
-                background: 'var(--surface)', color: 'var(--text)', fontSize: 13, fontWeight: 500, cursor: 'pointer',
+                background: 'var(--surface)', color: 'var(--text)', fontSize: 13, fontWeight: 500,
+                cursor: submitting ? 'wait' : 'pointer',
               }}
-            >Close</button>
-          )}
-        </div>
+            >Cancel</button>
+            <button
+              onClick={submit}
+              disabled={submitting || !allRequiredSatisfied}
+              style={{
+                padding: '8px 18px', borderRadius: 10, border: 'none',
+                background: (submitting || !allRequiredSatisfied) ? '#9e9e9e' : '#7c3aed',
+                color: 'white', fontSize: 13, fontWeight: 600,
+                cursor: (submitting || !allRequiredSatisfied) ? 'not-allowed' : 'pointer',
+              }}
+            >{submitting ? 'Submitting…' : 'Submit'}</button>
+          </div>
+        )}
 
         {/* Discard-confirmation overlay — rendered inside the dialog so it
             traps the click; backdrop click here only dismisses the
