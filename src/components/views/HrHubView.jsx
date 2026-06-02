@@ -1479,5 +1479,9 @@ const statusFilterBtn = { display: 'flex', alignItems: 'center', gap: 10, paddin
 const filterBar = { display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 12, background: 'var(--surface)', border: '1px solid var(--border-light)', marginBottom: 10, flexWrap: 'wrap' };
 const filterPill = { display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 128, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)', fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all .12s' };
 const filterPillActive = { background: 'var(--surface-3)', color: 'var(--text)', borderColor: 'var(--text)' };
-const primaryBtn = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 16px', borderRadius: 10, border: 'none', background: '#7c3aed', color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer', boxShadow: '0 2px 8px rgba(124,58,237,0.25)' };
+// whiteSpace:nowrap + flexShrink:0 so "New request" never wraps to two lines
+// and isn't squeezed by a long hero title at narrow widths (live-test B3/Q26 —
+// it broke to "New / request" at 760px). The hero's title block carries
+// minWidth:0, so it ellipsizes/shrinks instead.
+const primaryBtn = { display: 'inline-flex', alignItems: 'center', gap: 6, padding: '9px 16px', borderRadius: 10, border: 'none', background: '#7c3aed', color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0, boxShadow: '0 2px 8px rgba(124,58,237,0.25)' };
 const iconBtn = { width: 32, height: 32, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
