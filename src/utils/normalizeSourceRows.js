@@ -1044,24 +1044,23 @@ export function normalizeImmigrationTasks(items = []) {
 // Maps a Deel mobility CASE → the row backing the bespoke ImmigrationCasesTable
 // (exact columns per Mohamed's 2026-06-03 screenshot).
 //
-// ⚠️ BEST-EFFORT FIELD MAP — the case-level fields below were NOT in the
-// truncated /admin/mobility/cases sample this was built from, so they use the
-// field names from the /admin/mobility/actions caseData shape + likely
-// alternates, each with a safe fallback (empty / "No vendor"). If the live
-// payload nests them differently, correct the path in THIS ONE block —
-// nothing downstream changes. The process / action / SLA / case-team columns
-// ARE derived from the confirmed part of the payload.
+// Field map CONFIRMED against a real /admin/mobility/cases payload (DevTools
+// capture 2026-06-03). Confirmed paths: applicantName / applicant.name,
+// organization.name, country, type.friendlyName + type.workType, the active
+// process (processes[].isActive) → type.friendlyName + lastStatus.status.
+// friendlyName, that process's actions[] (dueDate / isSLABreached / userType)
+// for the SLA + action-required columns, caseTeam[], tags[],
+// expectedCompletionDate, caseDates[] (Next case date) and updatedAt. A
+// case-level `vendor` and `expiry` date are NOT in the payload — their
+// accessors keep safe fallbacks in case other case types carry them.
 const _imCaseField = {
-  applicantName: (c) => c?.applicant?.name || c?.worker?.name || c?.applicantName || '',
+  applicantName: (c) => c?.applicantName || c?.applicant?.name || c?.worker?.name || '',
   organization:  (c) => c?.organization?.name || c?.client?.name || c?.organizationName || '',
   country:       (c) => c?.country || c?.caseCountry || c?.applicant?.country || '',
   vendor:        (c) => c?.vendor?.name || c?.vendorName || (typeof c?.vendor === 'string' ? c.vendor : '') || '',
   tags:          (c) => (Array.isArray(c?.tags) ? c.tags.map(t => (typeof t === 'string' ? t : (t?.name || t?.label || ''))).filter(Boolean) : []),
-  estCompletion: (c) => c?.estimatedCompletionDate || c?.estCompletionDate || c?.expectedCompletionDate || '',
+  estCompletion: (c) => c?.expectedCompletionDate || c?.estimatedCompletionDate || c?.estCompletionDate || '',
   expiry:        (c) => c?.expiryDate || c?.expiresAt || c?.expirationDate || '',
-  // "Next case date" in the admin table reads e.g. "Case start / Due today" —
-  // field unconfirmed; fall back to the active step's due date. FLAGGED.
-  nextCaseDate:  (c, proc) => c?.nextCaseDate || c?.nextActionDate || proc?.lastStatus?.dueDate || '',
   updatedAt:     (c) => c?.updatedAt || c?.lastUpdatedAt || '',
 };
 
@@ -1119,16 +1118,18 @@ export function normalizeImmigrationCases(items = []) {
       return `Due in ${days} days`;
     })();
 
-    // SLA from the active process step (dueDate + slaDays) — the same model
-    // the "Process step SLA" column shows. Emit slaRemaining + slaWindowMs so
-    // the Queue's shared rowSlaSeverity / tallyDeelSla treat cases exactly
-    // like every other Deel source (header pills agree with the table — §1.9).
-    // An action-level isSLABreached also forces a breach.
-    const stepDueIso = proc?.lastStatus?.dueDate || null;
-    const stepSlaDays = Number(proc?.lastStatus?.slaDays);
-    const slaWindowMs = (Number.isFinite(stepSlaDays) && stepSlaDays > 0 ? stepSlaDays : 2) * 86400000;
-    const stepDueMs = stepDueIso ? Date.parse(stepDueIso) : NaN;
-    const slaRemaining = Number.isFinite(stepDueMs) ? Math.round((stepDueMs - now) / 1000) : null;
+    // SLA = the soonest actionable action's due date. The cases payload carries
+    // the due date on the ACTIONS (proc.actions[].dueDate), NOT on lastStatus —
+    // so derive from soonestDueMs (computed above), which is also what the
+    // "Process step SLA" column renders. Emit slaRemaining + slaWindowMs so the
+    // Queue's shared rowSlaSeverity / tallyDeelSla treat cases like every other
+    // Deel source (header pills agree with the table — §1.9). An action-level
+    // isSLABreached also forces a breach. No per-action SLA window is exposed,
+    // so the at-risk band uses a flat 2-day window.
+    const stepDueMs = soonestDueMs;
+    const stepDueIso = stepDueMs != null ? new Date(stepDueMs).toISOString() : null;
+    const slaWindowMs = 2 * 86400000;
+    const slaRemaining = stepDueMs != null ? Math.round((stepDueMs - now) / 1000) : null;
     const slaBreachStatus = (anyBreached || (slaRemaining != null && slaRemaining <= 0)) ? 'SLA_BREACHED'
       : (slaRemaining != null && slaRemaining < slaWindowMs / 4 / 1000) ? 'SLA_AT_RISK'
       : 'ON_TRACK';
@@ -1137,6 +1138,35 @@ export function normalizeImmigrationCases(items = []) {
 
     const activeAgent = proc?.activeAgent || null;
     const assigneeEmail = activeAgent?.email ? String(activeAgent.email).toLowerCase() : '';
+
+    // col 8 — Case team. Prefer the active agent (current owner), then append
+    // "+N" for the other distinct members of the real caseTeam[] array.
+    const caseTeamNames = Array.isArray(c?.caseTeam)
+      ? c.caseTeam.map(m => (m?.name || '').trim()).filter(Boolean)
+      : [];
+    const caseTeamPrimary = (activeAgent?.name || '').trim() || caseTeamNames[0] || '';
+    const caseTeamExtra = caseTeamNames.filter(n => n !== caseTeamPrimary).length;
+    const caseTeamLabel = caseTeamPrimary
+      ? (caseTeamExtra > 0 ? `${caseTeamPrimary} +${caseTeamExtra}` : caseTeamPrimary)
+      : '';
+
+    // col 7 — Next case date. Pick the soonest UPCOMING entry in caseDates[];
+    // if none are in the future, fall back to the soonest overall. Each entry
+    // names itself ("Case start", etc.), used as the column label.
+    const caseDatesArr = Array.isArray(c?.caseDates) ? c.caseDates : [];
+    const nextCaseDateInfo = (() => {
+      let upcoming = null;
+      let earliest = null;
+      for (const d of caseDatesArr) {
+        const ms = d?.dueDate ? Date.parse(d.dueDate) : NaN;
+        if (!Number.isFinite(ms)) continue;
+        const entry = { ms, iso: d.dueDate, label: d.name || 'Case date' };
+        if (earliest == null || ms < earliest.ms) earliest = entry;
+        if (ms >= now && (upcoming == null || ms < upcoming.ms)) upcoming = entry;
+      }
+      const pick = upcoming || earliest;
+      return pick ? { iso: pick.iso, label: pick.label } : { iso: null, label: '' };
+    })();
 
     return {
       id: String(c?.id || ''),
@@ -1153,19 +1183,19 @@ export function normalizeImmigrationCases(items = []) {
       processName,
       processStep,
       processStepOwner: stepOwner,
-      // col 4 — Process step SLA
-      processStepSlaDate: proc?.lastStatus?.dueDate || null,
+      // col 4 — Process step SLA (soonest actionable action due date)
+      processStepSlaDate: stepDueIso,
       // col 5 — Action required
       actionOwners,
       actionDueLabel: dueLabel,
       hasActionRequired: actionableActions.length > 0,
       // col 6 — Vendor
       vendor: _imCaseField.vendor(c),
-      // col 7 — Next case date (label best-effort; see field map)
-      nextCaseDate: _imCaseField.nextCaseDate(c, proc) || null,
-      nextCaseDateLabel: 'Case start',
+      // col 7 — Next case date (soonest upcoming caseDates[] entry)
+      nextCaseDate: nextCaseDateInfo.iso,
+      nextCaseDateLabel: nextCaseDateInfo.label,
       // col 8 — Case team
-      caseTeam: activeAgent?.name || '',
+      caseTeam: caseTeamLabel,
       // col 9 — Tags
       tags: _imCaseField.tags(c),
       // col 10 — Est. completion date

@@ -2087,14 +2087,13 @@ export async function listWorkbenchTasks(params = {}) {
  * steady-state, but PRs that broaden the upstream filter can briefly
  * surface every actionable historical row).
  *
- * 2026-05-29 — upstream filter changed from `caseStatus[]=OPEN
- * &status[]=ONGOING` to `caseStatus[]=OPEN` only. The ONGOING constraint
- * silently dropped every PENDING / AWAITING_CLIENT / AWAITING_AGENT /
- * AWAITING_REVIEW / NOT_STARTED / READY / BLOCKED / ON_HOLD row — i.e.
- * the majority of Pablo's team's day-to-day work — so GIX TLs saw a
- * vanishingly small slice of the queue. The normaliser already marks
- * COMPLETED / ARCHIVED / CANCELLED as resolved so terminal states are
- * safely partitioned client-side.
+ * 2026-06-03 — request shape CONFIRMED against the admin UI via a DevTools
+ * capture: `caseStatus[]=OPEN&caseStatus[]=ON_HOLD&status[]=ONGOING`. Earlier
+ * guesses (dropping ON_HOLD, and adding a "Role: Deel" actor exclusion that
+ * filtered out APPLICANT/CLIENT) starved the queue — both are corrected
+ * below. `status[]=ONGOING` is exactly what the admin UI sends and every
+ * actionable task carries `status:"ONGOING"`; terminal COMPLETED / ARCHIVED /
+ * CANCELLED rows are partitioned client-side by the normaliser.
  *
  * Returns the raw `items` array plus diagnostic counters so the route
  * layer can surface them (per skill §3.6 — "Track raw status counts as
@@ -2103,14 +2102,18 @@ export async function listWorkbenchTasks(params = {}) {
  */
 export async function listImmigrationActions(params = {}) {
   // ── Immigration Tasks (GIX) — /admin/mobility/actions ──────────────────────
-  // Mirrors the admin.deel.network/mobility/tasks queue. Per Beata Sroda /
-  // Mohamed (2026-06-03) it must surface EVERY actionable Deel task, not just
-  // the first page the upstream table shows. Spec:
-  //   • caseStatus[]=OPEN   — open cases only
-  //   • status[]=ONGOING    — "Active" tasks only (need an action now)
-  //   • Role: Deel          — exclude tasks waiting on the Applicant/Client
-  //   • walk ALL pages       — miss nothing, however deep it sits
-  //   • GIX admin token only — never the HRX DEEL_ADMIN_TOKEN
+  // Mirrors the admin.deel.network/mobility "Tasks" queue 1:1. Exact request
+  // the admin UI issues (DevTools-confirmed 2026-06-03):
+  //   caseStatus[]=OPEN & caseStatus[]=ON_HOLD & status[]=ONGOING & take=40
+  //   • caseStatus[]=OPEN + ON_HOLD — tasks on open AND on-hold cases (most
+  //     actionable tasks sit on ON_HOLD cases; dropping ON_HOLD was the bug)
+  //   • status[]=ONGOING            — active tasks only (terminal states are
+  //     excluded upstream + partitioned by the normaliser)
+  //   • NO actor filter             — the admin UI shows every actor
+  //     (APPLICANT / CLIENT / AGENT); the old "Role: Deel" exclusion dropped
+  //     the majority of the queue, so it is removed
+  //   • walk ALL pages              — miss nothing, however deep it sits
+  //   • GIX admin token only        — never the HRX DEEL_ADMIN_TOKEN
   const adminTokenOverride = params.adminTokenOverride || null;
   // Hard requirement: immigration is GIX-only. Refuse to fall back to the
   // module HRX token (deelFetch would otherwise use DEEL_ADMIN_TOKEN for
@@ -2134,17 +2137,10 @@ export async function listImmigrationActions(params = {}) {
   // 100 is the proven-working size; the full walk still covers everything.
   const pageSize = Math.min(100, Math.max(1, params.take || 100));
 
-  // Role: Deel — drop tasks whose required actor is the applicant or client.
-  // Everything else (AGENT / any Deel-side / unknown actor) is kept so we
-  // never accidentally hide a Deel task. Filtered here because the upstream
-  // request exposes no role parameter.
-  const NON_DEEL_ACTORS = new Set(['APPLICANT', 'CLIENT']);
-
   const all = [];
   const seenIds = new Set();
   const upstreamStatusCounts = {};   // raw `t.status` tally (debug, §3.6)
-  const upstreamActorCounts = {};    // raw `t.actor` tally — audits the role filter
-  let excludedNonDeel = 0;
+  const upstreamActorCounts = {};    // raw `t.actor` tally (actor distribution, §3.6)
   let scanned = 0;
   let skip = 0;
   let upstreamTotal = null;
@@ -2158,6 +2154,7 @@ export async function listImmigrationActions(params = {}) {
     pages++;
     const qs = new URLSearchParams();
     qs.append('caseStatus[]', 'OPEN');
+    qs.append('caseStatus[]', 'ON_HOLD');
     qs.append('status[]', 'ONGOING');
     qs.set('take', String(pageSize));
     if (skip > 0) qs.set('skip', String(skip));
@@ -2180,7 +2177,6 @@ export async function listImmigrationActions(params = {}) {
       if (id && seenIds.has(id)) continue;
       if (id) seenIds.add(id);
       newThisPage++;
-      if (NON_DEEL_ACTORS.has(actor)) { excludedNonDeel++; continue; }
       all.push(t);
     }
 
@@ -2199,7 +2195,6 @@ export async function listImmigrationActions(params = {}) {
     total: all.length,
     upstreamStatusCounts,
     upstreamActorCounts,
-    excludedNonDeel,
     upstreamTotal,
     upstreamPages: pages,
     upstreamScanned: scanned,
@@ -2226,12 +2221,12 @@ export async function listImmigrationCases(params = {}) {
   }
   const fetchOpts = { adminTokenOverride };
 
-  // Page-size hint. /admin/mobility/cases is an offset endpoint (skip/take —
-  // the admin UI pages at 20). We request a bigger page to cut round-trips,
-  // but never ASSUME the size is honoured: the walk ends on an empty page or
-  // a page with no new ids, so a smaller server cap can neither truncate nor
-  // loop. Backstopped by the route's build timeout + warming cache.
-  const pageSize = Math.min(100, Math.max(1, params.take || 100));
+  // Page-size hint. /admin/mobility/cases caps `take` LOWER than /actions:
+  // the admin UI pages cases at 20 (vs 40 for actions). take=100 returned
+  // HTTP 400 on every page → the fetch threw → 3-strike failure → the queue
+  // showed 0 cases (the live bug, DevTools-confirmed 2026-06-03). Match the
+  // admin UI's proven-safe 20; the full-page walk still pulls every case.
+  const pageSize = Math.min(20, Math.max(1, params.take || 20));
 
   const all = [];
   const seenIds = new Set();

@@ -74,7 +74,9 @@ export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url);
     const bustCache = searchParams.get('bust') === '1' || searchParams.has('_t');
-    const take = parseInt(searchParams.get('take') || '100', 10);
+    // /admin/mobility/cases caps `take` at 20 (the admin UI's page size) —
+    // take=100 → HTTP 400 → 0 cases. Default to 20; the fetcher walks all pages.
+    const take = parseInt(searchParams.get('take') || '20', 10);
 
     // Dept-namespaced cache key so HRX's snapshot (none, in practice) can
     // never leak to a GIX caller and vice versa.

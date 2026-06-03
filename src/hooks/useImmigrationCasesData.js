@@ -48,8 +48,10 @@ export function useImmigrationCasesData(enabled = true, userEmail = null) {
     const run = (async () => {
       try {
         // take = upstream page size for the full walk (the route paginates
-        // /admin/mobility/cases through every page); 100 = fewer round-trips.
-        const res = await fetchDeelImmigrationCases({ take: 100, bustCache: force });
+        // /admin/mobility/cases through every page). 20 = the admin UI's page
+        // size; /cases 400s on take=100 (capped lower than /actions), which
+        // was the "0 cases" bug. The route also clamps to 20 defensively.
+        const res = await fetchDeelImmigrationCases({ take: 20, bustCache: force });
         const fetched = res?.items || [];
         const now = Date.now();
         // Warming-payload short-circuit — don't blow away cached rows.
