@@ -7,6 +7,7 @@ import { useCurrentDept } from '../../hooks/useCurrentDept';
 import { renderRichText } from '../../utils/renderRichText';
 import Avatar from '../ui/Avatar';
 import AnnouncementMedia from '../ui/AnnouncementMedia';
+import AnnouncementPoll from '../ui/AnnouncementPoll';
 import EmptyState from '../ui/EmptyState';
 import CommentReactions from '../ui/CommentReactions';
 import ComposeModal from '../modals/ComposeModal';
@@ -84,7 +85,7 @@ function formatFriendlyDate(iso) {
 // and `*italic*` for F32). All call sites that already use renderRichText
 // pick up the formatting automatically.
 
-const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComms, addToast, tasks, apiAcknowledge, apiCreate, apiSend, apiUpdate, apiArchive, apiRemove, apiTogglePin, openCompose, onComposeOpened, apiUnarchive, apiComments, apiSetComments, apiLoadComments, apiAddComment, apiDeleteComment, apiLinks, apiLoadLinks, apiLinkAnnouncement, apiUnlinkAnnouncement, apiReact }) => {
+const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComms, addToast, tasks, apiAcknowledge, apiCreate, apiSend, apiUpdate, apiArchive, apiRemove, apiTogglePin, openCompose, onComposeOpened, apiUnarchive, apiComments, apiSetComments, apiLoadComments, apiAddComment, apiDeleteComment, apiLinks, apiLoadLinks, apiLinkAnnouncement, apiUnlinkAnnouncement, apiReact, apiVote }) => {
   const perms = useContext(PermissionsContext);
   const settings = useContext(SettingsContext);
   // canManageAnnouncements is true for admins / RMs (via accessControl powers)
@@ -450,9 +451,9 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
   };
 
   const handleSend=async (payload)=>{
-    const {type,title,body,target,priority,status,isPopup,imageUrl,link,soundKey,scheduledFor} = payload;
+    const {type,title,body,target,priority,status,isPopup,imageUrl,link,soundKey,scheduledFor,poll} = payload;
     const now=new Date().toISOString().slice(0,10);
-    const draft={type,title,body,target,priority,isPopup:isPopup||false,imageUrl:imageUrl||'',link:link||'',soundKey:soundKey||'chime',scheduledFor:scheduledFor||null,author:{id:user.id,name:user.name}};
+    const draft={type,title,body,target,priority,isPopup:isPopup||false,imageUrl:imageUrl||'',link:link||'',soundKey:soundKey||'chime',scheduledFor:scheduledFor||null,poll:poll||null,author:{id:user.id,name:user.name}};
     try {
       if(editDraft){
         if(apiUpdate) await apiUpdate(editDraft.id, draft);
@@ -1141,6 +1142,7 @@ const AnnouncementsView = ({ user, serverUserId, serverUserEmail, comms, setComm
           isSaved={isSaved(detailComm.id)}
           onToggleSave={() => toggleSave(detailComm.id)}
           onCopyLink={() => copyShareLink(detailComm.id)}
+          onVote={apiVote}
           onReact={(commId, emoji) => {
             if (apiReact) { apiReact(commId, emoji); }
             else {
@@ -1342,7 +1344,7 @@ function WalkthroughOverlay({ comm, remaining, onAcknowledge, onSkip, onExit, on
 }
 
 // ── Detail overlay — view single announcement ──
-function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setComms, apiComments, apiSetComments, apiLoadComments, apiAddComment, apiDeleteComment, apiLinks, apiLoadLinks, apiLinkAnnouncement, apiUnlinkAnnouncement, setDetailId, onReact, highlightCommentId, isSaved, onToggleSave, onCopyLink }) {
+function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setComms, apiComments, apiSetComments, apiLoadComments, apiAddComment, apiDeleteComment, apiLinks, apiLoadLinks, apiLinkAnnouncement, apiUnlinkAnnouncement, setDetailId, onReact, onVote, highlightCommentId, isSaved, onToggleSave, onCopyLink }) {
   const t = COMMS_TYPES[comm.type] || COMMS_TYPES.update;
   // Email-only ack check to match the rest of the UI. We do NOT OR in an
   // id-axis fallback here — MEMBERS.id collides with DB members.id values,
@@ -1698,6 +1700,15 @@ function DetailOverlay({ comm, user, isLA, onAcknowledge, onClose, comms, setCom
                   : <div key={i} style={{ marginBottom: 3 }}>{renderRichText(line, { color: t.color, keyPrefix: `db-${i}` })}</div>
             ))}
           </div>
+          )}
+          {comm.poll && (
+            <AnnouncementPoll
+              poll={comm.poll}
+              tallies={comm.pollTallies}
+              myVote={comm.pollMyVote}
+              totalVoters={comm.pollTotalVoters}
+              onVote={onVote ? (ids) => onVote(comm.id, ids) : undefined}
+            />
           )}
           {comm.link && (
             <a href={comm.link} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: t.color, fontWeight: 600, textDecoration: 'none', background: t.bg, border: `1px solid ${t.border}`, borderRadius: 128, padding: '6px 14px', marginTop: 12 }}>

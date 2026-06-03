@@ -22,6 +22,7 @@ import {
   linkAnnouncement as apiLinkAnnouncement,
   unlinkAnnouncement as apiUnlinkAnnouncement,
   reactToAnnouncement as apiReactToAnnouncement,
+  voteOnAnnouncement as apiVoteOnAnnouncement,
 } from '../services/announcementsApi';
 import { shortRandomId } from '../utils/shortRandomId';
 
@@ -63,6 +64,12 @@ function normalizeApiAnnouncement(a) {
     isPinned: a.isPinned || a.pinned || false,
     soundKey: a.soundKey || 'chime',
     reactions: a.reactions || {},
+    // Poll (null on most rows). tallies/myVote/totalVoters are aggregate-only
+    // — we never carry WHO voted, so polls are privacy-safe by default.
+    poll: a.poll || null,
+    pollTallies: a.pollTallies || {},
+    pollMyVote: Array.isArray(a.pollMyVote) ? a.pollMyVote : [],
+    pollTotalVoters: Number(a.pollTotalVoters) || 0,
     comments: a.comments || [],
     linkedIds: a.linkedIds || [],
   };
@@ -616,6 +623,45 @@ export function useAnnouncements({ toastRef } = {}) {
     }));
   }, [isOnline]);
 
+  // ── Vote on a poll ─────────────────────────────────────────────────────────
+  // Optimistic: recompute the announcement's tallies + myVote + voter total
+  // from the delta (drop the caller's prior picks, add the new ones), then POST
+  // and reconcile with the server's authoritative aggregate. `optionIds` is the
+  // FULL desired selection ([] retracts). Mirrors acknowledge/react. The server
+  // call never re-throws here — on failure the 15 s list poll restores truth.
+  const vote = useCallback(async (id, optionIds) => {
+    const ids = Array.isArray(optionIds) ? [...new Set(optionIds.map(String))] : [];
+    setComms(prev => prev.map(c => {
+      if (c.id !== id || !c.poll) return c;
+      const prevMine = Array.isArray(c.pollMyVote) ? c.pollMyVote : [];
+      const tallies = { ...(c.pollTallies || {}) };
+      for (const o of prevMine) tallies[o] = Math.max(0, (tallies[o] || 0) - 1);
+      for (const o of ids) tallies[o] = (tallies[o] || 0) + 1;
+      let voters = Number(c.pollTotalVoters) || 0;
+      const wasVoter = prevMine.length > 0;
+      const isVoter = ids.length > 0;
+      if (wasVoter && !isVoter) voters = Math.max(0, voters - 1);
+      else if (!wasVoter && isVoter) voters += 1;
+      return { ...c, pollMyVote: ids, pollTallies: tallies, pollTotalVoters: voters };
+    }));
+    try {
+      const res = await apiVoteOnAnnouncement(id, ids);
+      if (res && res.tallies) {
+        setComms(prev => prev.map(c => c.id === id
+          ? {
+              ...c,
+              pollTallies: res.tallies || {},
+              pollMyVote: Array.isArray(res.myVote) ? res.myVote : [],
+              pollTotalVoters: Number(res.totalVoters) || 0,
+            }
+          : c));
+      }
+    } catch (e) {
+      console.warn('[announcements] vote failed:', e.message);
+      notifyError('Vote failed', e?.message || 'Could not record your vote.');
+    }
+  }, [notifyError]);
+
   return {
     comms,
     setComms,
@@ -647,5 +693,6 @@ export function useAnnouncements({ toastRef } = {}) {
     linkAnnouncement: linkAnnouncementFn,
     unlinkAnnouncement: unlinkAnnouncementFn,
     react,
+    vote,
   };
 }

@@ -2204,6 +2204,26 @@ CREATE INDEX IF NOT EXISTS idx_tmo_org_node ON team_member_overrides(org_node_id
 ALTER TABLE announcements          ADD COLUMN IF NOT EXISTS org_node_id UUID REFERENCES org_nodes(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_announcements_org_node           ON announcements(org_node_id);
 
+-- Polls (2026-06-03, Laura Llopis request "Polls in Ops Hub") -- an optional
+-- structured poll attached to any announcement. The poll JSONB holds the
+-- options + settings (options array of id/label, allowMultiple, closesAt);
+-- votes live in their own table (mirrors announcement_acks) so tallying is a
+-- cheap GROUP BY and one-row-per option+user is enforced by the PK. Polls
+-- inherit the announcement dept isolation (org_node_id) + audience -- the
+-- feature is available to EVERY department, scoped exactly like the
+-- announcement it rides on (the 2026-06-03 "global feature for all
+-- departments" decision).
+ALTER TABLE announcements          ADD COLUMN IF NOT EXISTS poll JSONB;
+CREATE TABLE IF NOT EXISTS announcement_poll_votes (
+  announcement_id UUID REFERENCES announcements(id) ON DELETE CASCADE,
+  option_id       TEXT NOT NULL,
+  user_email      VARCHAR(255) NOT NULL,
+  user_id         INTEGER,
+  voted_at        TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (announcement_id, option_id, user_email)
+);
+CREATE INDEX IF NOT EXISTS idx_ann_poll_votes_ann ON announcement_poll_votes(announcement_id);
+
 ALTER TABLE hr_hub_request         ADD COLUMN IF NOT EXISTS org_node_id UUID REFERENCES org_nodes(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_hr_hub_request_org_node          ON hr_hub_request(org_node_id);
 

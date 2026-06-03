@@ -174,6 +174,7 @@ export async function GET(req) {
     const dataSql = `SELECT id, type, title, body, target, target_group_id,
                             priority, is_popup, image_url, link,
                             status, author_id, pinned, sound_key, sent_at, scheduled_for,
+                            poll,
                             created_at, updated_at
                        FROM announcements${whereSql}
                       ORDER BY pinned DESC, COALESCE(sent_at, created_at) DESC
@@ -212,6 +213,43 @@ export async function GET(req) {
       }
     }
 
+    // Poll vote tallies — only for the announcements on this page that carry a
+    // poll. Two cheap indexed GROUP BYs: per-option counts (+ whether THIS
+    // caller picked each option) and the distinct voter total (a multi-select
+    // voter is one person across several options, so we can't just sum counts).
+    const pollIds = filtered.filter(r => r.poll).map(r => r.id);
+    const pollTallyMap = {};   // announcementId → { optionId: count }
+    const pollMineMap = {};     // announcementId → [optionId] the caller chose
+    const pollVoterMap = {};    // announcementId → distinct voter count
+    if (pollIds.length > 0) {
+      const [perOpt, voters] = await Promise.all([
+        query(
+          `SELECT announcement_id, option_id, COUNT(*)::int AS cnt,
+                  BOOL_OR(LOWER(user_email) = $2) AS mine
+             FROM announcement_poll_votes
+            WHERE announcement_id = ANY($1::uuid[])
+            GROUP BY announcement_id, option_id`,
+          [pollIds, callerEmailLc],
+        ),
+        query(
+          `SELECT announcement_id, COUNT(DISTINCT LOWER(user_email))::int AS voters
+             FROM announcement_poll_votes
+            WHERE announcement_id = ANY($1::uuid[])
+            GROUP BY announcement_id`,
+          [pollIds],
+        ),
+      ]);
+      for (const row of perOpt.rows) {
+        if (!pollTallyMap[row.announcement_id]) pollTallyMap[row.announcement_id] = {};
+        pollTallyMap[row.announcement_id][row.option_id] = row.cnt;
+        if (row.mine) {
+          if (!pollMineMap[row.announcement_id]) pollMineMap[row.announcement_id] = [];
+          pollMineMap[row.announcement_id].push(row.option_id);
+        }
+      }
+      for (const row of voters.rows) pollVoterMap[row.announcement_id] = row.voters;
+    }
+
     // Hydrate author name + email by looking up members for every distinct
      // author_id in this page. Without this the frontend renders "—" in the
      // AUTHOR column, and — more importantly — the ack-button visibility
@@ -245,6 +283,12 @@ export async function GET(req) {
       soundKey: r.sound_key || 'chime',
       sentAt: r.sent_at,
       scheduledFor: r.scheduled_for,
+      // Poll (null on most rows). tallies/myVote/totalVoters are aggregate-
+      // only — we never expose WHO voted, so polls are privacy-safe by default.
+      poll: r.poll || null,
+      pollTallies: pollTallyMap[r.id] || {},
+      pollMyVote: pollMineMap[r.id] || [],
+      pollTotalVoters: pollVoterMap[r.id] || 0,
       createdAt: r.created_at, updatedAt: r.updated_at,
     }));
 
@@ -324,6 +368,7 @@ export async function POST(req) {
         image_url: payload.imageUrl,
         link: payload.link,
         sound_key: payload.soundKey,
+        poll: payload.poll,
         requested_by_id: user.id || null,
       },
       {
@@ -344,6 +389,10 @@ export async function POST(req) {
       soundKey: published.sound_key || 'chime',
       sentAt: published.sent_at,
       scheduledFor: published.scheduled_for,
+      poll: published.poll || null,
+      pollTallies: {},
+      pollMyVote: [],
+      pollTotalVoters: 0,
       createdAt: published.created_at,
     }, { status: 201 });
   } catch (err) {

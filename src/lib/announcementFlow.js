@@ -39,6 +39,38 @@ export async function recordAudit(requestId, user, action, meta = {}) {
   }
 }
 
+// Poll cap — keeps a single announcement's poll bounded (UI + payload size).
+const MAX_POLL_OPTIONS = 10;
+
+/**
+ * Sanitize an optional poll attached to an announcement. Returns a normalized
+ * { options:[{id,label}], allowMultiple, closesAt } or null when no poll is
+ * present. THROWS (→ 400 at the route) when a poll is present but malformed
+ * (e.g. < 2 real options) so a half-built poll can't publish. Option ids are
+ * assigned server-side by position (o0, o1, …) and are stable for the life of
+ * the announcement (polls aren't edited post-publish in v1), so vote rows in
+ * announcement_poll_votes always resolve to a real option.
+ */
+export function sanitizePoll(raw) {
+  if (raw == null) return null;
+  if (typeof raw !== 'object') throw new Error('Invalid poll');
+  const rawOptions = Array.isArray(raw.options) ? raw.options : [];
+  const options = [];
+  for (const o of rawOptions) {
+    if (options.length >= MAX_POLL_OPTIONS) break;
+    const label = (typeof o === 'string' ? o : (o?.label ?? '')).toString().trim();
+    if (!label) continue;
+    options.push({ id: `o${options.length}`, label: label.slice(0, 200) });
+  }
+  if (options.length < 2) throw new Error('A poll needs at least 2 non-empty options');
+  let closesAt = null;
+  if (raw.closesAt) {
+    const d = new Date(raw.closesAt);
+    if (!Number.isNaN(d.getTime())) closesAt = d.toISOString();
+  }
+  return { options, allowMultiple: Boolean(raw.allowMultiple), closesAt };
+}
+
 /**
  * Normalize a raw payload from a client. Returns a sanitized object or
  * throws an Error with a human-readable message.
@@ -89,6 +121,8 @@ export function normalizePayload(raw) {
     imageUrl: raw?.imageUrl ? String(raw.imageUrl).slice(0, 15 * 1024 * 1024) : null,
     link: raw?.link ? String(raw.link).slice(0, 2000) : null,
     soundKey: (raw?.soundKey || 'chime').toString().slice(0, 32),
+    // Optional poll. null when absent; throws on malformed (< 2 options).
+    poll: sanitizePoll(raw?.poll),
   };
 }
 
@@ -154,8 +188,8 @@ export async function publishFromRequest(request, options = {}) {
   const { rows } = await query(
     `INSERT INTO announcements
        (type, title, body, target, target_group_id, priority, is_popup, image_url, link,
-        author_id, sound_key, status, sent_at, scheduled_for, org_node_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+        author_id, sound_key, status, sent_at, scheduled_for, org_node_id, poll)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb)
      RETURNING *`,
     [
       request.type || 'announce',
@@ -177,6 +211,10 @@ export async function publishFromRequest(request, options = {}) {
       sent_at,
       scheduled_for,
       orgNodeId,
+      // Optional poll JSONB (null on most announcements). Both the direct
+      // publish + approval-publish paths flow through here, so a poll
+      // attached on either path is persisted identically.
+      request.poll ? JSON.stringify(request.poll) : null,
     ]
   );
   return rows[0];

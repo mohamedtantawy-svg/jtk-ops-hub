@@ -207,15 +207,36 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
   const [scheduledFor,setScheduledFor]=useState(
     draft?.scheduledFor ? toDatetimeLocal(draft.scheduledFor) : defaultScheduledFor()
   );
+  // ── Poll (2026-06-03, Laura Llopis "Polls in Ops Hub") ─────────────────────
+  // An optional poll rides the announcement; the title above is its question.
+  // Offered only on the direct-send path (canBypassQueue) for v1 — the
+  // approval-queue request flow doesn't carry a poll yet, so we hide the editor
+  // for queue-only authors rather than silently drop their poll on submit.
+  const [pollEnabled,setPollEnabled]=useState(!!draft?.poll);
+  const [pollOptions,setPollOptions]=useState(
+    Array.isArray(draft?.poll?.options) && draft.poll.options.length >= 2
+      ? draft.poll.options.map(o => (typeof o === 'string' ? o : (o?.label || '')))
+      : ['', '']
+  );
+  const [pollMultiple,setPollMultiple]=useState(!!draft?.poll?.allowMultiple);
+  const [pollClosesEnabled,setPollClosesEnabled]=useState(!!draft?.poll?.closesAt);
+  const [pollClosesAt,setPollClosesAt]=useState(
+    draft?.poll?.closesAt ? toDatetimeLocal(new Date(draft.poll.closesAt)) : defaultScheduledFor()
+  );
   const approver = isApprover(currentUser?.email);
   // `canBypassQueue` historically also gated the urgent-override UI
   // (since removed 2026-05-14). It now only controls whether the
   // composer offers a direct-send path vs queueing for approval — the
   // approval workflow itself is unchanged.
   const canBypassQueue = approver;
+  // Trimmed, non-empty poll option labels — drives both validation and the
+  // payload. A poll needs ≥ 2 real options before the announcement can publish.
+  const pollOptionLabels = pollOptions.map(o => o.trim()).filter(Boolean);
+  const pollValid = !pollEnabled || pollOptionLabels.length >= 2;
   const valid =
     title.trim().length > 0 &&
-    (body.trim().length > 0 || !!imageUrl);
+    (body.trim().length > 0 || !!imageUrl) &&
+    pollValid;
 
   const buildDraft = (status, extra = {}) => ({
     type, title, body,
@@ -226,6 +247,15 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
     priority, status,
     isPopup, imageUrl, link, soundKey,
     scheduledFor: scheduleLater ? new Date(scheduledFor).toISOString() : null,
+    // Optional poll. Server assigns stable option ids; we send labels only.
+    // null when disabled or under-specified so a half-built poll never ships.
+    poll: (pollEnabled && pollOptionLabels.length >= 2)
+      ? {
+          options: pollOptionLabels.map(label => ({ label })),
+          allowMultiple: pollMultiple,
+          closesAt: (pollClosesEnabled && pollClosesAt) ? new Date(pollClosesAt).toISOString() : null,
+        }
+      : null,
     ...extra,
   });
 
@@ -472,6 +502,67 @@ const ComposeModal = ({ onClose, onSend, draft, currentUser, onSubmitRequest }) 
               <input value={link} onChange={e=>setLink(e.target.value)} placeholder="https://slack.com/archives/..." style={{width:'100%',border:'1px solid var(--border)',borderRadius:8,padding:'9px 12px',fontSize:13,outline:'none',boxSizing:'border-box',fontFamily:'inherit',color:'var(--text)'}} />
             </div>
           </div>
+
+          {/* Poll (optional) — direct-send authors only for v1 (the approval
+              queue doesn't carry a poll yet, so we hide it for queue-only
+              authors rather than drop their poll silently on submit). */}
+          {canBypassQueue && (
+          <div style={{marginBottom:12}}>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:pollEnabled?8:0}}>
+              <div style={{fontSize:11,fontWeight:700,color:'var(--text-secondary)',letterSpacing:'.05em'}}>POLL <span style={{fontWeight:400,color:'var(--text-muted)'}}>(optional)</span></div>
+              <span style={{flex:1}} />
+              <label style={{display:'inline-flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:12,fontWeight:600,color:'var(--text-secondary)'}}>
+                <input type="checkbox" checked={pollEnabled} onChange={e=>setPollEnabled(e.target.checked)} />
+                Add a poll
+              </label>
+            </div>
+            {pollEnabled && (
+              <div style={{padding:12,border:'1px solid var(--border)',borderRadius:10,background:'var(--surface-2)'}}>
+                <div style={{fontSize:11,color:'var(--text-muted)',marginBottom:8}}>Recipients vote inline. The title above is the poll question.</div>
+                {pollOptions.map((opt,i)=>(
+                  <div key={i} style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
+                    <i className="bi-circle" style={{fontSize:12,color:'var(--text-muted)',flexShrink:0}} />
+                    <input
+                      value={opt}
+                      onChange={e=>setPollOptions(prev=>prev.map((o,idx)=>idx===i?e.target.value:o))}
+                      placeholder={`Option ${i+1}`}
+                      maxLength={200}
+                      style={{flex:1,minWidth:0,border:'1px solid var(--border)',borderRadius:8,padding:'7px 10px',fontSize:13,outline:'none',boxSizing:'border-box',fontFamily:'inherit',color:'var(--text)',background:'var(--surface)'}}
+                    />
+                    {pollOptions.length>2 && (
+                      <button type="button" onClick={()=>setPollOptions(prev=>prev.filter((_,idx)=>idx!==i))} aria-label={`Remove option ${i+1}`} title="Remove option" style={{background:'none',border:'none',cursor:'pointer',color:'#d42d35',fontSize:13,flexShrink:0,padding:4,lineHeight:1}}>
+                        <i className="bi-x-lg" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {pollOptions.length<10 && (
+                  <button type="button" onClick={()=>setPollOptions(prev=>[...prev,''])} style={{display:'inline-flex',alignItems:'center',gap:5,background:'none',border:'none',cursor:'pointer',color:'#6b3fa0',fontSize:12,fontWeight:600,padding:'2px 0'}}>
+                    <i className="bi-plus-lg" style={{fontSize:11}} /> Add option
+                  </button>
+                )}
+                <div style={{display:'flex',alignItems:'center',gap:16,marginTop:10,flexWrap:'wrap'}}>
+                  <label style={{display:'inline-flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:12,color:'var(--text-secondary)'}}>
+                    <input type="checkbox" checked={pollMultiple} onChange={e=>setPollMultiple(e.target.checked)} />
+                    Allow multiple answers
+                  </label>
+                  <label style={{display:'inline-flex',alignItems:'center',gap:6,cursor:'pointer',fontSize:12,color:'var(--text-secondary)'}}>
+                    <input type="checkbox" checked={pollClosesEnabled} onChange={e=>setPollClosesEnabled(e.target.checked)} />
+                    Set a close date
+                  </label>
+                  {pollClosesEnabled && (
+                    <input type="datetime-local" value={pollClosesAt} onChange={e=>setPollClosesAt(e.target.value)} style={{border:'1px solid var(--border)',borderRadius:8,padding:'6px 10px',fontSize:12,outline:'none',fontFamily:'inherit',color:'var(--text)',background:'var(--surface)'}} />
+                  )}
+                </div>
+                {!pollValid && (
+                  <div style={{fontSize:11,color:'#d97706',marginTop:8}}>
+                    <i className="bi-exclamation-triangle" style={{marginRight:4}} />Add at least 2 options to publish the poll.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          )}
 
           {/* Target + Priority */}
           <div style={{display:'flex',gap:12,marginBottom:12}}>

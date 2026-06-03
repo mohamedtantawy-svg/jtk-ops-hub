@@ -27,13 +27,15 @@ export async function fetchAnnouncementById(id) {
 export async function createAnnouncement(payload) {
   const {
     type, title, body, target, priority, isPopup, imageUrl, link, soundKey,
-    scheduledFor,
+    scheduledFor, poll,
   } = payload || {};
   return apiFetch('/announcements', {
     method: 'POST',
     body: JSON.stringify({
       type, title, body, target, priority, isPopup, imageUrl, link, soundKey,
       scheduledFor: scheduledFor || null,
+      // Optional poll ({ options, allowMultiple, closesAt }) — null on most.
+      poll: poll || null,
     }),
   });
 }
@@ -66,6 +68,21 @@ export async function acknowledgeAnnouncement(id) {
     return { ok: true, skipped: 'non-uuid-id', id };
   }
   return apiFetch(`/announcements/${id}/read`, { method: 'POST' });
+}
+
+// ── Vote on a poll ───────────────────────────────────────────────────────────
+// `optionIds` is the FULL desired selection — the server replaces the caller's
+// prior votes with it (one id for single-choice, several for multi, [] to
+// retract). Returns { ok, tallies, myVote, totalVoters }. Non-UUID ids no-op
+// (seed/demo rows) like acknowledgeAnnouncement.
+export async function voteOnAnnouncement(id, optionIds) {
+  if (!id || typeof id !== 'string' || !UUID_RE.test(id)) {
+    return { ok: true, skipped: 'non-uuid-id', id, tallies: {}, myVote: [], totalVoters: 0 };
+  }
+  return apiFetch(`/announcements/${id}/vote`, {
+    method: 'POST',
+    body: JSON.stringify({ optionIds: Array.isArray(optionIds) ? optionIds : [] }),
+  });
 }
 
 // ── Delete announcement ──────────────────────────────────────────────────────
