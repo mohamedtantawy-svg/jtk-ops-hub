@@ -2285,7 +2285,12 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
           onClose={() => setReassignModalTask(null)}
           onReassigned={() => {
             setReassignModalTask(null);
-            try { syncRefreshAll && syncRefreshAll(); } catch {}
+            // force=true so every source bypasses its CACHE_TTL throttle AND
+            // overwrites even when the reassigned row was the last one in this
+            // user's scope (server now legitimately returns empty). Without it
+            // the row stays painted until the next poll — the "reassigned but
+            // still on my side" bug. See useQueueUnifiedSync.refreshAll.
+            try { syncRefreshAll && syncRefreshAll(true); } catch {}
           }}
         />
       )}
@@ -2300,7 +2305,10 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
           onClose={() => setBulkReassignTasks(null)}
           onReassigned={() => {
             setBulkReassignTasks(null);
-            try { syncRefreshAll && syncRefreshAll(); } catch {}
+            // force=true — same reason as the single-row reassign above:
+            // bypass the per-source TTL throttle + overwrite empty results so
+            // every reassigned row leaves this user's view immediately.
+            try { syncRefreshAll && syncRefreshAll(true); } catch {}
           }}
         />
       )}

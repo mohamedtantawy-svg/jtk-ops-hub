@@ -379,16 +379,36 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
   // ── Refresh all sources ──────────────────────────────────────────────────
   // Each underlying hook de-dupes concurrent refresh() calls via an in-flight
   // Promise ref, so firing all seven here never double-fetches a source.
-  const refreshAll = useCallback(() => {
+  //
+  // `force` (default false) is forwarded to each per-source refresh. After a
+  // user-triggered MUTATION (e.g. a queue reassignment) callers MUST pass
+  // force=true so every Deel-source hook (a) bypasses its CACHE_TTL throttle —
+  // an un-forced refresh within the TTL window returns null and never
+  // refetches — AND (b) overwrites local items even when the server correctly
+  // returns an empty list. Without force, reassigning a row that was the last
+  // one in your scope leaves the stale row painted until the next background
+  // poll ("reassigned but I still see it on my side"). The per-source
+  // force-overwrite guard was added for the 2026-05-15 reassign bug but only
+  // ever reached the per-source refresh(true) path — never this aggregate,
+  // which is exactly what the reassign modal calls. queueSync (ZD/Jira) force-
+  // syncs internally regardless, so it takes no param here.
+  //
+  // STRICT === true: some call sites wire this as onClick={refreshAll} /
+  // onRefresh={refreshAll}, which would pass a React SyntheticEvent as the
+  // first arg. We only force on an explicit boolean true (the post-mutation
+  // sites), so a button-click event can never accidentally flip every source
+  // into a throttle-bypassing force-refetch.
+  const refreshAll = useCallback((force = false) => {
+    const doForce = force === true;
     try { queueSync?.refresh?.(); } catch {}
-    try { onboardingData.refresh(); } catch {}
-    try { pausedOnboardingData.refresh(); } catch {}
-    try { offboardingData.refresh(); } catch {}
-    try { changeRequestData.refresh(); } catch {}
-    try { workbenchData.refresh(); } catch {}
-    try { incentivePlansData.refresh(); } catch {}
-    try { immigrationTasksData.refresh(); } catch {}
-    try { immigrationCasesData.refresh(); } catch {}
+    try { onboardingData.refresh(doForce); } catch {}
+    try { pausedOnboardingData.refresh(doForce); } catch {}
+    try { offboardingData.refresh(doForce); } catch {}
+    try { changeRequestData.refresh(doForce); } catch {}
+    try { workbenchData.refresh(doForce); } catch {}
+    try { incentivePlansData.refresh(doForce); } catch {}
+    try { immigrationTasksData.refresh(doForce); } catch {}
+    try { immigrationCasesData.refresh(doForce); } catch {}
   }, [queueSync, onboardingData, pausedOnboardingData, offboardingData, changeRequestData, workbenchData, incentivePlansData, immigrationTasksData, immigrationCasesData]);
 
   return {
