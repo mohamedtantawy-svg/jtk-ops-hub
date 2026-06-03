@@ -100,6 +100,56 @@ function groupWeekendAdjacent(events) {
   return groups;
 }
 
+// Stable presentation shell for the wizard — full-page surface vs. centered
+// modal. MUST live at module scope. Previously this was `const Wrapper =
+// pageMode ? … : …` defined INSIDE CreateHandoverModal's render, so it got a
+// fresh function identity on every render and React remounted the ENTIRE
+// wizard body on each keystroke: the coverer-search input lost focus after a
+// single letter (the typed value survived in state but you couldn't keep
+// typing), the results dropdown closed, and each per-coverer
+// MultiCountryPicker reset its open/search state — Carolina Ferreira's
+// 2026-06-03 bug report. A stable component reconciles in place and preserves
+// focus + child state.
+function HandoverWizardShell({ pageMode, onClose, children }) {
+  if (pageMode) {
+    return (
+      <div
+        role="region"
+        aria-label="Create handover"
+        style={{
+          width: '100%',
+          minHeight: '100%',
+          background: 'var(--surface)',
+          display: 'flex', flexDirection: 'column',
+          fontFamily: 'inherit',
+        }}
+      >
+        {children}
+      </div>
+    );
+  }
+  return (
+    <>
+      <div role="presentation" onClick={onClose}
+        style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', zIndex: 60 }} />
+      <div role="dialog" aria-modal="true" aria-label="Create handover"
+        style={{
+          position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+          width: 'min(640px, 95vw)', maxHeight: '92vh',
+          background: 'var(--surface)',
+          borderRadius: 16,
+          boxShadow: '0 20px 60px rgba(15,23,42,0.20)',
+          display: 'flex', flexDirection: 'column',
+          zIndex: 61,
+          fontFamily: 'inherit',
+        }}
+      >
+        {children}
+      </div>
+    </>
+  );
+}
+
 // `pageMode=true` renders the wizard as a full in-page surface (no
 // backdrop, no fixed positioning) so the 5-step flow has the full
 // viewport height. The default modal mode is kept for callers that
@@ -414,45 +464,8 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
   // Outer wrappers differ between modal (fixed, backdrop, capped width)
   // and page mode (in-flow, fills the host container, no backdrop). The
   // header & body markup below is shared.
-  const Wrapper = pageMode
-    ? ({ children }) => (
-        <div
-          role="region"
-          aria-label="Create handover"
-          style={{
-            width: '100%',
-            minHeight: '100%',
-            background: 'var(--surface)',
-            display: 'flex', flexDirection: 'column',
-            fontFamily: 'inherit',
-          }}
-        >
-          {children}
-        </div>
-      )
-    : ({ children }) => (
-        <>
-          <div role="presentation" onClick={onClose}
-            style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', zIndex: 60 }} />
-          <div role="dialog" aria-modal="true" aria-label="Create handover"
-            style={{
-              position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-              width: 'min(640px, 95vw)', maxHeight: '92vh',
-              background: 'var(--surface)',
-              borderRadius: 16,
-              boxShadow: '0 20px 60px rgba(15,23,42,0.20)',
-              display: 'flex', flexDirection: 'column',
-              zIndex: 61,
-              fontFamily: 'inherit',
-            }}
-          >
-            {children}
-          </div>
-        </>
-      );
-
   return (
-    <Wrapper>
+    <HandoverWizardShell pageMode={pageMode} onClose={onClose}>
         <header style={{
           padding: pageMode ? '18px 32px' : '18px 22px',
           borderBottom: '1px solid var(--border-light)',
@@ -1023,7 +1036,7 @@ function CreateHandoverModal({ initialEventId, currentUserEmail, members, onClos
             )}
           </div>
         </footer>
-    </Wrapper>
+    </HandoverWizardShell>
   );
 }
 
