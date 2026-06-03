@@ -74,9 +74,10 @@ export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url);
     const bustCache = searchParams.get('bust') === '1' || searchParams.has('_t');
-    // /admin/mobility/cases caps `take` at 20 (the admin UI's page size) —
-    // take=100 → HTTP 400 → 0 cases. Default to 20; the fetcher walks all pages.
-    const take = parseInt(searchParams.get('take') || '20', 10);
+    // /admin/mobility/cases is cursor-paginated; take=100 is honoured. (The
+    // earlier take=20 made the walk too many slow pages → build timeout →
+    // "0 Waiting".) The fetcher walks via cursor up to its MAX_PAGES ceiling.
+    const take = parseInt(searchParams.get('take') || '100', 10);
 
     // Dept-namespaced cache key so HRX's snapshot (none, in practice) can
     // never leak to a GIX caller and vice versa.
@@ -103,11 +104,12 @@ export async function GET(req) {
           // is the only post-deploy signal that the full walk pulled
           // everything we expected.
           console.info(
-            '[immigration-cases] upstream scan: cases=%d scanned=%d pages=%d total=%s statuses=%s',
+            '[immigration-cases] upstream scan: cases=%d scanned=%d pages=%d total=%s truncated=%s statuses=%s',
             result.items?.length ?? 0,
             result.upstreamScanned ?? 0,
             result.upstreamPages,
             result.upstreamTotal == null ? 'n/a' : String(result.upstreamTotal),
+            result.truncated === true,
             JSON.stringify(result.upstreamStatusCounts || {}),
           );
           return {

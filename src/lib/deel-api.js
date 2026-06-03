@@ -2081,11 +2081,11 @@ export async function listWorkbenchTasks(params = {}) {
  * `isDeelSourceVisible(slug, 'immigrationTasks')`, which only returns
  * true for the GIX dept.
  *
- * Pagination via `take` + `skip` (Deel's standard offset-style for the
- * /admin/mobility namespace). Defaults to take=100 with 10 pages × 200 =
- * 2000 max — pessimistic backlog ceiling for the GIX dept (40-200 is
- * steady-state, but PRs that broaden the upstream filter can briefly
- * surface every actionable historical row).
+ * Pagination is CURSOR-based (the `cursor` token in each response); `skip`
+ * is IGNORED by this endpoint. Filters are re-sent WITH the cursor each page
+ * (mobility drops the filter — and leaks COMPLETED rows — if the cursor is
+ * sent alone). take=100 is honoured; bounded by MAX_PAGES as a memory /
+ * wall-time ceiling on the large company-wide backlog.
  *
  * 2026-06-03 — request shape CONFIRMED against the admin UI via a DevTools
  * capture: `caseStatus[]=OPEN&caseStatus[]=ON_HOLD&status[]=ONGOING`. Earlier
@@ -2127,28 +2127,27 @@ export async function listImmigrationActions(params = {}) {
   }
   const fetchOpts = { adminTokenOverride };
 
-  // Page-size hint. /admin/mobility/actions is an offset endpoint (skip/take —
-  // the admin UI itself pages with take=40). We request a big page to cut
-  // round-trips, but never ASSUME the upstream honours the exact size: the
-  // walk ends on an empty page or when a page yields no new ids, so a smaller
-  // server-side cap can neither make us miss rows nor loop forever.
-  // 2026-06-03: reverted 200 → 100 — take=200 made /admin/mobility/actions
-  // 400 every page (the admin UI itself pages at ≤40; cases honour 100).
-  // 100 is the proven-working size; the full walk still covers everything.
+  // CURSOR pagination — `skip` is IGNORED here (DevTools-confirmed 2026-06-03:
+  // page 2 with skip=100 re-served page 1, which capped the old walk at 100 of
+  // 300+). We follow the `cursor` token and RE-SEND the filters with it each
+  // page (sending the cursor alone drops the filter and leaks COMPLETED rows).
+  // take=100 is honoured.
   const pageSize = Math.min(100, Math.max(1, params.take || 100));
 
   const all = [];
   const seenIds = new Set();
-  const upstreamStatusCounts = {};   // raw `t.status` tally (debug, §3.6)
-  const upstreamActorCounts = {};    // raw `t.actor` tally (actor distribution, §3.6)
+  const upstreamStatusCounts = {};   // raw `t.status` tally (§3.6)
+  const upstreamActorCounts = {};    // raw `t.actor` tally (§3.6)
   let scanned = 0;
-  let skip = 0;
+  let cursor = null;
   let upstreamTotal = null;
-  // Runaway ceiling only — the empty-page / no-new-ids stops below end the
-  // walk well before this in practice. Covers any realistic immigration
-  // backlog; the route's build timeout bounds wall-time as a backstop.
-  const MAX_PAGES = 60;
+  // Memory + wall-time ceiling. The company-wide actionable-task backlog is
+  // large (1000s); this bounds each scan. `truncated` surfaces a hit ceiling
+  // so the cap is never silent (skill: no silent caps). The GIX queue scopes
+  // to the team by assignee after this returns.
+  const MAX_PAGES = 20;
   let pages = 0;
+  let truncated = false;
 
   while (pages < MAX_PAGES) {
     pages++;
@@ -2157,13 +2156,13 @@ export async function listImmigrationActions(params = {}) {
     qs.append('caseStatus[]', 'ON_HOLD');
     qs.append('status[]', 'ONGOING');
     qs.set('take', String(pageSize));
-    if (skip > 0) qs.set('skip', String(skip));
+    if (cursor) qs.set('cursor', cursor);   // re-send filters WITH the cursor
 
     const res = await deelFetch(`/admin/mobility/actions?${qs.toString()}`, fetchOpts);
     const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
+    if (pages === 1) upstreamTotal = res?.count ?? res?.total ?? null;
     if (items.length === 0) break;
     scanned += items.length;
-    upstreamTotal = res?.total ?? res?.count ?? upstreamTotal;
 
     let newThisPage = 0;
     for (const t of items) {
@@ -2172,22 +2171,20 @@ export async function listImmigrationActions(params = {}) {
       const actor = String(t?.actor || '_UNKNOWN').toUpperCase();
       upstreamStatusCounts[status] = (upstreamStatusCounts[status] || 0) + 1;
       upstreamActorCounts[actor] = (upstreamActorCounts[actor] || 0) + 1;
-      // Dedup across pages — defends against offset overlap AND a server that
-      // ignores `skip` and re-serves the same page.
-      if (id && seenIds.has(id)) continue;
+      if (id && seenIds.has(id)) continue;   // dedup across pages
       if (id) seenIds.add(id);
       newThisPage++;
       all.push(t);
     }
 
-    // Stop when the upstream's own grand total is fully covered, or when a
-    // page surfaces no NEW ids (last page reached, OR the upstream ignored
-    // `skip` — either way, walking further can't surface anything new).
-    // Deliberately NOT keyed on page length vs requested take, so an unknown
-    // server-side take cap can't end the walk early and drop tasks.
-    if (upstreamTotal != null && scanned >= upstreamTotal) break;
+    // Stops: short page (last page — this endpoint has no `hasMore`), no NEW
+    // ids (cursor not advancing / duplicate page), or no/again-same cursor.
+    const nextCursor = res?.cursor || res?.nextCursor || res?.next || null;
     if (newThisPage === 0) break;
-    skip += items.length;
+    if (items.length < pageSize) break;
+    if (!nextCursor || nextCursor === cursor) break;
+    cursor = nextCursor;
+    if (pages >= MAX_PAGES) truncated = true;   // more remained but hit ceiling
   }
 
   return {
@@ -2198,6 +2195,7 @@ export async function listImmigrationActions(params = {}) {
     upstreamTotal,
     upstreamPages: pages,
     upstreamScanned: scanned,
+    truncated,
   };
 }
 
@@ -2221,52 +2219,44 @@ export async function listImmigrationCases(params = {}) {
   }
   const fetchOpts = { adminTokenOverride };
 
-  // Page-size hint. /admin/mobility/cases caps `take` LOWER than /actions:
-  // the admin UI pages cases at 20 (vs 40 for actions). take=100 returned
-  // HTTP 400 on every page → the fetch threw → 3-strike failure → the queue
-  // showed 0 cases (the live bug, DevTools-confirmed 2026-06-03). Match the
-  // admin UI's proven-safe 20; the full-page walk still pulls every case.
-  const pageSize = Math.min(20, Math.max(1, params.take || 20));
+  // CURSOR pagination + `hasMore` (DevTools-confirmed 2026-06-03). `skip` is
+  // ignored; we follow the `cursor` token and RE-SEND statuses[] with it each
+  // page — sending the cursor alone leaks CLOSED cases. take=100 IS honoured
+  // (the earlier take=20 made the walk ~34 slow pages → it exceeded the build
+  // timeout → the "0 Waiting" state).
+  const pageSize = Math.min(100, Math.max(1, params.take || 100));
 
   const all = [];
   const seenIds = new Set();
-  const upstreamStatusCounts = {};   // raw `c.status` tally (OPEN / ON_HOLD), §3.6
+  const upstreamStatusCounts = {};   // raw `c.status` tally (§3.6)
   let scanned = 0;
-  let skip = 0;
   let cursor = null;
-  let useCursor = false;
   let upstreamTotal = null;
-  const MAX_PAGES = 120;   // runaway ceiling only; the stops below end it first
+  // Memory + wall-time ceiling. The company-wide open/on-hold case backlog is
+  // large (1000s) and each case object is heavy, so bound the scan to protect
+  // pod memory + the build timeout. `truncated` surfaces a hit ceiling (no
+  // silent caps). The GIX queue scopes to the team by assignee after this.
+  const MAX_PAGES = 12;
   let pages = 0;
+  let truncated = false;
 
   while (pages < MAX_PAGES) {
     pages++;
     const qs = new URLSearchParams();
-    if (useCursor && cursor) {
-      // Deel admin cursor convention (skill §3.6): once the upstream hands us
-      // a cursor, send ONLY the cursor — it already encodes the statuses
-      // filter + sort. Re-sending statuses[]/take/skip alongside a cursor
-      // returns 400. This is what /admin/mobility/cases actually uses —
-      // `skip` was ignored, capping the pull at one page (the 100-row bug).
-      qs.set('cursor', cursor);
-    } else {
-      qs.append('statuses[]', 'OPEN');
-      qs.append('statuses[]', 'ON_HOLD');
-      qs.set('take', String(pageSize));
-      if (skip > 0) qs.set('skip', String(skip));
-    }
+    qs.append('statuses[]', 'OPEN');
+    qs.append('statuses[]', 'ON_HOLD');
+    qs.set('take', String(pageSize));
+    if (cursor) qs.set('cursor', cursor);   // re-send filters WITH the cursor
 
     const res = await deelFetch(`/admin/mobility/cases?${qs.toString()}`, fetchOpts);
     if (pages === 1) {
-      // Telemetry: surface the upstream's top-level shape so the pagination
-      // mechanism (cursor vs offset) is confirmable from prod logs without a
-      // live probe.
+      upstreamTotal = res?.count ?? res?.total ?? null;
+      // Telemetry: confirm the upstream's top-level shape from prod logs.
       try { console.info('[immigration-cases] page-1 response keys: %s', JSON.stringify(Object.keys(res || {}))); } catch { /* noop */ }
     }
     const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
     if (items.length === 0) break;
     scanned += items.length;
-    upstreamTotal = res?.total ?? res?.count ?? upstreamTotal;
 
     let newThisPage = 0;
     for (const c of items) {
@@ -2279,21 +2269,14 @@ export async function listImmigrationCases(params = {}) {
       all.push(c);
     }
 
-    if (upstreamTotal != null && scanned >= upstreamTotal) break;
-
-    // Prefer cursor pagination when the upstream returns a continuation token
-    // (the documented Deel admin convention). Offset/`skip` is only the
-    // fallback while no cursor is present.
-    const nextCursor = res?.cursor || res?.nextCursor || res?.next
-      || res?.meta?.cursor || res?.meta?.nextCursor || res?.pagination?.cursor || null;
-    if (nextCursor && nextCursor !== cursor) {
-      useCursor = true;
-      cursor = nextCursor;
-      continue;
-    }
-    if (useCursor) break;            // cursor walk exhausted (no fresh token)
-    if (newThisPage === 0) break;    // offset: last page, or upstream ignored `skip`
-    skip += items.length;
+    // Stops: server says no more, short page (last), no NEW ids, or no/same cursor.
+    const nextCursor = res?.cursor || res?.nextCursor || res?.next || null;
+    if (res?.hasMore === false) break;
+    if (newThisPage === 0) break;
+    if (items.length < pageSize) break;
+    if (!nextCursor || nextCursor === cursor) break;
+    cursor = nextCursor;
+    if (pages >= MAX_PAGES) truncated = true;   // more remained but hit ceiling
   }
 
   return {
@@ -2303,5 +2286,6 @@ export async function listImmigrationCases(params = {}) {
     upstreamTotal,
     upstreamPages: pages,
     upstreamScanned: scanned,
+    truncated,
   };
 }

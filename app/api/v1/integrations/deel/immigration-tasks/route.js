@@ -109,11 +109,12 @@ export async function GET(req) {
           // distribution is the only post-deploy signal for "did the
           // upstream return everything we expected".
           console.info(
-            '[immigration-tasks] upstream scan: deelTasks=%d scanned=%d pages=%d total=%s statuses=%s actors=%s',
+            '[immigration-tasks] upstream scan: deelTasks=%d scanned=%d pages=%d total=%s truncated=%s statuses=%s actors=%s',
             result.items?.length ?? 0,
             result.upstreamScanned ?? 0,
             result.upstreamPages,
             result.upstreamTotal == null ? 'n/a' : String(result.upstreamTotal),
+            result.truncated === true,
             JSON.stringify(result.upstreamStatusCounts || {}),
             JSON.stringify(result.upstreamActorCounts || {}),
           );
