@@ -120,7 +120,7 @@ export default function OrgChartCanvas({
 
   const layout = useMemo(
     () => (chartMode === 'people'
-      ? layoutPeopleChart({ members, expansion })
+      ? layoutPeopleChart({ members, expansion, tree, rootNodes })
       : layoutOrgChart({ tree, rootNodes, members, expansion })),
     [chartMode, tree, rootNodes, members, expansion],
   );

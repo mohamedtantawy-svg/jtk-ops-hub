@@ -148,6 +148,16 @@ function place(item, x, y, out) {
   }
 }
 
+// Command Center is the executive department; it's identified by its stable
+// slug. In the org chart it renders as the single super-root with every other
+// department hanging off it. This is VISUAL ONLY — Command Center and every
+// other department remain parent_id=NULL top-level nodes in the data, so
+// dept-scope tenancy (which resolves a member's dept by walking parent_id up
+// to the NULL root) is completely unchanged. 2026-06-03, Mohamed.
+export function isCommandCenterNode(node) {
+  return !!node && node.slug === 'command-center';
+}
+
 /**
  * Build the visible layout for a forest of root nodes.
  *
@@ -184,10 +194,33 @@ export function layoutOrgChart({ tree, rootNodes, members, expansion }) {
   }
 
   const ctx = { tree, membersByNode, expansion: exp };
-  const subtrees = (rootNodes || [])
-    .filter(n => !n.isArchived)
-    .map(n => buildSubtree(n, 0, ctx))
-    .filter(Boolean);
+  const liveRoots = (rootNodes || []).filter(n => !n.isArchived);
+
+  // Command Center renders as the executive super-root: one card on top with
+  // every other department hanging off it (a connector line to each), the
+  // same way a department sits above its teams. Visual only — see
+  // isCommandCenterNode. Departments build one depth deeper and have their
+  // connector re-pointed at the CC card; everything below them (teams,
+  // sub-teams, members) keeps its real parent_id so those connectors are
+  // unaffected.
+  const ccRoot = liveRoots.find(isCommandCenterNode);
+  let subtrees;
+  if (ccRoot && liveRoots.length > 1) {
+    const ccSubtree = buildSubtree(ccRoot, 0, ctx);
+    const deptSubtrees = liveRoots
+      .filter(n => n !== ccRoot)
+      .map(n => buildSubtree(n, 1, ctx))
+      .filter(Boolean)
+      .map(st => ({ ...st, parentId: ccRoot.id }));
+    ccSubtree.children = [...ccSubtree.children, ...deptSubtrees];
+    ccSubtree.width = Math.max(
+      CARD_W,
+      ccSubtree.children.reduce((sum, c, i) => sum + c.width + (i > 0 ? COL_GAP : 0), 0),
+    );
+    subtrees = [ccSubtree];
+  } else {
+    subtrees = liveRoots.map(n => buildSubtree(n, 0, ctx)).filter(Boolean);
+  }
 
   const out = [];
   let cursor = PADDING;
@@ -214,25 +247,65 @@ export function layoutOrgChart({ tree, rootNodes, members, expansion }) {
 // mix, so the awkward "team card with member cards crammed underneath" view
 // is gone.
 //
-// Roots = members whose managerEmail is empty OR points at someone not in the
-// set (top of the org). Depth-0 nodes always show their direct reports;
-// deeper levels are opt-in via `expansion.peopleExpanded` (a Set of
-// lowercased emails) so a 170-person org isn't dumped on screen at once.
-export function layoutPeopleChart({ members, expansion }) {
+// Hierarchy = managerEmail → reports, with an org-STRUCTURE fallback so the
+// chart matches the structure view (Command Center on top, departments under
+// it). Many ICs have no explicit managerEmail (seeded rosters), which used to
+// dump them as detached top-level roots — the "weird" floating cards Mohamed
+// flagged 2026-06-03. Resolution order for each member's parent:
+//   1. managerEmail, when it resolves to someone in the set.
+//   2. else their top-level department's lead (orphan IC → dept director).
+//   3. else the Command Center lead (dept leads + anyone unplaced → apex).
+// Only the CC lead (or, with no CC node, each dept lead) ends up a true root.
+// Depth-0 always shows direct reports; deeper levels are opt-in via
+// `expansion.peopleExpanded` so a 170-person org isn't dumped at once.
+export function layoutPeopleChart({ members, expansion, tree, rootNodes }) {
   const expanded = expansion?.peopleExpanded || null;   // Set<emailLc> | null
 
   const byEmail = new Map();
   for (const m of members || []) {
     if (m?.email) byEmail.set(String(m.email).toLowerCase(), m);
   }
-  // Group reports under their manager; anyone whose manager is missing /
-  // external / self lands under the synthetic '__root__' bucket.
+
+  // Command Center lead = the apex everyone ultimately rolls up to. Walk
+  // org_nodes parent_id up to the top-level department for any node id so an
+  // orphan can be attached under their department's lead.
+  const byId = tree?.byId || null;
+  const ccNode = (rootNodes || []).find(n => n && !n.isArchived && isCommandCenterNode(n));
+  const ccLeadLc = ccNode?.leadEmail ? String(ccNode.leadEmail).toLowerCase() : null;
+  const topDeptCache = new Map();
+  const topDeptForNodeId = (nodeId) => {
+    if (!byId || !nodeId) return null;
+    if (topDeptCache.has(nodeId)) return topDeptCache.get(nodeId);
+    let cur = byId.get(nodeId);
+    let guard = 0;
+    while (cur && cur.parentId && guard++ < 100) cur = byId.get(cur.parentId);
+    topDeptCache.set(nodeId, cur || null);
+    return cur || null;
+  };
+  // Structural fallback parent for a member with no usable managerEmail.
+  // Always points "up" (dept lead → CC lead → root), so it can't create a
+  // new cycle; build()'s seen-guard still backstops bad managerEmail data.
+  const fallbackParentFor = (m) => {
+    const selfLc = String(m.email).toLowerCase();
+    const dept = m.orgNodeId ? topDeptForNodeId(m.orgNodeId) : null;
+    if (dept && !isCommandCenterNode(dept) && dept.leadEmail) {
+      const deptLeadLc = String(dept.leadEmail).toLowerCase();
+      if (deptLeadLc !== selfLc && byEmail.has(deptLeadLc)) return deptLeadLc;
+    }
+    if (ccLeadLc && ccLeadLc !== selfLc && byEmail.has(ccLeadLc)) return ccLeadLc;
+    return null;
+  };
+
+  // Group reports under their resolved parent (manager, else structural
+  // fallback). Only members with no resolvable parent become __root__.
   const byManager = new Map();
   for (const m of members || []) {
     if (!m?.email) continue;
     const self = String(m.email).toLowerCase();
     const mgr = String(m.managerEmail || '').toLowerCase();
-    const key = (mgr && mgr !== self && byEmail.has(mgr)) ? mgr : '__root__';
+    const key = (mgr && mgr !== self && byEmail.has(mgr))
+      ? mgr
+      : (fallbackParentFor(m) || '__root__');
     if (!byManager.has(key)) byManager.set(key, []);
     byManager.get(key).push(m);
   }
@@ -246,14 +319,17 @@ export function layoutPeopleChart({ members, expansion }) {
   const isOpen = (emailLc, depth) =>
     depth === 0 ? true : (expanded ? expanded.has(emailLc) : false);
 
-  function build(m, depth, seen) {
+  // parentEmailLc is the ACTUAL tree parent (manager OR structural fallback),
+  // threaded down from the caller — NOT m.managerEmail, which is wrong for any
+  // member attached via the fallback. The connector pass keys off this id.
+  function build(m, depth, seen, parentEmailLc) {
     const emailLc = String(m.email).toLowerCase();
     const reports = byManager.get(emailLc) || [];
     // Cycle guard — bad managerEmail data (A→B→A) must not infinite-loop.
     const cyclic = seen.has(emailLc);
     const open = !cyclic && reports.length > 0 && isOpen(emailLc, depth);
     const nextSeen = cyclic ? seen : new Set(seen).add(emailLc);
-    const children = open ? reports.map(r => build(r, depth + 1, nextSeen)) : [];
+    const children = open ? reports.map(r => build(r, depth + 1, nextSeen, emailLc)) : [];
     const childrenWidth = children.reduce((s, c, i) => s + c.width + (i > 0 ? COL_GAP : 0), 0);
     return {
       id: `p:${emailLc}`,
@@ -261,7 +337,7 @@ export function layoutPeopleChart({ members, expansion }) {
       width: Math.max(MEMBER_W, childrenWidth),
       height: MEMBER_H,
       depth,
-      parentId: depth === 0 ? null : `p:${String(m.managerEmail || '').toLowerCase()}`,
+      parentId: parentEmailLc ? `p:${parentEmailLc}` : null,
       children,
       // _reportCount + _expanded drive the card's expand chevron in people
       // mode; _people flags the card so MemberCard renders the chevron only
@@ -270,7 +346,7 @@ export function layoutPeopleChart({ members, expansion }) {
     };
   }
 
-  const subtrees = roots.map(r => build(r, 0, new Set()));
+  const subtrees = roots.map(r => build(r, 0, new Set(), null));
   const out = [];
   let cursor = PADDING;
   let maxDepth = 0;
