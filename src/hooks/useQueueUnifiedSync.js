@@ -21,6 +21,7 @@ import { useWorkbenchData } from './useWorkbenchData';
 import { useIncentivePlansData } from './useIncentivePlansData';
 import { useImmigrationTasksData } from './useImmigrationTasksData';
 import { useImmigrationCasesData } from './useImmigrationCasesData';
+import { isDeptSourceVisible } from '../lib/dept-source-visibility';
 
 const TICK_MS = 30_000;
 
@@ -30,7 +31,7 @@ function isoToMs(iso) {
   return Number.isFinite(t) ? t : null;
 }
 
-export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = null } = {}) {
+export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = null, visibleSources = null, deptLoading = false } = {}) {
   // Plumb the signed-in user's email into every source hook so each one can
   // namespace its localStorage cache per-user (prevents cross-user bleed-
   // through when multiple people sign into the same browser) and reject
@@ -234,6 +235,24 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
     immigrationCasesData.error, immigrationCasesData.lastSyncAt, immigrationCasesData.refresh,
   ]);
 
+  // ── Scope the sync surface to the current department ─────────────────────
+  // The popover list AND the badge state machine should reflect only the
+  // queues this dept actually surfaces — Zendesk/Jira always-on, Deel sources
+  // per the visibleSources profile. GIX showed all 11 sources here even though
+  // 6 are irrelevant to it. Mirrors the Queue tab row + the home "By Source"
+  // card via the shared isDeptSourceVisible helper (mistake #52: keep these in
+  // lockstep). Cold paint (deptLoading) shows everything so cached data + HRX
+  // never flicker. Queue's per-tab sync indicators read full `sources[id]` only
+  // for tabs that are themselves visible (or the always-on zendesk/jira), so
+  // scoping the returned map here doesn't change their behaviour.
+  const visibleSourceMap = useMemo(() => {
+    const out = {};
+    for (const [id, src] of Object.entries(sources)) {
+      if (isDeptSourceVisible(id, visibleSources, deptLoading)) out[id] = src;
+    }
+    return out;
+  }, [sources, visibleSources, deptLoading]);
+
   // ── Aggregated meta for the UnifiedSyncButton ────────────────────────────
   // A successful sync within RECENT_SYNC_MS proves HTTP works and overrides
   // any `navigator.onLine = false` false-positive. Same for an in-flight
@@ -268,7 +287,7 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
     offboarding: 12 * 60 * 1000,
   };
   const meta = useMemo(() => {
-    const list = Object.values(sources);
+    const list = Object.values(visibleSourceMap);
     const timestamps = list.map(s => s.lastSyncAt).filter(t => typeof t === 'number' && t > 0);
     const lastSyncAt = timestamps.length ? Math.max(...timestamps) : null;
     const oldestSyncAt = timestamps.length ? Math.min(...timestamps) : null;
@@ -345,7 +364,7 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
       allStale,
       allFailing,
     };
-  }, [sources, navReportsOffline, nowTick]);
+  }, [visibleSourceMap, navReportsOffline, nowTick]);
 
   // ── Self-correct the navigator hint when we have proof of connectivity ──
   // If any source just completed a sync successfully, the browser's opinion
@@ -381,7 +400,8 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
     incentivePlansData,
     immigrationTasksData,
     immigrationCasesData,
-    sources,
+    // Department-scoped: only the queues this dept surfaces (see visibleSourceMap).
+    sources: visibleSourceMap,
     meta,
     refreshAll,
     nowTick,

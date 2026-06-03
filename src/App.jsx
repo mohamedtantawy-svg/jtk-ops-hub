@@ -466,10 +466,17 @@ const App=()=>{
     const id = setTimeout(flip, 600);
     return () => { cancelled = true; clearTimeout(id); };
   }, [user]);
+  // Scope the unified sync surface (popover + badge) to the current
+  // department — only the queues this dept surfaces show. useCurrentDept is
+  // module-level shared, so this instance reuses the snapshot the rest of the
+  // app already reads (no extra /dept-scope/current fetch).
+  const { visibleSources: queueDeptVisibleSources, loading: queueDeptLoading } = useCurrentDept();
   const queueUnified = useQueueUnifiedSync({
     queueSync,
     enabled: !!user && prewarmReady,
     userEmail: user?.email || null,
+    visibleSources: queueDeptVisibleSources,
+    deptLoading: queueDeptLoading,
   });
   // Pre-warm the global hide list on auth so every queue render starts
   // with the right Set<source:id> in memory. The hook polls every 30s and

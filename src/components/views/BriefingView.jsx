@@ -36,8 +36,10 @@ import {
   scopeRedlineRequests,
   scopeWorkbenchTasks,
   scopeIncentivePlans,
+  scopeImmigrationTasks,
   scopeImmigrationCases,
 } from '../../lib/queue-scoping';
+import { isDeptSourceVisible, ALL_QUEUE_SOURCE_KEYS } from '../../lib/dept-source-visibility';
 import Avatar from '../ui/Avatar';
 import OOOBadge from '../ui/OOOBadge';
 import { useTimeOffEvents } from '../../hooks/useTimeOffEvents';
@@ -383,6 +385,10 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // breakdown (count-only per Mohamed; NOT folded into the Health Score /
   // SLA aggregates, which use a different SLA model). Rows arrive
   // pre-normalised from the route.
+  // GIX-only Deel sources. Immigration Cases was wired in 2026-06-03 but
+  // Immigration Tasks was missed — so the home "By Source" card silently
+  // dropped GIX's largest queue. Read both here.
+  const immigrationTasksData = queueUnified?.immigrationTasksData || { tasks: [] };
   const immigrationCasesData = queueUnified?.immigrationCasesData || { cases: [] };
   const incentivePlansData = queueUnified?.incentivePlansData || { items: [], loading: false, error: null };
 
@@ -569,6 +575,8 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const incentivePlanRows = useMemo(() => scopeIncentivePlans(incentivePlanRowsAll, user, briefingCoverageEmails), [incentivePlanRowsAll, user, briefingCoverageEmails]);
   // Immigration Cases are pre-normalised by the route; just role-scope by the
   // case's active-agent email. All cases are open/on-hold → active = all.
+  const immigrationTaskRows = useMemo(() => scopeImmigrationTasks(immigrationTasksData.tasks || [], user, briefingCoverageEmails), [immigrationTasksData.tasks, user, teamDataVersion, briefingCoverageEmails]);
+  const immigrationTaskActiveRows = useMemo(() => immigrationTaskRows.filter(r => !r.isResolved), [immigrationTaskRows]);
   const immigrationCaseRows = useMemo(() => scopeImmigrationCases(immigrationCasesData.cases || [], user, briefingCoverageEmails), [immigrationCasesData.cases, user, teamDataVersion, briefingCoverageEmails]);
   const immigrationCaseActiveRows = useMemo(() => immigrationCaseRows.filter(r => !r.isResolved), [immigrationCaseRows]);
 
@@ -878,7 +886,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // freshly added before the boot-time backfill ran isn't invisible.
   // Empty Set (cold paint, before /dept-scope/current resolves) also
   // means "include" — equivalent to pre-PR #745 behaviour.
-  const { deptId: currentDeptId, currentDeptNodeIds, dept: currentDept } = useCurrentDept();
+  const { deptId: currentDeptId, currentDeptNodeIds, dept: currentDept, visibleSources: deptVisibleSources, loading: deptScopeLoading } = useCurrentDept();
   // 2026-05-22 — dept-branded "HR Hub" quick-link tile.
   const hubBrand = useMemo(() => getHubBrand(currentDept), [currentDept]);
   // 2026-05-28: cross-dept OOO coverage bypass. When the caller is
@@ -1110,15 +1118,32 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // ── Source breakdown (org-wide for exec, scoped for others) ───────────
   const srcPool=isExec?orgOpen:scope;
   const srcCounts=srcPool.reduce((a,t)=>{a[t.source]=(a[t.source]||0)+1;return a;},{});
-  // Add Deel API sources (onboarding, offboarding, amendments, redlines, workbench)
-  if (onboardingRows.length)  srcCounts['onboarding']  = (srcCounts['onboarding']  || 0) + onboardingRows.length;
-  if (offboardingRows.length) srcCounts['offboarding'] = (srcCounts['offboarding'] || 0) + offboardingRows.length;
-  if (amendmentRows.length)   srcCounts['amendments']  = (srcCounts['amendments']  || 0) + amendmentRows.length;
-  if (redlineRows.length)     srcCounts['redlines']    = (srcCounts['redlines']    || 0) + redlineRows.length;
-  if (workbenchActiveRows.length)   srcCounts['workbench']   = (srcCounts['workbench']   || 0) + workbenchActiveRows.length;
-  if (incentivePlanRows.length) srcCounts['incentive_plans'] = (srcCounts['incentive_plans'] || 0) + incentivePlanRows.length;
-  if (immigrationCaseActiveRows.length) srcCounts['immigration_cases'] = (srcCounts['immigration_cases'] || 0) + immigrationCaseActiveRows.length;
-  const srcEntries=Object.entries(srcCounts).sort((a,b)=>b[1]-a[1]);
+  // Add the normalized Deel-source rows on top of the ticket source counts.
+  // Assign unconditionally (even when 0) so a configured-but-empty queue still
+  // resolves to a number — the dept seed + filter below decides what renders.
+  // immigration_tasks was previously missing here, so GIX's largest queue
+  // never appeared in "By Source"; immigration_cases was already counted.
+  srcCounts['onboarding']        = (srcCounts['onboarding']        || 0) + onboardingRows.length;
+  srcCounts['offboarding']       = (srcCounts['offboarding']       || 0) + offboardingRows.length;
+  srcCounts['amendments']        = (srcCounts['amendments']        || 0) + amendmentRows.length;
+  srcCounts['redlines']          = (srcCounts['redlines']          || 0) + redlineRows.length;
+  srcCounts['workbench']         = (srcCounts['workbench']         || 0) + workbenchActiveRows.length;
+  srcCounts['incentive_plans']   = (srcCounts['incentive_plans']   || 0) + incentivePlanRows.length;
+  srcCounts['immigration_tasks'] = (srcCounts['immigration_tasks'] || 0) + immigrationTaskActiveRows.length;
+  srcCounts['immigration_cases'] = (srcCounts['immigration_cases'] || 0) + immigrationCaseActiveRows.length;
+  // Department source set: show EVERY queue the current dept surfaces — Zendesk
+  // + Jira always-on, Deel sources per its visibleSources profile — seeded at 0
+  // so e.g. GIX's Jira renders "0" instead of vanishing, and drop the sources
+  // the dept doesn't surface. Auto-adapts to any new dept via its profile, and
+  // stays in lockstep with the Queue tab row + sync popover (shared helper).
+  // Cold paint (deptScopeLoading) shows everything so cached data never flickers.
+  const deptSrcCounts = {};
+  for (const key of new Set([...ALL_QUEUE_SOURCE_KEYS, ...Object.keys(srcCounts)])) {
+    if (isDeptSourceVisible(key, deptVisibleSources, deptScopeLoading)) {
+      deptSrcCounts[key] = srcCounts[key] || 0;
+    }
+  }
+  const srcEntries=Object.entries(deptSrcCounts).sort((a,b)=>b[1]-a[1]);
   // Total across all sources (for percentage calculation)
   const srcTotal = srcEntries.reduce((sum, [, cnt]) => sum + cnt, 0);
 
@@ -1959,7 +1984,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             {/* Col 2: Source Breakdown */}
             <DeelCard>
               <CardTitle>By Source</CardTitle>
-              {srcEntries.length === 0 && (
+              {srcTotal === 0 && (
                 /* 2026-05-21 audit F23: a brand-new dept (GIX / Payroll /
                    Benefits) with no integrations + no live data renders this
                    card empty. The blank space reads as a broken card; add a
@@ -1977,7 +2002,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               {srcEntries.map(([src,cnt])=>{
                 const tl=TOOLS[src];const pct=srcPctMap.get(src) ?? 0;
                 const isExpanded=expandedSource===src;
-                const deelApiRowsMap={onboarding:onboardingRows,offboarding:offboardingRows,amendments:amendmentRows,redlines:redlineRows,workbench:workbenchActiveRows};
+                const deelApiRowsMap={onboarding:onboardingRows,offboarding:offboardingRows,amendments:amendmentRows,redlines:redlineRows,workbench:workbenchActiveRows,incentive_plans:incentivePlanRows,immigration_tasks:immigrationTaskActiveRows,immigration_cases:immigrationCaseActiveRows};
                 const srcTasks=[...srcPool.filter(t=>t.source===src),...(deelApiRowsMap[src]||[])];
                 const srcBarColor=SOURCE_COLOURS[src]||tl?.color||'#9e9e9e';
                 return(
@@ -2080,6 +2105,9 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             if(amendmentRows.length)   srcMap.amendments  =(srcMap.amendments  ||0)+amendmentRows.length;
             if(redlineRows.length)     srcMap.redlines    =(srcMap.redlines    ||0)+redlineRows.length;
             if(workbenchActiveRows.length)   srcMap.workbench   =(srcMap.workbench   ||0)+workbenchActiveRows.length;
+            if(incentivePlanRows.length)        srcMap.incentive_plans  =(srcMap.incentive_plans  ||0)+incentivePlanRows.length;
+            if(immigrationTaskActiveRows.length) srcMap.immigration_tasks=(srcMap.immigration_tasks||0)+immigrationTaskActiveRows.length;
+            if(immigrationCaseActiveRows.length) srcMap.immigration_cases=(srcMap.immigration_cases||0)+immigrationCaseActiveRows.length;
             const srcBreakdown=Object.entries(srcMap).sort((a,b)=>b[1]-a[1]);
             return(<>
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:10}}>

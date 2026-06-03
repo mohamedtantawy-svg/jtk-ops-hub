@@ -33,6 +33,7 @@ import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
 import { useTaskNotes } from '../../hooks/useTaskNotes';
 import { useTeamDataVersion } from '../../hooks/useTeamDataVersion';
 import { useCurrentDept } from '../../hooks/useCurrentDept';
+import { isDeptSourceVisible } from '../../lib/dept-source-visibility';
 import { getHubBrand } from '../../lib/hub-brand';
 import { useHideResolved } from '../../hooks/useHideResolved';
 import {
@@ -191,23 +192,10 @@ const SUBJECT_WIDTH_DEFAULT = 480;
 const SUBJECT_WIDTH_STORAGE_BASE = 'ops_hub_queue_subject_width';
 const clampSubjectWidth = (n) => clampSubjectWidthShared(n, SUBJECT_WIDTH_DEFAULT);
 
-// Map a WORK_SOURCES tab id → its `visibleSources` key on the dept-scope
-// payload. Jira + Zendesk are NOT in visibleSources (they're available
-// to every dept by default and dispatched per-dept by the route layer)
-// so they pass through unconditionally.
-const SOURCE_TAB_TO_VISIBILITY_KEY = {
-  onboarding: 'onboarding',
-  offboarding: 'offboarding',
-  amendments: 'amendments',
-  redlines: 'redlines',
-  incentive_plans: 'incentivePlans',
-  workbench: 'workbench',
-  // 2026-05-22: GIX-only — `visibleSources.immigrationTasks` is true only
-  // for the Global Immigration dept profile in dept-integrations.js.
-  immigration_tasks: 'immigrationTasks',
-  // 2026-06-03: GIX-only Immigration Cases tab — same per-dept gate.
-  immigration_cases: 'immigrationCases',
-};
+// The WORK_SOURCES tab id → visibleSources key mapping (plus the always-on
+// Zendesk/Jira carve-out) now lives in src/lib/dept-source-visibility.js so
+// the Queue tab row, the home "By Source" card, and the sync popover share one
+// gate and can't drift (mistake #52).
 
 const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
   // Phase 14.1 (2026-05-20): per-dept Deel-source visibility. Tabs that
@@ -1541,10 +1529,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
                 // (all false) and resolves to the real values once
                 // /dept-scope/current returns — during that brief window
                 // we let unknown ids through, then hide on next render.
-                if (deptState?.loading) return true;
-                const key = SOURCE_TAB_TO_VISIBILITY_KEY[ws.id];
-                if (!key) return true; // jira/zendesk/hidden — always show
-                return visibleSources?.[key] === true;
+                return isDeptSourceVisible(ws.id, visibleSources, deptState?.loading);
               }).map(ws => {
                 const isQueueFilter = ws.id === 'zendesk' || ws.id === 'jira';
                 const isActive = isQueueFilter ? (fTool === ws.id && !workSource) : workSource === ws.id;
