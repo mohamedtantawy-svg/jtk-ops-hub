@@ -1399,6 +1399,11 @@ const App=()=>{
         } catch {}
         setFocusTaskId(n.linkId);
         setView('my-queue');
+      } else if (n.linkView === 'queue' && n.linkId) {
+        // Offboarding workflow-update notifications (offboarding-update-notify.js)
+        // deep-link here: open the queue and focus the case row by termination id.
+        setFocusTaskId(n.linkId);
+        setView('my-queue');
       } else if (n.linkView === 'urgent-assist' && n.linkId) {
         // Raquel Sanchez 2026-05-28 — Urgent Assist deep-link. The route
         // handlers write link_view='urgent-assist' on assignment +

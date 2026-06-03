@@ -600,6 +600,9 @@ export function normalizeOffboarding(items = [], slaConfig = null) {
       pausedAt: c.pausedAt || null,
       isPaused: !!c.isPaused,
       status: c.status || { label: 'Awaiting Triage', severity: 'warning', color: '#ed8d00' },
+      // Server flags a case whose termination workflow advanced recently (≤24h)
+      // so the row shows an "Updated" badge — pairs with the bell notification.
+      recentlyUpdated: c.recentlyUpdated === true,
       taskUrl: c.id ? `${DEEL_ADMIN_BASE}/eor/termination_v3/${c.id}` : '',
       contractUrl: DEEL_CONTRACT_URL(c.contractOid),
       jiraUrl: c.jiraUrl || '',

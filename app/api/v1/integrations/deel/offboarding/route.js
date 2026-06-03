@@ -13,6 +13,7 @@ import { scopeOffboardingCases } from '../../../../../../src/lib/queue-scoping';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
 import { buildWithTimeout } from '../../../../../../src/lib/scan-timeout';
 import { resolveEmailByName } from '../../../../../../src/utils/normalizeSourceRows';
+import { detectAndNotifyOffboardingChanges } from '../../../../../../src/lib/offboarding-update-notify';
 
 const CACHE_KEY = 'deel_offboarding';
 const CACHE_TTL = 5 * 60 * 1000;    // fresh for 5 minutes
@@ -221,6 +222,21 @@ async function buildOffboardingResult() {
     if (ap !== bp) return ap - bp;
     return (a.daysUntilEnd ?? 9999) - (b.daysUntilEnd ?? 9999);
   });
+
+  // Detect workflow-step changes since the last build and bell-notify each
+  // case's assignee (Carolina Ferreira 2026-06-03). Runs here because this
+  // build is shared (one rebuild per ~5-min cache cycle, not per user), so
+  // every step change is detected exactly once without an extra Deel fetch.
+  // Best-effort: the detector never throws, but guard anyway so a DB blip
+  // can't break the queue. Stamps `recentlyUpdated` for the row "Updated" pill.
+  try {
+    const recentlyUpdatedIds = await detectAndNotifyOffboardingChanges(items);
+    if (recentlyUpdatedIds && recentlyUpdatedIds.size > 0) {
+      for (const it of items) it.recentlyUpdated = recentlyUpdatedIds.has(String(it.id));
+    }
+  } catch (err) {
+    console.warn('[offboarding] update-notify failed:', err?.message);
+  }
 
   // Breakdown by primary status bucket — log + return so we can see the
   // distribution without scraping the full item list.

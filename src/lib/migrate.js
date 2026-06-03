@@ -839,6 +839,31 @@ CREATE INDEX IF NOT EXISTS idx_user_notifications_unread
 CREATE INDEX IF NOT EXISTS idx_user_notifications_source
   ON user_notifications (source_type, source_id);
 
+-- ── Offboarding workflow-change tracking (termination / resignation) ────────
+-- Carolina Ferreira 2026-06-03: HRX is no longer notified when a termination
+-- workflow advances (client signs off, employee signs the doc) since the old
+-- Jira/Slack pings stopped. We snapshot each case's current workflow step
+-- here; the shared offboarding build diffs against it and drops a bell
+-- notification on the assignee for every step change.
+CREATE TABLE IF NOT EXISTS offboarding_task_state (
+  termination_id  VARCHAR(255) PRIMARY KEY,
+  employee_name   VARCHAR(255),
+  last_step       VARCHAR(255),
+  assignee_email  VARCHAR(255),
+  first_seen_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_change_at  TIMESTAMPTZ,
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_offboarding_task_state_change
+  ON offboarding_task_state (last_change_at);
+-- One bell per workflow transition, idempotent across pods + cache rebuilds.
+-- user_notifications has no global unique constraint, so scope a PARTIAL
+-- unique index to just this feature's source_type (zero impact on other
+-- notification types). The detector's INSERT ... ON CONFLICT relies on it.
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_offboarding_update_notif
+  ON user_notifications (recipient_email, source_type, source_id)
+  WHERE source_type = 'offboarding_update';
+
 -- ── Feedback multi-attachment column (2026-04-30) ───────────────────────────
 -- The original feedback_requests.screenshot was a single TEXT column holding
 -- one base64 data URI. Submitters needed to paste multiple screenshots OR a

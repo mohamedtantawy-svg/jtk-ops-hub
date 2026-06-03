@@ -1333,6 +1333,22 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
           <i className={cfg.icon} style={{ fontSize: 9 }} />
           {row.status?.label || '--'}
         </span>
+        {/* Workflow-change badge — pairs with the bell notification when a
+            termination/resignation step advanced in the last 24h (e.g. client
+            signed off, employee signed). Literal indigo contrast pair (held
+            across themes like the status pills), distinct from the status
+            palette so it reads as "something changed", not a status. */}
+        {row.recentlyUpdated && (
+          <span title="Termination workflow updated recently" style={{
+            display: 'inline-flex', alignItems: 'center', gap: 3,
+            marginLeft: 6, padding: '2px 7px', borderRadius: 128,
+            background: '#eef2ff', color: '#4338ca', border: '1px solid #c7d2fe',
+            fontSize: 9, fontWeight: 700, whiteSpace: 'nowrap', verticalAlign: 'middle',
+          }}>
+            <i className="bi-arrow-repeat" style={{ fontSize: 9 }} />
+            Updated
+          </span>
+        )}
       </td>
 
       {/* Task Link */}
