@@ -2102,45 +2102,103 @@ export async function listWorkbenchTasks(params = {}) {
  * map is the only post-deploy signal we have for upstream filter gaps.
  */
 export async function listImmigrationActions(params = {}) {
-  const take = Math.min(200, Math.max(1, params.take || 100));
+  // ── Immigration Tasks (GIX) — /admin/mobility/actions ──────────────────────
+  // Mirrors the admin.deel.network/mobility/tasks queue. Per Beata Sroda /
+  // Mohamed (2026-06-03) it must surface EVERY actionable Deel task, not just
+  // the first page the upstream table shows. Spec:
+  //   • caseStatus[]=OPEN   — open cases only
+  //   • status[]=ONGOING    — "Active" tasks only (need an action now)
+  //   • Role: Deel          — exclude tasks waiting on the Applicant/Client
+  //   • walk ALL pages       — miss nothing, however deep it sits
+  //   • GIX admin token only — never the HRX DEEL_ADMIN_TOKEN
   const adminTokenOverride = params.adminTokenOverride || null;
-  const fetchOpts = adminTokenOverride ? { adminTokenOverride } : {};
+  // Hard requirement: immigration is GIX-only. Refuse to fall back to the
+  // module HRX token (deelFetch would otherwise use DEEL_ADMIN_TOKEN for
+  // /admin/* paths). The route + capacity-aggregator always pass the resolved
+  // DEEL_ADMIN_GIX token; a missing override is a wiring bug, not HRX data.
+  if (!adminTokenOverride) {
+    throw Object.assign(
+      new Error('listImmigrationActions requires the GIX admin token (adminTokenOverride)'),
+      { status: 500 },
+    );
+  }
+  const fetchOpts = { adminTokenOverride };
+
+  // Page-size hint. /admin/mobility/actions is an offset endpoint (skip/take —
+  // the admin UI itself pages with take=40). We request a big page to cut
+  // round-trips, but never ASSUME the upstream honours the exact size: the
+  // walk ends on an empty page or when a page yields no new ids, so a smaller
+  // server-side cap can neither make us miss rows nor loop forever.
+  const pageSize = Math.min(200, Math.max(1, params.take || 200));
+
+  // Role: Deel — drop tasks whose required actor is the applicant or client.
+  // Everything else (AGENT / any Deel-side / unknown actor) is kept so we
+  // never accidentally hide a Deel task. Filtered here because the upstream
+  // request exposes no role parameter.
+  const NON_DEEL_ACTORS = new Set(['APPLICANT', 'CLIENT']);
 
   const all = [];
-  const upstreamStatusCounts = {}; // tally `t.status` raw values, debug.
+  const seenIds = new Set();
+  const upstreamStatusCounts = {};   // raw `t.status` tally (debug, §3.6)
+  const upstreamActorCounts = {};    // raw `t.actor` tally — audits the role filter
+  let excludedNonDeel = 0;
+  let scanned = 0;
   let skip = 0;
   let upstreamTotal = null;
-  // Safety cap so a runaway upstream can't paginate forever.
-  // 10 pages × take=200 = 2000 max — far above steady-state but enough
-  // headroom for an initial broadened-filter sweep.
-  const MAX_PAGES = 10;
+  // Runaway ceiling only — the empty-page / no-new-ids stops below end the
+  // walk well before this in practice. Covers any realistic immigration
+  // backlog; the route's build timeout bounds wall-time as a backstop.
+  const MAX_PAGES = 60;
   let pages = 0;
+
   while (pages < MAX_PAGES) {
     pages++;
     const qs = new URLSearchParams();
     qs.append('caseStatus[]', 'OPEN');
-    qs.set('take', String(take));
+    qs.append('status[]', 'ONGOING');
+    qs.set('take', String(pageSize));
     if (skip > 0) qs.set('skip', String(skip));
+
     const res = await deelFetch(`/admin/mobility/actions?${qs.toString()}`, fetchOpts);
     const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
     if (items.length === 0) break;
-    all.push(...items);
-    for (const t of items) {
-      const s = (t?.status || '_UNKNOWN').toUpperCase();
-      upstreamStatusCounts[s] = (upstreamStatusCounts[s] || 0) + 1;
-    }
-    // Upstream may surface `total` or `count`; if present + fully covered, stop.
+    scanned += items.length;
     upstreamTotal = res?.total ?? res?.count ?? upstreamTotal;
-    if (upstreamTotal != null && all.length >= upstreamTotal) break;
-    if (items.length < take) break;
+
+    let newThisPage = 0;
+    for (const t of items) {
+      const id = String(t?.id || '');
+      const status = (t?.status || '_UNKNOWN').toUpperCase();
+      const actor = String(t?.actor || '_UNKNOWN').toUpperCase();
+      upstreamStatusCounts[status] = (upstreamStatusCounts[status] || 0) + 1;
+      upstreamActorCounts[actor] = (upstreamActorCounts[actor] || 0) + 1;
+      // Dedup across pages — defends against offset overlap AND a server that
+      // ignores `skip` and re-serves the same page.
+      if (id && seenIds.has(id)) continue;
+      if (id) seenIds.add(id);
+      newThisPage++;
+      if (NON_DEEL_ACTORS.has(actor)) { excludedNonDeel++; continue; }
+      all.push(t);
+    }
+
+    // Stop when the upstream's own grand total is fully covered, or when a
+    // page surfaces no NEW ids (last page reached, OR the upstream ignored
+    // `skip` — either way, walking further can't surface anything new).
+    // Deliberately NOT keyed on page length vs requested take, so an unknown
+    // server-side take cap can't end the walk early and drop tasks.
+    if (upstreamTotal != null && scanned >= upstreamTotal) break;
+    if (newThisPage === 0) break;
     skip += items.length;
   }
+
   return {
     items: all,
     total: all.length,
     upstreamStatusCounts,
+    upstreamActorCounts,
+    excludedNonDeel,
     upstreamTotal,
     upstreamPages: pages,
-    upstreamScanned: all.length,
+    upstreamScanned: scanned,
   };
 }

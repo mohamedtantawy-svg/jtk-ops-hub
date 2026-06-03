@@ -48,7 +48,9 @@ export function useImmigrationTasksData(enabled = true, userEmail = null) {
 
     const run = (async () => {
       try {
-        const res = await fetchDeelImmigrationTasks({ take: 100, bustCache: force });
+        // take = upstream page size for the full walk (the route paginates
+        // /admin/mobility/actions through every page); 200 = fewer round-trips.
+        const res = await fetchDeelImmigrationTasks({ take: 200, bustCache: force });
         const fetched = res?.items || [];
         const now = Date.now();
         // Warming-payload short-circuit — same as workbench. Don't blow

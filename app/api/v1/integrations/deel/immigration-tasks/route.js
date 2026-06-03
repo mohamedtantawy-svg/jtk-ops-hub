@@ -80,7 +80,7 @@ export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url);
     const bustCache = searchParams.get('bust') === '1' || searchParams.has('_t');
-    const take = parseInt(searchParams.get('take') || '100', 10);
+    const take = parseInt(searchParams.get('take') || '200', 10);
 
     // Dept-namespaced cache key so HRX's snapshot (none, in practice)
     // can never leak to a GIX caller and vice versa.
@@ -109,16 +109,21 @@ export async function GET(req) {
           // distribution is the only post-deploy signal for "did the
           // upstream return everything we expected".
           console.info(
-            '[immigration-tasks] upstream scan: items=%d pages=%d total=%s statuses=%s',
+            '[immigration-tasks] upstream scan: deelTasks=%d scanned=%d pages=%d total=%s excludedNonDeel=%d statuses=%s actors=%s',
             result.items?.length ?? 0,
+            result.upstreamScanned ?? 0,
             result.upstreamPages,
             result.upstreamTotal == null ? 'n/a' : String(result.upstreamTotal),
+            result.excludedNonDeel ?? 0,
             JSON.stringify(result.upstreamStatusCounts || {}),
+            JSON.stringify(result.upstreamActorCounts || {}),
           );
           return {
             items,
             total: items.length,
             upstreamStatusCounts: result.upstreamStatusCounts || {},
+            upstreamActorCounts: result.upstreamActorCounts || {},
+            excludedNonDeel: result.excludedNonDeel ?? 0,
             upstreamTotal: result.upstreamTotal ?? null,
             upstreamPages: result.upstreamPages ?? 0,
             upstreamScanned: result.upstreamScanned ?? items.length,
