@@ -502,6 +502,11 @@ export const scopeWorkbenchTasks   = (items, user, extraEmails) => filterByAssig
 // pure-assignee scope as Zendesk/Jira/Workbench applies — agent sees
 // own, TL sees direct reports, RM sees subtree, admin sees all.
 export const scopeImmigrationTasks = (items, user, extraEmails) => filterByAssignee(items, user, extraEmails);
+// 2026-06-03: GIX-only Immigration Cases. Each row carries the case's active
+// agent email as `assigneeEmail`, so the same pure-assignee scope as the
+// other Deel sources applies — agent sees own, TL sees direct reports, RM
+// sees subtree, admin sees all.
+export const scopeImmigrationCases = (items, user, extraEmails) => filterByAssignee(items, user, extraEmails);
 
 // Agents see ASSIGNEE-only (with country fallback only for orphan rows),
 // while TL / Regional / Admin keep the broader country-OR-assignee union so

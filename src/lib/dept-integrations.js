@@ -42,6 +42,10 @@ const EMPTY_DEEL_SOURCES = Object.freeze({
   // Every new dept defaults to false so a freshly stood-up dept never
   // accidentally hits the immigration backlog.
   immigrationTasks: false,
+  // 2026-06-03: GIX-only "Immigration Cases" source backing
+  // /admin/mobility/cases (OPEN + ON_HOLD). Default false so a new dept
+  // never surfaces the immigration case backlog until explicitly enabled.
+  immigrationCases: false,
 });
 
 export const DEPT_INTEGRATIONS = {
@@ -76,6 +80,9 @@ export const DEPT_INTEGRATIONS = {
       // Immigration Tasks is GIX-only by design — HRX never queries
       // /admin/mobility/actions.
       immigrationTasks: false,
+      // Immigration Cases is GIX-only too — HRX never queries
+      // /admin/mobility/cases.
+      immigrationCases: false,
     },
   },
 
@@ -164,6 +171,10 @@ export const DEPT_INTEGRATIONS = {
       // Tasks" queue surface. Hits /admin/mobility/actions with the
       // GIX admin token (DEEL_ADMIN_GIX). HRX never sees this source.
       immigrationTasks: true,
+      // 2026-06-03: GIX-only "Immigration Cases" queue — hits
+      // /admin/mobility/cases (OPEN + ON_HOLD) with the SAME GIX admin
+      // token (DEEL_ADMIN_GIX). HRX never sees this source.
+      immigrationCases: true,
     },
   },
 

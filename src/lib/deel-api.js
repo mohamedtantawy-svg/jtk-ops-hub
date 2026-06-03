@@ -2202,3 +2202,79 @@ export async function listImmigrationActions(params = {}) {
     upstreamScanned: scanned,
   };
 }
+
+// ── Immigration Cases (GIX) — /admin/mobility/cases ─────────────────────────
+// Backs the GIX "Immigration Cases" queue (Mohamed/Beata spec 2026-06-03).
+// Pulls ALL open + on-hold cases:
+//   • statuses[]=OPEN & statuses[]=ON_HOLD
+//   • walk EVERY page — miss nothing (the admin table pages at 20/page)
+//   • GIX admin token only — never the HRX DEEL_ADMIN_TOKEN
+// Unlike Immigration TASKS there is deliberately NO Role/actor filter — the
+// case queue surfaces every open/on-hold case regardless of who acts next.
+export async function listImmigrationCases(params = {}) {
+  const adminTokenOverride = params.adminTokenOverride || null;
+  // Hard requirement: GIX-only. Refuse to fall back to the module HRX token.
+  // The route + capacity-aggregator always pass the resolved DEEL_ADMIN_GIX.
+  if (!adminTokenOverride) {
+    throw Object.assign(
+      new Error('listImmigrationCases requires the GIX admin token (adminTokenOverride)'),
+      { status: 500 },
+    );
+  }
+  const fetchOpts = { adminTokenOverride };
+
+  // Page-size hint. /admin/mobility/cases is an offset endpoint (skip/take —
+  // the admin UI pages at 20). We request a bigger page to cut round-trips,
+  // but never ASSUME the size is honoured: the walk ends on an empty page or
+  // a page with no new ids, so a smaller server cap can neither truncate nor
+  // loop. Backstopped by the route's build timeout + warming cache.
+  const pageSize = Math.min(100, Math.max(1, params.take || 100));
+
+  const all = [];
+  const seenIds = new Set();
+  const upstreamStatusCounts = {};   // raw `c.status` tally (OPEN / ON_HOLD), §3.6
+  let scanned = 0;
+  let skip = 0;
+  let upstreamTotal = null;
+  const MAX_PAGES = 120;   // runaway ceiling only; the stops below end it first
+  let pages = 0;
+
+  while (pages < MAX_PAGES) {
+    pages++;
+    const qs = new URLSearchParams();
+    qs.append('statuses[]', 'OPEN');
+    qs.append('statuses[]', 'ON_HOLD');
+    qs.set('take', String(pageSize));
+    if (skip > 0) qs.set('skip', String(skip));
+
+    const res = await deelFetch(`/admin/mobility/cases?${qs.toString()}`, fetchOpts);
+    const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
+    if (items.length === 0) break;
+    scanned += items.length;
+    upstreamTotal = res?.total ?? res?.count ?? upstreamTotal;
+
+    let newThisPage = 0;
+    for (const c of items) {
+      const id = String(c?.id || '');
+      const status = (c?.status || '_UNKNOWN').toUpperCase();
+      upstreamStatusCounts[status] = (upstreamStatusCounts[status] || 0) + 1;
+      if (id && seenIds.has(id)) continue;   // dedup across pages
+      if (id) seenIds.add(id);
+      newThisPage++;
+      all.push(c);
+    }
+
+    if (upstreamTotal != null && scanned >= upstreamTotal) break;
+    if (newThisPage === 0) break;   // last page, or upstream ignored `skip`
+    skip += items.length;
+  }
+
+  return {
+    items: all,
+    total: all.length,
+    upstreamStatusCounts,
+    upstreamTotal,
+    upstreamPages: pages,
+    upstreamScanned: scanned,
+  };
+}

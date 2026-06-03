@@ -71,6 +71,9 @@ const EMPTY_VISIBLE_SOURCES = Object.freeze({
   // the FE never shows the tab until the per-dept profile resolves and
   // confirms visibility (only true for the Global Immigration dept).
   immigrationTasks: false,
+  // 2026-06-03: GIX-only "Immigration Cases" source. Same fail-closed
+  // default — the tab stays hidden until the dept profile confirms it.
+  immigrationCases: false,
 });
 
 // 2026-05-21 — initial Set is empty AND .size === 0 so consumers can

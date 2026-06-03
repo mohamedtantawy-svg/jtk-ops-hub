@@ -1039,3 +1039,156 @@ export function normalizeImmigrationTasks(items = []) {
     };
   });
 }
+
+// ── Immigration Cases (GIX) — /admin/mobility/cases (OPEN + ON_HOLD) ────────
+// Maps a Deel mobility CASE → the row backing the bespoke ImmigrationCasesTable
+// (exact columns per Mohamed's 2026-06-03 screenshot).
+//
+// ⚠️ BEST-EFFORT FIELD MAP — the case-level fields below were NOT in the
+// truncated /admin/mobility/cases sample this was built from, so they use the
+// field names from the /admin/mobility/actions caseData shape + likely
+// alternates, each with a safe fallback (empty / "No vendor"). If the live
+// payload nests them differently, correct the path in THIS ONE block —
+// nothing downstream changes. The process / action / SLA / case-team columns
+// ARE derived from the confirmed part of the payload.
+const _imCaseField = {
+  applicantName: (c) => c?.applicant?.name || c?.worker?.name || c?.applicantName || '',
+  organization:  (c) => c?.organization?.name || c?.client?.name || c?.organizationName || '',
+  country:       (c) => c?.country || c?.caseCountry || c?.applicant?.country || '',
+  vendor:        (c) => c?.vendor?.name || c?.vendorName || (typeof c?.vendor === 'string' ? c.vendor : '') || '',
+  tags:          (c) => (Array.isArray(c?.tags) ? c.tags.map(t => (typeof t === 'string' ? t : (t?.name || t?.label || ''))).filter(Boolean) : []),
+  estCompletion: (c) => c?.estimatedCompletionDate || c?.estCompletionDate || c?.expectedCompletionDate || '',
+  expiry:        (c) => c?.expiryDate || c?.expiresAt || c?.expirationDate || '',
+  // "Next case date" in the admin table reads e.g. "Case start / Due today" —
+  // field unconfirmed; fall back to the active step's due date. FLAGGED.
+  nextCaseDate:  (c, proc) => c?.nextCaseDate || c?.nextActionDate || proc?.lastStatus?.dueDate || '',
+  updatedAt:     (c) => c?.updatedAt || c?.lastUpdatedAt || '',
+};
+
+function _imHumanizeWorkType(wt) {
+  if (!wt) return '';
+  return String(wt).toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, ch => ch.toUpperCase());
+}
+
+const _IM_USERTYPE_LABEL = { AGENT: 'Deel', APPLICANT: 'Applicant', CLIENT: 'Client' };
+
+export function normalizeImmigrationCases(items = []) {
+  const now = Date.now();
+  return (items || []).map(c => {
+    const caseStatus = String(c?.status || '').toUpperCase();           // OPEN / ON_HOLD
+    const processes = Array.isArray(c?.processes) ? c.processes : [];
+    // Active process drives Process step / SLA / Action required / Case team.
+    const proc = processes.find(p => p?.isActive && !p?.isFinished) || processes[0] || null;
+
+    const processName = proc?.type?.friendlyName?.trim() || '';
+    const processStep = proc?.lastStatus?.status?.friendlyName?.trim()
+      || (proc?.currentStatuses || []).find(s => s?.state === 'ACTIVE')?.friendlyName?.trim()
+      || '';
+
+    // Actionable actions = anything still ONGOING/TODO on the active process.
+    const actionableActions = (proc?.actions || []).filter(a => {
+      const s = String(a?.status || '').toUpperCase();
+      return s === 'ONGOING' || s === 'TODO';
+    });
+    // Distinct action owners, in encounter order (e.g. "Applicant, Deel").
+    const ownerSeen = new Set();
+    const actionOwners = [];
+    for (const a of actionableActions) {
+      const ut = String(a?.userType || '').toUpperCase();
+      const label = _IM_USERTYPE_LABEL[ut] || (ut ? ut[0] + ut.slice(1).toLowerCase() : '');
+      if (label && !ownerSeen.has(label)) { ownerSeen.add(label); actionOwners.push(label); }
+    }
+    // Step-owner suffix on the Process-step column ("· Deel"): Deel if Deel
+    // has any actionable action on the step, else the next party.
+    const stepOwner = actionOwners.includes('Deel') ? 'Deel' : (actionOwners[0] || '');
+
+    // Soonest action due + breach flag → Action-required due label + SLA tier.
+    let soonestDueMs = null;
+    let anyBreached = false;
+    for (const a of actionableActions) {
+      if (a?.isSLABreached === true) anyBreached = true;
+      const d = a?.dueDate ? Date.parse(a.dueDate) : NaN;
+      if (Number.isFinite(d)) soonestDueMs = soonestDueMs == null ? d : Math.min(soonestDueMs, d);
+    }
+    const dueLabel = (() => {
+      if (soonestDueMs == null) return '';
+      const days = Math.ceil((soonestDueMs - now) / 86400000);
+      if (days < 0) return 'Overdue';
+      if (days === 0) return 'Due today';
+      if (days === 1) return 'Due in 1 day';
+      return `Due in ${days} days`;
+    })();
+
+    // SLA from the active process step (dueDate + slaDays) — the same model
+    // the "Process step SLA" column shows. Emit slaRemaining + slaWindowMs so
+    // the Queue's shared rowSlaSeverity / tallyDeelSla treat cases exactly
+    // like every other Deel source (header pills agree with the table — §1.9).
+    // An action-level isSLABreached also forces a breach.
+    const stepDueIso = proc?.lastStatus?.dueDate || null;
+    const stepSlaDays = Number(proc?.lastStatus?.slaDays);
+    const slaWindowMs = (Number.isFinite(stepSlaDays) && stepSlaDays > 0 ? stepSlaDays : 2) * 86400000;
+    const stepDueMs = stepDueIso ? Date.parse(stepDueIso) : NaN;
+    const slaRemaining = Number.isFinite(stepDueMs) ? Math.round((stepDueMs - now) / 1000) : null;
+    const slaBreachStatus = (anyBreached || (slaRemaining != null && slaRemaining <= 0)) ? 'SLA_BREACHED'
+      : (slaRemaining != null && slaRemaining < slaWindowMs / 4 / 1000) ? 'SLA_AT_RISK'
+      : 'ON_TRACK';
+    const severity = slaBreachStatus === 'SLA_BREACHED' ? 'critical'
+      : slaBreachStatus === 'SLA_AT_RISK' ? 'warning' : 'active';
+
+    const activeAgent = proc?.activeAgent || null;
+    const assigneeEmail = activeAgent?.email ? String(activeAgent.email).toLowerCase() : '';
+
+    return {
+      id: String(c?.id || ''),
+      source: 'immigration_cases',
+      caseStatus,
+      // col 1 — Name and organization
+      applicantName: _imCaseField.applicantName(c),
+      organization: _imCaseField.organization(c),
+      // col 2 — Country and case type
+      country: _imCaseField.country(c),
+      workTypeLabel: _imHumanizeWorkType(c?.type?.workType),
+      caseTypeLabel: c?.type?.friendlyName?.trim() || '',
+      // col 3 — Process step
+      processName,
+      processStep,
+      processStepOwner: stepOwner,
+      // col 4 — Process step SLA
+      processStepSlaDate: proc?.lastStatus?.dueDate || null,
+      // col 5 — Action required
+      actionOwners,
+      actionDueLabel: dueLabel,
+      hasActionRequired: actionableActions.length > 0,
+      // col 6 — Vendor
+      vendor: _imCaseField.vendor(c),
+      // col 7 — Next case date (label best-effort; see field map)
+      nextCaseDate: _imCaseField.nextCaseDate(c, proc) || null,
+      nextCaseDateLabel: 'Case start',
+      // col 8 — Case team
+      caseTeam: activeAgent?.name || '',
+      // col 9 — Tags
+      tags: _imCaseField.tags(c),
+      // col 10 — Est. completion date
+      estCompletionDate: _imCaseField.estCompletion(c) || null,
+      // col 11 — Expiry date
+      expiryDate: _imCaseField.expiry(c) || null,
+      // col 12 — Last updated on
+      updatedAt: _imCaseField.updatedAt(c) || proc?.updatedAt || c?.createdAt || null,
+      // ── scoping + queue chrome ──
+      assignee: activeAgent?.name || '',
+      assigneeEmail,
+      caseUrl: c?.id ? DEEL_MOBILITY_CASE_URL(c.id) : '',
+      status: {
+        label: caseStatus === 'ON_HOLD' ? 'On hold' : 'Open',
+        severity,
+        color: severity === 'critical' ? '#d42d35' : severity === 'warning' ? '#ed8d00' : '#1f74b3',
+      },
+      slaBreachStatus,
+      slaRemaining,
+      slaWindowMs,
+      isResolved: false,
+      isPaused: caseStatus === 'ON_HOLD',
+      createdAt: c?.createdAt || null,
+    };
+  });
+}

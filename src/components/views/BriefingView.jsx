@@ -36,6 +36,7 @@ import {
   scopeRedlineRequests,
   scopeWorkbenchTasks,
   scopeIncentivePlans,
+  scopeImmigrationCases,
 } from '../../lib/queue-scoping';
 import Avatar from '../ui/Avatar';
 import OOOBadge from '../ui/OOOBadge';
@@ -378,6 +379,11 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const offboardingData = queueUnified?.offboardingData || { items: [], loading: false, error: null };
   const changeRequestData = queueUnified?.changeRequestData || { amendments: [], redlines: [], loading: false, error: null };
   const workbenchData = queueUnified?.workbenchData || { tasks: [], loading: false, error: null };
+  // 2026-06-03: GIX-only Immigration Cases — counted in the home source
+  // breakdown (count-only per Mohamed; NOT folded into the Health Score /
+  // SLA aggregates, which use a different SLA model). Rows arrive
+  // pre-normalised from the route.
+  const immigrationCasesData = queueUnified?.immigrationCasesData || { cases: [] };
   const incentivePlansData = queueUnified?.incentivePlansData || { items: [], loading: false, error: null };
 
   const ds=perms?.dataScope||'own_tasks_only';
@@ -561,6 +567,10 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const workbenchActiveRows    = useMemo(() => workbenchRows.filter(r => !r.isResolved),    [workbenchRows]);
   const workbenchActiveRowsAll = useMemo(() => workbenchRowsAll.filter(r => !r.isResolved), [workbenchRowsAll]);
   const incentivePlanRows = useMemo(() => scopeIncentivePlans(incentivePlanRowsAll, user, briefingCoverageEmails), [incentivePlanRowsAll, user, briefingCoverageEmails]);
+  // Immigration Cases are pre-normalised by the route; just role-scope by the
+  // case's active-agent email. All cases are open/on-hold → active = all.
+  const immigrationCaseRows = useMemo(() => scopeImmigrationCases(immigrationCasesData.cases || [], user, briefingCoverageEmails), [immigrationCasesData.cases, user, teamDataVersion, briefingCoverageEmails]);
+  const immigrationCaseActiveRows = useMemo(() => immigrationCaseRows.filter(r => !r.isResolved), [immigrationCaseRows]);
 
   const inScope = useCallback(t => {
     if (scopeIds.includes(t.assigneeId)) return true;
@@ -1107,6 +1117,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   if (redlineRows.length)     srcCounts['redlines']    = (srcCounts['redlines']    || 0) + redlineRows.length;
   if (workbenchActiveRows.length)   srcCounts['workbench']   = (srcCounts['workbench']   || 0) + workbenchActiveRows.length;
   if (incentivePlanRows.length) srcCounts['incentive_plans'] = (srcCounts['incentive_plans'] || 0) + incentivePlanRows.length;
+  if (immigrationCaseActiveRows.length) srcCounts['immigration_cases'] = (srcCounts['immigration_cases'] || 0) + immigrationCaseActiveRows.length;
   const srcEntries=Object.entries(srcCounts).sort((a,b)=>b[1]-a[1]);
   // Total across all sources (for percentage calculation)
   const srcTotal = srcEntries.reduce((sum, [, cnt]) => sum + cnt, 0);

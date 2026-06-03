@@ -20,6 +20,7 @@ import {
   scopeRedlineRequests,
   scopeIncentivePlans,
   scopeImmigrationTasks,
+  scopeImmigrationCases,
   scopeHiddenTasks,
   filterByAssignee as scopeTicketsByAssignee,
   getVisibleEmails,
@@ -42,6 +43,7 @@ import {
 } from '../../lib/queue-subject-width';
 import UnifiedSyncButton from './UnifiedSyncButton';
 import SourceTable from './SourceTable';
+import ImmigrationCasesTable from './ImmigrationCasesTable';
 import ErrorBoundary from '../ui/ErrorBoundary';
 import CoverageBanner from '../ooo/CoverageBanner';
 import {
@@ -120,6 +122,7 @@ const WORK_SOURCES = [
   { id: 'incentive_plans',label: 'Incentive Plans',icon: 'bi-cash-coin',          color: '#0e7490', bg: '#ecfeff' },
   { id: 'workbench',      label: 'Workbench',      icon: 'bi-grid-3x3-gap-fill',  color: '#0369a1', bg: '#eff6ff' },
   { id: 'immigration_tasks', label: 'Immigration Tasks', icon: 'bi-passport-fill',color: '#0369a1', bg: '#e0f2fe' },
+  { id: 'immigration_cases', label: 'Immigration Cases', icon: 'bi-folder-fill',  color: '#0c4a6e', bg: '#e0f2fe' },
   { id: 'jira',           label: 'Jira',           icon: 'bi-kanban-fill',        color: '#1f74b3', bg: '#e8f0fe' },
   { id: 'zendesk',        label: 'Zendesk',        icon: 'bi-headset',            color: '#29811e', bg: '#e8f5e9' },
 ];
@@ -202,6 +205,8 @@ const SOURCE_TAB_TO_VISIBILITY_KEY = {
   // 2026-05-22: GIX-only — `visibleSources.immigrationTasks` is true only
   // for the Global Immigration dept profile in dept-integrations.js.
   immigration_tasks: 'immigrationTasks',
+  // 2026-06-03: GIX-only Immigration Cases tab — same per-dept gate.
+  immigration_cases: 'immigrationCases',
 };
 
 const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
@@ -324,7 +329,8 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
       if (src === 'onboarding' || src === 'offboarding' ||
           src === 'amendments' || src === 'redlines' ||
           src === 'workbench' || src === 'incentive_plans' ||
-          src === 'immigration_tasks' || src === 'work_tasks' ||
+          src === 'immigration_tasks' || src === 'immigration_cases' ||
+          src === 'work_tasks' ||
           src === 'hidden') {
         setFTool(null);
         setWorkSource(src);
@@ -530,6 +536,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
     workbenchData = { tasks: [] },
     incentivePlansData = { items: [] },
     immigrationTasksData = { tasks: [] },
+    immigrationCasesData = { cases: [] },
     meta: syncMeta = {},
     sources: syncSources = {},
     refreshAll: syncRefreshAll = () => {},
@@ -574,6 +581,11 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
   // taskUrl. Symptom: all 300 GIX rows rendered "Immigration Task" +
   // "--" + "Unassigned" + no Open link. Fix is to use the rows as-is.
   const immigrationTaskRowsAll  = useMemo(() => (immigrationTasksData.tasks || []).filter(r => !isHiddenKey('immigration_tasks', r.id)), [immigrationTasksData.tasks, isHiddenKey]);
+  // 2026-06-03: GIX-only Immigration Cases rows. Arrive PRE-NORMALISED from
+  // /api/v1/integrations/deel/immigration-cases (the route runs
+  // normalizeImmigrationCases server-side, then scopes by the case's active
+  // agent email), so they're used as-is — same contract as Immigration Tasks.
+  const immigrationCaseRowsAll  = useMemo(() => (immigrationCasesData.cases || []), [immigrationCasesData.cases]);
 
   const isAdmin = isAdminUser(user);
   const isLead = perms?.dataScope === 'team_tasks';
@@ -714,6 +726,9 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
   // id), so a future per-row SLA-extension request flow can apply here
   // identically to the other Deel sources.
   const immigrationTaskRows = useMemo(() => applySlaExtensionsToRows(scopeImmigrationTasks(immigrationTaskRowsAll, user, queueCoverageEmails), slaExtensionMap, 'immigration_tasks', slaExtensionPendingMap), [immigrationTaskRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion, queueCoverageEmails]);
+  // Immigration Cases are read-only (no hide / SLA-extension flow), so just
+  // role-scope by the case's active-agent email — same matrix as the others.
+  const immigrationCaseRows = useMemo(() => scopeImmigrationCases(immigrationCaseRowsAll, user, queueCoverageEmails), [immigrationCaseRowsAll, user, teamDataVersion, queueCoverageEmails]);
   // Workbench is the only Deel source that intentionally surfaces resolved
   // rows (24h of COMPLETED + CLOSED) so the "RESOLVED TODAY" section can
   // render. Strip them from the cross-source "All" aggregates so the
@@ -728,6 +743,9 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
   // pull — keeps the open/paused/resolved partitions consistent across
   // sources.
   const immigrationTaskActiveRows = useMemo(() => immigrationTaskRows.filter(r => !r.isResolved), [immigrationTaskRows]);
+  // Immigration Cases are all open/on-hold (never resolved), so active = all;
+  // mirror the partition for consistency with the other sources.
+  const immigrationCaseActiveRows = useMemo(() => immigrationCaseRows.filter(r => !r.isResolved), [immigrationCaseRows]);
   // Per-role view of the Hidden audit list. `hiddenTasks.items` stays
   // global (so `hiddenKeys` keeps filtering hidden rows out of every
   // queue for everyone — hides are universal), but the Hidden TAB now
@@ -917,6 +935,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
   const visWorkbenchRows   = useMemo(() => applyPanelFilter(workbenchRows),   [workbenchRows, applyPanelFilter]);
   const visIncentivePlanRows = useMemo(() => applyPanelFilter(incentivePlanRows), [incentivePlanRows, applyPanelFilter]);
   const visImmigrationTaskRows = useMemo(() => applyPanelFilter(immigrationTaskRows), [immigrationTaskRows, applyPanelFilter]);
+  const visImmigrationCaseRows = useMemo(() => applyPanelFilter(immigrationCaseRows), [immigrationCaseRows, applyPanelFilter]);
 
   // Per-source SLA severity classifier. At-risk = "less than 25% of the SLA
   // window remaining" — proportional to whatever active/paused window the
@@ -958,6 +977,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
   const tblWorkbenchRows   = useMemo(() => applySlaFilter(visWorkbenchRows),   [visWorkbenchRows,   applySlaFilter]);
   const tblIncentivePlanRows = useMemo(() => applySlaFilter(visIncentivePlanRows), [visIncentivePlanRows, applySlaFilter]);
   const tblImmigrationTaskRows = useMemo(() => applySlaFilter(visImmigrationTaskRows), [visImmigrationTaskRows, applySlaFilter]);
+  const tblImmigrationCaseRows = useMemo(() => applySlaFilter(visImmigrationCaseRows), [visImmigrationCaseRows, applySlaFilter]);
 
   // Tally a row set into { atRisk, breached, onTrack } using the proportional
   // at-risk band (windowMs/4). Mirrors rowSlaSeverity exactly so pill counts,
@@ -1032,6 +1052,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
     if (workSource === 'workbench')       return tallyDeelSla(mineOnlyForSla(visWorkbenchRows.filter(r => !r.isResolved)));
     if (workSource === 'incentive_plans') return tallyDeelSla(mineOnlyForSla(visIncentivePlanRows));
     if (workSource === 'immigration_tasks') return tallyDeelSla(mineOnlyForSla(visImmigrationTaskRows.filter(r => !r.isResolved)));
+    if (workSource === 'immigration_cases') return tallyDeelSla(mineOnlyForSla(visImmigrationCaseRows.filter(r => !r.isResolved)));
     // Admin Hidden tab — no SLA semantics. Pills sit at zero so they don't
     // borrow numbers from the underlying ZD/Jira queue.
     if (workSource === 'hidden') return { atRiskCount: 0, breachedCount: 0, onTrackCount: 0 };
@@ -1047,7 +1068,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
     const atRisk = slaBase.filter(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; }).length;
     const breached = slaBase.filter(t => { const s = slaInfo(t); return s && s.breach; }).length;
     return { atRiskCount: atRisk, breachedCount: breached, onTrackCount: slaBase.length - atRisk - breached };
-  }, [workSource, fTool, hasNonSlaActiveFilters, workspaceHomeSla, visPreSla, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows, visIncentivePlanRows, visImmigrationTaskRows, tallyDeelSla, mineOnlyForSla]);
+  }, [workSource, fTool, hasNonSlaActiveFilters, workspaceHomeSla, visPreSla, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows, visIncentivePlanRows, visImmigrationTaskRows, visImmigrationCaseRows, tallyDeelSla, mineOnlyForSla]);
 
   // Trish Lee 2026-05-28 — "the numbers aren't adding up": for Workbench
   // the tab badge said 9 but the SLA pills summed to 5; for Jira the
@@ -1079,12 +1100,13 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
     else if (workSource === 'workbench')          expected = visWorkbenchRows.filter(r => !r.isResolved).length;
     else if (workSource === 'incentive_plans')    expected = visIncentivePlanRows.length;
     else if (workSource === 'immigration_tasks')  expected = visImmigrationTaskRows.filter(r => !r.isResolved).length;
+    else if (workSource === 'immigration_cases')  expected = visImmigrationCaseRows.filter(r => !r.isResolved).length;
     else if (workSource === 'hidden' || workSource === 'work_tasks') return 0;
     else if (fTool === 'jira')                    expected = baseVis.filter(t => t.source === 'jira' && t.status !== 'resolved').length;
     else if (fTool === 'zendesk')                 expected = baseVis.filter(t => t.source === 'zendesk' && t.status !== 'resolved').length;
     else return 0;
     return Math.max(0, expected - pillSum);
-  }, [onTrackCount, atRiskCount, breachedCount, workSource, fTool, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows, visIncentivePlanRows, visImmigrationTaskRows, baseVis]);
+  }, [onTrackCount, atRiskCount, breachedCount, workSource, fTool, visOnboardingRows, visOffboardingRows, visAmendmentRows, visRedlineRows, visWorkbenchRows, visIncentivePlanRows, visImmigrationTaskRows, visImmigrationCaseRows, baseVis]);
 
   // ── View-aware header counts ──
   // For each Deel source we read the SLA-filtered row set so the "N open"
@@ -1110,6 +1132,9 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
     }
     if (workSource === 'incentive_plans') return { open: tblIncentivePlanRows.length, paused: 0, resolved: 0 };
     if (workSource === 'immigration_tasks') return { open: tblImmigrationTaskRows.length, paused: 0, resolved: 0 };
+    // Immigration Cases split OPEN vs ON_HOLD so the header reads
+    // "N open · M on hold" (isPaused === ON_HOLD per normalizeImmigrationCases).
+    if (workSource === 'immigration_cases') return { open: tblImmigrationCaseRows.filter(r => !r.isPaused).length, paused: tblImmigrationCaseRows.filter(r => r.isPaused).length, resolved: 0 };
     if (workSource === 'hidden') return { open: scopedHiddenItems.length, paused: 0, resolved: 0 };
     // Work-tasks live in their own backend; the panel does its own counting.
     if (workSource === 'work_tasks') return { open: 0, paused: 0, resolved: 0 };
@@ -1128,7 +1153,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
       paused: snoozed.length,
       resolved: done.length,
     };
-  }, [workSource, fTool, active, eorSigning, snoozed, done, tblOnboardingRows, tblOffboardingRows, tblAmendmentRows, tblRedlineRows, tblWorkbenchRows, tblIncentivePlanRows, tblImmigrationTaskRows, scopedHiddenItems]);
+  }, [workSource, fTool, active, eorSigning, snoozed, done, tblOnboardingRows, tblOffboardingRows, tblAmendmentRows, tblRedlineRows, tblWorkbenchRows, tblIncentivePlanRows, tblImmigrationTaskRows, tblImmigrationCaseRows, scopedHiddenItems]);
 
   const rawCounts = useMemo(() => {
     if (workSource === 'onboarding')      return { open: onboardingRows.length };
@@ -1138,6 +1163,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
     if (workSource === 'workbench')       return { open: workbenchActiveRows.length };
     if (workSource === 'incentive_plans') return { open: incentivePlanRows.length };
     if (workSource === 'immigration_tasks') return { open: immigrationTaskActiveRows.length };
+    if (workSource === 'immigration_cases') return { open: immigrationCaseActiveRows.length };
     if (workSource === 'hidden') return { open: scopedHiddenItems.length };
     if (workSource === 'work_tasks') return { open: 0 };
     const base = fTool ? baseVis.filter(t => t.source === fTool) : baseVis;
@@ -1145,7 +1171,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
     return {
       open: base.filter(t => t.status !== 'resolved' && t.status !== 'waiting').length + srcExtra,
     };
-  }, [workSource, fTool, baseVis, allSourceRows, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, incentivePlanRows, immigrationTaskActiveRows, scopedHiddenItems]);
+  }, [workSource, fTool, baseVis, allSourceRows, onboardingRows, offboardingRows, amendmentRows, redlineRows, workbenchRows, incentivePlanRows, immigrationTaskActiveRows, immigrationCaseActiveRows, scopedHiddenItems]);
   const hiddenByFilters = Math.max(0, rawCounts.open - headerCounts.open);
 
   // Persist filters to localStorage — user-scoped so two people on the
@@ -1375,7 +1401,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
           })()}
 
           {(isAdmin || isLead) && (() => {
-            const sourceLabels = { onboarding: 'Onboarding', offboarding: 'Offboarding', amendments: 'Amendments', redlines: 'Redlines', workbench: 'Workbench', incentive_plans: 'Incentive Plans', immigration_tasks: 'Immigration Tasks', hidden: 'Hidden' };
+            const sourceLabels = { onboarding: 'Onboarding', offboarding: 'Offboarding', amendments: 'Amendments', redlines: 'Redlines', workbench: 'Workbench', incentive_plans: 'Incentive Plans', immigration_tasks: 'Immigration Tasks', immigration_cases: 'Immigration Cases', hidden: 'Hidden' };
             const toolLabels = { zendesk: 'Zendesk', jira: 'Jira' };
             const viewLabel = sourceLabels[workSource] || toolLabels[fTool] || (isAdmin ? 'All Tasks' : user.team);
             return <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', marginLeft: 6 }}>{viewLabel}</span>;
@@ -1465,6 +1491,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
               : workSource === 'workbench' ? workbenchActiveRows
               : workSource === 'incentive_plans' ? incentivePlanRows
               : workSource === 'immigration_tasks' ? immigrationTaskActiveRows
+              : workSource === 'immigration_cases' ? immigrationCaseActiveRows
               : [];
             const present = new Set(rowsForPanel.map(r => r?.status?.severity).filter(Boolean));
             statusOptions = ['critical', 'warning', 'active', 'info']
@@ -1551,6 +1578,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
                     })()
                   : ws.id === 'incentive_plans' ? visIncentivePlanRows.length
                   : ws.id === 'immigration_tasks' ? visImmigrationTaskRows.filter(r => !r.isResolved).length
+                  : ws.id === 'immigration_cases' ? visImmigrationCaseRows.length
                   : ws.id === 'jira' ? jiraCount
                   : ws.id === 'zendesk' ? zdCount
                   : ws.id === 'hidden' ? scopedHiddenItems.length
@@ -1869,6 +1897,19 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
             onSlaExtension={(row) => setSlaExtensionModalTask({ source: 'immigration_tasks', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'immigration_tasks', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'immigration_tasks')))}
+          />
+        </ErrorBoundary>
+      )}
+      {workSource === 'immigration_cases' && (
+        <ErrorBoundary>
+          {/* 2026-06-03: GIX-only Immigration Cases — bespoke 12-column table
+              (Deel mobility cases, OPEN + ON_HOLD). Read-only; clicking a row
+              opens the case in admin.deel.network. */}
+          <ImmigrationCasesTable
+            rows={tblImmigrationCaseRows}
+            loading={immigrationCasesData.loading}
+            error={immigrationCasesData.error}
+            onRefresh={immigrationCasesData.refresh}
           />
         </ErrorBoundary>
       )}

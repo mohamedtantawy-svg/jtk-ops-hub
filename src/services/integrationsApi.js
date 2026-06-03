@@ -95,6 +95,20 @@ export async function fetchDeelImmigrationTasks({ take, bustCache } = {}) {
   return apiFetch(`/integrations/deel/immigration-tasks${qs ? `?${qs}` : ''}`, { timeoutMs: 60_000 });
 }
 
+// 2026-06-03: GIX-only Immigration Cases source. Backs the "Immigration
+// Cases" queue (all OPEN + ON_HOLD mobility cases). HRX gets a
+// `disabled: true` response (its deelSources has `immigrationCases: false`),
+// and the FE branches short-circuit it before issuing the request anyway.
+// Same 60s timeout window as the other Deel sources so the server's
+// warming-payload fallback has room.
+export async function fetchDeelImmigrationCases({ take, bustCache } = {}) {
+  const params = new URLSearchParams();
+  if (take) params.set('take', String(take));
+  if (bustCache) params.set('bust', '1');
+  const qs = params.toString();
+  return apiFetch(`/integrations/deel/immigration-cases${qs ? `?${qs}` : ''}`, { timeoutMs: 60_000 });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Jira
 // ─────────────────────────────────────────────────────────────────────────────

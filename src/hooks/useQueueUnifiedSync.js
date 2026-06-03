@@ -20,6 +20,7 @@ import { useChangeRequestData } from './useChangeRequestData';
 import { useWorkbenchData } from './useWorkbenchData';
 import { useIncentivePlansData } from './useIncentivePlansData';
 import { useImmigrationTasksData } from './useImmigrationTasksData';
+import { useImmigrationCasesData } from './useImmigrationCasesData';
 
 const TICK_MS = 30_000;
 
@@ -45,6 +46,9 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
   // Cost on HRX = a single 401-fast HTTP round trip per refresh cycle,
   // same as the current cost of every other non-HRX-visible source.
   const immigrationTasksData = useImmigrationTasksData(enabled, userEmail);
+  // 2026-06-03: GIX-only "Immigration Cases" source (all OPEN + ON_HOLD
+  // mobility cases). Same HRX no-op behaviour as Immigration Tasks.
+  const immigrationCasesData = useImmigrationCasesData(enabled, userEmail);
 
   // ── Shared "now" tick — one 30s timer powers every "X min ago" label ─────
   // Pauses while the tab is hidden so we don't wake the CPU for nothing;
@@ -198,6 +202,16 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
         lastSyncAt: immigrationTasksData.lastSyncAt ?? null,
         retry: immigrationTasksData.refresh,
       },
+      immigrationCases: {
+        id: 'immigrationCases',
+        label: 'Immigration Cases',
+        count: immigrationCasesData.cases?.length ?? 0,
+        loading: !!immigrationCasesData.loading,
+        isRefreshing: !!immigrationCasesData.isRefreshing,
+        error: immigrationCasesData.error || null,
+        lastSyncAt: immigrationCasesData.lastSyncAt ?? null,
+        retry: immigrationCasesData.refresh,
+      },
     };
   }, [
     queueSync?.sources?.zendesk, queueSync?.sources?.jira, queueSync?.refresh,
@@ -216,6 +230,8 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
     incentivePlansData.error, incentivePlansData.lastSyncAt, incentivePlansData.refresh,
     immigrationTasksData.tasks, immigrationTasksData.loading, immigrationTasksData.isRefreshing,
     immigrationTasksData.error, immigrationTasksData.lastSyncAt, immigrationTasksData.refresh,
+    immigrationCasesData.cases, immigrationCasesData.loading, immigrationCasesData.isRefreshing,
+    immigrationCasesData.error, immigrationCasesData.lastSyncAt, immigrationCasesData.refresh,
   ]);
 
   // ── Aggregated meta for the UnifiedSyncButton ────────────────────────────
@@ -353,7 +369,8 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
     try { workbenchData.refresh(); } catch {}
     try { incentivePlansData.refresh(); } catch {}
     try { immigrationTasksData.refresh(); } catch {}
-  }, [queueSync, onboardingData, pausedOnboardingData, offboardingData, changeRequestData, workbenchData, incentivePlansData, immigrationTasksData]);
+    try { immigrationCasesData.refresh(); } catch {}
+  }, [queueSync, onboardingData, pausedOnboardingData, offboardingData, changeRequestData, workbenchData, incentivePlansData, immigrationTasksData, immigrationCasesData]);
 
   return {
     onboardingData,
@@ -363,6 +380,7 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
     workbenchData,
     incentivePlansData,
     immigrationTasksData,
+    immigrationCasesData,
     sources,
     meta,
     refreshAll,
