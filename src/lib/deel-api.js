@@ -2129,7 +2129,10 @@ export async function listImmigrationActions(params = {}) {
   // round-trips, but never ASSUME the upstream honours the exact size: the
   // walk ends on an empty page or when a page yields no new ids, so a smaller
   // server-side cap can neither make us miss rows nor loop forever.
-  const pageSize = Math.min(200, Math.max(1, params.take || 200));
+  // 2026-06-03: reverted 200 → 100 — take=200 made /admin/mobility/actions
+  // 400 every page (the admin UI itself pages at ≤40; cases honour 100).
+  // 100 is the proven-working size; the full walk still covers everything.
+  const pageSize = Math.min(100, Math.max(1, params.take || 100));
 
   // Role: Deel — drop tasks whose required actor is the applicant or client.
   // Everything else (AGENT / any Deel-side / unknown actor) is kept so we
@@ -2235,6 +2238,8 @@ export async function listImmigrationCases(params = {}) {
   const upstreamStatusCounts = {};   // raw `c.status` tally (OPEN / ON_HOLD), §3.6
   let scanned = 0;
   let skip = 0;
+  let cursor = null;
+  let useCursor = false;
   let upstreamTotal = null;
   const MAX_PAGES = 120;   // runaway ceiling only; the stops below end it first
   let pages = 0;
@@ -2242,12 +2247,27 @@ export async function listImmigrationCases(params = {}) {
   while (pages < MAX_PAGES) {
     pages++;
     const qs = new URLSearchParams();
-    qs.append('statuses[]', 'OPEN');
-    qs.append('statuses[]', 'ON_HOLD');
-    qs.set('take', String(pageSize));
-    if (skip > 0) qs.set('skip', String(skip));
+    if (useCursor && cursor) {
+      // Deel admin cursor convention (skill §3.6): once the upstream hands us
+      // a cursor, send ONLY the cursor — it already encodes the statuses
+      // filter + sort. Re-sending statuses[]/take/skip alongside a cursor
+      // returns 400. This is what /admin/mobility/cases actually uses —
+      // `skip` was ignored, capping the pull at one page (the 100-row bug).
+      qs.set('cursor', cursor);
+    } else {
+      qs.append('statuses[]', 'OPEN');
+      qs.append('statuses[]', 'ON_HOLD');
+      qs.set('take', String(pageSize));
+      if (skip > 0) qs.set('skip', String(skip));
+    }
 
     const res = await deelFetch(`/admin/mobility/cases?${qs.toString()}`, fetchOpts);
+    if (pages === 1) {
+      // Telemetry: surface the upstream's top-level shape so the pagination
+      // mechanism (cursor vs offset) is confirmable from prod logs without a
+      // live probe.
+      try { console.info('[immigration-cases] page-1 response keys: %s', JSON.stringify(Object.keys(res || {}))); } catch { /* noop */ }
+    }
     const items = Array.isArray(res?.items) ? res.items : (Array.isArray(res) ? res : []);
     if (items.length === 0) break;
     scanned += items.length;
@@ -2265,7 +2285,19 @@ export async function listImmigrationCases(params = {}) {
     }
 
     if (upstreamTotal != null && scanned >= upstreamTotal) break;
-    if (newThisPage === 0) break;   // last page, or upstream ignored `skip`
+
+    // Prefer cursor pagination when the upstream returns a continuation token
+    // (the documented Deel admin convention). Offset/`skip` is only the
+    // fallback while no cursor is present.
+    const nextCursor = res?.cursor || res?.nextCursor || res?.next
+      || res?.meta?.cursor || res?.meta?.nextCursor || res?.pagination?.cursor || null;
+    if (nextCursor && nextCursor !== cursor) {
+      useCursor = true;
+      cursor = nextCursor;
+      continue;
+    }
+    if (useCursor) break;            // cursor walk exhausted (no fresh token)
+    if (newThisPage === 0) break;    // offset: last page, or upstream ignored `skip`
     skip += items.length;
   }
 

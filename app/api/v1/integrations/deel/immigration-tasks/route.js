@@ -80,7 +80,7 @@ export async function GET(req) {
   try {
     const { searchParams } = new URL(req.url);
     const bustCache = searchParams.get('bust') === '1' || searchParams.has('_t');
-    const take = parseInt(searchParams.get('take') || '200', 10);
+    const take = parseInt(searchParams.get('take') || '100', 10);
 
     // Dept-namespaced cache key so HRX's snapshot (none, in practice)
     // can never leak to a GIX caller and vice versa.
