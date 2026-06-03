@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Avatar from '../ui/Avatar';
 import RichTextBody from '../ui/RichTextBody';
 import MemberMultiPicker from '../org/MemberMultiPicker';
+import MentionTextarea from '../ui/MentionTextarea';
 import { getWorkTask, patchWorkTask, archiveWorkTask, listWorkTaskComments, createWorkTaskComment } from '../../services/workTasksApi';
 
 const PRIORITY_META = {
@@ -481,13 +482,20 @@ function DrawerBody({
         border: '1px solid var(--border-light)',
         borderRadius: 'var(--radius-md)',
         background: 'var(--surface)',
-        overflow: 'hidden',
+        // overflow must stay visible so the MentionTextarea autocomplete
+        // popover (opens upward from the composer at the bottom of this
+        // section) isn't clipped when the comment list is short. Header
+        // corners are rounded explicitly below to keep the card crisp
+        // without relying on overflow:hidden (skill §4.5 stacking rule).
+        overflow: 'visible',
       }}>
         <header style={{
           display: 'flex', alignItems: 'center', gap: 6,
           padding: '10px 12px',
           borderBottom: '1px solid var(--border-light)',
           background: 'var(--surface-2)',
+          borderTopLeftRadius: 'var(--radius-md)',
+          borderTopRightRadius: 'var(--radius-md)',
           fontSize: 11, fontWeight: 700, color: 'var(--text-muted)',
           textTransform: 'uppercase', letterSpacing: '0.05em',
         }}>
@@ -507,39 +515,52 @@ function DrawerBody({
             padding: 12, display: 'flex', flexDirection: 'column', gap: 8,
             borderTop: comments.length > 0 ? '1px solid var(--border-light)' : 'none',
           }}>
-            <textarea
-              value={draftComment}
-              onChange={e => setDraftComment(e.target.value)}
-              placeholder="Write a comment…"
-              rows={2}
-              style={{ ...inputStyle, padding: 8, resize: 'vertical', minHeight: 50 }}
-            />
-            {mentionDraft.length > 0 && (
-              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                Notify on post: {mentionDraft.map(e => memberByEmail.get(e)?.name || e).join(', ')}
-              </div>
-            )}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ flex: 1 }}>
-                <MemberMultiPicker
-                  selected={mentionDraft}
-                  onChange={setMentionDraft}
-                  candidates={candidates}
-                  oooEmails={oooEmails}
-                  placeholder="@-mention (notifies the person)"
-                />
-              </div>
+            {/* Inline @-mention composer — Duygu Cakalli 2026-06-02 bug
+                "unable to mention anyone on the task comments". Typing
+                @first.last in the body now autocompletes against the
+                dept-scoped roster and resolves to a notify-on-post mention,
+                matching the shared MentionTextarea used by the Feedback /
+                Announcements / HR Hub composers. Replaces the standalone
+                MemberMultiPicker, a separate widget users didn't discover —
+                they typed @name in the body (like everywhere else) and
+                nothing happened. mentionDraft is now driven by
+                onMentionsChange (resolved emails in the body); the server
+                re-validates + fires task_mentioned to each. */}
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
+              <MentionTextarea
+                value={draftComment}
+                onChange={e => setDraftComment(e.target.value)}
+                onMentionsChange={setMentionDraft}
+                members={candidates}
+                placeholder="Write a comment… type @ to mention someone"
+                rows={2}
+                minHeight={50}
+                maxHeight={160}
+                style={{ ...inputStyle, height: 'auto', padding: 8, resize: 'vertical', minHeight: 50, lineHeight: 1.45 }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && draftComment.trim()) {
+                    e.preventDefault();
+                    postComment();
+                  }
+                }}
+              />
               <button
                 type="button"
                 onClick={postComment}
                 disabled={postingComment || !draftComment.trim()}
                 style={{
                   ...primaryBtnStyle,
+                  flexShrink: 0,
                   opacity: (postingComment || !draftComment.trim()) ? 0.5 : 1,
                   cursor: (postingComment || !draftComment.trim()) ? 'not-allowed' : 'pointer',
                 }}
               >{postingComment ? 'Posting…' : 'Post comment'}</button>
             </div>
+            {mentionDraft.length > 0 && (
+              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                Notify on post: {mentionDraft.map(e => memberByEmail.get(e)?.name || e).join(', ')}
+              </div>
+            )}
           </div>
         </div>
       </section>
