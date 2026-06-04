@@ -77,7 +77,7 @@ const labelStyle = {
   letterSpacing: '.05em', marginBottom: 6, display: 'block',
 };
 
-export default function CreateSlaExtensionModal({ task, onClose, onSubmitted }) {
+export default function CreateSlaExtensionModal({ task, tasks, onClose, onSubmitted }) {
   const backdropRef = useRef(null);
   const [duration, setDuration] = useState(null);
   const [reasonCode, setReasonCode] = useState(null);
@@ -89,6 +89,28 @@ export default function CreateSlaExtensionModal({ task, onClose, onSubmitted }) 
   // Whether the submitted request was auto-approved server-side (set from
   // the POST response). Drives the confirmation copy below.
   const [submittedAuto, setSubmittedAuto] = useState(false);
+  // Bulk result tallies — applied / skipped-because-already-extended /
+  // hard-failed. Single-row submits set submittedCount = 1.
+  const [submittedCount, setSubmittedCount] = useState(0);
+  const [submittedSkipped, setSubmittedSkipped] = useState(0);
+  const [submittedFailed, setSubmittedFailed] = useState(0);
+
+  // `task` (single) and `tasks` (array) are both accepted — single-row
+  // callers are unchanged; the Queue bulk-bar passes `tasks`. In bulk, ONE
+  // duration + reason + note applies to every selected task and each fires
+  // its own auto-approve request (mirrors CreateHideTaskRequestModal). Bulk
+  // is capped at 1–2 business days (Ayushi 2026-06-04) — exactly the range
+  // that auto-approves, so a mass hold never waits on manager review.
+  const taskList = Array.isArray(tasks) && tasks.length > 0 ? tasks : (task ? [task] : []);
+  const isBulk = taskList.length > 1;
+  const headTask = taskList[0] || null;
+  // Rows that already carry an active/pending extension are pre-skipped in
+  // bulk — the server would 409 them anyway. `slaLocked` is stamped by the
+  // Queue's buildTaskDescriptor via isSlaExtensionLocked(row).
+  const eligibleTasks = isBulk ? taskList.filter(t => !t?.slaLocked) : taskList;
+  const preSkippedCount = isBulk ? (taskList.length - eligibleTasks.length) : 0;
+  // Bulk is capped at 1–2 days; single keeps the full 1–7 range.
+  const durationOptions = isBulk ? [1, 2] : DURATION_OPTIONS;
 
   // 1–2 day holds auto-approve; 3+ go to the manager. Drives the live
   // indicator on the form + the submit button label.
@@ -103,7 +125,32 @@ export default function CreateSlaExtensionModal({ task, onClose, onSubmitted }) 
   const trimmedNote = note.trim();
   const noteLen = trimmedNote.length;
   const noteMeetsMin = noteLen >= NOTE_MIN_CHARS;
-  const canSubmit = !!duration && !!reasonCode && acknowledged && noteMeetsMin && !submitting && !!task?.source && !!task?.id;
+  const submitTargets = isBulk ? eligibleTasks : taskList;
+  const targetsValid = submitTargets.length > 0 && submitTargets.every(t => !!t?.source && !!t?.id);
+  const canSubmit = !!duration && !!reasonCode && acknowledged && noteMeetsMin && !submitting && targetsValid;
+
+  const buildPayload = (t) => {
+    const reasonLabel = REASON_OPTIONS.find(r => r.value === reasonCode)?.label || 'reason not specified';
+    const summary = `${reasonLabel} — requesting ${duration} business day${duration === 1 ? '' : 's'}. ${trimmedNote}`;
+    return {
+      flow: 'sla_extension_request',
+      title: `SLA Extension — ${reasonLabel}${t?.subject ? `: ${t.subject}` : ''}`.slice(0, 300),
+      summary,
+      // The server requires `note` to be ≥ NOTE_MIN_CHARS on this flow.
+      // Sending the raw note alongside the composed `summary` lets the
+      // server validate length without parsing the prefix back out.
+      note: trimmedNote,
+      priority: 'medium',
+      links: t?.url ? [t.url] : [],
+      taskSource: t.source,
+      taskId: String(t.id),
+      taskUrl: t.url || null,
+      taskSubject: t.subject || null,
+      requestedDays: duration,
+      reasonCode,
+      acknowledged: true,
+    };
+  };
 
   const handleSubmit = async (e) => {
     e?.preventDefault?.();
@@ -111,32 +158,35 @@ export default function CreateSlaExtensionModal({ task, onClose, onSubmitted }) 
     setSubmitting(true);
     setError(null);
     try {
-      const reasonLabel = REASON_OPTIONS.find(r => r.value === reasonCode)?.label || 'reason not specified';
-      const summary = `${reasonLabel} — requesting ${duration} business day${duration === 1 ? '' : 's'}. ${trimmedNote}`;
-      const result = await createHrHubRequest({
-        flow: 'sla_extension_request',
-        title: `SLA Extension — ${reasonLabel}${task?.subject ? `: ${task.subject}` : ''}`.slice(0, 300),
-        summary,
-        // The server requires `note` to be ≥ NOTE_MIN_CHARS on this flow.
-        // Sending the raw note alongside the composed `summary` lets the
-        // server validate length without parsing the prefix back out.
-        note: trimmedNote,
-        priority: 'medium',
-        links: task?.url ? [task.url] : [],
-        taskSource: task.source,
-        taskId: String(task.id),
-        taskUrl: task.url || null,
-        taskSubject: task.subject || null,
-        requestedDays: duration,
-        reasonCode,
-        acknowledged: true,
-      });
-      setSubmittedId(result?.id || 'submitted');
-      // Server is the source of truth: it returns autoApproved=true only
-      // when the ≤2-day request was actually applied (a rare auto-approve
-      // failure falls back to manual review, so we must not assume).
-      setSubmittedAuto(result?.autoApproved === true);
-      onSubmitted?.({ id: result?.id, duration, reasonCode, autoApproved: result?.autoApproved === true });
+      if (!isBulk) {
+        // Single-row — unchanged contract.
+        const result = await createHrHubRequest(buildPayload(taskList[0]));
+        setSubmittedId(result?.id || 'submitted');
+        // Server is the source of truth: it returns autoApproved=true only
+        // when the ≤2-day request was actually applied (a rare auto-approve
+        // failure falls back to manual review, so we must not assume).
+        setSubmittedAuto(result?.autoApproved === true);
+        setSubmittedCount(1);
+        onSubmitted?.({ id: result?.id, duration, reasonCode, autoApproved: result?.autoApproved === true });
+        return;
+      }
+      // Bulk — fire one auto-approve request per eligible task in parallel.
+      // Partial failures never abort the batch (mirror of the bulk Hide
+      // modal). A 409 means the task already has an active/pending
+      // extension → counted as "skipped", not a hard failure.
+      const results = await Promise.allSettled(eligibleTasks.map(t => createHrHubRequest(buildPayload(t))));
+      const applied = results.filter(r => r.status === 'fulfilled');
+      const conflicts = results.filter(r => r.status === 'rejected' && r.reason?.status === 409);
+      const failed = results.filter(r => r.status === 'rejected' && r.reason?.status !== 409);
+      if (applied.length === 0 && conflicts.length === 0) {
+        throw new Error(failed[0]?.reason?.message || 'Failed to apply SLA extensions');
+      }
+      setSubmittedId(applied[0]?.value?.id || 'submitted');
+      setSubmittedAuto(true); // 1–2 day bulk always auto-approves
+      setSubmittedCount(applied.length);
+      setSubmittedSkipped(preSkippedCount + conflicts.length);
+      setSubmittedFailed(failed.length);
+      onSubmitted?.({ count: applied.length, skipped: preSkippedCount + conflicts.length, failed: failed.length, duration, reasonCode });
     } catch (err) {
       setError(err?.message || 'Failed to submit SLA extension request');
       setSubmitting(false);
@@ -167,12 +217,18 @@ export default function CreateSlaExtensionModal({ task, onClose, onSubmitted }) 
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div id="sla-ext-title" style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>
-              {submittedId ? (submittedAuto ? 'SLA extension applied' : 'SLA extension submitted') : 'Request SLA extension'}
+              {submittedId
+                ? (isBulk
+                    ? `${submittedCount} SLA extension${submittedCount === 1 ? '' : 's'} applied`
+                    : (submittedAuto ? 'SLA extension applied' : 'SLA extension submitted'))
+                : (isBulk ? `Extend SLA on ${taskList.length} tasks` : 'Request SLA extension')}
             </div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-              {task?.subject
-                ? <span><strong style={{ color: 'var(--text)' }}>{task.subject}</strong>{task.country ? ` · ${getCountryName(task.country) || task.country}` : ''}</span>
-                : 'Hold the SLA on this task while you resolve a blocker'}
+              {isBulk
+                ? <span>One duration &amp; reason applies to all <strong style={{ color: 'var(--text)' }}>{taskList.length}</strong> selected tasks. 1–2 day holds apply immediately.{preSkippedCount > 0 ? ` ${preSkippedCount} already extended — will be skipped.` : ''}</span>
+                : headTask?.subject
+                  ? <span><strong style={{ color: 'var(--text)' }}>{headTask.subject}</strong>{headTask.country ? ` · ${getCountryName(headTask.country) || headTask.country}` : ''}</span>
+                  : 'Hold the SLA on this task while you resolve a blocker'}
             </div>
           </div>
           <button
@@ -192,10 +248,17 @@ export default function CreateSlaExtensionModal({ task, onClose, onSubmitted }) 
               <i className={submittedAuto ? 'bi-lightning-charge-fill' : 'bi-send-check-fill'} style={{ fontSize: 22, color: '#15803d' }} />
             </div>
             <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>
-              {submittedAuto ? 'SLA extension applied' : 'Sent to your manager for review'}
+              {isBulk
+                ? `${submittedCount} extension${submittedCount === 1 ? '' : 's'} applied`
+                : (submittedAuto ? 'SLA extension applied' : 'Sent to your manager for review')}
             </div>
             <div style={{ fontSize: 13, color: 'var(--text-secondary, #616161)', maxWidth: 440, lineHeight: 1.5 }}>
-              {submittedAuto ? (
+              {isBulk ? (
+                <>The SLA is now paused for <strong style={{ color: 'var(--text)' }}>{duration} business day{duration === 1 ? '' : 's'}</strong> on {submittedCount} task{submittedCount === 1 ? '' : 's'} — applied immediately, no manager review.
+                {submittedSkipped > 0 ? <> {submittedSkipped} skipped (already extended).</> : null}
+                {submittedFailed > 0 ? <> <span style={{ color: '#b45309', fontWeight: 600 }}>{submittedFailed} failed — try those again.</span></> : null}
+                {' '}Track them under HR Hub → My Requests.</>
+              ) : submittedAuto ? (
                 <>The SLA on this task is now paused for <strong style={{ color: 'var(--text)' }}>{duration} business day{duration === 1 ? '' : 's'}</strong> — no manager review needed. It resumes automatically after that. You can track it under HR Hub → My Requests.</>
               ) : (
                 <>Once your manager approves, the SLA on this task will be paused for the number of days they confirm. You can track the status under HR Hub → My Requests.</>
@@ -215,7 +278,7 @@ export default function CreateSlaExtensionModal({ task, onClose, onSubmitted }) 
             <div>
               <label style={labelStyle}>How many business days? *</label>
               <div style={{ display: 'flex', gap: 8 }}>
-                {DURATION_OPTIONS.map(d => {
+                {durationOptions.map(d => {
                   const active = duration === d;
                   return (
                     <button
@@ -232,7 +295,7 @@ export default function CreateSlaExtensionModal({ task, onClose, onSubmitted }) 
                         boxShadow: active ? '0 1px 4px #d9770622' : 'none',
                       }}
                     >
-                      {d} days
+                      {d} day{d === 1 ? '' : 's'}
                     </button>
                   );
                 })}
@@ -253,11 +316,13 @@ export default function CreateSlaExtensionModal({ task, onClose, onSubmitted }) 
                   aria-hidden="true"
                 />
                 <span>
-                  {duration == null
-                    ? '1–2 days are approved automatically · 3+ days need manager review.'
-                    : willAutoApprove
-                      ? 'Auto-approved — applies immediately, no manager review needed.'
-                      : 'Sent to your manager for review before the SLA is paused.'}
+                  {isBulk
+                    ? 'Bulk holds are capped at 2 business days and apply immediately — no manager review.'
+                    : duration == null
+                      ? '1–2 days are approved automatically · 3+ days need manager review.'
+                      : willAutoApprove
+                        ? 'Auto-approved — applies immediately, no manager review needed.'
+                        : 'Sent to your manager for review before the SLA is paused.'}
                 </span>
               </div>
             </div>
@@ -385,7 +450,11 @@ export default function CreateSlaExtensionModal({ task, onClose, onSubmitted }) 
                   fontFamily: 'inherit',
                 }}
               >
-                {submitting ? 'Submitting…' : (willAutoApprove ? 'Apply extension' : 'Send to manager')}
+                {submitting
+                  ? 'Submitting…'
+                  : isBulk
+                    ? `Apply to ${eligibleTasks.length} task${eligibleTasks.length === 1 ? '' : 's'}`
+                    : (willAutoApprove ? 'Apply extension' : 'Send to manager')}
               </button>
             </div>
           </form>

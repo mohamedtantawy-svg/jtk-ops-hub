@@ -233,6 +233,7 @@ export default function SourceTable({
   onBulkHide,                // (rows[]) => void — bulk variant; enables checkboxes + bulk-bar Hide button
   onBulkEscalate,            // (rows[]) => void — bulk variant; enables checkboxes + bulk-bar Escalate button
   onBulkReassign,            // (rows[]) => void — bulk variant; enables checkboxes + bulk-bar Reassign button
+  onBulkSlaExtension,        // (rows[]) => void — bulk variant; enables checkboxes + bulk-bar Extend SLA button
   notesApi = null,           // useTaskNotes() return — enables the Note column when present
   subjectLabel = 'Employee', // 2026-05-22 — header label for the primary
                               // (resizable) column. Defaults to 'Employee'
@@ -332,7 +333,7 @@ export default function SourceTable({
   // but cleared when the source-set changes (see effect below) so a newly-
   // synced refresh doesn't carry stale ids selected.
   const [selectedIds, setSelectedIds] = useState(() => new Set());
-  const canBulk = !!(onBulkHide || onBulkEscalate || onBulkReassign);
+  const canBulk = !!(onBulkHide || onBulkEscalate || onBulkReassign || onBulkSlaExtension);
   const clearSelection = () => setSelectedIds(new Set());
   const toggleRowSelection = (id) => {
     setSelectedIds(prev => {
@@ -764,6 +765,13 @@ export default function SourceTable({
               style={bulkBtnStyle('#1d4ed8')}>
               <i className="bi-arrow-left-right" style={{ fontSize: 11 }} />
               Reassign {selectedIds.size}
+            </button>
+          )}
+          {onBulkSlaExtension && (
+            <button type="button" onClick={() => onBulkSlaExtension(selectedRows)}
+              style={bulkBtnStyle('#d97706')}>
+              <i className="bi-clock-history" style={{ fontSize: 11 }} />
+              Extend SLA {selectedIds.size}
             </button>
           )}
           {onBulkHide && (

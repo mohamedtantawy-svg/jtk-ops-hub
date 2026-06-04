@@ -441,8 +441,14 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
   // the whole batch.
   const [bulkReassignTasks, setBulkReassignTasks] = useState(null);
   const [bulkHideTasks, setBulkHideTasks] = useState(null);
+  // Bulk SLA-extension modal (Ayushi 2026-06-04). Reuses CreateSlaExtensionModal
+  // in `tasks` mode; bulk caps the hold at 1–2 days (all auto-approve) and
+  // fires one request per selected task.
+  const [bulkSlaExtensionTasks, setBulkSlaExtensionTasks] = useState(null);
   // Build a uniform task descriptor from a normalized SourceTable row, so
   // the bulk modal sees the same shape the per-row modal has always seen.
+  // `slaLocked` lets the bulk SLA modal pre-skip rows that already carry an
+  // active/pending extension (the server would 409 them anyway).
   const buildTaskDescriptor = useCallback((row, sourceKey) => ({
     source: sourceKey,
     id: String(row.id),
@@ -452,6 +458,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
     assigneeEmail: row.assigneeEmail || null,
     assigneeName: row.assignee || null,
     hasOverride: !!row.reassignedFromEmail,
+    slaLocked: isSlaExtensionLocked(row),
   }), []);
   // Escalate-to-HR-Hub modal state. Same descriptor shape as hide. We
   // resolve the requester's direct manager (managerEmail in the roster)
@@ -1705,6 +1712,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
             onEscalate={(row) => setEscalateModalTask({ source: 'onboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onReassign={canReassign ? (row) => setReassignModalTask({ source: 'onboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country, assigneeEmail: row.assigneeEmail || null, assigneeName: row.assignee || null, hasOverride: !!row.reassignedFromEmail }) : null}
             onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'onboarding')))}
+            onBulkSlaExtension={(rows) => setBulkSlaExtensionTasks(rows.map(r => buildTaskDescriptor(r, 'onboarding')))}
             onBulkReassign={canReassign ? (rows) => setBulkReassignTasks(rows.map(r => buildTaskDescriptor(r, 'onboarding'))) : null}
           />
         </ErrorBoundary>
@@ -1730,6 +1738,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
             onSlaExtension={(row) => setSlaExtensionModalTask({ source: 'offboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'offboarding', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'offboarding')))}
+            onBulkSlaExtension={(rows) => setBulkSlaExtensionTasks(rows.map(r => buildTaskDescriptor(r, 'offboarding')))}
             hideFilterBar
           />
         </ErrorBoundary>
@@ -1758,6 +1767,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
             onEscalate={(row) => setEscalateModalTask({ source: 'amendments', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onReassign={canReassign ? (row) => setReassignModalTask({ source: 'amendments', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country, assigneeEmail: row.assigneeEmail || null, assigneeName: row.assignee || null, hasOverride: !!row.reassignedFromEmail }) : null}
             onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'amendments')))}
+            onBulkSlaExtension={(rows) => setBulkSlaExtensionTasks(rows.map(r => buildTaskDescriptor(r, 'amendments')))}
             onBulkReassign={canReassign ? (rows) => setBulkReassignTasks(rows.map(r => buildTaskDescriptor(r, 'amendments'))) : null}
           />
         </ErrorBoundary>
@@ -1786,6 +1796,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
             onEscalate={(row) => setEscalateModalTask({ source: 'redlines', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onReassign={canReassign ? (row) => setReassignModalTask({ source: 'redlines', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country, assigneeEmail: row.assigneeEmail || null, assigneeName: row.assignee || null, hasOverride: !!row.reassignedFromEmail }) : null}
             onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'redlines')))}
+            onBulkSlaExtension={(rows) => setBulkSlaExtensionTasks(rows.map(r => buildTaskDescriptor(r, 'redlines')))}
             onBulkReassign={canReassign ? (rows) => setBulkReassignTasks(rows.map(r => buildTaskDescriptor(r, 'redlines'))) : null}
           />
         </ErrorBoundary>
@@ -1816,6 +1827,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
             onSlaExtension={(row) => setSlaExtensionModalTask({ source: 'workbench', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onEscalate={(row) => setEscalateModalTask({ source: 'workbench', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'workbench')))}
+            onBulkSlaExtension={(rows) => setBulkSlaExtensionTasks(rows.map(r => buildTaskDescriptor(r, 'workbench')))}
           />
         </ErrorBoundary>
       )}
@@ -1842,6 +1854,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
             onEscalate={(row) => setEscalateModalTask({ source: 'incentive_plans', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country })}
             onReassign={canReassign ? (row) => setReassignModalTask({ source: 'incentive_plans', id: String(row.id), url: row.taskUrl || null, subject: row.subject, country: row.country, assigneeEmail: row.assigneeEmail || null, assigneeName: row.assignee || null, hasOverride: !!row.reassignedFromEmail }) : null}
             onBulkHide={(rows) => setBulkHideTasks(rows.map(r => buildTaskDescriptor(r, 'incentive_plans')))}
+            onBulkSlaExtension={(rows) => setBulkSlaExtensionTasks(rows.map(r => buildTaskDescriptor(r, 'incentive_plans')))}
             onBulkReassign={canReassign ? (rows) => setBulkReassignTasks(rows.map(r => buildTaskDescriptor(r, 'incentive_plans'))) : null}
           />
         </ErrorBoundary>
@@ -2321,6 +2334,20 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
           tasks={bulkHideTasks}
           onClose={() => setBulkHideTasks(null)}
           onSubmitted={() => { try { hiddenTasks?.refresh?.(); } catch {} }}
+        />
+      )}
+
+      {/* Bulk SLA extension — CreateSlaExtensionModal in `tasks` mode. Bulk
+          caps the hold at 1–2 days so every request auto-approves and applies
+          immediately; one request fires per selected task. Refresh the
+          extension list on close so the rows show their "Extended" state. */}
+      {bulkSlaExtensionTasks && bulkSlaExtensionTasks.length > 0 && (
+        <CreateSlaExtensionModal
+          tasks={bulkSlaExtensionTasks}
+          onClose={() => {
+            setBulkSlaExtensionTasks(null);
+            try { slaExtensions?.refresh?.(); } catch {}
+          }}
         />
       )}
     </div>
