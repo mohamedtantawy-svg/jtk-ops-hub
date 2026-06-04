@@ -5,9 +5,13 @@ import { canApproveAnnouncementRequests } from '../../../../../../src/lib/announ
 import { recordAudit } from '../../../../../../src/lib/announcementFlow';
 
 // POST /api/v1/announcement-requests/:id/withdraw
-//   Requester (or an approver) can withdraw a pending/needs_info request.
-//   Published requests cannot be withdrawn — the announcement itself should
-//   be archived via the existing announcements API.
+//   Requester (or an approver) can withdraw a request that hasn't been
+//   published yet: pending, needs_info, or awaiting_post. The awaiting_post
+//   case (2026-06-04, Laura Llopis feedback) covers an *approved* announcement
+//   that ultimately won't be posted — awaiting_post has no announcement row
+//   yet, so withdrawing just marks the request 'withdrawn' with nothing to
+//   clean up. Published requests still cannot be withdrawn — the announcement
+//   itself should be archived via the existing announcements API.
 export async function POST(req, { params }) {
   try {
     const user = getAuthUser(req);
@@ -24,7 +28,7 @@ export async function POST(req, { params }) {
     if (!isRequester && !(await canApproveAnnouncementRequests(user))) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
-    if (!['pending', 'needs_info'].includes(r.status)) {
+    if (!['pending', 'needs_info', 'awaiting_post'].includes(r.status)) {
       return NextResponse.json({ error: `Cannot withdraw a ${r.status} request` }, { status: 400 });
     }
 

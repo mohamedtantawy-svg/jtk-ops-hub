@@ -31,10 +31,12 @@ function localInputToIso(val) {
     the full audit log + comment thread per request.
 
   Actions:
-    Requester:   withdraw, edit (if status in [pending, needs_info]), comment
-    Approver:    approve, reject, ask clarification, edit, comment
+    Requester:   withdraw (pending/needs_info/awaiting_post), edit, comment
+    Approver:    approve, reject, ask clarification, edit, comment, and
+                 remove an approved-but-unposted (awaiting_post) request
 
-  No destructive operations — rejections keep the row, they don't delete it.
+  No destructive operations — rejections + withdrawals keep the row (status
+  flips to rejected/withdrawn), they don't delete it.
 */
 
 const STATUS_STYLES = {
@@ -665,11 +667,25 @@ const ApprovalQueueView = ({ user, addToast, embedded = false }) => {
                         </div>
                       </div>
                     )}
-                    <button disabled={busy} onClick={handlePublishAwaitingPost}
-                      style={{ padding: '8px 14px', fontSize: 12, fontWeight: 600, color: 'white', background: '#6b3fa0', border: 'none', borderRadius: 'var(--radius-pill)', cursor: busy ? 'wait' : 'pointer' }}>
-                      <i className="bi-send-fill" style={{ marginRight: 4 }} />
-                      Publish on Ops Hub
-                    </button>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <button disabled={busy} onClick={handlePublishAwaitingPost}
+                        style={{ padding: '8px 14px', fontSize: 12, fontWeight: 600, color: 'white', background: '#6b3fa0', border: 'none', borderRadius: 'var(--radius-pill)', cursor: busy ? 'wait' : 'pointer' }}>
+                        <i className="bi-send-fill" style={{ marginRight: 4 }} />
+                        Publish on Ops Hub
+                      </button>
+                      {/* Remove an approved announcement that ultimately won't
+                          be posted (2026-06-04, Laura Llopis feedback). Reuses
+                          the withdraw action — awaiting_post has no announcement
+                          row yet, so it just marks the request Withdrawn.
+                          Visible to the requester + approvers (same gate as
+                          this block). */}
+                      <button disabled={busy} onClick={handleWithdraw}
+                        title="This announcement won't be posted — remove it from the queue. It will be marked Withdrawn."
+                        style={{ padding: '8px 14px', fontSize: 12, fontWeight: 600, color: 'var(--text)', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-pill)', cursor: busy ? 'wait' : 'pointer' }}>
+                        <i className="bi-x-circle" style={{ marginRight: 4 }} />
+                        Won&apos;t be posted — remove
+                      </button>
+                    </div>
                   </div>
                 )}
 
