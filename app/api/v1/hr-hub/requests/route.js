@@ -16,7 +16,7 @@
 //   9. Every state-changing call writes hr_hub_log.
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
-import { query } from '../../../../../src/lib/db';
+import { query, withTransaction } from '../../../../../src/lib/db';
 import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
 import { getVisibleEmailsForAccess } from '../../../../../src/data/members';
 import { getCurrentDeptId, getEffectiveDeptIdsForUser } from '../../../../../src/lib/dept-scope';
@@ -33,12 +33,21 @@ import {
   ALLOWED_REASON_CODES as ALLOWED_SLA_EXT_REASON_CODES,
   ALLOWED_REQUESTED_DAYS as ALLOWED_SLA_EXT_REQUESTED_DAYS,
   findActiveExtension,
+  insertSlaExtension,
 } from '../../../../../src/lib/sla-extension-helpers';
+import { cacheDel } from '../../../../../src/lib/server-cache';
 
 const ALLOWED_FLOWS = new Set(['hr_request', 'hr_reporting', 'escalation_zero', 'feedback', 'hide_task_request', 'sla_extension_request', 'payment_refund']);
 const ALLOWED_HIDE_REASON_CODES = new Set(['internal_deel_employee', 'test_task', 'other']);
 const ALLOWED_STATUSES = new Set(['new', 'in_progress', 'on_hold', 'pending_requester', 'resolved', 'rejected']);
 const ALLOWED_PRIORITIES = new Set(['low', 'medium', 'high', 'critical']);
+
+// SLA extensions of 1–2 business days are low-risk and auto-approved on
+// submit — they skip manager review entirely (Mohamed 2026-06-04). Longer
+// holds (3–7 days) still route to the requester's manager. Kept in lockstep
+// with AUTO_APPROVE_MAX_DAYS in src/components/modals/CreateSlaExtensionModal.jsx
+// (the FE indicator) — if you tune one, tune both.
+const SLA_EXT_AUTO_APPROVE_MAX_DAYS = 2;
 // `assigned` = items where assignee_email matches the caller. Distinct from
 // `mine` (which keys off created_by_email) — a manager who triages a request
 // they didn't submit needs the "Assigned to me" filter to surface it.
@@ -465,6 +474,7 @@ export async function POST(req) {
   // partial unique index would catch a race anyway, but failing here lets
   // the FE show a clear "extension already active until <date>" message.
   let slaExtRequestedDays = null, slaExtReasonCode = null, slaExtAcknowledged = null;
+  let slaExtAutoApprove = false;
   if (flow === 'sla_extension_request') {
     taskSource = clean(body.taskSource, 40);
     taskId = clean(body.taskId, 200);
@@ -481,6 +491,8 @@ export async function POST(req) {
       return NextResponse.json({ error: `requestedDays must be one of: ${[...ALLOWED_SLA_EXT_REQUESTED_DAYS].join(', ')}` }, { status: 400 });
     }
     slaExtRequestedDays = requested;
+    // 1–2 business-day holds auto-approve on submit; 3+ go to the manager.
+    slaExtAutoApprove = requested <= SLA_EXT_AUTO_APPROVE_MAX_DAYS;
     if (!ALLOWED_SLA_EXT_REASON_CODES.has(body.reasonCode)) {
       return NextResponse.json({ error: `reasonCode must be one of: ${[...ALLOWED_SLA_EXT_REASON_CODES].join(', ')}` }, { status: 400 });
     }
@@ -576,7 +588,7 @@ export async function POST(req) {
   // agent whose TL was the only entry in the chain), and ultimately
   // leaves assignee null so HR Hub admins pick it up via the unassigned
   // pool. The FE's optional `assigneeEmail` overrides this.
-  if (flow === 'sla_extension_request' && !assigneeEmail) {
+  if (flow === 'sla_extension_request' && !assigneeEmail && !slaExtAutoApprove) {
     const auto = managerEmailFor(callerEmail) || teamLeadEmail || null;
     if (auto) {
       assigneeEmail = String(auto).toLowerCase();
@@ -731,5 +743,81 @@ export async function POST(req) {
     );
   }
 
-  return NextResponse.json({ id: newId }, { status: 201 });
+  // 1–2 business-day SLA extensions are auto-approved on submit — no manager
+  // review (Mohamed 2026-06-04). This replicates the manager-approve
+  // transaction in app/api/v1/sla-extension/[id]/approve/route.js: flip the
+  // just-created request to resolved, insert the active sla_extension row,
+  // and log it as a System auto-approval. The request row was already
+  // committed above as status='new', so this runs best-effort — if it fails
+  // the request simply stays 'new' and falls back to normal manager review
+  // (the safest degradation).
+  let autoApproved = false;
+  if (slaExtAutoApprove && taskSource && taskId) {
+    try {
+      await withTransaction(async (client) => {
+        // Revoke any expired-but-unrevoked extension for the same task so the
+        // partial-unique ON CONFLICT in insertSlaExtension can accept the new
+        // row (NOW() can't live in the index predicate — mirrors approve).
+        await client.query(
+          `UPDATE sla_extension
+              SET revoked_at = NOW()
+            WHERE task_source = $1 AND task_id = $2
+              AND revoked_at IS NULL AND expires_at <= NOW()`,
+          [taskSource, taskId],
+        );
+        await client.query(
+          `UPDATE hr_hub_request
+              SET status = 'resolved',
+                  resolved_at = NOW(),
+                  updated_at = NOW(),
+                  sla_ext_approved_days = $2,
+                  assignee_email = COALESCE(assignee_email, $3),
+                  assignee_name  = COALESCE(assignee_name,  $4)
+            WHERE id = $1`,
+          [newId, slaExtRequestedDays, callerEmail, callerName],
+        );
+        const ext = await insertSlaExtension({
+          taskSource,
+          taskId,
+          taskUrl: taskUrl || null,
+          taskSubject: taskSubject || null,
+          requestId: newId,
+          reasonCode: slaExtReasonCode,
+          requestedByEmail: callerEmail,
+          requestedByName: callerName,
+          approvedByEmail: callerEmail,
+          approvedByName: 'Auto-approved',
+          approvedDays: slaExtRequestedDays,
+        }, client);
+        if (!ext) {
+          // A concurrent extension claimed this task between our pre-check
+          // and now — abort so the txn rolls back to status='new' and the
+          // request falls back to manual manager review.
+          throw new Error('sla_extension insert conflicted (concurrent extension)');
+        }
+        await writeLog(
+          newId,
+          { email: null, name: 'System' },
+          'sla_extension_auto_approved',
+          { status: 'new', requestedDays: slaExtRequestedDays },
+          { status: 'resolved', approvedDays: slaExtRequestedDays, auto: true, policy: `<=${SLA_EXT_AUTO_APPROVE_MAX_DAYS}_business_days` },
+          client,
+        );
+      });
+      autoApproved = true;
+      // Bust the active-extensions list cache so the requester's queue
+      // reflects the live extension on the next poll / modal-close refresh
+      // instead of waiting out the 30s server cache.
+      try { cacheDel('sla_extension_list'); } catch {}
+    } catch (err) {
+      console.warn('[hr-hub/requests] SLA auto-approval failed; request stays in manual review:', err.message);
+    }
+  }
+
+  return NextResponse.json(
+    autoApproved
+      ? { id: newId, autoApproved: true, approvedDays: slaExtRequestedDays }
+      : { id: newId },
+    { status: 201 },
+  );
 }

@@ -19,6 +19,12 @@ import { getCountryName } from '../../data/constants';
 
 const DURATION_OPTIONS = [1, 2, 3, 4, 5, 6, 7];
 
+// 1–2 business-day extensions are auto-approved server-side and apply
+// immediately — they skip manager review (Mohamed 2026-06-04). Kept in
+// lockstep with SLA_EXT_AUTO_APPROVE_MAX_DAYS in
+// app/api/v1/hr-hub/requests/route.js — if you tune one, tune both.
+const AUTO_APPROVE_MAX_DAYS = 2;
+
 // 2026-05-29 — Jose feedback: agents were skipping the optional note,
 // leaving managers without context. The note is now required with a
 // minimum of 20 characters; "Send to manager" stays disabled until met.
@@ -80,6 +86,13 @@ export default function CreateSlaExtensionModal({ task, onClose, onSubmitted }) 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [submittedId, setSubmittedId] = useState(null);
+  // Whether the submitted request was auto-approved server-side (set from
+  // the POST response). Drives the confirmation copy below.
+  const [submittedAuto, setSubmittedAuto] = useState(false);
+
+  // 1–2 day holds auto-approve; 3+ go to the manager. Drives the live
+  // indicator on the form + the submit button label.
+  const willAutoApprove = !!duration && duration <= AUTO_APPROVE_MAX_DAYS;
 
   useEffect(() => {
     const h = e => { if (e.key === 'Escape') onClose(); };
@@ -119,7 +132,11 @@ export default function CreateSlaExtensionModal({ task, onClose, onSubmitted }) 
         acknowledged: true,
       });
       setSubmittedId(result?.id || 'submitted');
-      onSubmitted?.({ id: result?.id, duration, reasonCode });
+      // Server is the source of truth: it returns autoApproved=true only
+      // when the ≤2-day request was actually applied (a rare auto-approve
+      // failure falls back to manual review, so we must not assume).
+      setSubmittedAuto(result?.autoApproved === true);
+      onSubmitted?.({ id: result?.id, duration, reasonCode, autoApproved: result?.autoApproved === true });
     } catch (err) {
       setError(err?.message || 'Failed to submit SLA extension request');
       setSubmitting(false);
@@ -150,7 +167,7 @@ export default function CreateSlaExtensionModal({ task, onClose, onSubmitted }) 
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div id="sla-ext-title" style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>
-              {submittedId ? 'SLA extension submitted' : 'Request SLA extension'}
+              {submittedId ? (submittedAuto ? 'SLA extension applied' : 'SLA extension submitted') : 'Request SLA extension'}
             </div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
               {task?.subject
@@ -172,13 +189,17 @@ export default function CreateSlaExtensionModal({ task, onClose, onSubmitted }) 
         {submittedId ? (
           <div style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center', textAlign: 'center' }}>
             <div style={{ width: 48, height: 48, borderRadius: 14, background: '#e8f5e9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <i className="bi-send-check-fill" style={{ fontSize: 22, color: '#15803d' }} />
+              <i className={submittedAuto ? 'bi-lightning-charge-fill' : 'bi-send-check-fill'} style={{ fontSize: 22, color: '#15803d' }} />
             </div>
-            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>Sent to your manager for review</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text)' }}>
+              {submittedAuto ? 'SLA extension applied' : 'Sent to your manager for review'}
+            </div>
             <div style={{ fontSize: 13, color: 'var(--text-secondary, #616161)', maxWidth: 440, lineHeight: 1.5 }}>
-              Once your manager approves, the SLA on this task will be paused
-              for the number of days they confirm. You can track the status
-              under HR Hub → My Requests.
+              {submittedAuto ? (
+                <>The SLA on this task is now paused for <strong style={{ color: 'var(--text)' }}>{duration} business day{duration === 1 ? '' : 's'}</strong> — no manager review needed. It resumes automatically after that. You can track it under HR Hub → My Requests.</>
+              ) : (
+                <>Once your manager approves, the SLA on this task will be paused for the number of days they confirm. You can track the status under HR Hub → My Requests.</>
+              )}
             </div>
             <button
               type="button"
@@ -215,6 +236,29 @@ export default function CreateSlaExtensionModal({ task, onClose, onSubmitted }) 
                     </button>
                   );
                 })}
+              </div>
+              {/* Auto-approval indicator — sets expectations before + after
+                  picking a duration. ≤2 days applies instantly; 3+ goes to
+                  the manager. */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 6, marginTop: 8,
+                fontSize: 11.5, fontWeight: 600, lineHeight: 1.4,
+                color: duration == null
+                  ? 'var(--text-muted)'
+                  : (willAutoApprove ? '#0f766e' : 'var(--text-secondary, #616161)'),
+              }}>
+                <i
+                  className={duration == null ? 'bi-info-circle' : (willAutoApprove ? 'bi-lightning-charge-fill' : 'bi-person-check')}
+                  style={{ fontSize: 12, flexShrink: 0 }}
+                  aria-hidden="true"
+                />
+                <span>
+                  {duration == null
+                    ? '1–2 days are approved automatically · 3+ days need manager review.'
+                    : willAutoApprove
+                      ? 'Auto-approved — applies immediately, no manager review needed.'
+                      : 'Sent to your manager for review before the SLA is paused.'}
+                </span>
               </div>
             </div>
 
@@ -341,7 +385,7 @@ export default function CreateSlaExtensionModal({ task, onClose, onSubmitted }) 
                   fontFamily: 'inherit',
                 }}
               >
-                {submitting ? 'Submitting…' : 'Send to manager'}
+                {submitting ? 'Submitting…' : (willAutoApprove ? 'Apply extension' : 'Send to manager')}
               </button>
             </div>
           </form>
