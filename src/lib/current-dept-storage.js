@@ -44,12 +44,26 @@ const _subscribers = new Set();
 let _channel = null;
 let _channelInitTried = false;
 
+// Whether this tab is a dedicated "Login as" impersonation session (opened via
+// /?impersonate=<email>; App.jsx sets this marker synchronously at boot). Such
+// tabs keep their current-dept-id TAB-LOCAL (sessionStorage) and never
+// broadcast it, so an admin impersonating someone in another department sees
+// 100% the target's view with no dept-id leaking to — or from — their own
+// tabs. Read lazily per call so it's correct regardless of module-eval order.
+function _isImpersonationTab() {
+  if (typeof window === 'undefined') return false;
+  try { return sessionStorage.getItem('ops_hub_impersonation_tab') === '1'; } catch { return false; }
+}
+
 function _getChannel() {
   if (_channelInitTried) return _channel;
   _channelInitTried = true;
   if (typeof window === 'undefined' || typeof BroadcastChannel === 'undefined') {
     return null;
   }
+  // Impersonation tabs are isolated: they neither broadcast nor adopt other
+  // tabs' dept changes, so never open the channel for them.
+  if (_isImpersonationTab()) return null;
   try {
     _channel = new BroadcastChannel(CHANNEL_NAME);
     _channel.addEventListener('message', (e) => {
@@ -77,7 +91,10 @@ function _notify(deptId) {
 export function getCurrentDeptIdSync() {
   if (typeof window === 'undefined') return null;
   try {
-    const v = localStorage.getItem(STORAGE_KEY);
+    // Impersonation tabs read their dept-id from tab-local sessionStorage so
+    // they never inherit the admin's own dept (see _isImpersonationTab).
+    const store = _isImpersonationTab() ? sessionStorage : localStorage;
+    const v = store.getItem(STORAGE_KEY);
     return v && v.length > 0 ? v : null;
   } catch {
     return null;
@@ -92,16 +109,21 @@ export function getCurrentDeptIdSync() {
 export function writeCurrentDeptId(deptId) {
   if (typeof window === 'undefined') return;
   const next = deptId && typeof deptId === 'string' ? deptId : null;
+  // Impersonation tabs persist their (target's) dept-id tab-locally and never
+  // broadcast it, so the admin's own tabs are untouched.
+  const impTab = _isImpersonationTab();
+  const store = impTab ? sessionStorage : localStorage;
   let prev = null;
-  try { prev = localStorage.getItem(STORAGE_KEY) || null; } catch { /* no-op */ }
+  try { prev = store.getItem(STORAGE_KEY) || null; } catch { /* no-op */ }
   if (prev === next) return; // no-op
   try {
-    if (next) localStorage.setItem(STORAGE_KEY, next);
-    else localStorage.removeItem(STORAGE_KEY);
+    if (next) store.setItem(STORAGE_KEY, next);
+    else store.removeItem(STORAGE_KEY);
   } catch { /* quota / private mode — proceed with broadcast anyway */ }
-  // Notify same-tab subscribers
+  // Notify same-tab subscribers (keeps this tab's data hooks in sync).
   _notify(next);
-  // Broadcast to other tabs
+  // Cross-tab broadcast for normal tabs only.
+  if (impTab) return;
   const ch = _getChannel();
   if (ch) {
     try { ch.postMessage({ type: 'current-dept-changed', deptId: next }); }

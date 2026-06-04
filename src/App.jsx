@@ -169,6 +169,62 @@ export const PermissionsContext = createContext(null);
 export const SettingsContext = createContext({});
 export const IntegrationsContext = createContext({});
 
+// ── Impersonation ("Login as") — open an isolated session in a NEW TAB ──────
+// Clicking "Login as <person>" opens a fresh tab at /?impersonate=<email>
+// instead of swapping the current tab in place. The new tab boots from scratch
+// as the target — their department, their visible sources, their data — fully
+// isolated from the admin's own tabs (tab-local dept storage + no cross-tab
+// dept broadcast; see _seedImpersonationFromUrl below + current-dept-storage.js).
+// The admin keeps their own view untouched in the original tab, and there's no
+// hard refresh to "swap cookies".
+function openImpersonationTab(email) {
+  const lc = String(email || '').trim().toLowerCase();
+  if (!lc || typeof window === 'undefined') return;
+  try { window.open(`/?impersonate=${encodeURIComponent(lc)}`, '_blank'); } catch {}
+}
+
+// Best-effort synchronous read of the signed-in (actor) email at boot, used to
+// bind a URL-seeded impersonation session to the human who's logged in. The
+// shared JWT means a freshly-opened tab already knows the actor: read the
+// cached login email first, then fall back to the JWT `email` claim.
+function _bootActorEmail() {
+  if (typeof window === 'undefined') return '';
+  try {
+    const e = (localStorage.getItem('ops_hub_logged_in_email') || '').trim().toLowerCase();
+    if (e) return e;
+  } catch {}
+  try {
+    const t = localStorage.getItem('ops_hub_token');
+    if (t) {
+      const p = JSON.parse(atob(t.split('.')[1]));
+      if (p?.email) return String(p.email).trim().toLowerCase();
+    }
+  } catch {}
+  return '';
+}
+
+// Seed a "Login as" tab synchronously at module load — before the first render
+// and before any data fetch — so the impersonation header (X-Impersonate-As,
+// read by apiFetch from sessionStorage) and the tab-local dept marker are in
+// place from the very first request. Writes the {actor,target} shape the
+// restore effect + apiFetch already expect, then strips ?impersonate so a
+// manual refresh stays clean (impersonation persists via sessionStorage for the
+// tab's lifetime). No-op on the server and when the param is absent; idempotent.
+(function _seedImpersonationFromUrl() {
+  if (typeof window === 'undefined') return;
+  try {
+    const sp = new URL(window.location.href).searchParams;
+    const target = (sp.get('impersonate') || '').trim().toLowerCase();
+    if (!target) return;
+    sessionStorage.setItem('ops_hub_impersonation_tab', '1');
+    sessionStorage.setItem('ops_hub_impersonating', JSON.stringify({ actor: _bootActorEmail(), target }));
+    sp.delete('impersonate');
+    const url = new URL(window.location.href);
+    url.search = sp.toString();
+    window.history.replaceState({}, '', url.toString());
+  } catch {}
+})();
+
 const App=()=>{
   // ── Auth state ─────────────────────────────────────────────────────────────
   const [loggedInEmail,setLoggedInEmail]=useState(()=>{
@@ -308,7 +364,19 @@ const App=()=>{
   // impersonation into user B's session. On mount we start with null and only
   // restore once `user` is known AND the stored actor matches — anything else
   // is treated as stale and dropped.
-  const [impersonating, setImpersonatingRaw] = useState(null);
+  const [impersonating, setImpersonatingRaw] = useState(() => {
+    // A "Login as" tab is seeded into sessionStorage at module load
+    // (_seedImpersonationFromUrl) — read the target back here so the banner +
+    // effectiveUser are correct on the very first paint, with no flash of the
+    // admin's own view. Pure read (no side effects) → StrictMode-safe.
+    if (typeof window === 'undefined') return null;
+    try {
+      const raw = sessionStorage.getItem('ops_hub_impersonating');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed.target === 'string' && parsed.target ? parsed.target : null;
+    } catch { return null; }
+  });
   const setImpersonating = useCallback((next) => {
     setImpersonatingRaw(next);
     try {
@@ -319,6 +387,7 @@ const App=()=>{
         }));
       } else {
         sessionStorage.removeItem('ops_hub_impersonating');
+        sessionStorage.removeItem('ops_hub_impersonation_tab');
       }
     } catch (e) {}
   }, [user]);
@@ -329,14 +398,27 @@ const App=()=>{
       const stored = sessionStorage.getItem('ops_hub_impersonating');
       if (!stored) return;
       const parsed = JSON.parse(stored);
-      if (
-        parsed
+      const validShape = parsed
         && typeof parsed === 'object'
         && !Array.isArray(parsed)
-        && parsed.actor === actorEmail
         && typeof parsed.target === 'string'
-        && parsed.target
-      ) {
+        && parsed.target;
+      // Dedicated "Login as" tab (opened via openImpersonationTab): the actor is
+      // whoever is signed in now — the tab was opened from their session — so
+      // bind the target to them rather than dropping on a boot-time actor guess
+      // that didn't match exactly. Non-impersonation tabs keep the strict actor
+      // check below so a token handoff (user A → user B on the same tab) can't
+      // carry A's impersonation into B's session.
+      let isImpTab = false;
+      try { isImpTab = sessionStorage.getItem('ops_hub_impersonation_tab') === '1'; } catch {}
+      if (validShape && isImpTab) {
+        if (parsed.actor !== actorEmail) {
+          try { sessionStorage.setItem('ops_hub_impersonating', JSON.stringify({ actor: actorEmail, target: parsed.target })); } catch {}
+        }
+        setImpersonatingRaw(parsed.target);
+        return;
+      }
+      if (validShape && parsed.actor === actorEmail) {
         setImpersonatingRaw(parsed.target);
       } else {
         // Actor mismatch, malformed, or legacy string-only format — drop it.
@@ -904,8 +986,7 @@ const App=()=>{
     if (!targetExists) return;
 
     if (me.access === 'admin') {
-      setImpersonating(email);
-      setView('briefing');
+      openImpersonationTab(email);
       return;
     }
     // RM: in addition to their reports chain (handled below), RMs may also
@@ -915,8 +996,7 @@ const App=()=>{
     // check still applies for impersonating non-admin targets.
     const targetIsAdmin = (liveMembersByEmail?.[emailLc]?.access || liveMembersByEmail?.[emailLc]?.role || MEMBERS_BY_EMAIL[email]?.access || '').toLowerCase() === 'admin';
     if (me.access === 'regional_manager' && targetIsAdmin) {
-      setImpersonating(email);
-      setView('briefing');
+      openImpersonationTab(email);
       return;
     }
     // TL/RM: verify target is in their reports chain (live data first, then baseline)
@@ -925,8 +1005,7 @@ const App=()=>{
       : getAllReports(user.email);
     const reportsLc = (reports || []).map(e => typeof e === 'string' ? e.toLowerCase() : (e?.email || '').toLowerCase());
     if (reportsLc.includes(emailLc)) {
-      setImpersonating(email);
-      setView('briefing');
+      openImpersonationTab(email);
       return;
     }
     // Active handover coverage — if this TL/RM is currently covering someone
@@ -936,8 +1015,7 @@ const App=()=>{
     // Summary but can't Login-as any of them to triage their queue, which
     // defeats the point of accepting the handover.
     if (coverageEmails && coverageEmails.has(emailLc)) {
-      setImpersonating(email);
-      setView('briefing');
+      openImpersonationTab(email);
     }
   }, [user, liveMembersByEmail, liveGetAllReports, coverageEmails]);
 
@@ -973,6 +1051,27 @@ const App=()=>{
     }
     if (target) handleImpersonate(target);
   }, [user, liveMembersByEmail, handleImpersonate]);
+
+  // This tab is a dedicated "Login as" session if it was opened via
+  // openImpersonationTab (marker set at boot). Exit closes the tab rather than
+  // reverting in place, so the admin's own session in their original tab is
+  // never touched.
+  const isImpersonationTab = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    try { return sessionStorage.getItem('ops_hub_impersonation_tab') === '1'; } catch { return false; }
+  }, []);
+  const exitImpersonation = useCallback(() => {
+    if (isImpersonationTab) {
+      try { sessionStorage.removeItem('ops_hub_impersonating'); } catch {}
+      try { sessionStorage.removeItem('ops_hub_impersonation_tab'); } catch {}
+      try { window.close(); } catch {}
+      // Script-opened tabs close above; if the browser refused, fall back to a
+      // clean admin view (marker already cleared, no impersonate param).
+      try { window.location.replace('/'); } catch {}
+      return;
+    }
+    setImpersonating(null);
+  }, [isImpersonationTab, setImpersonating]);
 
   const [announceCompose,setAnnounceCompose]=useState(false);
   const [feedbackCompose,setFeedbackCompose]=useState(false);
@@ -2241,7 +2340,7 @@ const App=()=>{
           <span>Viewing as <strong>{effectiveUser.name}</strong></span>
           <span style={{opacity:0.5}}>·</span>
           <span style={{opacity:0.8,fontWeight:400,fontSize:12}}>{(liveMembersByEmail?.[String(impersonating).toLowerCase()]?.title || MEMBERS_BY_EMAIL[impersonating]?.title || '')} · {(liveMembersByEmail?.[String(impersonating).toLowerCase()]?.team || effectiveUser?.team || MEMBERS_BY_EMAIL[impersonating]?.team || '')}</span>
-          <button onClick={()=>setImpersonating(null)} style={{marginLeft:8,padding:'4px 14px',borderRadius:128,border:'1px solid rgba(255,255,255,0.3)',background:'rgba(255,255,255,0.15)',color:'white',fontSize:12,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:4,transition:'background .15s'}}
+          <button onClick={exitImpersonation} style={{marginLeft:8,padding:'4px 14px',borderRadius:128,border:'1px solid rgba(255,255,255,0.3)',background:'rgba(255,255,255,0.15)',color:'white',fontSize:12,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:4,transition:'background .15s'}}
             onMouseEnter={e=>e.currentTarget.style.background='rgba(255,255,255,0.25)'} onMouseLeave={e=>e.currentTarget.style.background='rgba(255,255,255,0.15)'}>
             <i className="bi-box-arrow-left" style={{fontSize:11}}></i>Exit
           </button>
