@@ -358,7 +358,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const perms=useContext(PermissionsContext);
   const settings=useContext(SettingsContext);
   // deelData removed 2026-05-13 — Deel REST-v2 wrapper retired.
-  const { jiraData, slackData, queueUnified, hiddenTasks, slaExtensions } = useContext(IntegrationsContext);
+  const { queueUnified, hiddenTasks, slaExtensions } = useContext(IntegrationsContext);
   // Hide-task filter — mirrors the Queue's behaviour so home aggregates
   // exclude rows the manager has approved to hide. Without this, Home
   // surfaces a count that includes hidden rows (e.g. 797 workbench) while
@@ -1697,15 +1697,6 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                   </div>
                 ) : null}
               </div>)}
-              {/* Live integrations status — Deel pill removed 2026-05-13
-                  alongside the REST-v2 deprecation. Admin-API queues stay
-                  live through their own hooks. */}
-              {(jiraData?.isAvailable||slackData?.isAvailable)&&(
-                <div style={{marginTop:6,display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-                  {jiraData?.isAvailable&&<span style={{fontSize:10.5,fontWeight:600,color:'#0052CC',background:'#e6efff',padding:'1px 8px',borderRadius:99,display:'inline-flex',alignItems:'center',gap:4}}><span style={{width:5,height:5,borderRadius:'50%',background:'#0052CC',display:'inline-block'}}/>Jira Live</span>}
-                  {slackData?.isAvailable&&<span style={{fontSize:10.5,fontWeight:600,color:'#611f69',background:'#f3e8f9',padding:'1px 8px',borderRadius:99,display:'inline-flex',alignItems:'center',gap:4}}><span style={{width:5,height:5,borderRadius:'50%',background:'#611f69',display:'inline-block'}}/>Slack Live</span>}
-                </div>
-              )}
             </div>
 
             {/* Health Score Ring */}
