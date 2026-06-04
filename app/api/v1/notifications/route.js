@@ -31,11 +31,22 @@ const SELECT_COLUMNS = `
   CASE WHEN n.link_view = 'hr_hub' THEN hr.flow ELSE NULL END AS hr_hub_flow
 `;
 
+// The `n.link_id::uuid` cast MUST be guarded INSIDE the CASE, not by a
+// separate `AND` regex predicate: Postgres doesn't guarantee that predicate
+// short-circuits the cast in a JOIN ON, so the planner was evaluating
+// link_id::uuid on rows whose link_id is a non-UUID (e.g. a Zendesk/queue
+// notification's integer ticket id like "298444"), throwing "invalid input
+// syntax for type uuid" on every bell poll and 500ing the whole GET. Casting
+// the CASE result means the cast only ever sees a valid UUID string or NULL —
+// non-UUID link_ids yield NULL and simply don't join. Still index-friendly
+// (hr.id = <uuid> uses the hr_hub_request PK).
 const HR_HUB_JOIN = `
   LEFT JOIN hr_hub_request hr
     ON n.link_view = 'hr_hub'
-   AND n.link_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-   AND hr.id = n.link_id::uuid
+   AND hr.id = (
+         CASE WHEN n.link_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+              THEN n.link_id ELSE NULL END
+       )::uuid
 `;
 
 export async function GET(req) {
