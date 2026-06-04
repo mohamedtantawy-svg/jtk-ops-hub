@@ -30,6 +30,7 @@ import { useContext, useMemo, useState, useEffect, useCallback } from 'react';
 import { IntegrationsContext } from '../../App';
 import { useCurrentDept } from '../../hooks/useCurrentDept';
 import { getHubBrand } from '../../lib/hub-brand';
+import { isUrgentAssistTaskType } from '../../lib/urgent-assist-task-types';
 import { TOOLS, getCountryName } from '../../data/constants';
 import { slaInfo, getUrl } from '../../utils/helpers';
 import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
@@ -368,6 +369,23 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
     return () => { cancelled = true; };
   }, []);
 
+  // Workbench-sourced urgent-assist assigned to me — the manual count above is
+  // DB-only, so without this the tile misses workbench-sourced requests (the
+  // bulk of Urgent Assist). Mirrors the Urgent Assist tab's "Assigned to me"
+  // partition: UA task type + assignee = me + non-resolved.
+  const urgentMineWorkbench = useMemo(() => {
+    if (!myEmail) return 0;
+    let c = 0;
+    for (const t of (wb.tasks || [])) {
+      if (!t) continue;
+      if (!(isUrgentAssistTaskType(t.taskType) || isUrgentAssistTaskType(t.sourceType))) continue;
+      if ((t.assignee?.email || '').toLowerCase() !== myEmail) continue;
+      if (t.status === 'COMPLETED' || t.status === 'CLOSED') continue;
+      c++;
+    }
+    return c;
+  }, [wb.tasks, myEmail]);
+
   // Unacked announcements — same filter BriefingView uses. `comms` is
   // optional; if the host didn't pass it the tile shows "—" rather than
   // a wrong zero, so the agent isn't told "0 unacked" when we can't tell.
@@ -685,7 +703,7 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
           bgLight="#fff8e6"
           label="Urgent Assist"
           hint="open requests assigned to you"
-          count={urgentMine}
+          count={urgentMine == null ? null : urgentMine + urgentMineWorkbench}
           ctaLabel="Open Urgent Assist"
           onClick={() => setView?.('urgent-assist')}
         />

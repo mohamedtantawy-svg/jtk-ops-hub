@@ -17,13 +17,16 @@
 // CountriesCell) are also exported here — BriefingView's team table reuses
 // them so the Briefing rows match the Team-tab look-and-feel exactly.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useContext, useEffect, useMemo, useState } from 'react';
 import { TOOLS } from '../../data/constants';
 import { slaInfo } from '../../utils/helpers';
 import { apiFetch } from '../../services/api';
 import MultiCountryPicker from '../team/MultiCountryPicker';
 import { useCurrentDept } from '../../hooks/useCurrentDept';
 import { getHubBrand } from '../../lib/hub-brand';
+import { PermissionsContext, IntegrationsContext } from '../../App';
+import { getAllReports, getDirectReports } from '../../data/members';
+import { isUrgentAssistTaskType } from '../../lib/urgent-assist-task-types';
 
 // ── Pure helpers (mirrored from Team.jsx so the look matches) ──────────────
 
@@ -213,7 +216,7 @@ export function TriageStrip({ sourceRows = [], tickets = [], onNavigate }) {
 
 // ── DecisionsStrip ───────────────────────────────────────────────────────
 
-export function DecisionsStrip({ onNavigate }) {
+export function DecisionsStrip({ onNavigate, user = null }) {
   // 2026-05-22 — dept-branded HR Hub tile label.
   const deptState = useCurrentDept();
   const hubBrand = useMemo(() => getHubBrand(deptState.dept), [deptState.dept]);
@@ -221,6 +224,46 @@ export function DecisionsStrip({ onNavigate }) {
   const [leaderAlerts, setLeaderAlerts] = useState(null);
   const [urgentAssist, setUrgentAssist] = useState(null);
   const [approvalsCount, setApprovalsCount] = useState(null);
+
+  // ── Urgent Assist tile = manual (DB) + workbench (live) team count ─────────
+  // /urgent-assist/counts only counts the urgent_assist_request DB table.
+  // Workbench-sourced requests — the bulk of the Urgent Assist tab's "Assigned
+  // to my team" total — live in the live Deel feed, not the DB, so a manager
+  // saw 0 on the home tile while the tab showed 19. We add the workbench half
+  // here from the already-warm IntegrationsContext, using the SAME team
+  // partition the tab's "Assigned to my team" pill uses, so the two agree.
+  const perms = useContext(PermissionsContext);
+  const integrationsCtx = useContext(IntegrationsContext);
+  const workbenchTasks = integrationsCtx?.queueUnified?.workbenchData?.tasks || [];
+  const lcEmail = (user?.email || '').toLowerCase();
+  const dataScope = perms?.dataScope || 'own_tasks_only';
+  const teamEmails = useMemo(() => {
+    const out = new Set();
+    if (!lcEmail) return out;
+    out.add(lcEmail);
+    // Same subtree the Urgent Assist tab + the /counts route use: RM/Admin →
+    // transitive reports, TL → direct reports, agent → self only.
+    if (dataScope === 'all_tasks' || dataScope === 'regional_tasks') {
+      for (const e of getAllReports(lcEmail)) out.add(e);
+    } else if (dataScope === 'team_tasks') {
+      for (const r of getDirectReports(lcEmail)) out.add(r.email);
+    }
+    return out;
+  }, [lcEmail, dataScope]);
+  const workbenchUaTeamCount = useMemo(() => {
+    if (!lcEmail) return 0;
+    let c = 0;
+    for (const t of workbenchTasks) {
+      if (!t) continue;
+      if (!(isUrgentAssistTaskType(t.taskType) || isUrgentAssistTaskType(t.sourceType))) continue;
+      const ae = (t.assignee?.email || '').toLowerCase();
+      if (!ae || !(ae === lcEmail || teamEmails.has(ae))) continue;
+      // Non-resolved only — COMPLETED/CLOSED map to "resolved" on the tab.
+      if (t.status === 'COMPLETED' || t.status === 'CLOSED') continue;
+      c++;
+    }
+    return c;
+  }, [workbenchTasks, teamEmails, lcEmail]);
 
   useEffect(() => {
     let cancelled = false;
@@ -244,9 +287,10 @@ export function DecisionsStrip({ onNavigate }) {
     //                       Server-side COUNT(*) via /hr-hub/requests/counts.
     //   • leaderAlerts    — sidebar-badge unacked count, server filters by
     //                       severity threshold + caller's ack rows.
-    //   • urgentAssist    — same role-scoped union (assignee-only — Urgent
-    //                       Assist is "who's actioning"). Server-side
-    //                       COUNT(*) via /urgent-assist/counts.
+    //   • urgentAssist    — "Assigned to my team" for managers: the manual
+    //                       (DB) team count from /urgent-assist/counts PLUS the
+    //                       workbench team count derived above, so the tile
+    //                       matches the Urgent Assist tab (which merges both).
     //   • approvalsCount  — same role-scoped union, narrowed to
     //                       hide_task_request + sla_extension_request via
     //                       the counts endpoint's `flows=` filter.
@@ -281,10 +325,10 @@ export function DecisionsStrip({ onNavigate }) {
       if (j) setLeaderAlerts(j.count ?? 0);
     });
 
-    // ── Urgent Assist tile — role-scoped briefingTile count ──
+    // ── Urgent Assist tile — manual (DB) team count; workbench added below ──
     safe('/urgent-assist/counts').then(j => {
       if (cancelled || !j) return;
-      const n = j?.byScope?.briefingTile;
+      const n = j?.byScope?.team;
       if (typeof n === 'number') setUrgentAssist(n);
     });
 
@@ -377,7 +421,7 @@ export function DecisionsStrip({ onNavigate }) {
         icon: 'bi-lightning-fill',
         label: 'Urgent Assist',
         hint: 'open requests in my team',
-        count: urgentAssist,
+        count: urgentAssist == null ? null : urgentAssist + workbenchUaTeamCount,
         color: '#ed8d00',
         onClick: () => handleTileClick('urgent-assist', 'urgent-assist:setFilters', { scope: 'team', status: null }),
       })}

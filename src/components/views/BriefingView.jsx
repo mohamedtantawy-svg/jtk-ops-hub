@@ -2166,7 +2166,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             Click any tile to land on the relevant view.
         ══════════════════════════════════════════════════════════════════ */}
         {isManager&&<div style={{margin:'12px 24px 0'}}>
-          <DecisionsStrip onNavigate={(v)=>setView(v)} />
+          <DecisionsStrip onNavigate={(v)=>setView(v)} user={user} />
         </div>}
 
         {/* ── MAIN CONTENT ────────────────────────────────────────────────── */}
