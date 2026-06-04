@@ -37,8 +37,6 @@ const MODE_KEY  = 'ops_hub_ooo_mode';
 const LENS_KEY  = 'ops_hub_ooo_lens';
 const SUB_TAB_KEY = 'ops_hub_ooo_sub_tab';
 
-const DEFAULT_RANGE_DAYS = 60;
-
 function readUrl() {
   if (typeof window === 'undefined') return {};
   try {
@@ -66,12 +64,6 @@ function pushUrl({ mode, lens, from, to, handover }) {
   } catch {}
 }
 
-function isoOffsetFromToday(days) {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
 function readLocal(key, fallback) {
   try { return localStorage.getItem(key) || fallback; } catch { return fallback; }
 }
@@ -86,6 +78,11 @@ function isManagerRole(role) {
 function OOOView({ user, setView, addToast }) {
   const urlInit = readUrl();
   const todayIso = isoDate();
+  // Default end of the OOO window: one calendar month ahead of today, on
+  // the same UTC basis as todayIso (isoDate).
+  const monthAhead = new Date();
+  monthAhead.setUTCMonth(monthAhead.getUTCMonth() + 1);
+  const oneMonthAheadIso = isoDate(monthAhead);
 
   const [mode, setMode] = useState(
     urlInit.mode === 'table' || urlInit.mode === 'calendar'
@@ -93,14 +90,13 @@ function OOOView({ user, setView, addToast }) {
       : readLocal(MODE_KEY, 'calendar'),
   );
   const [lens, setLens] = useState(urlInit.lens || readLocal(LENS_KEY, LENS_IDS.AUTO));
-  // Default `from` widened from -7d to -90d (Megan Lawrence 2026-05-15) so
-  // old + mass-imported PTO entries surface without the user having to
-  // manually expand the date picker. The +60d forward window stays — most
-  // users land here to plan or audit upcoming OOO, not to scroll into the
-  // distant future. Users can still narrow / extend either side via the
-  // date pickers on the filter row.
-  const [from, setFrom] = useState(urlInit.from || isoOffsetFromToday(-90));
-  const [to,   setTo]   = useState(urlInit.to   || isoOffsetFromToday(DEFAULT_RANGE_DAYS));
+  // Default window is today → one month ahead — a forward-looking planner
+  // view; most users land here to plan or audit upcoming OOO. The server
+  // filters by overlap (end_date >= from AND start_date <= to), so an OOO
+  // that started earlier but is still active stays visible. Users can widen
+  // either side via the date pickers; ?from / ?to in the URL override.
+  const [from, setFrom] = useState(urlInit.from || todayIso);
+  const [to,   setTo]   = useState(urlInit.to   || oneMonthAheadIso);
   const [search, setSearch] = useState('');
   const [country, setCountry] = useState('all');
   const [missingOnly, setMissingOnly] = useState(false);
