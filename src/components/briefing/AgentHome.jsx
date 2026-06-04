@@ -46,6 +46,7 @@ import { apiFetch } from '../../services/api';
 import BriefingMyTasks from '../home/BriefingMyTasks';
 import PendingAcksBanner from './PendingAcksBanner';
 import StaleCountryDocsBanner from './StaleCountryDocsBanner';
+import PendingCoverageBanner from '../ooo/PendingCoverageBanner';
 
 function rowSlaSeverity(row) {
   if (!row) return 'ok';
@@ -615,6 +616,10 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
           For country owners only. Self-hides when every owned doc is
           fresh + published. Click jumps to OOO → Country docs sub-tab. */}
       <StaleCountryDocsBanner user={user} members={teamMembers} setView={setView} />
+
+      {/* ── Coverage requests awaiting response (Mohamed 2026-06-04) ──────
+          "Respond" opens the accept/decline popup. Self-hides when none. */}
+      <PendingCoverageBanner />
       <div style={{ height: 12 }} aria-hidden />
 
       {/* ── Your SLA status section ──────────────────────────────────── */}

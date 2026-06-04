@@ -6,6 +6,7 @@ import { INITIAL_REQUESTS } from './data/requests';
 import { MEMBERS, MEMBERS_BY_EMAIL, DEFAULT_USER_ACCESS_MAP, TEAM_MEMBERS, getAllReports, subscribeRoster, getRosterVersion, getLiveRosterFetched } from './data/members';
 import { useTeamMembers } from './hooks/useTeamMembers';
 import { useMyActiveCoverages, expandCoverageScope } from './hooks/useMyActiveCoverages';
+import { usePendingCoverages } from './hooks/usePendingCoverages';
 import { useCurrentDeptId, getCurrentDeptIdSync } from './lib/current-dept-storage';
 import { useCurrentDept } from './hooks/useCurrentDept';
 import { INITIAL_ACTIVITY, INITIAL_NOTES } from './data/tasks';
@@ -118,6 +119,7 @@ import DeelSubNav from './components/nav/DeelSubNav';
 import BriefingView from './components/views/BriefingView';
 import TeamLeadHome from './components/views/TeamLeadHome';
 import AgentHome from './components/briefing/AgentHome';
+import CoverageInvitationModal from './components/ooo/CoverageInvitationModal';
 import Queue from './components/queue/Queue';
 import Team from './components/views/Team';
 import Analytics from './components/views/Analytics';
@@ -432,6 +434,40 @@ const App=()=>{
     if (!impersonating || !user) return user;
     return resolveEffectiveMember(impersonating) || user;
   }, [impersonating, user, resolveEffectiveMember]);
+
+  // ── Coverage-invitation accept/decline popup (Mohamed 2026-06-04) ──────
+  // A coverer gets a popup to accept or reject an OOO coverage request,
+  // surfaced three ways: the bell notification (handleNotifClick below), the
+  // home PendingCoverageBanner ("Respond" → ooo:openCoverageInvite event),
+  // and a session-gated auto-prompt on load. `coverageInvite` holds
+  // { handoverId, invite? }; the modal fetches the handover by id so it
+  // works even though the coverer doesn't have the requester's time-off
+  // event loaded — that gap was Insiya's notification bug.
+  const { items: pendingCoverages } = usePendingCoverages({ enabled: !!user });
+  const [coverageInvite, setCoverageInvite] = useState(null);
+  useEffect(() => {
+    const onOpen = (e) => {
+      const hid = e?.detail?.handoverId;
+      if (hid) setCoverageInvite({ handoverId: hid, invite: e.detail.invite || null });
+    };
+    window.addEventListener('ooo:openCoverageInvite', onOpen);
+    return () => window.removeEventListener('ooo:openCoverageInvite', onOpen);
+  }, []);
+  // Auto-surface ONE popup per load when the caller has an unanswered ask.
+  // Gated per browser session (all current pending ids are marked seen when
+  // we open one) so it never cascades or nags — the home banner + bell cover
+  // the rest, and a NEW invite arriving mid-session still auto-pops once.
+  useEffect(() => {
+    if (!user || coverageInvite || !Array.isArray(pendingCoverages) || pendingCoverages.length === 0) return;
+    let prompted;
+    try { prompted = new Set(JSON.parse(sessionStorage.getItem('ops_hub_coverage_autoprompt_v1') || '[]')); }
+    catch { prompted = new Set(); }
+    const next = pendingCoverages.find(p => p?.handover_id && !prompted.has(p.handover_id));
+    if (!next) return;
+    pendingCoverages.forEach(p => { if (p?.handover_id) prompted.add(p.handover_id); });
+    try { sessionStorage.setItem('ops_hub_coverage_autoprompt_v1', JSON.stringify(Array.from(prompted))); } catch {}
+    setCoverageInvite({ handoverId: next.handover_id, invite: next });
+  }, [user, pendingCoverages, coverageInvite]);
   // Initial view honours `?view=<name>` on hard refresh so deep-links from
   // server-pushed notifications + shared URLs (e.g. /?view=hr-hub&req=<uuid>)
   // restore both the view AND the per-view drawer state. If `?req=` is
@@ -1321,6 +1357,7 @@ const App=()=>{
         timestamp: tsMs,
         createdAt: n.createdAt,
         read: !!n.readAt,
+        type: n.type,
         linkView: n.linkView,
         linkId: n.linkId,
         sourceType: n.sourceType,
@@ -1366,7 +1403,15 @@ const App=()=>{
     justFromNotifClickRef.current = fromNotif;
     if (n && n._source === 'server') {
       if (n.serverId && !n.read) serverNotifs.markRead(n.serverId);
-      if (n.linkView === 'announcements' && n.linkId) {
+      if (n.type === 'handover_coverage_invited' && n.linkId) {
+        // Coverage invitation → open the accept/decline popup directly,
+        // keyed on the handover id. Bypasses the OOO-view event-scan (which
+        // resolves handoverId → time_off_event_id by scanning the caller's
+        // OWN events) — that never matched for a coverer, so the bell click
+        // silently no-op'd. Insiya 2026-06-04 "Cannot click to review OOO
+        // coverage request from the notification".
+        setCoverageInvite({ handoverId: n.linkId, invite: null });
+      } else if (n.linkView === 'announcements' && n.linkId) {
         // Stamp the URL BEFORE setView so AnnouncementsView's useState
         // initialiser reads ?announcement=<id> on first paint. Without
         // this, mount races the 60 ms event dispatch and the detail
@@ -2454,6 +2499,14 @@ const App=()=>{
       {requestModal  &&<CreateRequestModal onConfirm={confirmRequest} onClose={()=>setRequestModal(false)} currentUser={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS,coverageEmails)||tasks}/>}
       {createEscalModal&&<CreateEscalationModal onConfirm={confirmManualEscal} onClose={()=>setCreateEscalModal(false)} currentUser={effectiveUser} tasks={perms?.scopeTasks?.(tasks,MEMBERS,coverageEmails)||tasks}/>}
       {showSearch    &&<GlobalSearch tasks={perms?.scopeTasks?.(tasks,MEMBERS,coverageEmails)||tasks} setView={setView} setSelTask={()=>{}} onClose={()=>setShowSearch(false)}/>}
+      {coverageInvite && (
+        <CoverageInvitationModal
+          handoverId={coverageInvite.handoverId}
+          invite={coverageInvite.invite}
+          userEmail={effectiveUser?.email || user?.email || ''}
+          onClose={() => setCoverageInvite(null)}
+        />
+      )}
       {showOnboard   &&<Onboarding onDismiss={(dontShow)=>{setShowOnboard(false);if(dontShow){try{localStorage.setItem('ops_hub_onboarded','1');}catch(e){}}}}/>}
       {/* What's-new tour — only renders once Onboarding is dismissed so
           we never stack two modals. The tour itself writes its seen-flag

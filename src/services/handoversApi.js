@@ -22,6 +22,15 @@ export async function fetchMyActiveCoverages() {
   return apiFetch('/handovers/my-active-coverages');
 }
 
+/**
+ * Coverage invitations awaiting the caller's response — handovers in
+ * pending_coverage_acceptance where the caller is a still-pending coverer.
+ * Powers the home-page PendingCoverageBanner + the accept/decline popup.
+ */
+export async function fetchMyPendingCoverages() {
+  return apiFetch('/handovers/my-pending-coverages');
+}
+
 /** Visible-scope handover list. Filters mirror the route's query params. */
 export async function listHandovers({ status, requester, manager, from, to } = {}) {
   const qs = new URLSearchParams();

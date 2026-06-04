@@ -46,6 +46,7 @@ import { useTimeOffEvents } from '../../hooks/useTimeOffEvents';
 import { ToolBadge, FnBadge } from '../ui/Badges';
 import BriefingMyTasks from '../home/BriefingMyTasks';
 import CoverageBanner from '../ooo/CoverageBanner';
+import PendingCoverageBanner from '../ooo/PendingCoverageBanner';
 import CoverageCard from '../ooo/CoverageCard';
 import { useMyActiveCoverages } from '../../hooks/useMyActiveCoverages';
 import OOOAlert from '../home/OOOAlert';
@@ -2171,6 +2172,11 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
 
         {/* ── MAIN CONTENT ────────────────────────────────────────────────── */}
         <div style={{padding:'12px 24px 20px'}}>
+
+          {/* ── Coverage requests awaiting response (Mohamed 2026-06-04) ──
+              Action-needed banner; "Respond" opens the accept/decline popup.
+              Self-hides when the caller has no pending invitations. */}
+          <PendingCoverageBanner />
 
           {/* ── Phase 3 CoverageBanner — surfaces active OOO coverages ───
               Renders only when the caller has accepted coverage on a
