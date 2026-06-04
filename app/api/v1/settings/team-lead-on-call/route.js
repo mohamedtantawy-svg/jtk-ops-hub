@@ -1,29 +1,24 @@
 // ── /api/v1/settings/team-lead-on-call ──────────────────────────────────
 // Mirror of /settings/manager-on-call for the second rotating role
-// (Mohamed 2026-05-14 spec). PUT additionally performs a bulk
-// reassignment of auto-assigned HR-Hub rows from the previous TLOC to
-// the new one — preserving manually-changed assignees.
-//
-// Why the side effect lives on PUT (and not a separate route):
-//   • The TLOC rotation IS the trigger for the bulk reassignment. Doing
-//     it inline keeps the operation atomic — there's no window where
-//     the settings row says "Alice" but the requests still point at
-//     "Bob".
-//   • The query is cheap thanks to the partial index
-//     `idx_hr_hub_request_auto_assign` (only un-manually-set rows are
-//     scanned, filtered by flow+assignee_email).
+// (Mohamed 2026-05-14 spec). Per-department (Mohamed 2026-06-04): storage +
+// the HRX-inheritance rule live in src/lib/dept-settings.js; this route reads/
+// writes `team_lead_on_call:<deptId>`. PUT additionally bulk-reassigns the
+// dept's auto-assigned HR-Hub rows from the previous TLOC to the new one —
+// preserving manually-changed assignees AND scoped to this dept so rotating
+// one dept's TLOC never touches another dept's requests.
 
 import { NextResponse } from 'next/server';
 import { getAuthUser } from '../../../../../src/lib/auth-helpers';
+import { getCurrentDeptSlugAndId } from '../../../../../src/lib/dept-scope';
+import { deptSettingKey, readDeptSettingRow } from '../../../../../src/lib/dept-settings';
 import { cacheGet, cacheSet, cacheDel } from '../../../../../src/lib/server-cache';
 
-const CACHE_KEY = 'team_lead_on_call';
+const BASE_KEY = 'team_lead_on_call';
 const CACHE_TTL = 5000;
 
-// No DEFAULT — empty until set by an admin/TL. The FE renders the pill
-// only when a TLOC is present, so an unset state simply means "no
-// auto-routing for HR Requests / Reporting" (assignee defaults back to
-// null on create, behaving exactly as before this feature shipped).
+// No DEFAULT — empty until set. The FE renders the pill only when a TLOC is
+// present, so an unset state means "no auto-routing for HR Requests /
+// Reporting" (assignee defaults back to null on create).
 const DEFAULT_TLOC = null;
 
 async function getDb() {
@@ -32,35 +27,36 @@ async function getDb() {
   return { query, withTransaction };
 }
 
+async function resolveScope(user, req) {
+  const scope = await getCurrentDeptSlugAndId(user, req).catch(() => null);
+  const deptId = scope?.deptId || null;
+  return { deptId, deptSlug: scope?.deptSlug || null, key: deptSettingKey(BASE_KEY, deptId) };
+}
+
 export async function GET(req) {
   const user = getAuthUser(req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  // cacheGet returns null on miss/expiry — match the MOC route's truthy
-  // check so a stale `null` doesn't shadow the DB read and erase the
-  // current TLOC on the FE side. The previous `!== undefined` predicate
-  // was always true (cacheGet never returns undefined), causing every
-  // refresh after the 5s TTL to short-circuit with `null` and the FE
-  // pill to revert to empty.
-  const cached = cacheGet(CACHE_KEY, CACHE_TTL);
+  const { deptId, deptSlug, key } = await resolveScope(user, req);
+
+  // cacheGet returns null on miss/expiry — truthy check so a stale `null`
+  // doesn't shadow the DB read and erase the current TLOC on the FE side.
+  const cached = cacheGet(key, CACHE_TTL);
   if (cached) return NextResponse.json(cached);
 
-  const db = await getDb();
-  if (db) {
-    try {
-      const { rows } = await db.query("SELECT value, updated_by, updated_at FROM app_settings WHERE key = 'team_lead_on_call'");
-      if (rows.length > 0 && rows[0].value) {
-        const result = { ...rows[0].value, updatedBy: rows[0].updated_by, updatedAt: rows[0].updated_at };
-        cacheSet(CACHE_KEY, result);
-        return NextResponse.json(result);
-      }
-    } catch (err) {
-      console.warn('[team-lead-on-call] DB read failed:', err.message);
+  try {
+    const row = await readDeptSettingRow(BASE_KEY, deptId, deptSlug);
+    if (row && row.value) {
+      const result = { ...row.value, updatedBy: row.updated_by, updatedAt: row.updated_at };
+      cacheSet(key, result);
+      return NextResponse.json(result);
     }
+  } catch (err) {
+    console.warn('[team-lead-on-call] DB read failed:', err.message);
   }
   // Cache the null result too so we don't hammer the DB on every poll
-  // before any TLOC has been set.
-  cacheSet(CACHE_KEY, DEFAULT_TLOC);
+  // before any TLOC has been set for this dept.
+  cacheSet(key, DEFAULT_TLOC);
   return NextResponse.json(DEFAULT_TLOC);
 }
 
@@ -79,41 +75,40 @@ export async function PUT(req) {
     avatarUrl: avatarUrl || '',
   };
 
+  const { key, deptId } = await resolveScope(user, req);
+
   const db = await getDb();
   let reassignedCount = 0;
   let previousTlocEmail = null;
 
   if (db) {
     try {
-      // Run the settings write + bulk reassignment in one txn so the
-      // settings row and the request rows never disagree.
+      // Settings write + bulk reassignment in one txn so the settings row and
+      // the request rows never disagree.
       await db.withTransaction(async (client) => {
-        // Capture the previous TLOC email so the bulk reassign only
-        // touches rows previously routed to them. The row might not
-        // exist yet on first-set; treat missing as null.
+        // Previous TLOC for this dept — used by the no-op guard below.
         const { rows: prev } = await client.query(
-          "SELECT value FROM app_settings WHERE key = 'team_lead_on_call' FOR UPDATE",
+          'SELECT value FROM app_settings WHERE key = $1 FOR UPDATE',
+          [key],
         );
         previousTlocEmail = prev.length > 0 ? (prev[0].value?.email || '').toLowerCase() || null : null;
 
         await client.query(
           `INSERT INTO app_settings (key, value, updated_by, updated_at)
-           VALUES ('team_lead_on_call', $1, $2, NOW())
+           VALUES ($3, $1, $2, NOW())
            ON CONFLICT (key) DO UPDATE SET value = $1, updated_by = $2, updated_at = NOW()`,
-          [JSON.stringify(value), user.email],
+          [JSON.stringify(value), user.email, key],
         );
 
-        // Bulk-reassign every auto-routed HR Request / HR Reporting row
-        // to the new TLOC — not just rows previously assigned to the
-        // previous TLOC. The narrower "from prev → new" version left
-        // behind rows with NULL or stale assignees (pre-feature rows,
-        // rows created during a brief no-TLOC window) so the user could
-        // still see un-routed work in their queue. Skip:
+        // Bulk-reassign every auto-routed HR Request / HR Reporting row IN
+        // THIS DEPT to the new TLOC. Skip:
         //   • Manually re-assigned rows (assignee_manually_set = TRUE).
         //   • Already-resolved or rejected rows.
-        //   • Rows already correctly pointing at the new TLOC.
-        //   • The case where the previous TLOC is the new TLOC (no-op).
-        if (value.email && previousTlocEmail !== value.email) {
+        //   • Rows already pointing at the new TLOC.
+        //   • previous TLOC == new TLOC (no-op).
+        //   • Other departments' rows (org_node_id filter) — rotating GIX's
+        //     TLOC must never reassign HRX's requests.
+        if (value.email && previousTlocEmail !== value.email && deptId) {
           const { rowCount } = await client.query(
             `UPDATE hr_hub_request
                 SET assignee_email = $1,
@@ -122,8 +117,9 @@ export async function PUT(req) {
               WHERE flow IN ('hr_request', 'hr_reporting')
                 AND assignee_manually_set = FALSE
                 AND status NOT IN ('resolved', 'rejected')
+                AND org_node_id = $3
                 AND LOWER(COALESCE(assignee_email, '')) IS DISTINCT FROM $1`,
-            [value.email, value.name],
+            [value.email, value.name, deptId],
           );
           reassignedCount = rowCount || 0;
         }
@@ -134,12 +130,8 @@ export async function PUT(req) {
     }
   }
 
-  // Bust caches so the next FE poll picks up the new TLOC + reassigned
-  // rows on the very next /me / hr-hub list cycle (otherwise the 5s
-  // settings cache + 30s server cache windows would hide the change).
-  cacheDel(CACHE_KEY);
-  // The HR Hub list is paged + cursor-based with no server cache, so no
-  // explicit cacheDel needed for it.
+  // Bust this dept's cache so the next FE poll picks up the new TLOC.
+  cacheDel(key);
 
   const result = {
     ...value,
@@ -148,6 +140,6 @@ export async function PUT(req) {
     reassignedCount,
     previousEmail: previousTlocEmail,
   };
-  cacheSet(CACHE_KEY, result);
+  cacheSet(key, result);
   return NextResponse.json(result);
 }

@@ -97,7 +97,7 @@ export async function PATCH(req, { params }) {
   if (!before) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const callerEmail = String(user.email).toLowerCase();
-  const mocEmail = await getCurrentMocEmail();
+  const mocEmail = await getCurrentMocEmail(user, req);
   if (!canEdit(user, before, { mocEmail })) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
@@ -301,7 +301,7 @@ export async function DELETE(req, { params }) {
   if (!before) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const callerEmail = String(user.email).toLowerCase();
-  const mocEmail = await getCurrentMocEmail();
+  const mocEmail = await getCurrentMocEmail(user, req);
   if (!canEdit(user, before, { mocEmail })) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }

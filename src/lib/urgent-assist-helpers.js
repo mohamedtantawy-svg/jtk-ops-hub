@@ -4,6 +4,7 @@
 
 import { query } from './db.js';
 import { MEMBERS_BY_EMAIL, getAllReports } from '../data/members.js';
+import { readDeptSettingRow } from './dept-settings.js';
 
 // ── Member lookups ─────────────────────────────────────────────────────────
 
@@ -57,12 +58,22 @@ export function teamLeadEmailFor(email) {
  * feedback "MOCs cannot change the status for these UA requests
  * manually raised by our team".
  */
-export async function getCurrentMocEmail() {
+export async function getCurrentMocEmail(user, req) {
   try {
-    const { rows } = await query(
-      "SELECT value FROM app_settings WHERE key = 'manager_on_call' LIMIT 1"
-    );
-    const email = rows[0]?.value?.email;
+    // Per-department: resolve the caller's dept and read THAT dept's MOC, so a
+    // GIX urgent-assist row is managed by GIX's MOC — not HRX's. HRX inherits
+    // the legacy global value until it sets its own (see dept-settings.js).
+    // Falls back to the bare (global) lookup when no dept context is supplied.
+    let deptId = null;
+    let deptSlug = null;
+    if (user && req) {
+      const { getCurrentDeptSlugAndId } = await import('./dept-scope.js');
+      const scope = await getCurrentDeptSlugAndId(user, req).catch(() => null);
+      deptId = scope?.deptId || null;
+      deptSlug = scope?.deptSlug || null;
+    }
+    const row = await readDeptSettingRow('manager_on_call', deptId, deptSlug);
+    const email = row?.value?.email;
     return email ? String(email).toLowerCase() : '';
   } catch {
     return '';

@@ -1,25 +1,27 @@
 // ── /api/v1/settings/queue-priority ───────────────────────────────────────
-// Persists the "Priority of the day" message that the Workspace landing
-// board shows to every team member. Stored in `app_settings` under the
-// key `queue_priority_of_day`.
+// Persists the "Priority of the day" message shown on the Workspace landing
+// board. Per-department (Mohamed 2026-06-04): storage + the HRX-inheritance
+// rule live in src/lib/dept-settings.js; this route reads/writes
+// `queue_priority_of_day:<deptId>`. Other depts start from the generic default
+// until an admin sets one for them.
 //
-// GET — public read (any signed-in user). 30s server cache + ETag-style
-//        `updatedAt` so the FE can show "Set by X · 12 min ago".
-// PUT — admin only. Stores `{ message, headline }`; both are plain text,
-//        capped at sensible lengths. Empty `message` clears the banner.
+// GET — public read (any signed-in user). 30s server cache + `updatedAt`.
+// PUT — admin only. Stores `{ message, headline }`. Empty clears the banner.
 
 import { NextResponse } from 'next/server';
 import { getAuthUser, requireRole } from '../../../../../src/lib/auth-helpers';
+import { getCurrentDeptSlugAndId } from '../../../../../src/lib/dept-scope';
+import { deptSettingKey, readDeptSettingRow } from '../../../../../src/lib/dept-settings';
 import { cacheGet, cacheSet, cacheDel } from '../../../../../src/lib/server-cache';
 
-const CACHE_KEY = 'queue_priority_of_day';
+const BASE_KEY = 'queue_priority_of_day';
 const CACHE_TTL = 30_000; // 30s — same cadence as queue-sla and capacity
 const MAX_HEADLINE = 80;
 const MAX_MESSAGE = 600;
 
 const DEFAULT_PRIORITY = {
-  // Ships with a sensible default so the banner always renders something on
-  // first load — admin can overwrite at any time.
+  // Sensible, dept-agnostic default so the banner always renders something on
+  // first load — admin can overwrite per dept at any time.
   headline: "Today's focus",
   message: 'Clear breaches first across every queue. Then tackle Zendesk, then Workbench, then everything else. Stay paired up — escalate fast.',
 };
@@ -28,6 +30,12 @@ async function getDb() {
   if (!process.env.DATABASE_URL) return null;
   const { query } = await import('../../../../../src/lib/db');
   return { query };
+}
+
+async function resolveScope(user, req) {
+  const scope = await getCurrentDeptSlugAndId(user, req).catch(() => null);
+  const deptId = scope?.deptId || null;
+  return { deptId, deptSlug: scope?.deptSlug || null, key: deptSettingKey(BASE_KEY, deptId) };
 }
 
 function sanitize(input) {
@@ -54,26 +62,23 @@ export async function GET(req) {
   const user = getAuthUser(req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const cached = cacheGet(CACHE_KEY, CACHE_TTL);
+  const { deptId, deptSlug, key } = await resolveScope(user, req);
+
+  const cached = cacheGet(key, CACHE_TTL);
   if (cached) return NextResponse.json(cached);
 
-  const db = await getDb();
   let stored = null;
   let updatedBy = null;
   let updatedAt = null;
-  if (db) {
-    try {
-      const { rows } = await db.query(
-        "SELECT value, updated_by, updated_at FROM app_settings WHERE key = 'queue_priority_of_day'",
-      );
-      if (rows.length > 0) {
-        stored = rows[0].value;
-        updatedBy = rows[0].updated_by;
-        updatedAt = rows[0].updated_at;
-      }
-    } catch (err) {
-      console.warn('[queue-priority] DB read failed:', err.message);
+  try {
+    const row = await readDeptSettingRow(BASE_KEY, deptId, deptSlug);
+    if (row) {
+      stored = row.value;
+      updatedBy = row.updated_by;
+      updatedAt = row.updated_at;
     }
+  } catch (err) {
+    console.warn('[queue-priority] DB read failed:', err.message);
   }
 
   const result = {
@@ -82,13 +87,12 @@ export async function GET(req) {
     updatedAt,
     isDefault: !stored,
   };
-  cacheSet(CACHE_KEY, result);
+  cacheSet(key, result);
   return NextResponse.json(result);
 }
 
 export async function PUT(req) {
-  // Admin only. Ops Hub directors / regional managers don't get this dial —
-  // it sets a global "what the whole team should focus on" and that's a
+  // Admin only. Sets a per-dept "what the whole team should focus on" — a
   // single-owner decision per Mohamed's 2026-05-05 ask.
   const { authorized, user, status, error } = requireRole(req, 'admin');
   if (!authorized) return NextResponse.json({ error }, { status });
@@ -108,25 +112,27 @@ export async function PUT(req) {
   const db = await getDb();
   if (!db) return NextResponse.json({ error: 'Database not configured' }, { status: 503 });
 
+  const { key } = await resolveScope(user, req);
+
   try {
     await db.query(
       `INSERT INTO app_settings (key, value, updated_by, updated_at)
-       VALUES ('queue_priority_of_day', $1::jsonb, $2, NOW())
+       VALUES ($3, $1::jsonb, $2, NOW())
        ON CONFLICT (key) DO UPDATE SET value = $1::jsonb, updated_by = $2, updated_at = NOW()`,
-      [JSON.stringify(sanitized), user.email],
+      [JSON.stringify(sanitized), user.email, key],
     );
   } catch (err) {
     console.error('[queue-priority] DB write failed:', err.message);
     return NextResponse.json({ error: 'Failed to save' }, { status: 500 });
   }
 
-  cacheDel(CACHE_KEY);
+  cacheDel(key);
   const result = {
     priority: withDefaults(sanitized),
     updatedBy: user.email,
     updatedAt: new Date().toISOString(),
     isDefault: false,
   };
-  cacheSet(CACHE_KEY, result);
+  cacheSet(key, result);
   return NextResponse.json(result);
 }

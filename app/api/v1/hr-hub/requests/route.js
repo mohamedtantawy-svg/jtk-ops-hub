@@ -19,7 +19,8 @@ import { getAuthUser } from '../../../../../src/lib/auth-helpers';
 import { query, withTransaction } from '../../../../../src/lib/db';
 import { ensureRosterHydrated } from '../../../../../src/lib/roster-server';
 import { getVisibleEmailsForAccess } from '../../../../../src/data/members';
-import { getCurrentDeptId, getEffectiveDeptIdsForUser } from '../../../../../src/lib/dept-scope';
+import { getCurrentDeptSlugAndId, getEffectiveDeptIdsForUser } from '../../../../../src/lib/dept-scope';
+import { readDeptSettingRow } from '../../../../../src/lib/dept-settings';
 import {
   memberByEmail,
   managerEmailFor,
@@ -596,24 +597,25 @@ export async function POST(req) {
     }
   }
 
-  // Team Lead On Call auto-assignment (Mohamed 2026-05-14 spec). For
-  // hr_request and hr_reporting flows, if the caller didn't explicitly
-  // pass an `assigneeEmail`, default to the current Team Lead On Call.
-  // `assignee_manually_set` stays FALSE so the next TLOC rotation
-  // bulk-reassigns this row; the moment anyone explicitly PATCHes the
-  // assignee on this row, the [id]/route.js handler flips that flag to
-  // TRUE and rotation skips it.
-  //
-  // We read directly from `app_settings` (with COALESCE to handle the
-  // never-been-set case) instead of importing the settings route. Keeps
-  // the request POST a single network hop.
+  // Resolve the submitter's department once — used both to scope the Team
+  // Lead On Call auto-assignment below and to stamp org_node_id on the row
+  // (Phase 11c, 2026-05-20). Isolation follows the submitter: a Payroll
+  // user's request lands in Payroll's HR Hub regardless of where the assignee
+  // sits. If dept resolution fails we still create the row with a null
+  // org_node_id; the v1 dept-backfill picks it up on next boot.
+  const { deptId: submitterDeptId, deptSlug: submitterDeptSlug } =
+    (await getCurrentDeptSlugAndId(user, req)) || {};
+
+  // Team Lead On Call auto-assignment (Mohamed 2026-05-14 spec), now per
+  // department (2026-06-04). For hr_request / hr_reporting, if the caller
+  // didn't pass an `assigneeEmail`, default to THIS DEPT's current Team Lead
+  // On Call. `assignee_manually_set` stays FALSE so the next TLOC rotation
+  // reassigns this row; an explicit PATCH of the assignee flips it to TRUE.
   let assigneeManuallySet = !!body.assigneeEmail;
   if ((flow === 'hr_request' || flow === 'hr_reporting') && !assigneeEmail) {
     try {
-      const tlocRes = await query(
-        "SELECT value FROM app_settings WHERE key = 'team_lead_on_call'",
-      );
-      const tloc = tlocRes.rows[0]?.value || null;
+      const tlocRow = await readDeptSettingRow('team_lead_on_call', submitterDeptId || null, submitterDeptSlug || null);
+      const tloc = tlocRow?.value || null;
       const tlocEmail = tloc?.email ? String(tloc.email).toLowerCase() : null;
       if (tlocEmail) {
         assigneeEmail = tlocEmail;
@@ -621,20 +623,11 @@ export async function POST(req) {
         assigneeManuallySet = false;
       }
     } catch (err) {
-      // Best-effort: if the lookup fails (no DB, missing row), fall
-      // through to a null assignee — the request still creates, just
-      // lands in the unassigned pool same as before this feature.
+      // Best-effort: if the lookup fails, fall through to a null assignee —
+      // the request still creates, just lands in the unassigned pool.
       console.warn('[hr-hub/requests] TLOC lookup failed, falling back to null assignee:', err.message);
     }
   }
-
-  // Phase 11c (2026-05-20): stamp the submitter's currentDeptId on every
-  // new request. Isolation follows the submitter — a Payroll user's
-  // request lands in Payroll's HR Hub regardless of where the assignee
-  // sits. If dept resolution fails we still create the row (null) so a
-  // user without org placement can submit; the v1 dept-backfill picks it
-  // up on next boot.
-  const submitterDeptId = await getCurrentDeptId(user, req);
 
   // 2026-05-22 — Jose Ruales spec: if the resolved assignee is currently
   // OOO, re-route to their first non-OOO manager and stamp the original

@@ -1,7 +1,9 @@
 // ── useQueuePriority ──────────────────────────────────────────────────────
-// Reads and writes the global "Priority of the day" message that the
-// Workspace landing board shows to every team member. Admin-only on the
-// write side (server enforces too).
+// Reads and writes the per-department "Priority of the day" message that the
+// Workspace landing board shows to every team member. Admin-only on the write
+// side (server enforces too). Dept-scoped (2026-06-04): the localStorage cache
+// is keyed per dept and the banner refetches on a super-admin dept switch, so
+// each dept sees its own priority — never HRX's.
 //
 // State shape mirrors /api/v1/settings/queue-priority:
 //   { priority: { headline, message }, updatedBy, updatedAt, isDefault }
@@ -12,25 +14,28 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { apiFetch } from '../services/api';
+import { useCurrentDeptId, getCurrentDeptIdSync } from '../lib/current-dept-storage';
 
-const LS_KEY = 'ops_hub_queue_priority_v1';
+const LS_BASE = 'ops_hub_queue_priority_v1';
+const lsKeyFor = (deptId) => (deptId ? `${LS_BASE}:${deptId}` : LS_BASE);
 
-function readLs() {
+function readLs(deptId) {
   try {
     if (typeof localStorage === 'undefined') return null;
-    const raw = localStorage.getItem(LS_KEY);
+    const raw = localStorage.getItem(lsKeyFor(deptId));
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === 'object' ? parsed : null;
   } catch { return null; }
 }
 
-function writeLs(value) {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(value)); } catch {}
+function writeLs(deptId, value) {
+  try { localStorage.setItem(lsKeyFor(deptId), JSON.stringify(value)); } catch {}
 }
 
 export function useQueuePriority() {
-  const [data, setData] = useState(() => readLs());
+  const deptId = useCurrentDeptId();
+  const [data, setData] = useState(() => readLs(getCurrentDeptIdSync()));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -40,11 +45,14 @@ export function useQueuePriority() {
     if (inFlightRef.current) return inFlightRef.current;
     setLoading(true);
     setError(null);
+    // Pin the dept at call time so the response caches under the dept it was
+    // fetched for, even if the user switches mid-flight.
+    const dept = getCurrentDeptIdSync();
     const run = (async () => {
       try {
         const res = await apiFetch('/settings/queue-priority');
         setData(res);
-        writeLs(res);
+        writeLs(dept, res);
         return res;
       } catch (err) {
         setError(err?.message || 'Could not load priority');
@@ -58,18 +66,25 @@ export function useQueuePriority() {
     return run;
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
+  // Repaint from the target dept's cache + refetch whenever the dept changes
+  // (super-admin switch). apiFetch already carries the dept cookie/header, so
+  // the server returns the new dept's priority.
+  useEffect(() => {
+    setData(readLs(deptId));
+    refresh();
+  }, [deptId, refresh]);
 
   const save = useCallback(async ({ headline, message }) => {
     setSaving(true);
     setError(null);
+    const dept = getCurrentDeptIdSync();
     try {
       const res = await apiFetch('/settings/queue-priority', {
         method: 'PUT',
         body: JSON.stringify({ priority: { headline, message } }),
       });
       setData(res);
-      writeLs(res);
+      writeLs(dept, res);
       return { ok: true, data: res };
     } catch (err) {
       setError(err?.message || 'Failed to save');
