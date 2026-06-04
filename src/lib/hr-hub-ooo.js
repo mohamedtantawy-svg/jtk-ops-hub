@@ -1,15 +1,24 @@
-// ── HR Hub OOO cover (2026-05-22) ──────────────────────────────────────────
+// ── HR Hub OOO cover (2026-05-22; backup-first 2026-06-04) ──────────────────
 // When a new HR Hub request resolves to an assignee who's currently out of
-// office, the row is re-routed to the next non-OOO ancestor in the manager
-// chain. The original assignee is stamped in `cover_for_assignee_email`
-// so the lazy reconciler can flip the row back the moment they return.
+// office, the row is re-routed so it doesn't sit unworked. The original
+// assignee is stamped in `cover_for_assignee_email` so the lazy reconciler
+// can flip the row back the moment they return.
 //
-// Why the manager (and not the TLOC, a country owner, etc.)?
-// ──────────────────────────────────────────────────────────
-// Jose Ruales spec: "it should be reassigned to their manager if they are
-// OOO." Manager owns the same scope of work + already accountable for the
-// agent's queue. Falls back to TL → admin pool only if the entire chain
-// is OOO (rare).
+// Who does it re-route to?
+// ────────────────────────
+// 1. The BACKUP who accepted the OOO person's handover coverage (Mohamed
+//    2026-06-04: "when a manager is OOO, the HR Hub tasks should be assigned
+//    to their backup who accepted the handover, not to their manager"). The
+//    coverer explicitly agreed to step into this person's seat for the
+//    window, so their work goes there — NOT up the management chain. When
+//    several coverers exist, the all-scope backup wins (an empty country
+//    list = covers everything); the most-recent handover breaks ties.
+// 2. FALLBACK — only if there's no accepted backup (or the backup is itself
+//    OOO): walk up to the first non-OOO manager (Jose Ruales' original spec —
+//    the manager owns the same scope + is already accountable for the queue).
+// 3. If the whole manager chain is also OOO, leave the row on the original
+//    assignee (no cover stamp); the reconciler / unassigned-pool owners
+//    handle it.
 //
 // Why a lazy reconciler instead of a cron?
 // ────────────────────────────────────────
@@ -67,6 +76,47 @@ export async function isCurrentlyOoo(email) {
   } catch (err) {
     console.warn('[hr-hub-ooo] isCurrentlyOoo lookup failed:', err.message);
     return false;
+  }
+}
+
+/**
+ * Find the accepted handover BACKUP currently covering `email` (the person
+ * who is OOO). Returns the coverer who explicitly accepted to cover this
+ * person for a window that includes today, or null if there is none.
+ *
+ * When the OOO person has multiple accepted coverers (e.g. country-scoped
+ * splits), the all-scope coverer wins — an empty / null country list means
+ * "covers everything", which is the right target for a generic HR Hub
+ * request. array_length(empty, 1) is NULL in Postgres, so COALESCE(...,0)
+ * sorts the all-scope backup first; the most-recent handover breaks ties.
+ *
+ * Returns null on lookup failure so a transient DB blip just falls through
+ * to the manager-chain fallback rather than mis-routing.
+ */
+async function findActiveCovererFor(email) {
+  if (!email) return null;
+  try {
+    const { rows } = await query(
+      `SELECT hc.coverer_email,
+              COALESCE(array_length(hc.country_codes, 1), 0) AS scope_size
+         FROM handover_coverers hc
+         JOIN handovers h ON h.id = hc.handover_id
+        WHERE LOWER(h.requester_email) = LOWER($1)
+          AND hc.acceptance_status = 'accepted'
+          AND h.status IN ('approved','active')
+          AND h.start_date <= CURRENT_DATE
+          AND h.end_date   >= CURRENT_DATE
+        ORDER BY scope_size ASC, h.start_date DESC
+        LIMIT 1`,
+      [email],
+    );
+    if (rows.length === 0) return null;
+    const cEmail = String(rows[0].coverer_email || '').toLowerCase();
+    if (!cEmail) return null;
+    return { email: cEmail, name: memberByEmail(cEmail)?.name || null };
+  } catch (err) {
+    console.warn('[hr-hub-ooo] findActiveCovererFor lookup failed:', err.message);
+    return null;
   }
 }
 
@@ -132,6 +182,23 @@ export async function resolveAssigneeWithOooCover(proposedEmail, proposedName) {
       redirected: false,
     };
   }
+  // Prefer the accepted handover BACKUP (Mohamed 2026-06-04): the coverer
+  // who explicitly accepted to cover this person has stepped into their seat,
+  // so route their work there rather than up the management chain. Skip a
+  // backup who is themselves OOO — that just moves the problem.
+  const backup = await findActiveCovererFor(lcEmail);
+  if (backup && backup.email && backup.email !== lcEmail && !(await isCurrentlyOoo(backup.email))) {
+    return {
+      assigneeEmail: backup.email,
+      assigneeName: backup.name,
+      coverForEmail: lcEmail,
+      coverForName: proposedName || memberByEmail(lcEmail)?.name || null,
+      redirected: true,
+    };
+  }
+
+  // No accepted backup (or the backup is also OOO) — fall back to the first
+  // non-OOO manager (Jose Ruales' original spec).
   const cover = await findFirstNonOooManager(lcEmail);
   if (!cover) {
     // Every manager in the chain is also OOO — leave the row on the
