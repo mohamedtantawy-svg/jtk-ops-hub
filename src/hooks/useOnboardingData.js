@@ -8,6 +8,7 @@
 // Cache key is user-scoped so different signed-in users on the same browser
 // never inherit each other's server-scoped payload.
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { shouldAdoptFetchedItems } from './adoptFetchedItems';
 import { fetchDeelOnboarding } from '../services/integrationsApi';
 import { getQueueChannel, broadcastSync } from './queueSyncChannel';
 import { idbGetWithMigration, idbSet } from '../lib/idb-cache';
@@ -79,7 +80,7 @@ export function useOnboardingData(enabled = true, userEmail = null) {
         // working" bug repro: 1-row queue, reassign, modal closes, row
         // stays — server response is correctly empty but the FE
         // suppresses the update.
-        if (force || fetched.length > 0 || itemsRef.current.length === 0) {
+        if (shouldAdoptFetchedItems({ force, fetchedLength: fetched.length, currentLength: itemsRef.current.length, key: `${SOURCE_ID}:${userEmail || ''}:${currentDeptId || ''}` })) {
           setItems(fetched);
           // Fire-and-forget IDB write — doesn't block the data path.
           idbSet(cacheKeyFor(userEmail, currentDeptId), { items: fetched, ts: now }).catch(() => {});

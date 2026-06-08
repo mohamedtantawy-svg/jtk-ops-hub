@@ -10,6 +10,7 @@ import { fetchDeelWorkbench } from '../services/integrationsApi';
 import { getQueueChannel, broadcastSync } from './queueSyncChannel';
 import { idbGetWithMigration, idbSet } from '../lib/idb-cache';
 import { useCurrentDeptId } from '../lib/current-dept-storage';
+import { shouldAdoptFetchedItems } from './adoptFetchedItems';
 
 const SOURCE_ID = 'workbench';
 const CACHE_TTL = 3 * 60 * 1000;
@@ -70,7 +71,7 @@ export function useWorkbenchData(enabled = true, userEmail = null) {
         // `force` lets user-triggered refreshes overwrite empty fetches —
         // critical for any user action that legitimately empties the queue
         // (see useOnboardingData comment + the Reassign-not-working repro).
-        if (force || fetched.length > 0 || tasksRef.current.length === 0) {
+        if (shouldAdoptFetchedItems({ force, fetchedLength: fetched.length, currentLength: tasksRef.current.length, key: `${SOURCE_ID}:${userEmail || ''}:${currentDeptId || ''}` })) {
           setTasks(fetched);
           idbSet(cacheKeyFor(userEmail, currentDeptId), { items: fetched, ts: now }).catch(() => {});
           broadcastSync(SOURCE_ID, fetched, null, userEmail, currentDeptId);

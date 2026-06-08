@@ -10,6 +10,7 @@ import { fetchDeelImmigrationCases } from '../services/integrationsApi';
 import { getQueueChannel, broadcastSync } from './queueSyncChannel';
 import { idbGetWithMigration, idbSet } from '../lib/idb-cache';
 import { useCurrentDeptId } from '../lib/current-dept-storage';
+import { shouldAdoptFetchedItems } from './adoptFetchedItems';
 
 const SOURCE_ID = 'immigration_cases';
 const CACHE_TTL = 3 * 60 * 1000;
@@ -70,7 +71,7 @@ export function useImmigrationCasesData(enabled = true, userEmail = null) {
           if (error) setError(null);
           return [];
         }
-        if (force || fetched.length > 0 || casesRef.current.length === 0) {
+        if (shouldAdoptFetchedItems({ force, fetchedLength: fetched.length, currentLength: casesRef.current.length, key: `${SOURCE_ID}:${userEmail || ''}:${currentDeptId || ''}` })) {
           setCases(fetched);
           idbSet(cacheKeyFor(userEmail, currentDeptId), { items: fetched, ts: now }).catch(() => {});
           broadcastSync(SOURCE_ID, fetched, null, userEmail, currentDeptId);

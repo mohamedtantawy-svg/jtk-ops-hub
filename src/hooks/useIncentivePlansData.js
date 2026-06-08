@@ -8,6 +8,7 @@ import { fetchDeelIncentivePlans } from '../services/integrationsApi';
 import { getQueueChannel, broadcastSync } from './queueSyncChannel';
 import { idbGetWithMigration, idbSet } from '../lib/idb-cache';
 import { useCurrentDeptId } from '../lib/current-dept-storage';
+import { shouldAdoptFetchedItems } from './adoptFetchedItems';
 
 const SOURCE_ID = 'incentivePlans';
 const CACHE_TTL = 5 * 60 * 1000;
@@ -52,7 +53,7 @@ export function useIncentivePlansData(enabled = true, userEmail = null) {
         // `force` lets user-triggered refreshes overwrite empty fetches —
         // critical for the post-Reassign sync path where the row legitimately
         // drops out of the caller's scope (see useOnboardingData comment).
-        if (force || fetched.length > 0 || itemsRef.current.length === 0) {
+        if (shouldAdoptFetchedItems({ force, fetchedLength: fetched.length, currentLength: itemsRef.current.length, key: `${SOURCE_ID}:${userEmail || ''}:${currentDeptId || ''}` })) {
           setItems(fetched);
           idbSet(cacheKeyFor(userEmail, currentDeptId), { items: fetched, ts: now }).catch(() => {});
           broadcastSync(SOURCE_ID, fetched, null, userEmail, currentDeptId);

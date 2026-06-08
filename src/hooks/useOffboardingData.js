@@ -10,6 +10,7 @@ import { fetchDeelOffboarding } from '../services/integrationsApi';
 import { getQueueChannel, broadcastSync } from './queueSyncChannel';
 import { idbGetWithMigration, idbSet } from '../lib/idb-cache';
 import { useCurrentDeptId } from '../lib/current-dept-storage';
+import { shouldAdoptFetchedItems } from './adoptFetchedItems';
 
 const SOURCE_ID = 'offboarding';
 const CACHE_TTL = 5 * 60 * 1000;
@@ -75,7 +76,7 @@ export function useOffboardingData(enabled = true, userEmail = null) {
         // `force` lets user-triggered refreshes overwrite empty fetches —
         // critical for any user action that legitimately empties the queue
         // (see useOnboardingData comment + the Reassign-not-working repro).
-        if (force || fetched.length > 0 || itemsRef.current.length === 0) {
+        if (shouldAdoptFetchedItems({ force, fetchedLength: fetched.length, currentLength: itemsRef.current.length, key: `${SOURCE_ID}:${userEmail || ''}:${currentDeptId || ''}` })) {
           setItems(fetched);
           idbSet(cacheKeyFor(userEmail, currentDeptId), { items: fetched, ts: now }).catch(() => {});
           broadcastSync(SOURCE_ID, fetched, null, userEmail, currentDeptId);

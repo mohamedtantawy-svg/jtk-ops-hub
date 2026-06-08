@@ -12,6 +12,7 @@ import { fetchDeelAmendments, fetchDeelRedlines } from '../services/integrations
 import { getQueueChannel, broadcastSync } from './queueSyncChannel';
 import { idbGetWithMigration, idbSet } from '../lib/idb-cache';
 import { useCurrentDeptId } from '../lib/current-dept-storage';
+import { shouldAdoptFetchedItems } from './adoptFetchedItems';
 
 const SOURCE_AMENDMENTS = 'amendments';
 const SOURCE_REDLINES = 'redlines';
@@ -81,14 +82,14 @@ export function useChangeRequestData(enabled = true, userEmail = null) {
         // Background polls keep the "preserve last-known-good" guard so a
         // transient blip doesn't blank the list. See useOnboardingData
         // for the matching comment + the Reassign-not-working repro.
-        if (amendResult.status === 'fulfilled' && (force || fetchedAmendments.length > 0 || amendmentsRef.current.length === 0)) {
+        if (amendResult.status === 'fulfilled' && shouldAdoptFetchedItems({ force, fetchedLength: fetchedAmendments.length, currentLength: amendmentsRef.current.length, key: `${SOURCE_AMENDMENTS}:${userEmail || ''}:${currentDeptId || ''}` })) {
           setAmendments(fetchedAmendments);
           idbSet(cacheKeyFor(CACHE_KEY_AMENDMENTS_BASE, userEmail, currentDeptId), { items: fetchedAmendments, ts: now }).catch(() => {});
           broadcastSync(SOURCE_AMENDMENTS, fetchedAmendments, null, userEmail, currentDeptId);
           lastFetchAmendmentsRef.current = now;
           liveAmendmentsRef.current = true;
         }
-        if (redlineResult.status === 'fulfilled' && (force || fetchedRedlines.length > 0 || redlinesRef.current.length === 0)) {
+        if (redlineResult.status === 'fulfilled' && shouldAdoptFetchedItems({ force, fetchedLength: fetchedRedlines.length, currentLength: redlinesRef.current.length, key: `${SOURCE_REDLINES}:${userEmail || ''}:${currentDeptId || ''}` })) {
           setRedlines(fetchedRedlines);
           idbSet(cacheKeyFor(CACHE_KEY_REDLINES_BASE, userEmail, currentDeptId), { items: fetchedRedlines, ts: now }).catch(() => {});
           broadcastSync(SOURCE_REDLINES, fetchedRedlines, null, userEmail, currentDeptId);
