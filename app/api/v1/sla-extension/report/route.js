@@ -180,7 +180,8 @@ export async function GET(req) {
 
       // Requested days
       const reqDays = Number(r.sla_ext_requested_days);
-      if (Number.isInteger(reqDays) && reqDays >= 1 && reqDays <= 7) {
+      const reqDaysValid = Number.isInteger(reqDays) && reqDays >= 1 && reqDays <= 7;
+      if (reqDaysValid) {
         byRequestedDays.set(reqDays, (byRequestedDays.get(reqDays) || 0) + 1);
       }
 
@@ -201,12 +202,21 @@ export async function GET(req) {
             email,
             name: r.created_by_name || email,
             submitted: 0, approved: 0, rejected: 0, pending: 0,
+            // Per-agent requested-days behaviour (Jose Ruales 2026-06-05):
+            // surfaces who leans on the 7-day max vs the 1-day minimum.
+            daysSum: 0, daysCount: 0, maxDaysCount: 0, minDaysCount: 0,
           };
           byAgent.set(email, entry);
         } else if (!entry.name && r.created_by_name) {
           entry.name = r.created_by_name;
         }
         entry.submitted++;
+        if (reqDaysValid) {
+          entry.daysSum += reqDays;
+          entry.daysCount++;
+          if (reqDays === 7) entry.maxDaysCount++;
+          else if (reqDays === 1) entry.minDaysCount++;
+        }
       }
 
       // Decision buckets
@@ -281,7 +291,25 @@ export async function GET(req) {
       .map(([source, n]) => ({ source, label: SOURCE_LABELS[source] || source, n }))
       .sort((a, b) => b.n - a.n);
 
-    const byAgentArr = [...byAgent.values()].sort((a, b) => b.submitted - a.submitted);
+    // Enrich each agent with requested-days behaviour and strip the raw
+    // accumulators. avgRequestedDays + maxDaysPct answer Jose Ruales' ask:
+    // who disproportionately requests the 7-day max vs the 1-day minimum
+    // (coaching signal). Sorted by volume; the FE colour-codes the outliers.
+    const byAgentArr = [...byAgent.values()]
+      .map(a => ({
+        email: a.email,
+        name: a.name,
+        submitted: a.submitted,
+        approved: a.approved,
+        rejected: a.rejected,
+        pending: a.pending,
+        avgRequestedDays: a.daysCount > 0 ? Math.round((a.daysSum / a.daysCount) * 10) / 10 : null,
+        maxDaysCount: a.maxDaysCount,
+        maxDaysPct: a.daysCount > 0 ? Math.round((a.maxDaysCount / a.daysCount) * 100) : 0,
+        minDaysCount: a.minDaysCount,
+        minDaysPct: a.daysCount > 0 ? Math.round((a.minDaysCount / a.daysCount) * 100) : 0,
+      }))
+      .sort((a, b) => b.submitted - a.submitted);
 
     return NextResponse.json({
       rangeStart: isoDay(from),

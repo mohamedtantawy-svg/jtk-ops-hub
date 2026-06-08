@@ -588,7 +588,7 @@ function AgentTable({ rows, loading }) {
     <div style={{ display: 'flex', flexDirection: 'column' }}>
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'minmax(0,1fr) 60px 60px 60px 60px',
+        gridTemplateColumns: 'minmax(0,1fr) 52px 52px 52px 52px 50px 58px',
         gap: 8, alignItems: 'center',
         padding: '6px 8px',
         fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.4,
@@ -599,6 +599,8 @@ function AgentTable({ rows, loading }) {
         <div style={{ textAlign: 'right' }}>Appr.</div>
         <div style={{ textAlign: 'right' }}>Rej.</div>
         <div style={{ textAlign: 'right' }}>Pend.</div>
+        <div style={{ textAlign: 'right' }} title="Average days requested">Avg</div>
+        <div style={{ textAlign: 'right' }} title="Times the 7-day maximum was requested (% of this agent's requests)">7d max</div>
       </div>
       {rows.slice(0, 25).map(a => (
         <div
@@ -606,7 +608,7 @@ function AgentTable({ rows, loading }) {
           className="slx-table-row"
           style={{
             display: 'grid',
-            gridTemplateColumns: 'minmax(0,1fr) 60px 60px 60px 60px',
+            gridTemplateColumns: 'minmax(0,1fr) 52px 52px 52px 52px 50px 58px',
             gap: 8, alignItems: 'center',
             padding: '8px',
             fontSize: 12,
@@ -622,6 +624,18 @@ function AgentTable({ rows, loading }) {
           <div style={{ textAlign: 'right', color: '#15803d', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{a.approved}</div>
           <div style={{ textAlign: 'right', color: '#dc2626', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{a.rejected}</div>
           <div style={{ textAlign: 'right', color: '#d97706', fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>{a.pending}</div>
+          <div
+            style={{ textAlign: 'right', fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: a.avgRequestedDays != null && a.avgRequestedDays >= 5 ? '#d97706' : 'var(--text)' }}
+            title={a.avgRequestedDays != null ? `Averages ${a.avgRequestedDays} day(s) requested` : 'No requested-days data'}
+          >
+            {a.avgRequestedDays != null ? `${a.avgRequestedDays}d` : '—'}
+          </div>
+          <div
+            style={{ textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums', color: (a.maxDaysPct >= 50 && a.submitted >= 3) ? '#dc2626' : 'var(--text-secondary)' }}
+            title={`Requested the 7-day max ${a.maxDaysCount} time(s) — ${a.maxDaysPct}% of their requests`}
+          >
+            {a.maxDaysCount}
+          </div>
         </div>
       ))}
       {rows.length > 25 && (
@@ -629,6 +643,17 @@ function AgentTable({ rows, loading }) {
           + {rows.length - 25} more agent{rows.length - 25 === 1 ? '' : 's'}
         </div>
       )}
+      <div style={{
+        marginTop: 8, padding: '8px 10px',
+        background: 'var(--surface-2)', color: 'var(--text-secondary)',
+        fontSize: 11, borderRadius: 8, lineHeight: 1.4,
+      }}>
+        <i className="bi-info-circle" style={{ marginRight: 5 }} />
+        <strong style={{ color: 'var(--text)' }}>Avg</strong> = average days requested ·{' '}
+        <strong style={{ color: 'var(--text)' }}>7d max</strong> = times the 7-day maximum was requested.
+        A <span style={{ color: '#dc2626', fontWeight: 600 }}>red</span> 7d max (≥50% of an agent&rsquo;s 3+ requests) or an{' '}
+        <span style={{ color: '#d97706', fontWeight: 600 }}>amber</span> avg (≥5d) flags leaning on long extensions — a coaching signal.
+      </div>
     </div>
   );
 }
