@@ -6,6 +6,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm ci && npm run build && mkdir -p public
 
 FROM public.ecr.aws/docker/library/node:22-alpine AS runner
+ARG CODEARTIFACT_AUTH_TOKEN
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
