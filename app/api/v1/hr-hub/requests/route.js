@@ -27,6 +27,7 @@ import {
   teamLeadEmailFor,
   addFollower,
   writeLog,
+  writeNotifications,
 } from '../../../../../src/lib/hr-hub-helpers';
 import { resolveAssigneeWithOooCover, reconcileOooCovers } from '../../../../../src/lib/hr-hub-ooo';
 import {
@@ -804,6 +805,37 @@ export async function POST(req) {
       try { cacheDel('sla_extension_list'); } catch {}
     } catch (err) {
       console.warn('[hr-hub/requests] SLA auto-approval failed; request stays in manual review:', err.message);
+    }
+  }
+
+  // Auto-approval skipped manager review — proactively notify the requester's
+  // manager + team lead so a hold is never granted on their team's case
+  // without them knowing. Daniel Olatunji 2026-06-08: short (1–2 day) holds
+  // were resolving silently and managers only noticed cases "disappearing" /
+  // "auto-completed" from the dashboard. The hr_hub_log entry above records
+  // it; this surfaces it in the bell (link_view='hr_hub' → the request detail,
+  // where the auto-approval + the task it covers are visible). Best-effort in
+  // its own try/catch: a notification failure must never undo a successful
+  // approval or change the 201 response.
+  if (autoApproved) {
+    try {
+      const reviewerEmails = [managerEmailFor(callerEmail), teamLeadEmailFor(callerEmail)].filter(Boolean);
+      if (reviewerEmails.length > 0) {
+        const dayWord = slaExtRequestedDays === 1 ? 'day' : 'days';
+        await writeNotifications({
+          recipients: reviewerEmails,
+          excludeEmail: callerEmail,
+          type: 'status_change',
+          title: `SLA extension auto-approved (${slaExtRequestedDays} ${dayWord})`,
+          body: `${callerName || callerEmail} was auto-granted a ${slaExtRequestedDays}-business-${dayWord} hold on ${taskSubject || taskId} — under the ${SLA_EXT_AUTO_APPROVE_MAX_DAYS}-day threshold, so it skipped manager review.`,
+          requestId: newId,
+          sourceType: 'hr_hub_status_change',
+          sourceId: newId,
+          actor: { email: null, name: 'SLA Auto-Approval' },
+        });
+      }
+    } catch (notifyErr) {
+      console.warn('[hr-hub/requests] SLA auto-approval notification failed (non-fatal):', notifyErr.message);
     }
   }
 
