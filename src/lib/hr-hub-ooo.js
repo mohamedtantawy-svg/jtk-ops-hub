@@ -10,9 +10,11 @@
 //    2026-06-04: "when a manager is OOO, the HR Hub tasks should be assigned
 //    to their backup who accepted the handover, not to their manager"). The
 //    coverer explicitly agreed to step into this person's seat for the
-//    window, so their work goes there — NOT up the management chain. When
-//    several coverers exist, the all-scope backup wins (an empty country
-//    list = covers everything); the most-recent handover breaks ties.
+//    window, so their work goes there — NOT up the management chain. Only the
+//    ALL-SCOPE backup (empty country list = covers everything) is used; a
+//    country-scoped coverer is for country-scoped QUEUE work and must NOT grab
+//    a generic HR Hub request (Ljubica Andjelic 2026-06-06). Most-recent
+//    handover breaks ties; with no all-scope backup we fall through to step 2.
 // 2. FALLBACK — only if there's no accepted backup (or the backup is itself
 //    OOO): walk up to the first non-OOO manager (Jose Ruales' original spec —
 //    the manager owns the same scope + is already accountable for the queue).
@@ -84,11 +86,19 @@ export async function isCurrentlyOoo(email) {
  * who is OOO). Returns the coverer who explicitly accepted to cover this
  * person for a window that includes today, or null if there is none.
  *
- * When the OOO person has multiple accepted coverers (e.g. country-scoped
- * splits), the all-scope coverer wins — an empty / null country list means
- * "covers everything", which is the right target for a generic HR Hub
- * request. array_length(empty, 1) is NULL in Postgres, so COALESCE(...,0)
- * sorts the all-scope backup first; the most-recent handover breaks ties.
+ * Only the ALL-SCOPE backup applies here — a coverer whose `country_codes`
+ * list is empty ("covers everything"). Country-scoped coverers exist for
+ * country-scoped QUEUE work (onboarding/offboarding cases for a given country,
+ * via queue-scoping._coverageEmailsForRequester); an HR Hub request carries no
+ * structured country (hr_hub_request has no country column), so a
+ * country-scoped backup is NOT a valid target for it. Handing a generic
+ * tools-team / function request to, say, the France coverer was the Ljubica
+ * Andjelic 2026-06-06 bug ("assigned to the POC's country follower instead of
+ * the OOO backup"). If the OOO person set up ONLY country-scoped coverers, we
+ * return null and fall through to the manager chain — never to an arbitrary
+ * country backup. `country_codes` is NOT NULL DEFAULT '{}', and
+ * array_length('{}', 1) is NULL in Postgres, so the all-scope rows are exactly
+ * those with a NULL array length; the most-recent handover breaks ties.
  *
  * Returns null on lookup failure so a transient DB blip just falls through
  * to the manager-chain fallback rather than mis-routing.
@@ -97,8 +107,7 @@ async function findActiveCovererFor(email) {
   if (!email) return null;
   try {
     const { rows } = await query(
-      `SELECT hc.coverer_email,
-              COALESCE(array_length(hc.country_codes, 1), 0) AS scope_size
+      `SELECT hc.coverer_email
          FROM handover_coverers hc
          JOIN handovers h ON h.id = hc.handover_id
         WHERE LOWER(h.requester_email) = LOWER($1)
@@ -106,7 +115,8 @@ async function findActiveCovererFor(email) {
           AND h.status IN ('approved','active')
           AND h.start_date <= CURRENT_DATE
           AND h.end_date   >= CURRENT_DATE
-        ORDER BY scope_size ASC, h.start_date DESC
+          AND array_length(hc.country_codes, 1) IS NULL
+        ORDER BY h.start_date DESC
         LIMIT 1`,
       [email],
     );
