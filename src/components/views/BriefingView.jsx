@@ -48,7 +48,7 @@ import BriefingMyTasks from '../home/BriefingMyTasks';
 import CoverageBanner from '../ooo/CoverageBanner';
 import PendingCoverageBanner from '../ooo/PendingCoverageBanner';
 import CoverageCard from '../ooo/CoverageCard';
-import { useMyActiveCoverages } from '../../hooks/useMyActiveCoverages';
+import { useMyActiveCoverages, expandCoverageScope } from '../../hooks/useMyActiveCoverages';
 import OOOAlert from '../home/OOOAlert';
 import TeamRequestsToMe from '../home/TeamRequestsToMe';
 import DailySummary from '../home/DailySummary';
@@ -79,6 +79,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     members: liveMembers,
     membersByEmail: liveMembersByEmail,
     setCountries: liveSetCountries,
+    getDirectReports: liveGetDirectReports,
     getAllReports: liveGetAllReports,
     loading: rosterLoading,
   } = useTeamMembers();
@@ -98,23 +99,20 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // (with the position-id mapping fix) is consumed below; this block
   // only needs the email set for the gate.
   const { items: activeCoverages } = useMyActiveCoverages();
-  const coverageEmailsForLogin = useMemo(() => {
-    const out = new Set();
-    if (!Array.isArray(activeCoverages) || activeCoverages.length === 0) return out;
-    for (const c of activeCoverages) {
-      const requester = (c.requester_email || '').toLowerCase();
-      if (!requester) continue;
-      out.add(requester);
-      const m = MEMBERS_BY_EMAIL[requester];
-      const access = String(m?.access || '').toLowerCase();
-      if (access === 'regional_manager') {
-        for (const r of getAllReports(requester)) out.add(String(r).toLowerCase());
-      } else if (access === 'team_lead' || access === 'admin') {
-        for (const r of getDirectReports(requester)) out.add(String(r.email).toLowerCase());
-      }
-    }
-    return out;
-  }, [activeCoverages]);
+  // Use the shared expandCoverageScope with the LIVE roster adapter (not the
+  // static members import) and list the live roster in the deps so this set
+  // re-derives the moment the roster hydrates. Without the roster in the
+  // deps a cold-roster / coverage load race froze the covered subtree out of
+  // the Login-as gate until a full page reload (the same race that hid the
+  // covered team's Team-Summary task counts — 2026-06-08).
+  const coverageEmailsForLogin = useMemo(
+    () => expandCoverageScope(activeCoverages, {
+      membersByEmail: liveMembersByEmail,
+      getDirectReports: liveGetDirectReports,
+      getAllReports: liveGetAllReports,
+    }).emails,
+    [activeCoverages, liveMembersByEmail, liveGetDirectReports, liveGetAllReports],
+  );
   // ── Login-as gate (mirrors Team.jsx::canLoginAs) ─────────────────────────
   // Only TL/RM/admin can impersonate. Target must be in the caller's
   // reporting subtree OR an active coverage subtree, not deactivated,
@@ -415,50 +413,39 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // email through MEMBERS to record the position-based id used by
   // `scopeIds.includes`.
   const delegatedScope = useMemo(() => {
-    const emails = new Set();
+    // Emails come from the shared expandCoverageScope with the LIVE roster
+    // adapter — the SAME helper App.jsx / Queue.jsx / Team.jsx already use.
+    // Listing the live roster in the deps (below) is what fixes the "covered
+    // team shows 0 tasks until a hard refresh" bug: the previous inline
+    // expansion read the static members import and only re-ran on
+    // [activeCoverages], so a cold-roster / coverage load race froze the
+    // covered subtree out for the whole session and only a full reload (warm
+    // roster cache) recovered it (Insiya covering Ewa — 2026-06-08).
+    const { emails } = expandCoverageScope(activeCoverages, {
+      membersByEmail: liveMembersByEmail,
+      getDirectReports: liveGetDirectReports,
+      getAllReports: liveGetAllReports,
+    });
+    // Map each covered email to its MEMBERS-position id so the ids match the
+    // position-based id used by `allAgents`'s `scopeIds.includes(m.id)` filter
+    // — NOT the DB pk in MEMBERS_BY_EMAIL (see the 2026-06-02 Belu fix; DB ids
+    // never matched, leaving covered groups' tc/open/paused/breaches at 0).
+    // MEMBERS is the live-binding rebuilt by the same hydrateRoster() that
+    // changes liveMembersByEmail, so the dep already covers a re-derive.
     const ids = new Set();
-    if (!Array.isArray(activeCoverages) || activeCoverages.length === 0) {
-      return { emails, ids };
-    }
-    // 2026-06-02 (Belu feedback) — pre-build an email → MEMBERS-position-id
-    // map so the ids we collect match the position-based id used by
-    // `allAgents`'s `scopeIds.includes(m.id)` filter. MEMBERS_BY_EMAIL
-    // stores the RAW roster row whose `id` (when present) is the DB pk —
-    // a different namespace from `MEMBERS[i].id = i + 1`. Using DB ids
-    // here caused `scopeIds.includes(m.id)` to never match the covered
-    // subtree, leaving Olga's group's `allAgentsBelow` empty and her
-    // aggregated tc / open / paused / breaches all reading 0 even though
-    // her direct reports rendered with non-zero stats elsewhere on the
-    // page.
-    const positionIdByEmail = new Map();
-    for (let i = 0; i < MEMBERS.length; i++) {
-      const e = String(MEMBERS[i].email || '').toLowerCase();
-      if (e) positionIdByEmail.set(e, MEMBERS[i].id);
-    }
-    const pushMember = (email) => {
-      const lc = String(email || '').toLowerCase();
-      if (!lc) return;
-      if (emails.has(lc)) return;
-      emails.add(lc);
-      const pid = positionIdByEmail.get(lc);
-      if (pid != null) ids.add(pid);
-    };
-    for (const c of activeCoverages) {
-      const requester = (c.requester_email || '').toLowerCase();
-      if (!requester) continue;
-      const m = MEMBERS_BY_EMAIL[requester];
-      const access = String(m?.access || '').toLowerCase();
-      pushMember(requester);
-      if (access === 'regional_manager') {
-        for (const r of getAllReports(requester)) pushMember(r);
-      } else if (access === 'team_lead') {
-        for (const r of getDirectReports(requester)) pushMember(r.email);
-      } else if (access === 'admin') {
-        for (const r of getDirectReports(requester)) pushMember(r.email);
+    if (emails.size > 0) {
+      const positionIdByEmail = new Map();
+      for (let i = 0; i < MEMBERS.length; i++) {
+        const e = String(MEMBERS[i].email || '').toLowerCase();
+        if (e) positionIdByEmail.set(e, MEMBERS[i].id);
+      }
+      for (const e of emails) {
+        const pid = positionIdByEmail.get(e);
+        if (pid != null) ids.add(pid);
       }
     }
     return { emails, ids };
-  }, [activeCoverages]);
+  }, [activeCoverages, liveMembersByEmail, liveGetDirectReports, liveGetAllReports]);
 
   const scopeMembers=perms?.scopeMembers(MEMBERS)||[user];
   // 2026-05-28: scopeIds widens to include the covered subtree so a TL
