@@ -151,7 +151,7 @@ export async function GET(req) {
   // always matches the event count even on slightly malformed data.
   const sql = `
     SELECT
-      e.id, e.work_email, e.start_date, e.end_date, e.source, e.external_id, e.status, e.reason,
+      e.id, e.work_email, e.start_date, e.end_date, e.source, e.external_id, e.status, e.reason, e.leave_type,
       h.id            AS handover_id,
       h.status        AS handover_status,
       h.requester_email AS handover_requester_email,
@@ -206,6 +206,7 @@ export async function GET(req) {
       external_id: r.external_id,
       status: r.status,
       reason: r.reason,
+      leave_type: r.leave_type,
       handover: r.handover_id ? {
         id: r.handover_id,
         status: r.handover_status,

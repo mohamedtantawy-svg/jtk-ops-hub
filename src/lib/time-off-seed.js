@@ -26,7 +26,12 @@ import seed from '../data/time_off_seed.json' with { type: 'json' };
 // Bump when src/data/time_off_seed.json is regenerated AND you want the
 // new rows applied on next boot. Existing rows are preserved either way
 // thanks to the unique constraint + ON CONFLICT DO NOTHING.
-const SEED_VERSION = 1;
+// v2 (2026-06-09, Derek House "GIX - OOO Tracking"): regenerated from the
+// Jun 09 HRX Time Off Report (1378 windows) and now carries the Deel Policy
+// Type via `leave_type`. The seed is still additive — ON CONFLICT enriches an
+// existing row's leave_type (never deletes), so handovers + manual entries are
+// untouched. Bumping the version is what re-runs the seed body on next boot.
+const SEED_VERSION = 2;
 const VERSION_KEY = 'time_off_seed_version';
 
 async function getStoredVersion() {
@@ -65,7 +70,8 @@ function normaliseRows(payload) {
     if (!email || !email.includes('@')) continue;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) continue;
     if (start > end) continue;
-    out.push({ email, start, end });
+    const leaveType = (r?.leave_type || '').trim().slice(0, 60) || null;
+    out.push({ email, start, end, leaveType });
   }
   return out;
 }
@@ -100,23 +106,30 @@ export async function seedTimeOffEventsIfNeeded() {
     );
     const batchId = batchInsert.rows[0]?.id;
 
-    // Bulk insert with positional params. 1245 rows × 4 cols = 4980 params
+    // Bulk insert with positional params. 1378 rows × 5 cols = 6890 params
     // — well under pg's 65k limit. If the seed ever grows past ~10k rows
-    // we'd need to chunk; for now one INSERT is fine.
+    // we'd need to chunk; for now one INSERT is fine. ON CONFLICT now ENRICHES
+    // an existing row's leave_type (COALESCE keeps a prior type when the new
+    // row has none) instead of skipping — additive, never destructive, so
+    // handover links (time_off_event_id) and manual edits survive untouched.
+    // `xmax = 0` distinguishes a fresh INSERT from an enriched UPDATE for the
+    // audit counts.
     const valuesSql = rows
-      .map((_, i) => `($${i * 4 + 1}, $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4})`)
+      .map((_, i) => `($${i * 5 + 1}, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5})`)
       .join(', ');
-    const params = rows.flatMap(r => [r.email, r.start, r.end, batchId]);
+    const params = rows.flatMap(r => [r.email, r.start, r.end, r.leaveType, batchId]);
     const insertResult = await query(
       `INSERT INTO time_off_events
-         (work_email, start_date, end_date, imported_batch)
+         (work_email, start_date, end_date, leave_type, imported_batch)
        VALUES ${valuesSql}
-       ON CONFLICT (work_email, start_date, end_date, source) DO NOTHING
-       RETURNING id`,
+       ON CONFLICT (work_email, start_date, end_date, source) DO UPDATE
+         SET leave_type = COALESCE(EXCLUDED.leave_type, time_off_events.leave_type),
+             updated_at = NOW()
+       RETURNING (xmax = 0) AS is_insert`,
       params,
     );
-    const inserted = insertResult.rowCount ?? insertResult.rows.length;
-    const skipped = rows.length - inserted;
+    const inserted = insertResult.rows.filter(r => r.is_insert).length;
+    const skipped = insertResult.rows.length - inserted;
 
     await query(
       `UPDATE time_off_import_batches
@@ -131,7 +144,7 @@ export async function seedTimeOffEventsIfNeeded() {
 
     console.log(
       `[time-off-seed] v${SEED_VERSION}: ${inserted} new event(s) inserted, ` +
-      `${skipped} already present (was v${currentVersion})`,
+      `${skipped} existing enriched with leave_type (was v${currentVersion})`,
     );
     return {
       reseeded: true,

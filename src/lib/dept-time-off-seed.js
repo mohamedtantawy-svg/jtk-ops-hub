@@ -37,7 +37,8 @@ function normaliseRows(payload) {
     if (!email || !email.includes('@')) continue;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) continue;
     if (start > end) continue;
-    out.push({ email, start, end });
+    const leaveType = (r?.leave_type || '').trim().slice(0, 60) || null;
+    out.push({ email, start, end, leaveType });
   }
   return out;
 }
@@ -132,24 +133,29 @@ export async function seedDeptTimeOffEventsIfNeeded({ deptSlug, seedPayload, see
     );
     const batchId = batchInsert.rows[0]?.id;
 
-    // Bulk INSERT with the dept's org_node_id stamped on every row. 691
-    // rows × 5 cols = 3455 params for GIX — well under pg's 65k limit.
-    // If a dept ever brings > ~13k rows we'd need to chunk; not needed
-    // today.
+    // Bulk INSERT with the dept's org_node_id stamped on every row + the Deel
+    // leave_type. 729 rows × 6 cols = 4374 params for GIX — well under pg's
+    // 65k limit. If a dept ever brings > ~10k rows we'd need to chunk; not
+    // needed today. ON CONFLICT ENRICHES an existing row's leave_type instead
+    // of skipping (COALESCE keeps a prior type when the new row has none) —
+    // additive + non-destructive, so handover links + manual edits survive.
+    // `xmax = 0` separates fresh inserts from enriched updates for the audit.
     const valuesSql = rows
-      .map((_, i) => `($${i * 5 + 1}, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5})`)
+      .map((_, i) => `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6})`)
       .join(', ');
-    const params = rows.flatMap(r => [r.email, r.start, r.end, batchId, deptId]);
+    const params = rows.flatMap(r => [r.email, r.start, r.end, r.leaveType, batchId, deptId]);
     const insertResult = await query(
       `INSERT INTO time_off_events
-         (work_email, start_date, end_date, imported_batch, org_node_id)
+         (work_email, start_date, end_date, leave_type, imported_batch, org_node_id)
        VALUES ${valuesSql}
-       ON CONFLICT (work_email, start_date, end_date, source) DO NOTHING
-       RETURNING id`,
+       ON CONFLICT (work_email, start_date, end_date, source) DO UPDATE
+         SET leave_type = COALESCE(EXCLUDED.leave_type, time_off_events.leave_type),
+             updated_at = NOW()
+       RETURNING (xmax = 0) AS is_insert`,
       params,
     );
-    const inserted = insertResult.rowCount ?? insertResult.rows.length;
-    const skipped = rows.length - inserted;
+    const inserted = insertResult.rows.filter(r => r.is_insert).length;
+    const skipped = insertResult.rows.length - inserted;
 
     await query(
       `UPDATE time_off_import_batches
@@ -164,7 +170,7 @@ export async function seedDeptTimeOffEventsIfNeeded({ deptSlug, seedPayload, see
 
     console.log(
       `[dept-time-off-seed:${versionKey}] v${seedVersion} (${deptSlug}): ${inserted} new event(s) inserted, ` +
-      `${skipped} already present (was v${currentVersion}, dept=${deptId.slice(0, 8)})`,
+      `${skipped} existing enriched with leave_type (was v${currentVersion}, dept=${deptId.slice(0, 8)})`,
     );
     return {
       reseeded: true,
@@ -192,7 +198,12 @@ export async function seedDeptTimeOffEventsIfNeeded({ deptSlug, seedPayload, see
 
 import gixSeed from '../data/gix_time_off_seed.json' with { type: 'json' };
 
-const GIX_SEED_VERSION = 1;
+// v2 (2026-06-09, Derek House "GIX - OOO Tracking"): regenerated from the
+// Jun 09 GIX Time Off Report (729 windows, incl. Antonella Baletto's leave
+// that the May snapshot missed) and now carries the Deel Policy Type via
+// `leave_type`. Additive + enrich-on-conflict, so existing GIX events +
+// handovers are preserved. Version bump re-runs the seed body on next boot.
+const GIX_SEED_VERSION = 2;
 const GIX_VERSION_KEY = 'gix_time_off_seed_version';
 
 export async function seedGixTimeOffEventsIfNeeded() {

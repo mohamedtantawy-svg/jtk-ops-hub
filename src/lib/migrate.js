@@ -2237,6 +2237,12 @@ ALTER TABLE urgent_assist_schedule ADD COLUMN IF NOT EXISTS org_node_id UUID REF
 CREATE INDEX IF NOT EXISTS idx_urgent_assist_schedule_org_node  ON urgent_assist_schedule(org_node_id);
 
 ALTER TABLE time_off_events        ADD COLUMN IF NOT EXISTS org_node_id UUID REFERENCES org_nodes(id) ON DELETE SET NULL;
+-- 2026-06-09 (Derek House — "GIX - OOO Tracking"): carry the Deel "Policy
+-- Type" (Vacation / Sick leave / Personal leave / Regional holiday / parental
+-- leaves / etc.) so Ops Hub reflects WHAT kind of leave each window is, not
+-- just the dates. Nullable + additive — existing rows keep working; the
+-- time-off seeds backfill it on existing rows via ON CONFLICT DO UPDATE.
+ALTER TABLE time_off_events        ADD COLUMN IF NOT EXISTS leave_type VARCHAR(60);
 CREATE INDEX IF NOT EXISTS idx_time_off_events_org_node         ON time_off_events(org_node_id);
 
 ALTER TABLE handovers              ADD COLUMN IF NOT EXISTS org_node_id UUID REFERENCES org_nodes(id) ON DELETE SET NULL;
