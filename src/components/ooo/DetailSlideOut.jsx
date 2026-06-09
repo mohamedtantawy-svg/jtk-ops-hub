@@ -35,6 +35,7 @@ import {
   handoverStateColor,
   daysBetween,
   daysUntil,
+  leaveTypeMeta,
 } from '../../lib/handover-helpers';
 
 const STATUS_COLOURS = {
@@ -457,6 +458,17 @@ function DetailSlideOut({
               }}>
                 {handover ? humanStatus(handover.status) : 'No handover'}
               </span>
+              {event.leave_type && (() => {
+                const lt = leaveTypeMeta(event.leave_type);
+                return (
+                  <span style={{
+                    marginLeft: 8, display: 'inline-flex', alignItems: 'center',
+                    padding: '3px 10px', borderRadius: 999,
+                    background: lt.bg, color: lt.color,
+                    fontSize: 11, fontWeight: 600,
+                  }}>{lt.label}</span>
+                );
+              })()}
               {event.reason && (
                 <span style={{
                   marginLeft: 8, display: 'inline-flex', alignItems: 'center',

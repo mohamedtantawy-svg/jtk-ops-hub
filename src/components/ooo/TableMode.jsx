@@ -8,7 +8,7 @@
 
 import { useMemo, useState } from 'react';
 import Avatar from '../ui/Avatar';
-import { isoDate, eventTiming, handoverStateColor, daysBetween } from '../../lib/handover-helpers';
+import { isoDate, eventTiming, handoverStateColor, daysBetween, leaveTypeMeta } from '../../lib/handover-helpers';
 import { deleteTimeOffEvent } from '../../services/timeOffApi';
 
 // Mirror of canCallerManageTarget in DetailSlideOut — duplicated here so the
@@ -367,7 +367,18 @@ function TableMode({
                   </div>
                 </td>
                 <td style={{ padding: '10px 14px', color: 'var(--text)', whiteSpace: 'nowrap' }}>
-                  {formatRange(r.event.start_date, r.event.end_date)}
+                  <div>{formatRange(r.event.start_date, r.event.end_date)}</div>
+                  {r.event.leave_type && (() => {
+                    const lt = leaveTypeMeta(r.event.leave_type);
+                    return (
+                      <span style={{
+                        display: 'inline-block', marginTop: 4,
+                        padding: '1px 7px', borderRadius: 999,
+                        background: lt.bg, color: lt.color,
+                        fontSize: 10, fontWeight: 600,
+                      }}>{lt.label}</span>
+                    );
+                  })()}
                 </td>
                 <td style={{ padding: '10px 14px', color: 'var(--text-secondary)' }}>{r.days}d</td>
                 <td style={{ padding: '10px 14px' }}>

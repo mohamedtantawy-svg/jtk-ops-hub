@@ -88,9 +88,10 @@ function OOOBadge({
   const coverNames = (Array.isArray(coverers) ? coverers : [])
     .filter(c => c && c.acceptance_status === 'accepted')
     .map(c => memberLookup?.(c.email)?.name || c.email);
+  const typeSuffix = event.leave_type ? ` · ${event.leave_type}` : '';
   const tooltip = timing === 'active'
-    ? `OOO until ${formatRange(event.end_date, event.end_date)}${coverNames.length ? ` · Covered by ${coverNames.join(', ')}` : ''}`
-    : `Upcoming OOO ${range}${coverNames.length ? ` · Covered by ${coverNames.join(', ')}` : ''}`;
+    ? `OOO${typeSuffix} until ${formatRange(event.end_date, event.end_date)}${coverNames.length ? ` · Covered by ${coverNames.join(', ')}` : ''}`
+    : `Upcoming OOO${typeSuffix} ${range}${coverNames.length ? ` · Covered by ${coverNames.join(', ')}` : ''}`;
 
   if (variant === 'overlay') {
     return (

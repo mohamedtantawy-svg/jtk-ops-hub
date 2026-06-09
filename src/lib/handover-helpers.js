@@ -206,3 +206,36 @@ export const HANDOVER_NOTIFICATION_TYPES = Object.freeze({
   EXPIRED:                  'handover_expired',
   DATES_DRIFTED:            'handover_dates_drifted',
 });
+
+// ── Leave-type display (2026-06-09, Derek House "GIX - OOO Tracking") ──────
+// Maps a Deel "Policy Type" (time_off_events.leave_type) to a category colour
+// for the OOO pills / badges. The label is the raw type — it's already human-
+// readable ("Sick leave", "Vacation", "Regional holiday", "Maternity leave",
+// …). Colours are semantic + deliberately literal (skill rule #30): a leave
+// type conveys meaning that must NOT shift with light/dark theme.
+const LEAVE_TYPE_COLOURS = {
+  vacation: { color: '#1f74b3', bg: '#e0f2fe' }, // blue
+  sick:     { color: '#b91c1c', bg: '#fee2e2' }, // red
+  personal: { color: '#7c3aed', bg: '#f3eff8' }, // purple
+  holiday:  { color: '#15803d', bg: '#e8f5e9' }, // green — public / regional holiday
+  parental: { color: '#be185d', bg: '#fce7f3' }, // pink
+  other:    { color: '#6b6560', bg: '#f5f5f4' }, // grey
+};
+function leaveTypeCategory(t) {
+  const s = String(t || '').toLowerCase();
+  if (!s) return null;
+  if (s.includes('sick')) return 'sick';
+  if (s.includes('regional holiday') || s.includes('public holiday')) return 'holiday';
+  if (s.includes('matern') || s.includes('patern') || s.includes('parental')
+      || s.includes('childbirth') || s.includes('breastfeeding')) return 'parental';
+  if (s.includes('personal') || s.includes('childcare') || s.includes('family')) return 'personal';
+  if (s.includes('vacation') || s.includes('holiday allowance') || s.includes('paid leave')
+      || s.includes('compensatory') || s.includes('supplementary') || s.includes('floating')) return 'vacation';
+  return 'other';
+}
+export function leaveTypeMeta(leaveType) {
+  if (!leaveType) return null;
+  const category = leaveTypeCategory(leaveType);
+  const c = LEAVE_TYPE_COLOURS[category] || LEAVE_TYPE_COLOURS.other;
+  return { label: String(leaveType), category, color: c.color, bg: c.bg };
+}
