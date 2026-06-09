@@ -12,6 +12,7 @@ import {
 } from '../../../lib/performance-constants';
 import { TrendLine, MetricRadar, BandRing } from './PerformanceCharts';
 import ReviewEditor from './ReviewEditor';
+import WarningsPanel from './WarningsPanel';
 
 const PURPLE = '#7c3aed';
 
@@ -209,6 +210,8 @@ export default function MyPerformance({ user }) {
           );
         })}
       </div>
+
+      <WarningsPanel memberEmail={user?.email} memberName={user?.name} isSelf canIssue={false} />
 
       {editorOpen && (
         <ReviewEditor

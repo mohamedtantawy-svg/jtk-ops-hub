@@ -42,3 +42,18 @@ export async function getPerfReview(id) {
 export async function patchPerfReview(id, patch) {
   return apiFetch(`/performance/reviews/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) });
 }
+
+// ── Warnings ──
+export async function listPerfWarnings({ member } = {}) {
+  const qs = member ? `?member=${encodeURIComponent(member)}` : '';
+  return apiFetch(`/performance/warnings${qs}`);
+}
+export async function issuePerfWarning(payload) {
+  return apiFetch('/performance/warnings', { method: 'POST', body: JSON.stringify(payload) });
+}
+export async function patchPerfWarning(id, patch) {
+  return apiFetch(`/performance/warnings/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) });
+}
+export async function deletePerfWarning(id) {
+  return apiFetch(`/performance/warnings/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}

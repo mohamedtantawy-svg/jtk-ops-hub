@@ -22,6 +22,7 @@ import {
   WELLNESS_OPTIONS, PROMOTION_OPTIONS, reviewStatusMeta,
 } from '../../../lib/performance-constants';
 import { upsertPerfReview, patchPerfReview } from '../../../services/performanceApi';
+import WarningsPanel from './WarningsPanel';
 
 const PURPLE = '#7c3aed';
 
@@ -361,6 +362,12 @@ export default function ReviewEditor({
             </div>
           </div>
         </div>
+
+        {member.email && (
+          <div style={{ padding: '0 20px 8px' }}>
+            <WarningsPanel memberEmail={member.email} memberName={member.name} canIssue={canScore} isSelf={isSelf} compact />
+          </div>
+        )}
 
         {/* Footer actions */}
         <div style={footer}>
