@@ -146,6 +146,20 @@ const OFFBOARDING_RESIG_ACTIVE_MS = 5  * DAY_MS;
 const OFFBOARDING_SLA_PAUSED_MS   = PAUSED_SLA_MS;
 const WORKBENCH_SLA_ACTIVE_MS  = 48 * HOUR_MS;
 const WORKBENCH_SLA_PAUSED_MS  = PAUSED_SLA_MS;
+// 2026-06-09 (Alexandra Apsychou — "Ops Hub SLA update on long processes -
+// Termination"): EOR Termination workbench tasks are long offboarding
+// processes that routinely cannot finalise inside the 48h workbench window,
+// so Ops Hub flagged + auto-escalated them as breached only 2-3 business
+// days in (the upstream WB breaches them too, but that's Deel-side). Per the
+// report, a workbench task whose SUBJECT carries "EOR TERMINATION" (e.g.
+// "EOR TERMINATION - <name>", flow "Termination Review (HRX)") gets a
+// 7-business-day window measured from creation instead of the default 48h.
+// Matched on the upstream task name; tolerates the snake_case
+// "EOR_TERMINATION" variant the admin API occasionally serves. Per-row so it
+// flows through every consumer (Queue/SourceTable pills, Briefing/Team/
+// Analytics aggregates) via the row's slaWindowMs/slaRemaining/slaBreachStatus.
+const WORKBENCH_EOR_TERMINATION_SLA_ACTIVE_MS = 7 * DAY_MS;
+const WORKBENCH_EOR_TERMINATION_RE = /eor[\s_]+termination/i;
 // 2026-05-28 (Pablo Gonzalez — Adapt SLA timers to Immigration):
 // Global Immigration workbench tasks legitimately run multi-month
 // because visa cases stretch across embassy timelines. The HRX 48h
@@ -830,7 +844,11 @@ export function normalizeWorkbench(items = [], slaConfig = null, opts = {}) {
     // (configurable) applies when upstream flags a pause state.
     const isPaused = !isResolved && (!!t.isPaused || rawStatus === 'ON_HOLD');
     const pausedAt = isPaused ? (t.pausedAt || (rawStatus === 'ON_HOLD' ? t.updatedAt : null)) : null;
-    const sla = computeSlaWindow(activeMs, t.createdAt, {
+    // EOR Termination tasks are long offboarding processes — give them the
+    // 7-business-day active window instead of the 48h workbench default.
+    const isEorTermination = WORKBENCH_EOR_TERMINATION_RE.test(String(t.name || ''));
+    const rowActiveMs = isEorTermination ? WORKBENCH_EOR_TERMINATION_SLA_ACTIVE_MS : activeMs;
+    const sla = computeSlaWindow(rowActiveMs, t.createdAt, {
       pausedMs: isPaused ? pausedMs : null,
       pausedAt,
     });
