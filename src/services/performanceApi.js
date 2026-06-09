@@ -43,6 +43,11 @@ export async function patchPerfReview(id, patch) {
   return apiFetch(`/performance/reviews/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) });
 }
 
+// ── Reminders (home-page cards + nav badge) ──
+export async function getPerfReminders() {
+  return apiFetch('/performance/reminders');
+}
+
 // ── Warnings ──
 export async function listPerfWarnings({ member } = {}) {
   const qs = member ? `?member=${encodeURIComponent(member)}` : '';

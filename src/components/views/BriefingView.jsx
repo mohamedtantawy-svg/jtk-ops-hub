@@ -56,6 +56,7 @@ import TeamRequestsToMe from '../home/TeamRequestsToMe';
 import DailySummary from '../home/DailySummary';
 import StaleTickets from '../home/StaleTickets';
 import ApproachingBreach from '../home/ApproachingBreach';
+import PerfReminderCard from '../performance/PerfReminderCard';
 import {
   TriageStrip,
   DecisionsStrip,
@@ -73,7 +74,7 @@ const SOURCE_COLOURS = {
   amendments: '#ed8d00', redlines: '#7c3aed',
 };
 
-const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSubFilter,requests=[],projects=[],managerOnCall=null,onChangeManagerOnCall,teamLeadOnCall=null,onChangeTeamLeadOnCall,realUser=null,onViewAgentQueue=null,onImpersonate=null,impersonating=null})=>{
+const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSubFilter,requests=[],projects=[],managerOnCall=null,onChangeManagerOnCall,teamLeadOnCall=null,onChangeTeamLeadOnCall,realUser=null,onViewAgentQueue=null,onImpersonate=null,impersonating=null,perfBadge=null,onOpenPerformance=null})=>{
   // Live roster for the Manager-on-call picker so admins see managers added
   // via the Team tab (not just the baked-in baseline). Filter out
   // soft-deleted rows so we don't offer to impersonate a disabled account.
@@ -1905,6 +1906,14 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             </div>
           );
         })()}
+
+        {/* ── Performance check-in reminder ──────────────────────────────
+            Self-hides when nothing's pending. Click → HR Hub › Performance. */}
+        {perfBadge && (perfBadge.managerDue > 0 || perfBadge.memberPending > 0) && (
+          <div style={{ padding: '12px 24px 0' }}>
+            <PerfReminderCard perfBadge={perfBadge} onOpen={onOpenPerformance} />
+          </div>
+        )}
 
         {/* ══════════════════════════════════════════════════════════════════
             EXECUTIVE SUMMARY — Director / Regional Manager ONLY

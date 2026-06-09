@@ -24,6 +24,7 @@ import { useHiddenTasks } from './hooks/useHiddenTasks';
 import { useSlaExtensions } from './hooks/useSlaExtensions';
 import { useUrgentAssistBadge } from './hooks/useUrgentAssistBadge';
 import { useHrHubBadge } from './hooks/useHrHubBadge';
+import { usePerfBadge } from './hooks/usePerfBadge';
 import { DEFAULT_SETTINGS } from './data/settings';
 import { DEFAULT_ACCESS_TYPES, ALL_VIEWS } from './data/accessControl';
 import { ADMIN_LIST_VERSION } from './data/adminEmails';
@@ -641,6 +642,28 @@ const App=()=>{
     enabled: !!user,
     userEmail: user?.email || '',
   });
+  // Performance reminders for the home page — managerDue (direct reports
+  // missing a finalized review this month) + memberPending (own review awaits
+  // reflection/acknowledgment). Drives the AgentHome / TeamLeadHome /
+  // BriefingView reminder cards.
+  const perfBadge = usePerfBadge({
+    enabled: !!user,
+    userEmail: user?.email || '',
+  });
+  // Navigate to HR Hub → Performance subtab (used by the home reminder cards).
+  const openPerformanceTab = useCallback(() => {
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('hrtab', 'performance');
+      url.searchParams.delete('req');
+      window.history.replaceState({}, '', url.toString());
+    } catch {}
+    setView('hr-hub');
+    setTimeout(() => {
+      try { window.dispatchEvent(new CustomEvent('hr-hub:setSubtab', { detail: { subTab: 'performance' } })); }
+      catch {}
+    }, 60);
+  }, []);
   const [feed,setFeed]=useState(FEED_EVENTS);
   const [notes,setNotes]=useState(INITIAL_NOTES);
   const [escalations,setEscalations]=useState([
@@ -1474,6 +1497,21 @@ const App=()=>{
         };
         setTimeout(() => {
           try { window.dispatchEvent(new CustomEvent('hr-hub:openDetail', { detail })); }
+          catch {}
+        }, 60);
+      } else if (n.linkView === 'performance') {
+        // Performance cycle reminder → HR Hub, Performance subtab. Set the
+        // URL param so a fresh mount lands there, and fire the subtab event
+        // for the already-on-hr-hub case.
+        try {
+          const url = new URL(window.location.href);
+          url.searchParams.set('hrtab', 'performance');
+          url.searchParams.delete('req');
+          window.history.replaceState({}, '', url.toString());
+        } catch {}
+        setView('hr-hub');
+        setTimeout(() => {
+          try { window.dispatchEvent(new CustomEvent('hr-hub:setSubtab', { detail: { subTab: 'performance' } })); }
           catch {}
         }, 60);
       } else if ((n.linkView === 'leader-alerts' || n.linkView === 'leader_alerts') && n.linkId) {
@@ -2451,9 +2489,9 @@ const App=()=>{
         </div>
       )}
       <div className="deel-content" data-region="main-content" aria-label="Main content" style={{display:'flex',overflowX:'hidden',overflowY:'auto',position:'relative',flex:1}}>
-          {view==='briefing'      &&perms?.canView('briefing')!==false &&(perms?.raw?.dataScope==='all_tasks'||perms?.raw?.dataScope==='regional_tasks'||perms?.raw?.dataScope==='team_tasks') &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasksWithSlaExt,MEMBERS,coverageEmails)||tasksWithSlaExt} setView={setView} setSelTask={()=>{}} comms={comms} escalations={[]} setSubFilter={setSubFilter} requests={[]} projects={[]} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall} teamLeadOnCall={teamLeadOnCall} onChangeTeamLeadOnCall={handleChangeTeamLeadOnCall} realUser={user} onViewAgentQueue={(email)=>{ setQueueAssignee(email); setView('my-queue'); }} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
-          {view==='lead-home' &&<div className="page-enter"><TeamLeadHome user={effectiveUser} tasks={tasksWithSlaExt} setView={setView} managerOnCall={managerOnCall}/></div>}
-          {view==='agent-home' &&<div className="page-enter"><AgentHome user={effectiveUser} tasks={tasksWithSlaExt} setView={setView} comms={comms}/></div>}
+          {view==='briefing'      &&perms?.canView('briefing')!==false &&(perms?.raw?.dataScope==='all_tasks'||perms?.raw?.dataScope==='regional_tasks'||perms?.raw?.dataScope==='team_tasks') &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasksWithSlaExt,MEMBERS,coverageEmails)||tasksWithSlaExt} setView={setView} setSelTask={()=>{}} comms={comms} escalations={[]} setSubFilter={setSubFilter} requests={[]} projects={[]} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall} teamLeadOnCall={teamLeadOnCall} onChangeTeamLeadOnCall={handleChangeTeamLeadOnCall} realUser={user} onViewAgentQueue={(email)=>{ setQueueAssignee(email); setView('my-queue'); }} onImpersonate={handleImpersonate} impersonating={impersonating} perfBadge={perfBadge} onOpenPerformance={openPerformanceTab}/></div>}
+          {view==='lead-home' &&<div className="page-enter"><TeamLeadHome user={effectiveUser} tasks={tasksWithSlaExt} setView={setView} managerOnCall={managerOnCall} perfBadge={perfBadge} onOpenPerformance={openPerformanceTab}/></div>}
+          {view==='agent-home' &&<div className="page-enter"><AgentHome user={effectiveUser} tasks={tasksWithSlaExt} setView={setView} comms={comms} perfBadge={perfBadge} onOpenPerformance={openPerformanceTab}/></div>}
           {view==='my-queue'      &&perms?.canView('my-queue')!==false     &&<div className="page-enter"><Queue user={effectiveUser} tasks={tasksWithSlaExt} subFilter={subFilter} focusTaskId={focusTaskId} onTaskFocused={()=>setFocusTaskId(null)} initialAssignee={queueAssignee} onInitialAssigneeConsumed={()=>setQueueAssignee(null)}/></div>}
           {view==='announcements' &&perms?.canView('announcements')!==false&&<div className="page-enter"><AnnouncementsView user={effectiveUser} serverUserId={apiServerUserId} serverUserEmail={apiServerUserEmail} comms={comms} setComms={setComms} addToast={addToast} tasks={tasks} apiAcknowledge={apiAcknowledge} apiCreate={apiCreate} apiSend={apiSend} apiUpdate={apiUpdate} apiArchive={apiArchive} apiRemove={apiRemove} apiTogglePin={apiTogglePin} openCompose={announceCompose} onComposeOpened={()=>setAnnounceCompose(false)} apiUnarchive={apiUnarchive} apiComments={apiComments} apiSetComments={apiSetComments} apiLoadComments={apiLoadComments} apiAddComment={apiAddCommentFn} apiDeleteComment={apiDeleteCommentFn} apiLinks={apiLinks} apiLoadLinks={apiLoadLinks} apiLinkAnnouncement={apiLinkAnnouncementFn} apiUnlinkAnnouncement={apiUnlinkAnnouncementFn} apiReact={apiReactFn} apiVote={apiVoteFn}/></div>}
           {view==='approval-queue' &&<div className="page-enter"><ApprovalQueueView user={effectiveUser} addToast={addToast}/></div>}

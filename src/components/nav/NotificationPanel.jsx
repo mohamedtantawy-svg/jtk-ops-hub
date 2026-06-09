@@ -50,6 +50,7 @@ export const TYPE_META = {
   sla:            { icon: 'bi-clock-history',         color: '#d42d35', label: 'SLA' },
   success:        { icon: 'bi-check-circle-fill',     color: '#15803d', label: 'success' },
   info:           { icon: 'bi-bell-fill',             color: '#1f74b3', label: 'update' },
+  performance:    { icon: 'bi-clipboard2-check-fill', color: '#7c3aed', label: 'performance' },
 };
 
 export function metaFor(type) {
@@ -91,6 +92,8 @@ export function categorizeNotificationGroup(group) {
   if (linkView === 'hr_hub') {
     return hrHubFlow === 'sla_extension_request' ? 'sla_extensions' : 'hr_hub';
   }
+  // Performance is a subtab of HR Hub — group its reminders there.
+  if (linkView === 'performance') return 'hr_hub';
   if (linkView === 'leader-alerts' || linkView === 'leader_alerts') return 'leader_alerts';
   if (sourceType.startsWith('urgent_assist')) return 'urgent_assist';
   if (sourceType.startsWith('work_task') || linkView === 'my-queue' || linkView === 'work-tasks') {

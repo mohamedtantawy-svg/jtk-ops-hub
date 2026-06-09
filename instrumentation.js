@@ -301,6 +301,33 @@ export async function register() {
           console.warn('[tasks-sla-sync] could not schedule:', err?.message);
         }
       }
+
+      // ── Performance cycle heartbeat (Phase F, 2026-06-09) ──────────
+      // Opens the month's perf cycles + fans out monthly reminder
+      // notifications (managers: reviews due; members: reflect /
+      // acknowledge). The runner self-gates to ~once per UTC day via an
+      // app_settings soft-TTL, so a 6 h interval just guarantees the day
+      // gets claimed even with restarts. Idempotent per (kind,member,
+      // period) — nobody is nudged twice in a month. Multi-pod safe.
+      // Disable knob: OPS_HUB_DISABLE_PERF_CYCLE_SYNC=1.
+      if (!process.env.OPS_HUB_DISABLE_PERF_CYCLE_SYNC) {
+        try {
+          const { runPerformanceCycleSync } = await import('./src/lib/performance-cycle-sync');
+          setTimeout(() => {
+            runPerformanceCycleSync().catch(err => {
+              console.warn('[perf-cycle] priming run failed:', err?.message);
+            });
+          }, 120_000);
+          setInterval(() => {
+            runPerformanceCycleSync().catch(err => {
+              console.warn('[perf-cycle] scheduled run failed:', err?.message);
+            });
+          }, 6 * 60 * 60 * 1000).unref?.();
+          console.log('[perf-cycle] scheduled — priming in 120 s, then every 6 h (self-gated daily)');
+        } catch (err) {
+          console.warn('[perf-cycle] could not schedule:', err?.message);
+        }
+      }
     } catch (err) {
       console.error('[db] Startup migration/seed error:', err.message);
       // Don't crash — app falls back to mock data

@@ -537,6 +537,20 @@ export default function HrHubView({ user, onCreateHrHub }) {
     return () => window.removeEventListener('hr-hub:openDetail', handler);
   }, []);
 
+  // `hr-hub:setSubtab` flips between the HR Requests board and the
+  // Performance tab. Fired by the home-page reminder cards + Performance
+  // bell notifications so the click lands on the right subtab even when the
+  // user is already on HR Hub (setView is a no-op then).
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = (e) => {
+      const t = e?.detail?.subTab;
+      if (t === 'performance' || t === 'hr_requests') setSubTab(t);
+    };
+    window.addEventListener('hr-hub:setSubtab', handler);
+    return () => window.removeEventListener('hr-hub:setSubtab', handler);
+  }, []);
+
   // Briefing DecisionsStrip tiles dispatch `hr-hub:setFilters` to pre-set
   // scope / flow / status when they land here so the user sees the exact
   // list the tile summarized (e.g. the HR Hub tile lands on scope=team,

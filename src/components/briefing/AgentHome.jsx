@@ -47,6 +47,7 @@ import { apiFetch } from '../../services/api';
 import BriefingMyTasks from '../home/BriefingMyTasks';
 import PendingAcksBanner from './PendingAcksBanner';
 import StaleCountryDocsBanner from './StaleCountryDocsBanner';
+import PerfReminderCard from '../performance/PerfReminderCard';
 import PendingCoverageBanner from '../ooo/PendingCoverageBanner';
 
 function rowSlaSeverity(row) {
@@ -103,7 +104,7 @@ function isPausedOnboarding(r) {
   return r?.source === 'onboarding' && r?.isPaused === true;
 }
 
-export default function AgentHome({ user, tasks = [], setView, comms = [], ackEmails = null, isAckedByMe: isAckedByMeProp = null }) {
+export default function AgentHome({ user, tasks = [], setView, comms = [], ackEmails = null, isAckedByMe: isAckedByMeProp = null, perfBadge = null, onOpenPerformance = null }) {
   const { queueUnified, hiddenTasks, slaExtensions } = useContext(IntegrationsContext);
   // 2026-05-22 — dept-branded "HR Hub" tile label.
   const deptState = useCurrentDept();
@@ -615,6 +616,15 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
           </div>
         </div>
       </div>
+
+      {/* ── Performance check-in reminder ──────────────────────────────
+          Self-hides when nothing's pending. Click → HR Hub › Performance. */}
+      {perfBadge && (perfBadge.managerDue > 0 || perfBadge.memberPending > 0) && (
+        <>
+          <PerfReminderCard perfBadge={perfBadge} onOpen={onOpenPerformance} />
+          <div style={{ height: 12 }} aria-hidden />
+        </>
+      )}
 
       {/* ── Pending acknowledgements carousel ──────────────────────────
           Surfaces anything a comms author has sent that this agent hasn't

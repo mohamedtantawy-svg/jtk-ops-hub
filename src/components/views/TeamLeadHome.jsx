@@ -28,6 +28,7 @@ import { useCapacitySettings } from '../../hooks/useCapacitySettings';
 import { COUNTRY_OWNERS, OWNER_COUNTRIES } from '../../data/countryOwners';
 import { useCurrentDept } from '../../hooks/useCurrentDept';
 import { getHubBrand } from '../../lib/hub-brand';
+import PerfReminderCard from '../performance/PerfReminderCard';
 
 const CARD = {
   background: 'var(--surface)',
@@ -76,7 +77,7 @@ function fmtDuration(secs) {
   return `${days}d`;
 }
 
-export default function TeamLeadHome({ user, tasks = [], setView, managerOnCall }) {
+export default function TeamLeadHome({ user, tasks = [], setView, managerOnCall, perfBadge = null, onOpenPerformance = null }) {
   const { queueUnified, hiddenTasks, slaExtensions } = useContext(IntegrationsContext);
   // 2026-05-22 — dept-branded "HR Hub" pending tile.
   const deptState = useCurrentDept();
@@ -346,6 +347,12 @@ export default function TeamLeadHome({ user, tasks = [], setView, managerOnCall 
           Live · TL Home (preview)
         </div>
       </div>
+
+      {/* ── Performance check-in reminder ──────────────────────────────
+          Self-hides when nothing's pending. Click → HR Hub › Performance. */}
+      {perfBadge && (perfBadge.managerDue > 0 || perfBadge.memberPending > 0) && (
+        <PerfReminderCard perfBadge={perfBadge} onOpen={onOpenPerformance} style={{ marginBottom: 16 }} />
+      )}
 
       {/* ── Triage strip ───────────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
