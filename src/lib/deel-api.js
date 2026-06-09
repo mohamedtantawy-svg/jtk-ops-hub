@@ -1468,6 +1468,16 @@ export async function listRedlineRequests(params = {}) {
       workbenchStatus:   wbTask.status || '',
       customStatusName:  wbTask.customStatusName || '',
       assigneeId:        wbTask.assigneeId || null,
+      // Workbench task's own assignee. Redlines carry no upstream assignee of
+      // their own, so the redlines route adopts the workbench owner as the
+      // row's assignee (Jojo Zhao "task assignee mismatch" — the WB task is
+      // assigned to the real owner while Ops Hub showed a synthesised country
+      // owner). The embedded opsWorkbenchTask usually exposes only assigneeId;
+      // capture the email/name too when the payload includes them so the route
+      // can skip the workbench_known_tasks lookup. Empty when absent — the
+      // route then resolves the owner via the persistent workbench snapshot.
+      workbenchAssigneeEmail: (wbTask.assignee?.email || '').toLowerCase(),
+      workbenchAssigneeName:  wbTask.assignee?.name || '',
       // Participants
       participants:      (r.participants || []).map(p => ({
         name:            p.name || '',

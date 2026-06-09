@@ -248,3 +248,43 @@ export async function reconcileWorkbenchSnapshot({
     stats: { observed: upserted, derivedAdded, pruned, cold },
   };
 }
+
+/**
+ * Resolve workbench task assignees by task id from the persistent snapshot.
+ *
+ * `workbench_known_tasks` carries every workbench task observed in the last
+ * scan window (active + 24h of resolved), with the assignee email/name baked
+ * into `task_data`. The redlines route joins each redline's `workbenchTaskId`
+ * against this snapshot to adopt the workbench owner as the redline's
+ * assignee (redlines have no upstream assignee of their own).
+ *
+ * Returns Map<taskId, { email, name }> — only entries that carry a real
+ * assignee email. Tasks with no assignee, or no snapshot row, are omitted so
+ * the caller falls back to the country owner. Non-fatal on DB error (returns
+ * whatever resolved) — a snapshot miss must never empty or misroute the queue.
+ */
+export async function getWorkbenchAssigneesByTaskIds(taskIds = []) {
+  const ids = [...new Set((taskIds || [])
+    .map(x => (x != null ? String(x) : ''))
+    .filter(Boolean))];
+  const out = new Map();
+  if (ids.length === 0) return out;
+  try {
+    const { rows } = await query(
+      `SELECT task_id,
+              task_data->>'assigneeEmail'    AS email,
+              task_data->'assignee'->>'name' AS name
+         FROM workbench_known_tasks
+        WHERE task_id = ANY($1::text[])`,
+      [ids],
+    );
+    for (const r of rows) {
+      const email = (r.email || '').toLowerCase();
+      if (!email) continue;
+      out.set(String(r.task_id), { email, name: r.name || '' });
+    }
+  } catch (err) {
+    console.warn('[workbench-resolution-state] assignee lookup failed (non-fatal):', err?.message);
+  }
+  return out;
+}

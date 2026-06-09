@@ -15,6 +15,8 @@ import { scopeRedlineRequests } from '../../../../../../src/lib/queue-scoping';
 import { ensureRosterHydrated } from '../../../../../../src/lib/roster-server';
 import { buildWithTimeout } from '../../../../../../src/lib/scan-timeout';
 import { getReassignmentMap, applyReassignments } from '../../../../../../src/lib/queue-reassignments';
+import { getWorkbenchAssigneesByTaskIds } from '../../../../../../src/lib/workbench-resolution-state';
+import { MEMBERS_BY_EMAIL } from '../../../../../../src/data/members';
 
 // Default: both Review (legalReview) and Execution (HRXToExecute) buckets —
 // the two "Action Needed" surfaces on admin.deel.network.
@@ -79,6 +81,7 @@ export async function GET(req) {
           ...rr,
           displayStatus: deriveRedlineStatus(rr),
         }));
+        await adoptWorkbenchOwners(items);
         return { items, total: result.total };
       }, { timeoutMs: SCAN_TIMEOUT_MS, staleTtl: STALE_TTL });
       if (r.result == null) {
@@ -106,6 +109,53 @@ export async function GET(req) {
     console.error('[integrations/deel/redlines]', err.message);
     return NextResponse.json({ error: 'Internal server error' }, { status: err.status || 500 });
   }
+}
+
+/**
+ * Adopt the workbench ticket's owner as the redline's assignee.
+ *
+ * Redlines carry no upstream assignee of their own, so Ops Hub otherwise
+ * synthesises a country owner (round-robin in normalizeSourceRows). But most
+ * redlines already have a workbench task assigned to the real owner — Jojo
+ * Zhao's "task assignee mismatch" report: the WB task was assigned to Shell
+ * while Ops Hub showed Jojo (the synthesised country owner). When the redline's
+ * workbench task is assigned to a known Ops Hub member, adopt that person as
+ * the row's assignee so it attributes, scopes, and displays to them — matching
+ * Deel.
+ *
+ * Precedence (highest first): manual in-app reassignment > workbench owner >
+ * country owner. This stamps `assigneeEmail` in the CACHED builder, which runs
+ * BEFORE `scoped()` overlays any `queue_reassignments` override via
+ * applyReassignments — so a manual Ops Hub reassignment still wins. Rows with
+ * no workbench task, an unassigned task, or an assignee who isn't an Ops Hub
+ * member are left untouched, so the FE keeps synthesising the country owner.
+ *
+ * Resolution per row: the assignee email embedded on the redline's workbench
+ * task (rare — usually only an id is present) → the persistent workbench
+ * snapshot (`workbench_known_tasks`) keyed by the workbench task id. A snapshot
+ * miss is silent and harmless (falls back to country owner).
+ *
+ * Mutates `items` in place. Sets `assigneeIsSynthetic`-clearing fields via the
+ * normaliser downstream (a populated `assigneeEmail` makes the row non-synthetic).
+ */
+async function adoptWorkbenchOwners(items) {
+  if (!Array.isArray(items) || items.length === 0) return;
+  const taskIds = items.map(r => r.workbenchTaskId).filter(Boolean);
+  const snap = await getWorkbenchAssigneesByTaskIds(taskIds);
+  let adopted = 0;
+  for (const r of items) {
+    const direct = (r.workbenchAssigneeEmail || '').toLowerCase();
+    const fromSnap = r.workbenchTaskId ? snap.get(String(r.workbenchTaskId)) : null;
+    const email = direct || fromSnap?.email || '';
+    if (!email) continue;
+    const member = MEMBERS_BY_EMAIL[email];
+    if (!member) continue;          // unknown to Ops Hub — keep the country owner
+    r.assigneeEmail = email;
+    r.assignee = (direct ? r.workbenchAssigneeName : fromSnap?.name) || member.name || email;
+    r.assigneeFromWorkbench = true; // provenance for debugging / future UI
+    adopted++;
+  }
+  console.log(`[redlines] adopted workbench owner on ${adopted}/${items.length} redlines (rest fall back to the country owner)`);
 }
 
 /**
