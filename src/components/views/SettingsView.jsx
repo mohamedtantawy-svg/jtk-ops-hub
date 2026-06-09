@@ -537,7 +537,7 @@ const SettingsView=({settings,setSettings,user,addToast,tasks,setTasks,subFilter
         <div style={{marginTop:12,marginBottom:8,fontSize:13,fontWeight:600,color:'var(--text-muted)',letterSpacing:'normal'}}>HEALTH SCORE WEIGHTS</div>
         <NumberInput label="SLA weight" desc="Weight of SLA compliance in health score calculation" value={s.briefing_health_sla_weight} onChange={v=>set('briefing_health_sla_weight',v)} min={0} max={100} suffix="%"/>
         <NumberInput label="Resolution weight" desc="Weight of resolution rate in health score" value={s.briefing_health_resolution_weight} onChange={v=>set('briefing_health_resolution_weight',v)} min={0} max={100} suffix="%"/>
-        <NumberInput label="Response weight" desc="Weight of first response time in health score" value={s.briefing_health_response_weight} onChange={v=>set('briefing_health_response_weight',v)} min={0} max={100} suffix="%"/>
+        <NumberInput label="Task age weight" desc="Weight of average task age (time since created) in health score" value={s.briefing_health_response_weight} onChange={v=>set('briefing_health_response_weight',v)} min={0} max={100} suffix="%"/>
         <NumberInput label="Capacity weight" desc="Weight of team capacity utilization in health score" value={s.briefing_health_capacity_weight} onChange={v=>set('briefing_health_capacity_weight',v)} min={0} max={100} suffix="%"/>
 
         <div style={{marginTop:12,marginBottom:8,fontSize:13,fontWeight:600,color:'var(--text-muted)',letterSpacing:'normal'}}>WIDGETS</div>

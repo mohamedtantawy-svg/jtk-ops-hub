@@ -15,7 +15,6 @@ import { applySlaExtensionsToRows } from '../../utils/applySlaExtensions';
 // per-view mounts collapses 4× initial requests into 1×.
 import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
 import { useCapacitySettings } from '../../hooks/useCapacitySettings';
-import { elapsedBizMinutes } from '../../utils/bizTime';
 import {
   normalizeOnboarding,
   normalizePausedOnboarding,
@@ -1090,33 +1089,43 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // 50% closed = score 100 per Mohamed's spec.
   const resScore = Math.min(100, Math.round((resRate / 50) * 100));
 
-  // Avg Response Time — pre-#485 logic. Average biz-day minutes from
-  // the most-recent meaningful anchor across every active ZD ticket
-  // (open + onhold). slaInfo() owns the "is breached" semantics; this
-  // metric is purely descriptive elapsed-time so the manager has a
-  // single number for "how long are we taking on average".
-  const zdActive = zdScope; // already (zd && status !== 'resolved')
-  const zdRespMins = zdActive.length > 0
-    ? Math.round(zdActive.reduce((sum, t) => {
-        const anchor = t.lastCustomerResponseAt || t.updatedAt || t.createdAt;
-        if (!anchor) return sum;
-        const ms = new Date(anchor).getTime();
-        if (!Number.isFinite(ms)) return sum;
-        return sum + elapsedBizMinutes(ms, Date.now());
-      }, 0) / zdActive.length)
-    : 0;
-  const avgResponseTime = zdRespMins;
-  const respScore = avgResponseTime < 24 * 60 ? 100
-    : avgResponseTime < 36 * 60 ? 70
-    : avgResponseTime < 48 * 60 ? 40
-    : 20;
+  // Avg Task Age — CALENDAR time since each item was CREATED, averaged across
+  // every open queue item (everything except Jira — same pool as SLA above).
+  // Replaces the old "Avg Response Time" factor (2026-06-09, Mohamed's spec).
+  // "age" = now - createdAt (wall-clock, NOT biz-day) so it reflects how long
+  // work has been sitting regardless of source. Scoring anchors:
+  //   ≤ 5 days  → 100 (perfect) · 7 days → 50 (mid) · ≥ 10 days → 0 (very bad),
+  // piecewise-linear between the anchors.
+  const ageItems = [
+    ...slaCompPoolTickets,
+    ...onboardingRows, ...offboardingRows, ...amendmentRows, ...redlineRows,
+    ...workbenchActiveRows, ...incentivePlanRows, ...activeEorRows,
+  ];
+  let _ageSumDays = 0, ageCount = 0;
+  for (const it of ageItems) {
+    const c = it && it.createdAt;
+    if (!c) continue;
+    const ms = new Date(c).getTime();
+    if (!Number.isFinite(ms)) continue;
+    const days = (Date.now() - ms) / 86400000;
+    if (days < 0) continue;
+    _ageSumDays += days; ageCount += 1;
+  }
+  const avgAgeDays = ageCount > 0 ? _ageSumDays / ageCount : 0;
+  const ageScore = avgAgeDays <= 5 ? 100
+    : avgAgeDays <= 7 ? Math.round(100 - (avgAgeDays - 5) * 25)         // 5d→100 … 7d→50
+    : avgAgeDays <= 10 ? Math.round(50 - (avgAgeDays - 7) * (50 / 3))   // 7d→50 … 10d→0
+    : 0;                                                               // ≥10d → very bad
+  const avgAgeWhole = Math.floor(avgAgeDays);
+  const avgAgeHrs = Math.round((avgAgeDays - avgAgeWhole) * 24);
+  const ageLabel = avgAgeDays > 0 ? `${avgAgeWhole}d ${avgAgeHrs}h` : '0d';
 
   const wSLA = Number.isFinite(settings.briefing_health_sla_weight) ? settings.briefing_health_sla_weight : 50;
   const wRes = Number.isFinite(settings.briefing_health_resolution_weight) ? settings.briefing_health_resolution_weight : 10;
   const wResp = Number.isFinite(settings.briefing_health_response_weight) ? settings.briefing_health_response_weight : 20;
   const wCap = Number.isFinite(settings.briefing_health_capacity_weight) ? settings.briefing_health_capacity_weight : 20;
   const wSum = (wSLA + wRes + wResp + wCap) || 100;
-  const healthScore = Math.round((slaCompRate*wSLA + resScore*wRes + respScore*wResp + wlScore*wCap) / wSum) || 0;
+  const healthScore = Math.round((slaCompRate*wSLA + resScore*wRes + ageScore*wResp + wlScore*wCap) / wSum) || 0;
   const hColor = healthScore >= 80 ? '#29811e' : healthScore >= 60 ? '#ed8d00' : '#d42d35';
   const hLabel = healthScore >= 80 ? 'Healthy' : healthScore >= 60 ? 'Attention' : 'Critical';
 
@@ -1740,7 +1749,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 {[
                   {label:'SLA Compliance',weight:wSLA,value:`${slaCompRate}%`,score:slaCompRate,sub:`${Math.max(0, slaTotal - slaBreachTotal)}/${slaTotal} on-time · everything except Jira`,icon:'bi-shield-check'},
                   {label:'Resolution Rate',weight:wRes,value:`${resRate}%`,score:resScore,sub:`${zdClosedCount} closed · ${zdOpenAndOnHoldCount} open + on-hold · Zendesk only · 50% = excellent`,icon:'bi-check2-all'},
-                  {label:'Avg Response Time',weight:wResp,value:avgResponseTime>=60?`${Math.round(avgResponseTime/60)}h ${avgResponseTime%60}m`:`${avgResponseTime}m`,score:respScore,sub:`Zendesk biz-day · ${zdActive.length} active ticket(s) · ${respScore>=80?'Fast':respScore>=60?'Normal':respScore>=40?'Slow':'Very slow'}`,icon:'bi-clock-history'},
+                  {label:'Avg Task Age',weight:wResp,value:ageLabel,score:ageScore,sub:`Time since created · ${ageCount} open item${ageCount===1?'':'s'} · everything except Jira · ${avgAgeDays<5?'Fresh':avgAgeDays<7?'Aging':avgAgeDays<10?'Stale':'Critical'}`,icon:'bi-hourglass-split'},
                   {label:'Team Capacity',weight:wCap,value:wl,score:wlScore,sub: isOwnScope ? `${myCount} tasks · ${Math.round(capPct)}% of ${capHighMin}` : `${myCount} avg / agent · ${agentTaskTotal} tasks ÷ ${teamSize} ${teamSize === 1 ? 'agent' : 'agents'}`,icon:'bi-speedometer2'},
                 ].map(row=>{
                   const rc=row.score>=80?'#29811e':row.score>=60?'#ed8d00':'#d42d35';
@@ -1763,7 +1772,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 })}
                 <div style={{marginTop:10,padding:'8px 10px',borderRadius:10,background:hColor+'08',border:`1px solid ${hColor}15`,textAlign:'center',lineHeight:1.4}}>
                   <div style={{fontSize:10,color:hColor,fontWeight:700,letterSpacing:'.02em'}}>
-                    Score = (SLA×{wSLA} + Res×{wRes} + Resp×{wResp} + Cap×{wCap}) ÷ {wSum}
+                    Score = (SLA×{wSLA} + Res×{wRes} + Age×{wResp} + Cap×{wCap}) ÷ {wSum}
                   </div>
                   <div style={{fontSize:9,color:'var(--text-muted)',marginTop:3}}>
                     Weights are configurable in Settings → Briefing
