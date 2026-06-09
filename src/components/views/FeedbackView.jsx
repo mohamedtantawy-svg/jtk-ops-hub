@@ -15,6 +15,8 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'r
 import { PermissionsContext } from '../../App';
 import { MEMBERS, MEMBERS_BY_EMAIL } from '../../data/members';
 import { useFeedback } from '../../hooks/useFeedback';
+import { useTrackers } from '../../hooks/useTrackers';
+import TrackerGrid from './trackers/TrackerGrid';
 import Avatar from '../ui/Avatar';
 import EmptyState from '../ui/EmptyState';
 import ImageLightbox from '../ui/ImageLightbox';
@@ -168,6 +170,15 @@ function toMarkdown(item) {
 export default function FeedbackView({ user, addToast, openCompose, onComposeOpened, openPicker, onPickerOpened }) {
   const perms = useContext(PermissionsContext);
   const isPriv = perms?.isAdmin || perms?.dataScope === 'regional_tasks' || false;
+  // Managerial viewer = any non-agent data scope. Drives canEdit on the
+  // spreadsheet grid sub-tabs. (Grid sub-tabs only exist for managers anyway —
+  // useTrackers returns [] for agents — but we still pass canEdit so a
+  // non-managerial edge case lands read-only.)
+  const isManagerial = perms?.dataScope === 'all_tasks' || perms?.dataScope === 'regional_tasks' || perms?.dataScope === 'team_tasks';
+  // Spreadsheet trackers (Mass Onboarding / Mass Offboarding, + future). The
+  // hook is managers-only on the server: agents get [] (403 swallowed), so the
+  // grid sub-tabs naturally never appear for them.
+  const { trackers: gridTrackers } = useTrackers();
 
   // Default filter set 2026-05-11: scope=All, status=New. The New bucket
   // is the first stop in the lifecycle (New → In Progress → Paused →
@@ -185,28 +196,33 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
   const [escalationComposeOpen, setEscalationComposeOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  // Top-level kind tab. Drives every list/board/counter filter below so the
-  // two workflows never bleed into each other visually. URL-mirrored so
-  // F5 + share-the-URL preserves the chosen surface. Default lands on
-  // Ops Hub Feedback (the historical Feedback board content).
-  const [kindFilter, setKindFilter] = useState('ops_hub_feedback'); // 'ops_hub_feedback' | 'escalation_zero'
+  // Top-level sub-tab. Drives every list/board/counter filter below so the
+  // two board workflows never bleed into each other visually, and also selects
+  // which spreadsheet grid tracker is shown. URL-mirrored so F5 +
+  // share-the-URL preserves the chosen surface. Default lands on Ops Hub
+  // Feedback (the historical Feedback board content). The variable name stays
+  // `kindFilter` (now also holding grid tracker keys) to keep the diff
+  // surgical — every board memo below still keys off it correctly.
+  const [kindFilter, setKindFilter] = useState('ops_hub_feedback'); // 'ops_hub_feedback' | 'escalation_zero' | <tracker.key>
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
       const params = new URLSearchParams(window.location.search);
       const v = params.get('kind');
-      if (v === 'escalation_zero' || v === 'ops_hub_feedback') {
-        setKindFilter(v);
-      }
+      // Accept any non-empty value here; grid tracker keys aren't known at
+      // mount (trackers load async). The `activeSub` fallback below guards an
+      // unknown/stale key back to 'ops_hub_feedback' once SUB_TABS is built.
+      if (v) setKindFilter(v);
     } catch {}
   }, []);
-  // Persist kind selection to the URL so a hard refresh restores the same
-  // tab. Mirrors how the deep-link `fb` param flows through.
+  // Persist sub-tab selection to the URL so a hard refresh restores the same
+  // tab. Mirrors how the deep-link `fb` param flows through. Boards + grids
+  // both round-trip; only the default ('ops_hub_feedback') drops the param.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
       const url = new URL(window.location.href);
-      if (kindFilter === 'escalation_zero') url.searchParams.set('kind', 'escalation_zero');
+      if (kindFilter && kindFilter !== 'ops_hub_feedback') url.searchParams.set('kind', kindFilter);
       else url.searchParams.delete('kind');
       window.history.replaceState({}, '', url.toString());
     } catch {}
@@ -287,6 +303,15 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
     window.addEventListener('feedback:openDetail', handler);
     return () => window.removeEventListener('feedback:openDetail', handler);
   }, []);
+
+  // A board-row deep-link (bell `feedback:openDetail` or `?fb=`) must land on a
+  // board surface — if a grid sub-tab (Mass tracker) is active, the board row
+  // can't render. When a deep-link sets expandedId, snap back to a board kind
+  // (the existing ?fb= bypass then surfaces the row regardless of which board).
+  useEffect(() => {
+    if (!expandedId) return;
+    setKindFilter(prev => (prev === 'ops_hub_feedback' || prev === 'escalation_zero') ? prev : 'ops_hub_feedback');
+  }, [expandedId]);
 
   // When the user manually collapses the deep-linked row, drop the ?fb=
   // URL param so a subsequent reload doesn't keep auto-expanding it.
@@ -446,6 +471,22 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
     return c;
   }, [scopedItems]);
 
+  // ── Sub-tab nav (boards + spreadsheet grids) ────────────────────────────
+  // The two historical boards come first (surface:'board'), then one entry
+  // per spreadsheet tracker (surface:'grid'). Board counts preserve the
+  // existing per-kind badge (count across every scope); grid counts use the
+  // tracker's rowCount. gridTrackers is [] for agents, so this is just the
+  // two boards for them — identical to the pre-existing 2-tab control.
+  const SUB_TABS = useMemo(() => [
+    { key: 'ops_hub_feedback', label: 'Ops Hub Feedback', surface: 'board', icon: 'bi-lightbulb-fill', count: items.filter(it => (it.kind || 'ops_hub_feedback') === 'ops_hub_feedback').length },
+    { key: 'escalation_zero',  label: 'Escalation Zero',  surface: 'board', icon: 'bi-stars',          count: items.filter(it => it.kind === 'escalation_zero').length },
+    ...gridTrackers.map(t => ({ key: t.key, label: t.name, surface: 'grid', icon: 'bi-table', trackerId: t.id, count: t.rowCount })),
+  ], [items, gridTrackers]);
+
+  // Resolve the active sub-tab. Guard: if kindFilter points at a grid tracker
+  // that hasn't loaded yet (or vanished), fall back to the first board.
+  const activeSub = SUB_TABS.find(s => s.key === kindFilter) || SUB_TABS[0];
+
   // ── Actions ─────────────────────────────────────────────────────────────
   const handleSubmit = async (payload) => {
     try {
@@ -542,46 +583,50 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{
               width: 40, height: 40, borderRadius: 12,
-              background: kindFilter === 'escalation_zero' ? '#f3eff8' : '#fff8e6',
-              color: kindFilter === 'escalation_zero' ? '#7c3aed' : '#d97706',
+              background: activeSub.surface === 'grid' ? '#f3eff8' : (kindFilter === 'escalation_zero' ? '#f3eff8' : '#fff8e6'),
+              color: activeSub.surface === 'grid' ? '#7c3aed' : (kindFilter === 'escalation_zero' ? '#7c3aed' : '#d97706'),
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
-              <i className={kindFilter === 'escalation_zero' ? 'bi-stars' : 'bi-lightbulb-fill'} style={{ fontSize: 19 }} />
+              <i className={activeSub.surface === 'grid' ? 'bi-table' : (kindFilter === 'escalation_zero' ? 'bi-stars' : 'bi-lightbulb-fill')} style={{ fontSize: 19 }} />
             </div>
             <div style={{ minWidth: 0 }}>
               <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: 'var(--text)' }}>
-                {kindFilter === 'escalation_zero' ? 'Escalation Zero' : 'Ops Hub Feedback'}
+                {activeSub.surface === 'grid' ? activeSub.label : (kindFilter === 'escalation_zero' ? 'Escalation Zero' : 'Ops Hub Feedback')}
               </h1>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-                {kindFilter === 'escalation_zero'
-                  ? 'Strategic improvements, process gaps, product feedback. Reviewed by leadership.'
-                  : 'Bugs, ideas, and improvements for ops-hub. Vote on what matters most.'}
-                {lastSyncAt && <> · <span title={new Date(lastSyncAt).toISOString()}>synced {relTime(new Date(lastSyncAt).toISOString())}</span></>}
+                {activeSub.surface === 'grid'
+                  ? 'Spreadsheet tracker — click any cell to edit, add rows as the work lands.'
+                  : (kindFilter === 'escalation_zero'
+                      ? 'Strategic improvements, process gaps, product feedback. Reviewed by leadership.'
+                      : 'Bugs, ideas, and improvements for ops-hub. Vote on what matters most.')}
+                {activeSub.surface === 'board' && lastSyncAt && <> · <span title={new Date(lastSyncAt).toISOString()}>synced {relTime(new Date(lastSyncAt).toISOString())}</span></>}
               </div>
             </div>
           </div>
         </div>
-        <button onClick={() => setPickerOpen(true)} style={primaryBtn}>
-          <i className="bi-plus-circle-fill" style={{ fontSize: 13 }} /> New request
-        </button>
+        {activeSub.surface === 'board' && (
+          <button onClick={() => setPickerOpen(true)} style={primaryBtn}>
+            <i className="bi-plus-circle-fill" style={{ fontSize: 13 }} /> New request
+          </button>
+        )}
       </div>
 
-      {/* Kind tabs — Ops Hub Feedback vs Escalation Zero. Counts reflect
-          ALL items in each kind across every scope so the user can see how
-          full the other surface is before switching. 2026-05-21 split. */}
-      <div style={{ ...scopeRow, marginBottom: 12 }}>
-        <div role="tablist" aria-label="Feedback surface" style={segmentedControl}>
-          {[
-            { value: 'ops_hub_feedback', label: 'Ops Hub Feedback', icon: 'bi-lightbulb-fill', count: items.filter(it => (it.kind || 'ops_hub_feedback') === 'ops_hub_feedback').length },
-            { value: 'escalation_zero',  label: 'Escalation Zero',  icon: 'bi-stars',          count: items.filter(it => it.kind === 'escalation_zero').length },
-          ].map(seg => {
-            const active = kindFilter === seg.value;
+      {/* Sub-tab nav — the two boards (Ops Hub Feedback / Escalation Zero)
+          first, then one tab per spreadsheet tracker. Board counts reflect ALL
+          items in each kind across every scope so the user can see how full
+          the other surface is before switching; grid counts use rowCount.
+          Grid tabs only appear for managers (useTrackers → [] for agents).
+          2026-05-21 split; 2026-06-09 N-way + grid trackers. */}
+      <div style={{ ...scopeRow, marginBottom: 12, flexWrap: 'wrap' }}>
+        <div role="tablist" aria-label="Tracker surface" style={{ ...segmentedControl, flexWrap: 'wrap' }}>
+          {SUB_TABS.map(seg => {
+            const active = activeSub.key === seg.key;
             return (
               <button
-                key={seg.value}
+                key={seg.key}
                 role="tab"
                 aria-selected={active}
-                onClick={() => setKindFilter(seg.value)}
+                onClick={() => setKindFilter(seg.key)}
                 style={{ ...segmentBtn, ...(active ? segmentBtnActive : null) }}
               >
                 <i className={seg.icon} style={{ fontSize: 13, marginRight: 6 }} />
@@ -593,6 +638,15 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
         </div>
       </div>
 
+      {/* ── Surface branch ──────────────────────────────────────────────
+          Boards render the full board chrome (scope toggle, status cards,
+          filter bar, row list, board empty/skeleton states, detail panels).
+          Grid trackers render the spreadsheet via TrackerGrid instead — it
+          ships its own toolbar / action-items strip / add-delete-row controls.
+          The hero + sub-tab nav above and the modals below mount regardless;
+          the modals only matter for boards anyway (composer/picker). */}
+      {activeSub.surface === 'board' ? (
+      <>
       {/* Scope toggle (My requests | All requests) — secondary nav within
           the active kind. Count ticked beside each segment so the user can
           pre-empt how busy either view is before clicking. */}
@@ -763,6 +817,19 @@ export default function FeedbackView({ user, addToast, openCompose, onComposeOpe
           </ul>
         )}
       </div>
+      </>
+      ) : (
+        // Grid surface — the spreadsheet tracker renders itself (toolbar,
+        // action-items strip, add/delete rows). canEdit is gated to
+        // managerial viewers; a non-managerial edge case lands read-only.
+        <div style={listWrap}>
+          <TrackerGrid
+            trackerId={activeSub.trackerId}
+            trackerName={activeSub.label}
+            canEdit={isManagerial}
+          />
+        </div>
+      )}
 
       {composeOpen && (
         <CreateFeedbackModal

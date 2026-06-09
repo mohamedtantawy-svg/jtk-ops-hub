@@ -58,7 +58,7 @@ const PRIMARY_TABS = [
   // queue:focusSource{ source:'work_tasks' }`. The "New Task" Quick
   // Create action below still works — it just lands on the Workspace
   // Tasks tab with the composer expanded.
-  { id: 'feedback',      icon: 'bi-lightbulb',            label: 'Feedback' },
+  { id: 'feedback',      icon: 'bi-clipboard-data',       label: 'Tracker' },
   { id: 'announcements', icon: 'bi-megaphone',            label: 'Announcements' },
 ];
 

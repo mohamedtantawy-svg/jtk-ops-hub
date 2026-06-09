@@ -86,6 +86,9 @@ const _VIEW_ALIASES = {
   // the dedicated Org tab. Any saved deep-link `?view=team` resolves to
   // `?view=org` so admins don't bounce to briefing.
   'team': 'org',
+  // 2026-06-09 — the Feedback tab was relabelled "Tracker" (view id stays
+  // 'feedback' for deep-link / cache stability). ?view=tracker resolves to it.
+  'tracker': 'feedback',
 };
 function _resolveViewAlias(v) {
   if (!v) return v;

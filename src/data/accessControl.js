@@ -194,7 +194,7 @@ export const VIEW_LABELS = {
   'approval-queue':'Approval Queue',
   'slack':         'Slack',
   'team':          'Team',
-  'feedback':      'Feedback',
+  'feedback':      'Tracker',
   'hr-hub':        'HR Hub',
   'leader-alerts': 'Leaders Hub',
   'ooo':           'OOO',
