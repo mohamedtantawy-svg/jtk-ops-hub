@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { FUNCTIONS, SLA_MINS } from '../../data/constants';
 import { MEMBERS } from '../../data/members';
+import { bizDayAgeStats, fmtBizDays } from '../../utils/taskAge';
 
 // ---------------------------------------------------------------------------
 // AgentProductivity — extended agent performance with capacity & weighting.
@@ -19,20 +20,12 @@ function getWeight(type) {
   return TASK_WEIGHTS[type] || DEFAULT_WEIGHT;
 }
 
-function fmtTime(mins) {
-  if (mins == null || isNaN(mins)) return '--';
-  if (mins < 60) return `${Math.round(mins)}m`;
-  const h = Math.floor(mins / 60);
-  const m = Math.round(mins % 60);
-  return m > 0 ? `${h}h ${m}m` : `${h}h`;
-}
-
 const SORT_COLS = [
   { key: 'name', label: 'Agent' },
   { key: 'assigned', label: 'Assigned' },
   { key: 'resolved', label: 'Resolved' },
   { key: 'open', label: 'Open' },
-  { key: 'avgResponse', label: 'Avg Resp.' },
+  { key: 'avgResponse', label: 'Avg Age' },
   { key: 'slaCompliance', label: 'SLA %' },
   { key: 'escalRate', label: 'Esc. Rate' },
   { key: 'weightedLoad', label: 'Wt. Load' },
@@ -129,14 +122,11 @@ export default function AgentProductivity({ tasks = [], members: membersProp, da
       const resolved = agentTasks.filter((t) => t.status === 'resolved').length;
       const open = agentTasks.filter((t) => t.status !== 'resolved').length;
 
-      // Avg response time (use minutesSinceLastResponse or minutesAgo)
-      const responseTimes = agentTasks
-        .filter((t) => t.status !== 'resolved')
-        .map((t) => (t.minutesSinceLastResponse != null ? t.minutesSinceLastResponse : (t.minutesAgo ?? 0)));
-      const avgResponse =
-        responseTimes.length > 0
-          ? responseTimes.reduce((a, b) => a + b, 0) / responseTimes.length
-          : 0;
+      // Avg task age in BUSINESS DAYS across the agent's OPEN tasks (how long
+      // their current backlog has been sitting). Replaces the old avg-response-
+      // time metric (2026-06-09). Held in `avgResponse` so the generic sort/
+      // render keys stay unchanged; surfaced as "Avg Age".
+      const avgResponse = bizDayAgeStats(agentTasks.filter((t) => t.status !== 'resolved')).avgDays;
 
       // SLA compliance: resolved tasks within SLA limit
       const resolvedTasks = agentTasks.filter((t) => t.status === 'resolved');
@@ -262,7 +252,7 @@ export default function AgentProductivity({ tasks = [], members: membersProp, da
                 <td style={TD_STYLE}>{row.assigned}</td>
                 <td style={{ ...TD_STYLE, fontWeight: 600, color: '#29811e' }}>{row.resolved}</td>
                 <td style={{ ...TD_STYLE, color: row.open > 0 ? '#ed8d00' : '#9e9e9e' }}>{row.open}</td>
-                <td style={TD_STYLE}>{fmtTime(row.avgResponse)}</td>
+                <td style={TD_STYLE}>{fmtBizDays(row.avgResponse)}</td>
                 <td style={TD_STYLE}>
                   <SlaCell pct={row.slaCompliance} />
                 </td>

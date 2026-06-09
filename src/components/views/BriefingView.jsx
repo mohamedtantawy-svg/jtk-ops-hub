@@ -9,6 +9,7 @@ import { matchesAudience } from '../../data/comms';
 import { PermissionsContext, SettingsContext, IntegrationsContext } from '../../App';
 import { CALENDAR_EVENTS } from '../../data/calendar';
 import { slaInfo, rel, getVisibleEmails } from '../../utils/helpers';
+import { bizDayAgeStats, taskAgeScore, taskAgeBand, fmtBizDays } from '../../utils/taskAge';
 import { applySlaExtensionsToRows } from '../../utils/applySlaExtensions';
 // Queue data hooks are now mounted once in App.jsx and threaded through
 // IntegrationsContext — see queueUnified destructure below. Removing the
@@ -1089,36 +1090,19 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // 50% closed = score 100 per Mohamed's spec.
   const resScore = Math.min(100, Math.round((resRate / 50) * 100));
 
-  // Avg Task Age — CALENDAR time since each item was CREATED, averaged across
-  // every open queue item (everything except Jira — same pool as SLA above).
-  // Replaces the old "Avg Response Time" factor (2026-06-09, Mohamed's spec).
-  // "age" = now - createdAt (wall-clock, NOT biz-day) so it reflects how long
-  // work has been sitting regardless of source. Scoring anchors:
-  //   ≤ 5 days  → 100 (perfect) · 7 days → 50 (mid) · ≥ 10 days → 0 (very bad),
-  // piecewise-linear between the anchors.
+  // Avg Task Age — BUSINESS-DAY time since each item was CREATED (weekends
+  // don't elapse), averaged across every open queue item (everything except
+  // Jira — same pool as SLA above). Replaces the old "Avg Response Time" factor
+  // (2026-06-09, Mohamed's spec). Quality bands (see src/utils/taskAge.js):
+  //   < 10 biz days → Great · 10–14 → Good · > 14 → Bad.
   const ageItems = [
     ...slaCompPoolTickets,
     ...onboardingRows, ...offboardingRows, ...amendmentRows, ...redlineRows,
     ...workbenchActiveRows, ...incentivePlanRows, ...activeEorRows,
   ];
-  let _ageSumDays = 0, ageCount = 0;
-  for (const it of ageItems) {
-    const c = it && it.createdAt;
-    if (!c) continue;
-    const ms = new Date(c).getTime();
-    if (!Number.isFinite(ms)) continue;
-    const days = (Date.now() - ms) / 86400000;
-    if (days < 0) continue;
-    _ageSumDays += days; ageCount += 1;
-  }
-  const avgAgeDays = ageCount > 0 ? _ageSumDays / ageCount : 0;
-  const ageScore = avgAgeDays <= 5 ? 100
-    : avgAgeDays <= 7 ? Math.round(100 - (avgAgeDays - 5) * 25)         // 5d→100 … 7d→50
-    : avgAgeDays <= 10 ? Math.round(50 - (avgAgeDays - 7) * (50 / 3))   // 7d→50 … 10d→0
-    : 0;                                                               // ≥10d → very bad
-  const avgAgeWhole = Math.floor(avgAgeDays);
-  const avgAgeHrs = Math.round((avgAgeDays - avgAgeWhole) * 24);
-  const ageLabel = avgAgeDays > 0 ? `${avgAgeWhole}d ${avgAgeHrs}h` : '0d';
+  const { avgDays: avgAgeDays, count: ageCount } = bizDayAgeStats(ageItems);
+  const ageScore = taskAgeScore(avgAgeDays);
+  const ageLabel = fmtBizDays(avgAgeDays);
 
   const wSLA = Number.isFinite(settings.briefing_health_sla_weight) ? settings.briefing_health_sla_weight : 50;
   const wRes = Number.isFinite(settings.briefing_health_resolution_weight) ? settings.briefing_health_resolution_weight : 10;
@@ -1749,7 +1733,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 {[
                   {label:'SLA Compliance',weight:wSLA,value:`${slaCompRate}%`,score:slaCompRate,sub:`${Math.max(0, slaTotal - slaBreachTotal)}/${slaTotal} on-time · everything except Jira`,icon:'bi-shield-check'},
                   {label:'Resolution Rate',weight:wRes,value:`${resRate}%`,score:resScore,sub:`${zdClosedCount} closed · ${zdOpenAndOnHoldCount} open + on-hold · Zendesk only · 50% = excellent`,icon:'bi-check2-all'},
-                  {label:'Avg Task Age',weight:wResp,value:ageLabel,score:ageScore,sub:`Time since created · ${ageCount} open item${ageCount===1?'':'s'} · everything except Jira · ${avgAgeDays<5?'Fresh':avgAgeDays<7?'Aging':avgAgeDays<10?'Stale':'Critical'}`,icon:'bi-hourglass-split'},
+                  {label:'Avg Task Age',weight:wResp,value:ageLabel,score:ageScore,sub:`Biz days since created · ${ageCount} open item${ageCount===1?'':'s'} · everything except Jira · ${taskAgeBand(avgAgeDays)}`,icon:'bi-hourglass-split'},
                   {label:'Team Capacity',weight:wCap,value:wl,score:wlScore,sub: isOwnScope ? `${myCount} tasks · ${Math.round(capPct)}% of ${capHighMin}` : `${myCount} avg / agent · ${agentTaskTotal} tasks ÷ ${teamSize} ${teamSize === 1 ? 'agent' : 'agents'}`,icon:'bi-speedometer2'},
                 ].map(row=>{
                   const rc=row.score>=80?'#29811e':row.score>=60?'#ed8d00':'#d42d35';

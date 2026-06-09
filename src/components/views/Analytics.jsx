@@ -4,6 +4,7 @@ import { MEMBERS } from '../../data/members';
 import { HOURLY_VOLUME } from '../../data/feed';
 import { SettingsContext, PermissionsContext, IntegrationsContext } from '../../App';
 import { slaInfo } from '../../utils/helpers';
+import { bizDayAgeStats, fmtBizDays, taskAgeBand } from '../../utils/taskAge';
 // Queue data hooks are mounted in App.jsx — read via IntegrationsContext.
 import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
 import { useCurrentDept } from '../../hooks/useCurrentDept';
@@ -139,20 +140,13 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
     : '-';
 
   // ── KPI computations from real data ───────────────────────────────────
-  const myResponseTimes = useMemo(() => {
-    const rts = all
-      .filter(t => t.minutesSinceLastResponse != null)
-      .map(t => t.minutesSinceLastResponse);
-    return rts.length > 0
-      ? Math.round(rts.reduce((a, b) => a + b, 0) / rts.length)
-      : 0;
-  }, [all]);
-
-  const avgResponseLabel = useMemo(() => {
-    if (myResponseTimes === 0) return '--';
-    if (myResponseTimes < 60) return `${myResponseTimes}m`;
-    return `${Math.floor(myResponseTimes / 60)}h ${myResponseTimes % 60}m`;
-  }, [myResponseTimes]);
+  // Avg task age — BUSINESS-DAY time since createdAt across OPEN tasks (current
+  // backlog age). Replaces the old avg-response-time KPI (2026-06-09).
+  const myAgeBizDays = useMemo(
+    () => bizDayAgeStats(all.filter(t => t.status !== 'resolved')).avgDays,
+    [all],
+  );
+  const avgAgeLabel = useMemo(() => myAgeBizDays > 0 ? fmtBizDays(myAgeBizDays) : '--', [myAgeBizDays]);
 
   // Mount the same Deel queue hooks Briefing / Queue use so the SLA
   // compliance KPI here covers all 7 work streams instead of just the
@@ -246,22 +240,19 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
       const resolvedCount = resolvedTasks.length;
       const openCount = agentTasks.filter(t => t.status !== 'resolved').length;
 
-      // Real avg response time from minutesSinceLastResponse
-      const responseTimes = agentTasks
-        .filter(t => t.minutesSinceLastResponse != null)
-        .map(t => t.minutesSinceLastResponse);
-      const avgT = responseTimes.length > 0
-        ? Math.round(responseTimes.reduce((x, y) => x + y, 0) / responseTimes.length)
-        : 0;
+      // Task age in BUSINESS DAYS (time since created) across the agent's OPEN
+      // tasks. Replaces avg response time (2026-06-09). `avgT` = mean biz-day age
+      // (kept as the numeric sort key); `avgFirstResp` repurposed to the OLDEST
+      // open task's age.
+      const ageStats = bizDayAgeStats(agentTasks.filter(t => t.status !== 'resolved'));
+      const avgT = ageStats.avgDays;
 
       // Real escalation rate
       const escalated = agentTasks.filter(t => t.status === 'escalated').length;
       const agentEscalRate = assigned > 0 ? parseFloat(((escalated / assigned) * 100).toFixed(1)) : 0;
 
-      // Real avg first response (use minutesSinceLastResponse as proxy)
-      const avgFirstResp = avgT > 0
-        ? (avgT < 60 ? `${avgT}m` : `${Math.floor(avgT / 60)}h ${avgT % 60}m`)
-        : '--';
+      // Oldest open task age (replaces the old "avg first response" column).
+      const avgFirstResp = ageStats.maxDays > 0 ? fmtBizDays(ageStats.maxDays) : '--';
 
       // Real SLA compliance — honours per-task slaMinsOverride
       // (server-stamped from queue_sla_thresholds) before falling back
@@ -358,11 +349,11 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
       iconBg: '#e8f5e3',
     },
     {
-      label: 'Avg Response Time',
-      value: avgResponseLabel,
-      sub: myResponseTimes > 0 ? `${myResponseTimes} min average` : 'No response data',
+      label: 'Avg Task Age',
+      value: avgAgeLabel,
+      sub: myAgeBizDays > 0 ? `${taskAgeBand(myAgeBizDays)} · biz days · open tasks` : 'No open tasks',
       color: '#ed8d00',
-      icon: 'bi-clock-fill',
+      icon: 'bi-hourglass-split',
       iconBg: '#fff8e6',
     },
     {
@@ -595,9 +586,9 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
                 { k: 'assigned', l: 'Assigned' },
                 { k: 'resolved', l: 'Resolved' },
                 { k: 'open', l: 'Open' },
-                { k: 'avgT', l: 'Avg time' },
+                { k: 'avgT', l: 'Avg age' },
                 { k: 'escalRate', l: 'Esc rate' },
-                { k: '', l: 'Avg 1st resp' },
+                { k: '', l: 'Oldest' },
                 { k: 'slaComp', l: 'SLA comp%' },
               ].map(({ k, l }) => (
                 <span key={l} onClick={k ? () => toggleSort(k) : undefined} style={{ color: k && sortCol === k ? 'var(--text, #1b1b1b)' : 'var(--text-muted, #9e9e9e)', fontSize: 13, fontWeight: 500, textTransform: 'none', letterSpacing: 'normal', textAlign: l === 'Agent' ? 'left' : 'center', cursor: k ? 'pointer' : 'default', userSelect: 'none', display: 'flex', alignItems: 'center', justifyContent: l === 'Agent' ? 'flex-start' : 'center', gap: 2 }}>
@@ -618,7 +609,7 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
                 <span style={{ textAlign: 'center', fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>{assigned}</span>
                 <span style={{ textAlign: 'center', fontSize: 14, fontWeight: 700, color: '#29811e', fontVariantNumeric: 'tabular-nums' }}>{res}</span>
                 <span style={{ textAlign: 'center', fontSize: 14, fontWeight: 600, color: '#ed8d00', fontVariantNumeric: 'tabular-nums' }}>{op}</span>
-                <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 600, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{avgT}m</div>
+                <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 600, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{fmtBizDays(avgT)}</div>
                 <span style={{ textAlign: 'center', fontSize: 13, fontWeight: 600, color: er > 5 ? '#d42d35' : er > 3 ? '#ed8d00' : '#29811e', fontVariantNumeric: 'tabular-nums' }}>{er}%</span>
                 <span style={{ textAlign: 'center', fontSize: 12, color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>{avgFirstResp}</span>
                 <div style={{ textAlign: 'center' }}>
