@@ -122,6 +122,38 @@ export function cacheGet(key, ttl) {
 }
 
 /**
+ * Read every FRESH cache entry whose key starts with `prefix`. Returns an
+ * array of the stored `data` values (order not guaranteed). Read-only — never
+ * evicts or mutates. Scans both the in-memory map and the on-disk cache dir.
+ *
+ * Added 2026-06-09 for the country-overlay endpoint: some Queue source routes
+ * key their cache with a parameter hash (e.g. `deel_amendments_v2_<statuses>`),
+ * so a reader that doesn't know the exact param set can't reconstruct the key.
+ * A prefix scan finds the cached full payload without that coupling. Callers
+ * that expect a single logical source should merge/dedupe the returned values.
+ */
+export function cacheGetByPrefix(prefix, ttl) {
+  if (!prefix) return [];
+  const keys = new Set();
+  for (const k of memoryFallback.keys()) {
+    if (typeof k === 'string' && k.startsWith(prefix)) keys.add(k);
+  }
+  try {
+    for (const file of readdirSync(CACHE_DIR)) {
+      if (!file.endsWith('.json')) continue;
+      const k = file.slice(0, -5);
+      if (k.startsWith(prefix)) keys.add(k);
+    }
+  } catch { /* FS unavailable — memory scan still applies */ }
+  const out = [];
+  for (const k of keys) {
+    const data = cacheGet(k, ttl); // reuses freshness + memory/disk fallback
+    if (data != null) out.push(data);
+  }
+  return out;
+}
+
+/**
  * Write a value to cache (both file and memory).
  * Enforces LRU max size to prevent unbounded memory growth.
  * @param {string} key — cache key
