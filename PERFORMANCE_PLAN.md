@@ -30,16 +30,20 @@ template thresholds. Template-versioned so history is immutable.
   `can_manage_performance` power + `performance-admin.js::canAdministerPerformance`.
 
 ## Phases (commit + push each to dev; deploy once all done)
-- [ ] **A** Sub-tab shell (HR Requests + Performance) + data model (4 tables) + `is_performance_admin`
-      grant + `can_manage_performance` + constants + empty PerformanceView.
-- [ ] **B** Role templates (seed HRX 5 roles) + server scoring engine + admin Settings editor.
-- [ ] **C** Monthly cycle + Evaluation form (auto-score) + Check-In form + status workflow + lock + API.
-- [ ] **D** Individual dashboard: monthly trend, radar, quarter avg, band ring, promotion eligibility.
-- [ ] **E** Team/manager dashboard + review queue: completion %, distribution, top/bottom, heatmap.
-- [ ] **F** Warnings + promotions (issue/ack/history, eligibility auto-suggest).
-- [ ] **G** Reminders: `usePerfBadge` home cards (managers + members) + bell notifications + monthly cron.
-- [ ] **H** Historical ingestion (`data/perf_historical_seed.json` → perf_reviews, name→email→org) +
-      Command Center rollup + adversarial review + live-audit playbook.
+- [x] **A** Sub-tab shell (HR Requests + Performance) + data model (4 tables) + `is_performance_admin`
+      grant + `can_manage_performance` + constants + empty PerformanceView. — `a3c6fa4`
+- [x] **B** Role templates (seed HRX 5 roles) + server scoring engine + admin Settings editor. — `9688f8a`
+- [x] **C** Monthly cycle + Evaluation form (auto-score) + Check-In form + status workflow + lock + API. — `e114210`
+- [x] **D** Individual dashboard: monthly trend, radar, quarter avg, band ring, promotion eligibility +
+      team/manager dashboard (distribution, completion). — `ff12bcd`
+- [x] **E** Warnings (verbal→PIP): issue/acknowledge/resolve, member + manager panels; promotions on
+      reviews surfaced as eligibility. — `7342df2`
+- [x] **F** Reminders: `usePerfBadge` home cards (managers + members) + bell notifications
+      (`link_view='performance'`) + monthly cron (`performance-cycle-sync`, idempotent, daily-gated). — `daf3214`
+- [x] **G** Historical ingestion (`data/perf_historical_seed.json` → perf_reviews, name→email→org,
+      finalized+locked, source='import', idempotent sentinel + ON CONFLICT). — Phase G/H commit
+- [x] **H** Command Center People rollup (per-dept avg score, latest finalized month) + registry
+      (`commandCenterSources.js` `performance`, §3.18) + final adversarial review. — Phase G/H commit
 
 ## Decisions (baked in; flag to change)
 1 review row = eval + check-in. Member self-reflection + manager scores. Role templates dept-editable

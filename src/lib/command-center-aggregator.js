@@ -425,20 +425,57 @@ export async function getPeople() {
   const outToday = await leaveFold(`t.start_date <= CURRENT_DATE AND t.end_date >= CURRENT_DATE`);
   const upcoming = await leaveFold(`t.start_date > CURRENT_DATE AND t.start_date <= CURRENT_DATE + INTERVAL '7 days'`);
 
+  // Performance rollup (Phase H 2026-06-09): avg overall score per dept for the
+  // most recent month with finalized reviews. SUM+COUNT folded per root, then
+  // averaged after folding (a plain SUM of per-node averages would be wrong).
+  // Fail-soft: any error → perfFold empty → cards just omit the perf stat.
+  let perfMonth = 0, perfYear = 0;
+  try {
+    const { rows } = await query(
+      `SELECT period_year AS y, period_month AS m FROM perf_reviews
+        WHERE status IN ('finalized','acknowledged')
+        ORDER BY period_year DESC, period_month DESC LIMIT 1`);
+    if (rows[0]) { perfYear = rows[0].y; perfMonth = rows[0].m; }
+  } catch (e) { console.warn('[cc-agg getPeople] perf period', e.message); }
+  let perfFold = new Map();
+  if (perfMonth) {
+    perfFold = await foldByRoot(
+      `SELECT org_node_id, SUM(overall_score)::int AS sum_overall, COUNT(*)::int AS reviews
+         FROM perf_reviews
+        WHERE period_month = $1 AND period_year = $2 AND status IN ('finalized','acknowledged')
+          AND org_node_id IS NOT NULL
+        GROUP BY org_node_id`,
+      resolveRoot,
+      r => ({ nodeId: r.org_node_id, values: { sumOverall: r.sum_overall, reviews: r.reviews } }),
+      [perfMonth, perfYear]);
+  }
+  const perfPeriod = perfMonth ? `${perfYear}-${String(perfMonth).padStart(2, '0')}` : null;
+
   const departments = roots.map(d => {
     const headcount = (head.get(d.id) || {}).headcount || 0;
     const vacancies = (vac.get(d.id) || {}).vacancies || 0;
     const out = (outToday.get(d.id) || {}).c || 0;
     const up = (upcoming.get(d.id) || {}).c || 0;
     const resolved30 = (hh.get(d.id) || {}).resolved30 || 0;
+    const pf = perfFold.get(d.id) || {};
+    const perfReviews = pf.reviews || 0;
+    const perfAvg = perfReviews > 0 ? Math.round((pf.sumOverall / perfReviews) * 10) / 10 : null;
     return { id: d.id, name: d.name, slug: d.slug, color: d.color, headcount, vacancies, outToday: out, upcoming: up, resolved30,
+      perfAvg, perfReviews, perfPeriod,
       coverage: headcount > 0 ? Math.round((1 - out / headcount) * 100) : 100 };
   }).sort((a, b) => b.headcount - a.headcount);
 
+  const perfTot = departments.reduce((t, d) => ({
+    sum: t.sum + (d.perfAvg != null ? d.perfAvg * d.perfReviews : 0),
+    n: t.n + (d.perfAvg != null ? d.perfReviews : 0),
+  }), { sum: 0, n: 0 });
   const totals = departments.reduce((t, d) => ({
     headcount: t.headcount + d.headcount, vacancies: t.vacancies + d.vacancies,
     outToday: t.outToday + d.outToday, upcoming: t.upcoming + d.upcoming, resolved30: t.resolved30 + d.resolved30,
-  }), empty.totals);
+  }), { ...empty.totals });
+  totals.perfAvg = perfTot.n > 0 ? Math.round((perfTot.sum / perfTot.n) * 10) / 10 : null;
+  totals.perfReviews = perfTot.n;
+  totals.perfPeriod = perfPeriod;
   return { departments, totals };
 }
 

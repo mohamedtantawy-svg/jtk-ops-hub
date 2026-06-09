@@ -32,6 +32,7 @@ export const COMMAND_CENTER_SOURCES = [
   { key: 'handovers',       label: 'Handovers / coverage', table: 'handovers',             deptDimension: 'org_node_id',       kpis: ['active', 'coverageGaps'],                      phase: 5 },
   { key: 'work_tasks',      label: 'Work tasks',           table: 'work_tasks',            deptDimension: 'org_node_id',       kpis: ['open', 'overdue'],                             phase: 3 },
   { key: 'announcements',   label: 'Announcements',        table: 'announcements',         deptDimension: 'org_node_id',       kpis: ['ackRate'],                                     phase: 5 },
+  { key: 'performance',     label: 'Performance reviews',  table: 'perf_reviews',          deptDimension: 'org_node_id',       kpis: ['avgScore', 'reviewedRate'],                    phase: 9 },
 
   // ── External / queue sources (per-dept enablement via dept-integrations) ──
   { key: 'zendesk',         label: 'Zendesk tickets',      table: null,                    deptDimension: 'dept-integrations', kpis: ['open', 'sla', 'responseTime', 'resolvedRate'], phase: 2 },

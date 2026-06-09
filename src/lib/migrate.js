@@ -14,6 +14,7 @@ import { backfillHrExperienceTenancyIfNeeded } from './dept-backfill';
 import { seedGlobalImmigrationRosterIfNeeded } from './global-immigration-roster-seed';
 import { seedCommandCenterDeptIfNeeded } from './command-center-dept-seed';
 import { seedPerfTemplatesIfNeeded } from './perf-templates-seed';
+import { seedPerfHistoricalIfNeeded } from './perf-seed';
 
 const SCHEMA_SQL = `
 -- Members
@@ -2946,6 +2947,19 @@ export async function runMigrations() {
     }
   } catch (err) {
     console.warn('[db] Performance templates seed failed:', err?.message);
+  }
+
+  // Historical performance import (Phase G 2026-06-09). One finalized/locked
+  // perf_reviews row per member-month from data/perf_historical_seed.json so
+  // history is visible the moment the tab ships. Idempotent (sentinel + ON
+  // CONFLICT DO NOTHING); never clobbers live reviews. See perf-seed.js.
+  try {
+    const phResult = await seedPerfHistoricalIfNeeded();
+    if (phResult?.reseeded) {
+      console.log(`[db] Historical performance seeded: ${phResult.inserted} review(s), ${phResult.skippedNoEmail || 0} unresolved, ${phResult.conflicts || 0} kept`);
+    }
+  } catch (err) {
+    console.warn('[db] Historical performance seed failed:', err?.message);
   }
 
   // Phase C 2026-05-18: when HANDOVER_DEFAULTS_VERSION bumps, refresh the
