@@ -57,6 +57,7 @@ function normaliseOverrideRow(row) {
     isHrHubAdmin: row.is_hr_hub_admin === true,
     isLeaderAlertsAdmin: row.is_leader_alerts_admin === true,
     isCommandCenterViewer: row.is_command_center_viewer === true,
+    isPerformanceAdmin: row.is_performance_admin === true,
     // Org Tab (Phase 0): org_node_id is nullable during the migration window
     // — null means the merge consumer falls back to `team` for grouping until
     // Phase 6 retires the legacy column.
@@ -94,6 +95,7 @@ function applyOverride(base, override, loginsByEmail) {
     isHrHubAdmin: false,
     isLeaderAlertsAdmin: false,
     isCommandCenterViewer: false,
+    isPerformanceAdmin: false,
     orgNodeId: null,
   };
   const merged = { ...base };
@@ -119,6 +121,7 @@ function applyOverride(base, override, loginsByEmail) {
   merged.isHrHubAdmin = override.isHrHubAdmin === true;
   merged.isLeaderAlertsAdmin = override.isLeaderAlertsAdmin === true;
   merged.isCommandCenterViewer = override.isCommandCenterViewer === true;
+  merged.isPerformanceAdmin = override.isPerformanceAdmin === true;
   merged.orgNodeId = override.orgNodeId || null;
   return merged;
 }
@@ -235,6 +238,7 @@ export function mergeTeamMembers(overrideRows = [], loginRows = [], orgNodes = [
       isHrHubAdmin: override.isHrHubAdmin === true,
       isLeaderAlertsAdmin: override.isLeaderAlertsAdmin === true,
       isCommandCenterViewer: override.isCommandCenterViewer === true,
+      isPerformanceAdmin: override.isPerformanceAdmin === true,
       orgNodeId: override.orgNodeId || null,
       department: resolveTopDept(override.orgNodeId || null, orgNodeLookup),
     });

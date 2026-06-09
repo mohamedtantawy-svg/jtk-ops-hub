@@ -162,6 +162,10 @@ export const ALL_ADMIN_POWERS = [
   // comment regardless of authorship. Bundled into `at_leader_alerts_admin`
   // and stackable on top of any other access type.
   'can_manage_leader_alerts',
+  // Performance admin power: edit performance schemas/templates and cross-
+  // team performance configuration. Bundled into the `at_performance_admin`
+  // default access type and stackable on top of any other access type.
+  'can_manage_performance',
   // Command Center (Phase 0): read-only access to the executive cross-
   // department oversight surface. EXEC-ONLY — deliberately NOT inherited by
   // Regional Managers (see ADMIN_POWERS_NO_EXEC); bundled into at_command_center
@@ -233,6 +237,7 @@ export const ADMIN_POWER_LABELS = {
   'can_manage_org':            'Manage Org Structure',
   'can_manage_hr_hub':         'Manage HR Hub',
   'can_manage_leader_alerts':  'Manage Leaders Alerts',
+  'can_manage_performance':    'Manage Performance',
   'can_view_command_center':   'View Command Center',
 };
 
@@ -318,6 +323,21 @@ export const DEFAULT_ACCESS_TYPES = [
     views: [...VIEWS_NO_SETTINGS_NO_MANAGERIAL],
     actions: [...ALL_ACTIONS],
     adminPowers: ['can_manage_hr_hub'],
+    dataScope: 'own_tasks_only',
+    isDefault: true,
+  },
+  {
+    // Performance Admin — assignable from the Team tab. Grants full edit
+    // rights over Performance schemas/templates and cross-team performance
+    // configuration WITHOUT granting any other system-level admin powers.
+    // Stackable on top of an agent / TL / RM access type — when a user has
+    // multiple types, the union of `views` / `actions` / `adminPowers` applies.
+    id: 'at_performance_admin',
+    name: 'Performance Admin',
+    description: 'Full edit access to Performance: schemas, templates, and cross-team configuration. Does not grant other settings access.',
+    views: [...VIEWS_NO_SETTINGS_NO_MANAGERIAL],
+    actions: [...ALL_ACTIONS],
+    adminPowers: ['can_manage_performance'],
     dataScope: 'own_tasks_only',
     isDefault: true,
   },

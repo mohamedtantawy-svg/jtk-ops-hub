@@ -25,6 +25,7 @@ import {
 import { approveHideTask } from '../../services/hideTaskApi';
 import HrHubDetailPanel from '../hr-hub/HrHubDetailPanel';
 import HrHubSettingsPanel from '../hr-hub/HrHubSettingsPanel';
+import PerformanceView from './PerformanceView';
 import DenyHideTaskModal from '../modals/DenyHideTaskModal';
 import ApproveSlaExtensionModal from '../modals/ApproveSlaExtensionModal';
 import DenySlaExtensionModal from '../modals/DenySlaExtensionModal';
@@ -167,6 +168,32 @@ export default function HrHubView({ user, onCreateHrHub }) {
   const [slaApproveModalReq, setSlaApproveModalReq] = useState(null);
   const [slaDenyModalReq, setSlaDenyModalReq] = useState(null);
   const [decisionError, setDecisionError] = useState(null);
+
+  // ── Top-level sub-tab (HR Requests | Performance) ──────────────────────────
+  // Mirrors FeedbackView's ?kind= sub-tab pattern. The whole existing HR Hub
+  // board lives under 'hr_requests' (unchanged); 'performance' renders the
+  // already-built PerformanceView. URL-mirrored via a NON-colliding `hrtab`
+  // param (flow / scope / status / req are already taken by the board's own
+  // deep-link state) so a refresh / shared URL restores the chosen sub-tab.
+  // Kept with the other top-level hooks (above every early return) so the
+  // hook order is stable. Default 'hr_requests' drops the param.
+  const [subTab, setSubTab] = useState('hr_requests'); // 'hr_requests' | 'performance'
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const v = new URLSearchParams(window.location.search).get('hrtab');
+      if (v === 'performance') setSubTab('performance');
+    } catch {}
+  }, []);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const url = new URL(window.location.href);
+      if (subTab && subTab !== 'hr_requests') url.searchParams.set('hrtab', subTab);
+      else url.searchParams.delete('hrtab');
+      window.history.replaceState({}, '', url.toString());
+    } catch {}
+  }, [subTab]);
   // Read all view-state params from the URL ONCE at mount. Read in this
   // initialiser (NOT a useEffect) so a hard refresh on a shared / deep-link
   // URL paints the right filters on the first render instead of flashing the
@@ -613,13 +640,54 @@ export default function HrHubView({ user, onCreateHrHub }) {
             </div>
           </div>
         </div>
-        <button
-          onClick={() => onCreateHrHub?.()}
-          style={primaryBtn}
-        >
-          <i className="bi-plus-circle-fill" style={{ fontSize: 13 }} /> New request
-        </button>
+        {subTab === 'hr_requests' && (
+          <button
+            onClick={() => onCreateHrHub?.()}
+            style={primaryBtn}
+          >
+            <i className="bi-plus-circle-fill" style={{ fontSize: 13 }} /> New request
+          </button>
+        )}
       </div>
+
+      {/* Sub-tab nav (HR Requests | Performance) — mirrors FeedbackView's
+          surface tablist. Sits directly under the hero, shared across both
+          sub-tabs. Reuses HrHubView's own segmentedControl tokens. The board
+          body below is wrapped in a sub-tab branch; the modals stay outside
+          it so they always mount. */}
+      <div style={{ ...scopeRow, flexWrap: 'wrap' }}>
+        <div role="tablist" aria-label="HR Hub section" style={{ ...segmentedControl, flexWrap: 'wrap' }}>
+          {[
+            { key: 'hr_requests', label: 'HR Requests', icon: 'bi-inbox-fill', count: statusCounts.total },
+            { key: 'performance', label: 'Performance', icon: 'bi-graph-up-arrow', count: null },
+          ].map(seg => {
+            const active = subTab === seg.key;
+            return (
+              <button
+                key={seg.key}
+                role="tab"
+                aria-selected={active}
+                onClick={() => setSubTab(seg.key)}
+                style={{ ...segmentBtn, ...(active ? segmentBtnActive : null) }}
+              >
+                <i className={seg.icon} style={{ fontSize: 13 }} />
+                {seg.label}
+                {seg.count != null && (
+                  <span style={{ ...segmentCount, ...(active ? segmentCountActive : null) }}>{seg.count}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Surface branch ──────────────────────────────────────────────
+          'hr_requests' renders the entire existing HR Hub board (scope
+          toggle → status cards → filter bar → list) UNCHANGED. 'performance'
+          renders the already-built PerformanceView. The hero + sub-tab nav
+          above and all the modals below mount regardless of the branch. */}
+      {subTab === 'hr_requests' ? (
+      <>
 
       {/* Scope toggle (My / Team / All / Assigned to me / Mentioned) with count
           badges. "Mentioned" mirrors Slack's @mentions tab — surfaces every
@@ -833,6 +901,10 @@ export default function HrHubView({ user, onCreateHrHub }) {
           </div>
         )}
       </div>
+      </>
+      ) : (
+        <PerformanceView user={user} />
+      )}
 
       {settingsOpen && <HrHubSettingsPanel onClose={() => setSettingsOpen(false)} />}
       {detailId && (

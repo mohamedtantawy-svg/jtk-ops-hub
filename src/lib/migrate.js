@@ -707,6 +707,14 @@ ALTER TABLE team_member_overrides ADD COLUMN IF NOT EXISTS is_hr_hub_admin BOOLE
 CREATE INDEX IF NOT EXISTS idx_tmo_is_hr_hub_admin
   ON team_member_overrides(is_hr_hub_admin) WHERE is_hr_hub_admin = true;
 
+-- ── Performance Admin per-user grant (2026-06-09) ──────────────────────────
+-- Stackable. Gates Performance template/schema edits + cross-team config.
+-- Read via src/lib/performance-admin.js (30 s cache). Per-review read/write
+-- scoping is handled by the org tree (getVisibleEmails), not this flag.
+ALTER TABLE team_member_overrides ADD COLUMN IF NOT EXISTS is_performance_admin BOOLEAN DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS idx_tmo_is_performance_admin
+  ON team_member_overrides(is_performance_admin) WHERE is_performance_admin = true;
+
 -- ── Command Center viewer grant (2026-06-03, Command Center Phase 0) ────────
 -- Read-only access to the executive Command Center (cross-department
 -- oversight for CEO / VP Ops / COO). Stackable on any base access type;
@@ -978,6 +986,115 @@ BEGIN
       CHECK (status IN ('new','in_progress','blocked','completed'));
   END IF;
 END $$;
+
+-- ── Performance management (2026-06-09) ─────────────────────────────────────
+-- HR Hub → Performance. Term performance management: a monthly cycle per dept,
+-- role-specific evaluation templates, one review per member per cycle (scored
+-- evaluation + qualitative check-in), and formal warnings. Org-tree-scoped
+-- (member/TL/RM/admin via getVisibleEmails) + dept-scoped via org_node_id.
+
+-- A monthly performance cycle per department.
+CREATE TABLE IF NOT EXISTS perf_cycles (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_node_id  UUID REFERENCES org_nodes(id) ON DELETE CASCADE,
+  period_month INTEGER NOT NULL,
+  period_year  INTEGER NOT NULL,
+  status       VARCHAR(16) NOT NULL DEFAULT 'open',   -- open | locked
+  opened_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  locked_at    TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (org_node_id, period_month, period_year)
+);
+CREATE INDEX IF NOT EXISTS idx_perf_cycles_dept ON perf_cycles(org_node_id, period_year, period_month);
+
+-- Role-specific evaluation templates (criteria + weights + bands) as JSONB so a
+-- dept can edit without a migration. Versioned: each review keeps the template
+-- version it was scored with so historical scores are immutable.
+CREATE TABLE IF NOT EXISTS perf_templates (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_node_id  UUID REFERENCES org_nodes(id) ON DELETE CASCADE,
+  role_key     VARCHAR(48) NOT NULL,
+  name         VARCHAR(120) NOT NULL,
+  version      INTEGER NOT NULL DEFAULT 1,
+  weights      JSONB NOT NULL DEFAULT '{"operations":0.5,"kpi":0.3,"growth":0.2}'::jsonb,
+  operations_criteria JSONB NOT NULL DEFAULT '[]'::jsonb,  -- [{key,label,description}]
+  growth_criteria     JSONB NOT NULL DEFAULT '[]'::jsonb,
+  ops_thresholds      JSONB,                          -- optional [t1..t5] yes-count tiers
+  growth_thresholds   JSONB,
+  is_active    BOOLEAN NOT NULL DEFAULT true,
+  is_archived  BOOLEAN NOT NULL DEFAULT false,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_perf_templates_dept ON perf_templates(org_node_id, role_key) WHERE is_archived = false;
+
+-- One review per member per cycle: scored evaluation + qualitative check-in.
+-- member_email/manager_email are stored LOWERCASED so the UNIQUE works for upsert.
+CREATE TABLE IF NOT EXISTS perf_reviews (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_node_id   UUID REFERENCES org_nodes(id) ON DELETE SET NULL,
+  cycle_id      UUID REFERENCES perf_cycles(id) ON DELETE SET NULL,
+  period_month  INTEGER NOT NULL,
+  period_year   INTEGER NOT NULL,
+  member_email  VARCHAR(255) NOT NULL,
+  member_name   VARCHAR(255),
+  member_id     INTEGER REFERENCES members(id) ON DELETE SET NULL,
+  manager_email VARCHAR(255),
+  manager_name  VARCHAR(255),
+  role_key      VARCHAR(48),
+  template_id   UUID REFERENCES perf_templates(id) ON DELETE SET NULL,
+  template_version INTEGER,
+  sentiment     NUMERIC(3,1),
+  operations    NUMERIC(3,1),
+  kpi           NUMERIC(3,1),
+  growth        NUMERIC(3,1),
+  kpi_points    NUMERIC(5,1),
+  weighted_score NUMERIC(3,1),
+  overall_score INTEGER,
+  band          VARCHAR(24),
+  promotion     VARCHAR(16) DEFAULT 'no',
+  eval_answers  JSONB NOT NULL DEFAULT '{}'::jsonb,
+  checkin       JSONB NOT NULL DEFAULT '{}'::jsonb,
+  status        VARCHAR(20) NOT NULL DEFAULT 'draft',
+  is_locked     BOOLEAN NOT NULL DEFAULT false,
+  source        VARCHAR(20) NOT NULL DEFAULT 'app',   -- app | import
+  external_id   VARCHAR(255),
+  finalized_at  TIMESTAMPTZ,
+  finalized_by_email VARCHAR(255),
+  acknowledged_at TIMESTAMPTZ,
+  created_by_email VARCHAR(255),
+  updated_by_email VARCHAR(255),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (member_email, period_month, period_year)
+);
+CREATE INDEX IF NOT EXISTS idx_perf_reviews_member  ON perf_reviews(member_email, period_year, period_month);
+CREATE INDEX IF NOT EXISTS idx_perf_reviews_manager ON perf_reviews(manager_email, period_year, period_month);
+CREATE INDEX IF NOT EXISTS idx_perf_reviews_dept    ON perf_reviews(org_node_id, period_year, period_month);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_perf_reviews_external ON perf_reviews(external_id) WHERE external_id IS NOT NULL;
+
+-- Formal performance warnings (verbal/written/final/pip), optionally linked to
+-- a review, with acknowledgment + resolution history.
+CREATE TABLE IF NOT EXISTS perf_warnings (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  org_node_id   UUID REFERENCES org_nodes(id) ON DELETE SET NULL,
+  member_email  VARCHAR(255) NOT NULL,
+  member_name   VARCHAR(255),
+  level         VARCHAR(16) NOT NULL DEFAULT 'verbal',
+  reason        TEXT,
+  detail        TEXT,
+  review_id     UUID REFERENCES perf_reviews(id) ON DELETE SET NULL,
+  issued_by_email VARCHAR(255),
+  issued_by_name  VARCHAR(255),
+  issued_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  acknowledged_at TIMESTAMPTZ,
+  is_resolved   BOOLEAN NOT NULL DEFAULT false,
+  resolved_at   TIMESTAMPTZ,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_perf_warnings_member ON perf_warnings(member_email, issued_at DESC);
 
 -- ── Country-ownership junction (2026-04-30) ─────────────────────────────────
 -- Replaces the static src/data/countryOwners.js map with a DB-backed source

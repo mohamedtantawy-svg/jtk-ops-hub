@@ -78,7 +78,7 @@ export async function GET(req) {
                     service, country, avatar_url, start_date, is_new, is_deleted,
                     on_leave, is_announcements_admin,
                     is_access_admin, is_hr_hub_admin, is_leader_alerts_admin,
-                    is_command_center_viewer
+                    is_command_center_viewer, is_performance_admin
                FROM team_member_overrides`
           );
           // /me only consumes profile fields (role/team/region/etc.), never
@@ -174,6 +174,7 @@ export async function GET(req) {
         isHrHubAdmin: mergedEntry.isHrHubAdmin === true,
         isLeaderAlertsAdmin: mergedEntry.isLeaderAlertsAdmin === true,
         isCommandCenterViewer: mergedEntry.isCommandCenterViewer === true,
+        isPerformanceAdmin: mergedEntry.isPerformanceAdmin === true,
       });
     }
 

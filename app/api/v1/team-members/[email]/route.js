@@ -76,6 +76,7 @@ export async function PATCH(req, { params }) {
       isAnnouncementsAdmin: 'is_announcements_admin',
       isAccessAdmin: 'is_access_admin',
       isCommandCenterViewer: 'is_command_center_viewer',
+      isPerformanceAdmin: 'is_performance_admin',
       // Phase 3 (Org Tab): allocation now flows through org_node_id. Legacy
       // `team` stays in the map for backwards-compat through Phase 5; Phase
       // 6 drops it once every consumer reads from the new structure.
@@ -108,7 +109,7 @@ export async function PATCH(req, { params }) {
         if (clientKey === 'managerEmail' && typeof val === 'string') val = val.toLowerCase();
         // Coerce boolean permission flags so JSON `true`/`false` strings or
         // numbers become real booleans for the JSONB write.
-        if (clientKey === 'isAnnouncementsAdmin' || clientKey === 'isAccessAdmin' || clientKey === 'isCommandCenterViewer') val = !!val;
+        if (clientKey === 'isAnnouncementsAdmin' || clientKey === 'isAccessAdmin' || clientKey === 'isCommandCenterViewer' || clientKey === 'isPerformanceAdmin') val = !!val;
         updates.push(dbCol);
         values.push(val);
       }
@@ -134,7 +135,7 @@ export async function PATCH(req, { params }) {
       RETURNING email, name, initials, title, access, manager_email, team, region,
                 service, country, avatar_url, start_date, is_new, is_deleted,
                 on_leave, is_announcements_admin,
-                is_access_admin, is_command_center_viewer,
+                is_access_admin, is_command_center_viewer, is_performance_admin,
                 org_node_id,
                 created_at, updated_at
     `;
@@ -214,6 +215,14 @@ export async function PATCH(req, { params }) {
         bustCommandCenterAccessCache(email);
       } catch {}
     }
+    // Same for the Performance admin grant — take effect on the next
+    // performance-route hit rather than waiting for the 30s TTL.
+    if (Object.prototype.hasOwnProperty.call(body, 'isPerformanceAdmin')) {
+      try {
+        const { bustPerformanceAdminCache } = await import('../../../../../src/lib/performance-admin');
+        bustPerformanceAdminCache(email);
+      } catch {}
+    }
 
     return NextResponse.json({
       email: row.email,
@@ -243,6 +252,7 @@ export async function PATCH(req, { params }) {
       isAnnouncementsAdmin: row.is_announcements_admin === true,
       isAccessAdmin: row.is_access_admin === true,
       isCommandCenterViewer: row.is_command_center_viewer === true,
+      isPerformanceAdmin: row.is_performance_admin === true,
       // Phase 3 (Org Tab): expose the org node id so the FE applies the
       // updated allocation without re-fetching the full roster.
       orgNodeId: row.org_node_id || null,

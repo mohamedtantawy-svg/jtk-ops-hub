@@ -31,6 +31,15 @@ export const usePermissions = (user, accessTypes, userAccessMap) => {
       || hasAdminPower(accessType, 'can_manage_hr_hub')
       || hasAdminPower(accessType, 'can_manage_settings');
 
+    // Per-user Performance admin grant — same shape as HR Hub Admin. Read
+    // from team_member_overrides.is_performance_admin by the server, surfaced
+    // as `isPerformanceAdmin`. Full app admins also qualify; the flag stacks
+    // on top of any base access type so a TL or agent can edit Performance
+    // config without escalating.
+    const canManagePerformance = user?.isPerformanceAdmin === true
+      || hasAdminPower(accessType, 'can_manage_performance')
+      || hasAdminPower(accessType, 'can_manage_settings');
+
     // Per-user Leaders Alerts admin grant — same shape as HR Hub Admin.
     // Read from team_member_overrides.is_leader_alerts_admin by the
     // server, surfaced as `isLeaderAlertsAdmin`. Full admins always
@@ -83,6 +92,9 @@ export const usePermissions = (user, accessTypes, userAccessMap) => {
       // editing in the Settings panel; edit/soft-delete any alert or
       // comment regardless of authorship.
       canManageLeaderAlerts,
+      // Performance admin — edit Performance schemas/templates + cross-team
+      // performance config. Combines the admin gate with per-user grants.
+      canManagePerformance,
       // Read-only executive Command Center gate (cross-department oversight).
       // Used for the nav tab, the App.jsx mount, and the URL-gate; mirrors the
       // server-side canViewCommandCenter() so visibility and data agree.

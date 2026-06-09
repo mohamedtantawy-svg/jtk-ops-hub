@@ -275,6 +275,7 @@ const App=()=>{
               isHrHubAdmin: stored.isHrHubAdmin === true,
               isLeaderAlertsAdmin: stored.isLeaderAlertsAdmin === true,
               isCommandCenterViewer: stored.isCommandCenterViewer === true,
+              isPerformanceAdmin: stored.isPerformanceAdmin === true,
             };
           }
         }
@@ -908,6 +909,7 @@ const App=()=>{
                   isHrHubAdmin: serverUser.isHrHubAdmin === true,
                   isLeaderAlertsAdmin: serverUser.isLeaderAlertsAdmin === true,
                   isCommandCenterViewer: serverUser.isCommandCenterViewer === true,
+                  isPerformanceAdmin: serverUser.isPerformanceAdmin === true,
                 }
               : serverUser;
             // Persist the freshest snapshot so the next mount's useState
