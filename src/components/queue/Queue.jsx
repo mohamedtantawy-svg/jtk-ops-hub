@@ -58,6 +58,8 @@ import {
   normalizeImmigrationTasks,
 } from '../../utils/normalizeSourceRows';
 import { isUrgentAssistTaskType } from '../../lib/urgent-assist-task-types';
+import { useCountryOverlay } from '../../hooks/useCountryOverlay';
+import { COUNTRY_OWNERS } from '../../data/countryOwners';
 import CreateHideTaskRequestModal from '../modals/CreateHideTaskRequestModal';
 import CreateSlaExtensionModal from '../modals/CreateSlaExtensionModal';
 import ReassignTaskModal from '../modals/ReassignTaskModal';
@@ -76,6 +78,24 @@ function resolveAssignee(task) {
   const fromRoster = email ? MEMBERS_BY_EMAIL[email] : null;
   if (fromRoster) return fromRoster;
   return { name: task?.assigneeName || 'Unassigned' };
+}
+
+// Fix #3 (Sarah Suge) — union `extra` rows into `base`, de-duplicated by id,
+// base winning on collision. Used to merge country-overlay rows (which sit
+// OUTSIDE the viewer's normal scope) into each post-scope row set. Returns the
+// SAME `base` reference when `extra` is empty, so the default queue path is a
+// byte-for-byte no-op whenever no country filter is active.
+function mergeById(base, extra) {
+  if (!Array.isArray(extra) || extra.length === 0) return base;
+  const out = Array.isArray(base) ? [...base] : [];
+  const seen = new Set(out.map(r => (r?.id != null ? String(r.id) : r)));
+  for (const r of extra) {
+    const k = r?.id != null ? String(r.id) : r;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(r);
+  }
+  return out;
 }
 
 // ── Time formatter ──
@@ -732,6 +752,46 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused, initialAssi
   // live bindings, so the value itself doesn't go INTO the memo body —
   // it only triggers re-derive.
   const teamDataVersion = useTeamDataVersion();
+
+  // ── Fix #3 (Sarah Suge) — country-wide task overlay ──────────────────────
+  // When the Country filter is active, fetch every task in those countries —
+  // including rows outside this viewer's visibility — and normalize them with
+  // the SAME pipeline as the in-scope rows so they merge cleanly into each
+  // panel below. Inert (returns {}) when no country is selected, so the merges
+  // are no-ops and the default scoped path is unchanged. Tickets + immigration
+  // arrive in final shape (tickets are ticket-shaped; immigration is
+  // pre-normalized by its route) so they're used as-is, mirroring
+  // immigrationTaskRowsAll / immigrationCaseRowsAll.
+  const { bySource: overlayBySource } = useCountryOverlay(fCountry, { enabled: !!(user && user.email) });
+  const overlayRows = useMemo(() => {
+    const ob = overlayBySource || {};
+    const arr = (x) => (Array.isArray(x) ? x : []);
+    const deptSlug = deptState?.dept?.slug;
+    // Normalize → drop hidden → apply SLA extensions, exactly like the in-scope
+    // *RowsAll + *Rows memos do, but with NO role scoping (that's the point).
+    const deel = (raw, normFn, sourceKey, hiddenKeys) => {
+      const items = arr(raw);
+      if (!items.length) return [];
+      let rows = normFn(items);
+      for (const hk of hiddenKeys) rows = rows.filter(r => !isHiddenKey(hk, r.id));
+      return applySlaExtensionsToRows(rows, slaExtensionMap, sourceKey, slaExtensionPendingMap);
+    };
+    return {
+      tickets:          arr(ob.tickets),
+      onboarding:       deel(ob.onboarding, (i) => normalizeOnboarding(i, queueSla), 'onboarding', ['onboarding']),
+      pausedOnboarding: deel(ob.paused_onboarding, (i) => normalizePausedOnboarding(i, queueSla), 'onboarding', ['paused_onboarding', 'onboarding']),
+      offboarding:      deel(ob.offboarding, (i) => normalizeOffboarding(i, queueSla), 'offboarding', ['offboarding']),
+      amendments:       deel(ob.amendments, (i) => normalizeAmendments(i, queueSla), 'amendments', ['amendments']),
+      redlines:         deel(ob.redlines, (i) => normalizeRedlines(i, queueSla), 'redlines', ['redlines']),
+      incentivePlans:   deel(ob.incentive_plans, (i) => normalizeIncentivePlans(i, queueSla), 'incentive_plans', ['incentive_plans']),
+      workbench:        deel(
+                          arr(ob.workbench).filter(t => !isUrgentAssistTaskType(t?.taskType) && !isUrgentAssistTaskType(t?.sourceType)),
+                          (i) => normalizeWorkbench(i, queueSla, { deptSlug }), 'workbench', ['workbench']),
+      immigrationTasks: arr(ob.immigration_tasks).filter(r => !isHiddenKey('immigration_tasks', r.id)),
+      immigrationCases: arr(ob.immigration_cases),
+    };
+  }, [overlayBySource, queueSla, isHiddenKey, slaExtensionMap, slaExtensionPendingMap, deptState?.dept?.slug]);
+
   const onboardingActionRowsScoped = useMemo(() => scopeOnboardingPeople(onboardingRowsAll, user, queueCoverageEmails), [onboardingRowsAll, user, teamDataVersion, queueCoverageEmails]);
   const pausedOnboardingRowsScoped = useMemo(() => scopePausedOnboarding(pausedOnboardingRowsAll, user, queueCoverageEmails), [pausedOnboardingRowsAll, user, teamDataVersion, queueCoverageEmails]);
   const onboardingActionRows = useMemo(() => applySlaExtensionsToRows(onboardingActionRowsScoped, slaExtensionMap, 'onboarding', slaExtensionPendingMap), [onboardingActionRowsScoped, slaExtensionMap, slaExtensionPendingMap]);
@@ -739,25 +799,25 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused, initialAssi
   const onboardingRows = useMemo(() => {
     const seen = new Set();
     const merged = [];
-    for (const r of [...onboardingActionRows, ...pausedOnboardingRows]) {
+    for (const r of [...onboardingActionRows, ...pausedOnboardingRows, ...overlayRows.onboarding, ...overlayRows.pausedOnboarding]) {
       const k = r?.id != null ? String(r.id) : r;
       if (seen.has(k)) continue;
       seen.add(k); merged.push(r);
     }
     return merged;
-  }, [onboardingActionRows, pausedOnboardingRows]);
-  const offboardingRows = useMemo(() => applySlaExtensionsToRows(scopeOffboardingCases(offboardingRowsAll, user, queueCoverageEmails), slaExtensionMap, 'offboarding', slaExtensionPendingMap), [offboardingRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion, queueCoverageEmails]);
-  const amendmentRows   = useMemo(() => applySlaExtensionsToRows(scopeAmendmentRequests(amendmentRowsAll, user, queueCoverageEmails), slaExtensionMap, 'amendments', slaExtensionPendingMap), [amendmentRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion, queueCoverageEmails]);
-  const redlineRows     = useMemo(() => applySlaExtensionsToRows(scopeRedlineRequests(redlineRowsAll, user, queueCoverageEmails), slaExtensionMap, 'redlines', slaExtensionPendingMap), [redlineRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion, queueCoverageEmails]);
-  const workbenchRows   = useMemo(() => applySlaExtensionsToRows(scopeWorkbenchTasks(workbenchRowsAll, user, queueCoverageEmails), slaExtensionMap, 'workbench', slaExtensionPendingMap), [workbenchRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion, queueCoverageEmails]);
-  const incentivePlanRows = useMemo(() => applySlaExtensionsToRows(scopeIncentivePlans(incentivePlanRowsAll, user, queueCoverageEmails), slaExtensionMap, 'incentive_plans', slaExtensionPendingMap), [incentivePlanRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion, queueCoverageEmails]);
+  }, [onboardingActionRows, pausedOnboardingRows, overlayRows.onboarding, overlayRows.pausedOnboarding]);
+  const offboardingRows = useMemo(() => mergeById(applySlaExtensionsToRows(scopeOffboardingCases(offboardingRowsAll, user, queueCoverageEmails), slaExtensionMap, 'offboarding', slaExtensionPendingMap), overlayRows.offboarding), [offboardingRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion, queueCoverageEmails, overlayRows.offboarding]);
+  const amendmentRows   = useMemo(() => mergeById(applySlaExtensionsToRows(scopeAmendmentRequests(amendmentRowsAll, user, queueCoverageEmails), slaExtensionMap, 'amendments', slaExtensionPendingMap), overlayRows.amendments), [amendmentRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion, queueCoverageEmails, overlayRows.amendments]);
+  const redlineRows     = useMemo(() => mergeById(applySlaExtensionsToRows(scopeRedlineRequests(redlineRowsAll, user, queueCoverageEmails), slaExtensionMap, 'redlines', slaExtensionPendingMap), overlayRows.redlines), [redlineRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion, queueCoverageEmails, overlayRows.redlines]);
+  const workbenchRows   = useMemo(() => mergeById(applySlaExtensionsToRows(scopeWorkbenchTasks(workbenchRowsAll, user, queueCoverageEmails), slaExtensionMap, 'workbench', slaExtensionPendingMap), overlayRows.workbench), [workbenchRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion, queueCoverageEmails, overlayRows.workbench]);
+  const incentivePlanRows = useMemo(() => mergeById(applySlaExtensionsToRows(scopeIncentivePlans(incentivePlanRowsAll, user, queueCoverageEmails), slaExtensionMap, 'incentive_plans', slaExtensionPendingMap), overlayRows.incentivePlans), [incentivePlanRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion, queueCoverageEmails, overlayRows.incentivePlans]);
   // Immigration tasks share the standard SLA-extension keyed map (source +
   // id), so a future per-row SLA-extension request flow can apply here
   // identically to the other Deel sources.
-  const immigrationTaskRows = useMemo(() => applySlaExtensionsToRows(scopeImmigrationTasks(immigrationTaskRowsAll, user, queueCoverageEmails), slaExtensionMap, 'immigration_tasks', slaExtensionPendingMap), [immigrationTaskRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion, queueCoverageEmails]);
+  const immigrationTaskRows = useMemo(() => mergeById(applySlaExtensionsToRows(scopeImmigrationTasks(immigrationTaskRowsAll, user, queueCoverageEmails), slaExtensionMap, 'immigration_tasks', slaExtensionPendingMap), overlayRows.immigrationTasks), [immigrationTaskRowsAll, user, slaExtensionMap, slaExtensionPendingMap, teamDataVersion, queueCoverageEmails, overlayRows.immigrationTasks]);
   // Immigration Cases are read-only (no hide / SLA-extension flow), so just
   // role-scope by the case's active-agent email — same matrix as the others.
-  const immigrationCaseRows = useMemo(() => scopeImmigrationCases(immigrationCaseRowsAll, user, queueCoverageEmails), [immigrationCaseRowsAll, user, teamDataVersion, queueCoverageEmails]);
+  const immigrationCaseRows = useMemo(() => mergeById(scopeImmigrationCases(immigrationCaseRowsAll, user, queueCoverageEmails), overlayRows.immigrationCases), [immigrationCaseRowsAll, user, teamDataVersion, queueCoverageEmails, overlayRows.immigrationCases]);
   // Workbench is the only Deel source that intentionally surfaces resolved
   // rows (24h of COMPLETED + CLOSED) so the "RESOLVED TODAY" section can
   // render. Strip them from the cross-source "All" aggregates so the
@@ -798,6 +858,11 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused, initialAssi
   // ── Memoized filter chain — only recomputes when inputs change ──
   const { baseVis, visPreSla, active, eorSigning, snoozed, done, all } = useMemo(() => {
     let _vis = scopeTicketsByAssignee(ns, user).filter(passesJiraRoleFilter);
+    // Fix #3 — inject country-overlay tickets here, AFTER the assignee scope so
+    // they bypass it, but BEFORE the user filters below so the active Country
+    // filter keeps them (and the Status/tool/search filters still apply).
+    // No-op when no country is selected (overlayRows.tickets is empty).
+    _vis = mergeById(_vis, overlayRows.tickets);
     const _baseVis = _vis.filter(t => !t.isCalendarBooking);
     if (fTool)          _vis = _vis.filter(t => t.source === fTool);
     if (fStatus.length) _vis = _vis.filter(t => fStatus.includes(t.status));
@@ -919,7 +984,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused, initialAssi
     const _done = _vis.filter(t => t.status === 'resolved');
     const _all = [..._sorted, ..._eorSigning, ..._snoozed, ..._done];
     return { baseVis: _baseVis, visPreSla: _visPreSla, active: _sorted, eorSigning: _eorSigning, snoozed: _snoozed, done: _done, all: _all };
-  }, [ns, user, fTool, fStatus, fUnassigned, fCountry, fAssignee, fSla, fSlaMetric, search, settings.sla_enabled, passesJiraRoleFilter, sortCol, sortDir]);
+  }, [ns, user, fTool, fStatus, fUnassigned, fCountry, fAssignee, fSla, fSlaMetric, search, settings.sla_enabled, passesJiraRoleFilter, overlayRows.tickets, sortCol, sortDir]);
 
   const jiraRoleFilterActive = fJiraActionable !== true || fJiraRaised !== false;
   const hasActiveFilters = useMemo(() => !!(fTool || fStatus.length > 0 || fSla || fSlaMetric || fUnassigned || fCountry.length > 0 || fAssignee.length > 0 || search || jiraRoleFilterActive), [fTool, fStatus, fSla, fSlaMetric, fUnassigned, fCountry, fAssignee, search, jiraRoleFilterActive]);
@@ -1552,11 +1617,21 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused, initialAssi
           };
           for (const t of baseVis) tally(t.country);
           for (const r of allSourceRows) tally(r?.country);
+          // Fix #3 (Sarah Suge) — offer EVERY company country (from the
+          // ownership map), not just the ones present in the caller's scoped
+          // rows, so a manager can filter to a country they don't own/serve and
+          // the overlay surfaces all its tasks. Counts come from currently-
+          // loaded rows (which include overlay rows once a country is picked),
+          // so an as-yet-unselected country simply shows no count badge.
+          for (const cc of Object.keys(COUNTRY_OWNERS || {})) {
+            const code = canonicalCC(cc);
+            if (code && !countryCounts.has(code)) countryCounts.set(code, 0);
+          }
           const countryOptions = Array.from(countryCounts.entries())
             .map(([code, count]) => ({
               value: code,
               label: `${getFlag(code) || ''} ${getCountryName(code) || code}`.trim(),
-              count,
+              count: count || undefined,
             }))
             .sort((a, b) => a.label.localeCompare(b.label));
           // Jose Ruales 2026-06-09 — assignee filter options. Built from the
