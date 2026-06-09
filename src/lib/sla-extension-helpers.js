@@ -11,15 +11,17 @@
 
 import { query } from './db.js';
 
-// Allowed source keys — same eight surfaces as Hide Task minus
-// `urgent_assist` (urgent-assist has its own off-cycle workflow), plus
-// the ticket sources Zendesk and Jira. Centralised so the row action
-// only renders for known sources and the server validates strictly.
+// Allowed source keys — the Deel queue surfaces that support an SLA
+// extension request, plus the ticket sources Zendesk and Jira. Centralised
+// so the row action only renders for known sources and the server validates
+// strictly. `active_eor` added 2026-06-09 alongside the Active EOR queue
+// source — its rows carry an SLA window like onboarding/redlines, so bulk +
+// single SLA extensions apply.
 export const ALLOWED_TASK_SOURCES = new Set([
   'zendesk', 'jira', 'workbench',
   'onboarding', 'offboarding',
   'amendments', 'redlines',
-  'incentive_plans',
+  'incentive_plans', 'active_eor',
 ]);
 
 // Reason codes from the user-facing spec. The team-member picks one
