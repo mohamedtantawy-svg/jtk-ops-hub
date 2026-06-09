@@ -109,6 +109,7 @@ export const ALLOWED_REASSIGN_SOURCES = new Set([
   'amendments',
   'redlines',
   'incentive_plans',
+  'active_eor',
 ]);
 
 export function isReassignableSource(source) {

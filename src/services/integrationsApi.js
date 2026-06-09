@@ -80,6 +80,17 @@ export async function fetchDeelIncentivePlans({ status, bustCache } = {}) {
   return apiFetch(`/integrations/deel/incentive-plans${qs ? `?${qs}` : ''}`);
 }
 
+// 2026-06-09: HRX-only "Active EOR" source — the post-onboarding
+// Active.*.AwaitingReview review queue (5 sub-statuses, unified). Non-HRX
+// depts get a `disabled: true` response (their deelSources has
+// `activeEor: false`). Deep per-status × per-country fan-out, so use the
+// same 60s timeout window as the other heavy Deel scans to give the
+// server's warming-payload fallback room.
+export async function fetchDeelActiveEor({ bustCache } = {}) {
+  const qs = bustCache ? '?bust=1' : '';
+  return apiFetch(`/integrations/deel/active-eor${qs}`, { timeoutMs: 60_000 });
+}
+
 // 2026-05-22 (evening): GIX-only Immigration Tasks source. Backs the
 // "Immigration Tasks" queue surface for Global Immigration. HRX gets a
 // `disabled: true` response from this endpoint because HRX deelSources

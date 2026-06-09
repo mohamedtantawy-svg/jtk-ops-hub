@@ -20,6 +20,7 @@ import { slaInfo, getUrl } from '../../utils/helpers';
 import {
   normalizeOnboarding, normalizePausedOnboarding, normalizeOffboarding,
   normalizeAmendments, normalizeRedlines, normalizeWorkbench, normalizeIncentivePlans,
+  normalizeActiveEor,
 } from '../../utils/normalizeSourceRows';
 import { applySlaExtensionsToRows } from '../../utils/applySlaExtensions';
 import { useQueueSlaSettings } from '../../hooks/useQueueSlaSettings';
@@ -129,6 +130,7 @@ export default function TeamLeadHome({ user, tasks = [], setView, managerOnCall 
   const changeRequestData = queueUnified?.changeRequestData || { amendments: [], redlines: [] };
   const workbenchData = queueUnified?.workbenchData || { tasks: [] };
   const incentivePlansData = queueUnified?.incentivePlansData || { items: [] };
+  const activeEorData = queueUnified?.activeEorData || { items: [] };
 
   const sourceRows = useMemo(() => {
     const ob = applySlaExtensionsToRows(
@@ -152,8 +154,11 @@ export default function TeamLeadHome({ user, tasks = [], setView, managerOnCall 
     const ip = applySlaExtensionsToRows(
       normalizeIncentivePlans(incentivePlansData.items, queueSla).filter(r => !isHiddenKey('incentive_plans', r.id)),
       slaExtensionMap, 'incentive_plans');
-    return [...ob, ...pob, ...off, ...am, ...rl, ...wb, ...ip];
-  }, [onboardingData.items, pausedOnboardingData.items, offboardingData.items, changeRequestData.amendments, changeRequestData.redlines, workbenchData.tasks, incentivePlansData.items, queueSla, isHiddenKey, slaExtensionMap]);
+    const aeor = applySlaExtensionsToRows(
+      normalizeActiveEor(activeEorData.items, queueSla).filter(r => !isHiddenKey('active_eor', r.id)),
+      slaExtensionMap, 'active_eor');
+    return [...ob, ...pob, ...off, ...am, ...rl, ...wb, ...ip, ...aeor];
+  }, [onboardingData.items, pausedOnboardingData.items, offboardingData.items, changeRequestData.amendments, changeRequestData.redlines, workbenchData.tasks, incentivePlansData.items, activeEorData.items, queueSla, isHiddenKey, slaExtensionMap]);
 
   // ── Merge ZD/Jira/Workbench tasks (assignee-based) with source rows ────
   const ticketRows = useMemo(() => {

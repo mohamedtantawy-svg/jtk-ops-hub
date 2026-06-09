@@ -28,6 +28,7 @@ const DEFAULT_SLA = {
   offboarding_termination: { activeMins: 20160, pausedMins: 2880 },
   offboarding_resignation: { activeMins: 7200,  pausedMins: 2880 },
   incentive_plans:         { activeMins: 7200,  pausedMins: 2880 },
+  active_eor:              { activeMins: 43200, pausedMins: 2880 },
 };
 
 function readFromLs() {

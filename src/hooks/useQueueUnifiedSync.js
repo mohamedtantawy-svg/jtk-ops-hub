@@ -21,6 +21,7 @@ import { useWorkbenchData } from './useWorkbenchData';
 import { useIncentivePlansData } from './useIncentivePlansData';
 import { useImmigrationTasksData } from './useImmigrationTasksData';
 import { useImmigrationCasesData } from './useImmigrationCasesData';
+import { useActiveEorData } from './useActiveEorData';
 import { isDeptSourceVisible } from '../lib/dept-source-visibility';
 
 const TICK_MS = 30_000;
@@ -50,6 +51,10 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
   // 2026-06-03: GIX-only "Immigration Cases" source (all OPEN + ON_HOLD
   // mobility cases). Same HRX no-op behaviour as Immigration Tasks.
   const immigrationCasesData = useImmigrationCasesData(enabled, userEmail);
+  // 2026-06-09: HRX-only "Active EOR" source (post-onboarding
+  // Active.*.AwaitingReview review tasks). Non-HRX depts get `disabled: true`
+  // from the route → the hook drops to an empty cache (no-op).
+  const activeEorData = useActiveEorData(enabled, userEmail);
 
   // ── Shared "now" tick — one 30s timer powers every "X min ago" label ─────
   // Pauses while the tab is hidden so we don't wake the CPU for nothing;
@@ -213,6 +218,16 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
         lastSyncAt: immigrationCasesData.lastSyncAt ?? null,
         retry: immigrationCasesData.refresh,
       },
+      activeEor: {
+        id: 'activeEor',
+        label: 'Active EOR',
+        count: activeEorData.items?.length ?? 0,
+        loading: !!activeEorData.loading,
+        isRefreshing: !!activeEorData.isRefreshing,
+        error: activeEorData.error || null,
+        lastSyncAt: activeEorData.lastSyncAt ?? null,
+        retry: activeEorData.refresh,
+      },
     };
   }, [
     queueSync?.sources?.zendesk, queueSync?.sources?.jira, queueSync?.refresh,
@@ -233,6 +248,8 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
     immigrationTasksData.error, immigrationTasksData.lastSyncAt, immigrationTasksData.refresh,
     immigrationCasesData.cases, immigrationCasesData.loading, immigrationCasesData.isRefreshing,
     immigrationCasesData.error, immigrationCasesData.lastSyncAt, immigrationCasesData.refresh,
+    activeEorData.items, activeEorData.loading, activeEorData.isRefreshing,
+    activeEorData.error, activeEorData.lastSyncAt, activeEorData.refresh,
   ]);
 
   // ── Scope the sync surface to the current department ─────────────────────
@@ -409,7 +426,8 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
     try { incentivePlansData.refresh(doForce); } catch {}
     try { immigrationTasksData.refresh(doForce); } catch {}
     try { immigrationCasesData.refresh(doForce); } catch {}
-  }, [queueSync, onboardingData, pausedOnboardingData, offboardingData, changeRequestData, workbenchData, incentivePlansData, immigrationTasksData, immigrationCasesData]);
+    try { activeEorData.refresh(doForce); } catch {}
+  }, [queueSync, onboardingData, pausedOnboardingData, offboardingData, changeRequestData, workbenchData, incentivePlansData, immigrationTasksData, immigrationCasesData, activeEorData]);
 
   return {
     onboardingData,
@@ -420,6 +438,7 @@ export function useQueueUnifiedSync({ queueSync, enabled = true, userEmail = nul
     incentivePlansData,
     immigrationTasksData,
     immigrationCasesData,
+    activeEorData,
     // Department-scoped: only the queues this dept surfaces (see visibleSourceMap).
     sources: visibleSourceMap,
     meta,

@@ -15,6 +15,7 @@ import {
   normalizeOnboarding,
   normalizeOffboarding,
   normalizeWorkbench,
+  normalizeActiveEor,
 } from '../../utils/normalizeSourceRows';
 import { applySlaExtensionsToRows } from '../../utils/applySlaExtensions';
 import Avatar from '../ui/Avatar';
@@ -176,6 +177,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
   const teamOnbData = teamQueueUnified?.onboardingData || { items: [] };
   const teamOffData = teamQueueUnified?.offboardingData || { items: [] };
   const teamWbData = teamQueueUnified?.workbenchData || { tasks: [] };
+  const teamAEorData = teamQueueUnified?.activeEorData || { items: [] };
   const { sla: teamQueueSla } = useQueueSlaSettings();
   // SLA Extension override (Phase 3) — apply to each per-agent source row
   // set so the per-agent SLA dot below reads the extended state and
@@ -189,6 +191,7 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
   // resolved here so per-agent capacity + SLA dot reflect today's
   // backlog, not yesterday's wins.
   const wbAgentRows  = useMemo(() => applySlaExtensionsToRows(normalizeWorkbench(teamWbData.tasks, teamQueueSla).filter(r => !r.isResolved), teamSlaExtMap, 'workbench'), [teamWbData.tasks, teamQueueSla, teamSlaExtMap]);
+  const aeorAgentRows = useMemo(() => applySlaExtensionsToRows(normalizeActiveEor(teamAEorData.items, teamQueueSla), teamSlaExtMap, 'active_eor'), [teamAEorData.items, teamQueueSla, teamSlaExtMap]);
 
   // UI state
   const [showAddModal, setShowAddModal] = useState(false);
@@ -411,8 +414,9 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
     const onb = onbAgentRows.filter(r => emailSet.has((r.assigneeEmail || '').toLowerCase()));
     const off = offAgentRows.filter(r => emailSet.has((r.assigneeEmail || '').toLowerCase()));
     const wb  = wbAgentRows.filter(r => emailSet.has((r.assigneeEmail || '').toLowerCase()));
+    const aeor = aeorAgentRows.filter(r => emailSet.has((r.assigneeEmail || '').toLowerCase()));
     return {
-      total: ts.length + onb.length + off.length + wb.length,
+      total: ts.length + onb.length + off.length + wb.length + aeor.length,
       n: ts.filter(t => t.status === 'new').length,
       ip: ts.filter(t => t.status === 'in_progress').length,
       w: ts.filter(t => t.status === 'waiting').length,
@@ -430,14 +434,15 @@ const Team = ({ user, tasks, setTask, setView, realUser, onImpersonate, imperson
     const agentOnb = onbAgentRows.filter(r => (r.assigneeEmail || '').toLowerCase() === e);
     const agentOff = offAgentRows.filter(r => (r.assigneeEmail || '').toLowerCase() === e);
     const agentWb  = wbAgentRows.filter(r => (r.assigneeEmail || '').toLowerCase() === e);
-    if (agentTasks.length === 0 && agentOnb.length === 0 && agentOff.length === 0 && agentWb.length === 0) {
+    const agentAeor = aeorAgentRows.filter(r => (r.assigneeEmail || '').toLowerCase() === e);
+    if (agentTasks.length === 0 && agentOnb.length === 0 && agentOff.length === 0 && agentWb.length === 0 && agentAeor.length === 0) {
       return 'green';
     }
     const ticketBreached = agentTasks.some(t => { const s = slaInfo(t); return (s && s.breach) || t.isAlert; });
-    const deelBreached = [...agentOnb, ...agentOff, ...agentWb].some(r => r.slaBreachStatus === 'SLA_BREACHED');
+    const deelBreached = [...agentOnb, ...agentOff, ...agentWb, ...agentAeor].some(r => r.slaBreachStatus === 'SLA_BREACHED');
     if (ticketBreached || deelBreached) return 'red';
     const ticketAtRisk = agentTasks.some(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; });
-    const deelAtRisk = [...agentOnb, ...agentOff, ...agentWb].some(r => {
+    const deelAtRisk = [...agentOnb, ...agentOff, ...agentWb, ...agentAeor].some(r => {
       if (r.slaBreachStatus === 'SLA_BREACHED' || typeof r.slaRemaining !== 'number' || r.slaRemaining <= 0) return false;
       const windowSec = Number.isFinite(r.slaWindowMs) && r.slaWindowMs > 0 ? r.slaWindowMs / 1000 : 24*60*60;
       return r.slaRemaining < windowSec / 4;
@@ -1826,6 +1831,7 @@ const QUEUE_META = [
   { id: 'offboarding_termination', label: 'Offboarding · Termination', anchor: 'creation',           hasPaused: true  },
   { id: 'offboarding_resignation', label: 'Offboarding · Resignation', anchor: 'creation',           hasPaused: true  },
   { id: 'incentive_plans',         label: 'Incentive Plans',         anchor: 'creation',             hasPaused: true  },
+  { id: 'active_eor',              label: 'Active EOR',              anchor: 'entered review',       hasPaused: false },
 ];
 
 // Display every duration in HOURS so the editor reads consistently across

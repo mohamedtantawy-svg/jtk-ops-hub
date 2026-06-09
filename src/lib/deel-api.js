@@ -427,6 +427,87 @@ async function _enrichOnboardingClientNames(items) {
   }));
 }
 
+// ── Active EOR (Admin API) ───────────────────────────────────────────────────
+//
+// "Active EOR" surfaces the awaiting-review tasks that fire AFTER an EOR
+// employee is already active (post-onboarding). Each row sits in one of five
+// `Active.<Section>.AwaitingReview` statuses; the FE shows which one in a
+// per-row Type column. The list/country endpoints are the SAME
+// `/admin/eor/employee-manager/{list,countries/list}/<status>` family
+// onboarding uses, so we reuse `_scanOnboardingByStatus` verbatim — there is
+// NO `Active.ActionableQueue` parent bucket and no cursor pagination, so the
+// orchestrator is just a SEQUENTIAL loop over the 5 statuses (skill mistake
+// #41 — running the per-status country fan-outs concurrently caused the Deel
+// 429 storms; sequential keeps peak concurrency at ~3-4).
+const ACTIVE_EOR_STATUSES = [
+  { statusName: 'Active.ComplianceDocs.AwaitingReview',            friendly: 'Compliance documents' },
+  { statusName: 'Active.EmploymentInfoUpdate.AwaitingReview',      friendly: 'Employment details' },
+  { statusName: 'Active.PayrollInfoUpdate.AwaitingReview',         friendly: 'Payroll details' },
+  { statusName: 'Active.MissingOnboardingData.AwaitingReview',     friendly: 'Missing data during onboarding' },
+  { statusName: 'Active.CopyrightTaxReliefCheckin.AwaitingReview', friendly: 'Copyright Scheme' },
+];
+
+// Map a raw Active-EOR list row to the unified shape. Mirrors
+// _mapOnboardingRow, but Active rows key on `id` (numeric EOR-onboarding id)
+// + `employeeContractOid`, expose the org as `client.name`, and carry no
+// `onboardingFlowStep` — so we stamp the scanned status as `flowStep` and the
+// friendly label as `statusLabel` (the Type column reads it). SLA anchors on
+// `updatedAt` (≈ entry into the current AwaitingReview status on the captured
+// payloads), falling back so the 30-day window always has an anchor.
+function _mapActiveEorRow(p, statusName, friendly) {
+  return {
+    id:                p.id != null ? String(p.id) : (p.employeeContractOid || p.oid || ''),
+    oid:               p.employeeContractOid || p.oid || '',          // contract OID (deep-link)
+    name:              p.employeeName || '',
+    country:           p.employmentCountry || p.entity?.country || '',
+    nationality:       p.employeeNationality || '',
+    startDate:         p.desiredStartDate || '',
+    createdAt:         p.updatedAt || p.createdAt || p.desiredStartDate || '',   // SLA anchor
+    taskCreatedAt:     p.updatedAt || p.taskCreatedAt || p.createdAt || '',
+    updatedAt:         p.updatedAt || '',
+    flowStep:          statusName,        // exact Active.* status this row was scanned under
+    statusLabel:       friendly,          // friendly Type-column label
+    tag:               p.tag || '',
+    avatarUrl:         p.avatarUrl || '',
+    assignee:          p.assignee?.name || '',
+    assigneeEmail:     p.assignee?.email || '',
+    assigneeId:        p.assigneeId || null,
+    clientName:        p.organizationName || p.client?.name || p.entity?.name || '',
+  };
+}
+
+/**
+ * Fetches the Active-EOR awaiting-review queue: a sequential per-status,
+ * per-country fan-out across ACTIVE_EOR_STATUSES, de-duped by employee id.
+ * Each merged row carries the status it was found under (flowStep) + a
+ * friendly Type label (statusLabel). Returns { items, total } (no cursor).
+ */
+export async function listActiveEorPeople() {
+  const seen = new Set();
+  const merged = [];
+  for (const { statusName, friendly } of ACTIVE_EOR_STATUSES) {
+    let rows = [];
+    try {
+      rows = await _scanOnboardingByStatus(statusName, statusName.split('.').slice(-2).join('.'));
+    } catch (err) {
+      // One dead status must not empty the whole queue (mirrors onboarding's
+      // allSettled tolerance). Log it so a silently-empty sub-status is visible.
+      console.warn(`[active-eor] status scan failed: ${statusName}`, err?.message || err);
+      continue;
+    }
+    for (const p of rows) {
+      const key = p.id != null ? String(p.id) : (p.employeeContractOid || p.oid || '');
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(_mapActiveEorRow(p, statusName, friendly));
+    }
+  }
+  // Active rows usually expose client.name directly, so enrichment is a
+  // no-op for them; kept as a safety net for any row missing the org name.
+  const items = await _enrichOnboardingClientNames(merged);
+  return { items, total: items.length };
+}
+
 // ── Paused Onboarding (Admin API) ─────────────────────────────────────────────
 
 /**

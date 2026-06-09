@@ -108,6 +108,8 @@ export async function GET(req) {
     addDeel('amendments',        'amendments',     () => cacheGetByPrefix('deel_amendments_v2', READ_TTL));
     addDeel('redlines',          'redlines',       () => cacheGetByPrefix('deel_redlines_v2', READ_TTL));
     addDeel('incentive_plans',   'incentivePlans', () => cacheGetByPrefix('deel_incentive_plans_v1', READ_TTL));
+    // Active EOR — HRX-only, single (non-offset, non-dept-namespaced) cache key.
+    addDeel('active_eor',        'activeEor',      () => cacheGet('deel_active_eor', READ_TTL));
     // Dept-namespaced keys — read the CURRENT dept's row only.
     addDeel('workbench',         'workbench',        () => cacheGet(isHrx ? 'deel_workbench' : `deel_workbench_${deptSlug}`, READ_TTL));
     addDeel('immigration_tasks', 'immigrationTasks', () => cacheGet(`deel_immigration_tasks_${deptSlug}`, READ_TTL));

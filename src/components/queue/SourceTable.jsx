@@ -1237,14 +1237,26 @@ const SourceRow = memo(function SourceRow({ row, showSource, showPausedSla = fal
         </td>
       )}
 
-      {/* Type (Termination / Resignation) */}
+      {/* Type column. Offboarding → Termination / Resignation; Active EOR →
+          one of five awaiting-review sub-statuses (compact pill + distinct
+          colour per type, full label in the tooltip so the 78px column stays
+          tidy). Status-pill colours are intentionally literal per skill §4.5. */}
       {showType && (() => {
         const t = row.typeLabel || '';
+        // Active EOR sub-status pills (keyed on the friendly label).
+        const AEOR = {
+          'Compliance documents':           { short: 'Compliance',   bg: '#fef2f2', color: '#d42d35', border: '#fca5a5' },
+          'Employment details':             { short: 'Employment',   bg: '#eff6ff', color: '#1d4ed8', border: '#bfdbfe' },
+          'Payroll details':                { short: 'Payroll',      bg: '#ecfdf5', color: '#15803d', border: '#bbf7d0' },
+          'Missing data during onboarding': { short: 'Missing data', bg: '#fff7ed', color: '#c2410c', border: '#fed7aa' },
+          'Copyright Scheme':               { short: 'Copyright',    bg: '#f5f3ff', color: '#6d28d9', border: '#ddd6fe' },
+        };
+        const aeor = AEOR[t];
         const isResignation = t.startsWith('Resignation');
-        const bg = isResignation ? '#eef2ff' : '#fef2f2';
-        const color = isResignation ? '#4338ca' : '#d42d35';
-        const border = isResignation ? '#c7d2fe' : '#fca5a5';
-        const short = t === 'Resignation (Employee)' ? 'Resign. (Emp)' : t === 'Resignation (Client)' ? 'Resign. (Client)' : t || '--';
+        const bg = aeor ? aeor.bg : (isResignation ? '#eef2ff' : '#fef2f2');
+        const color = aeor ? aeor.color : (isResignation ? '#4338ca' : '#d42d35');
+        const border = aeor ? aeor.border : (isResignation ? '#c7d2fe' : '#fca5a5');
+        const short = aeor ? aeor.short : (t === 'Resignation (Employee)' ? 'Resign. (Emp)' : t === 'Resignation (Client)' ? 'Resign. (Client)' : t || '--');
         return (
           <td style={tdStyle}>
             {t ? (

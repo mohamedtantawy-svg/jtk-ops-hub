@@ -7,6 +7,7 @@ export const TOOLS={
   amendments:    {label:'Amendments',     icon:'bi-pencil-square',    color:'#ed8d00',bg:'#fff8e6',dot:'#ed8d00'},
   redlines:      {label:'Redlines',       icon:'bi-file-earmark-diff',color:'#7c3aed',bg:'#f3eff8',dot:'#7c3aed'},
   incentive_plans:{label:'Incentive Plans',icon:'bi-cash-coin',        color:'#0e7490',bg:'#ecfeff',dot:'#0e7490'},
+  active_eor:    {label:'Active EOR',     icon:'bi-person-check-fill', color:'#0f766e',bg:'#f0fdfa',dot:'#0f766e'},
   immigration_tasks:{label:'Immigration Tasks',icon:'bi-passport-fill',color:'#0369a1',bg:'#e0f2fe',dot:'#0369a1'},
   immigration_cases:{label:'Immigration Cases',icon:'bi-folder-fill',   color:'#0c4a6e',bg:'#e0f2fe',dot:'#0c4a6e'},
   gmail:         {label:'Gmail',          icon:'bi-envelope',         color:'#c62828',bg:'#fce4ec',dot:'#c62828'},

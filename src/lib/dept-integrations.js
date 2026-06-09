@@ -46,6 +46,10 @@ const EMPTY_DEEL_SOURCES = Object.freeze({
   // /admin/mobility/cases (OPEN + ON_HOLD). Default false so a new dept
   // never surfaces the immigration case backlog until explicitly enabled.
   immigrationCases: false,
+  // 2026-06-09: HRX-only "Active EOR" source — the post-onboarding
+  // Active.*.AwaitingReview review queue. Default false so a new dept
+  // never surfaces it until explicitly enabled.
+  activeEor: false,
 });
 
 export const DEPT_INTEGRATIONS = {
@@ -83,6 +87,9 @@ export const DEPT_INTEGRATIONS = {
       // Immigration Cases is GIX-only too — HRX never queries
       // /admin/mobility/cases.
       immigrationCases: false,
+      // 2026-06-09: Active EOR (post-onboarding awaiting-review tasks) is an
+      // HRX source — this is the ONLY dept where it is true.
+      activeEor: true,
     },
   },
 
@@ -175,6 +182,8 @@ export const DEPT_INTEGRATIONS = {
       // /admin/mobility/cases (OPEN + ON_HOLD) with the SAME GIX admin
       // token (DEEL_ADMIN_GIX). HRX never sees this source.
       immigrationCases: true,
+      // Active EOR is an HRX-only source — GIX never queries it.
+      activeEor: false,
     },
   },
 

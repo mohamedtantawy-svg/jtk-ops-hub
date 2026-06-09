@@ -38,6 +38,8 @@ export const SOURCE_TO_VISIBILITY_KEY = {
   immigrationTasks: 'immigrationTasks',
   immigration_cases: 'immigrationCases',
   immigrationCases: 'immigrationCases',
+  active_eor: 'activeEor',
+  activeEor: 'activeEor',
 };
 
 // Canonical queue-source keys (snake_case) in display order. Used by the
@@ -45,8 +47,8 @@ export const SOURCE_TO_VISIBILITY_KEY = {
 // Jira renders "0" instead of vanishing — before layering real counts on top.
 export const ALL_QUEUE_SOURCE_KEYS = [
   'zendesk', 'jira', 'onboarding', 'offboarding', 'amendments',
-  'redlines', 'workbench', 'incentive_plans', 'immigration_tasks',
-  'immigration_cases',
+  'redlines', 'workbench', 'incentive_plans', 'active_eor',
+  'immigration_tasks', 'immigration_cases',
 ];
 
 /**

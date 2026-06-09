@@ -42,6 +42,7 @@ export const COMMAND_CENTER_SOURCES = [
   { key: 'amendments',      label: 'Amendments',           table: null,                    deptDimension: 'dept-integrations', kpis: ['open', 'sla'],                                 phase: 2 },
   { key: 'redlines',        label: 'Redlines',             table: null,                    deptDimension: 'dept-integrations', kpis: ['open', 'sla'],                                 phase: 2 },
   { key: 'incentive_plans', label: 'Incentive Plans',      table: null,                    deptDimension: 'dept-integrations', kpis: ['open', 'sla'],                                 phase: 2 },
+  { key: 'active_eor',      label: 'Active EOR',           table: null,                    deptDimension: 'dept-integrations', kpis: ['open', 'sla'],                                 phase: 2 },
   { key: 'immigration_tasks', label: 'Immigration Tasks',  table: null,                    deptDimension: 'dept-integrations', kpis: ['open', 'sla'],                                 phase: 2 },
   { key: 'immigration_cases', label: 'Immigration Cases',  table: null,                    deptDimension: 'dept-integrations', kpis: ['open', 'sla'],                                 phase: 2 },
 
@@ -63,7 +64,7 @@ export const COMMAND_CENTER_SOURCES = [
 // (watch the snake_case vs camelCase mismatch flagged in skill mistake #52).
 export const COMMAND_CENTER_DEEL_SOURCE_KEYS = [
   'onboarding', 'offboarding', 'amendments', 'redlines', 'incentivePlans',
-  'workbench', 'immigrationTasks', 'immigrationCases',
+  'workbench', 'immigrationTasks', 'immigrationCases', 'activeEor',
 ];
 
 // Sources whose rollup is expected to be live by the end of a given phase.

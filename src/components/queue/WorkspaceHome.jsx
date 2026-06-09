@@ -70,6 +70,7 @@ export default function WorkspaceHome({
   redlinesCount = 0,
   workbenchCount = 0,
   incentivePlansCount = 0,
+  activeEorCount = 0,
   // Paused (on-hold) sub-counts per source. When > 0, each step card renders
   // a small "(N open · M on hold)" line under the big total so users can see
   // the active vs. waiting split without drilling in. Carolina Ferreira
@@ -141,11 +142,12 @@ export default function WorkspaceHome({
 
   const totalOpen =
     zdCount + jiraCount + onboardingCount + offboardingCount +
-    amendmentsCount + redlinesCount + workbenchCount + incentivePlansCount;
+    amendmentsCount + redlinesCount + workbenchCount + incentivePlansCount +
+    activeEorCount;
 
   const restOpen =
     onboardingCount + offboardingCount + amendmentsCount +
-    redlinesCount + incentivePlansCount;
+    redlinesCount + incentivePlansCount + activeEorCount;
 
   // Aggregate paused (on-hold) sub-counts for the Step 4 "Everything else"
   // card. Jira is included here because Step 4's number is `restOpen +
@@ -420,7 +422,7 @@ export default function WorkspaceHome({
           accentBg="#f3eff8"
           icon="bi-collection-fill"
           eyebrow="EVERYTHING ELSE"
-          title="Onb · Off · Am · Rl · IP · Jira"
+          title="Onb · Off · Am · Rl · IP · AE · Jira"
           subtitle="The slower-burn queues. Tackle them after the urgent three are clean."
           count={restOpen + jiraCount}
           countLabel="items open"
@@ -432,6 +434,7 @@ export default function WorkspaceHome({
             { label: 'Am',  count: amendmentsCount,  color: '#ed8d00', bg: '#fff8e6', onClick: () => onSelectSource?.('amendments') },
             { label: 'Rl',  count: redlinesCount,    color: '#7c3aed', bg: '#f3eff8', onClick: () => onSelectSource?.('redlines') },
             { label: 'IP',  count: incentivePlansCount, color: '#0e7490', bg: '#ecfeff', onClick: () => onSelectSource?.('incentive_plans') },
+            { label: 'AE',  count: activeEorCount,   color: '#0f766e', bg: '#f0fdfa', onClick: () => onSelectSource?.('active_eor') },
             { label: 'Jira',count: jiraCount,        color: '#1f74b3', bg: '#e8f0fe', onClick: () => onSelectTool?.('jira') },
           ]}
         />

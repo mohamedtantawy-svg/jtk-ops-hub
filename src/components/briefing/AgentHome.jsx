@@ -39,6 +39,7 @@ import { useTeamMembers } from '../../hooks/useTeamMembers';
 import {
   normalizeOnboarding, normalizePausedOnboarding, normalizeOffboarding,
   normalizeAmendments, normalizeRedlines, normalizeWorkbench, normalizeIncentivePlans,
+  normalizeActiveEor,
 } from '../../utils/normalizeSourceRows';
 import { applySlaExtensionsToRows } from '../../utils/applySlaExtensions';
 import { matchesAudience } from '../../data/comms';
@@ -138,6 +139,9 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
   const cr = queueUnified?.changeRequestData || { amendments: [], redlines: [] };
   const wb = queueUnified?.workbenchData || { tasks: [] };
   const ip = queueUnified?.incentivePlansData || { items: [] };
+  // Active EOR — HRX-only single-stream source. For non-HRX depts
+  // activeEorData.items is empty, so this is a harmless no-op there.
+  const aeor = queueUnified?.activeEorData || { items: [] };
 
   const myRows = useMemo(() => {
     const matches = (r) => (r.assigneeEmail || '').toLowerCase() === myEmail;
@@ -169,8 +173,13 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
     const g = applySlaExtensionsToRows(
       normalizeIncentivePlans(ip.items, queueSla).filter(r => !isHidden('incentive_plans', r.id) && matches(r)),
       slaExtensionMap, 'incentive_plans');
-    return [...a, ...b, ...c, ...d, ...e, ...f, ...g];
-  }, [onb.items, pob.items, off.items, cr.amendments, cr.redlines, wb.tasks, ip.items, queueSla, isHidden, myEmail, slaExtensionMap, deptState?.dept?.slug]);
+    // Active EOR — same chain as onboarding/incentive: normalize → hide-filter
+    // → assignee-self filter → SLA extension overlay ('active_eor' key).
+    const h = applySlaExtensionsToRows(
+      normalizeActiveEor(aeor.items, queueSla).filter(r => !isHidden('active_eor', r.id) && matches(r)),
+      slaExtensionMap, 'active_eor');
+    return [...a, ...b, ...c, ...d, ...e, ...f, ...g, ...h];
+  }, [onb.items, pob.items, off.items, cr.amendments, cr.redlines, wb.tasks, ip.items, aeor.items, queueSla, isHidden, myEmail, slaExtensionMap, deptState?.dept?.slug]);
 
   const myTickets = useMemo(() => (tasks || [])
     .filter(t => (t.source === 'zendesk' || t.source === 'jira'))
@@ -330,7 +339,7 @@ export default function AgentHome({ user, tasks = [], setView, comms = [], ackEm
   }, [myRows, myTickets]);
 
   const sourcePills = useMemo(() => {
-    const order = ['onboarding', 'offboarding', 'zendesk', 'jira', 'workbench', 'amendments', 'redlines', 'incentive_plans'];
+    const order = ['onboarding', 'offboarding', 'zendesk', 'jira', 'workbench', 'amendments', 'redlines', 'incentive_plans', 'active_eor'];
     return order
       .map(s => ({ id: s, count: sourceCounts[s] || 0, meta: TOOLS[s] }))
       .filter(s => s.count > 0);

@@ -15,6 +15,7 @@ import {
   normalizeRedlines,
   normalizeWorkbench,
   normalizeIncentivePlans,
+  normalizeActiveEor,
 } from '../../utils/normalizeSourceRows';
 import Avatar from '../ui/Avatar';
 import MultiFilter from '../analytics/MultiFilter';
@@ -166,6 +167,7 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
   const changeRequestDataA = queueUnifiedA?.changeRequestData || { amendments: [], redlines: [] };
   const workbenchDataA = queueUnifiedA?.workbenchData || { tasks: [] };
   const incentivePlansDataA = queueUnifiedA?.incentivePlansData || { items: [] };
+  const activeEorDataA = queueUnifiedA?.activeEorData || { items: [] };
   const { sla: queueSlaA } = useQueueSlaSettings();
   // 2026-05-28 — capture dept slug so the workbench normaliser can use
   // the GIX 60-day default in dept-scoped Analytics view too.
@@ -177,6 +179,7 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
   const redlineRowsA = useMemo(() => normalizeRedlines(changeRequestDataA.redlines, queueSlaA), [changeRequestDataA.redlines, queueSlaA]);
   const wbRowsA = useMemo(() => normalizeWorkbench(workbenchDataA.tasks, queueSlaA, { deptSlug: analyticsDeptSlug }), [workbenchDataA.tasks, queueSlaA, analyticsDeptSlug]);
   const ipRowsA = useMemo(() => normalizeIncentivePlans(incentivePlansDataA.items, queueSlaA), [incentivePlansDataA.items, queueSlaA]);
+  const aeorRowsA = useMemo(() => normalizeActiveEor(activeEorDataA.items, queueSlaA), [activeEorDataA.items, queueSlaA]);
 
   const slaCompliance = useMemo(() => {
     // Tickets — slaInfo() returns null for resolved/waiting (excludes
@@ -200,14 +203,14 @@ const Analytics = ({ tasks, currentUser, subFilter, escalations = [] }) => {
       if (elapsed > limitMins) breached++;
     }
     // Deel sources — slaBreachStatus is the per-row biz-day computation.
-    const deelRows = [...onbRowsA, ...pausedOnbRowsA, ...offRowsA, ...amendRowsA, ...redlineRowsA, ...wbRowsA, ...ipRowsA];
+    const deelRows = [...onbRowsA, ...pausedOnbRowsA, ...offRowsA, ...amendRowsA, ...redlineRowsA, ...wbRowsA, ...ipRowsA, ...aeorRowsA];
     for (const r of deelRows) {
       pool++;
       if (r.slaBreachStatus === 'SLA_BREACHED') breached++;
     }
     if (pool === 0) return 100;
     return Math.round(((pool - breached) / pool) * 100);
-  }, [all, resolved, onbRowsA, pausedOnbRowsA, offRowsA, amendRowsA, redlineRowsA, wbRowsA, ipRowsA]);
+  }, [all, resolved, onbRowsA, pausedOnbRowsA, offRowsA, amendRowsA, redlineRowsA, wbRowsA, ipRowsA, aeorRowsA]);
 
   // ── Escalation rate KPI (real data) ───────────────────────────────────
   const escalatedTasks = all.filter(t => t.status === 'escalated');

@@ -570,3 +570,4 @@ export const scopeOffboardingCases      = (items, user, extraEmails) => scopeAge
 export const scopeAmendmentRequests     = (items, user, extraEmails) => scopeAgentOrUnion(items, user, extraEmails);
 export const scopeRedlineRequests       = (items, user, extraEmails) => scopeAgentOrUnion(items, user, extraEmails);
 export const scopeIncentivePlans        = (items, user, extraEmails) => scopeAgentOrUnion(items, user, extraEmails);
+export const scopeActiveEor             = (items, user, extraEmails) => scopeAgentOrUnion(items, user, extraEmails);

@@ -140,6 +140,11 @@ const INCENTIVE_PLAN_SLA_ACTIVE_MS = 5 * DAY_MS;
 const INCENTIVE_PLAN_SLA_PAUSED_MS = PAUSED_SLA_MS;
 const ONBOARDING_SLA_ACTIVE_MS = 24 * HOUR_MS;
 const ONBOARDING_SLA_PAUSED_MS = PAUSED_SLA_MS;
+// Active EOR (post-onboarding awaiting-review tasks): 30-day active window per
+// Mohamed's 2026-06-09 spec. Tunable via app_settings.queue_sla_thresholds
+// ('active_eor'); 48h universal paused fallback.
+const ACTIVE_EOR_SLA_ACTIVE_MS = 30 * DAY_MS;
+const ACTIVE_EOR_SLA_PAUSED_MS = PAUSED_SLA_MS;
 // Offboarding splits by row type (typeLabel). Both share the same paused window.
 const OFFBOARDING_TERM_ACTIVE_MS  = 14 * DAY_MS;
 const OFFBOARDING_RESIG_ACTIVE_MS = 5  * DAY_MS;
@@ -568,6 +573,72 @@ export function normalizePausedOnboarding(items = [], slaConfig = null) {
       contractUrl: DEEL_CONTRACT_URL(p.oid),
       isPaused: true,
       pauseType: p.pauseType || '',
+      slaRemaining: sla.slaRemaining,
+      slaBreachStatus: sla.slaBreachStatus,
+      slaWindowMs: sla.slaWindowMs,
+    };
+  });
+}
+
+// ── Active EOR → normalized rows ──
+// Post-onboarding awaiting-review tasks across 5 Active.<Section>.AwaitingReview
+// statuses, unified on one page. The row's sub-status drives a per-row Type
+// column (typeLabel); the Status column shows the uniform "Awaiting review"
+// state. Columns mirror Onboarding (Employee / Organization / Country /
+// Assignee / Start Date / SLA) plus the Type column. Assignment is
+// country-based (synthetic owner) — upstream assigneeId is usually null. SLA
+// is the 30-day active window (tunable via the 'active_eor' queue threshold).
+export function normalizeActiveEor(items = [], slaConfig = null) {
+  const { activeMs } = slaMsFor(slaConfig, 'active_eor', ACTIVE_EOR_SLA_ACTIVE_MS, ACTIVE_EOR_SLA_PAUSED_MS);
+  return dropTestRows(items, p => [p?.name, p?.clientName]).map(p => {
+    // Deep-link to the admin employee dashboard for this exact sub-status.
+    // statusName stays UNENCODED to match the live admin URL (dots intact);
+    // the step segment is the last dotted segment ('AwaitingReview'). Country
+    // falls back to GLOBAL so the admin UI doesn't 404 on an empty segment.
+    const taskCountry = p.country || 'GLOBAL';
+    const segs = (p.flowStep || '').split('.').filter(Boolean);
+    const lastStep = segs[segs.length - 1] || 'AwaitingReview';
+    const taskUrl = (p.oid && p.flowStep)
+      ? `${DEEL_ADMIN_BASE}/dashboards/employees/${taskCountry}/status/${p.flowStep}/contract/${p.oid}/step/${lastStep}`
+      : (p.oid ? DEEL_CONTRACT_URL(p.oid) : '');
+
+    const createdAt = p.taskCreatedAt || p.createdAt || '';
+    const sla = computeSlaWindow(activeMs, createdAt);
+
+    // Country-based assignment: prefer a real upstream assignee, else
+    // synthesize the country owner (assigneeId is null on most active rows).
+    let assigneeName = p.assignee || '';
+    let assigneeEmail = (p.assigneeEmail || resolveEmailByName(p.assignee) || '').toLowerCase();
+    let assigneeIsSynthetic = false;
+    if (!assigneeEmail) {
+      const synth = syntheticOwnerForCountry(p.country, p.id || p.oid);
+      if (synth) {
+        assigneeName = synth.name;
+        assigneeEmail = synth.email;
+        assigneeIsSynthetic = true;
+      }
+    }
+
+    const typeLabel = p.statusLabel || '';
+    return {
+      id: p.id || p.oid || '',
+      source: 'active_eor',
+      subject: p.name || 'Unknown',
+      clientName: p.clientName || '',
+      startDate: p.startDate || '',
+      function: typeLabel || 'Active EOR',
+      typeLabel,                       // drives the Type column (showType)
+      country: p.country || '',
+      assignee: assigneeName,
+      assigneeEmail,
+      assigneeIsSynthetic,
+      reassignedFromEmail: p.reassignedFromEmail || null,
+      reassignedAt: p.reassignedAt || null,
+      createdAt,
+      updatedAt: p.updatedAt || p.taskCreatedAt || '',
+      status: { label: 'Awaiting review', severity: 'warning', color: '#ed8d00' },
+      taskUrl,
+      contractUrl: DEEL_CONTRACT_URL(p.oid),
       slaRemaining: sla.slaRemaining,
       slaBreachStatus: sla.slaBreachStatus,
       slaWindowMs: sla.slaWindowMs,

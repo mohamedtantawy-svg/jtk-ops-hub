@@ -24,6 +24,7 @@ import {
   normalizeRedlines,
   normalizeWorkbench,
   normalizeIncentivePlans,
+  normalizeActiveEor,
 } from '../../utils/normalizeSourceRows';
 // Authoritative Queue scoping — same functions Queue.jsx uses so Briefing counts
 // match what the user actually sees in each source table (incl. country-owner
@@ -36,6 +37,7 @@ import {
   scopeRedlineRequests,
   scopeWorkbenchTasks,
   scopeIncentivePlans,
+  scopeActiveEor,
   scopeImmigrationTasks,
   scopeImmigrationCases,
 } from '../../lib/queue-scoping';
@@ -390,6 +392,10 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const immigrationTasksData = queueUnified?.immigrationTasksData || { tasks: [] };
   const immigrationCasesData = queueUnified?.immigrationCasesData || { cases: [] };
   const incentivePlansData = queueUnified?.incentivePlansData || { items: [], loading: false, error: null };
+  // HRX-only "Active EOR" queue (single-stream; no paused variant). For
+  // non-HRX depts items is empty, so every active_eor aggregate below is a
+  // harmless no-op there. Read exactly like onboardingData / incentivePlansData.
+  const activeEorData = queueUnified?.activeEorData || { items: [], loading: false, error: null };
 
   const ds=perms?.dataScope||'own_tasks_only';
   const isOwnScope=ds==='own_tasks_only';
@@ -507,6 +513,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const redlineRowsAll = useMemo(() => applySlaExtensionsToRows(normalizeRedlines(changeRequestData.redlines, queueSla).filter(r => !isHiddenKey('redlines', r.id)), slaExtensionMap, 'redlines'), [changeRequestData.redlines, queueSla, isHiddenKey, slaExtensionMap]);
   const workbenchRowsAll = useMemo(() => applySlaExtensionsToRows(normalizeWorkbench(workbenchData.tasks, queueSla, { deptSlug: briefingDeptSlug }).filter(r => !isHiddenKey('workbench', r.id)), slaExtensionMap, 'workbench'), [workbenchData.tasks, queueSla, isHiddenKey, slaExtensionMap, briefingDeptSlug]);
   const incentivePlanRowsAll = useMemo(() => applySlaExtensionsToRows(normalizeIncentivePlans(incentivePlansData.items, queueSla).filter(r => !isHiddenKey('incentive_plans', r.id)), slaExtensionMap, 'incentive_plans'), [incentivePlansData.items, queueSla, isHiddenKey, slaExtensionMap]);
+  const activeEorRowsAll = useMemo(() => applySlaExtensionsToRows(normalizeActiveEor(activeEorData.items, queueSla).filter(r => !isHiddenKey('active_eor', r.id)), slaExtensionMap, 'active_eor'), [activeEorData.items, queueSla, isHiddenKey, slaExtensionMap]);
 
   // Source-row scoping — delegate to the Queue's single source of truth so
   // "Active Requests" here always matches what the user sees in each tab.
@@ -561,6 +568,10 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const workbenchActiveRows    = useMemo(() => workbenchRows.filter(r => !r.isResolved),    [workbenchRows]);
   const workbenchActiveRowsAll = useMemo(() => workbenchRowsAll.filter(r => !r.isResolved), [workbenchRowsAll]);
   const incentivePlanRows = useMemo(() => scopeIncentivePlans(incentivePlanRowsAll, user, briefingCoverageEmails), [incentivePlanRowsAll, user, briefingCoverageEmails]);
+  // Active EOR — country-OR-assignee scoping (same model as incentive plans).
+  // Single-stream source with no resolved/paused state, so active rows == all
+  // scoped rows; the aggregates below read activeEorRows directly.
+  const activeEorRows = useMemo(() => scopeActiveEor(activeEorRowsAll, user, briefingCoverageEmails), [activeEorRowsAll, user, teamDataVersion, briefingCoverageEmails]);
   // Immigration Cases are pre-normalised by the route; just role-scope by the
   // case's active-agent email. All cases are open/on-hold → active = all.
   const immigrationTaskRows = useMemo(() => scopeImmigrationTasks(immigrationTasksData.tasks || [], user, briefingCoverageEmails), [immigrationTasksData.tasks, user, teamDataVersion, briefingCoverageEmails]);
@@ -698,14 +709,15 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // a closed task doesn't keep counting against today's backlog.
   const deelSourceRowsLen =
     onboardingRows.length + offboardingRows.length + amendmentRows.length +
-    redlineRows.length + workbenchActiveRows.length + incentivePlanRows.length;
+    redlineRows.length + workbenchActiveRows.length + incentivePlanRows.length +
+    activeEorRows.length;
   const activeRequestsCount = isOwnScope
     ? personal.length + deelSourceRowsLen
     : isTeamScope
       ? scope.length + deelSourceRowsLen
       : orgOpen.length + onboardingRowsAll.length + offboardingRowsAll.length +
         amendmentRowsAll.length + redlineRowsAll.length + workbenchActiveRowsAll.length +
-        incentivePlanRowsAll.length;
+        incentivePlanRowsAll.length + activeEorRowsAll.length;
 
   // ── Today's meetings ───────────────────────────────────────────────────
   // Calendar events carry a type — we only count real meetings, not deadlines
@@ -940,9 +952,14 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     const wbOpen   = mWb.length;
     const wbBreach = mWb.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length;
 
-    const open    = tOpen + onbOpen + offOpen + wbOpen;
+    // — Active EOR (HRX-only; single-stream; per-row slaBreachStatus) —
+    const mActiveEor = activeEorRowsAll.filter(r => r.assigneeEmail && r.assigneeEmail === memEmail);
+    const activeEorOpen   = mActiveEor.length;
+    const activeEorBreach = mActiveEor.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length;
+
+    const open    = tOpen + onbOpen + offOpen + wbOpen + activeEorOpen;
     const paused  = tPaused + pausedOnbCount;
-    const br      = tBreach + onbBreach + pausedOnbBreach + offBreach + wbBreach;
+    const br      = tBreach + onbBreach + pausedOnbBreach + offBreach + wbBreach + activeEorBreach;
     const tc      = open + paused;   // strict invariant: Total = Open + Paused
 
     return { ...m, tc, br, open, paused, escalated: tEsc };
@@ -1046,14 +1063,16 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   }).length;
   const slaCompPoolDeel = onboardingRows.length + offboardingRows.length
     + amendmentRows.length + redlineRows.length
-    + workbenchActiveRows.length + incentivePlanRows.length;
+    + workbenchActiveRows.length + incentivePlanRows.length
+    + activeEorRows.length;
   const slaCompBreachedDeel =
       onboardingRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
     + offboardingRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
     + amendmentRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
     + redlineRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
     + workbenchActiveRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
-    + incentivePlanRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length;
+    + incentivePlanRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length
+    + activeEorRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED').length;
   const slaTotal = slaCompPoolTickets.length + slaCompPoolDeel;
   const slaBreachTotal = slaCompBreachedTickets + slaCompBreachedDeel;
   const slaCompRate = slaTotal > 0 ? Math.round(((slaTotal - slaBreachTotal) / slaTotal) * 100) : 100;
@@ -1117,6 +1136,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   srcCounts['redlines']          = (srcCounts['redlines']          || 0) + redlineRows.length;
   srcCounts['workbench']         = (srcCounts['workbench']         || 0) + workbenchActiveRows.length;
   srcCounts['incentive_plans']   = (srcCounts['incentive_plans']   || 0) + incentivePlanRows.length;
+  srcCounts['active_eor']        = (srcCounts['active_eor']        || 0) + activeEorRows.length;
   srcCounts['immigration_tasks'] = (srcCounts['immigration_tasks'] || 0) + immigrationTaskActiveRows.length;
   srcCounts['immigration_cases'] = (srcCounts['immigration_cases'] || 0) + immigrationCaseActiveRows.length;
   // Department source set: show EVERY queue the current dept surfaces — Zendesk
@@ -1179,12 +1199,14 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   const wbAtRisk     = deelAtRisk(workbenchActiveRows);
   const ipBreach     = incentivePlanRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED');
   const ipAtRisk     = deelAtRisk(incentivePlanRows);
+  const activeEorBreach = activeEorRows.filter(r => r.slaBreachStatus === 'SLA_BREACHED');
+  const activeEorAtRisk = deelAtRisk(activeEorRows);
   const orgBreach = orgSlaPool.filter(t => { const s = slaInfo(t); return s && s.breach; }).length
-    + onbBreached.length + offBreached.length + amendBreach.length + redBreach.length + wbBreach.length + ipBreach.length;
+    + onbBreached.length + offBreached.length + amendBreach.length + redBreach.length + wbBreach.length + ipBreach.length + activeEorBreach.length;
   const orgAtRisk = orgSlaPool.filter(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; }).length
-    + onbAtRisk.length + offAtRisk.length + amendAtRisk.length + redAtRisk.length + wbAtRisk.length + ipAtRisk.length;
+    + onbAtRisk.length + offAtRisk.length + amendAtRisk.length + redAtRisk.length + wbAtRisk.length + ipAtRisk.length + activeEorAtRisk.length;
   const orgSlaTotal = orgSlaPool.length + onboardingRows.length + offboardingRows.length
-    + amendmentRows.length + redlineRows.length + workbenchActiveRows.length + incentivePlanRows.length;
+    + amendmentRows.length + redlineRows.length + workbenchActiveRows.length + incentivePlanRows.length + activeEorRows.length;
   const orgSlaComp = orgSlaTotal > 0 ? Math.round(((orgSlaTotal - orgBreach) / orgSlaTotal) * 100) : 100;
 
   // ── Sparkline ─────────────────────────────────────────────────────────
@@ -1411,11 +1433,11 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
   // `slaBreachStatus` and proportional band.
   const orgBreachedTasks = [
     ...orgSlaPool.filter(t => { const s = slaInfo(t); return s && s.breach; }),
-    ...onbBreached, ...offBreached, ...amendBreach, ...redBreach, ...wbBreach, ...ipBreach,
+    ...onbBreached, ...offBreached, ...amendBreach, ...redBreach, ...wbBreach, ...ipBreach, ...activeEorBreach,
   ];
   const orgAtRiskTasks = [
     ...orgSlaPool.filter(t => { const s = slaInfo(t); return s && !s.ok && !s.breach; }),
-    ...onbAtRisk, ...offAtRisk, ...amendAtRisk, ...redAtRisk, ...wbAtRisk, ...ipAtRisk,
+    ...onbAtRisk, ...offAtRisk, ...amendAtRisk, ...redAtRisk, ...wbAtRisk, ...ipAtRisk, ...activeEorAtRisk,
   ];
   const orgWithinSlaTasks = orgSlaPool.filter(t => { const s = slaInfo(t); return !s || (s && s.ok); });
 
@@ -1981,7 +2003,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
               {srcEntries.map(([src,cnt])=>{
                 const tl=TOOLS[src];const pct=srcPctMap.get(src) ?? 0;
                 const isExpanded=expandedSource===src;
-                const deelApiRowsMap={onboarding:onboardingRows,offboarding:offboardingRows,amendments:amendmentRows,redlines:redlineRows,workbench:workbenchActiveRows,incentive_plans:incentivePlanRows,immigration_tasks:immigrationTaskActiveRows,immigration_cases:immigrationCaseActiveRows};
+                const deelApiRowsMap={onboarding:onboardingRows,offboarding:offboardingRows,amendments:amendmentRows,redlines:redlineRows,workbench:workbenchActiveRows,incentive_plans:incentivePlanRows,active_eor:activeEorRows,immigration_tasks:immigrationTaskActiveRows,immigration_cases:immigrationCaseActiveRows};
                 const srcTasks=[...srcPool.filter(t=>t.source===src),...(deelApiRowsMap[src]||[])];
                 const srcBarColor=SOURCE_COLOURS[src]||tl?.color||'#9e9e9e';
                 return(
@@ -2085,6 +2107,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             if(redlineRows.length)     srcMap.redlines    =(srcMap.redlines    ||0)+redlineRows.length;
             if(workbenchActiveRows.length)   srcMap.workbench   =(srcMap.workbench   ||0)+workbenchActiveRows.length;
             if(incentivePlanRows.length)        srcMap.incentive_plans  =(srcMap.incentive_plans  ||0)+incentivePlanRows.length;
+            if(activeEorRows.length)            srcMap.active_eor       =(srcMap.active_eor       ||0)+activeEorRows.length;
             if(immigrationTaskActiveRows.length) srcMap.immigration_tasks=(srcMap.immigration_tasks||0)+immigrationTaskActiveRows.length;
             if(immigrationCaseActiveRows.length) srcMap.immigration_cases=(srcMap.immigration_cases||0)+immigrationCaseActiveRows.length;
             const srcBreakdown=Object.entries(srcMap).sort((a,b)=>b[1]-a[1]);
@@ -2185,6 +2208,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                 ...redlineRows,
                 ...workbenchActiveRows,
                 ...incentivePlanRows,
+                ...activeEorRows,
               ]}
               tickets={scope}
               onNavigate={(v) => setView(v)}
