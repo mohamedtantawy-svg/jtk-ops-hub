@@ -1,0 +1,376 @@
+{
+ "version": 1,
+ "sourceFile": "HRX Performance.xlsx + HRX Leaders Performance.xlsx",
+ "rows": [
+  {
+   "role_key": "country_owner",
+   "name": "Country Owners",
+   "weights": {
+    "operations": 0.5,
+    "kpi": 0.3,
+    "growth": 0.2
+   },
+   "operations_criteria": [
+    {
+     "key": "workplace_policies",
+     "label": "Workplace Policies",
+     "description": "* Respond promptly to Slack and requests. \n* Following & Engaging on team channels and updates.\n* Proper usage of workflows, reporting & handovers"
+    },
+    {
+     "key": "issue_management",
+     "label": "Issue Management",
+     "description": "* Own escalations end-to-end. Respond, resolve.\n* Implement preventative measures within agreed timelines."
+    },
+    {
+     "key": "comms_culture",
+     "label": "Comms & Culture",
+     "description": "* Communicate clearly & collaborate with team and stakeholders, \n* Support others while managing own workload effectively.\n* Maintain flexibility to support operational coverage."
+    },
+    {
+     "key": "country_ownership",
+     "label": "Country Ownership",
+     "description": "* Aware of country changes & reporting compliance updates \n* Maintain country KB and validations\n* Fully own country-specific operations and issues."
+    },
+    {
+     "key": "proactiveness",
+     "label": "Proactiveness",
+     "description": "* Anticipate and surface issues early.\n* Propose and execute solutions."
+    },
+    {
+     "key": "time_meetings",
+     "label": "Time & Meetings",
+     "description": "* Manages time effectively, Manager is updated on working hours\n* Engaged during meetings & Trainings\n* Joining meetings on time, camera on when appropriate."
+    },
+    {
+     "key": "training_enablement",
+     "label": "Training & Enablement",
+     "description": "* Actively keep up with new processes and tools.\n* Demonstrate continuous self-learning."
+    },
+    {
+     "key": "quality_of_work",
+     "label": "Quality of Work",
+     "description": "* Deliver high-quality output (Tasks and projects)\n* Accuracy in communications and reporting"
+    }
+   ],
+   "growth_criteria": [
+    {
+     "key": "core_teams",
+     "label": "Core Teams",
+     "description": "* Trainings & onboarding new team members\n* Knowledge-sharing & providing trainings\n* Function Management"
+    },
+    {
+     "key": "moc",
+     "label": "MOC",
+     "description": "* Covering urgent assist channel / line\n* Covering reporting channels or requests channels"
+    },
+    {
+     "key": "achievements",
+     "label": "Achievements",
+     "description": "* Led a special initiative improving operations\n* Shipped country improvment"
+    },
+    {
+     "key": "coverage",
+     "label": "Coverage",
+     "description": "* Covered teammates or manager while ooo\n* Took on extra responsibilities"
+    }
+   ],
+   "ops_thresholds": null,
+   "growth_thresholds": null
+  },
+  {
+   "role_key": "hrx_247",
+   "name": "24/7 HRX",
+   "weights": {
+    "operations": 0.5,
+    "kpi": 0.3,
+    "growth": 0.2
+   },
+   "operations_criteria": [
+    {
+     "key": "workplace_policies",
+     "label": "Workplace Policies",
+     "description": "* Respond promptly to Slack and requests. \n* Following & Engaging on team channels and updates.\n* Proper usage of workflows & reporting"
+    },
+    {
+     "key": "proactiveness",
+     "label": "Proactiveness",
+     "description": "* Anticipate and surface issues early.\n* Propose and execute solutions."
+    },
+    {
+     "key": "comms_culture",
+     "label": "Comms & Culture",
+     "description": "* Communicate clearly & collaborate with team and stakeholders, \n* Support others while managing own workload effectively.\n* Maintain flexibility to support operational coverage."
+    },
+    {
+     "key": "function_ownership",
+     "label": "Function Ownership",
+     "description": "* Works online in Workbench when available to work on cases. \n*Adheres to AA rules of work and WM guidelines\n* Ensures all tasks placed on hold include a clear justification and follows up on them."
+    },
+    {
+     "key": "time_meetings",
+     "label": "Time & Meetings",
+     "description": "* Manages time effectively. Adheres to the schedule.\n* Engaged during meetings & Trainings\n* Joining meetings on time, camera on when appropriate"
+    },
+    {
+     "key": "training_enablement",
+     "label": "Training & Enablement",
+     "description": "* Actively keep up with new processes and tools.\n* Demonstrate continuous self-learning."
+    },
+    {
+     "key": "quality_of_work",
+     "label": "Quality of Work",
+     "description": "* Deliver high-quality output (ad-hoc tasks and projects)\n* Accuracy in communications and reporting\n* Remains with zero HRX escalations"
+    }
+   ],
+   "growth_criteria": [
+    {
+     "key": "knowledge_management",
+     "label": "Knowledge Management",
+     "description": "* Knowledge-sharing & providing trainings\n* Points out gaps in KBs & clarifies doubts with HRX country owners\n* Updates KBs. Sends announcements to the team"
+    },
+    {
+     "key": "moc",
+     "label": "MOC",
+     "description": "* Covering HRX urgent assist channel on the weekend with FRT up to 15mins\n* Resolving urgent assist requests \"not just triaging.\""
+    },
+    {
+     "key": "achievements",
+     "label": "Achievements",
+     "description": "* Led a special initiative improving operations\n* Comes up with improvement ideas"
+    },
+    {
+     "key": "coverage",
+     "label": "Coverage",
+     "description": "* Covered teammates or manager while OOO\n* Took on extra responsibilities outside the regular scope of work"
+    }
+   ],
+   "ops_thresholds": null,
+   "growth_thresholds": null
+  },
+  {
+   "role_key": "swat_new_services",
+   "name": "SWAT & New Services",
+   "weights": {
+    "operations": 0.5,
+    "kpi": 0.3,
+    "growth": 0.2
+   },
+   "operations_criteria": [
+    {
+     "key": "workplace_policies",
+     "label": "Workplace Policies",
+     "description": "* Respond promptly to Slack and requests. \n* Following & Engaging on team channels and updates.\n* Proper usage of workflows, reporting & handovers"
+    },
+    {
+     "key": "issue_management",
+     "label": "Issue Management",
+     "description": "* Own escalations end-to-end. Respond, resolve.\n* Implement preventative measures within agreed timelines."
+    },
+    {
+     "key": "comms_culture",
+     "label": "Comms & Culture",
+     "description": "* Communicate clearly & collaborate with team and stakeholders, \n* Support others while managing own workload effectively.\n* Maintain flexibility to support operational coverage."
+    },
+    {
+     "key": "function_ownership",
+     "label": "Function Ownership",
+     "description": "* Fully own and effectively manage function\n* Overseeing projects &owning outcomes\n* Proactievely shipping imporvements & Ideas"
+    },
+    {
+     "key": "proactiveness",
+     "label": "Proactiveness",
+     "description": "* Anticipate and surface issues early.\n* Propose and execute solutions."
+    },
+    {
+     "key": "time_meetings",
+     "label": "Time & Meetings",
+     "description": "* Manages time effectively, Manager is updated on working hours\n* Engaged during meetings & Trainings\n* Joining meetings on time, camera on when appropriate."
+    },
+    {
+     "key": "training_enablement",
+     "label": "Training & Enablement",
+     "description": "* Actively keep up with new processes and tools.\n* Demonstrate continuous self-learning.\n* Effectively delivering team training and process SOPs"
+    },
+    {
+     "key": "quality_of_work",
+     "label": "Quality of Work",
+     "description": "* Deliver high-quality output (Tasks and projects)\n* Accuracy in communications and reporting\n* Accuracy in resolving urgent assist requests"
+    }
+   ],
+   "growth_criteria": [
+    {
+     "key": "achievements",
+     "label": "Achievements",
+     "description": "* Led a special initiative improving operations\n* Shipped country/ global improvment"
+    },
+    {
+     "key": "country_assignment",
+     "label": "Country Assignment",
+     "description": "* Covering country operations (short/long terms)\n* Took on extra responsibilities"
+    },
+    {
+     "key": "coverage",
+     "label": "Coverage",
+     "description": "* Covered teammates or manager while ooo\n* Support and mentorship to core-team"
+    },
+    {
+     "key": "moc",
+     "label": "MOC",
+     "description": "* Resolving urgent assist requests \"not just triaging\"\n* Covering reporting channgels or requests channels"
+    }
+   ],
+   "ops_thresholds": null,
+   "growth_thresholds": null
+  },
+  {
+   "role_key": "new_services",
+   "name": "New Services",
+   "weights": {
+    "operations": 0.5,
+    "kpi": 0.3,
+    "growth": 0.2
+   },
+   "operations_criteria": [
+    {
+     "key": "workplace_policies",
+     "label": "Workplace Policies",
+     "description": "Respond promptly on Slack, maintain flexibility to support operational coverage, Reporting workflow, on top of team channels and slack posts"
+    },
+    {
+     "key": "issue_management",
+     "label": "Issue Management",
+     "description": "Own escalations end-to-end. Respond, resolve, and implement preventative measures within agreed timelines."
+    },
+    {
+     "key": "team_contribution_culture",
+     "label": "Team Contribution / Culture",
+     "description": "Communicate clearly, collaborate proactively with team members and stakeholders, and support others while managing own workload effectively."
+    },
+    {
+     "key": "function_ownership",
+     "label": "Function Ownership",
+     "description": "Fully own and effectively manage function, overseeing projects, owning outcomes and continous improvements"
+    },
+    {
+     "key": "proactiveness",
+     "label": "Proactiveness",
+     "description": "Anticipate and surface issues early, propose and execute solutions, drive improvements in operational efficiency."
+    },
+    {
+     "key": "time_attendance",
+     "label": "Time & Attendance",
+     "description": "Maintain punctuality, camera on when appropriate, remain engaged during meetings, and follow handover policies."
+    },
+    {
+     "key": "training_enablement",
+     "label": "Training & Enablement",
+     "description": "Actively keep up with new processes and tools, stay focused during training, and demonstrate continuous self-learning."
+    },
+    {
+     "key": "quality_of_work",
+     "label": "Quality of Work",
+     "description": "Deliver high-quality output: accuracy in communications, tasks, and project deliverables with minimal rework."
+    }
+   ],
+   "growth_criteria": [
+    {
+     "key": "achievements",
+     "label": "Achievements",
+     "description": "Led and implemented a high impact special project/initiative that improved client/employee/team experience"
+    },
+    {
+     "key": "country_assignment",
+     "label": "Country Assignment",
+     "description": "Covered short term country assignment, regional long-term leaves or took on extra responsibilities"
+    },
+    {
+     "key": "leadership",
+     "label": "Leadership",
+     "description": "Covered manager while OOO, support and mentorship to core-team and team members"
+    },
+    {
+     "key": "driving_revenue",
+     "label": "Driving Revenue",
+     "description": ""
+    }
+   ],
+   "ops_thresholds": null,
+   "growth_thresholds": null
+  },
+  {
+   "role_key": "team_lead",
+   "name": "Team Leads",
+   "weights": {
+    "operations": 0.5,
+    "kpi": 0.3,
+    "growth": 0.2
+   },
+   "operations_criteria": [
+    {
+     "key": "coaching_growth",
+     "label": "Coaching & Growth",
+     "description": "* Regular 1:1s, feedback quality and proper documentation.\n* Promotion readness of team members & celebrating wins.\n* Passing feedbacks to team members and ensure action"
+    },
+    {
+     "key": "collaboration_comms",
+     "label": "Collaboration & Comms",
+     "description": "* Collaboration and visibility across departments or regions.\n* Can communicate complex issues clearly and persuasively.\n* Fast responses to team members and leaders"
+    },
+    {
+     "key": "operational_leadership",
+     "label": "Operational Leadership",
+     "description": "* Ensures deliverables meet deadlines, no last-minute changes.\n* Speed, transparency, and clarity of decisions during challenges.\n* Smart allocation of time, people and work."
+    },
+    {
+     "key": "data_reporting",
+     "label": "Data & Reporting",
+     "description": "* Tracking and managing team reports & projects on regular basis.\n* Keeps leadership and team informed with no surprises."
+    },
+    {
+     "key": "conflict_escalations",
+     "label": "Conflict & Escalations",
+     "description": "* Handles disagreements constructively and promptly.\n* Owns escalations and resolutions e2e."
+    },
+    {
+     "key": "time_attendance",
+     "label": "Time & Attendance",
+     "description": "* Manages time effectively, Manager is updated on working hours\n* Engaged during meetings & Trainings\n* Joining meetings on time, camera on when appropriate."
+    },
+    {
+     "key": "training_enablement",
+     "label": "Training & Enablement",
+     "description": "* Keeping up with new processes and tools, self-learning\n* Effectively train the team members and ensure following process."
+    },
+    {
+     "key": "customer_satisfaction",
+     "label": "Customer Satisfaction",
+     "description": "* Ensures Client/EOR expectations are met or exceeded.\n* Seeks feedback proactively, and builds trust."
+    }
+   ],
+   "growth_criteria": [
+    {
+     "key": "team_projects",
+     "label": "Team Projects",
+     "description": "Leading & Delivering country / team projects"
+    },
+    {
+     "key": "global_projects",
+     "label": "Global Projects",
+     "description": "Leading / Delivering global projects"
+    },
+    {
+     "key": "leadership",
+     "label": "Leadership",
+     "description": "Covering RM manager while OOO, support and mentorship to SWAT and other team leads"
+    },
+    {
+     "key": "influence_coverage",
+     "label": "Influence & Coverage",
+     "description": "* Represents and advocates for the team in senior forums and key client calls\n* Took an extra resp."
+    }
+   ],
+   "ops_thresholds": null,
+   "growth_thresholds": null
+  }
+ ]
+}

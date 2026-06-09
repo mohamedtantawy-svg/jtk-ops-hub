@@ -8,6 +8,7 @@
 import { useState, useMemo, useContext } from 'react';
 import { PermissionsContext } from '../../App';
 import { useCurrentDept } from '../../hooks/useCurrentDept';
+import PerformanceSettings from './performance/PerformanceSettings';
 
 export default function PerformanceView({ user }) {
   const perms = useContext(PermissionsContext);
@@ -58,13 +59,7 @@ export default function PerformanceView({ user }) {
           body="Run monthly reviews, see completion and score distribution, drill into each report, and manage warnings & promotions — scoped to your team."
         />
       )}
-      {active.key === 'settings' && (
-        <Placeholder
-          icon="bi-sliders"
-          title="Performance settings"
-          body="Configure role-specific evaluation templates, criteria, weights, score bands, and the monthly cycle schedule for your department."
-        />
-      )}
+      {active.key === 'settings' && <PerformanceSettings canManage={canManage} />}
     </div>
   );
 }

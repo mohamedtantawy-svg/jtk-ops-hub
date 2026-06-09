@@ -13,6 +13,7 @@ import { seedOrgDefaultIfNeeded } from './org-default-seed';
 import { backfillHrExperienceTenancyIfNeeded } from './dept-backfill';
 import { seedGlobalImmigrationRosterIfNeeded } from './global-immigration-roster-seed';
 import { seedCommandCenterDeptIfNeeded } from './command-center-dept-seed';
+import { seedPerfTemplatesIfNeeded } from './perf-templates-seed';
 
 const SCHEMA_SQL = `
 -- Members
@@ -2931,6 +2932,20 @@ export async function runMigrations() {
     }
   } catch (err) {
     console.warn('[db] Command Center dept seed failed:', err?.message);
+  }
+
+  // Performance templates (2026-06-09): seed the 5 HRX role evaluation
+  // templates into perf_templates under the HR Experience dept. Runs AFTER
+  // seedOrgDefaultIfNeeded so the HRX org_node exists. Idempotent via the
+  // perf_templates_seed_version sentinel + per-row NOT-EXISTS guard (a dept's
+  // Settings edits are never overwritten). See perf-templates-seed.js.
+  try {
+    const ptResult = await seedPerfTemplatesIfNeeded();
+    if (ptResult?.reseeded) {
+      console.log(`[db] Performance templates seeded to v${ptResult.version}: ${ptResult.inserted} role template(s)`);
+    }
+  } catch (err) {
+    console.warn('[db] Performance templates seed failed:', err?.message);
   }
 
   // Phase C 2026-05-18: when HANDOVER_DEFAULTS_VERSION bumps, refresh the
