@@ -3,6 +3,7 @@ import { seedCountryOwnersIfEmpty } from './country-owners-seed';
 import { seedHrHubSettingsIfNeeded } from './hr-hub-seed';
 import { seedLeaderAlertsSettingsIfNeeded } from './leader-alerts-seed';
 import { seedEscalationZeroHistoricalIfNeeded } from './escalation-zero-seed';
+import { seedTrackersIfNeeded } from './tracker-seed';
 import { seedTimeOffEventsIfNeeded } from './time-off-seed';
 import { seedGixTimeOffEventsIfNeeded } from './dept-time-off-seed';
 import { seedHandoverDefaultsIfNeeded } from './handover-defaults-seed';
@@ -925,6 +926,58 @@ END $$;
 -- would table-scan ~hundreds of feedback rows to surface ~10 escalations.
 CREATE INDEX IF NOT EXISTS idx_feedback_kind
   ON feedback_requests(kind, created_at DESC);
+
+-- ── Trackers (generic spreadsheet engine, 2026-06-09) ───────────────────────
+-- Grid surfaces under the renamed "Tracker" tab. Each tracker = a name + an
+-- ordered column schema (JSONB); each row = a cells map keyed by column key.
+-- Mass Onboarding / Mass Offboarding are seeded by tracker-seed.js; team
+-- members create their own later via the API (no code change). Managers-only:
+-- enforced server-side in app/api/v1/trackers/* (FE sub-tab gate is cosmetic).
+CREATE TABLE IF NOT EXISTS trackers (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  key           VARCHAR(64) UNIQUE NOT NULL,
+  name          VARCHAR(120) NOT NULL,
+  type          VARCHAR(32) NOT NULL DEFAULT 'custom',
+  description   TEXT,
+  column_schema JSONB NOT NULL DEFAULT '[]'::jsonb,
+  visibility    VARCHAR(20) NOT NULL DEFAULT 'managers',
+  sort          INTEGER NOT NULL DEFAULT 0,
+  is_archived   BOOLEAN NOT NULL DEFAULT false,
+  created_by_email VARCHAR(255),
+  created_by_name  VARCHAR(255),
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_trackers_sort ON trackers(sort) WHERE is_archived = false;
+
+CREATE TABLE IF NOT EXISTS tracker_rows (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tracker_id  UUID NOT NULL REFERENCES trackers(id) ON DELETE CASCADE,
+  cells       JSONB NOT NULL DEFAULT '{}'::jsonb,
+  status      VARCHAR(20) NOT NULL DEFAULT 'new',
+  sort        INTEGER NOT NULL DEFAULT 0,
+  created_by_email VARCHAR(255),
+  created_by_name  VARCHAR(255),
+  updated_by_email VARCHAR(255),
+  updated_by_name  VARCHAR(255),
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_tracker_rows_tracker ON tracker_rows(tracker_id, sort);
+-- CHECK as an idempotent DO block (portable; ADD CONSTRAINT IF NOT EXISTS
+-- isn't supported pre-PG 9.6) — mirrors feedback_requests_kind_check.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+     WHERE conname = 'tracker_rows_status_check'
+       AND conrelid = 'tracker_rows'::regclass
+  ) THEN
+    ALTER TABLE tracker_rows
+      ADD CONSTRAINT tracker_rows_status_check
+      CHECK (status IN ('new','in_progress','blocked','completed'));
+  END IF;
+END $$;
 
 -- ── Country-ownership junction (2026-04-30) ─────────────────────────────────
 -- Replaces the static src/data/countryOwners.js map with a DB-backed source
@@ -2616,6 +2669,19 @@ export async function runMigrations() {
     }
   } catch (err) {
     console.warn('[db] Escalation Zero historical seed failed:', err?.message);
+  }
+
+  // Trackers: seed the two built-in spreadsheet trackers (Mass Onboarding /
+  // Mass Offboarding) on the generic tracker engine. Idempotent via the
+  // `tracker_seed_version` sentinel; UPSERT-by-key never overwrites a
+  // tracker's column_schema or rows on re-seed. See tracker-seed.js.
+  try {
+    const seedResult = await seedTrackersIfNeeded();
+    if (seedResult?.reseeded) {
+      console.log(`[db] Trackers seeded to v${seedResult.version}: ${seedResult.inserted} built-in tracker(s) inserted`);
+    }
+  } catch (err) {
+    console.warn('[db] Tracker seed failed:', err?.message);
   }
 
   // OOO: bootstrap time_off_events from the bundled HRX snapshot
