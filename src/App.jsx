@@ -1157,6 +1157,12 @@ const App=()=>{
       return url.searchParams.get('task') || null;
     } catch { return null; }
   });
+  // Jose Ruales 2026-06-09 — manager workload drill-in. Set to a direct
+  // report's email when a manager clicks their name in the Briefing Team
+  // Summary; forwarded to Queue as initialAssignee, which pre-filters the
+  // Workspace to that person across every queue, then clears it via
+  // onInitialAssigneeConsumed. Mirrors the focusTaskId hand-off above.
+  const [queueAssignee,setQueueAssignee]=useState(null);
   // One-time Tasks onboarding tour (2026-05-25). Auto-opens the first
   // time a user signs in after the Phase 1-3 deploy. Persisted server-
   // side via /api/v1/work-tasks/tour-status (app_settings sentinel).
@@ -2440,10 +2446,10 @@ const App=()=>{
         </div>
       )}
       <div className="deel-content" data-region="main-content" aria-label="Main content" style={{display:'flex',overflowX:'hidden',overflowY:'auto',position:'relative',flex:1}}>
-          {view==='briefing'      &&perms?.canView('briefing')!==false &&(perms?.raw?.dataScope==='all_tasks'||perms?.raw?.dataScope==='regional_tasks'||perms?.raw?.dataScope==='team_tasks') &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasksWithSlaExt,MEMBERS,coverageEmails)||tasksWithSlaExt} setView={setView} setSelTask={()=>{}} comms={comms} escalations={[]} setSubFilter={setSubFilter} requests={[]} projects={[]} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall} teamLeadOnCall={teamLeadOnCall} onChangeTeamLeadOnCall={handleChangeTeamLeadOnCall} realUser={user} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
+          {view==='briefing'      &&perms?.canView('briefing')!==false &&(perms?.raw?.dataScope==='all_tasks'||perms?.raw?.dataScope==='regional_tasks'||perms?.raw?.dataScope==='team_tasks') &&<div className="page-enter"><BriefingView user={effectiveUser} tasks={perms?.scopeTasks?.(tasksWithSlaExt,MEMBERS,coverageEmails)||tasksWithSlaExt} setView={setView} setSelTask={()=>{}} comms={comms} escalations={[]} setSubFilter={setSubFilter} requests={[]} projects={[]} managerOnCall={managerOnCall} onChangeManagerOnCall={handleChangeManagerOnCall} teamLeadOnCall={teamLeadOnCall} onChangeTeamLeadOnCall={handleChangeTeamLeadOnCall} realUser={user} onViewAgentQueue={(email)=>{ setQueueAssignee(email); setView('my-queue'); }} onImpersonate={handleImpersonate} impersonating={impersonating}/></div>}
           {view==='lead-home' &&<div className="page-enter"><TeamLeadHome user={effectiveUser} tasks={tasksWithSlaExt} setView={setView} managerOnCall={managerOnCall}/></div>}
           {view==='agent-home' &&<div className="page-enter"><AgentHome user={effectiveUser} tasks={tasksWithSlaExt} setView={setView} comms={comms}/></div>}
-          {view==='my-queue'      &&perms?.canView('my-queue')!==false     &&<div className="page-enter"><Queue user={effectiveUser} tasks={tasksWithSlaExt} subFilter={subFilter} focusTaskId={focusTaskId} onTaskFocused={()=>setFocusTaskId(null)}/></div>}
+          {view==='my-queue'      &&perms?.canView('my-queue')!==false     &&<div className="page-enter"><Queue user={effectiveUser} tasks={tasksWithSlaExt} subFilter={subFilter} focusTaskId={focusTaskId} onTaskFocused={()=>setFocusTaskId(null)} initialAssignee={queueAssignee} onInitialAssigneeConsumed={()=>setQueueAssignee(null)}/></div>}
           {view==='announcements' &&perms?.canView('announcements')!==false&&<div className="page-enter"><AnnouncementsView user={effectiveUser} serverUserId={apiServerUserId} serverUserEmail={apiServerUserEmail} comms={comms} setComms={setComms} addToast={addToast} tasks={tasks} apiAcknowledge={apiAcknowledge} apiCreate={apiCreate} apiSend={apiSend} apiUpdate={apiUpdate} apiArchive={apiArchive} apiRemove={apiRemove} apiTogglePin={apiTogglePin} openCompose={announceCompose} onComposeOpened={()=>setAnnounceCompose(false)} apiUnarchive={apiUnarchive} apiComments={apiComments} apiSetComments={apiSetComments} apiLoadComments={apiLoadComments} apiAddComment={apiAddCommentFn} apiDeleteComment={apiDeleteCommentFn} apiLinks={apiLinks} apiLoadLinks={apiLoadLinks} apiLinkAnnouncement={apiLinkAnnouncementFn} apiUnlinkAnnouncement={apiUnlinkAnnouncementFn} apiReact={apiReactFn} apiVote={apiVoteFn}/></div>}
           {view==='approval-queue' &&<div className="page-enter"><ApprovalQueueView user={effectiveUser} addToast={addToast}/></div>}
           {view==='settings'      &&perms?.canView('settings')!==false     &&<div className="page-enter"><SettingsView settings={settings} setSettings={setSettings} user={user} addToast={addToast} tasks={tasks} setTasks={setTasks} subFilter={subFilter} accessTypes={accessTypes} setAccessTypes={setAccessTypes} userAccessMap={userAccessMap} setUserAccessMap={setUserAccessMap} perms={perms}/></div>}

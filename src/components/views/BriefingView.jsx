@@ -71,7 +71,7 @@ const SOURCE_COLOURS = {
   amendments: '#ed8d00', redlines: '#7c3aed',
 };
 
-const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSubFilter,requests=[],projects=[],managerOnCall=null,onChangeManagerOnCall,teamLeadOnCall=null,onChangeTeamLeadOnCall,realUser=null,onImpersonate=null,impersonating=null})=>{
+const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSubFilter,requests=[],projects=[],managerOnCall=null,onChangeManagerOnCall,teamLeadOnCall=null,onChangeTeamLeadOnCall,realUser=null,onViewAgentQueue=null,onImpersonate=null,impersonating=null})=>{
   // Live roster for the Manager-on-call picker so admins see managers added
   // via the Team tab (not just the baked-in baseline). Filter out
   // soft-deleted rows so we don't offer to impersonate a disabled account.
@@ -2245,7 +2245,16 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                             <Avatar name={m.name} size={32}/>
                             <div style={{minWidth:0}}>
                               <div style={{fontWeight:600,color:'var(--text)',display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
-                                {m.name}
+                                {onViewAgentQueue && m.email ? (
+                                  <button
+                                    type="button"
+                                    onClick={(e)=>{ e.stopPropagation(); onViewAgentQueue(m.email); }}
+                                    title={`View ${m.name}'s workload in the Workspace queue`}
+                                    style={{border:'none',background:'none',padding:0,margin:0,font:'inherit',color:'inherit',cursor:'pointer',textAlign:'left'}}
+                                    onMouseEnter={(e)=>{ e.currentTarget.style.textDecoration='underline'; e.currentTarget.style.color='#7c3aed'; }}
+                                    onMouseLeave={(e)=>{ e.currentTarget.style.textDecoration='none'; e.currentTarget.style.color='inherit'; }}
+                                  >{m.name}</button>
+                                ) : m.name}
                                 <AccessBadge access={live?.access || m.access || 'agent'} />
                                 <LastSeenPill iso={live?.lastSeenAt} loading={!!rosterLoading} />
                                 <OOOBadge events={oooEventsByEmail.get((m.email || '').toLowerCase())} />
@@ -2347,7 +2356,16 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                             <Avatar name={g.manager.name} size={32}/>
                             <div style={{minWidth:0}}>
                               <div style={{fontWeight:700,color:'var(--text)',display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
-                                {g.manager.name}
+                                {onViewAgentQueue && g.manager.email ? (
+                                  <button
+                                    type="button"
+                                    onClick={(e)=>{ e.stopPropagation(); onViewAgentQueue(g.manager.email); }}
+                                    title={`View ${g.manager.name}'s workload in the Workspace queue`}
+                                    style={{border:'none',background:'none',padding:0,margin:0,font:'inherit',color:'inherit',cursor:'pointer',textAlign:'left'}}
+                                    onMouseEnter={(e)=>{ e.currentTarget.style.textDecoration='underline'; e.currentTarget.style.color='#7c3aed'; }}
+                                    onMouseLeave={(e)=>{ e.currentTarget.style.textDecoration='none'; e.currentTarget.style.color='inherit'; }}
+                                  >{g.manager.name}</button>
+                                ) : g.manager.name}
                                 <AccessBadge access={live?.access || g.manager.access} />
                                 <LastSeenPill iso={live?.lastSeenAt} loading={!!rosterLoading} />
                                 <OOOBadge events={oooEventsByEmail.get((g.manager.email || '').toLowerCase())} />
