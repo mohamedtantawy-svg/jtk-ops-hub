@@ -66,7 +66,10 @@ export function canScoreMemberPerf(user, memberEmail, isPerfAdmin = false) {
   const target = String(memberEmail).toLowerCase();
   if (target === String(user.email).toLowerCase()) return false;   // can't score self
   try {
-    return getAllReports(String(user.email).toLowerCase()).some(r => (r.email || '').toLowerCase() === target);
+    // getAllReports returns an array of EMAIL STRINGS (not member objects) —
+    // BFS over managerEmail. getDirectReports returns objects, hence the
+    // difference vs directReportEmails below.
+    return getAllReports(String(user.email).toLowerCase()).some(e => String(e || '').toLowerCase() === target);
   } catch { return false; }
 }
 

@@ -130,4 +130,4 @@ export function quarterOfMonth(m) { return Math.floor((Number(m) - 1) / 3) + 1; 
 // Managerial roles allowed to view/score (mirrors the queue managerial gate;
 // includes legacy short forms as belt-and-suspenders). Agents see only self.
 export const PERF_MANAGERIAL_ROLES = ['admin', 'regional_manager', 'team_lead', 'regional_mgr', 'lead'];
-export function isManagerialRole(role) { return PERF_MANAGERIAL_ROLES.includes(role); }
+export function isManagerialRole(role) { return PERF_MANAGERIAL_ROLES.includes(String(role || '').toLowerCase()); }

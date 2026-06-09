@@ -9,6 +9,8 @@ import { useState, useMemo, useContext } from 'react';
 import { PermissionsContext } from '../../App';
 import { useCurrentDept } from '../../hooks/useCurrentDept';
 import PerformanceSettings from './performance/PerformanceSettings';
+import MyPerformance from './performance/MyPerformance';
+import TeamReviews from './performance/TeamReviews';
 
 export default function PerformanceView({ user }) {
   const perms = useContext(PermissionsContext);
@@ -45,31 +47,9 @@ export default function PerformanceView({ user }) {
         })}
       </div>
 
-      {active.key === 'me' && (
-        <Placeholder
-          icon="bi-graph-up-arrow"
-          title="Your performance"
-          body="Your monthly performance history, scores, trends, check-ins, and growth will appear here once your team's reviews are live."
-        />
-      )}
-      {active.key === 'team' && (
-        <Placeholder
-          icon="bi-people-fill"
-          title="Your team's performance"
-          body="Run monthly reviews, see completion and score distribution, drill into each report, and manage warnings & promotions — scoped to your team."
-        />
-      )}
+      {active.key === 'me' && <MyPerformance user={user} />}
+      {active.key === 'team' && <TeamReviews user={user} canManage={canManage} />}
       {active.key === 'settings' && <PerformanceSettings canManage={canManage} />}
-    </div>
-  );
-}
-
-function Placeholder({ icon, title, body }) {
-  return (
-    <div style={{ marginTop: 16, padding: '48px 24px', textAlign: 'center', border: '1px dashed var(--border)', borderRadius: 14, background: 'var(--surface)' }}>
-      <i className={`bi ${icon}`} style={{ fontSize: 34, color: 'var(--text-muted)', display: 'block', marginBottom: 14, opacity: 0.5 }} />
-      <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>{title}</div>
-      <div style={{ fontSize: 13, color: 'var(--text-secondary)', maxWidth: 520, margin: '0 auto', lineHeight: 1.5 }}>{body}</div>
     </div>
   );
 }

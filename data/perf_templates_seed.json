@@ -75,7 +75,13 @@
     }
    ],
    "ops_thresholds": null,
-   "growth_thresholds": null
+   "growth_thresholds": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
   },
   {
    "role_key": "hrx_247",
@@ -145,7 +151,13 @@
     }
    ],
    "ops_thresholds": null,
-   "growth_thresholds": null
+   "growth_thresholds": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
   },
   {
    "role_key": "swat_new_services",
@@ -220,7 +232,13 @@
     }
    ],
    "ops_thresholds": null,
-   "growth_thresholds": null
+   "growth_thresholds": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
   },
   {
    "role_key": "new_services",
@@ -295,7 +313,13 @@
     }
    ],
    "ops_thresholds": null,
-   "growth_thresholds": null
+   "growth_thresholds": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
   },
   {
    "role_key": "team_lead",
@@ -370,7 +394,13 @@
     }
    ],
    "ops_thresholds": null,
-   "growth_thresholds": null
+   "growth_thresholds": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ]
   }
  ]
 }
