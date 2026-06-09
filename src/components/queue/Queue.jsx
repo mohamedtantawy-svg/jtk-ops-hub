@@ -197,7 +197,7 @@ const clampSubjectWidth = (n) => clampSubjectWidthShared(n, SUBJECT_WIDTH_DEFAUL
 // the Queue tab row, the home "By Source" card, and the sync popover share one
 // gate and can't drift (mistake #52).
 
-const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
+const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused, initialAssignee = null, onInitialAssigneeConsumed }) => {
   // Phase 14.1 (2026-05-20): per-dept Deel-source visibility. Tabs that
   // belong to a source the current dept has explicitly hidden don't render
   // at all (GIX hides 5; HRX keeps all 6). HRX preserves identical
@@ -237,6 +237,14 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
   // no filter. Insiya Jasdanwalla 2026-05-15 ask: "Request to filter team
   // queue by country — cannot filter the queue by specific country".
   const [fCountry, setFCountry] = useState([]);
+  // Jose Ruales 2026-06-09 (Manager Workload Visibility) — assignee filter,
+  // parity with HR Hub. Multi-select array of lowercased emails (mirrors
+  // fCountry). Powers the per-agent workload drill-in: a manager clicks a
+  // direct report in the Briefing Team Summary and lands here pre-filtered to
+  // that person across every queue (see the initialAssignee prop + its consume
+  // effect). NOT persisted to localStorage — it's a transient "view this
+  // person's queue" action, not a durable preference (mirrors `search`).
+  const [fAssignee, setFAssignee] = useState([]);
 
   // Post-mount filter rehydration — runs once per signed-in identity.
   useEffect(() => {
@@ -340,6 +348,32 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
       setWorkSource('work_tasks');
     }
   }, [focusTaskId]);
+  // Jose Ruales 2026-06-09 — manager workload drill-in. When a manager clicks a
+  // direct report's name in the Briefing Team Summary, App flips the view to
+  // 'my-queue' and sets initialAssignee to that agent's email. Consume it on
+  // mount: pre-fill the assignee filter to that person, clear every other
+  // narrowing filter, and drop to the cross-source landing so the manager sees
+  // that agent's FULL workload across all queues. Cleared via
+  // onInitialAssigneeConsumed so a later tab switch doesn't re-pin the filter
+  // (mirrors the focusTaskId consume pattern above). Views are conditionally
+  // mounted, so an App-level intent prop is used rather than a CustomEvent
+  // (which would fire before this component mounts and be missed).
+  useEffect(() => {
+    if (!initialAssignee) return;
+    const email = String(initialAssignee).toLowerCase().trim();
+    if (email) {
+      setFAssignee([email]);
+      setFTool(null);
+      setWorkSource(null);
+      setFStatus([]);
+      setFSla(null);
+      setFSlaMetric(null);
+      setFUnassigned(false);
+      setFCountry([]);
+      setSearch('');
+    }
+    onInitialAssigneeConsumed?.();
+  }, [initialAssignee]); // eslint-disable-line react-hooks/exhaustive-deps
   // ── Column sort for the ZD/Jira table ─────────────────────────────────────
   // Default = SLA tier (Breached → At-Risk → On Track), oldest-first within
   // each tier. Clicking a column header switches primary sort to that column;
@@ -769,6 +803,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
     if (fStatus.length) _vis = _vis.filter(t => fStatus.includes(t.status));
     if (fUnassigned)    _vis = _vis.filter(t => !t.assigneeId && !t.assigneeEmail);
     if (fCountry.length) _vis = _vis.filter(t => fCountry.includes(canonicalCC(t.country)));
+    if (fAssignee.length) _vis = _vis.filter(t => fAssignee.includes((t.assigneeEmail || '').toLowerCase()));
     // 2026-05-28 (Pablo Gonzalez) — Zendesk SLA-metric filter. Applied to
     // Zendesk rows only (Jira + Deel pass through untouched because they
     // don't carry slaMetric). Combines naturally with fSla='breached' so
@@ -884,10 +919,10 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
     const _done = _vis.filter(t => t.status === 'resolved');
     const _all = [..._sorted, ..._eorSigning, ..._snoozed, ..._done];
     return { baseVis: _baseVis, visPreSla: _visPreSla, active: _sorted, eorSigning: _eorSigning, snoozed: _snoozed, done: _done, all: _all };
-  }, [ns, user, fTool, fStatus, fUnassigned, fCountry, fSla, fSlaMetric, search, settings.sla_enabled, passesJiraRoleFilter, sortCol, sortDir]);
+  }, [ns, user, fTool, fStatus, fUnassigned, fCountry, fAssignee, fSla, fSlaMetric, search, settings.sla_enabled, passesJiraRoleFilter, sortCol, sortDir]);
 
   const jiraRoleFilterActive = fJiraActionable !== true || fJiraRaised !== false;
-  const hasActiveFilters = useMemo(() => !!(fTool || fStatus.length > 0 || fSla || fSlaMetric || fUnassigned || fCountry.length > 0 || search || jiraRoleFilterActive), [fTool, fStatus, fSla, fSlaMetric, fUnassigned, fCountry, search, jiraRoleFilterActive]);
+  const hasActiveFilters = useMemo(() => !!(fTool || fStatus.length > 0 || fSla || fSlaMetric || fUnassigned || fCountry.length > 0 || fAssignee.length > 0 || search || jiraRoleFilterActive), [fTool, fStatus, fSla, fSlaMetric, fUnassigned, fCountry, fAssignee, search, jiraRoleFilterActive]);
   // Same predicate minus `fSla`. Drives the SLA-pill count branch below so
   // that clicking the On Track / At Risk / Breached pill doesn't itself
   // switch the pill count from the cross-source aggregate (ZD + every Deel
@@ -908,7 +943,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
   // the scope being counted. Other non-SLA filters legitimately narrow
   // the scope (e.g. fTool='jira' narrows to Jira) — those still flip the
   // count via `hasActiveFilters` below.
-  const hasNonSlaActiveFilters = useMemo(() => !!(fTool || fStatus.length > 0 || fUnassigned || fCountry.length > 0 || search || jiraRoleFilterActive), [fTool, fStatus, fUnassigned, fCountry, search, jiraRoleFilterActive]);
+  const hasNonSlaActiveFilters = useMemo(() => !!(fTool || fStatus.length > 0 || fUnassigned || fCountry.length > 0 || fAssignee.length > 0 || search || jiraRoleFilterActive), [fTool, fStatus, fUnassigned, fCountry, fAssignee, search, jiraRoleFilterActive]);
 
   // ── Source-panel filter (status severity + unassigned) ──
   // SLA filter is applied SEPARATELY (below) so the SLA pill counts stay
@@ -919,8 +954,9 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
     if (fStatus.length) r = r.filter(row => fStatus.includes(row?.status?.severity));
     if (fUnassigned)    r = r.filter(row => !row?.assigneeEmail);
     if (fCountry.length) r = r.filter(row => fCountry.includes(canonicalCC(row?.country)));
+    if (fAssignee.length) r = r.filter(row => fAssignee.includes((row?.assigneeEmail || '').toLowerCase()));
     return r;
-  }, [fStatus, fUnassigned, fCountry]);
+  }, [fStatus, fUnassigned, fCountry, fAssignee]);
 
   // Pre-computed post-status/unassigned row sets. Drive the SLA pill counts.
   const visOnboardingRows  = useMemo(() => applyPanelFilter(onboardingRows),  [onboardingRows, applyPanelFilter]);
@@ -1465,6 +1501,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
             if (fStatus.length && !fStatus.includes(t.status)) return false;
             if (fUnassigned && (t.assigneeId || t.assigneeEmail)) return false;
             if (fCountry.length && !fCountry.includes(canonicalCC(t.country))) return false;
+            if (fAssignee.length && !fAssignee.includes((t.assigneeEmail || '').toLowerCase())) return false;
             return true;
           };
           const jiraCount = baseVis.filter(t => t.source === 'jira' && applyQueueFilter(t)).length;
@@ -1519,6 +1556,30 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
             .map(([code, count]) => ({
               value: code,
               label: `${getFlag(code) || ''} ${getCountryName(code) || code}`.trim(),
+              count,
+            }))
+            .sort((a, b) => a.label.localeCompare(b.label));
+          // Jose Ruales 2026-06-09 — assignee filter options. Built from the
+          // PRE-filter row sets (baseVis tickets + allSourceRows Deel) so every
+          // assignee the caller can see stays selectable even while the filter
+          // is active, and the counts reflect the pre-assignee-filter set —
+          // exactly how countryOptions behaves. Name resolves via the live
+          // roster, falling back to the row's own assignee name for external
+          // users not in our directory.
+          const assigneeCounts = new Map(); // email -> { count, name }
+          const tallyAssignee = (email, name) => {
+            const lc = (email || '').toLowerCase();
+            if (!lc) return;
+            const cur = assigneeCounts.get(lc);
+            if (cur) { cur.count++; if (!cur.name && name) cur.name = name; }
+            else assigneeCounts.set(lc, { count: 1, name: name || '' });
+          };
+          for (const t of baseVis) tallyAssignee(t.assigneeEmail, resolveAssignee(t).name);
+          for (const r of allSourceRows) tallyAssignee(r?.assigneeEmail, r?.assignee);
+          const assigneeOptions = Array.from(assigneeCounts.entries())
+            .map(([email, { count, name }]) => ({
+              value: email,
+              label: MEMBERS_BY_EMAIL[email]?.name || name || email,
               count,
             }))
             .sort((a, b) => a.label.localeCompare(b.label));
@@ -1644,6 +1705,20 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
                 />
               )}
 
+              {/* Assignee filter — parity with HR Hub. Shown when more than one
+                  assignee is present (a lone-assignee agent view doesn't need
+                  it) OR a filter is already active so it stays clearable. */}
+              {(assigneeOptions.length > 1 || fAssignee.length > 0) && (
+                <MultiFilterDropdown
+                  icon="bi-person-check"
+                  label="Assignee"
+                  selected={fAssignee}
+                  options={assigneeOptions}
+                  onChange={setFAssignee}
+                  activeColor="#7c3aed"
+                />
+              )}
+
               <button onClick={() => setFUnassigned(!fUnassigned)} style={{ height: 32, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '0 12px', borderRadius: 8, border: fUnassigned ? '1px solid #d42d35' : '1px solid #e8e8e8', background: fUnassigned ? '#fef2f2' : 'white', color: fUnassigned ? '#d42d35' : '#616161', fontSize: 12, fontWeight: fUnassigned ? 600 : 500, cursor: 'pointer', transition: 'all .15s', whiteSpace: 'nowrap' }}>
                 <i className="bi-person-dash" style={{ fontSize: 11 }}></i>Unassigned
               </button>
@@ -1669,7 +1744,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
               {hasActiveFilters && hiddenByFilters > 0 && (
                 <button
                   type="button"
-                  onClick={() => { setFTool(null); setFStatus([]); setFSla(null); setFSlaMetric(null); setFUnassigned(false); setFCountry([]); setSearch(''); setFJiraActionable(true); setFJiraRaised(false); }}
+                  onClick={() => { setFTool(null); setFStatus([]); setFSla(null); setFSlaMetric(null); setFUnassigned(false); setFCountry([]); setFAssignee([]); setSearch(''); setFJiraActionable(true); setFJiraRaised(false); }}
                   title={`Your active filters are hiding ${hiddenByFilters} ${hiddenByFilters === 1 ? 'task' : 'tasks'}. Click to clear all filters.`}
                   style={{ height: 32, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '0 10px', borderRadius: 8, background: '#fff7ed', border: '1px solid #fed7aa', color: '#b45309', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap', cursor: 'pointer', fontFamily: 'inherit' }}
                   onMouseEnter={e => { e.currentTarget.style.background = '#ffedd5'; }}
@@ -1681,7 +1756,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
               )}
 
               {hasActiveFilters && (
-                <button onClick={() => { setFTool(null); setFStatus([]); setFSla(null); setFSlaMetric(null); setFUnassigned(false); setFCountry([]); setSearch(''); setFJiraActionable(true); setFJiraRaised(false); }} style={{ height: 32, display: 'inline-flex', alignItems: 'center', gap: 4, padding: '0 10px', borderRadius: 8, border: 'none', background: 'transparent', color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap', textDecoration: 'underline' }}>
+                <button onClick={() => { setFTool(null); setFStatus([]); setFSla(null); setFSlaMetric(null); setFUnassigned(false); setFCountry([]); setFAssignee([]); setSearch(''); setFJiraActionable(true); setFJiraRaised(false); }} style={{ height: 32, display: 'inline-flex', alignItems: 'center', gap: 4, padding: '0 10px', borderRadius: 8, border: 'none', background: 'transparent', color: 'var(--text-muted)', fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap', textDecoration: 'underline' }}>
                   Clear all
                 </button>
               )}
@@ -2112,7 +2187,7 @@ const Queue = ({ user, tasks, subFilter, focusTaskId, onTaskFocused }) => {
                               </div>
                               <button
                                 type="button"
-                                onClick={() => { setFTool(null); setFStatus([]); setFSla(null); setFSlaMetric(null); setFUnassigned(false); setFCountry([]); setSearch(''); setFJiraActionable(true); setFJiraRaised(false); }}
+                                onClick={() => { setFTool(null); setFStatus([]); setFSla(null); setFSlaMetric(null); setFUnassigned(false); setFCountry([]); setFAssignee([]); setSearch(''); setFJiraActionable(true); setFJiraRaised(false); }}
                                 style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 8, border: '1px solid #1f74b3', background: '#1f74b3', color: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
                               >
                                 <i className="bi-x-circle" style={{ fontSize: 12 }}></i>
