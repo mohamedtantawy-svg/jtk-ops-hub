@@ -998,7 +998,7 @@ END $$;
 -- A monthly performance cycle per department.
 CREATE TABLE IF NOT EXISTS perf_cycles (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_node_id  UUID REFERENCES org_nodes(id) ON DELETE CASCADE,
+  org_node_id  UUID,   -- FK added via ALTER after org_nodes exists (see below)
   period_month INTEGER NOT NULL,
   period_year  INTEGER NOT NULL,
   status       VARCHAR(16) NOT NULL DEFAULT 'open',   -- open | locked
@@ -1015,7 +1015,7 @@ CREATE INDEX IF NOT EXISTS idx_perf_cycles_dept ON perf_cycles(org_node_id, peri
 -- version it was scored with so historical scores are immutable.
 CREATE TABLE IF NOT EXISTS perf_templates (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_node_id  UUID REFERENCES org_nodes(id) ON DELETE CASCADE,
+  org_node_id  UUID,   -- FK added via ALTER after org_nodes exists (see below)
   role_key     VARCHAR(48) NOT NULL,
   name         VARCHAR(120) NOT NULL,
   version      INTEGER NOT NULL DEFAULT 1,
@@ -1035,7 +1035,7 @@ CREATE INDEX IF NOT EXISTS idx_perf_templates_dept ON perf_templates(org_node_id
 -- member_email/manager_email are stored LOWERCASED so the UNIQUE works for upsert.
 CREATE TABLE IF NOT EXISTS perf_reviews (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_node_id   UUID REFERENCES org_nodes(id) ON DELETE SET NULL,
+  org_node_id   UUID,   -- FK added via ALTER after org_nodes exists (see below)
   cycle_id      UUID REFERENCES perf_cycles(id) ON DELETE SET NULL,
   period_month  INTEGER NOT NULL,
   period_year   INTEGER NOT NULL,
@@ -1080,7 +1080,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_perf_reviews_external ON perf_reviews(exte
 -- a review, with acknowledgment + resolution history.
 CREATE TABLE IF NOT EXISTS perf_warnings (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_node_id   UUID REFERENCES org_nodes(id) ON DELETE SET NULL,
+  org_node_id   UUID,   -- FK added via ALTER after org_nodes exists (see below)
   member_email  VARCHAR(255) NOT NULL,
   member_name   VARCHAR(255),
   level         VARCHAR(16) NOT NULL DEFAULT 'verbal',
@@ -2448,6 +2448,30 @@ CREATE INDEX IF NOT EXISTS idx_workspace_members_org_node       ON workspace_mem
 ALTER TABLE mention_group
   ADD COLUMN IF NOT EXISTS org_node_id UUID REFERENCES org_nodes(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_mention_group_org_node ON mention_group(org_node_id);
+
+-- ────────────────────────────────────────────────────────────────────────────
+-- Performance tables → org_nodes FK (Phase A, deferred 2026-06-09).
+-- The perf_* CREATE TABLEs (defined far earlier in this SCHEMA_SQL, before
+-- org_nodes exists) declare org_node_id as a plain UUID to avoid a forward FK
+-- that would abort the whole atomic SCHEMA_SQL batch. We attach the FK here,
+-- AFTER org_nodes is created, exactly like every other org_node_id column.
+-- SET NULL (not CASCADE) so a dept-node delete/reorg never destroys historical
+-- performance data. Idempotent via the pg_constraint conname guard.
+-- ────────────────────────────────────────────────────────────────────────────
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_perf_cycles_org_node') THEN
+    ALTER TABLE perf_cycles ADD CONSTRAINT fk_perf_cycles_org_node FOREIGN KEY (org_node_id) REFERENCES org_nodes(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_perf_templates_org_node') THEN
+    ALTER TABLE perf_templates ADD CONSTRAINT fk_perf_templates_org_node FOREIGN KEY (org_node_id) REFERENCES org_nodes(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_perf_reviews_org_node') THEN
+    ALTER TABLE perf_reviews ADD CONSTRAINT fk_perf_reviews_org_node FOREIGN KEY (org_node_id) REFERENCES org_nodes(id) ON DELETE SET NULL;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_perf_warnings_org_node') THEN
+    ALTER TABLE perf_warnings ADD CONSTRAINT fk_perf_warnings_org_node FOREIGN KEY (org_node_id) REFERENCES org_nodes(id) ON DELETE SET NULL;
+  END IF;
+END $$;
 
 -- Swap the global handle unique for a per-dept unique. The DROP is
 -- defensive (IF EXISTS) since older instances will not have the old

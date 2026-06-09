@@ -89,7 +89,8 @@ export async function seedPerfHistoricalIfNeeded() {
             weighted_score, overall_score, band, status, is_locked, source, external_id,
             finalized_at, finalized_by_email, created_by_email, updated_by_email)
          VALUES
-           ($1,$2,$3,$4,$5,
+           ((SELECT id FROM org_nodes WHERE id = $1::uuid),
+            $2,$3,$4,$5,
             (SELECT id FROM members WHERE LOWER(email)=$4 LIMIT 1),
             $6,$7,$8,$9,$10,$11,$12,$13,$14,'finalized',true,'import',$15,$16,$17,'import','import')
          ON CONFLICT (member_email, period_month, period_year) DO NOTHING`,
