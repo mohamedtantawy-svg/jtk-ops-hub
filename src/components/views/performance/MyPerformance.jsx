@@ -7,11 +7,16 @@ import { useMemo, useState } from 'react';
 import { usePerfReviews } from '../../../hooks/usePerfReviews';
 import { usePerfTemplates } from '../../../hooks/usePerfTemplates';
 import {
-  bandForScore, MONTH_LABELS, reviewStatusMeta,
+  bandForScore, MONTH_LABELS, reviewStatusMeta, quarterOfMonth,
+  PROMOTION_ELIGIBLE_MIN_OVERALL, PROMOTION_ELIGIBLE_CYCLES,
 } from '../../../lib/performance-constants';
+import { TrendLine, MetricRadar, BandRing } from './PerformanceCharts';
 import ReviewEditor from './ReviewEditor';
 
 const PURPLE = '#7c3aed';
+
+// Statuses that count as a "finalized" cycle for promotion eligibility.
+const FINALIZED_STATUSES = new Set(['finalized', 'acknowledged']);
 
 export default function MyPerformance({ user }) {
   const { reviews, loading, error, refresh } = usePerfReviews({ scope: 'mine' });
@@ -48,10 +53,44 @@ export default function MyPerformance({ user }) {
     return templates.find(t => t.roleKey === myRoleKey) || templates[0];
   }, [templates, myRoleKey]);
 
-  // Sparkline series — oldest → newest weighted scores.
+  // Sparkline series — oldest → newest weighted scores (header mini-trend).
   const series = useMemo(
     () => [...sorted].reverse().map(r => Number(r.weightedScore ?? r.overallScore) || 0),
     [sorted]);
+
+  // Full TrendLine series — oldest → newest { month, year, score }.
+  const trendSeries = useMemo(
+    () => [...sorted].reverse().map(r => ({
+      month: Number(r.periodMonth),
+      year: Number(r.periodYear),
+      score: Number(r.weightedScore ?? r.overallScore) || 0,
+    })),
+    [sorted]);
+
+  // Quarter average = avg overall across the latest scored review's quarter.
+  const quarterAvg = useMemo(() => {
+    if (!latestScored) return null;
+    const q = quarterOfMonth(Number(latestScored.periodMonth));
+    const y = Number(latestScored.periodYear);
+    const inQuarter = sorted.filter(r =>
+      Number(r.periodYear) === y &&
+      quarterOfMonth(Number(r.periodMonth)) === q &&
+      Number(r.overallScore) > 0);
+    if (inQuarter.length === 0) return null;
+    const avg = inQuarter.reduce((s, r) => s + Number(r.overallScore), 0) / inQuarter.length;
+    return { value: Math.round(avg * 10) / 10, q, year: y, count: inQuarter.length };
+  }, [sorted, latestScored]);
+
+  // Promotion eligibility — the last N finalized reviews all ≥ the overall min.
+  const promo = useMemo(() => {
+    const finalized = sorted.filter(r => FINALIZED_STATUSES.has(r.status) && Number(r.overallScore) > 0);
+    if (finalized.length < PROMOTION_ELIGIBLE_CYCLES) {
+      return { eligible: false, have: finalized.length };
+    }
+    const lastN = finalized.slice(0, PROMOTION_ELIGIBLE_CYCLES);
+    const eligible = lastN.every(r => Number(r.overallScore) >= PROMOTION_ELIGIBLE_MIN_OVERALL);
+    return { eligible, have: finalized.length };
+  }, [sorted]);
 
   return (
     <div style={{ marginTop: 16 }}>
@@ -74,6 +113,54 @@ export default function MyPerformance({ user }) {
 
       {error && <Err msg={error} />}
       {loading && reviews.length === 0 && <div style={{ padding: 24, color: 'var(--text-muted)', fontSize: 13 }}>Loading…</div>}
+
+      {/* Visualization header — ring + quarter avg + promotion, trend, radar */}
+      {latestScored && (
+        <>
+          <style>{`@media (max-width: 900px) { .perf-viz-grid { grid-template-columns: 1fr !important; } }`}</style>
+          <div className="perf-viz-grid" style={vizGrid}>
+            {/* At-a-glance: ring + quarter avg + promotion badge */}
+            <div style={{ ...vizCard, display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
+              <BandRing score={Number(latestScored.weightedScore ?? latestScored.overallScore) || 0} label="Latest final" />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0, flex: 1 }}>
+                <div>
+                  <div style={miniLabel}>Quarter avg{quarterAvg ? ` · Q${quarterAvg.q} ${quarterAvg.year}` : ''}</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--text)', lineHeight: 1.1 }}>
+                    {quarterAvg ? quarterAvg.value.toFixed(1) : '—'}
+                    {quarterAvg && <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginLeft: 6 }}>({quarterAvg.count} {quarterAvg.count === 1 ? 'cycle' : 'cycles'})</span>}
+                  </div>
+                </div>
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
+                  padding: '6px 13px', borderRadius: 128, fontSize: 12, fontWeight: 800,
+                  color: promo.eligible ? '#15803d' : '#d97706',
+                  background: promo.eligible ? '#dcfce7' : '#fff7ed',
+                  border: `1px solid ${promo.eligible ? '#15803d' : '#d97706'}33`,
+                }}>
+                  <i className={`bi ${promo.eligible ? 'bi-rocket-takeoff' : 'bi-bricks'}`} />
+                  {promo.eligible ? 'On track for promotion' : 'Keep building'}
+                </span>
+              </div>
+            </div>
+
+            {/* Trend over all periods */}
+            <div style={vizCard}>
+              <TrendLine series={trendSeries} title="Final score trend" />
+            </div>
+
+            {/* Latest review radar */}
+            <div style={{ ...vizCard, display: 'flex', flexDirection: 'column' }}>
+              <MetricRadar
+                title="Latest review"
+                operations={latestScored.operations}
+                kpi={latestScored.kpi}
+                growth={latestScored.growth}
+                sentiment={latestScored.sentiment}
+              />
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Current period CTA */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, margin: '16px 0 10px', flexWrap: 'wrap' }}>
@@ -181,3 +268,5 @@ const statusPill = { display: 'inline-block', marginTop: 3, padding: '2px 9px', 
 const miniLabel = { fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-muted)' };
 const emptyCard = { padding: '40px 24px', textAlign: 'center', border: '1px dashed var(--border)', borderRadius: 14, color: 'var(--text-muted)', background: 'var(--surface)' };
 const primaryBtn = { fontSize: 13, fontWeight: 700, color: '#fff', background: PURPLE, border: 'none', borderRadius: 8, padding: '8px 16px', cursor: 'pointer' };
+const vizGrid = { display: 'grid', gridTemplateColumns: 'minmax(260px, 1fr) minmax(0, 1.2fr) minmax(0, 0.9fr)', gap: 12, marginTop: 12 };
+const vizCard = { padding: '16px 18px', border: '1px solid var(--border)', borderRadius: 14, background: 'var(--surface)' };
