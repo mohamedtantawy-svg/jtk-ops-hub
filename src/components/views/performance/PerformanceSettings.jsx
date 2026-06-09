@@ -78,7 +78,7 @@ export default function PerformanceSettings({ canManage = false }) {
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>{t.name}</div>
                     <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                      {t.operationsCriteria.length} operations · {t.growthCriteria.length} growth · v{t.version}
+                      {(t.operationsCriteria?.length || 0)} operations · {(t.growthCriteria?.length || 0)} growth · v{t.version}
                     </div>
                   </div>
                 </div>

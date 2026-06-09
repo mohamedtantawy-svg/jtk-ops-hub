@@ -185,10 +185,14 @@ export async function POST(req) {
          band = COALESCE(EXCLUDED.band, perf_reviews.band),
          promotion = CASE WHEN $25 THEN EXCLUDED.promotion ELSE perf_reviews.promotion END,
          eval_answers = CASE WHEN $25 THEN EXCLUDED.eval_answers ELSE perf_reviews.eval_answers END,
-         checkin = COALESCE(perf_reviews.checkin,'{}'::jsonb) || EXCLUDED.checkin,
+         checkin = CASE WHEN perf_reviews.is_locked AND NOT $25 THEN perf_reviews.checkin
+                        ELSE COALESCE(perf_reviews.checkin,'{}'::jsonb) || EXCLUDED.checkin END,
          template_id = COALESCE(EXCLUDED.template_id, perf_reviews.template_id),
          template_version = COALESCE(EXCLUDED.template_version, perf_reviews.template_version),
-         status = EXCLUDED.status, updated_by_email = EXCLUDED.updated_by_email, updated_at = NOW()
+         status = CASE WHEN $25 THEN EXCLUDED.status
+                       WHEN perf_reviews.is_locked THEN perf_reviews.status
+                       ELSE EXCLUDED.status END,
+         updated_by_email = EXCLUDED.updated_by_email, updated_at = NOW()
        RETURNING *`,
       [
         deptId, cycleId, month, year, memberEmail, ctx.memberName || body.memberName || memberEmail,

@@ -58,7 +58,7 @@ export async function runPerformanceCycleSync({ force = false } = {}) {
   const month = now.getUTCMonth() + 1;
   const year = now.getUTCFullYear();
   const period = periodKey(month, year);
-  const monthLabel = `${MONTH_LABELS[month - 1] || ''} ${year}`.trim();
+  const monthLabel = `${MONTH_LABELS[month] || ''} ${year}`.trim(); // MONTH_LABELS is 1-indexed ('' at 0)
 
   // 1) Open cycles for every dept that adopted a template.
   let cyclesOpened = 0;
