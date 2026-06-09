@@ -605,7 +605,8 @@ CREATE INDEX IF NOT EXISTS idx_ann_requests_created ON announcement_requests(cre
 DO $$ BEGIN
   ALTER TABLE announcement_requests DROP CONSTRAINT IF EXISTS chk_ann_requests_status;
   ALTER TABLE announcement_requests ADD CONSTRAINT chk_ann_requests_status
-    CHECK (status IN ('pending','approved','rejected','withdrawn','needs_info','awaiting_post'));
+    CHECK (status IN ('pending','approved','rejected','withdrawn','needs_info','awaiting_post'))
+    NOT VALID;  -- (2026-06-09) validate new rows only; never abort the boot batch on legacy data
 END $$;
 ALTER TABLE announcement_requests ADD COLUMN IF NOT EXISTS awaiting_post_at TIMESTAMPTZ;
 
@@ -1254,7 +1255,10 @@ CREATE INDEX IF NOT EXISTS idx_hr_hub_request_team_lead  ON hr_hub_request(team_
 DO $$ BEGIN
   ALTER TABLE hr_hub_request DROP CONSTRAINT IF EXISTS hr_hub_request_status_check;
   ALTER TABLE hr_hub_request ADD CONSTRAINT hr_hub_request_status_check
-    CHECK (status IN ('new','in_progress','on_hold','pending_requester','resolved','rejected'));
+    CHECK (status IN ('new','in_progress','on_hold','pending_requester','resolved','rejected'))
+    NOT VALID;  -- (2026-06-09) enforce on new/updated rows only; statuses are admin-
+                -- configurable (hr_hub_settings), so a custom/legacy value must never
+                -- abort the atomic SCHEMA_SQL batch and block every later migration.
 END $$;
 -- 'pending_requester' (2026-05-25) — Josephine Tuoyo asked for an explicit
 -- state covering "waiting on the requester to come back with info".
@@ -1540,17 +1544,16 @@ CREATE INDEX IF NOT EXISTS idx_urgent_assist_log_request ON urgent_assist_log(re
 -- v3 in the same idempotent block below.
 ALTER TABLE hr_hub_request DROP CONSTRAINT IF EXISTS hr_hub_request_flow_check;
 ALTER TABLE hr_hub_request DROP CONSTRAINT IF EXISTS hr_hub_request_flow_check_v2;
-DO $$ BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-     WHERE conrelid = 'hr_hub_request'::regclass
-       AND conname  = 'hr_hub_request_flow_check_v3'
-  ) THEN
-    ALTER TABLE hr_hub_request
-      ADD CONSTRAINT hr_hub_request_flow_check_v3
-      CHECK (flow IN ('hr_request','hr_reporting','escalation_zero','feedback','hide_task_request','sla_extension_request'));
-  END IF;
-END $$;
+-- FIX (2026-06-09): the v3 constraint is intentionally NO LONGER (re)added here.
+-- v3's value list omits 'payment_refund'. Because v3 is dropped + replaced by v4
+-- further down, every steady-state boot found v3 absent and RE-ADDED it — but on
+-- any env that already has payment_refund rows (every prod env since 2026-06-02),
+-- that ADD fails with "constraint hr_hub_request_flow_check_v3 is violated by some
+-- row". Since the whole SCHEMA_SQL runs as ONE atomic transaction, that single
+-- failure aborted the ENTIRE batch, silently blocking every later migration
+-- (perf_* tables, tracker tables, is_performance_admin, …). v4 below is the
+-- single source of truth; here we only ensure any stale v3 is removed.
+ALTER TABLE hr_hub_request DROP CONSTRAINT IF EXISTS hr_hub_request_flow_check_v3;
 
 ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS task_source   VARCHAR(40);
 ALTER TABLE hr_hub_request ADD COLUMN IF NOT EXISTS task_id       VARCHAR(200);
@@ -1622,7 +1625,8 @@ DO $$ BEGIN
   ) THEN
     ALTER TABLE hr_hub_request
       ADD CONSTRAINT hr_hub_request_flow_check_v4
-      CHECK (flow IN ('hr_request','hr_reporting','escalation_zero','feedback','hide_task_request','sla_extension_request','payment_refund'));
+      CHECK (flow IN ('hr_request','hr_reporting','escalation_zero','feedback','hide_task_request','sla_extension_request','payment_refund'))
+      NOT VALID;  -- enforce on new/updated rows; never abort the boot batch on legacy data
   END IF;
 END $$;
 
@@ -2747,15 +2751,78 @@ CREATE INDEX IF NOT EXISTS idx_capacity_proposals_dept_status
   ON capacity_proposals(org_node_id, status, created_at DESC);
 `;
 
-export async function runMigrations() {
-  console.log('[db] Running schema migrations...');
+// Split SCHEMA_SQL into top-level statements, respecting dollar-quoted blocks
+// (DO $$ ... $$ / $tag$ ... $tag$), single-quoted string literals, and line/block
+// comments so a ';' inside any of them never splits a statement. Used only by the
+// resilient fallback below — never on the atomic happy path.
+function splitSqlStatements(sql) {
+  const stmts = [];
+  let cur = '';
+  let i = 0;
+  const n = sql.length;
+  let inSingle = false, inLineComment = false, inBlockComment = false;
+  let dollarTag = null;
+  while (i < n) {
+    const ch = sql[i];
+    const two = sql.substr(i, 2);
+    if (inLineComment) { cur += ch; if (ch === '\n') inLineComment = false; i++; continue; }
+    if (inBlockComment) { cur += ch; if (two === '*/') { cur += sql[i + 1]; i += 2; inBlockComment = false; continue; } i++; continue; }
+    if (inSingle) {
+      cur += ch;
+      if (ch === "'") { if (sql[i + 1] === "'") { cur += sql[i + 1]; i += 2; continue; } inSingle = false; }
+      i++; continue;
+    }
+    if (dollarTag) {
+      if (ch === '$' && sql.substr(i, dollarTag.length) === dollarTag) { cur += dollarTag; i += dollarTag.length; dollarTag = null; continue; }
+      cur += ch; i++; continue;
+    }
+    if (two === '--') { inLineComment = true; cur += two; i += 2; continue; }
+    if (two === '/*') { inBlockComment = true; cur += two; i += 2; continue; }
+    if (ch === "'") { inSingle = true; cur += ch; i++; continue; }
+    if (ch === '$') {
+      const m = /^\$[A-Za-z0-9_]*\$/.exec(sql.slice(i));
+      if (m) { dollarTag = m[0]; cur += dollarTag; i += dollarTag.length; continue; }
+    }
+    if (ch === ';') { const t = cur.trim(); if (t) stmts.push(t); cur = ''; i++; continue; }
+    cur += ch; i++;
+  }
+  const tail = cur.trim();
+  if (tail) stmts.push(tail);
+  return stmts;
+}
+
+// Run SCHEMA_SQL with a resilience guarantee. The whole script is normally one
+// atomic multi-statement query (transactional — all-or-nothing). The hard
+// lesson of 2026-06-09: that means ONE bad statement (a forward-FK on a fresh
+// DB, a stale CHECK violated by legacy data, …) rolls back the ENTIRE batch and
+// silently blocks every later table/column, masking the next error behind the
+// first. So: try atomic first (fast, transactional for healthy envs); if it
+// throws, fall back to executing each statement independently (idempotent DDL,
+// safe to re-run) so every GOOD statement still applies and the failures are
+// isolated + logged instead of taking down the whole schema. Never throws.
+async function runSchemaSql() {
   try {
     await query(SCHEMA_SQL);
-    console.log('[db] Schema migrations complete.');
+    console.log('[db] Schema migrations complete (atomic).');
+    return;
   } catch (err) {
-    console.error('[db] Migration error:', err.message);
-    throw err;
+    console.error('[db] Atomic schema migration failed:', err.message);
+    console.error('[db] Falling back to per-statement execution so one bad statement cannot block the rest…');
   }
+  const statements = splitSqlStatements(SCHEMA_SQL);
+  let ok = 0;
+  const failures = [];
+  for (const stmt of statements) {
+    try { await query(stmt); ok++; }
+    catch (e) { failures.push({ stmt: stmt.slice(0, 140).replace(/\s+/g, ' '), error: e.message }); }
+  }
+  console.log(`[db] Per-statement schema migration: ${ok} ok, ${failures.length} failed (of ${statements.length}).`);
+  for (const f of failures) console.error(`   ✗ [migrate] ${f.error} :: ${f.stmt}`);
+}
+
+export async function runMigrations() {
+  console.log('[db] Running schema migrations...');
+  await runSchemaSql();
 
   // Versioned re-seed: when SEED_VERSION (in country-owners-seed.js) is
   // bumped, the next boot wipes team_member_countries and re-inserts from
