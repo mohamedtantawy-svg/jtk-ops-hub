@@ -64,7 +64,28 @@ export async function GET(req) {
                 org_node_id,
                 created_at, updated_at
            FROM team_member_overrides`,
-      ),
+      ).catch(err => {
+        // RESILIENCE (2026-06-09): a newly-added grant column (e.g.
+        // is_performance_admin) that hasn't been migrated yet must NOT take
+        // down the entire team view. Without this, a single missing column
+        // made the whole route fall through to the static baseline →
+        // reverted reporting lines + everyone "Never seen". Retry WITHOUT the
+        // newest grant column so real overrides (reporting/region/leads) +
+        // last-seen still load; the missing flag just reads false.
+        console.warn('[team-members GET] overrides SELECT failed, retrying without is_performance_admin:', err?.message);
+        return query(
+          `SELECT email, name, initials, title, access, manager_email, team, region,
+                  service, country, avatar_url, start_date, is_new, is_deleted,
+                  on_leave, is_announcements_admin,
+                  is_access_admin, is_command_center_viewer,
+                  org_node_id,
+                  created_at, updated_at
+             FROM team_member_overrides`,
+        ).catch(err2 => {
+          console.warn('[team-members GET] overrides retry failed:', err2?.message);
+          return { rows: [] };
+        });
+      }),
       query(
         `SELECT email, country_code FROM team_member_countries ORDER BY country_code`,
       ).catch(err => {

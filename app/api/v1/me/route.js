@@ -73,14 +73,31 @@ export async function GET(req) {
         //    profile the Team view renders. This is the single source of
         //    truth for role/team/region/country/name/avatar.
         try {
-          const { rows: ovRows } = await query(
-            `SELECT email, name, initials, title, access, manager_email, team, region,
-                    service, country, avatar_url, start_date, is_new, is_deleted,
-                    on_leave, is_announcements_admin,
-                    is_access_admin, is_hr_hub_admin, is_leader_alerts_admin,
-                    is_command_center_viewer, is_performance_admin
-               FROM team_member_overrides`
-          );
+          let ovRows;
+          try {
+            ({ rows: ovRows } = await query(
+              `SELECT email, name, initials, title, access, manager_email, team, region,
+                      service, country, avatar_url, start_date, is_new, is_deleted,
+                      on_leave, is_announcements_admin,
+                      is_access_admin, is_hr_hub_admin, is_leader_alerts_admin,
+                      is_command_center_viewer, is_performance_admin
+                 FROM team_member_overrides`
+            ));
+          } catch (colErr) {
+            // RESILIENCE (2026-06-09): if the newest grant column isn't
+            // migrated yet, still load the real override profile (region/team/
+            // leads) by retrying without is_performance_admin rather than
+            // collapsing to the members-table JWT fallback.
+            console.warn('[me] overrides SELECT failed, retrying without is_performance_admin:', colErr?.message);
+            ({ rows: ovRows } = await query(
+              `SELECT email, name, initials, title, access, manager_email, team, region,
+                      service, country, avatar_url, start_date, is_new, is_deleted,
+                      on_leave, is_announcements_admin,
+                      is_access_admin, is_hr_hub_admin, is_leader_alerts_admin,
+                      is_command_center_viewer
+                 FROM team_member_overrides`
+            ));
+          }
           // /me only consumes profile fields (role/team/region/etc.), never
           // login activity — pass [] for loginRows to skip the redundant
           // member_logins lookup.
