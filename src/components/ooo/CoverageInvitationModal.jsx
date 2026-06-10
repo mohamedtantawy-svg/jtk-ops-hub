@@ -62,7 +62,14 @@ export default function CoverageInvitationModal({ handoverId, invite = null, use
       try {
         const h = await getHandover(handoverId);
         if (!alive) return;
-        setDetail(h);
+        // getHandover (apiFetch) resolves to the raw body `{ handover: {...} }`,
+        // NOT the handover itself — unwrap it exactly like DetailSlideOut.jsx
+        // does (`res?.handover`). Without `.handover`, detail.status and
+        // detail.coverers were always undefined → myRow undefined →
+        // detailEligible always false → the modal showed "no longer awaiting
+        // your response" to EVERY coverer and never rendered Accept/Decline
+        // (Ljubica 2026-06-10 "Cannot accept coverage handover").
+        setDetail(h?.handover || null);
       } catch (err) {
         if (!alive) return;
         setLoadError(err?.message || 'Could not load this coverage request.');
