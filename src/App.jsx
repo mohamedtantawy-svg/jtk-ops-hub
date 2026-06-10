@@ -1593,10 +1593,20 @@ const App=()=>{
         setFocusTaskId(n.linkId);
         setView('my-queue');
       } else if (n.linkView === 'queue' && n.linkId) {
-        // Offboarding workflow-update notifications (offboarding-update-notify.js)
-        // deep-link here: open the queue and focus the case row by termination id.
-        setFocusTaskId(n.linkId);
+        // Offboarding workflow-update notifications (offboarding-update-notify.js).
+        // n.linkId is a NUMERIC Deel termination id — the case lives in the
+        // queue's Offboarding source, NOT the work_tasks drawer. The old code
+        // pushed it into focusTaskId (the work_tasks UUID slot), which routed it
+        // into WorkTaskDetailDrawer and spammed `invalid input syntax for type
+        // uuid: "<id>"` on the UUID-keyed work-tasks routes (open-fetch + 8s
+        // comment poll). Open the queue and focus the Offboarding source tab via
+        // the existing queue:focusSource handler (same 60ms-after-setView pattern
+        // Briefing uses so Queue has mounted its listener). 2026-06-10 log fix.
         setView('my-queue');
+        setTimeout(() => {
+          try { window.dispatchEvent(new CustomEvent('queue:focusSource', { detail: { source: 'offboarding' } })); }
+          catch {}
+        }, 60);
       } else if (n.linkView === 'urgent-assist' && n.linkId) {
         // Raquel Sanchez 2026-05-28 — Urgent Assist deep-link. The route
         // handlers write link_view='urgent-assist' on assignment +

@@ -49,6 +49,13 @@ function parseDueDate(raw) {
   return { value: d, set: true };
 }
 
+// Reject non-UUID task ids up front. work_tasks.id is UUID, so a numeric /
+// legacy id (e.g. an offboarding termination id mis-routed from a `queue`
+// notification into the work_tasks drawer) bound to $1 throws Postgres 22P02
+// `invalid input syntax for type uuid`. A non-UUID id can never match a
+// work_tasks row, so 404 is the correct, non-throwing answer. See 2026-06-10.
+const isUuid = (s) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s || ''));
+
 async function fetchTaskRow(taskId) {
   const { rows } = await query(
     `SELECT id, org_node_id, title, description, status, priority,
@@ -66,6 +73,7 @@ export async function GET(req, { params }) {
   const user = getAuthUser(req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { taskId } = await params;
+  if (!isUuid(taskId)) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const existing = await fetchTaskRow(taskId);
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -135,6 +143,7 @@ export async function PATCH(req, { params }) {
   const user = getAuthUser(req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { taskId } = await params;
+  if (!isUuid(taskId)) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const existing = await fetchTaskRow(taskId);
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -331,6 +340,7 @@ export async function DELETE(req, { params }) {
   const user = getAuthUser(req);
   if (!user.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const { taskId } = await params;
+  if (!isUuid(taskId)) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
   const existing = await fetchTaskRow(taskId);
   if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 });

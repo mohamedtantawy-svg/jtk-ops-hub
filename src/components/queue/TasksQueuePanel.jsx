@@ -78,10 +78,17 @@ export default function TasksQueuePanel({ user, focusTaskId, onTaskFocused }) {
   // and clear focusTaskId via onTaskFocused so the id doesn't survive a
   // subsequent tab switch.
   useEffect(() => {
-    if (focusTaskId) {
+    if (!focusTaskId) return;
+    // Only open the work_tasks drawer for a genuine work-task UUID. A non-UUID
+    // focus id (e.g. a numeric offboarding termination id mis-routed from a
+    // `queue` notification) must NOT open the UUID-keyed drawer — doing so hit
+    // the work_tasks detail + 8s comment poll with a non-UUID id and spammed
+    // Postgres 22P02 in the logs. Either way we clear the hand-off so the id
+    // never lingers in App state (App passes onTaskFocused = setFocusTaskId(null)).
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(focusTaskId))) {
       setDetailTaskId(focusTaskId);
-      onTaskFocused?.();
     }
+    onTaskFocused?.();
   }, [focusTaskId, onTaskFocused]);
 
   const { tasks, oooEmails, loading, error, reload, create } = useWorkTasks(user?.email, {
