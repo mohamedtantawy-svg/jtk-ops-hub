@@ -1840,8 +1840,15 @@ export async function listAmendmentRequests(params = {}) {
 // Offboarding panel instead.
 export const HRX_OPERATIONS_TEAM_ID = 'f235fd21-c5a0-4804-badf-2cc3dc76191e';
 
-const WORKBENCH_PAGE_SIZE = 200;
-const WORKBENCH_MAX_PAGES = 25; // 25 * 200 = 5000 item ceiling (well above current volume)
+// 2026-06-10: the admin API now rejects limit > 100 with a 400
+// ("\"limit\" must be less than or equal to 100") — observed live on the
+// capacity aggregator, which was the only caller relying on this default
+// (the workbench route passes the FE's limit=50; urgent-assist passes 50).
+// Page size halved to the enforced cap, MAX_PAGES doubled so the total
+// item ceiling stays at 5000. At the FE's limit=50 the ceiling is now
+// 2500 (was 1250 — uncomfortably close to the live active set).
+const WORKBENCH_PAGE_SIZE = 100;
+const WORKBENCH_MAX_PAGES = 50; // 50 * 100 = 5000 item ceiling (well above current volume)
 
 // Resolution tracking for Workbench is DB-backed — see
 // `src/lib/workbench-resolution-state.js` and the `workbench_known_tasks`

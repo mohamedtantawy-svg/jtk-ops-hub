@@ -18,15 +18,18 @@ const CACHE_DIR = join(process.env.CACHE_DIR || '/tmp', 'ops-hub-cache');
 // 2026-05-12 memory audit (pod RSS > 3 GiB OOM kills): tightened from 30
 // in-memory entries to 12. Each entry holds a full Deel/Zendesk/Jira
 // payload (workbench's slimmed projection is still ~5000 rows × ~600 B =
-// ~3 MiB per entry). With 12 entries the worst-case in-memory cache
-// footprint is ~36 MiB — well under the 1 GiB pod budget. Distinct
-// active keys today: `queue`, `queue_zendesk_active_*`,
-// `queue_jira_active_*`, `deel_workbench`, `deel_onboarding`,
-// `deel_onboarding_paused`, `deel_offboarding`, `deel_amendments_v2`,
-// `deel_redlines_v2`, `deel_incentive_plans_v1`,
-// `urgent_assist_workbench_global` — ~11 routine keys plus a couple of
-// settings entries, all of which evict cleanly under 12.
-const MAX_ENTRIES = 12;
+// ~3 MiB per entry).
+//
+// 2026-06-10: raised 12 → 24. The hot key set outgrew 12 (per-dept queue
+// namespaces from Phase 13c — `queue_zendesk_<dept>` / `queue_jira_<dept>`
+// per active dept — plus `deel_workbench_<dept>`, the redlines status-
+// suffixed key, and the new slim `capacity_src_*` snapshots). At 12 the
+// LRU was evicting still-hot payload entries, so steady-state polling
+// re-read + re-JSON.parsed multi-MB cache files from /tmp over and over —
+// pure allocation churn. Worst case at 24 is ~72 MiB in memory (most of
+// the new keys are the few-KB capacity slims), still far under budget;
+// the real bound stays the 30-min staleness sweep below.
+const MAX_ENTRIES = 24;
 const CLEANUP_INTERVAL = 5 * 60_000; // sweep stale entries every 5 minutes
 // 30 min instead of 60 min — anything we haven't touched in 30 min isn't
 // hot, so holding it in memory + on disk just costs bytes. The

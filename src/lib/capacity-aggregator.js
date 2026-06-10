@@ -37,7 +37,9 @@ import {
   listWorkbenchTasks,
   listImmigrationActions,
 } from './deel-api';
-import { visibleDeelSourcesFor, resolveWorkbenchConfig } from './dept-integrations';
+import { visibleDeelSourcesFor, resolveWorkbenchConfig, getWorkbenchTeamExclusionForHrx } from './dept-integrations';
+import { buildWithTimeout } from './scan-timeout';
+import { cacheGet } from './server-cache';
 
 // Settings shape mirrors the per-dept defaults synthesized by the route's
 // loadSettings — keeping a fallback here lets the member-load function
@@ -68,12 +70,79 @@ function getCountry(row) {
   return cc || 'UNKNOWN';
 }
 
-function safe(promise, label) {
-  return promise.catch(err => {
-    console.warn(`[capacity] ${label} fetch failed:`, err?.message);
-    return { items: [] };
-  });
+// ── Per-source fetch discipline (2026-06-10 memory fix) ───────────────────
+// The original fetchAllSources fired all 8 list-fetchers DIRECTLY in one
+// Promise.all — bypassing the in-flight dedupe, the MAX_CONCURRENT_SCANS
+// semaphore, and the per-build abort signal that every queue route gets
+// via buildWithTimeout. Each capacity aggregation therefore piled up to 8
+// parallel full Deel admin walks on the heap at once (live logs: RSS
+// 2067 MiB at 15:02 right after a capacity cycle) and double-scanned
+// sources the routes had just fetched seconds earlier.
+//
+// Now each source goes through buildWithTimeout under a capacity_src_*
+// key, so concurrent aggregations share one flight, at most
+// MAX_CONCURRENT_SCANS builders run at a time, and a stuck walk gets
+// hard-killed. The builder reduces the payload to the two fields the
+// bump loop reads (country + isResignation) BEFORE caching, so the
+// retained slim snapshot is a few KB per source instead of the full row
+// set. A 5-minute freshness window (matching the queue routes' own TTLs)
+// means a manual capacity refresh reuses a just-built snapshot instead of
+// re-scanning the world; the dept-level 15-min cache below stays the
+// coarse gate.
+const SRC_FRESH_TTL  = 5 * 60 * 1000;
+const SRC_TIMEOUT_MS = 60_000;
+const SRC_STALE_TTL  = 60 * 60 * 1000;
+
+function slimForCounts(items) {
+  return (items || []).map(r => ({
+    country: getCountry(r),
+    isResignation: r?.isResignation === true,
+  }));
 }
+
+function sourceViaCache(cacheKey, fetcher, label, opts = {}) {
+  // Read-through (heavyweights only): reuse the queue route's own cached
+  // payload when fresh. The FE polls those routes every few minutes, so
+  // in practice their caches are always warm and the capacity aggregation
+  // becomes free instead of re-walking the same admin API the route
+  // scanned seconds earlier (the log audit caught back-to-back duplicate
+  // offboarding admin-scans from exactly this). Slimmed immediately so a
+  // second full copy is never retained. Both route shapes are verified to
+  // carry the fields slimForCounts reads (offboarding: country +
+  // isResignation; workbench: country), and both are cached UNSCOPED
+  // (cacheSet runs before per-user scoping) so the counts cover the full
+  // dept-visible set.
+  if (opts.routeKey) {
+    const routePayload = cacheGet(opts.routeKey, SRC_FRESH_TTL);
+    const rows = Array.isArray(routePayload?.items) ? routePayload.items : null;
+    if (rows) {
+      const filtered = opts.rowFilter ? rows.filter(opts.rowFilter) : rows;
+      return Promise.resolve({ items: slimForCounts(filtered) });
+    }
+  }
+  const fresh = cacheGet(cacheKey, SRC_FRESH_TTL);
+  if (fresh) return Promise.resolve(fresh);
+  return buildWithTimeout(
+    cacheKey,
+    async () => {
+      const res = await fetcher();
+      return { items: slimForCounts(res?.items) };
+    },
+    { timeoutMs: SRC_TIMEOUT_MS, staleTtl: SRC_STALE_TTL },
+  )
+    .then(r => r.result || { items: [] })
+    .catch(err => {
+      console.warn(`[capacity] ${label} fetch failed:`, err?.message);
+      return { items: [] };
+    });
+}
+
+// The workbench route caches its payload with the resolved-in-24h tail
+// included (includeCompleted=true on the HRX path). Capacity counts only
+// the live actionable backlog, so the read-through drops terminal rows.
+const WB_TERMINAL_STATUSES = new Set(['COMPLETED', 'CLOSED']);
+const isActiveWorkbenchRow = (t) =>
+  !WB_TERMINAL_STATUSES.has(String(t?.status || '').toUpperCase());
 
 async function fetchAllSources(deptSlug) {
   const visible = visibleDeelSourcesFor(deptSlug);
@@ -82,20 +151,47 @@ async function fetchAllSources(deptSlug) {
   // listImmigrationActions (per Phase 13b). The other listX functions
   // use the env-var DEEL_ADMIN_TOKEN — fine because HRX's deelSources
   // are the only ones that turn those on.
+  //
+  // Param parity with the workbench route (2026-06-10): the old code
+  // passed `teamFilter`, which listWorkbenchTasks silently ignores (it
+  // reads `teamNameFilter`), and the HRX path skipped the team exclusion,
+  // so GIX-claimed tasks would have double-counted into HRX capacity.
+  // `includeCompleted: false` because capacity counts the live actionable
+  // backlog ("what's waiting to be worked", per the Phase-1 spec header) —
+  // the resolved-in-24h tail belongs to the queue view, and skipping it
+  // also skips the workbench_known_tasks DB reconcile that the queue
+  // route already owns.
   const wbOpts = wbCfg
-    ? { adminTokenOverride: wbCfg.token, teamIds: wbCfg.teamIds, teamFilter: wbCfg.teamFilter }
-    : {};
+    ? {
+        adminTokenOverride: wbCfg.token,
+        teamIds: wbCfg.teamIds,
+        teamNameFilter: wbCfg.teamFilter || [],
+        includeCompleted: false,
+      }
+    : {
+        teamNameExclude: getWorkbenchTeamExclusionForHrx() || undefined,
+        includeCompleted: false,
+      };
   const immOpts = wbCfg ? { adminTokenOverride: wbCfg.token } : {};
+  const empty = Promise.resolve({ items: [] });
+  // Workbench + immigration params differ per dept (token + team scope) —
+  // namespace their slim caches by dept so HRX and GIX never share one.
+  const deptKey = deptSlug || 'hrx';
 
   return Promise.all([
-    visible.onboarding       ? safe(listOnboardingPeople({}),    'onboarding')   : Promise.resolve({ items: [] }),
-    visible.onboarding       ? safe(listPausedOnboarding(),      'pausedOnb')    : Promise.resolve({ items: [] }),
-    visible.offboarding      ? safe(listOffboardingCases(),      'offboarding')  : Promise.resolve({ items: [] }),
-    visible.amendments       ? safe(listAmendmentRequests({}),   'amendments')   : Promise.resolve({ items: [] }),
-    visible.redlines         ? safe(listRedlineRequests({}),     'redlines')     : Promise.resolve({ items: [] }),
-    visible.incentivePlans   ? safe(listIncentivePlans({}),      'incentive')    : Promise.resolve({ items: [] }),
-    visible.workbench        ? safe(listWorkbenchTasks(wbOpts),  'workbench')    : Promise.resolve({ items: [] }),
-    visible.immigrationTasks ? safe(listImmigrationActions(immOpts), 'immigration') : Promise.resolve({ items: [] }),
+    visible.onboarding       ? sourceViaCache('capacity_src_onboarding',  () => listOnboardingPeople({}),  'onboarding')   : empty,
+    visible.onboarding       ? sourceViaCache('capacity_src_paused_onb',  () => listPausedOnboarding(),    'pausedOnb')    : empty,
+    visible.offboarding      ? sourceViaCache('capacity_src_offboarding', () => listOffboardingCases(),    'offboarding',
+                                              { routeKey: 'deel_offboarding' })                                            : empty,
+    visible.amendments       ? sourceViaCache('capacity_src_amendments',  () => listAmendmentRequests({}), 'amendments')   : empty,
+    visible.redlines         ? sourceViaCache('capacity_src_redlines',    () => listRedlineRequests({}),   'redlines')     : empty,
+    visible.incentivePlans   ? sourceViaCache('capacity_src_incentive',   () => listIncentivePlans({}),    'incentive')    : empty,
+    visible.workbench        ? sourceViaCache(`capacity_src_workbench_${deptKey}`,   () => listWorkbenchTasks(wbOpts),      'workbench',
+                                              // Mirrors the workbench route's cache key scheme (HRX uses the
+                                              // bare key; non-HRX is dept-suffixed).
+                                              { routeKey: wbCfg ? `deel_workbench_${deptSlug}` : 'deel_workbench',
+                                                rowFilter: isActiveWorkbenchRow })                                         : empty,
+    visible.immigrationTasks ? sourceViaCache(`capacity_src_immigration_${deptKey}`, () => listImmigrationActions(immOpts), 'immigration') : empty,
   ]);
 }
 

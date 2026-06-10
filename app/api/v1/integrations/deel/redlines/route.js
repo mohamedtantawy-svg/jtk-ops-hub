@@ -143,19 +143,31 @@ async function adoptWorkbenchOwners(items) {
   const taskIds = items.map(r => r.workbenchTaskId).filter(Boolean);
   const snap = await getWorkbenchAssigneesByTaskIds(taskIds);
   let adopted = 0;
+  let noEmail = 0;   // row HAS a workbench task id but no assignee email resolved
+  let notMember = 0; // email resolved but isn't an Ops Hub member
   for (const r of items) {
     const direct = (r.workbenchAssigneeEmail || '').toLowerCase();
     const fromSnap = r.workbenchTaskId ? snap.get(String(r.workbenchTaskId)) : null;
     const email = direct || fromSnap?.email || '';
-    if (!email) continue;
+    if (!email) {
+      if (r.workbenchTaskId) noEmail++;
+      continue;
+    }
     const member = MEMBERS_BY_EMAIL[email];
-    if (!member) continue;          // unknown to Ops Hub — keep the country owner
+    if (!member) { notMember++; continue; } // unknown to Ops Hub — keep the country owner
     r.assigneeEmail = email;
     r.assignee = (direct ? r.workbenchAssigneeName : fromSnap?.name) || member.name || email;
     r.assigneeFromWorkbench = true; // provenance for debugging / future UI
     adopted++;
   }
-  console.log(`[redlines] adopted workbench owner on ${adopted}/${items.length} redlines (rest fall back to the country owner)`);
+  // The 2026-06-10 log audit showed a flat 0/12x adoption every cycle with
+  // no way to tell which link breaks. The funnel breakdown makes the next
+  // log pull definitive: taskIds=0 → redlines carry no workbench task id;
+  // hits=0 with taskIds>0 → those tasks aren't in workbench_known_tasks
+  // (likely a non-HRX-team task the snapshot never scans); no-email →
+  // tasks known but unassigned upstream; not-member → assigned to someone
+  // outside the Ops Hub roster.
+  console.log(`[redlines] adopted workbench owner on ${adopted}/${items.length} redlines (taskIds=${taskIds.length}, snapshot-hits=${snap.size}, no-email=${noEmail}, not-member=${notMember}; rest fall back to the country owner)`);
 }
 
 /**

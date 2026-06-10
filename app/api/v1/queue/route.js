@@ -126,6 +126,31 @@ const CACHE_KEY = 'queue';
 const CACHE_TTL = 3 * 60_000;       // fresh for 3 minutes
 const STALE_TTL = 30 * 60_000;      // serve stale up to 30 minutes while refreshing
 
+// ── In-flight dedupe (2026-06-10 memory fix) ────────────────────────────────
+// This route never went through buildWithTimeout, so it had no in-flight
+// collapse: the moment a source TTL lapsed, EVERY concurrent poller (one
+// per active user tab) missed the cache simultaneously and each ran its
+// own full fetchZendeskQueue/fetchJiraQueue — the live logs show 4-6
+// identical "[queue] Zendesk SLA cache" builds inside the same second,
+// every ~2 minutes, all but one thrown away. Each duplicate maps ~2,700
+// tickets and fires its own SLA SELECT, which was a top contributor to
+// the heap sawtooth (RSS regularly 1.6-2 GiB on a ~450 MiB live set).
+// Concurrent callers with the same cache key now share one build promise;
+// scoping still runs per-request on the shared result. The slot clears
+// when the build settles so a failed fetch can't poison later requests.
+const _queueInFlight = new Map(); // cacheKey -> Promise<result>
+function dedupedBuild(cacheKey, builder) {
+  let p = _queueInFlight.get(cacheKey);
+  if (!p) {
+    p = builder();
+    _queueInFlight.set(cacheKey, p);
+    p.finally(() => {
+      if (_queueInFlight.get(cacheKey) === p) _queueInFlight.delete(cacheKey);
+    }).catch(() => {});
+  }
+  return p;
+}
+
 // ── Runtime SLA settings (Team-tab editable) ────────────────────────────────
 // Reads app_settings.queue_sla_thresholds — same row the
 // /api/v1/settings/queue-sla route writes. Cached 30s in-process so the
@@ -1947,30 +1972,35 @@ export async function GET(req) {
       // fetcher based on the resolved dept-slug. A non-HRX dept with
       // unconfigured env vars returns an empty {items: []} — the FE shows
       // the "configure your integrations" empty state instead of HRX data.
-      let fetched;
-      if (source === 'zendesk') {
-        fetched = isHrx ? await fetchZendeskQueue() : await fetchZendeskQueueForDept(deptZendeskCfg);
-      } else {
-        fetched = isHrx ? await fetchJiraQueue() : await fetchJiraQueueForDept(deptJiraCfg);
-      }
-      result = {
-        source,
-        items: fetched.items,
-        meta: {
-          count: fetched.count || 0,
-          status: fetched.status,
-          error: fetched.error,
-          // Truncation surfaces when the per-source pagination loop bailed at
-          // its safety cap (Zendesk Search's 1000-result hard limit per
-          // status, Jira's MAX_ISSUES_PER_CLAUSE) while the server still had
-          // more rows. The FE banner uses this to tell the viewer to refine
-          // their filter so they aren't blind to hidden tickets.
-          truncated: !!fetched.truncated,
-          serverTotal: fetched.serverTotal || null,
-        },
-        syncedAt: new Date().toISOString(),
-      };
-      cacheSet(cacheKey, result);
+      // Wrapped in the in-flight dedupe so concurrent cache-miss pollers
+      // share one upstream fetch instead of each running their own.
+      result = await dedupedBuild(cacheKey, async () => {
+        let fetched;
+        if (source === 'zendesk') {
+          fetched = isHrx ? await fetchZendeskQueue() : await fetchZendeskQueueForDept(deptZendeskCfg);
+        } else {
+          fetched = isHrx ? await fetchJiraQueue() : await fetchJiraQueueForDept(deptJiraCfg);
+        }
+        const built = {
+          source,
+          items: fetched.items,
+          meta: {
+            count: fetched.count || 0,
+            status: fetched.status,
+            error: fetched.error,
+            // Truncation surfaces when the per-source pagination loop bailed at
+            // its safety cap (Zendesk Search's 1000-result hard limit per
+            // status, Jira's MAX_ISSUES_PER_CLAUSE) while the server still had
+            // more rows. The FE banner uses this to tell the viewer to refine
+            // their filter so they aren't blind to hidden tickets.
+            truncated: !!fetched.truncated,
+            serverTotal: fetched.serverTotal || null,
+          },
+          syncedAt: new Date().toISOString(),
+        };
+        cacheSet(cacheKey, built);
+        return built;
+      });
     } catch (fetchErr) {
       const stale = cacheGet(cacheKey, STALE_TTL);
       if (stale) {
@@ -2006,45 +2036,50 @@ export async function GET(req) {
 
   let response;
   try {
-    const [zendesk, jira] = await Promise.all([
-      isHrx ? fetchZendeskQueue() : fetchZendeskQueueForDept(deptZendeskCfg),
-      isHrx ? fetchJiraQueue() : fetchJiraQueueForDept(deptJiraCfg),
-    ]);
+    // Same in-flight dedupe as the per-source path — concurrent combined
+    // cache misses share one Zendesk+Jira fan-out.
+    response = await dedupedBuild(combinedCacheKey, async () => {
+      const [zendesk, jira] = await Promise.all([
+        isHrx ? fetchZendeskQueue() : fetchZendeskQueueForDept(deptZendeskCfg),
+        isHrx ? fetchJiraQueue() : fetchJiraQueueForDept(deptJiraCfg),
+      ]);
 
-    const seen = new Set();
-    const items = [];
-    for (const item of [...zendesk.items, ...jira.items]) {
-      if (!seen.has(item.id)) {
-        seen.add(item.id);
-        items.push(item);
+      const seen = new Set();
+      const items = [];
+      for (const item of [...zendesk.items, ...jira.items]) {
+        if (!seen.has(item.id)) {
+          seen.add(item.id);
+          items.push(item);
+        }
       }
-    }
 
-    response = {
-      items,
-      meta: {
-        zendesk: {
-          count: zendesk.count || 0,
-          status: zendesk.status,
-          error: zendesk.error,
-          truncated: !!zendesk.truncated,
-          serverTotal: zendesk.serverTotal || null,
+      const built = {
+        items,
+        meta: {
+          zendesk: {
+            count: zendesk.count || 0,
+            status: zendesk.status,
+            error: zendesk.error,
+            truncated: !!zendesk.truncated,
+            serverTotal: zendesk.serverTotal || null,
+          },
+          jira: {
+            count: jira.count || 0,
+            status: jira.status,
+            error: jira.error,
+            truncated: !!jira.truncated,
+          },
+          syncedAt: new Date().toISOString(),
+          totalActive: items.filter(i => i.status !== 'resolved').length,
+          totalResolved: items.filter(i => i.status === 'resolved').length,
         },
-        jira: {
-          count: jira.count || 0,
-          status: jira.status,
-          error: jira.error,
-          truncated: !!jira.truncated,
-        },
-        syncedAt: new Date().toISOString(),
-        totalActive: items.filter(i => i.status !== 'resolved').length,
-        totalResolved: items.filter(i => i.status === 'resolved').length,
-      },
-    };
+      };
 
-    // Cache combined result only — per-source caches are populated independently
-    // to avoid tripling memory usage by storing the same data 3x.
-    cacheSet(combinedCacheKey, response);
+      // Cache combined result only — per-source caches are populated independently
+      // to avoid tripling memory usage by storing the same data 3x.
+      cacheSet(combinedCacheKey, built);
+      return built;
+    });
   } catch (fetchErr) {
     if (stale) {
       console.warn(`[queue/${cacheNS}] Fetch failed, returning stale cache:`, fetchErr.message);
