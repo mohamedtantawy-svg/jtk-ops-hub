@@ -78,6 +78,26 @@ function extractActiveApprovalName(raw) {
 // ops queue even though they're owned by another team. The role-based JQL
 // alone can't exclude them, so we narrow the project up front.
 const JIRA_PROJECT_KEYS = ['COHD', 'OSHD'];
+
+// Issue types OWNED by other teams (Legal / Global Mobility) that leak into
+// the HRX queue whenever an HRX person happens to be the assignee, reporter,
+// or "HRX Responsible" on them. They are NOT HRX's work. Insiya 2026-06-10
+// (Feedback): "Mobility tickets are showing up under our breached queue for
+// JIRA (old termination tickets they have not closed)." Confirmed against
+// live Jira: the leaking COHD/OSHD rows are issue types "Legal - Terminations"
+// and "Legal - EOR Litigation" (Mobility's sibling is "Mobility - Terminations");
+// genuine HRX work uses "HRX - *" issue types, none of which carry these — so
+// excluding them removes the leak with ZERO HRX false-drops. Matched in JS
+// POST-FETCH (3VL-safe): a JQL NOT-clause dropped every HRX ticket in PR #785
+// because Jira treats NOT(UNKNOWN) as no-match; a JS equality check only ever
+// drops on a POSITIVE match. HRX path (fetchJiraQueue) only — the GIX/other-dept
+// fetcher (fetchJiraQueueForDept) is untouched, so these tickets still appear
+// in their owning department's queue.
+const HRX_EXCLUDED_JIRA_ISSUE_TYPES = new Set([
+  'legal - terminations',
+  'legal - eor litigation',
+  'mobility - terminations',
+]);
 import { ADMIN_EMAILS_LIST } from '../../../../src/data/adminEmails';
 import { cacheGet, cacheSet } from '../../../../src/lib/server-cache';
 import { filterByAssignee } from '../../../../src/lib/queue-scoping';
@@ -1620,7 +1640,17 @@ async function fetchJiraQueue() {
       };
     });
 
-    return { items, status: 'ok', count: items.length, truncated: jiraTruncated, error: null };
+    // Drop other teams' (Legal / Global Mobility) termination & litigation
+    // tickets that leak into HRX via an HRX assignee / reporter / HRX-Responsible
+    // — see HRX_EXCLUDED_JIRA_ISSUE_TYPES. 3VL-safe: only drop on a POSITIVE
+    // issue-type match; a missing/unknown jiraType is always kept so no genuine
+    // HRX ticket is lost (the failure mode that killed the PR #785 JQL approach).
+    const hrxItems = items.filter((it) => {
+      const t = (it.jiraType || '').trim().toLowerCase();
+      return !(t && HRX_EXCLUDED_JIRA_ISSUE_TYPES.has(t));
+    });
+
+    return { items: hrxItems, status: 'ok', count: hrxItems.length, truncated: jiraTruncated, error: null };
   } catch (err) {
     console.error('[queue] Jira fetch error:', err.message);
     return { items: [], status: 'error', truncated: false, error: 'Jira fetch failed' };
