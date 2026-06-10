@@ -904,7 +904,13 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     return currentDeptNodeIds.has(memberOrgNodeId);
   }, [currentDeptId, currentDeptNodeIds, delegatedScope]);
 
-  const allAgents = MEMBERS.filter(m => m.role === 'agent' && scopeIds.includes(m.id) && inCurrentDept(m)).map(m => {
+  // Per-member workload across every per-email-scopable source. Extracted
+  // 2026-06-10 (Insiya feedback "see tasks assigned to Managers (self)
+  // under the team summary") so the viewing manager's OWN Team-Summary row
+  // can reuse the EXACT same engine as a report's row. Pure over the
+  // in-scope arrays (tasks / escalations / *RowsAll); no HR Hub (counted
+  // nowhere yet) and no Amendments/Redlines (shared pool, no per-assignee).
+  const computeMemberStats = (m) => {
     const memEmail = (m.email || '').toLowerCase();
 
     // — Tickets (Zendesk + Jira merged in `tasks`) —
@@ -964,7 +970,12 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     const tc      = open + paused;   // strict invariant: Total = Open + Paused
 
     return { ...m, tc, br, open, paused, escalated: tEsc };
-  }).sort((a, b) => b.tc - a.tc);
+  };
+
+  const allAgents = MEMBERS
+    .filter(m => m.role === 'agent' && scopeIds.includes(m.id) && inCurrentDept(m))
+    .map(computeMemberStats)
+    .sort((a, b) => b.tc - a.tc);
 
   // Team avg — informational only (used by some legacy cards, kept for now).
   // For managers we trust `allAgents` directly: it's already scoped via
@@ -1031,6 +1042,38 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
     const mCapPct = Math.min(200, Math.round((m.tc / BASELINE_CAPACITY) * 100));
     return { ...m, wl: band.wl, wc: band.wc, capPct: mCapPct };
   });
+
+  // ── Viewer's OWN workload row for Team Summary (2026-06-10) ────────────
+  // Managers are excluded from `allAgents` (role === 'agent'), so the
+  // person viewing never saw their own assigned caseload in Team Summary.
+  // Insiya (TL) asked to see the items assigned to HER — Zendesk/Jira,
+  // Workbench, Onboarding/Offboarding/Active EOR + escalations — alongside
+  // her reports. Reuse the exact per-member engine so the self row is
+  // byte-for-byte consistent with report rows, then pin it as a separate
+  // "Your workload" section. It is deliberately kept OUT of every aggregate
+  // (teamAvg / scopeAgents / teamSummaryTree sums) so the manager's own
+  // tasks never inflate the team's capacity numbers. Static MEMBERS first
+  // (same id-space as report rows; email match catches the rest), live
+  // roster as fallback for a manager added after the static roster bake.
+  // Dept-scoped: shown ONLY after the dept resolves (currentDeptNodeIds
+  // populated) AND the viewer is in it, so a super-admin browsing another
+  // dept never flashes their home-dept self row during cold paint (report
+  // rows tolerate cold-paint inclusion by design; the pinned self row must
+  // not). Hidden when the viewer holds no assigned work, which naturally
+  // suppresses it for RMs/Admins with no personal caseload.
+  const _selfLc = (user.email || '').toLowerCase();
+  const selfMemberRecord = isManager
+    ? (MEMBERS_BY_EMAIL[_selfLc] || (liveMembersByEmail && liveMembersByEmail[_selfLc]) || null)
+    : null;
+  const selfWL = (selfMemberRecord && currentDeptNodeIds && currentDeptNodeIds.size > 0 && inCurrentDept(selfMemberRecord))
+    ? (() => {
+        const s = computeMemberStats(selfMemberRecord);
+        if ((s.tc || 0) <= 0 && (s.escalated || 0) <= 0) return null;
+        const band = classifyWorkload(s.tc);
+        const capPct = Math.min(200, Math.round((s.tc / BASELINE_CAPACITY) * 100));
+        return { ...s, wl: band.wl, wc: band.wc, capPct, _isSelf: true };
+      })()
+    : null;
 
   // ── Health Score (composite 0-100) — 2026-05-07 v2 recalibration ──────
   // Default weights total 100 (SLA 50 · Resp 20 · Cap 20 · Res 10), all
@@ -2275,12 +2318,15 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                                   <button
                                     type="button"
                                     onClick={(e)=>{ e.stopPropagation(); onViewAgentQueue(m.email); }}
-                                    title={`View ${m.name}'s workload in the Workspace queue`}
+                                    title={m._isSelf ? 'View your own workload in the Workspace queue' : `View ${m.name}'s workload in the Workspace queue`}
                                     style={{border:'none',background:'none',padding:0,margin:0,font:'inherit',color:'inherit',cursor:'pointer',textAlign:'left'}}
                                     onMouseEnter={(e)=>{ e.currentTarget.style.textDecoration='underline'; e.currentTarget.style.color='#7c3aed'; }}
                                     onMouseLeave={(e)=>{ e.currentTarget.style.textDecoration='none'; e.currentTarget.style.color='inherit'; }}
                                   >{m.name}</button>
                                 ) : m.name}
+                                {m._isSelf && (
+                                  <span style={{fontSize:9,fontWeight:700,color:'#7c3aed',background:'#f3eff8',padding:'1px 6px',borderRadius:99,letterSpacing:'.04em',textTransform:'uppercase',flexShrink:0}}>You</span>
+                                )}
                                 <AccessBadge access={live?.access || m.access || 'agent'} />
                                 <LastSeenPill iso={live?.lastSeenAt} loading={!!rosterLoading} />
                                 <OOOBadge events={oooEventsByEmail.get((m.email || '').toLowerCase())} />
@@ -2322,12 +2368,16 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                           <span style={{fontSize:11,fontWeight:700,color:m.wc,padding:'3px 12px',borderRadius:128,background:m.wc+'15'}}>{m.wl}</span>
                         </td>
                         <td style={{padding:'12px 16px',textAlign:'right',whiteSpace:'nowrap'}}>
-                          <LoginAsButton
-                            targetEmail={m.email}
-                            targetName={m.name}
-                            onImpersonate={onImpersonate}
-                            canImpersonate={canLoginAs(m.email)}
-                          />
+                          {m._isSelf ? (
+                            <span style={{fontSize:11,color:'var(--text-muted)'}} title="This is you">&mdash;</span>
+                          ) : (
+                            <LoginAsButton
+                              targetEmail={m.email}
+                              targetName={m.name}
+                              onImpersonate={onImpersonate}
+                              canImpersonate={canLoginAs(m.email)}
+                            />
+                          )}
                         </td>
                       </tr>
                       );
@@ -2478,14 +2528,25 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
                     };
 
                     const { groups, directAgents } = teamSummaryTree;
+                    // Viewer's own workload — pinned at the very top as its
+                    // own section so a manager sees the items assigned to
+                    // THEM alongside their reports (Insiya feedback). Hidden
+                    // when they hold no work; kept out of every aggregate.
+                    const selfSection = selfWL ? (
+                      <Fragment key="self-workload">
+                        {sectionLabel('Your workload')}
+                        {agentRow(selfWL, 'self-row', 0)}
+                      </Fragment>
+                    ) : null;
                     // TL with no sub-managers + no direct-agent overrides →
                     // fall back to the flat agent list (preserves the
                     // pre-rework behaviour for that one role).
                     if (groups.length === 0 && directAgents.length === 0) {
-                      return hmMembers.map(m => agentRow(m, m.id, 0));
+                      return (<>{selfSection}{hmMembers.map(m => agentRow(m, m.id, 0))}</>);
                     }
                     return (
                       <>
+                        {selfSection}
                         {groups.map(g => renderGroup(g, 0))}
                         {directAgents.length > 0 && (
                           <Fragment key="direct-reports">
@@ -2501,6 +2562,7 @@ const BriefingView=({user,tasks,setView,setSelTask,comms=[],escalations=[],setSu
             </div>
             <div style={{padding:'10px 24px 14px',fontSize:11,color:'var(--text-muted)',borderTop:'1px solid var(--border-light)',background:'var(--surface-2)'}}>
               <i className="bi-info-circle" style={{marginRight:6}}></i>
+              {selfWL && 'Your workload (top) shows the items assigned to you across the same sources, separate from the team totals. '}
               Totals aggregate Zendesk, Jira, Workbench, Onboarding, Offboarding. Amendments &amp; Redlines live in a shared pool (no server-side assignee) so they roll into team capacity but not per-agent counts. Baseline 30 tasks &#8209; &lt;20 Low &middot; 20&#8209;50 Medium &middot; &gt;50 High.
             </div>
           </DeelCard>}
